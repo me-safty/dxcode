@@ -371,6 +371,8 @@ const buildAppUnderTest = (options?: {
       startupPresentation: "browser",
       desktopBootstrapToken: defaultDesktopBootstrapToken,
       autoBootstrapProjectFromCwd: false,
+      autoBootstrapWorkspaceFolders: [],
+      activeBootstrapWorkspaceFolderKey: undefined,
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,

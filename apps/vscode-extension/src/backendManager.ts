@@ -3,8 +3,17 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+  spawn as spawnChildProcess,
+  type ChildProcessWithoutNullStreams,
+} from "node:child_process";
 import * as vscode from "vscode";
+
+import {
+  ensureGithubVirtualWorkspaceClone,
+  parseGithubVirtualWorkspace,
+  pruneVirtualWorkspaceCache as pruneVirtualWorkspaceCacheImpl,
+} from "./virtualWorkspaceCache.ts";
 
 const READINESS_PATH = "/.well-known/t3/environment";
 
@@ -17,6 +26,16 @@ interface BackendBootstrap {
   readonly desktopBootstrapToken: string;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
+  readonly workspaceFolders?: readonly BootstrapWorkspaceFolder[];
+  readonly activeWorkspaceFolderKey?: string;
+}
+
+interface BootstrapWorkspaceFolder {
+  readonly key: string;
+  readonly name: string;
+  readonly cwd: string;
+  readonly uriScheme: string;
+  readonly uriAuthority: string;
 }
 
 export interface BackendConnection {
@@ -46,25 +65,39 @@ export type BackendSpawn = (
   options: BackendSpawnOptions,
 ) => ChildProcessWithoutNullStreams;
 
+export interface BackendRunCommandOptions {
+  readonly cwd?: string;
+}
+
+export type BackendRunCommand = (
+  command: string,
+  args: readonly string[],
+  options?: BackendRunCommandOptions,
+) => Promise<void>;
+
 export interface BackendManagerDependencies {
   readonly findAvailablePort: () => Promise<number>;
   readonly fetch: typeof fetch;
   readonly mkdirSync: typeof fs.mkdirSync;
+  readonly pruneVirtualWorkspaceCache: typeof pruneVirtualWorkspaceCacheImpl;
   readonly randomBytes: typeof crypto.randomBytes;
   readonly spawn: BackendSpawn;
+  readonly runCommand: BackendRunCommand;
 }
 
 const defaultBackendManagerDependencies: BackendManagerDependencies = {
   findAvailablePort,
   fetch,
   mkdirSync: fs.mkdirSync,
+  pruneVirtualWorkspaceCache: pruneVirtualWorkspaceCacheImpl,
   randomBytes: crypto.randomBytes,
   spawn: (command, args, options) =>
-    spawn(command, [...args], {
+    spawnChildProcess(command, [...args], {
       cwd: options.cwd,
       env: options.env,
       stdio: [...options.stdio],
     }) as ChildProcessWithoutNullStreams,
+  runCommand,
 };
 
 export class BackendManager {
@@ -102,6 +135,10 @@ export class BackendManager {
     }
   }
 
+  get activeCwd(): string | null {
+    return this.#connection?.cwd ?? null;
+  }
+
   async restart(): Promise<BackendConnection> {
     await this.stop();
     return await this.ensureStarted();
@@ -131,12 +168,18 @@ export class BackendManager {
   }
 
   async #start(): Promise<BackendConnection> {
-    const workspaceFolder = resolveWorkspaceFolder();
-    const cwd = workspaceFolder?.uri.fsPath ?? os.homedir();
+    const t3Home = resolveT3Home();
+    this.#dependencies.mkdirSync(t3Home, { recursive: true });
+    const workspaceFolders = await resolveBootstrapWorkspaceFolders({
+      t3Home,
+      dependencies: this.#dependencies,
+      outputChannel: this.#outputChannel,
+    });
+    const activeWorkspaceFolder = resolveActiveWorkspaceFolder(workspaceFolders);
+    const cwd = activeWorkspaceFolder?.cwd ?? os.homedir();
     const port = await this.#dependencies.findAvailablePort();
     const host = "127.0.0.1";
     const bootstrapToken = this.#dependencies.randomBytes(24).toString("hex");
-    const t3Home = resolveT3Home();
     const command = resolveServerCommand(this.#context, cwd);
     const bootstrap: BackendBootstrap = {
       mode: "desktop",
@@ -147,10 +190,11 @@ export class BackendManager {
       desktopBootstrapToken: bootstrapToken,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
+      ...(workspaceFolders.length > 0 ? { workspaceFolders } : {}),
+      ...(activeWorkspaceFolder ? { activeWorkspaceFolderKey: activeWorkspaceFolder.key } : {}),
     };
     const args = [...command.args, "--bootstrap-fd", "3", "--auto-bootstrap-project-from-cwd", cwd];
 
-    this.#dependencies.mkdirSync(t3Home, { recursive: true });
     this.#outputChannel.appendLine(`[backend] Starting: ${command.command} ${args.join(" ")}`);
 
     const child = this.#dependencies.spawn(command.command, args, {
@@ -200,19 +244,108 @@ export class BackendManager {
       cwd,
       t3Home,
     };
+    void Promise.resolve().then(() => {
+      try {
+        const result = this.#dependencies.pruneVirtualWorkspaceCache({
+          t3Home,
+          activeCheckoutPaths: workspaceFolders.map((folder) => folder.cwd),
+          outputChannel: this.#outputChannel,
+        });
+        if (result.deleted > 0 || result.errors > 0) {
+          this.#outputChannel.appendLine(
+            `[backend] Pruned ${result.deleted} virtual workspace checkout(s); kept ${result.kept}; errors ${result.errors}.`,
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.#outputChannel.appendLine(
+          `[backend] Failed to prune virtual workspace cache: ${message}`,
+        );
+      }
+    });
     return this.#connection;
   }
 }
 
-function resolveWorkspaceFolder(): vscode.WorkspaceFolder | undefined {
+function resolveActiveWorkspaceFolder(
+  workspaceFolders: readonly BootstrapWorkspaceFolder[],
+): BootstrapWorkspaceFolder | undefined {
   const activeUri = vscode.window.activeTextEditor?.document.uri;
   if (activeUri) {
-    return vscode.workspace.getWorkspaceFolder(activeUri);
+    const activeWorkspaceFolder = vscode.workspace.getWorkspaceFolder(activeUri);
+    const activeKey = activeWorkspaceFolder ? workspaceFolderKey(activeWorkspaceFolder) : null;
+    if (activeKey) {
+      return workspaceFolders.find((folder) => folder.key === activeKey);
+    }
   }
-  return vscode.workspace.workspaceFolders?.[0];
+  return workspaceFolders[0];
 }
 
-function resolveT3Home(): string {
+async function resolveBootstrapWorkspaceFolders(input: {
+  readonly t3Home: string;
+  readonly dependencies: Pick<BackendManagerDependencies, "mkdirSync" | "runCommand">;
+  readonly outputChannel: vscode.OutputChannel;
+}): Promise<BootstrapWorkspaceFolder[]> {
+  const workspaceFolders: BootstrapWorkspaceFolder[] = [];
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    const resolvedFolder = await resolveBootstrapWorkspaceFolder(folder, input);
+    if (resolvedFolder) {
+      workspaceFolders.push(resolvedFolder);
+    }
+  }
+  return workspaceFolders;
+}
+
+async function resolveBootstrapWorkspaceFolder(
+  folder: vscode.WorkspaceFolder,
+  input: {
+    readonly t3Home: string;
+    readonly dependencies: Pick<BackendManagerDependencies, "mkdirSync" | "runCommand">;
+    readonly outputChannel: vscode.OutputChannel;
+  },
+): Promise<BootstrapWorkspaceFolder | null> {
+  const uriScheme = folder.uri.scheme || "file";
+  const uriAuthority = folder.uri.authority || "";
+  const key = workspaceFolderKey(folder);
+  if (uriScheme === "file" || uriScheme === "vscode-remote") {
+    return {
+      key,
+      name: folder.name || path.basename(folder.uri.fsPath) || "workspace",
+      cwd: folder.uri.fsPath,
+      uriScheme,
+      uriAuthority,
+    };
+  }
+
+  const githubWorkspace = parseGithubVirtualWorkspace(folder);
+  if (githubWorkspace) {
+    const cwd = await ensureGithubVirtualWorkspaceClone({
+      ...githubWorkspace,
+      key,
+      t3Home: input.t3Home,
+      dependencies: input.dependencies,
+      outputChannel: input.outputChannel,
+    });
+    return {
+      key,
+      name: folder.name || githubWorkspace.repository,
+      cwd,
+      uriScheme,
+      uriAuthority,
+    };
+  }
+
+  input.outputChannel.appendLine(
+    `[backend] Skipping unsupported virtual workspace folder ${folder.name || key} (${key}). T3 Code requires a local filesystem checkout for agent execution.`,
+  );
+  return null;
+}
+
+function workspaceFolderKey(folder: vscode.WorkspaceFolder): string {
+  return `${folder.uri.scheme || "file"}:${folder.uri.authority || ""}:${folder.uri.fsPath}`;
+}
+
+export function resolveT3Home(): string {
   const configured = vscode.workspace.getConfiguration("t3code").get<string>("home")?.trim();
   if (configured) {
     return configured.replace(/^~(?=$|[/\\])/, os.homedir());
@@ -311,6 +444,34 @@ function findAvailablePort(): Promise<number> {
       }
       const { port } = address;
       server.close(() => resolve(port));
+    });
+  });
+}
+
+function runCommand(
+  command: string,
+  args: readonly string[],
+  options?: BackendRunCommandOptions,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawnChildProcess(command, [...args], {
+      cwd: options?.cwd,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    const stderrChunks: Buffer[] = [];
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderrChunks.push(chunk);
+    });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const stderr = Buffer.concat(stderrChunks).toString().trim();
+      reject(
+        new Error(`Command failed: ${command} ${args.join(" ")}${stderr ? `\n${stderr}` : ""}`),
+      );
     });
   });
 }

@@ -28,7 +28,7 @@ The VS Code webview hides T3 Code controls that duplicate VS Code-native surface
 - Checkout mode indicator: VS Code already shows the active workspace/checkouts.
 - Branch/ref selector: VS Code already owns branch/ref selection through its source-control UI.
 - T3 Code terminal drawer: VS Code already owns terminal surfaces.
-- Project management chrome: VS Code already scopes the webview to the active workspace folder.
+- Project management chrome: VS Code already scopes the webview to the active workspace folders.
 
 Each control can be restored individually with extension settings:
 
@@ -39,7 +39,7 @@ Each control can be restored individually with extension settings:
 
 All four settings default to `false`. Values are passed to the React app through `window.t3HostBridge.getDisplayPreferences()` at startup and through `window.t3HostBridge.onDisplayPreferencesChanged(...)` while the webview is open, so changes apply without reopening the T3 Code view. When `t3code.ui.enableTerminal` is `false`, the embedded T3 terminal drawer is disabled, terminal keybindings are ignored, terminal-backed project actions are hidden, and any open terminal drawer is closed.
 
-Project management chrome is not configurable in the VS Code extension. The extension backend is started for one workspace folder, so the React app treats the VS Code surface as a single-project view: it filters the sidebar to the bootstrapped workspace project, hides the add-project button, hides the "Projects" group label, hides the current project row label, removes the thread group rail, and renders only that project's threads. This avoids showing unrelated desktop-app projects inside a workspace-scoped editor surface.
+Project management chrome is not configurable in the VS Code extension. The extension backend is started from the active workspace folder and receives the full VS Code workspace folder list, so the React app treats the VS Code surface as a workspace-scoped view: it filters the sidebar to the bootstrapped workspace projects, hides the add-project button, hides redundant project labels only when there is a single visible project, and renders only those projects' threads. This avoids showing unrelated desktop-app projects inside an editor-scoped surface while still supporting multi-root workspaces.
 
 The sidebar toggle remains visible in VS Code webviews at all viewport widths. In desktop/browser surfaces the existing responsive behavior is preserved, but inside VS Code the user must always have a visible control for closing or reopening the thread-history sidebar.
 
@@ -47,7 +47,21 @@ When the thread-history sidebar is open in the inline desktop layout, the VS Cod
 
 The thread-history sidebar open/closed state is stored in shared `ClientSettings`. In VS Code this goes through the host bridge to `<T3 home>/userdata/client-settings.json`, so reloading the VS Code window restores the previous sidebar state.
 
-The webview startup route is reset to the T3 chat home each time the extension renders the view. This intentionally ignores any stale hash route VS Code may have retained from an earlier webview instance, then lets the authenticated backend welcome event choose the current workspace's startup thread. In VS Code, startup selection is constrained to the bootstrapped project: the app prefers the most recently visited thread for that project, falls back to the newest active thread for that project, and otherwise remains on the no-active-thread/new-thread screen.
+The webview startup route is reset to the T3 chat home each time the extension renders the view. This intentionally ignores any stale hash route VS Code may have retained from an earlier webview instance, then lets the authenticated backend welcome event choose the current workspace's startup thread. In VS Code, startup selection is constrained to bootstrapped workspace projects: the app prefers the active workspace folder's project, chooses the most recently visited thread within that project, falls back to that project's newest active thread, and otherwise falls back within the visible workspace project set.
+
+## Virtual Workspace Cache
+
+VS Code virtual workspace folders, such as GitHub RemoteHub folders shaped like `vscode-vfs://github/<owner>/<repo>`, do not provide a real process `cwd`. T3 materializes supported GitHub virtual folders into local partial clones under `<T3 home>/virtual-workspaces/github/<owner>-<repo>-<hash>`, starts the backend from that checkout, and keeps the original VS Code URI-derived folder key in the bootstrap metadata.
+
+Each T3-owned virtual checkout contains `.t3-virtual-workspace.json` with provider, clone URL, workspace folder key, creation time, last-used time, and last-backend-started time. After a backend starts successfully, the extension prunes cache-owned GitHub virtual workspace clones that have not been used for 15 days. Pruning is intentionally conservative: it keeps at least the 10 most recently used checkouts and never deletes a checkout that belongs to the currently running backend.
+
+The explicit command for manual cleanup is:
+
+```sh
+t3code.cleanVirtualWorkspaceCache
+```
+
+Run it from the VS Code command palette as "T3 Code: Clean Virtual Workspace Cache". The command deletes inactive T3-owned virtual workspace checkouts immediately, ignores directories without T3 metadata, and keeps the active checkout if the backend is running.
 
 ## Implementation Status
 
@@ -60,13 +74,14 @@ Implemented so far:
   - `t3code.open`
   - `t3code.newThread`
   - `t3code.restartBackend`
+  - `t3code.cleanVirtualWorkspaceCache`
 - Added a stable Activity Bar view container and webview view:
   - `t3code.sidebarView`
 - Added custom editor contribution and provider:
   - `t3code.conversationEditor`
   - virtual resources shaped like `t3-code://route/local/new`
 - Added a backend process manager that:
-  - chooses the active workspace folder or first workspace folder as `cwd`
+  - chooses the active executable workspace folder or materialized virtual checkout as `cwd`
   - allocates a loopback port
   - generates a bootstrap token
   - writes a desktop-compatible bootstrap envelope through fd 3
@@ -74,12 +89,21 @@ Implemented so far:
   - starts the bundled `dist/server/bin.mjs` with `ELECTRON_RUN_AS_NODE=1`
   - falls back to a development checkout command when no bundled server exists
   - supports user-configurable server command, args, cwd, and T3 home
+  - records T3-owned virtual workspace clone metadata
+  - prunes inactive virtual workspace clones not used for 15 days after successful backend startup
   - polls `/.well-known/t3/environment` with a per-request timeout
   - terminates the backend on extension disposal
 - Added a neutral host bridge contract:
   - `T3HostBridge`
   - `window.t3HostBridge`
   - `getDisplayPreferences()` for host-level UI and capability preferences
+- Added VS Code multi-root bootstrap metadata:
+  - the extension sends every VS Code workspace folder through the desktop bootstrap envelope
+  - each folder has a stable key derived from URI scheme, authority, and filesystem path
+  - the active editor's workspace folder is marked as the active bootstrap folder
+  - GitHub RemoteHub virtual folders are materialized into a local T3-managed clone before bootstrapping
+  - T3-owned virtual workspace clones are kept under `<T3 home>/virtual-workspaces/github`
+  - the extension keeps at least the 10 most recently used virtual workspace clones and never prunes the active checkout
 - Updated the web app to:
   - prefer `window.t3HostBridge.getLocalEnvironmentBootstrap()`
   - fall back to `window.desktopBridge.getLocalEnvironmentBootstrap()`
@@ -89,13 +113,13 @@ Implemented so far:
   - use host-injected bearer auth for VS Code webview HTTP and WebSocket startup
   - hide VS Code-duplicated controls by default based on host display preferences
   - keep the sidebar toggle visible at all VS Code webview widths
-  - scope the sidebar to the bootstrapped VS Code workspace project
+  - scope the sidebar to the bootstrapped VS Code workspace projects
   - hide project-management chrome in VS Code single-project mode
   - remove the thread group rail in VS Code single-project mode
   - show only one thread-sidebar toggle at a time
   - persist the thread-sidebar open state in shared `ClientSettings`
   - reset VS Code webview startup routing before React initializes
-  - choose only a current-project thread during VS Code first-load navigation
+  - choose only a visible VS Code workspace thread during first-load navigation, preferring the active workspace project
   - read and write `ClientSettings` through `window.t3HostBridge` when no desktop bridge is present
   - support `VITE_BASE_URL` so extension-local web assets can be built with relative paths
 - Added webview rendering that:
@@ -162,6 +186,8 @@ Known packaging notes:
 
 Decision: when running inside the VS Code webview, the T3 web app presents only the project that the extension-owned backend bootstrapped from the current workspace folder.
 
+Status: superseded for multi-root workspaces by the 2026-05-15 multi-root bootstrap decision. The single-project behavior remains the compatibility path when VS Code exposes only one workspace folder.
+
 Reasoning:
 
 - VS Code already defines the active workspace/repository context. Showing the desktop app's full project list inside that context makes it possible to accidentally navigate into unrelated repositories.
@@ -175,6 +201,72 @@ Implemented:
 - The sidebar removes the thin thread group rail in VS Code webviews because there is no visible next project boundary to communicate.
 - Thread rows remain visible and are limited to the current workspace project.
 - The sidebar toggle is visible in VS Code webviews at all viewport widths.
+
+### 2026-05-15: Support Multi-root VS Code Workspace Bootstrap
+
+Decision: keep `thread.projectId` as the authoritative ownership key, but bootstrap one T3 project per VS Code workspace folder and expose the full project set in the lifecycle welcome payload.
+
+Reasoning:
+
+- A repository root is a useful grouping key, but it is not a safe ownership key. Worktrees, monorepo subprojects, devcontainers, SSH remotes, and local paths can share repository metadata while requiring separate working state and command execution context.
+- The existing T3 thread index already uses `projectId -> threadIds`, so multi-root support should widen the bootstrapped project set rather than replace thread ownership with repository identity.
+- VS Code workspace folder URIs carry scheme and authority. Including those fields in the bootstrap key distinguishes local, SSH, and devcontainer roots even when their filesystem paths are identical from the agent's point of view.
+- Backward compatibility matters: older clients and non-VS Code surfaces still understand `bootstrapProjectId` and `bootstrapThreadId`.
+
+Implemented:
+
+- `DesktopBackendBootstrap` accepts `workspaceFolders[]` and `activeWorkspaceFolderKey`.
+- Each workspace folder carries `key`, `name`, `cwd`, `uriScheme`, and `uriAuthority`.
+- The VS Code extension builds folder keys as `<scheme>:<authority>:<fsPath>`, sends every workspace folder, and keeps launching the backend from the active folder.
+- `file:` and `vscode-remote:` workspace folders are treated as directly executable filesystem roots.
+- `vscode-vfs://github/<owner>/<repo>` workspace folders from GitHub RemoteHub are cloned with `git clone --filter=blob:none` into `<T3 home>/virtual-workspaces/github/<owner>-<repo>-<hash>` and bootstrapped from that local checkout.
+- Unsupported virtual workspace folders are skipped instead of passing their `Uri.fsPath` to the backend as a bogus cwd.
+- `ServerConfig` stores the bootstrapped folder list and active folder key from the desktop bootstrap envelope.
+- Server startup resolves or creates one T3 project per bootstrapped folder, creates a startup thread when a project has no active thread, and publishes all results as `bootstrapProjects[]`.
+- The legacy welcome fields `bootstrapProjectId` and `bootstrapThreadId` remain populated from the active folder's project for compatibility.
+- The React app filters VS Code sidebars to the bootstrapped `projectId` set, falling back to bootstrapped `cwd`s while project ids are still settling.
+- VS Code first-load navigation selects only visible workspace threads and prefers the active workspace project's candidates.
+- Global new-thread shortcuts and command-palette actions in VS Code use the visible workspace project set for their default project instead of unrelated desktop projects.
+
+Operational model:
+
+- Multi-root workspace: one backend process, one T3 project per VS Code root, and one visible thread group per bootstrapped project.
+- Git worktree: each worktree path remains a distinct T3 project; repository identity can group it visually, but thread ownership stays on the physical worktree project.
+- Devcontainer or SSH: the workspace folder key includes `vscode-remote` scheme and authority, so the bootstrap identity distinguishes remote/container roots from local roots. The backend still executes inside the environment where the extension host starts it.
+- GitHub RemoteHub: the VS Code folder URI is virtual and `Uri.fsPath` is not a usable process cwd. T3 clones the GitHub repository to a local cache, uses that checkout as the project cwd, and preserves the virtual folder key for bootstrap identity.
+- Repository identity: still used for sidebar grouping and labels, not as the persistence key for threads.
+
+Automated coverage:
+
+- Server startup tests cover existing project/thread reuse, missing project/thread creation, and multi-root active-folder selection.
+- CLI config tests cover desktop bootstrap propagation for devcontainer-style workspace folder metadata.
+- VS Code extension tests cover single-root startup, multi-root SSH-style folder bootstrap, GitHub RemoteHub clone materialization, and unsupported virtual workspace fallback.
+- Web sidebar logic tests cover multi-root filtering, cwd fallback before project ids settle, and active-project startup thread selection.
+
+### 2026-05-15: Prune T3-owned Virtual Workspace Clones
+
+Decision: keep GitHub RemoteHub materialized checkouts as a T3-owned cache with metadata, prune checkouts not used for 15 days, keep at least the 10 most recently used checkouts, and never delete the currently active backend checkout.
+
+Reasoning:
+
+- GitHub RemoteHub gives T3 a virtual URI, not a real executable `cwd`, so supported virtual folders need a local clone before agents can run shell commands.
+- Cloning on every startup would make RemoteHub workspaces slow and waste network bandwidth; keeping a cache preserves normal repeated-use ergonomics.
+- A cache without cleanup leaks disk over time. Fifteen days is eager enough to recover stale repositories while still covering most short-to-medium branch and review workflows.
+- The active backend checkout must be protected because deleting it would break commands and file references for the running session.
+- Keeping the 10 most recently used checkouts avoids surprising users who rotate through several repositories within a short period.
+
+Implemented:
+
+- GitHub virtual workspace checkouts write `.t3-virtual-workspace.json` with provider, clone URL, workspace folder key, creation time, last-used time, and last-backend-started time.
+- Existing cache checkouts are reused and their usage metadata is refreshed when the backend starts from them.
+- Successful backend startup schedules best-effort pruning for T3-owned GitHub virtual workspace checkouts under `<T3 home>/virtual-workspaces/github`.
+- Pruning deletes only metadata-owned checkouts older than 15 days, preserves the active checkout paths, and keeps the 10 most recently used checkouts regardless of age.
+- The VS Code command `t3code.cleanVirtualWorkspaceCache` ("T3 Code: Clean Virtual Workspace Cache") deletes inactive metadata-owned virtual checkouts immediately while preserving the active checkout and ignoring unowned directories.
+
+Automated coverage:
+
+- VS Code extension tests cover RemoteHub clone materialization before backend startup.
+- Virtual workspace cache tests cover stable checkout path resolution, initial clone metadata, existing-checkout reuse and metadata refresh, 15-day pruning with active and most-recently-used protection, retention-window protection, unowned directory protection, and explicit clean-command behavior.
 
 ### 2026-05-15: Remove the VS Code Thread Group Rail
 
@@ -345,15 +437,17 @@ Deviation from original plan:
 
 Decision: use one extension-owned backend process based on the active editor's workspace folder, falling back to the first workspace folder or the user home directory.
 
+Status: retained. Multi-root support now uses one backend process bootstrapped from the active folder while passing all workspace folders to the backend for project resolution.
+
 Reasoning:
 
-- This satisfies the initial single-workspace experimentation path with minimal server churn.
-- It keeps the process manager small while preserving room for a future multi-root backend registry.
+- This keeps provider sessions in one backend while allowing the server and web app to resolve multiple workspace projects.
+- It keeps the process manager small while preserving room for a future one-process-per-environment registry if remote/container execution requires it.
 
 Deviation from original plan:
 
 - The backend manager is not yet a full one-process-per-workspace registry.
-- Multi-root workspace behavior is basic.
+- Multi-root workspace behavior is now project-aware inside one backend process.
 
 ### 2026-05-14: Package Staged Runtime Dependencies
 

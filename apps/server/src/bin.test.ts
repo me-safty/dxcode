@@ -75,6 +75,8 @@ const makeCliTestServerConfig = (baseDir: string) =>
       startupPresentation: "browser",
       desktopBootstrapToken: undefined,
       autoBootstrapProjectFromCwd: false,
+      autoBootstrapWorkspaceFolders: [],
+      activeBootstrapWorkspaceFolderKey: undefined,
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,

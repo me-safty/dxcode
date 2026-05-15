@@ -9,12 +9,17 @@ import {
   useComposerDraftStore,
 } from "../composerDraftStore";
 import { newDraftId, newThreadId } from "../lib/utils";
-import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
+import {
+  filterProjectsForVscodeScope,
+  orderItemsByPreferredIds,
+} from "../components/Sidebar.logic";
+import { isVscodeWebview } from "../env";
 import {
   deriveLogicalProjectKeyFromSettings,
   getProjectOrderKey,
   selectProjectGroupingSettings,
 } from "../logicalProject";
+import { useServerConfig, useServerWelcome } from "../rpc/serverState";
 import { selectProjectsAcrossEnvironments, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteTarget } from "../threadRoutes";
@@ -166,13 +171,36 @@ export function useHandleNewThread() {
       : null,
   );
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
+  const serverConfig = useServerConfig();
+  const serverWelcome = useServerWelcome();
+  const visibleProjects = useMemo(
+    () =>
+      isVscodeWebview
+        ? filterProjectsForVscodeScope(projects, {
+            environmentId:
+              serverWelcome?.environment.environmentId ??
+              serverConfig?.environment.environmentId ??
+              null,
+            projectId: serverWelcome?.bootstrapProjectId ?? null,
+            projectIds:
+              serverWelcome?.bootstrapProjects?.map((project) => project.projectId) ?? null,
+            activeProjectId:
+              serverWelcome?.bootstrapProjects?.find((project) => project.isActive)?.projectId ??
+              serverWelcome?.bootstrapProjectId ??
+              null,
+            cwd: serverConfig?.cwd ?? serverWelcome?.cwd ?? null,
+            cwds: serverWelcome?.bootstrapProjects?.map((project) => project.cwd) ?? null,
+          })
+        : projects,
+    [projects, serverConfig, serverWelcome],
+  );
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
-      items: projects,
+      items: visibleProjects,
       preferredIds: projectOrder,
       getId: getProjectOrderKey,
     });
-  }, [projectOrder, projects]);
+  }, [projectOrder, visibleProjects]);
   const handleNewThread = useNewThreadState();
 
   return {

@@ -27,7 +27,10 @@ type SidebarProject = {
 export type VscodeProjectScope = {
   environmentId: EnvironmentId | null;
   projectId?: ProjectId | null | undefined;
+  projectIds?: readonly ProjectId[] | null | undefined;
+  activeProjectId?: ProjectId | null | undefined;
   cwd?: string | null | undefined;
+  cwds?: readonly string[] | null | undefined;
 };
 
 export type ThreadTraversalDirection = "previous" | "next";
@@ -277,8 +280,14 @@ export function filterProjectsForVscodeScope<
     if (project.environmentId !== scope.environmentId) {
       return false;
     }
+    if (scope.projectIds && scope.projectIds.length > 0) {
+      return scope.projectIds.includes(project.id);
+    }
     if (scope.projectId) {
       return project.id === scope.projectId;
+    }
+    if (scope.cwds && scope.cwds.length > 0) {
+      return scope.cwds.includes(project.cwd);
     }
     return Boolean(scope.cwd) && project.cwd === scope.cwd;
   });
@@ -289,16 +298,30 @@ export function resolveVscodeInitialThreadRef(input: {
   threadLastVisitedAtById: Readonly<Record<string, string>>;
   scope: VscodeProjectScope;
 }): ScopedThreadRef | null {
-  if (!input.scope.environmentId || !input.scope.projectId) {
+  if (!input.scope.environmentId) {
+    return null;
+  }
+  const scopedProjectIds =
+    input.scope.projectIds && input.scope.projectIds.length > 0
+      ? input.scope.projectIds
+      : input.scope.projectId
+        ? [input.scope.projectId]
+        : [];
+  if (scopedProjectIds.length === 0) {
     return null;
   }
 
-  const candidates = input.threads.filter(
+  const allCandidates = input.threads.filter(
     (thread) =>
       thread.environmentId === input.scope.environmentId &&
-      thread.projectId === input.scope.projectId &&
+      scopedProjectIds.includes(thread.projectId) &&
       thread.archivedAt === null,
   );
+  const activeProjectId = input.scope.activeProjectId ?? input.scope.projectId ?? null;
+  const activeCandidates = activeProjectId
+    ? allCandidates.filter((thread) => thread.projectId === activeProjectId)
+    : [];
+  const candidates = activeCandidates.length > 0 ? activeCandidates : allCandidates;
   if (candidates.length === 0) {
     return null;
   }

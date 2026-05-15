@@ -1,11 +1,12 @@
 import * as vscode from "vscode";
 
-import { BackendManager } from "./backendManager.ts";
+import { BackendManager, resolveT3Home } from "./backendManager.ts";
 import {
   createClientSettingsPersistence,
   registerClientSettingsHostBridge,
   resolveClientSettingsPath,
 } from "./clientSettingsPersistence.ts";
+import { cleanVirtualWorkspaceCache } from "./virtualWorkspaceCache.ts";
 import { renderT3Webview, type WebviewDisplayPreferences } from "./webview.ts";
 
 export function activate(context: vscode.ExtensionContext) {
@@ -48,6 +49,27 @@ export function activate(context: vscode.ExtensionContext) {
         },
         async () => {
           await backendManager.restart();
+        },
+      );
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("t3code.cleanVirtualWorkspaceCache", async () => {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Cleaning T3 Code virtual workspace cache",
+        },
+        async () => {
+          const activeCwd = backendManager.activeCwd;
+          const result = cleanVirtualWorkspaceCache({
+            t3Home: resolveT3Home(),
+            activeCheckoutPaths: activeCwd ? [activeCwd] : [],
+            outputChannel,
+          });
+          vscode.window.showInformationMessage(
+            `T3 Code cleaned ${result.deleted} virtual workspace checkout(s); kept ${result.kept}.`,
+          );
         },
       );
     }),

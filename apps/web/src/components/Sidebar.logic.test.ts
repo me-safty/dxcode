@@ -194,6 +194,57 @@ describe("filterProjectsForVscodeScope", () => {
       }),
     ).toEqual([currentProject]);
   });
+
+  it("keeps all bootstrapped VS Code projects in multi-root workspaces", () => {
+    const project1 = {
+      id: ProjectId.make("project-1"),
+      environmentId: localEnvironmentId,
+      cwd: "/repo/api",
+    };
+    const project2 = {
+      id: ProjectId.make("project-2"),
+      environmentId: localEnvironmentId,
+      cwd: "/repo/web",
+    };
+    const otherProject = {
+      id: ProjectId.make("project-3"),
+      environmentId: localEnvironmentId,
+      cwd: "/repo/other",
+    };
+
+    expect(
+      filterProjectsForVscodeScope([project1, otherProject, project2], {
+        environmentId: localEnvironmentId,
+        projectIds: [project1.id, project2.id],
+        activeProjectId: project2.id,
+      }),
+    ).toEqual([project1, project2]);
+  });
+
+  it("falls back to bootstrapped cwds before project ids are known", () => {
+    const project1 = {
+      id: ProjectId.make("project-1"),
+      environmentId: localEnvironmentId,
+      cwd: "/repo/api",
+    };
+    const project2 = {
+      id: ProjectId.make("project-2"),
+      environmentId: localEnvironmentId,
+      cwd: "/repo/web",
+    };
+    const otherProject = {
+      id: ProjectId.make("project-3"),
+      environmentId: localEnvironmentId,
+      cwd: "/repo/other",
+    };
+
+    expect(
+      filterProjectsForVscodeScope([project1, otherProject, project2], {
+        environmentId: localEnvironmentId,
+        cwds: ["/repo/api", "/repo/web"],
+      }),
+    ).toEqual([project1, project2]);
+  });
 });
 
 function makeSidebarThread(
@@ -279,6 +330,36 @@ describe("resolveVscodeInitialThreadRef", () => {
     ).toEqual({
       environmentId: localEnvironmentId,
       threadId: newer.id,
+    });
+  });
+
+  it("prefers the active VS Code project within visible multi-root candidates", () => {
+    const activeOlder = makeSidebarThread({
+      id: ThreadId.make("thread-active-older"),
+      projectId: ProjectId.make("project-active"),
+      updatedAt: "2026-03-09T10:00:00.000Z",
+    });
+    const inactiveNewer = makeSidebarThread({
+      id: ThreadId.make("thread-inactive-newer"),
+      projectId: ProjectId.make("project-inactive"),
+      updatedAt: "2026-03-09T12:00:00.000Z",
+    });
+
+    expect(
+      resolveVscodeInitialThreadRef({
+        threads: [inactiveNewer, activeOlder],
+        threadLastVisitedAtById: {
+          [`${localEnvironmentId}:${inactiveNewer.id}`]: "2026-03-09T13:00:00.000Z",
+        },
+        scope: {
+          environmentId: localEnvironmentId,
+          projectIds: [ProjectId.make("project-active"), ProjectId.make("project-inactive")],
+          activeProjectId: ProjectId.make("project-active"),
+        },
+      }),
+    ).toEqual({
+      environmentId: localEnvironmentId,
+      threadId: activeOlder.id,
     });
   });
 });

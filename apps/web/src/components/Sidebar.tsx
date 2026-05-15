@@ -2570,6 +2570,7 @@ interface SidebarProjectsContentProps {
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
   sortedProjects: readonly SidebarProjectSnapshot[];
   hideProjectChrome: boolean;
+  hideAddProjectButton: boolean;
   expandedThreadListsByProject: ReadonlySet<string>;
   activeRouteProjectKey: string | null;
   routeThreadKey: string | null;
@@ -2612,6 +2613,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     deleteThread,
     sortedProjects,
     hideProjectChrome,
+    hideAddProjectButton,
     expandedThreadListsByProject,
     activeRouteProjectKey,
     routeThreadKey,
@@ -2718,22 +2720,24 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 onProjectGroupingModeChange={handleProjectGroupingModeChange}
                 onThreadPreviewCountChange={handleThreadPreviewCountChange}
               />
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label="Add project"
-                      data-testid="sidebar-add-project-trigger"
-                      className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
-                      onClick={openAddProject}
-                    />
-                  }
-                >
-                  <FolderPlusIcon className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipPopup side="right">Add project</TooltipPopup>
-              </Tooltip>
+              {!hideAddProjectButton && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label="Add project"
+                        data-testid="sidebar-add-project-trigger"
+                        className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                        onClick={openAddProject}
+                      />
+                    }
+                  >
+                    <FolderPlusIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="right">Add project</TooltipPopup>
+                </Tooltip>
+              )}
             </div>
           </div>
         )}
@@ -2875,7 +2879,14 @@ export default function Sidebar() {
               serverConfig?.environment.environmentId ??
               primaryEnvironmentId,
             projectId: serverWelcome?.bootstrapProjectId ?? null,
+            projectIds:
+              serverWelcome?.bootstrapProjects?.map((project) => project.projectId) ?? null,
+            activeProjectId:
+              serverWelcome?.bootstrapProjects?.find((project) => project.isActive)?.projectId ??
+              serverWelcome?.bootstrapProjectId ??
+              null,
             cwd: serverConfig?.cwd ?? serverWelcome?.cwd ?? null,
+            cwds: serverWelcome?.bootstrapProjects?.map((project) => project.cwd) ?? null,
           })
         : projects,
     [primaryEnvironmentId, projects, serverConfig, serverWelcome],
@@ -3495,7 +3506,8 @@ export default function Sidebar() {
             archiveThread={archiveThread}
             deleteThread={deleteThread}
             sortedProjects={sortedProjects}
-            hideProjectChrome={isVscodeWebview}
+            hideProjectChrome={isVscodeWebview && sortedProjects.length <= 1}
+            hideAddProjectButton={isVscodeWebview}
             expandedThreadListsByProject={expandedThreadListsByProject}
             activeRouteProjectKey={activeRouteProjectKey}
             routeThreadKey={routeThreadKey}

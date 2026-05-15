@@ -55,6 +55,10 @@
       {
         "command": "t3code.restartBackend",
         "title": "T3 Code: Restart Backend"
+      },
+      {
+        "command": "t3code.cleanVirtualWorkspaceCache",
+        "title": "T3 Code: Clean Virtual Workspace Cache"
       }
     ],
     "configuration": {
@@ -145,11 +149,15 @@
         },
         {
           "command": "t3code.restartBackend"
+        },
+        {
+          "command": "t3code.cleanVirtualWorkspaceCache"
         }
       ]
     }
   },
   "activationEvents": [
+    "onCommand:t3code.cleanVirtualWorkspaceCache",
     "onCommand:t3code.newThread",
     "onCommand:t3code.open",
     "onCommand:t3code.restartBackend",

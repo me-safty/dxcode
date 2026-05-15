@@ -298,6 +298,8 @@ export const resolveServerConfig = (
       () => mode === "desktop",
     );
     const desktopBootstrapToken = bootstrap?.desktopBootstrapToken;
+    const autoBootstrapWorkspaceFolders = bootstrap?.workspaceFolders ?? [];
+    const activeBootstrapWorkspaceFolderKey = bootstrap?.activeWorkspaceFolderKey;
     const autoBootstrapProjectFromCwd = Option.getOrElse(
       resolveOptionPrecedence(
         Option.fromUndefinedOr(options?.forceAutoBootstrapProjectFromCwd),
@@ -371,6 +373,8 @@ export const resolveServerConfig = (
       startupPresentation,
       desktopBootstrapToken,
       autoBootstrapProjectFromCwd,
+      autoBootstrapWorkspaceFolders,
+      activeBootstrapWorkspaceFolderKey,
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,

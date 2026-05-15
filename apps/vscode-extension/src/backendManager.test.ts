@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +15,17 @@ import {
 const vscodeState = vi.hoisted(() => ({
   workspaceFolderPath: "/workspace",
   activeEditorPath: "/workspace/src/file.ts",
+  workspaceFolders: [
+    {
+      name: "workspace",
+      uri: {
+        scheme: "file",
+        authority: "",
+        path: "/workspace",
+        fsPath: "/workspace",
+      },
+    },
+  ],
   settings: {} as Record<string, unknown>,
 }));
 
@@ -22,7 +34,12 @@ vi.mock("vscode", () => ({
     activeTextEditor: {
       document: {
         uri: {
-          fsPath: vscodeState.activeEditorPath,
+          get fsPath() {
+            return vscodeState.activeEditorPath;
+          },
+          get path() {
+            return vscodeState.activeEditorPath;
+          },
         },
       },
     },
@@ -31,18 +48,11 @@ vi.mock("vscode", () => ({
     getConfiguration: () => ({
       get: (key: string) => vscodeState.settings[key],
     }),
-    getWorkspaceFolder: () => ({
-      uri: {
-        fsPath: vscodeState.workspaceFolderPath,
-      },
-    }),
-    workspaceFolders: [
-      {
-        uri: {
-          fsPath: vscodeState.workspaceFolderPath,
-        },
-      },
-    ],
+    getWorkspaceFolder: (uri: { fsPath: string }) =>
+      vscodeState.workspaceFolders.find((folder) => uri.fsPath.startsWith(folder.uri.fsPath)),
+    get workspaceFolders() {
+      return vscodeState.workspaceFolders;
+    },
   },
 }));
 
@@ -90,7 +100,9 @@ function makeDependencies(input: {
   readonly fetch?: typeof fetch;
   readonly findAvailablePort?: () => Promise<number>;
   readonly mkdirSync?: typeof fs.mkdirSync;
+  readonly pruneVirtualWorkspaceCache?: BackendManagerDependencies["pruneVirtualWorkspaceCache"];
   readonly randomBytes?: typeof import("node:crypto").randomBytes;
+  readonly runCommand?: BackendManagerDependencies["runCommand"];
 }): BackendManagerDependencies {
   return {
     fetch:
@@ -106,12 +118,20 @@ function makeDependencies(input: {
         ),
     findAvailablePort: input.findAvailablePort ?? vi.fn().mockResolvedValue(49111),
     mkdirSync: input.mkdirSync ?? vi.fn(),
+    pruneVirtualWorkspaceCache:
+      input.pruneVirtualWorkspaceCache ??
+      vi.fn(() => ({
+        deleted: 0,
+        kept: 0,
+        errors: 0,
+      })),
     randomBytes:
       input.randomBytes ??
       (vi.fn(() =>
         Buffer.from("0123456789abcdef01234567"),
       ) as unknown as typeof import("node:crypto").randomBytes),
     spawn: input.spawn,
+    runCommand: input.runCommand ?? vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -123,6 +143,18 @@ describe("BackendManager", () => {
     fs.mkdirSync(path.join(extensionRoot, "dist", "server"), { recursive: true });
     fs.writeFileSync(path.join(extensionRoot, "dist", "server", "bin.mjs"), "");
     vscodeState.settings = {};
+    vscodeState.workspaceFolders = [
+      {
+        name: "workspace",
+        uri: {
+          scheme: "file",
+          authority: "",
+          path: vscodeState.workspaceFolderPath,
+          fsPath: vscodeState.workspaceFolderPath,
+        },
+      },
+    ];
+    vscodeState.activeEditorPath = "/workspace/src/file.ts";
   });
 
   afterEach(() => {
@@ -194,6 +226,16 @@ describe("BackendManager", () => {
       desktopBootstrapToken: "303132333435363738396162636465663031323334353637",
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
+      workspaceFolders: [
+        {
+          key: "file::/workspace",
+          name: "workspace",
+          cwd: "/workspace",
+          uriScheme: "file",
+          uriAuthority: "",
+        },
+      ],
+      activeWorkspaceFolderKey: "file::/workspace",
     });
     expect(fetchMock).toHaveBeenCalledWith(
       new URL("http://127.0.0.1:49111/.well-known/t3/environment"),
@@ -240,6 +282,205 @@ describe("BackendManager", () => {
     );
     expect(spawnMock.mock.calls[0]?.[2]?.env?.T3CODE_PORT).toBeUndefined();
     expect(spawnMock.mock.calls[0]?.[2]?.env?.ELECTRON_RUN_AS_NODE).toBe("1");
+  });
+
+  it("passes all VS Code workspace folders and marks the active folder", async () => {
+    vscodeState.workspaceFolders = [
+      {
+        name: "api",
+        uri: {
+          scheme: "vscode-remote",
+          authority: "ssh-remote+box",
+          path: "/workspaces/api",
+          fsPath: "/workspaces/api",
+        },
+      },
+      {
+        name: "web",
+        uri: {
+          scheme: "vscode-remote",
+          authority: "ssh-remote+box",
+          path: "/workspaces/web",
+          fsPath: "/workspaces/web",
+        },
+      },
+    ];
+    vscodeState.activeEditorPath = "/workspaces/web/src/App.tsx";
+    let bootstrapJson = "";
+    const spawnMock = vi.fn<BackendSpawn>(() =>
+      makeChildProcess((value) => {
+        bootstrapJson = value;
+      }),
+    );
+    const manager = new BackendManager(
+      { extensionPath: extensionRoot } as never,
+      makeOutputChannel() as never,
+      makeDependencies({ spawn: spawnMock }),
+    );
+
+    await expect(manager.ensureStarted()).resolves.toMatchObject({
+      cwd: "/workspaces/web",
+    });
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      process.execPath,
+      [
+        path.join(extensionRoot, "dist", "server", "bin.mjs"),
+        "--bootstrap-fd",
+        "3",
+        "--auto-bootstrap-project-from-cwd",
+        "/workspaces/web",
+      ],
+      expect.objectContaining({
+        cwd: "/workspaces/web",
+      }),
+    );
+    expect(JSON.parse(bootstrapJson)).toMatchObject({
+      workspaceFolders: [
+        {
+          key: "vscode-remote:ssh-remote+box:/workspaces/api",
+          name: "api",
+          cwd: "/workspaces/api",
+          uriScheme: "vscode-remote",
+          uriAuthority: "ssh-remote+box",
+        },
+        {
+          key: "vscode-remote:ssh-remote+box:/workspaces/web",
+          name: "web",
+          cwd: "/workspaces/web",
+          uriScheme: "vscode-remote",
+          uriAuthority: "ssh-remote+box",
+        },
+      ],
+      activeWorkspaceFolderKey: "vscode-remote:ssh-remote+box:/workspaces/web",
+    });
+  });
+
+  it("materializes GitHub RemoteHub virtual workspaces before starting the backend", async () => {
+    const t3Home = path.join(extensionRoot, "t3-home");
+    vscodeState.settings.home = t3Home;
+    vscodeState.workspaceFolders = [
+      {
+        name: "vscode",
+        uri: {
+          scheme: "vscode-vfs",
+          authority: "github",
+          path: "/microsoft/vscode",
+          fsPath: "/microsoft/vscode",
+        },
+      },
+    ];
+    vscodeState.activeEditorPath = "/microsoft/vscode/src/vs/code/electron-main/main.ts";
+    const key = "vscode-vfs:github:/microsoft/vscode";
+    const checkoutHash = crypto.createHash("sha256").update(key).digest("hex").slice(0, 12);
+    const checkoutPath = path.join(
+      t3Home,
+      "virtual-workspaces",
+      "github",
+      `microsoft-vscode-${checkoutHash}`,
+    );
+    let bootstrapJson = "";
+    const spawnMock = vi.fn<BackendSpawn>(() =>
+      makeChildProcess((value) => {
+        bootstrapJson = value;
+      }),
+    );
+    const runCommandMock = vi
+      .fn<BackendManagerDependencies["runCommand"]>()
+      .mockImplementation(async (_command, args) => {
+        const checkoutDir = args[3];
+        if (checkoutDir) {
+          fs.mkdirSync(path.join(checkoutDir, ".git"), { recursive: true });
+        }
+      });
+    const manager = new BackendManager(
+      { extensionPath: extensionRoot } as never,
+      makeOutputChannel() as never,
+      makeDependencies({ runCommand: runCommandMock, spawn: spawnMock }),
+    );
+
+    await expect(manager.ensureStarted()).resolves.toMatchObject({
+      cwd: checkoutPath,
+    });
+
+    expect(runCommandMock).toHaveBeenCalledWith("git", [
+      "clone",
+      "--filter=blob:none",
+      "https://github.com/microsoft/vscode.git",
+      checkoutPath,
+    ]);
+    expect(spawnMock).toHaveBeenCalledWith(
+      process.execPath,
+      [
+        path.join(extensionRoot, "dist", "server", "bin.mjs"),
+        "--bootstrap-fd",
+        "3",
+        "--auto-bootstrap-project-from-cwd",
+        checkoutPath,
+      ],
+      expect.objectContaining({
+        cwd: checkoutPath,
+      }),
+    );
+    expect(JSON.parse(bootstrapJson)).toMatchObject({
+      workspaceFolders: [
+        {
+          key,
+          name: "vscode",
+          cwd: checkoutPath,
+          uriScheme: "vscode-vfs",
+          uriAuthority: "github",
+        },
+      ],
+      activeWorkspaceFolderKey: key,
+    });
+  });
+
+  it("does not pass unsupported virtual workspace fsPath values as backend cwd", async () => {
+    vscodeState.workspaceFolders = [
+      {
+        name: "virtual",
+        uri: {
+          scheme: "memfs",
+          authority: "example",
+          path: "/virtual/project",
+          fsPath: "/virtual/project",
+        },
+      },
+    ];
+    vscodeState.activeEditorPath = "/virtual/project/file.ts";
+    const outputChannel = makeOutputChannel();
+    const spawnMock = vi.fn<BackendSpawn>(() => makeChildProcess(() => {}));
+    const runCommandMock = vi
+      .fn<BackendManagerDependencies["runCommand"]>()
+      .mockResolvedValue(undefined);
+    const manager = new BackendManager(
+      { extensionPath: extensionRoot } as never,
+      outputChannel as never,
+      makeDependencies({ runCommand: runCommandMock, spawn: spawnMock }),
+    );
+
+    await expect(manager.ensureStarted()).resolves.toMatchObject({
+      cwd: os.homedir(),
+    });
+
+    expect(runCommandMock).not.toHaveBeenCalled();
+    expect(spawnMock).toHaveBeenCalledWith(
+      process.execPath,
+      [
+        path.join(extensionRoot, "dist", "server", "bin.mjs"),
+        "--bootstrap-fd",
+        "3",
+        "--auto-bootstrap-project-from-cwd",
+        os.homedir(),
+      ],
+      expect.objectContaining({
+        cwd: os.homedir(),
+      }),
+    );
+    expect(outputChannel.appendLine).toHaveBeenCalledWith(
+      expect.stringContaining("Skipping unsupported virtual workspace folder"),
+    );
   });
 
   it("reuses the active backend connection after readiness succeeds", async () => {

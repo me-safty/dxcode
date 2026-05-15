@@ -13,6 +13,7 @@ import * as LogLevel from "effect/LogLevel";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
+import type { DesktopBootstrapWorkspaceFolder } from "@t3tools/contracts";
 
 export const DEFAULT_PORT = 3773;
 
@@ -70,6 +71,8 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly startupPresentation: StartupPresentation;
   readonly desktopBootstrapToken: string | undefined;
   readonly autoBootstrapProjectFromCwd: boolean;
+  readonly autoBootstrapWorkspaceFolders: ReadonlyArray<DesktopBootstrapWorkspaceFolder>;
+  readonly activeBootstrapWorkspaceFolderKey: string | undefined;
   readonly logWebSocketEvents: boolean;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
@@ -165,6 +168,8 @@ export class ServerConfig extends Context.Service<ServerConfig, ServerConfigShap
           ...derivedPaths,
           mode: "web",
           autoBootstrapProjectFromCwd: false,
+          autoBootstrapWorkspaceFolders: [],
+          activeBootstrapWorkspaceFolderKey: undefined,
           logWebSocketEvents: false,
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
