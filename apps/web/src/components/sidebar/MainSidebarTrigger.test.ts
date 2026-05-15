@@ -23,14 +23,14 @@ describe("shouldRenderMainSidebarTrigger", () => {
     ).toBe(true);
   });
 
-  it("uses the mobile sheet state on mobile", () => {
+  it("keeps the main header trigger visible while the mobile sheet is open", () => {
     expect(
       shouldRenderMainSidebarTrigger({
         isMobile: true,
         open: true,
         openMobile: true,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       shouldRenderMainSidebarTrigger({
         isMobile: true,

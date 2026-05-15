@@ -43,7 +43,7 @@ Project management chrome is not configurable in the VS Code extension. The exte
 
 The sidebar toggle remains visible in VS Code webviews at all viewport widths. In desktop/browser surfaces the existing responsive behavior is preserved, but inside VS Code the user must always have a visible control for closing or reopening the thread-history sidebar.
 
-When the thread-history sidebar is open, the VS Code webview shows only the sidebar-local toggle before the T3 Code wordmark, using the close-sidebar icon. The main header toggle before the thread title is hidden until the sidebar is closed, so the view never presents two equivalent sidebar controls at once.
+When the thread-history sidebar is open in the inline desktop layout, the VS Code webview shows only the sidebar-local toggle before the T3 Code wordmark, using the close-sidebar icon. The main header toggle before the thread title is hidden until the sidebar is closed, so the view never presents two equivalent sidebar controls at once. In the narrow floating-sidebar layout, the main header toggle remains visible while the floating sidebar is open and switches to the close-sidebar icon, avoiding header text reflow while keeping a local close control available.
 
 The thread-history sidebar open/closed state is stored in shared `ClientSettings`. In VS Code this goes through the host bridge to `<T3 home>/userdata/client-settings.json`, so reloading the VS Code window restores the previous sidebar state.
 
@@ -206,7 +206,7 @@ Reasoning:
 Implemented:
 
 - The shared sidebar trigger now uses the close-sidebar icon when the desktop sidebar is open, not only when the mobile sheet is open.
-- Main-view header triggers render only when the thread-history sidebar is closed.
+- Main-view header triggers render only when the inline thread-history sidebar is closed. In the narrow floating-sidebar layout, the main header trigger remains visible while open and switches to the close-sidebar icon.
 - `threadSidebarOpen` is part of `ClientSettings`, defaults to `true`, and is persisted through the existing browser, desktop, and VS Code host persistence paths.
 - Automated coverage verifies main-header trigger visibility and the sidebar trigger open/close labels.
 

@@ -7,7 +7,7 @@ export function shouldRenderMainSidebarTrigger(input: {
   open: boolean;
   openMobile: boolean;
 }): boolean {
-  return input.isMobile ? !input.openMobile : !input.open;
+  return input.isMobile || !input.open;
 }
 
 export function MainSidebarTrigger({ className }: { className?: string }) {
