@@ -1,9 +1,14 @@
 import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
-import { Effect, FileSystem, Layer, Path, Random } from "effect";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import * as Random from "effect/Random";
 
 import { ServerConfig } from "../../config.ts";
+import { layer as ProcessRunnerLive } from "../../processRunner.ts";
 import { ServerEnvironment, type ServerEnvironmentShape } from "../Services/ServerEnvironment.ts";
-import { version } from "../../../package.json" with { type: "json" };
+import packageJson from "../../../package.json" with { type: "json" };
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 
 function platformOs(): ExecutionEnvironmentDescriptor["platform"]["os"] {
@@ -77,7 +82,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       os: platformOs(),
       arch: platformArch(),
     },
-    serverVersion: version,
+    serverVersion: packageJson.version,
     capabilities: {
       repositoryIdentity: true,
     },
@@ -89,4 +94,6 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
   } satisfies ServerEnvironmentShape;
 });
 
-export const ServerEnvironmentLive = Layer.effect(ServerEnvironment, makeServerEnvironment());
+export const ServerEnvironmentLive = Layer.effect(ServerEnvironment, makeServerEnvironment()).pipe(
+  Layer.provide(ProcessRunnerLive),
+);

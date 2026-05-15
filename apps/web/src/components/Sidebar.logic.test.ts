@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ProviderDriverKind } from "@t3tools/contracts";
 
 import {
   createThreadJumpHintVisibilityController,
+  getSidebarThreadIdsToPrewarm,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
   getVisibleThreadsForProject,
   getProjectSortTimestamp,
+  groupSidebarThreadsByWorktree,
   hasUnseenCompletion,
   isContextMenuPointerDown,
   orderItemsByPreferredIds,
@@ -19,7 +22,13 @@ import {
   sortProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
-import { EnvironmentId, OrchestrationLatestTurn, ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  OrchestrationLatestTurn,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -121,6 +130,20 @@ describe("createThreadJumpHintVisibilityController", () => {
   });
 });
 
+describe("getSidebarThreadIdsToPrewarm", () => {
+  it("returns only the first visible thread ids up to the prewarm limit", () => {
+    expect(getSidebarThreadIdsToPrewarm(["t1", "t2", "t3"], 2)).toEqual(["t1", "t2"]);
+  });
+
+  it("returns all visible thread ids when they fit within the limit", () => {
+    expect(getSidebarThreadIdsToPrewarm(["t1", "t2"], 10)).toEqual(["t1", "t2"]);
+  });
+
+  it("returns no thread ids when the limit is zero", () => {
+    expect(getSidebarThreadIdsToPrewarm(["t1", "t2"], 0)).toEqual([]);
+  });
+});
+
 describe("shouldClearThreadSelectionOnMouseDown", () => {
   it("preserves selection for thread items", () => {
     const child = {
@@ -169,6 +192,28 @@ describe("resolveSidebarNewThreadEnvMode", () => {
 });
 
 describe("resolveSidebarNewThreadSeedContext", () => {
+  it("prefers the default worktree mode over active thread context", () => {
+    expect(
+      resolveSidebarNewThreadSeedContext({
+        projectId: "project-1",
+        defaultEnvMode: "worktree",
+        activeThread: {
+          projectId: "project-1",
+          branch: "feature/existing",
+          worktreePath: "/repo/.t3/worktrees/existing",
+        },
+        activeDraftThread: {
+          projectId: "project-1",
+          branch: "feature/draft",
+          worktreePath: "/repo/.t3/worktrees/draft",
+          envMode: "worktree",
+        },
+      }),
+    ).toEqual({
+      envMode: "worktree",
+    });
+  });
+
   it("inherits the active server thread context when creating a new thread in the same project", () => {
     expect(
       resolveSidebarNewThreadSeedContext({
@@ -272,6 +317,42 @@ describe("orderItemsByPreferredIds", () => {
       ProjectId.make("project-1"),
     ]);
   });
+
+  it("honors projectOrder physical keys via getProjectOrderKey", async () => {
+    // Regression guard for #1904 / the regression introduced by #2055:
+    // `projectOrder` is populated with physical keys (envId + cwd-derived)
+    // by the store and by drag-end handlers. Readers must identify projects
+    // with the same key format, or manual sort silently snaps back.
+    const { getProjectOrderKey } = await import("../logicalProject");
+    const projects = [
+      {
+        environmentId: EnvironmentId.make("environment-local"),
+        id: ProjectId.make("id-alpha"),
+        cwd: "/work/alpha",
+      },
+      {
+        environmentId: EnvironmentId.make("environment-local"),
+        id: ProjectId.make("id-beta"),
+        cwd: "/work/beta",
+      },
+      {
+        environmentId: EnvironmentId.make("environment-local"),
+        id: ProjectId.make("id-gamma"),
+        cwd: "/work/gamma",
+      },
+    ];
+    const ordered = orderItemsByPreferredIds({
+      items: projects,
+      preferredIds: [getProjectOrderKey(projects[2]!), getProjectOrderKey(projects[0]!)],
+      getId: getProjectOrderKey,
+    });
+
+    expect(ordered.map((project) => project.cwd)).toEqual([
+      "/work/gamma",
+      "/work/alpha",
+      "/work/beta",
+    ]);
+  });
 });
 
 describe("resolveAdjacentThreadId", () => {
@@ -360,6 +441,92 @@ describe("getVisibleSidebarThreadIds", () => {
   });
 });
 
+describe("groupSidebarThreadsByWorktree", () => {
+  const thread = (id: string, worktreePath: string | null, branch: string | null = null) => ({
+    id: ThreadId.make(id),
+    worktreePath,
+    branch,
+  });
+
+  it("groups local threads together", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-local-1", null, "main"),
+      thread("thread-local-2", null, "feature/local"),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      key: "local",
+      label: "Local",
+      detail: null,
+      worktreePath: null,
+      branch: "main",
+    });
+    expect(groups[0]?.threads.map((item) => item.id)).toEqual([
+      ThreadId.make("thread-local-1"),
+      ThreadId.make("thread-local-2"),
+    ]);
+  });
+
+  it("groups worktree threads by exact worktree path", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-a-1", "C:\\Users\\Vivek\\Affil\\nextcard\\.worktrees\\alpha", "alpha"),
+      thread("thread-b-1", "C:\\Users\\Vivek\\Affil\\nextcard\\.worktrees\\beta", "beta"),
+      thread("thread-a-2", "C:\\Users\\Vivek\\Affil\\nextcard\\.worktrees\\alpha", "alpha"),
+    ]);
+
+    expect(groups.map((group) => group.label)).toEqual(["alpha", "beta"]);
+    expect(groups.map((group) => group.threads.map((item) => item.id))).toEqual([
+      [ThreadId.make("thread-a-1"), ThreadId.make("thread-a-2")],
+      [ThreadId.make("thread-b-1")],
+    ]);
+  });
+
+  it("preserves the already-sorted thread order inside each group", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-newest", "/repo/.worktrees/feature", "feature"),
+      thread("thread-local", null, "main"),
+      thread("thread-older", "/repo/.worktrees/feature", "feature"),
+    ]);
+
+    expect(groups[0]?.threads.map((item) => item.id)).toEqual([
+      ThreadId.make("thread-newest"),
+      ThreadId.make("thread-older"),
+    ]);
+  });
+
+  it("uses the first sorted thread in a group as the new-thread seed", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-newest", "/repo/.worktrees/review", "review/newest"),
+      thread("thread-older", "/repo/.worktrees/review", "review/older"),
+    ]);
+
+    expect(groups[0]?.seedThread.id).toBe(ThreadId.make("thread-newest"));
+    expect(groups[0]?.branch).toBe("review/newest");
+    expect(groups[0]?.worktreePath).toBe("/repo/.worktrees/review");
+  });
+
+  it("labels worktree groups with the branch name before falling back to the path basename", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-branch", "/repo/.worktrees/generated-folder", "feature/readable-branch"),
+      thread("thread-path", "/repo/.worktrees/path-label", null),
+    ]);
+
+    expect(groups.map((group) => group.label)).toEqual(["feature/readable-branch", "path-label"]);
+  });
+
+  it("prefers an AI-generated branch label over a temporary worktree branch", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-temp", "/repo/.worktrees/t3code-12345678", "t3code/12345678"),
+      thread("thread-renamed", "/repo/.worktrees/t3code-12345678", "t3code/readable-branch"),
+    ]);
+
+    expect(groups[0]?.label).toBe("t3code/readable-branch");
+    expect(groups[0]?.branch).toBe("t3code/readable-branch");
+    expect(groups[0]?.seedThread.id).toBe(ThreadId.make("thread-temp"));
+  });
+});
+
 describe("isContextMenuPointerDown", () => {
   it("treats secondary-button presses as context menu gestures on all platforms", () => {
     expect(
@@ -401,7 +568,7 @@ describe("resolveThreadStatusPill", () => {
     latestTurn: null,
     lastVisitedAt: undefined,
     session: {
-      provider: "codex" as const,
+      provider: ProviderDriverKind.make("codex"),
       status: "running" as const,
       createdAt: "2026-03-09T10:00:00.000Z",
       updatedAt: "2026-03-09T10:00:00.000Z",
@@ -625,7 +792,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     name: "Project",
     cwd: "/tmp/project",
     defaultModelSelection: {
-      provider: "codex",
+      instanceId: ProviderInstanceId.make("codex"),
       model: "gpt-5.4",
       ...defaultModelSelection,
     },
@@ -644,7 +811,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     projectId: ProjectId.make("project-1"),
     title: "Thread",
     modelSelection: {
-      provider: "codex",
+      instanceId: ProviderInstanceId.make("codex"),
       model: "gpt-5.4",
       ...overrides?.modelSelection,
     },

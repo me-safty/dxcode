@@ -1,6 +1,6 @@
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 
-import { AuthSessionId, TrimmedNonEmptyString } from "./baseSchemas";
+import { AuthSessionId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
  * Declares the server's overall authentication posture.

@@ -1,53 +1,36 @@
-import { Effect, FileSystem, Path } from "effect";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import {
   type ClientOrchestrationCommand,
+  type ChatAttachment,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  type ThreadId,
+  type UploadChatAttachment,
 } from "@t3tools/contracts";
 
-import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore";
-import { ServerConfig } from "../config";
-import { parseBase64DataUrl } from "../imageMime";
-import { WorkspacePaths } from "../workspace/Services/WorkspacePaths";
+import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
+import { ServerConfig } from "../config.ts";
+import { parseBase64DataUrl } from "../imageMime.ts";
+import { WorkspacePaths } from "../workspace/Services/WorkspacePaths.ts";
 
-export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
+export const normalizeUploadChatAttachments = (input: {
+  readonly threadId: ThreadId | string;
+  readonly attachments: ReadonlyArray<UploadChatAttachment>;
+}): Effect.Effect<
+  ReadonlyArray<ChatAttachment>,
+  OrchestrationDispatchCommandError,
+  FileSystem.FileSystem | Path.Path | ServerConfig
+> =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const serverConfig = yield* ServerConfig;
-    const workspacePaths = yield* WorkspacePaths;
 
-    const normalizeProjectWorkspaceRoot = (workspaceRoot: string) =>
-      workspacePaths.normalizeWorkspaceRoot(workspaceRoot).pipe(
-        Effect.mapError(
-          (cause) =>
-            new OrchestrationDispatchCommandError({
-              message: cause.message,
-            }),
-        ),
-      );
-
-    if (command.type === "project.create") {
-      return {
-        ...command,
-        workspaceRoot: yield* normalizeProjectWorkspaceRoot(command.workspaceRoot),
-      } satisfies OrchestrationCommand;
-    }
-
-    if (command.type === "project.meta.update" && command.workspaceRoot !== undefined) {
-      return {
-        ...command,
-        workspaceRoot: yield* normalizeProjectWorkspaceRoot(command.workspaceRoot),
-      } satisfies OrchestrationCommand;
-    }
-
-    if (command.type !== "thread.turn.start") {
-      return command as OrchestrationCommand;
-    }
-
-    const normalizedAttachments = yield* Effect.forEach(
-      command.message.attachments,
+    return yield* Effect.forEach(
+      input.attachments,
       (attachment) =>
         Effect.gen(function* () {
           const parsed = parseBase64DataUrl(attachment.dataUrl);
@@ -64,7 +47,7 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
             });
           }
 
-          const attachmentId = createAttachmentId(command.threadId);
+          const attachmentId = createAttachmentId(String(input.threadId));
           if (!attachmentId) {
             return yield* new OrchestrationDispatchCommandError({
               message: "Failed to create a safe attachment id.",
@@ -110,6 +93,65 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
         }),
       { concurrency: 1 },
     );
+  });
+
+export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
+  Effect.gen(function* () {
+    const workspacePaths = yield* WorkspacePaths;
+
+    const normalizeProjectWorkspaceRoot = (workspaceRoot: string) =>
+      workspacePaths.normalizeWorkspaceRoot(workspaceRoot).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationDispatchCommandError({
+              message: cause.message,
+            }),
+        ),
+      );
+
+    const normalizeProjectWorkspaceRootForCreate = (
+      workspaceRoot: string,
+      createIfMissing: boolean | undefined,
+    ) =>
+      workspacePaths
+        .normalizeWorkspaceRoot(workspaceRoot, {
+          createIfMissing: createIfMissing === true,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationDispatchCommandError({
+                message: cause.message,
+              }),
+          ),
+        );
+
+    if (command.type === "project.create") {
+      return {
+        ...command,
+        workspaceRoot: yield* normalizeProjectWorkspaceRootForCreate(
+          command.workspaceRoot,
+          command.createWorkspaceRootIfMissing,
+        ),
+        createWorkspaceRootIfMissing: command.createWorkspaceRootIfMissing === true,
+      } satisfies OrchestrationCommand;
+    }
+
+    if (command.type === "project.meta.update" && command.workspaceRoot !== undefined) {
+      return {
+        ...command,
+        workspaceRoot: yield* normalizeProjectWorkspaceRoot(command.workspaceRoot),
+      } satisfies OrchestrationCommand;
+    }
+
+    if (command.type !== "thread.turn.start") {
+      return command as OrchestrationCommand;
+    }
+
+    const normalizedAttachments = yield* normalizeUploadChatAttachments({
+      threadId: command.threadId,
+      attachments: command.message.attachments,
+    });
 
     return {
       ...command,

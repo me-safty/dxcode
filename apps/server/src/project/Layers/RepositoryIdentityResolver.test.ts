@@ -1,17 +1,31 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { Duration, Effect, FileSystem, Layer } from "effect";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import { TestClock } from "effect/testing";
 
-import { runProcess } from "../../processRunner.ts";
+import * as ProcessRunner from "../../processRunner.ts";
 import { RepositoryIdentityResolver } from "../Services/RepositoryIdentityResolver.ts";
 import {
   makeRepositoryIdentityResolver,
   RepositoryIdentityResolverLive,
 } from "./RepositoryIdentityResolver.ts";
 
+const normalizePathSeparators = (value: string) => value.replaceAll("\\", "/");
+const normalizeResolvedPath = (value: string) => normalizePathSeparators(value);
+
 const git = (cwd: string, args: ReadonlyArray<string>) =>
-  Effect.promise(() => runProcess("git", ["-C", cwd, ...args]));
+  Effect.gen(function* () {
+    const processRunner = yield* ProcessRunner.ProcessRunner;
+    return yield* processRunner.run({
+      command: "git",
+      args: ["-C", cwd, ...args],
+      shell: process.platform === "win32",
+    });
+  }).pipe(Effect.provide(ProcessRunner.layer));
 
 const makeRepositoryIdentityResolverTestLayer = (options: {
   readonly positiveCacheTtl?: Duration.Input;
@@ -23,7 +37,7 @@ const makeRepositoryIdentityResolverTestLayer = (options: {
       cacheCapacity: 16,
       ...options,
     }),
-  );
+  ).pipe(Layer.provide(ProcessRunner.layer));
 
 it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
   it.effect("normalizes equivalent GitHub remotes into a stable repository identity", () =>
@@ -38,13 +52,44 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
 
       const resolver = yield* RepositoryIdentityResolver;
       const identity = yield* resolver.resolve(cwd);
+      const resolvedIdentityRoot =
+        identity?.rootPath === undefined ? "" : yield* fileSystem.realPath(identity.rootPath);
+      const resolvedCwd = yield* fileSystem.realPath(cwd);
 
       expect(identity).not.toBeNull();
       expect(identity?.canonicalKey).toBe("github.com/t3tools/t3code");
+      expect(normalizeResolvedPath(resolvedIdentityRoot)).toBe(normalizeResolvedPath(resolvedCwd));
       expect(identity?.displayName).toBe("t3tools/t3code");
       expect(identity?.provider).toBe("github");
       expect(identity?.owner).toBe("t3tools");
       expect(identity?.name).toBe("t3code");
+    }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
+  );
+
+  it.effect("returns the git top-level root path when resolving from a nested workspace", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const repoRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-nested-root-test-",
+      });
+      const nestedWorkspace = path.join(repoRoot, "packages", "web");
+
+      yield* fileSystem.makeDirectory(nestedWorkspace, { recursive: true });
+      yield* git(repoRoot, ["init"]);
+      yield* git(repoRoot, ["remote", "add", "origin", "git@github.com:T3Tools/t3code.git"]);
+
+      const resolver = yield* RepositoryIdentityResolver;
+      const identity = yield* resolver.resolve(nestedWorkspace);
+      const resolvedIdentityRoot =
+        identity?.rootPath === undefined ? "" : yield* fileSystem.realPath(identity.rootPath);
+      const resolvedRepoRoot = yield* fileSystem.realPath(repoRoot);
+
+      expect(identity).not.toBeNull();
+      expect(identity?.canonicalKey).toBe("github.com/t3tools/t3code");
+      expect(normalizeResolvedPath(resolvedIdentityRoot)).toBe(
+        normalizeResolvedPath(resolvedRepoRoot),
+      );
     }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
   );
 
@@ -112,7 +157,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
   );
 
   it.effect(
-    "refreshes cached null identities after the negative TTL when a remote is configured later",
+    "keeps null identities cached across repeated resolves until the negative TTL expires",
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -128,8 +173,10 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
 
         yield* git(cwd, ["remote", "add", "origin", "git@github.com:T3Tools/t3code.git"]);
 
-        const cachedIdentity = yield* resolver.resolve(cwd);
-        expect(cachedIdentity).toBeNull();
+        for (const _attempt of [1, 2, 3]) {
+          const cachedIdentity = yield* resolver.resolve(cwd);
+          expect(cachedIdentity).toBeNull();
+        }
 
         yield* TestClock.adjust(Duration.millis(120));
 

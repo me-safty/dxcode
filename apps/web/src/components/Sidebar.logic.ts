@@ -1,5 +1,6 @@
 import * as React from "react";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 import {
   getThreadSortTimestamp,
   sortThreads,
@@ -12,6 +13,9 @@ import { isLatestTurnSettled } from "../session-logic";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
+// Visible sidebar rows are prewarmed into the thread-detail cache so opening a
+// nearby thread usually reuses an already-hot subscription.
+export const SIDEBAR_THREAD_PREWARM_LIMIT = 10;
 export type SidebarNewThreadEnvMode = "local" | "worktree";
 type SidebarProject = {
   id: string;
@@ -183,6 +187,12 @@ export function resolveSidebarNewThreadSeedContext(input: {
   worktreePath?: string | null;
   envMode: SidebarNewThreadEnvMode;
 } {
+  if (input.defaultEnvMode === "worktree") {
+    return {
+      envMode: "worktree",
+    };
+  }
+
   if (input.activeDraftThread?.projectId === input.projectId) {
     return {
       branch: input.activeDraftThread.branch,
@@ -241,6 +251,13 @@ export function getVisibleSidebarThreadIds<TThreadId>(
   return renderedProjects.flatMap((renderedProject) =>
     renderedProject.shouldShowThreadPanel === false ? [] : renderedProject.renderedThreadIds,
   );
+}
+
+export function getSidebarThreadIdsToPrewarm<TThreadId>(
+  visibleThreadIds: readonly TThreadId[],
+  limit = SIDEBAR_THREAD_PREWARM_LIMIT,
+): TThreadId[] {
+  return visibleThreadIds.slice(0, Math.max(0, limit));
 }
 
 export function resolveAdjacentThreadId<T>(input: {
@@ -441,6 +458,74 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
     hiddenThreads: threads.filter((thread) => !visibleThreadIds.has(thread.id)),
     visibleThreads: threads.filter((thread) => visibleThreadIds.has(thread.id)),
   };
+}
+
+export interface SidebarWorktreeThreadGroup<TThread> {
+  key: string;
+  label: string;
+  detail: string | null;
+  worktreePath: string | null;
+  branch: string | null;
+  seedThread: TThread;
+  threads: TThread[];
+}
+
+function basenameFromPath(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  for (const segment of trimmed.split(/[\\/]/).toReversed()) {
+    if (segment.length > 0) return segment;
+  }
+  return path;
+}
+
+function isDisplayableWorktreeBranch(branch: string | null): branch is string {
+  return branch !== null && !isTemporaryWorktreeBranch(branch);
+}
+
+function resolveWorktreeGroupBranch(current: string | null, next: string | null): string | null {
+  if (isDisplayableWorktreeBranch(current)) return current;
+  if (isDisplayableWorktreeBranch(next)) return next;
+  return current ?? next;
+}
+
+function resolveWorktreeGroupLabel(worktreePath: string | null, branch: string | null): string {
+  if (worktreePath === null) return "Local";
+  return branch ?? basenameFromPath(worktreePath);
+}
+
+export function groupSidebarThreadsByWorktree<
+  TThread extends {
+    branch: string | null;
+    worktreePath: string | null;
+  },
+>(threads: readonly TThread[]): SidebarWorktreeThreadGroup<TThread>[] {
+  const groups = new Map<string, SidebarWorktreeThreadGroup<TThread>>();
+
+  for (const thread of threads) {
+    const worktreePath = thread.worktreePath;
+    const key = worktreePath === null ? "local" : `worktree:${worktreePath}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.threads.push(thread);
+      const branch = resolveWorktreeGroupBranch(existing.branch, thread.branch);
+      existing.branch = branch;
+      existing.label = resolveWorktreeGroupLabel(existing.worktreePath, branch);
+      continue;
+    }
+
+    const branch = resolveWorktreeGroupBranch(null, thread.branch);
+    groups.set(key, {
+      key,
+      label: resolveWorktreeGroupLabel(worktreePath, branch),
+      detail: worktreePath,
+      worktreePath,
+      branch,
+      seedThread: thread,
+      threads: [thread],
+    });
+  }
+
+  return [...groups.values()];
 }
 
 export function getFallbackThreadIdAfterDelete<

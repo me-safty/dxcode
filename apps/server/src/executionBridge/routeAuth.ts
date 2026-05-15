@@ -1,6 +1,6 @@
-import { Schema } from "effect";
-import { Effect } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 export class ExecutionBridgeAuthError extends Schema.TaggedErrorClass<ExecutionBridgeAuthError>()(
   "ExecutionBridgeAuthError",
@@ -10,13 +10,9 @@ export class ExecutionBridgeAuthError extends Schema.TaggedErrorClass<ExecutionB
   },
 ) {}
 
-function readExecutionBridgeSecret() {
-  return process.env.T3_EXECUTION_BRIDGE_SHARED_SECRET?.trim();
-}
-
 export const authenticateExecutionBridgeRequest = Effect.gen(function* () {
-  const secret = readExecutionBridgeSecret();
-  if (!secret) {
+  const sharedSecret = process.env.T3_EXECUTION_BRIDGE_SHARED_SECRET?.trim();
+  if (!sharedSecret) {
     return yield* new ExecutionBridgeAuthError({
       message: "Execution bridge secret is not configured.",
       status: 503,
@@ -24,8 +20,7 @@ export const authenticateExecutionBridgeRequest = Effect.gen(function* () {
   }
 
   const request = yield* HttpServerRequest.HttpServerRequest;
-  const authorization = request.headers["authorization"];
-  if (authorization !== `Bearer ${secret}`) {
+  if (request.headers.authorization !== `Bearer ${sharedSecret}`) {
     return yield* new ExecutionBridgeAuthError({
       message: "Unauthorized execution bridge request.",
       status: 401,

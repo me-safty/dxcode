@@ -1,8 +1,15 @@
 import type { RepositoryIdentity } from "@t3tools/contracts";
-import { Cache, Duration, Effect, Exit, Layer } from "effect";
-import { detectGitHostingProviderFromRemoteUrl, normalizeGitRemoteUrl } from "@t3tools/shared/git";
+import * as Cache from "effect/Cache";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import {
+  detectSourceControlProviderFromGitRemoteUrl,
+  normalizeGitRemoteUrl,
+} from "@t3tools/shared/git";
 
-import { runProcess } from "../../processRunner.ts";
+import * as ProcessRunner from "../../processRunner.ts";
 import {
   RepositoryIdentityResolver,
   type RepositoryIdentityResolverShape,
@@ -42,9 +49,10 @@ function pickPrimaryRemote(
 function buildRepositoryIdentity(input: {
   readonly remoteName: string;
   readonly remoteUrl: string;
+  readonly rootPath: string;
 }): RepositoryIdentity {
   const canonicalKey = normalizeGitRemoteUrl(input.remoteUrl);
-  const hostingProvider = detectGitHostingProviderFromRemoteUrl(input.remoteUrl);
+  const sourceControlProvider = detectSourceControlProviderFromGitRemoteUrl(input.remoteUrl);
   const repositoryPath = canonicalKey.split("/").slice(1).join("/");
   const repositoryPathSegments = repositoryPath.split("/").filter((segment) => segment.length > 0);
   const [owner] = repositoryPathSegments;
@@ -57,8 +65,9 @@ function buildRepositoryIdentity(input: {
       remoteName: input.remoteName,
       remoteUrl: input.remoteUrl,
     },
+    rootPath: input.rootPath,
     ...(repositoryPath ? { displayName: repositoryPath } : {}),
-    ...(hostingProvider ? { provider: hostingProvider.kind } : {}),
+    ...(sourceControlProvider ? { provider: sourceControlProvider.kind } : {}),
     ...(owner ? { owner } : {}),
     ...(repositoryName ? { name: repositoryName } : {}),
   };
@@ -66,7 +75,7 @@ function buildRepositoryIdentity(input: {
 
 const DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY = 512;
 const DEFAULT_POSITIVE_CACHE_TTL = Duration.minutes(1);
-const DEFAULT_NEGATIVE_CACHE_TTL = Duration.seconds(10);
+const DEFAULT_NEGATIVE_CACHE_TTL = Duration.minutes(1);
 
 interface RepositoryIdentityResolverOptions {
   readonly cacheCapacity?: number;
@@ -74,50 +83,63 @@ interface RepositoryIdentityResolverOptions {
   readonly negativeCacheTtl?: Duration.Input;
 }
 
-async function resolveRepositoryIdentityCacheKey(cwd: string): Promise<string> {
+const resolveRepositoryIdentityCacheKey = Effect.fn("resolveRepositoryIdentityCacheKey")(function* (
+  cwd: string,
+) {
+  const processRunner = yield* ProcessRunner.ProcessRunner;
   let cacheKey = cwd;
 
-  try {
-    const topLevelResult = await runProcess("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
-      allowNonZeroExit: true,
-    });
-    if (topLevelResult.code !== 0) {
-      return cacheKey;
-    }
-
-    const candidate = topLevelResult.stdout.trim();
-    if (candidate.length > 0) {
-      cacheKey = candidate;
-    }
-  } catch {
+  const topLevelResult = yield* processRunner
+    .run({
+      command: "git",
+      args: ["-C", cwd, "rev-parse", "--show-toplevel"],
+      timeoutBehavior: "timedOutResult",
+      shell: process.platform === "win32",
+    })
+    .pipe(Effect.option);
+  if (topLevelResult._tag === "None" || topLevelResult.value.code !== 0) {
     return cacheKey;
   }
 
-  return cacheKey;
-}
+  const candidate = topLevelResult.value.stdout.trim();
+  if (candidate.length > 0) {
+    cacheKey = candidate;
+  }
 
-async function resolveRepositoryIdentityFromCacheKey(
-  cacheKey: string,
-): Promise<RepositoryIdentity | null> {
-  try {
-    const remoteResult = await runProcess("git", ["-C", cacheKey, "remote", "-v"], {
-      allowNonZeroExit: true,
-    });
-    if (remoteResult.code !== 0) {
+  return cacheKey;
+});
+
+const resolveRepositoryIdentityFromCacheKey = Effect.fn("resolveRepositoryIdentityFromCacheKey")(
+  function* (
+    cacheKey: string,
+  ): Effect.fn.Return<RepositoryIdentity | null, never, ProcessRunner.ProcessRunner> {
+    const processRunner = yield* ProcessRunner.ProcessRunner;
+    const remoteResult = yield* processRunner
+      .run({
+        command: "git",
+        args: ["-C", cacheKey, "remote", "-v"],
+        timeoutBehavior: "timedOutResult",
+        shell: process.platform === "win32",
+      })
+      .pipe(Effect.option);
+    if (remoteResult._tag === "None" || remoteResult.value.code !== 0) {
       return null;
     }
 
-    const remote = pickPrimaryRemote(parseRemoteFetchUrls(remoteResult.stdout));
-    return remote ? buildRepositoryIdentity(remote) : null;
-  } catch {
-    return null;
-  }
-}
+    const remote = pickPrimaryRemote(parseRemoteFetchUrls(remoteResult.value.stdout));
+    return remote ? buildRepositoryIdentity({ ...remote, rootPath: cacheKey }) : null;
+  },
+);
 
 export const makeRepositoryIdentityResolver = Effect.fn("makeRepositoryIdentityResolver")(
   function* (options: RepositoryIdentityResolverOptions = {}) {
+    const processRunner = yield* ProcessRunner.ProcessRunner;
+
     const repositoryIdentityCache = yield* Cache.makeWith<string, RepositoryIdentity | null>(
-      (cacheKey) => Effect.promise(() => resolveRepositoryIdentityFromCacheKey(cacheKey)),
+      (cacheKey) =>
+        resolveRepositoryIdentityFromCacheKey(cacheKey).pipe(
+          Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+        ),
       {
         capacity: options.cacheCapacity ?? DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY,
         timeToLive: Exit.match({
@@ -133,7 +155,9 @@ export const makeRepositoryIdentityResolver = Effect.fn("makeRepositoryIdentityR
     const resolve: RepositoryIdentityResolverShape["resolve"] = Effect.fn(
       "RepositoryIdentityResolver.resolve",
     )(function* (cwd) {
-      const cacheKey = yield* Effect.promise(() => resolveRepositoryIdentityCacheKey(cwd));
+      const cacheKey = yield* resolveRepositoryIdentityCacheKey(cwd).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+      );
       return yield* Cache.get(repositoryIdentityCache, cacheKey);
     });
 
@@ -146,4 +170,4 @@ export const makeRepositoryIdentityResolver = Effect.fn("makeRepositoryIdentityR
 export const RepositoryIdentityResolverLive = Layer.effect(
   RepositoryIdentityResolver,
   makeRepositoryIdentityResolver(),
-);
+).pipe(Layer.provide(ProcessRunner.layer));

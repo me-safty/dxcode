@@ -3,12 +3,14 @@ node_modules
 .turbo
 .DS_Store
 *.log
+logs/
 *.tsbuildinfo
 apps/*/dist
 .astro
 packages/*/dist
 .env
 .env.local
+.env.machine
 build/
 .logs/
 release/
@@ -22,3 +24,7 @@ apps/web/src/components/__screenshots__
 __screenshots__/
 .tanstack
 squashfs-root/
+.vercel
+.gstack/
+dist-electron/
+.electron-runtime/
