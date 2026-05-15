@@ -46,6 +46,7 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   renderableWorkEntryChangedFiles,
+  renderableWorkEntryHeading,
   resolveAssistantMessageCopyState,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
@@ -1242,7 +1243,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const { workEntry, workspaceRoot, searchQuery, searchActive } = props;
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
-  const heading = toolWorkEntryHeading(workEntry);
+  const heading = renderableWorkEntryHeading(workEntry);
   const rawPreview = workEntryPreview(workEntry, workspaceRoot);
   const preview =
     rawPreview &&
@@ -1334,14 +1335,9 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                   {preview && (
                     <span className="text-muted-foreground/55">
                       {" - "}
-                      {renderHighlightedText(
-                        preview,
-                        searchQuery,
-                        `work-preview:${workEntry.id}`,
-                        {
-                          active: searchActive,
-                        },
-                      )}
+                      {renderHighlightedText(preview, searchQuery, `work-preview:${workEntry.id}`, {
+                        active: searchActive,
+                      })}
                     </span>
                   )}
                 </p>

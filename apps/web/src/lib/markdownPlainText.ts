@@ -24,11 +24,7 @@ function decodeNumericHtmlEntity(entity: string, rawValue: string): string {
     ? Number.parseInt(normalizedValue.slice(2), 16)
     : Number.parseInt(normalizedValue.slice(1), 10);
 
-  if (
-    !Number.isInteger(codePoint) ||
-    codePoint < 0 ||
-    codePoint > MAX_UNICODE_CODE_POINT
-  ) {
+  if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > MAX_UNICODE_CODE_POINT) {
     return entity;
   }
 
@@ -41,7 +37,7 @@ function decodeHtmlEntities(text: string): string {
       return decodeNumericHtmlEntity(entity, rawValue);
     }
 
-    return decodeNamedCharacterReference(rawValue) ?? entity;
+    return decodeNamedCharacterReference(rawValue) || entity;
   });
 }
 

@@ -1,3 +1,4 @@
+import { EnvironmentId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -8,12 +9,15 @@ vi.mock("../../hooks/useTheme", () => ({
   }),
 }));
 
+const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
+
 describe("ProposedPlanCard", () => {
   it("highlights matches in the rendered plan title", async () => {
     const { ProposedPlanCard } = await import("./ProposedPlanCard");
     const markup = renderToStaticMarkup(
       <ProposedPlanCard
         planMarkdown={"## Seeded Thread Search Plan\n\n1. First step"}
+        environmentId={ENVIRONMENT_ID}
         cwd={undefined}
         workspaceRoot={undefined}
         searchQuery="seed"
@@ -34,6 +38,7 @@ describe("ProposedPlanCard", () => {
     const markup = renderToStaticMarkup(
       <ProposedPlanCard
         planMarkdown={`# Search plan\n\n${longBody}\n- buried search token`}
+        environmentId={ENVIRONMENT_ID}
         cwd={undefined}
         workspaceRoot={undefined}
         searchQuery="search token"

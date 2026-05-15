@@ -1687,8 +1687,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const deferredThreadSearchQuery = useDeferredValue(threadSearchQuery);
   const threadSearchIndex = useMemo(
-    () =>
-      threadSearchOpen ? buildThreadSearchIndex(threadSearchRows) : EMPTY_THREAD_SEARCH_INDEX,
+    () => (threadSearchOpen ? buildThreadSearchIndex(threadSearchRows) : EMPTY_THREAD_SEARCH_INDEX),
     [threadSearchOpen, threadSearchRows],
   );
   const threadSearchLookupStateRef = useRef<ThreadSearchLookupState>(
