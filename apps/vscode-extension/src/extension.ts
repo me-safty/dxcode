@@ -1,3 +1,4 @@
+// @effect-diagnostics globalDate:off
 import { normalizeThreadConversationMaxWidth } from "@t3tools/shared/displayPreferences";
 import * as vscode from "vscode";
 
@@ -90,6 +91,11 @@ export function activate(context: vscode.ExtensionContext) {
             activeCheckoutPaths: activeCwd ? [activeCwd] : [],
             outputChannel,
           });
+          const message = `T3 Code cleaned ${result.deleted} virtual workspace checkout(s); kept ${result.kept}; errors ${result.errors}.`;
+          if (result.errors > 0) {
+            vscode.window.showWarningMessage(message);
+            return;
+          }
           vscode.window.showInformationMessage(
             `T3 Code cleaned ${result.deleted} virtual workspace checkout(s); kept ${result.kept}.`,
           );
@@ -135,7 +141,10 @@ class T3SidebarProvider implements vscode.WebviewViewProvider {
     const connection = await this.#backendManager.ensureStarted();
     const bridgeDisposable = registerClientSettingsHostBridge({
       webview: webviewView.webview,
-      persistence: createClientSettingsPersistence(resolveClientSettingsPath(connection.t3Home)),
+      persistence: createClientSettingsPersistence(
+        resolveClientSettingsPath(connection.t3Home),
+        this.#outputChannel,
+      ),
       outputChannel: this.#outputChannel,
       confirm: showHostConfirmDialog,
     });
@@ -205,7 +214,10 @@ class T3ConversationEditorProvider implements vscode.CustomReadonlyEditorProvide
     const connection = await this.#backendManager.ensureStarted();
     const bridgeDisposable = registerClientSettingsHostBridge({
       webview: webviewPanel.webview,
-      persistence: createClientSettingsPersistence(resolveClientSettingsPath(connection.t3Home)),
+      persistence: createClientSettingsPersistence(
+        resolveClientSettingsPath(connection.t3Home),
+        this.#outputChannel,
+      ),
       outputChannel: this.#outputChannel,
       confirm: showHostConfirmDialog,
     });
@@ -348,7 +360,7 @@ function readWebviewDisplayPreferences(): WebviewDisplayPreferences {
     showBranchSelector: configuration.get<boolean>("ui.showBranchSelector", false),
     enableTerminal: configuration.get<boolean>("ui.enableTerminal", false),
     threadConversationMaxWidthPx: normalizeThreadConversationMaxWidth(
-      configuration.get<number>("ui.threadConversationMaxWidth"),
+      configuration.get<number | null>("ui.threadConversationMaxWidth"),
     ),
   };
 }

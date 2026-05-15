@@ -1,3 +1,5 @@
+// @effect-diagnostics globalDate:off
+// @effect-diagnostics nodeBuiltinImport:off
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -81,7 +83,14 @@ export async function ensureGithubVirtualWorkspaceClone(input: {
   const now = input.now ?? new Date();
   if (fs.existsSync(path.join(checkoutDir, ".git"))) {
     input.outputChannel.appendLine(
-      `[backend] Using GitHub virtual workspace checkout ${input.owner}/${input.repository}: ${checkoutDir}`,
+      `[backend] Refreshing GitHub virtual workspace checkout ${input.owner}/${input.repository}: ${checkoutDir}`,
+    );
+    await refreshGithubVirtualWorkspaceCheckout({
+      checkoutDir,
+      dependencies: input.dependencies,
+    });
+    input.outputChannel.appendLine(
+      `[backend] Using refreshed GitHub virtual workspace checkout ${input.owner}/${input.repository}: ${checkoutDir}`,
     );
     touchVirtualWorkspaceMetadata({
       checkoutDir,
@@ -115,6 +124,20 @@ export async function ensureGithubVirtualWorkspaceClone(input: {
     throw error;
   }
   return checkoutDir;
+}
+
+async function refreshGithubVirtualWorkspaceCheckout(input: {
+  readonly checkoutDir: string;
+  readonly dependencies: VirtualWorkspaceCommandDependencies;
+}): Promise<void> {
+  const git = async (args: readonly string[]) => {
+    await input.dependencies.runCommand("git", ["-C", input.checkoutDir, ...args]);
+  };
+
+  await git(["fetch", "--prune", "origin"]);
+  await git(["remote", "set-head", "origin", "--auto"]);
+  await git(["reset", "--hard", "origin/HEAD"]);
+  await git(["clean", "-ffdx"]);
 }
 
 export function resolveGithubVirtualWorkspaceCheckoutPath(input: {

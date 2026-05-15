@@ -25,6 +25,9 @@ const usePrimaryEnvironmentBootstrapStore = create<PrimaryEnvironmentBootstrapSt
 }));
 
 let primaryEnvironmentDescriptorPromise: Promise<ExecutionEnvironmentDescriptor> | null = null;
+let primaryEnvironmentDescriptorRequestId = 0;
+let subscribedBackendConnectionBridge: typeof window.t3HostBridge | null = null;
+let unsubscribeBackendConnectionBridge: (() => void) | null = null;
 
 function createPrimaryKnownEnvironment(input: {
   readonly source: KnownEnvironment["source"];
@@ -59,8 +62,48 @@ async function fetchPrimaryEnvironmentDescriptor(): Promise<ExecutionEnvironment
     }
 
     const descriptor = (await response.json()) as ExecutionEnvironmentDescriptor;
-    writePrimaryEnvironmentDescriptor(descriptor);
     return descriptor;
+  });
+}
+
+function requestPrimaryEnvironmentDescriptor(): Promise<ExecutionEnvironmentDescriptor> {
+  const requestId = (primaryEnvironmentDescriptorRequestId += 1);
+  const nextPromise = fetchPrimaryEnvironmentDescriptor().then((descriptor) => {
+    if (requestId === primaryEnvironmentDescriptorRequestId) {
+      writePrimaryEnvironmentDescriptor(descriptor);
+    }
+    return descriptor;
+  });
+  primaryEnvironmentDescriptorPromise = nextPromise;
+  return nextPromise.finally(() => {
+    if (primaryEnvironmentDescriptorPromise === nextPromise) {
+      primaryEnvironmentDescriptorPromise = null;
+    }
+  });
+}
+
+function ensureBackendConnectionBridgeSubscription(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const bridge = window.t3HostBridge ?? null;
+  if (bridge === subscribedBackendConnectionBridge) {
+    return;
+  }
+
+  unsubscribeBackendConnectionBridge?.();
+  unsubscribeBackendConnectionBridge = null;
+  subscribedBackendConnectionBridge = bridge;
+
+  if (!bridge?.onBackendConnectionChanged) {
+    return;
+  }
+
+  unsubscribeBackendConnectionBridge = bridge.onBackendConnectionChanged(() => {
+    void refreshPrimaryEnvironmentDescriptor().catch((error: unknown) => {
+      console.warn("Failed to refresh T3 environment descriptor after backend restart.", error);
+    });
   });
 }
 
@@ -91,6 +134,7 @@ export function getPrimaryKnownEnvironment(): KnownEnvironment | null {
 }
 
 export function resolveInitialPrimaryEnvironmentDescriptor(): Promise<ExecutionEnvironmentDescriptor> {
+  ensureBackendConnectionBridgeSubscription();
   const descriptor = readPrimaryEnvironmentDescriptor();
   if (descriptor) {
     return Promise.resolve(descriptor);
@@ -100,17 +144,20 @@ export function resolveInitialPrimaryEnvironmentDescriptor(): Promise<ExecutionE
     return primaryEnvironmentDescriptorPromise;
   }
 
-  const nextPromise = fetchPrimaryEnvironmentDescriptor();
-  primaryEnvironmentDescriptorPromise = nextPromise;
-  return nextPromise.finally(() => {
-    if (primaryEnvironmentDescriptorPromise === nextPromise) {
-      primaryEnvironmentDescriptorPromise = null;
-    }
-  });
+  return requestPrimaryEnvironmentDescriptor();
+}
+
+export function refreshPrimaryEnvironmentDescriptor(): Promise<ExecutionEnvironmentDescriptor> {
+  ensureBackendConnectionBridgeSubscription();
+  return requestPrimaryEnvironmentDescriptor();
 }
 
 export function __resetPrimaryEnvironmentBootstrapForTests(): void {
   primaryEnvironmentDescriptorPromise = null;
+  primaryEnvironmentDescriptorRequestId = 0;
+  unsubscribeBackendConnectionBridge?.();
+  unsubscribeBackendConnectionBridge = null;
+  subscribedBackendConnectionBridge = null;
   usePrimaryEnvironmentBootstrapStore.getState().reset();
 }
 

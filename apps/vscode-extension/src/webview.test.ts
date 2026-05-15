@@ -177,8 +177,8 @@ describe("VS Code display preference settings", () => {
     expect(properties["t3code.ui.showCheckoutModeIndicator"]?.default).toBe(false);
     expect(properties["t3code.ui.showBranchSelector"]?.default).toBe(false);
     expect(properties["t3code.ui.enableTerminal"]?.default).toBe(false);
-    expect(properties["t3code.ui.threadConversationMaxWidth"]?.type).toBe("number");
-    expect("default" in properties["t3code.ui.threadConversationMaxWidth"]).toBe(false);
+    expect(properties["t3code.ui.threadConversationMaxWidth"]?.type).toEqual(["number", "null"]);
+    expect(properties["t3code.ui.threadConversationMaxWidth"]?.default).toBeNull();
     expect(properties["t3code.ui.threadConversationMaxWidth"]?.minimum).toBe(
       THREAD_CONVERSATION_MIN_WIDTH_PX,
     );

@@ -2,6 +2,7 @@ export {
   getPrimaryKnownEnvironment,
   readPrimaryEnvironmentDescriptor,
   resetPrimaryEnvironmentDescriptorForTests,
+  refreshPrimaryEnvironmentDescriptor,
   resolveInitialPrimaryEnvironmentDescriptor,
   usePrimaryEnvironmentId,
   writePrimaryEnvironmentDescriptor,

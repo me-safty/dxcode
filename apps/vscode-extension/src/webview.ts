@@ -120,6 +120,7 @@ function makeBridgeScript(input: {
       const normalizeThreadConversationMaxWidth = ${normalizeThreadConversationMaxWidth.toString()};
       const displayPreferenceListeners = new Set();
       const hostAppearanceListeners = new Set();
+      const backendConnectionListeners = new Set();
       window.__T3_IS_VSCODE_WEBVIEW = true;
       const pendingRequests = new Map();
       function applyHostAppearance(appearance) {
@@ -168,6 +169,9 @@ function makeBridgeScript(input: {
         }
         if (message && message.type === "t3.backendConnectionChanged") {
           bootstrap = { ...bootstrap, ...message.connection };
+          for (const listener of backendConnectionListeners) {
+            listener(bootstrap);
+          }
           return;
         }
         if (!message || message.type !== "t3.hostResponse") {
@@ -221,6 +225,12 @@ function makeBridgeScript(input: {
           hostAppearanceListeners.add(callback);
           return () => {
             hostAppearanceListeners.delete(callback);
+          };
+        },
+        onBackendConnectionChanged(callback) {
+          backendConnectionListeners.add(callback);
+          return () => {
+            backendConnectionListeners.delete(callback);
           };
         },
         getClientSettings() {

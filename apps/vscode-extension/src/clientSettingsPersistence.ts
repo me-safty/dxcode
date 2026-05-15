@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 /* oxlint-disable unicorn/require-post-message-target-origin */
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
@@ -26,7 +27,10 @@ export function resolveClientSettingsPath(t3Home: string): string {
   return path.join(t3Home, "userdata", "client-settings.json");
 }
 
-export function createClientSettingsPersistence(settingsPath: string): ClientSettingsPersistence {
+export function createClientSettingsPersistence(
+  settingsPath: string,
+  outputChannel?: Pick<vscode.OutputChannel, "appendLine">,
+): ClientSettingsPersistence {
   return {
     get: async () => {
       try {
@@ -38,7 +42,12 @@ export function createClientSettingsPersistence(settingsPath: string): ClientSet
 
         const legacyDocument = parsed as ClientSettingsDocument;
         return isObject(legacyDocument.settings) ? legacyDocument.settings : parsed;
-      } catch {
+      } catch (error) {
+        if (!isNodeErrorCode(error, "ENOENT")) {
+          outputChannel?.appendLine(
+            `[webview] Failed to read client settings ${settingsPath}: ${stringifyError(error)}`,
+          );
+        }
         return null;
       }
     },
@@ -55,6 +64,19 @@ export function createClientSettingsPersistence(settingsPath: string): ClientSet
       }
     },
   };
+}
+
+function isNodeErrorCode(error: unknown, code: string): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    error.code === code
+  );
+}
+
+function stringifyError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function registerClientSettingsHostBridge(input: {

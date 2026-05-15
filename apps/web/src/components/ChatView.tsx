@@ -904,6 +904,7 @@ export default function ChatView(props: ChatViewProps) {
   const storeNewTerminal = useTerminalUiStateStore((s) => s.newTerminal);
   const storeSetActiveTerminal = useTerminalUiStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalUiStateStore((s) => s.closeTerminal);
+  const storeClearTerminalUiState = useTerminalUiStateStore((s) => s.clearTerminalUiState);
   const serverThreadKeys = useStore(
     useShallow((state) =>
       selectThreadsAcrossEnvironments(state).map((thread) =>
@@ -2545,9 +2546,10 @@ export default function ChatView(props: ChatViewProps) {
         });
       }
       storeSetTerminalOpen(threadRefToClose, false);
+      storeClearTerminalUiState(threadRefToClose);
     }
     setTerminalUiLaunchContext(null);
-  }, [disabledTerminalThreadRefsToClose, storeSetTerminalOpen]);
+  }, [disabledTerminalThreadRefsToClose, storeClearTerminalUiState, storeSetTerminalOpen]);
 
   useEffect(() => {
     if (!activeThread?.id || terminalUiState.terminalOpen) return;

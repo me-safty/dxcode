@@ -1,3 +1,5 @@
+// @effect-diagnostics globalDate:off
+// @effect-diagnostics nodeBuiltinImport:off
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -72,7 +74,7 @@ describe("virtual workspace cache", () => {
     });
   });
 
-  it("reuses existing checkouts and updates usage metadata without recloning", async () => {
+  it("refreshes existing checkouts before reuse and updates usage metadata without recloning", async () => {
     const key = "vscode-vfs:github:/microsoft/vscode";
     const checkoutDir = resolveGithubVirtualWorkspaceCheckoutPath({
       key,
@@ -105,7 +107,30 @@ describe("virtual workspace cache", () => {
       }),
     ).resolves.toBe(checkoutDir);
 
-    expect(runCommand).not.toHaveBeenCalled();
+    expect(runCommand).toHaveBeenCalledTimes(4);
+    expect(runCommand).toHaveBeenNthCalledWith(1, "git", [
+      "-C",
+      checkoutDir,
+      "fetch",
+      "--prune",
+      "origin",
+    ]);
+    expect(runCommand).toHaveBeenNthCalledWith(2, "git", [
+      "-C",
+      checkoutDir,
+      "remote",
+      "set-head",
+      "origin",
+      "--auto",
+    ]);
+    expect(runCommand).toHaveBeenNthCalledWith(3, "git", [
+      "-C",
+      checkoutDir,
+      "reset",
+      "--hard",
+      "origin/HEAD",
+    ]);
+    expect(runCommand).toHaveBeenNthCalledWith(4, "git", ["-C", checkoutDir, "clean", "-ffdx"]);
     expect(readMetadata(checkoutDir)).toEqual(
       expect.objectContaining({
         createdAt: "2026-05-01T10:00:00.000Z",

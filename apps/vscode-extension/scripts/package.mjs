@@ -78,6 +78,23 @@ function run(command, args) {
   }
 }
 
+let packageJsonRestored = false;
+function restorePackageJson() {
+  if (packageJsonRestored) {
+    return;
+  }
+  writeFileSync(packageJsonPath, packageJsonSource);
+  packageJsonRestored = true;
+}
+
+function restorePackageJsonAndExit(exitCode) {
+  restorePackageJson();
+  process.exit(exitCode);
+}
+
+process.once("SIGINT", () => restorePackageJsonAndExit(130));
+process.once("SIGTERM", () => restorePackageJsonAndExit(143));
+
 rmSync(vsixPath, { force: true });
 rmSync(join(extensionDir, "dist", vsixName), { force: true });
 
@@ -100,5 +117,5 @@ try {
   }
   run("bun", vsceArgs);
 } finally {
-  writeFileSync(packageJsonPath, packageJsonSource);
+  restorePackageJson();
 }

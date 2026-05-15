@@ -3,6 +3,7 @@ import { EnvironmentId } from "@t3tools/contracts";
 
 import {
   getPrimaryKnownEnvironment,
+  readPrimaryEnvironmentDescriptor,
   resolveInitialPrimaryEnvironmentDescriptor,
   resetPrimaryEnvironmentDescriptorForTests,
   writePrimaryEnvironmentDescriptor,
@@ -200,5 +201,66 @@ describe("environmentBootstrap", () => {
       httpBaseUrl: "http://127.0.0.1:4888/",
       wsBaseUrl: "ws://127.0.0.1:4888/",
     });
+  });
+
+  it("refreshes the primary descriptor when the VS Code host bridge backend changes", async () => {
+    const refreshedEnvironment = {
+      ...BASE_ENVIRONMENT,
+      label: "Restarted local environment",
+      serverVersion: "0.0.1-test",
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(BASE_ENVIRONMENT))
+      .mockResolvedValueOnce(jsonResponse(refreshedEnvironment));
+    type BackendConnectionChangedCallback = (bootstrap: {
+      label: string;
+      httpBaseUrl: string | null;
+      wsBaseUrl: string | null;
+    }) => void;
+    const backendConnectionChangedCallbacks: BackendConnectionChangedCallback[] = [];
+    let hostBootstrap = {
+      label: "VS Code",
+      httpBaseUrl: "http://127.0.0.1:4888",
+      wsBaseUrl: "ws://127.0.0.1:4888",
+      bootstrapToken: "vscode-bootstrap-token",
+    };
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      location: new URL("https://webview.example/"),
+      history: {
+        replaceState: vi.fn(),
+      },
+      t3HostBridge: {
+        getLocalEnvironmentBootstrap: () => hostBootstrap,
+        onBackendConnectionChanged: (callback: BackendConnectionChangedCallback) => {
+          backendConnectionChangedCallbacks.push(callback);
+          return vi.fn();
+        },
+      },
+    });
+
+    await expect(resolveInitialPrimaryEnvironmentDescriptor()).resolves.toEqual(BASE_ENVIRONMENT);
+    hostBootstrap = {
+      label: "VS Code",
+      httpBaseUrl: "http://127.0.0.1:4999",
+      wsBaseUrl: "ws://127.0.0.1:4999",
+      bootstrapToken: "vscode-bootstrap-token",
+    };
+    const notifyBackendConnectionChanged = backendConnectionChangedCallbacks[0];
+    if (!notifyBackendConnectionChanged) {
+      throw new Error("Backend connection change listener was not registered.");
+    }
+    notifyBackendConnectionChanged({
+      label: "VS Code",
+      httpBaseUrl: "http://127.0.0.1:4999",
+      wsBaseUrl: "ws://127.0.0.1:4999",
+    });
+
+    await vi.waitFor(() => {
+      expect(readPrimaryEnvironmentDescriptor()).toEqual(refreshedEnvironment);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith("http://127.0.0.1:4999/.well-known/t3/environment");
   });
 });

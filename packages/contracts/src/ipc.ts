@@ -294,6 +294,9 @@ export interface T3HostBridge {
   ) => () => void;
   getHostAppearance?: () => T3HostAppearance | null;
   onHostAppearanceChanged?: (callback: (appearance: T3HostAppearance) => void) => () => void;
+  onBackendConnectionChanged?: (
+    callback: (bootstrap: DesktopEnvironmentBootstrap) => void,
+  ) => () => void;
   getClientSettings?: () => Promise<ClientSettings | null>;
   setClientSettings?: (settings: ClientSettings) => Promise<void>;
   /** Optional because non-hosted browser surfaces fall back to `window.confirm`. */

@@ -11,6 +11,15 @@ const configuredWsUrl = process.env.VITE_WS_URL?.trim();
 const configuredBaseUrl = process.env.VITE_BASE_URL?.trim();
 const configuredHostedAppChannel = process.env.VITE_HOSTED_APP_CHANNEL?.trim() || "";
 const configuredAppVersion = process.env.APP_VERSION?.trim() || pkg.version;
+
+if (
+  configuredBaseUrl &&
+  !configuredBaseUrl.startsWith("/") &&
+  !/^https?:\/\//u.test(configuredBaseUrl)
+) {
+  throw new Error('VITE_BASE_URL must be an absolute path starting with "/" or a full URL.');
+}
+
 const configuredHostedAppUrl = (() => {
   const explicitHostedAppUrl = process.env.VITE_HOSTED_APP_URL?.trim();
   if (explicitHostedAppUrl) {
