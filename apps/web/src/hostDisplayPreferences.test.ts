@@ -1,4 +1,8 @@
 import type { T3HostBridge, T3HostDisplayPreferences } from "@t3tools/contracts";
+import {
+  THREAD_CONVERSATION_MAX_WIDTH_PX,
+  THREAD_CONVERSATION_MIN_WIDTH_PX,
+} from "@t3tools/shared/displayPreferences";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveHostDisplayPreferences } from "./hostDisplayPreferences";
@@ -64,7 +68,7 @@ describe("resolveHostDisplayPreferences", () => {
           threadConversationMaxWidthPx: 120,
         },
       }).threadConversationMaxWidthPx,
-    ).toBe(320);
+    ).toBe(THREAD_CONVERSATION_MIN_WIDTH_PX);
     expect(
       resolveHostDisplayPreferences({
         isVscodeWebview: true,
@@ -72,7 +76,7 @@ describe("resolveHostDisplayPreferences", () => {
           threadConversationMaxWidthPx: 5000,
         },
       }).threadConversationMaxWidthPx,
-    ).toBe(4096);
+    ).toBe(THREAD_CONVERSATION_MAX_WIDTH_PX);
   });
 
   it("keeps the thread conversation width unset when the host does not provide a value", () => {

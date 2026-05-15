@@ -1,4 +1,5 @@
 import type { T3HostBridge, T3HostDisplayPreferences } from "@t3tools/contracts";
+import { normalizeThreadConversationMaxWidth } from "@t3tools/shared/displayPreferences";
 import { useSyncExternalStore } from "react";
 
 import { isVscodeWebview } from "./env";
@@ -35,13 +36,6 @@ export function resolveHostDisplayPreferences(input: {
       preferences?.threadConversationMaxWidthPx,
     ),
   };
-}
-
-function normalizeThreadConversationMaxWidth(value: number | null | undefined): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return null;
-  }
-  return Math.round(Math.min(4096, Math.max(320, value)));
 }
 
 function normalizeDisplayPreferences(

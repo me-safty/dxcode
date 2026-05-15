@@ -40,6 +40,7 @@
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
+    "@t3tools/shared": "workspace:*",
     "@types/node": "catalog:",
     "@types/vscode": "^1.106.0",
     "@vscode/vsce": "^3.6.0",

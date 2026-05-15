@@ -1,6 +1,10 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import {
+  THREAD_CONVERSATION_MAX_WIDTH_PX,
+  THREAD_CONVERSATION_MIN_WIDTH_PX,
+} from "@t3tools/shared/displayPreferences";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import packageJson from "../package.json" with { type: "json" };
@@ -68,6 +72,12 @@ describe("renderT3Webview", () => {
     expect(html).toContain('message.type === "t3.backendConnectionChanged"');
     expect(html).toContain('root.setAttribute("data-t3-host-theme", "vscode")');
     expect(html).toContain("applyDisplayPreferences(displayPreferences)");
+    expect(html).toContain(
+      `const threadConversationMinWidthPx = ${THREAD_CONVERSATION_MIN_WIDTH_PX}`,
+    );
+    expect(html).toContain(
+      `const threadConversationMaxWidthPx = ${THREAD_CONVERSATION_MAX_WIDTH_PX}`,
+    );
     expect(html).toContain('root.setAttribute("data-t3-thread-conversation-width", "custom")');
     expect(html).toContain(
       'root.style.setProperty("--t3-thread-conversation-max-width", width + "px")',
@@ -163,6 +173,12 @@ describe("VS Code display preference settings", () => {
     expect(properties["t3code.ui.showBranchSelector"]?.default).toBe(false);
     expect(properties["t3code.ui.enableTerminal"]?.default).toBe(false);
     expect(properties["t3code.ui.threadConversationMaxWidth"]?.default).toBeNull();
+    expect(properties["t3code.ui.threadConversationMaxWidth"]?.minimum).toBe(
+      THREAD_CONVERSATION_MIN_WIDTH_PX,
+    );
+    expect(properties["t3code.ui.threadConversationMaxWidth"]?.maximum).toBe(
+      THREAD_CONVERSATION_MAX_WIDTH_PX,
+    );
     expect(properties["t3code.ui.restoreDefaultTheme"]?.default).toBe(false);
     expect("t3code.ui.showTerminalToggle" in properties).toBe(false);
   });

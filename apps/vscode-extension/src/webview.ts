@@ -1,3 +1,7 @@
+import {
+  THREAD_CONVERSATION_MAX_WIDTH_PX,
+  THREAD_CONVERSATION_MIN_WIDTH_PX,
+} from "@t3tools/shared/displayPreferences";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as vscode from "vscode";
@@ -105,6 +109,8 @@ function makeBridgeScript(input: {
       let displayPreferences = ${JSON.stringify(input.displayPreferences)};
       let hostAppearance = ${JSON.stringify(input.hostAppearance)};
       const initialRoute = ${JSON.stringify(input.initialRoute)};
+      const threadConversationMinWidthPx = ${THREAD_CONVERSATION_MIN_WIDTH_PX};
+      const threadConversationMaxWidthPx = ${THREAD_CONVERSATION_MAX_WIDTH_PX};
       const displayPreferenceListeners = new Set();
       const hostAppearanceListeners = new Set();
       window.__T3_IS_VSCODE_WEBVIEW = true;
@@ -120,10 +126,19 @@ function makeBridgeScript(input: {
       }
       function applyDisplayPreferences(preferences) {
         const root = document.documentElement;
-        const width =
-          preferences && typeof preferences.threadConversationMaxWidthPx === "number" && Number.isFinite(preferences.threadConversationMaxWidthPx)
-            ? Math.round(Math.min(4096, Math.max(320, preferences.threadConversationMaxWidthPx)))
-            : null;
+        let width = null;
+        if (
+          preferences &&
+          typeof preferences.threadConversationMaxWidthPx === "number" &&
+          Number.isFinite(preferences.threadConversationMaxWidthPx)
+        ) {
+          width = Math.round(
+            Math.min(
+              threadConversationMaxWidthPx,
+              Math.max(threadConversationMinWidthPx, preferences.threadConversationMaxWidthPx),
+            ),
+          );
+        }
         if (width === null) {
           root.removeAttribute("data-t3-thread-conversation-width");
           root.style.removeProperty("--t3-thread-conversation-max-width");
