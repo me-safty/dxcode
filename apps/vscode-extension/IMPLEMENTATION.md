@@ -20,7 +20,7 @@ Build a platform-targeted VSIX:
 bun run --filter t3code-vscode package -- --target darwin-arm64 --out release-publish/t3code-vscode-darwin-arm64.vsix
 ```
 
-Local packages use the temporary publisher id `t3code-local` when `VSCE_PUBLISHER` is not set. For Marketplace publishing, the release workflow uses `@vscode/vsce` with a Visual Studio Marketplace Personal Access Token. Configure the GitHub repository variable `VSCE_PUBLISHER` with the Marketplace publisher id and the GitHub secret `VSCE_PAT` with a token that can publish for that publisher. Stable releases publish normal VSIX packages, and nightly/prerelease releases publish with `--pre-release`.
+Local packages use the temporary publisher id `t3tools` when `VSCE_PUBLISHER` is not set. For Marketplace publishing, the release workflow uses `@vscode/vsce` with a Visual Studio Marketplace Personal Access Token. Configure the GitHub repository variable `VSCE_PUBLISHER` with the Marketplace publisher id and the GitHub secret `VSCE_PAT` with a token that can publish for that publisher. Stable releases publish normal VSIX packages, and nightly/prerelease releases publish with `--pre-release`.
 
 ## Auth Transport
 
@@ -577,7 +577,7 @@ Reasoning:
 Implemented:
 
 - `apps/vscode-extension/scripts/package.mjs` accepts `--target`, `--out`, and `--pre-release`, then forwards those options to `vsce package`.
-- The package script writes `VSCE_PUBLISHER` into `package.json` only for the duration of packaging and restores the source manifest afterward. Local packages fall back to `t3code-local` when `VSCE_PUBLISHER` is unset.
+- The package script writes `VSCE_PUBLISHER` into `package.json` only for the duration of packaging and restores the source manifest afterward. Local packages fall back to `t3tools` when `VSCE_PUBLISHER` is unset.
 - `apps/vscode-extension/package.json` includes Marketplace repository metadata and the packaged extension includes an extension-local `LICENSE`.
 - `scripts/update-release-package-versions.ts` now includes `apps/vscode-extension/package.json`, so Marketplace releases do not repeat `0.0.1`.
 - `.github/workflows/release.yml` builds `darwin-arm64`, `darwin-x64`, `linux-x64`, and `win32-x64` VSIX artifacts after preflight.
