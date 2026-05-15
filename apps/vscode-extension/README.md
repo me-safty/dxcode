@@ -27,7 +27,7 @@ The VS Code webview hides T3 Code controls that duplicate VS Code-native surface
 - Open/reveal picker: VS Code already owns editor and file-reveal actions.
 - Checkout mode indicator: VS Code already shows the active workspace/checkouts.
 - Branch/ref selector: VS Code already owns branch/ref selection through its source-control UI.
-- Terminal drawer toggle: VS Code already owns terminal surfaces.
+- T3 Code terminal drawer: VS Code already owns terminal surfaces.
 - Project management chrome: VS Code already scopes the webview to the active workspace folder.
 
 Each control can be restored individually with extension settings:
@@ -35,9 +35,9 @@ Each control can be restored individually with extension settings:
 - `t3code.ui.showOpenInPicker`
 - `t3code.ui.showCheckoutModeIndicator`
 - `t3code.ui.showBranchSelector`
-- `t3code.ui.showTerminalToggle`
+- `t3code.ui.enableTerminal`
 
-All four settings default to `false`. Values are passed to the React app through `window.t3HostBridge.getDisplayPreferences()` at startup and through `window.t3HostBridge.onDisplayPreferencesChanged(...)` while the webview is open, so changes apply without reopening the T3 Code view.
+All four settings default to `false`. Values are passed to the React app through `window.t3HostBridge.getDisplayPreferences()` at startup and through `window.t3HostBridge.onDisplayPreferencesChanged(...)` while the webview is open, so changes apply without reopening the T3 Code view. When `t3code.ui.enableTerminal` is `false`, the embedded T3 terminal drawer is disabled, terminal keybindings are ignored, terminal-backed project actions are hidden, and any open terminal drawer is closed.
 
 Project management chrome is not configurable in the VS Code extension. The extension backend is started for one workspace folder, so the React app treats the VS Code surface as a single-project view: it filters the sidebar to the bootstrapped workspace project, hides the add-project button, hides the "Projects" group label, hides the current project row label, removes the thread group rail, and renders only that project's threads. This avoids showing unrelated desktop-app projects inside a workspace-scoped editor surface.
 
@@ -79,7 +79,7 @@ Implemented so far:
 - Added a neutral host bridge contract:
   - `T3HostBridge`
   - `window.t3HostBridge`
-  - `getDisplayPreferences()` for host-level UI visibility preferences
+  - `getDisplayPreferences()` for host-level UI and capability preferences
 - Updated the web app to:
   - prefer `window.t3HostBridge.getLocalEnvironmentBootstrap()`
   - fall back to `window.desktopBridge.getLocalEnvironmentBootstrap()`
@@ -112,7 +112,7 @@ Implemented so far:
   - `t3code.ui.showOpenInPicker`
   - `t3code.ui.showCheckoutModeIndicator`
   - `t3code.ui.showBranchSelector`
-  - `t3code.ui.showTerminalToggle`
+  - `t3code.ui.enableTerminal`
 - Added shared T3 Code app `ClientSettings` persistence for VS Code:
   - persists to `<T3 home>/userdata/client-settings.json`
   - uses the same raw client-settings file format as desktop
@@ -250,13 +250,13 @@ Hidden by default:
 - Open/reveal picker.
 - Checkout mode indicator.
 - Branch/ref selector.
-- Terminal drawer toggle button.
+- T3 Code terminal drawer.
 
 Reasoning:
 
 - The extension runs inside VS Code, so controls for opening the current workspace in VS Code, revealing files through the platform file manager, showing checkout type, picking refs, and opening a terminal duplicate capabilities already present in the host.
 - Removing duplicated chrome keeps the embedded T3 Code surface focused on conversation and agent workflow while preserving the underlying app behavior for users who explicitly want the original controls.
-- `window.t3HostBridge` remains neutral. VS Code detection now relies only on the explicit `window.__T3_IS_VSCODE_WEBVIEW` marker, while host-specific visibility choices are passed through `window.t3HostBridge.getDisplayPreferences()`.
+- `window.t3HostBridge` remains neutral. VS Code detection now relies only on the explicit `window.__T3_IS_VSCODE_WEBVIEW` marker, while host-specific UI and capability choices are passed through `window.t3HostBridge.getDisplayPreferences()`.
 
 Implemented:
 
@@ -264,11 +264,30 @@ Implemented:
   - `t3code.ui.showOpenInPicker`
   - `t3code.ui.showCheckoutModeIndicator`
   - `t3code.ui.showBranchSelector`
-  - `t3code.ui.showTerminalToggle`
+  - `t3code.ui.enableTerminal`
 - Added `T3HostDisplayPreferences` to the shared host bridge contract.
 - Injected the current VS Code setting values into each rendered webview.
 - Broadcast setting changes to open T3 Code webviews and subscribed to them from React.
 - Applied the preferences in `ChatHeader` and `BranchToolbar`.
+
+### 2026-05-15: Disable the Embedded Terminal in VS Code by Default
+
+Decision: rename the VS Code terminal setting from a display toggle to `t3code.ui.enableTerminal`, and make `false` disable the embedded T3 terminal surface instead of only hiding its toolbar button.
+
+Reasoning:
+
+- VS Code already provides native terminal surfaces and terminal keybindings.
+- Hiding only the T3 terminal button left other terminal entry points active, including keyboard shortcuts and project actions that launch into the embedded drawer.
+- A setting named "enable terminal" better describes the real capability boundary than "show terminal toggle."
+
+Implemented:
+
+- Replaced `t3code.ui.showTerminalToggle` with disabled-by-default `t3code.ui.enableTerminal`.
+- Renamed the host bridge preference from `showTerminalToggle` to `enableTerminal`.
+- When disabled, terminal shortcuts are ignored without preventing the host from handling the key event.
+- When disabled while a drawer is open, the React terminal drawer state is closed.
+- Terminal-backed project actions are hidden and do not launch embedded terminals while disabled.
+- Automated coverage verifies the renamed setting, injected preference, terminal command filtering, and disabled-terminal close target resolution.
 
 ### 2026-05-14: Use Stable Webview Surfaces First
 

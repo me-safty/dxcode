@@ -239,14 +239,14 @@ export interface T3HostDisplayPreferences {
   showOpenInPicker: boolean;
   showCheckoutModeIndicator: boolean;
   showBranchSelector: boolean;
-  showTerminalToggle: boolean;
+  enableTerminal: boolean;
 }
 
 export const T3HostDisplayPreferencesSchema = Schema.Struct({
   showOpenInPicker: Schema.Boolean,
   showCheckoutModeIndicator: Schema.Boolean,
   showBranchSelector: Schema.Boolean,
-  showTerminalToggle: Schema.Boolean,
+  enableTerminal: Schema.Boolean,
 });
 
 export interface T3HostBridge {

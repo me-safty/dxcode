@@ -98,7 +98,7 @@ export const ChatHeader = memo(function ChatHeader({
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const hostDisplayPreferences = useHostDisplayPreferences();
   const showTerminalToggle = shouldRenderTerminalToggle({
-    hostShowTerminalToggle: hostDisplayPreferences.showTerminalToggle,
+    hostShowTerminalToggle: hostDisplayPreferences.enableTerminal,
   });
 
   return (

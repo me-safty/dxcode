@@ -76,7 +76,7 @@ describe("host display preferences", () => {
     ).toBe(true);
   });
 
-  it("hides the terminal toggle when the host disables it", () => {
+  it("hides the terminal toggle when the host disables terminal support", () => {
     expect(shouldRenderTerminalToggle({ hostShowTerminalToggle: false })).toBe(false);
   });
 });

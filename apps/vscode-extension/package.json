@@ -98,10 +98,10 @@
           "default": false,
           "description": "Show the T3 Code branch/ref selector inside VS Code webviews."
         },
-        "t3code.ui.showTerminalToggle": {
+        "t3code.ui.enableTerminal": {
           "type": "boolean",
           "default": false,
-          "description": "Show the T3 Code terminal drawer toggle inside VS Code webviews."
+          "description": "Enable the T3 Code terminal drawer, terminal actions, and terminal keybindings inside VS Code webviews."
         }
       }
     },

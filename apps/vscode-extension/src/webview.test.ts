@@ -92,13 +92,14 @@ describe("renderT3Webview", () => {
         showOpenInPicker: true,
         showCheckoutModeIndicator: true,
         showBranchSelector: false,
-        showTerminalToggle: true,
+        enableTerminal: true,
       },
     });
 
     expect(html).toContain('const initialRoute = "/_chat/"');
     expect(html).toContain('"showOpenInPicker":true');
     expect(html).toContain('"showBranchSelector":false');
+    expect(html).toContain('"enableTerminal":true');
   });
 });
 
@@ -109,6 +110,7 @@ describe("VS Code display preference settings", () => {
     expect(properties["t3code.ui.showOpenInPicker"]?.default).toBe(false);
     expect(properties["t3code.ui.showCheckoutModeIndicator"]?.default).toBe(false);
     expect(properties["t3code.ui.showBranchSelector"]?.default).toBe(false);
-    expect(properties["t3code.ui.showTerminalToggle"]?.default).toBe(false);
+    expect(properties["t3code.ui.enableTerminal"]?.default).toBe(false);
+    expect("t3code.ui.showTerminalToggle" in properties).toBe(false);
   });
 });

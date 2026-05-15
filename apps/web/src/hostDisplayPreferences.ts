@@ -7,14 +7,14 @@ const DEFAULT_DISPLAY_PREFERENCES: T3HostDisplayPreferences = {
   showOpenInPicker: true,
   showCheckoutModeIndicator: true,
   showBranchSelector: true,
-  showTerminalToggle: true,
+  enableTerminal: true,
 };
 
 const VSCODE_DISPLAY_PREFERENCES: T3HostDisplayPreferences = {
   showOpenInPicker: false,
   showCheckoutModeIndicator: false,
   showBranchSelector: false,
-  showTerminalToggle: false,
+  enableTerminal: false,
 };
 
 export function resolveHostDisplayPreferences(input: {
@@ -28,7 +28,7 @@ export function resolveHostDisplayPreferences(input: {
     showCheckoutModeIndicator:
       preferences?.showCheckoutModeIndicator ?? defaults.showCheckoutModeIndicator,
     showBranchSelector: preferences?.showBranchSelector ?? defaults.showBranchSelector,
-    showTerminalToggle: preferences?.showTerminalToggle ?? defaults.showTerminalToggle,
+    enableTerminal: preferences?.enableTerminal ?? defaults.enableTerminal,
   };
 }
 

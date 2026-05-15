@@ -17,9 +17,11 @@ import {
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
+  isTerminalKeybindingCommand,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
   shouldWriteThreadErrorToCurrentServerThread,
+  terminalThreadRefsToCloseWhenDisabled,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 
@@ -179,6 +181,42 @@ describe("reconcileMountedTerminalThreadIds", () => {
         activeThreadTerminalOpen: false,
       }),
     ).toEqual(currentThreadIds.slice(-MAX_HIDDEN_MOUNTED_TERMINAL_THREADS));
+  });
+});
+
+describe("terminal host preference behavior", () => {
+  it("recognizes terminal keybinding commands", () => {
+    expect(isTerminalKeybindingCommand("terminal.toggle")).toBe(true);
+    expect(isTerminalKeybindingCommand("terminal.split")).toBe(true);
+    expect(isTerminalKeybindingCommand("terminal.new")).toBe(true);
+    expect(isTerminalKeybindingCommand("terminal.close")).toBe(true);
+    expect(isTerminalKeybindingCommand("diff.toggle")).toBe(false);
+  });
+
+  it("resolves open terminal thread refs that must close when the host disables terminals", () => {
+    const threadRef = scopeThreadRef(localEnvironmentId, ThreadId.make("thread-open"));
+    const invalidThreadKey = "not-a-scoped-thread-key";
+
+    expect(
+      terminalThreadRefsToCloseWhenDisabled({
+        enableTerminal: false,
+        openTerminalThreadKeys: [
+          `${threadRef.environmentId}:${threadRef.threadId}`,
+          invalidThreadKey,
+        ],
+      }),
+    ).toEqual([threadRef]);
+  });
+
+  it("keeps open terminal thread refs alone when the host enables terminals", () => {
+    const threadRef = scopeThreadRef(localEnvironmentId, ThreadId.make("thread-open"));
+
+    expect(
+      terminalThreadRefsToCloseWhenDisabled({
+        enableTerminal: true,
+        openTerminalThreadKeys: [`${threadRef.environmentId}:${threadRef.threadId}`],
+      }),
+    ).toEqual([]);
   });
 });
 

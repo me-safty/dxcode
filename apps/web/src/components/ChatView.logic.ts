@@ -1,6 +1,7 @@
 import {
   type EnvironmentId,
   isProviderDriverKind,
+  type KeybindingCommand,
   ProjectId,
   type ModelSelection,
   type ProviderDriverKind,
@@ -8,6 +9,7 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import { parseScopedThreadKey } from "@t3tools/client-runtime";
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadSession } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
@@ -23,6 +25,30 @@ export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
+
+const TERMINAL_KEYBINDING_COMMANDS = new Set<KeybindingCommand>([
+  "terminal.toggle",
+  "terminal.split",
+  "terminal.new",
+  "terminal.close",
+]);
+
+export function isTerminalKeybindingCommand(command: KeybindingCommand): boolean {
+  return TERMINAL_KEYBINDING_COMMANDS.has(command);
+}
+
+export function terminalThreadRefsToCloseWhenDisabled(input: {
+  readonly enableTerminal: boolean;
+  readonly openTerminalThreadKeys: readonly string[];
+}): ScopedThreadRef[] {
+  if (input.enableTerminal) {
+    return [];
+  }
+  return input.openTerminalThreadKeys.flatMap((threadKey) => {
+    const threadRef = parseScopedThreadKey(threadKey);
+    return threadRef ? [threadRef] : [];
+  });
+}
 
 export function buildLocalDraftThread(
   threadId: ThreadId,

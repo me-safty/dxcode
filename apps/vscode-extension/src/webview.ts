@@ -8,7 +8,7 @@ export interface WebviewDisplayPreferences {
   readonly showOpenInPicker: boolean;
   readonly showCheckoutModeIndicator: boolean;
   readonly showBranchSelector: boolean;
-  readonly showTerminalToggle: boolean;
+  readonly enableTerminal: boolean;
 }
 
 export interface WebviewRenderInput {
@@ -64,7 +64,7 @@ const DEFAULT_DISPLAY_PREFERENCES: WebviewDisplayPreferences = {
   showOpenInPicker: false,
   showCheckoutModeIndicator: false,
   showBranchSelector: false,
-  showTerminalToggle: false,
+  enableTerminal: false,
 };
 
 function makeBridgeScript(input: {

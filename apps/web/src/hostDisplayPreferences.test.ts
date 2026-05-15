@@ -7,14 +7,14 @@ const allVisiblePreferences: T3HostDisplayPreferences = {
   showOpenInPicker: true,
   showCheckoutModeIndicator: true,
   showBranchSelector: true,
-  showTerminalToggle: true,
+  enableTerminal: true,
 };
 
 const allHiddenPreferences: T3HostDisplayPreferences = {
   showOpenInPicker: false,
   showCheckoutModeIndicator: false,
   showBranchSelector: false,
-  showTerminalToggle: false,
+  enableTerminal: false,
 };
 
 describe("resolveHostDisplayPreferences", () => {
@@ -42,13 +42,13 @@ describe("resolveHostDisplayPreferences", () => {
         isVscodeWebview: true,
         preferences: {
           showBranchSelector: true,
-          showTerminalToggle: true,
+          enableTerminal: true,
         },
       }),
     ).toEqual({
       ...allHiddenPreferences,
       showBranchSelector: true,
-      showTerminalToggle: true,
+      enableTerminal: true,
     });
   });
 });

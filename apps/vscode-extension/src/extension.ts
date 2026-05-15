@@ -164,7 +164,7 @@ const DISPLAY_PREFERENCE_SETTINGS = [
   "t3code.ui.showOpenInPicker",
   "t3code.ui.showCheckoutModeIndicator",
   "t3code.ui.showBranchSelector",
-  "t3code.ui.showTerminalToggle",
+  "t3code.ui.enableTerminal",
 ] as const;
 
 class WebviewDisplayPreferenceBroadcaster {
@@ -207,7 +207,7 @@ function readWebviewDisplayPreferences(): WebviewDisplayPreferences {
     showOpenInPicker: configuration.get<boolean>("ui.showOpenInPicker", false),
     showCheckoutModeIndicator: configuration.get<boolean>("ui.showCheckoutModeIndicator", false),
     showBranchSelector: configuration.get<boolean>("ui.showBranchSelector", false),
-    showTerminalToggle: configuration.get<boolean>("ui.showTerminalToggle", false),
+    enableTerminal: configuration.get<boolean>("ui.enableTerminal", false),
   };
 }
 
