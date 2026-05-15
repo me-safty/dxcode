@@ -176,6 +176,46 @@ describe("buildSidebarWorktreeThreadGroups", () => {
     ]);
   });
 
+  it("uses worktree path rather than branch name to identify the current checkout", () => {
+    const currentCheckoutThread = {
+      branch: "feature/current-checkout",
+      worktreePath: null,
+      title: "Current checkout",
+    };
+    const mainBranchWorktreeThread = {
+      branch: "main",
+      worktreePath: "/repo/.t3/worktrees/main",
+      title: "Main branch worktree",
+    };
+
+    expect(
+      buildSidebarWorktreeThreadGroups([currentCheckoutThread, mainBranchWorktreeThread]),
+    ).toEqual([
+      {
+        expanded: true,
+        key: SIDEBAR_CURRENT_CHECKOUT_WORKTREE_KEY,
+        uiKey: currentCheckoutGroupUiKey,
+        label: "Current checkout",
+        threadsExpanded: false,
+        totalThreadCount: 1,
+        hiddenThreadCount: 0,
+        overflowThreadCount: 0,
+        threads: [currentCheckoutThread],
+      },
+      {
+        expanded: true,
+        key: "/repo/.t3/worktrees/main",
+        uiKey: "::/repo/.t3/worktrees/main",
+        label: "main",
+        threadsExpanded: false,
+        totalThreadCount: 1,
+        hiddenThreadCount: 0,
+        overflowThreadCount: 0,
+        threads: [mainBranchWorktreeThread],
+      },
+    ]);
+  });
+
   it("groups contiguous worktree threads by worktree path", () => {
     const currentThread = { branch: "main", worktreePath: null, title: "Current" };
     const firstWorktreeThread = {
