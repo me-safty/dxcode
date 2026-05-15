@@ -11,7 +11,11 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
-import { ExternalLauncher, layer as ExternalLauncherLive } from "./externalLauncher.ts";
+import {
+  ExternalLauncher,
+  layer as ExternalLauncherLive,
+  resolveMacApplicationDirectories,
+} from "./externalLauncher.ts";
 
 function makeMockDetachedHandle(onUnref: () => void = () => undefined) {
   return ChildProcessSpawner.makeHandle({
@@ -31,6 +35,14 @@ function makeMockDetachedHandle(onUnref: () => void = () => undefined) {
     getOutputFd: () => Stream.empty,
   });
 }
+
+it("searches system Applications when HOME is unavailable", () => {
+  assert.deepEqual(resolveMacApplicationDirectories({}), ["/Applications"]);
+  assert.deepEqual(resolveMacApplicationDirectories({ HOME: "/Users/tester" }), [
+    "/Users/tester/Applications",
+    "/Applications",
+  ]);
+});
 
 const testLayer = (input: {
   readonly platform: NodeJS.Platform;
@@ -164,6 +176,7 @@ it.effect("discovers and launches editors from the user Applications directory o
     const cursorApp = path.join(home, "Applications", "Cursor.app");
     yield* fileSystem.makeDirectory(cursorApp, { recursive: true });
     yield* fileSystem.writeFileString(path.join(binDir, "open"), "");
+    yield* fileSystem.chmod(path.join(binDir, "open"), 0o755);
 
     let spawned: ChildProcess.StandardCommand | undefined;
     const layer = testLayer({

@@ -177,30 +177,34 @@ const resolveAvailableCommand = Effect.fn("externalLauncher.resolveAvailableComm
   return Option.none();
 });
 
-const resolveMacEditorApplication = Effect.fn(
-  "externalLauncher.resolveMacEditorApplication",
-)(function* (
-  editorId: EditorId,
-  env: NodeJS.ProcessEnv,
-): Effect.fn.Return<Option.Option<string>, never, FileSystem.FileSystem | Path.Path> {
-  const appBundleNames = MAC_EDITOR_APP_BUNDLE_NAMES[editorId];
+export function resolveMacApplicationDirectories(env: NodeJS.ProcessEnv): ReadonlyArray<string> {
   const home = env.HOME?.trim();
-  if (!appBundleNames || !home) {
-    return Option.none();
-  }
+  return home ? [`${home}/Applications`, "/Applications"] : ["/Applications"];
+}
 
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  for (const directory of [path.join(home, "Applications"), "/Applications"]) {
-    for (const appBundleName of appBundleNames) {
-      const appPath = path.join(directory, appBundleName);
-      if (yield* fileSystem.exists(appPath)) {
-        return Option.some(appPath);
+const resolveMacEditorApplication = Effect.fn("externalLauncher.resolveMacEditorApplication")(
+  function* (
+    editorId: EditorId,
+    env: NodeJS.ProcessEnv,
+  ): Effect.fn.Return<Option.Option<string>, never, FileSystem.FileSystem | Path.Path> {
+    const appBundleNames = MAC_EDITOR_APP_BUNDLE_NAMES[editorId];
+    if (!appBundleNames) {
+      return Option.none();
+    }
+
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    for (const directory of resolveMacApplicationDirectories(env)) {
+      for (const appBundleName of appBundleNames) {
+        const appPath = path.join(directory, appBundleName);
+        if (yield* fileSystem.exists(appPath).pipe(Effect.orElseSucceed(() => false))) {
+          return Option.some(appPath);
+        }
       }
     }
-  }
-  return Option.none();
-});
+    return Option.none();
+  },
+);
 
 function resolveMacAppEditorTarget(target: string): string {
   return Option.match(parseTargetPathAndPosition(target), {
