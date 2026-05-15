@@ -33,6 +33,10 @@ const TERMINAL_KEYBINDING_COMMANDS = new Set<KeybindingCommand>([
   "terminal.new",
   "terminal.close",
 ]);
+type CloseTerminalSessionApi = {
+  readonly terminal: Pick<EnvironmentApi["terminal"], "clear" | "write"> &
+    Partial<Pick<EnvironmentApi["terminal"], "close">>;
+};
 
 export function isTerminalKeybindingCommand(command: KeybindingCommand): boolean {
   return TERMINAL_KEYBINDING_COMMANDS.has(command);
@@ -49,7 +53,7 @@ export function terminalThreadRefsToCloseWhenDisabled(input: {
 }
 
 export function closeTerminalSession(input: {
-  readonly api: EnvironmentApi;
+  readonly api: CloseTerminalSessionApi;
   readonly threadId: ThreadId;
   readonly terminalId?: string;
   readonly isFinalTerminal?: boolean;
@@ -62,7 +66,7 @@ export function closeTerminalSession(input: {
       .write({ threadId: input.threadId, terminalId: input.terminalId, data: "exit\n" })
       .catch(() => undefined);
   };
-  const terminalClose = (input.api.terminal as Partial<EnvironmentApi["terminal"]>).close;
+  const terminalClose = input.api.terminal.close;
 
   if (typeof terminalClose === "function") {
     void (async () => {

@@ -77,7 +77,7 @@ type EnvironmentStateSnapshot = ReturnType<
 type ProjectGroupingSettings = ReturnType<typeof selectProjectGroupingSettings>;
 type ServerConfigSnapshot = ReturnType<typeof useServerConfig>;
 
-function deriveActiveBootstrapProjectContext(payload: ServerLifecycleWelcomePayload): {
+function resolveActiveBootstrapProject(payload: ServerLifecycleWelcomePayload): {
   readonly bootstrapProjects: readonly BootstrapProject[];
   readonly activeBootstrapProject: BootstrapProject | null;
   readonly projectId: ProjectId;
@@ -414,7 +414,7 @@ function EventRouter() {
         return;
       }
 
-      const activeBootstrapContext = deriveActiveBootstrapProjectContext(payload);
+      const activeBootstrapContext = resolveActiveBootstrapProject(payload);
       if (!activeBootstrapContext) {
         return;
       }

@@ -73,6 +73,7 @@ let hostBearerToken: {
 } | null = null;
 const AUTH_SESSION_ESTABLISH_TIMEOUT_MS = 2_000;
 const AUTH_SESSION_ESTABLISH_STEP_MS = 100;
+const AUTH_BOOTSTRAP_CREDENTIAL_RESTART_LIMIT = 3;
 
 export function peekPairingTokenFromUrl(): string | null {
   return getPairingTokenFromUrl(new URL(window.location.href));
@@ -118,11 +119,24 @@ function getInjectedBearerToken(): string | null {
     : null;
 }
 
-function getActiveBearerToken(): string | null {
-  const bootstrapCredential = getHostBootstrapCredential();
+function clearAuthBootstrapStateForCredential(bootstrapCredential: string | null): void {
   if (hostBearerToken && hostBearerToken.bootstrapCredential !== bootstrapCredential) {
     hostBearerToken = null;
   }
+  if (bootstrapPromise && bootstrapPromise.bootstrapCredential !== bootstrapCredential) {
+    bootstrapPromise = null;
+  }
+  if (
+    resolvedAuthenticatedGateState &&
+    resolvedAuthenticatedGateState.bootstrapCredential !== bootstrapCredential
+  ) {
+    resolvedAuthenticatedGateState = null;
+  }
+}
+
+function getActiveBearerToken(): string | null {
+  const bootstrapCredential = getHostBootstrapCredential();
+  clearAuthBootstrapStateForCredential(bootstrapCredential);
 
   return hostBearerToken?.sessionToken ?? getInjectedBearerToken();
 }
@@ -522,8 +536,11 @@ export async function revokeOtherServerClientSessions(): Promise<number> {
   return result.revokedCount ?? 0;
 }
 
-export async function resolveInitialServerAuthGateState(): Promise<ServerAuthGateState> {
+async function resolveInitialServerAuthGateStateAttempt(
+  remainingCredentialRestarts: number,
+): Promise<ServerAuthGateState> {
   const bootstrapCredential = getHostBootstrapCredential();
+  clearAuthBootstrapStateForCredential(bootstrapCredential);
   if (
     resolvedAuthenticatedGateState?.bootstrapCredential === bootstrapCredential &&
     resolvedAuthenticatedGateState.state.status === "authenticated"
@@ -539,8 +556,19 @@ export async function resolveInitialServerAuthGateState(): Promise<ServerAuthGat
   bootstrapPromise = { bootstrapCredential, promise: nextPromise };
   return nextPromise
     .then(async (result) => {
-      if (getHostBootstrapCredential() !== bootstrapCredential) {
-        return await resolveInitialServerAuthGateState();
+      const activeBootstrapCredential = getHostBootstrapCredential();
+      if (activeBootstrapCredential !== bootstrapCredential) {
+        clearAuthBootstrapStateForCredential(activeBootstrapCredential);
+        if (remainingCredentialRestarts <= 0) {
+          const currentSession = await fetchSessionState();
+          const unsettledState: ServerAuthGateState = {
+            status: "requires-auth",
+            auth: currentSession.auth,
+            errorMessage: "Authentication bootstrap changed before it could complete.",
+          };
+          return unsettledState;
+        }
+        return await resolveInitialServerAuthGateStateAttempt(remainingCredentialRestarts - 1);
       }
       if (result.status === "authenticated") {
         resolvedAuthenticatedGateState = { bootstrapCredential, state: result };
@@ -552,6 +580,10 @@ export async function resolveInitialServerAuthGateState(): Promise<ServerAuthGat
         bootstrapPromise = null;
       }
     });
+}
+
+export async function resolveInitialServerAuthGateState(): Promise<ServerAuthGateState> {
+  return await resolveInitialServerAuthGateStateAttempt(AUTH_BOOTSTRAP_CREDENTIAL_RESTART_LIMIT);
 }
 
 export function __resetServerAuthBootstrapForTests() {

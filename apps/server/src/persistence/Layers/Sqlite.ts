@@ -34,7 +34,7 @@ const makeRuntimeSqliteLayer = Effect.fn("makeRuntimeSqliteLayer")(function* (
 const setup = Layer.effectDiscard(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    yield* sql`PRAGMA busy_timeout = 10000;`;
+    yield* sql.unsafe(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`);
     yield* sql`PRAGMA journal_mode = WAL;`;
     yield* sql`PRAGMA foreign_keys = ON;`;
     yield* runMigrations();

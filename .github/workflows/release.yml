@@ -720,7 +720,7 @@ jobs:
             exit 1
           fi
 
-          args=(publish --packagePath "${packages[@]}")
+          args=(publish --pat "$VSCE_PAT" --packagePath "${packages[@]}")
           if [[ "${{ needs.preflight.outputs.is_prerelease }}" == "true" ]]; then
             args+=(--pre-release)
           fi

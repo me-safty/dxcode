@@ -229,6 +229,7 @@ const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
 const CHECKPOINT_DIFF_MAX_OUTPUT_BYTES = 10_000_000;
 const CHECKPOINT_CAPTURE_TIMEOUT_MS = 120_000;
+// Disable Git's workspace caches for operations that must observe fresh agent writes.
 const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
   "-c",
   "core.fsmonitor=false",
@@ -676,12 +677,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           });
         }
 
-        yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["update-ref", input.checkpointRef, commitOid],
-          timeoutMs: CHECKPOINT_CAPTURE_TIMEOUT_MS,
-        });
+        yield* executeCheckpointGit(["update-ref", input.checkpointRef, commitOid]);
       }).pipe(Effect.ensuring(cleanupTempIndex));
     }),
 

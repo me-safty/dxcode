@@ -97,6 +97,7 @@ const DEFAULT_HOST_APPEARANCE: WebviewHostAppearance = {
   themeSource: "default",
   colorScheme: "light",
 };
+const HOST_BRIDGE_REQUEST_TIMEOUT_MS = 30_000;
 
 function makeBridgeScript(input: {
   readonly bootstrap: WebviewBackendConnection & { readonly label: string };
@@ -115,6 +116,7 @@ function makeBridgeScript(input: {
       const threadConversationMaxWidthPx = ${THREAD_CONVERSATION_MAX_WIDTH_PX};
       const THREAD_CONVERSATION_MIN_WIDTH_PX = threadConversationMinWidthPx;
       const THREAD_CONVERSATION_MAX_WIDTH_PX = threadConversationMaxWidthPx;
+      const HOST_BRIDGE_REQUEST_TIMEOUT_MS = ${HOST_BRIDGE_REQUEST_TIMEOUT_MS};
       const normalizeThreadConversationMaxWidth = ${normalizeThreadConversationMaxWidth.toString()};
       const displayPreferenceListeners = new Set();
       const hostAppearanceListeners = new Set();
@@ -189,7 +191,7 @@ function makeBridgeScript(input: {
           const timeoutId = setTimeout(() => {
             pendingRequests.delete(id);
             reject(new Error("T3 host bridge request timed out."));
-          }, 30000);
+          }, HOST_BRIDGE_REQUEST_TIMEOUT_MS);
           pendingRequests.set(id, { resolve, reject, timeoutId });
           vscode.postMessage({
             type: "t3.hostRequest",
