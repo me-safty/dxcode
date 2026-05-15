@@ -8,16 +8,13 @@ const packageJsonPath = join(extensionDir, "package.json");
 const packageJsonSource = readFileSync(packageJsonPath, "utf8");
 const packageJson = JSON.parse(packageJsonSource);
 const packageOptions = parsePackageOptions(process.argv.slice(2));
-const publisher = process.env.VSCE_PUBLISHER?.trim();
+const configuredPublisher = process.env.VSCE_PUBLISHER?.trim();
+const publisher = configuredPublisher || "t3code-local";
 const targetSuffix = packageOptions.target ? `-${packageOptions.target}` : "";
 const vsixName = `${packageJson.name}-${packageJson.version}${targetSuffix}.vsix`;
 const vsixPath = packageOptions.out
   ? resolveExtensionPath(packageOptions.out)
   : join(extensionDir, vsixName);
-
-if (!publisher) {
-  throw new Error("VSCE_PUBLISHER must be set before packaging the VS Code extension.");
-}
 
 function parsePackageOptions(args) {
   const options = {
@@ -78,6 +75,11 @@ rmSync(vsixPath, { force: true });
 rmSync(join(extensionDir, "dist", vsixName), { force: true });
 
 try {
+  if (!configuredPublisher) {
+    console.warn(
+      `VSCE_PUBLISHER is not set; packaging a local VSIX with publisher "${publisher}".`,
+    );
+  }
   writeFileSync(packageJsonPath, `${JSON.stringify({ ...packageJson, publisher }, null, 2)}\n`);
   run("bun", ["run", "build"]);
   const vsceArgs = ["x", "vsce", "package", "--no-dependencies", "--out", vsixPath];
