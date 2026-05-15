@@ -294,28 +294,38 @@ import { RELEASES_URL } from "../lib/releases";
       const code = block.querySelector("code");
       if (!code) return;
 
+      const wrap = document.createElement("div");
+      wrap.className = "cmd-block-wrap";
+      block.parentNode?.insertBefore(wrap, block);
+      wrap.appendChild(block);
+
+      const tooltip = document.createElement("span");
+      tooltip.className = "cmd-tooltip";
+      tooltip.textContent = "Copy";
+      wrap.appendChild(tooltip);
+
       const button = document.createElement("button");
       button.type = "button";
       button.className = "cmd-copy";
-      button.title = "Copy command";
       button.setAttribute("aria-label", "Copy command to clipboard");
       button.innerHTML = COPY_ICON_SVG + CHECK_ICON_SVG;
+      block.appendChild(button);
 
       let resetTimer: number | undefined;
-      button.addEventListener("click", async () => {
+      block.addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(code.textContent ?? "");
           button.classList.add("is-copied");
+          tooltip.textContent = "Copied";
           if (resetTimer !== undefined) window.clearTimeout(resetTimer);
           resetTimer = window.setTimeout(() => {
             button.classList.remove("is-copied");
+            tooltip.textContent = "Copy";
           }, 1600);
         } catch {
           // Ignore clipboard failures (insecure context, denied permission).
         }
       });
-
-      block.appendChild(button);
     });
   }
 
@@ -397,11 +407,18 @@ import { RELEASES_URL } from "../lib/releases";
     letter-spacing: -0.005em;
   }
 
-  .cli-callout .cmd-block {
+  .cli-callout :global(.cmd-block-wrap) {
     flex: 1 1 220px;
+    min-width: 0;
   }
 
   /* ── Shared command block ── */
+
+  :global(.cmd-block-wrap) {
+    position: relative;
+    display: block;
+    width: 100%;
+  }
 
   .cmd-block {
     position: relative;
@@ -415,6 +432,42 @@ import { RELEASES_URL } from "../lib/releases";
     overflow-x: auto;
     display: flex;
     align-items: center;
+    cursor: pointer;
+    transition:
+      border-color 0.18s ease,
+      background 0.18s ease;
+  }
+
+  .cmd-block:hover {
+    border-color: var(--border-strong);
+    background: rgba(0, 0, 0, 0.35);
+  }
+
+  :global(.cmd-tooltip) {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    right: 0;
+    background: rgba(0, 0, 0, 0.9);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(4px);
+    transition:
+      opacity 0.18s ease,
+      transform 0.18s ease;
+    white-space: nowrap;
+    z-index: 5;
+  }
+
+  :global(.cmd-block-wrap:hover .cmd-tooltip) {
+    opacity: 1;
+    transform: translateY(0);
   }
 
   .cmd-block code {
