@@ -1,4 +1,3 @@
-// @effect-diagnostics globalDate:off
 import { normalizeThreadConversationMaxWidth } from "@t3tools/shared/displayPreferences";
 import * as vscode from "vscode";
 

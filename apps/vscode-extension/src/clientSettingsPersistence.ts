@@ -1,4 +1,3 @@
-// @effect-diagnostics nodeBuiltinImport:off
 /* oxlint-disable unicorn/require-post-message-target-origin */
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";

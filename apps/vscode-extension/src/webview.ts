@@ -1,4 +1,3 @@
-// @effect-diagnostics nodeBuiltinImport:off
 import {
   THREAD_CONVERSATION_MAX_WIDTH_PX,
   THREAD_CONVERSATION_MIN_WIDTH_PX,
