@@ -1884,12 +1884,33 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       fallbackErrorMessage: "git worktree add failed",
     });
 
+    yield* copyGitignoredEnvFiles(input.cwd, worktreePath);
+
     return {
       worktree: {
         path: worktreePath,
         refName: targetBranch,
       },
     };
+  });
+
+  const copyGitignoredEnvFiles = Effect.fn("copyGitignoredEnvFiles")(function* (
+    sourceCwd: string,
+    worktreePath: string,
+  ) {
+    const entries: ReadonlyArray<string> = yield* fileSystem
+      .readDirectory(sourceCwd)
+      .pipe(Effect.catch(() => Effect.succeed<ReadonlyArray<string>>([])));
+    const envEntries = entries.filter((entry: string) => entry.startsWith(".env"));
+    for (const entry of envEntries) {
+      const from = path.join(sourceCwd, entry);
+      const to = path.join(worktreePath, entry);
+      const stat = yield* fileSystem
+        .stat(from)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!stat || stat.type !== "File") continue;
+      yield* fileSystem.copyFile(from, to).pipe(Effect.catch(() => Effect.void));
+    }
   });
 
   const fetchPullRequestBranch: GitVcsDriver.GitVcsDriverShape["fetchPullRequestBranch"] =

@@ -64,7 +64,7 @@ export function resolveEffectiveEnvMode(input: {
     if (activeWorktreePath) {
       return "local";
     }
-    return draftThreadEnvMode === "worktree" ? "worktree" : "local";
+    return draftThreadEnvMode === "local" ? "local" : "worktree";
   }
   return activeWorktreePath ? "worktree" : "local";
 }
