@@ -43,6 +43,7 @@
     "build:desktop": "turbo run build --filter=@t3tools/desktop --filter=t3",
     "typecheck": "turbo run typecheck",
     "lint": "oxlint --report-unused-disable-directives",
+    "lint:t3work:additive": "node t3work-additive-guard.mjs",
     "test": "turbo run test",
     "test:desktop-smoke": "turbo run smoke-test --filter=@t3tools/desktop",
     "fmt": "oxfmt",
@@ -57,6 +58,10 @@
     "dist:desktop:win:arm64": "node scripts/build-desktop-artifact.ts --platform win --target nsis --arch arm64",
     "dist:desktop:win:x64": "node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64",
     "release:smoke": "node scripts/release-smoke.ts",
+    "sync:upstream:status": "node scripts/t3work-sync-upstream-fork.mjs status",
+    "sync:upstream:main": "node scripts/t3work-sync-upstream-fork.mjs sync-main",
+    "sync:upstream:main:push": "node scripts/t3work-sync-upstream-fork.mjs sync-main --push-origin",
+    "sync:upstream:current": "node scripts/t3work-sync-upstream-fork.mjs rebase-current",
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist apps/*/dist-electron packages/*/dist .turbo apps/*/.turbo packages/*/.turbo",
     "sync:vscode-icons": "node scripts/sync-vscode-icons.mjs"
   },

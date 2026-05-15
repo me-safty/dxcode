@@ -101,6 +101,7 @@ export const Route = createRootRouteWithContext<{
 
 function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
+  const isT3workRoute = pathname === "/t3work" || pathname.startsWith("/t3work/");
   const { authGateState } = Route.useRouteContext();
   const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
 
@@ -123,9 +124,13 @@ function RootRouteView() {
 
   const appShell = (
     <CommandPalette>
-      <AppSidebarLayout>
+      {isT3workRoute ? (
         <Outlet />
-      </AppSidebarLayout>
+      ) : (
+        <AppSidebarLayout>
+          <Outlet />
+        </AppSidebarLayout>
+      )}
     </CommandPalette>
   );
 

@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "biwak",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/pj/Dev/github/biwak/prototype && exec bun run dev --port 5190"
+      ],
+      "port": 5190
+    }
+  ]
+}

@@ -8,8 +8,10 @@ import pkg from "./package.json" with { type: "json" };
 const port = Number(process.env.PORT ?? 5733);
 const host = process.env.HOST?.trim() || "localhost";
 const configuredWsUrl = process.env.VITE_WS_URL?.trim();
+const defaultDevWsUrl = "ws://localhost:3773";
 const configuredHostedAppChannel = process.env.VITE_HOSTED_APP_CHANNEL?.trim() || "";
 const configuredAppVersion = process.env.APP_VERSION?.trim() || pkg.version;
+const configuredAtlassianClientId = process.env.ATLASSIAN_CLIENT_ID?.trim() || "";
 const configuredHostedAppUrl = (() => {
   const explicitHostedAppUrl = process.env.VITE_HOSTED_APP_URL?.trim();
   if (explicitHostedAppUrl) {
@@ -53,7 +55,7 @@ function resolveDevProxyTarget(wsUrl: string | undefined): string | undefined {
   }
 }
 
-const devProxyTarget = resolveDevProxyTarget(configuredWsUrl);
+const devProxyTarget = resolveDevProxyTarget(configuredWsUrl ?? defaultDevWsUrl);
 
 export default defineConfig({
   plugins: [
@@ -84,6 +86,7 @@ export default defineConfig({
     "import.meta.env.VITE_HOSTED_APP_URL": JSON.stringify(configuredHostedAppUrl ?? ""),
     "import.meta.env.VITE_HOSTED_APP_CHANNEL": JSON.stringify(configuredHostedAppChannel),
     "import.meta.env.APP_VERSION": JSON.stringify(configuredAppVersion),
+    __ATLASSIAN_CLIENT_ID__: JSON.stringify(configuredAtlassianClientId),
   },
   resolve: {
     tsconfigPaths: true,

@@ -4,6 +4,8 @@
 
 - All of `bun fmt`, `bun lint`, and `bun typecheck` must pass before considering tasks completed.
 - NEVER run `bun test`. Always use `bun run test` (runs Vitest).
+- For t3work additive/prefix-constrained tasks, agents MUST run `node t3work-additive-guard.mjs` after finishing code changes and before reporting completion.
+- The additive prefix guard is a blocking completion gate for those tasks: if it fails, the task is not complete.
 
 ## Project Snapshot
 
@@ -22,6 +24,14 @@ If a tradeoff is required, choose correctness and robustness over short-term con
 ## Maintainability
 
 Long term maintainability is a core priority. If you add new functionality, first check if there is shared logic that can be extracted to a separate module. Duplicate logic across multiple files is a code smell and should be avoided. Don't be afraid to change existing code. Don't take shortcuts by just adding local logic to solve a problem.
+
+## T3work MVP Constitution
+
+When working on the t3work MVP docs, packages, or app surfaces, agents MUST follow the t3work engineering constitution:
+
+- `docs/t3work-mvp/10-engineering-constitution.md`
+
+In short: t3work work must reuse the existing T3 Code shell and UI as the baseline, keep additions isolated where possible, favor small composable code, target high-value 90-100% test coverage, provide Storybook and snapshot coverage for reusable UI and important screens, persist rich artifacts instead of chat-only output, and validate UI/workflow changes by opening the app in a browser and clicking through the changed flow end to end.
 
 ## Package Roles
 

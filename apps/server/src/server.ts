@@ -88,6 +88,14 @@ import {
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
 } from "./orchestration/http.ts";
+import {
+  t3workAtlassianAccountsRouteLayer,
+  t3workAtlassianConnectBasicRouteLayer,
+  t3workAtlassianConnectOAuthRouteLayer,
+  t3workAtlassianProjectsRouteLayer,
+  t3workAtlassianResourceRouteLayer,
+  t3workAtlassianResourcesRouteLayer,
+} from "./t3work-atlassian-routes.ts";
 import * as NetService from "@t3tools/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
@@ -307,6 +315,12 @@ export const makeRoutesLayer = Layer.mergeAll(
   attachmentsRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
+  t3workAtlassianAccountsRouteLayer,
+  t3workAtlassianConnectBasicRouteLayer,
+  t3workAtlassianConnectOAuthRouteLayer,
+  t3workAtlassianProjectsRouteLayer,
+  t3workAtlassianResourceRouteLayer,
+  t3workAtlassianResourcesRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
