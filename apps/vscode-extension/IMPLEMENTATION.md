@@ -89,13 +89,13 @@ Current status: locally installable experimental VSIX exists, uses stable VS Cod
 
 Implemented so far:
 
-- Created the `apps/vscode-extension` workspace package with `package.json`, `src/extension.ts`, `src/backendManager.ts`, `src/webview.ts`, `tsdown.config.ts`, build scripts, package scripts, a desktop-logo package icon, and a VS Code Activity Bar SVG icon.
+- Created the `apps/vscode-extension` workspace package with `package.json`, `src/extension.ts`, `src/backendManager.ts`, `src/webview.ts`, `tsdown.config.ts`, build scripts, package scripts, a desktop-logo package icon, and a VS Code Side Bar SVG icon.
 - Added extension commands:
   - `t3code.open`
   - `t3code.newThread`
   - `t3code.restartBackend`
   - `t3code.cleanVirtualWorkspaceCache`
-- Added a stable Activity Bar view container and webview view:
+- Added a stable Secondary Side Bar view container and webview view:
   - `t3code.sidebarView`
 - Added custom editor contribution and provider:
   - `t3code.conversationEditor`
@@ -218,6 +218,23 @@ Known packaging notes:
 - Marketplace publishing uses the `VSCE_PUBLISHER` GitHub repository variable and `VSCE_PAT` GitHub secret. Per the VS Code publishing docs, `vsce` publishes with a Visual Studio Marketplace Personal Access Token; the token should be scoped so it can publish for the configured publisher.
 
 ## Decision Log
+
+### 2026-05-15: Default VS Code View Into Secondary Side Bar
+
+Decision: require VS Code 1.106+ for the extension and contribute the T3 Code view container through `viewsContainers.secondarySidebar` instead of the Activity Bar.
+
+Reasoning:
+
+- VS Code 1.106 added stable support for extension-owned view containers in the Secondary Side Bar.
+- T3 Code behaves like a coding-agent/chat companion surface, so the Secondary Side Bar is a better default than taking a primary Activity Bar slot.
+- Requiring 1.106+ avoids runtime layout mutation and avoids maintaining duplicate Activity Bar and Secondary Side Bar fallback views.
+- Existing users may keep VS Code's persisted layout if they have already moved the view manually.
+
+Implemented:
+
+- Updated the extension engine floor to VS Code `^1.106.0`.
+- Moved the `t3code` view container contribution from `activitybar` to `secondarySidebar`.
+- Kept `t3code.sidebarView` and `t3code.open` unchanged so provider registration and focusing behavior remain stable.
 
 ### 2026-05-15: Propagate VS Code Theme and Font Defaults
 
@@ -613,7 +630,7 @@ Decision: keep the current stable webview integration as the baseline and defer 
 
 Reasoning:
 
-- The existing Activity Bar webview already presents T3 Code's native thread history and workspace-scoped thread behavior in a way that feels intuitive during current use.
+- The existing sidebar webview already presents T3 Code's native thread history and workspace-scoped thread behavior in a way that feels intuitive during current use.
 - VS Code Chat Sessions integration would mainly add native VS Code discoverability and session navigation around the same T3 threads, not fix the core T3 thread model.
 - Thread-specific custom editor routing matters most for deep links, native session items, and multiple editor tabs tied to specific threads. The current webview-first workflow does not depend on that behavior.
 - Additional host actions such as add current file/selection, reveal/open file, and theme/font propagation should be driven by observed workflow friction rather than added speculatively.

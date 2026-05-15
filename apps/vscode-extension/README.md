@@ -18,14 +18,14 @@ Install the latest VS Code extension build from [GitHub Releases](https://github
 
 ## VS Code UI
 
-- `t3code.sidebarView`: the T3 Code Activity Bar panel. Use it to open the workspace-scoped T3 Code chat UI inside VS Code.
+- `t3code.sidebarView`: the T3 Code Secondary Side Bar panel. Use it to open the workspace-scoped T3 Code chat UI inside VS Code.
 - `t3code.conversationEditor`: the T3 Code thread editor used to open T3 Code threads in editor tabs.
 
 The extension hides T3 Code controls that duplicate VS Code-native surfaces by default, including the open/reveal picker, checkout indicator, branch selector, and embedded terminal drawer. These can be restored with the settings below.
 
 ## Commands
 
-- `T3 Code: Open` (`t3code.open`): focuses the T3 Code Activity Bar panel.
+- `T3 Code: Open` (`t3code.open`): focuses the T3 Code Secondary Side Bar panel.
 - `T3 Code: New Thread` (`t3code.newThread`): opens a new T3 Code thread in an editor.
 - `T3 Code: Restart Backend` (`t3code.restartBackend`): restarts the extension-owned local T3 backend.
 - `T3 Code: Clean Virtual Workspace Cache` (`t3code.cleanVirtualWorkspaceCache`): removes inactive T3-owned virtual workspace checkouts.

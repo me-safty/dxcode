@@ -41,7 +41,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@types/vscode": "^1.96.0",
+    "@types/vscode": "^1.106.0",
     "@vscode/vsce": "^3.6.0",
     "tsdown": "catalog:",
     "typescript": "catalog:",
@@ -132,7 +132,7 @@
       }
     ],
     "viewsContainers": {
-      "activitybar": [
+      "secondarySidebar": [
         {
           "id": "t3code",
           "title": "T3 Code",
@@ -176,6 +176,6 @@
   ],
   "icon": "resources/icon.png",
   "engines": {
-    "vscode": "^1.96.0"
+    "vscode": "^1.106.0"
   }
 }
