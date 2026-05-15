@@ -415,6 +415,41 @@ describe("findThreadSearchResults", () => {
     ]);
   });
 
+  it("indexes skill tokens by their rendered chip labels", () => {
+    const skillRows: TimelineRow[] = [
+      {
+        kind: "message",
+        id: "assistant-skill-row",
+        createdAt: "2026-03-28T12:00:02.000Z",
+        durationStart: "2026-03-28T12:00:02.000Z",
+        showCompletionDivider: false,
+        completionSummary: null,
+        showAssistantCopyButton: false,
+        assistantCopyStreaming: false,
+        message: {
+          id: MessageId.make("assistant-skill-message"),
+          role: "assistant",
+          text: "Run $github:gh-fix-ci next.",
+          createdAt: "2026-03-28T12:00:02.000Z",
+          streaming: false,
+          attachments: [],
+        },
+      },
+    ];
+
+    expect(
+      findThreadSearchResults(skillRows, "fix ci workflow", {
+        skills: [{ name: "github:gh-fix-ci", displayName: "Fix CI Workflow" }],
+      }),
+    ).toEqual([
+      {
+        rowId: "assistant-skill-row",
+        rowIndex: 0,
+        matchCount: 1,
+      },
+    ]);
+  });
+
   it("indexes proposed plans by displayed title and body instead of raw markdown", () => {
     expect(findThreadSearchResults(rows, "seeded thread search plan")).toEqual([
       {

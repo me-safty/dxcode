@@ -147,7 +147,7 @@ import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ThreadSearchBar } from "./chat/ThreadSearchBar";
-import { deriveMessagesTimelineRows } from "./chat/MessagesTimeline.logic";
+import { deriveMessagesTimelineRows, type TimelineRow } from "./chat/MessagesTimeline.logic";
 import {
   buildThreadSearchIndex,
   createEmptyThreadSearchLookupState,
@@ -210,6 +210,7 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 const EMPTY_THREAD_SEARCH_INDEX: readonly ThreadSearchIndexEntry[] = [];
+const EMPTY_THREAD_SEARCH_ROWS: readonly TimelineRow[] = [];
 const EMPTY_MATCHED_THREAD_SEARCH_ROW_IDS = new Set<string>();
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
@@ -1669,41 +1670,60 @@ export default function ChatView(props: ChatViewProps) {
         worktreePath: activeThread?.worktreePath ?? null,
       })
     : null;
-  const threadSearchRows = useMemo(
-    () =>
-      deriveMessagesTimelineRows({
-        timelineEntries,
-        completionDividerBeforeEntryId,
-        completionSummary,
-        isWorking,
-        activeTurnInProgress: isWorking || !latestTurnSettled,
-        activeTurnId: activeLatestTurn?.turnId ?? null,
-        activeTurnStartedAt: activeWorkStartedAt,
-        turnDiffSummaryByAssistantMessageId,
-        revertTurnCountByUserMessageId,
-      }),
-    [
-      activeLatestTurn?.turnId,
-      activeWorkStartedAt,
+  // Prefer an instance-id match so a custom Codex instance (e.g.
+  // `codex_personal`) surfaces its own status/message in the banner rather
+  // than the default Codex's. Falls back to first-match-by-kind when no
+  // saved instance id is available or the instance no longer exists.
+  const activeProviderInstanceId =
+    activeThread?.session?.providerInstanceId ??
+    activeThread?.modelSelection.instanceId ??
+    activeProject?.defaultModelSelection?.instanceId ??
+    null;
+  const activeProviderStatus = useMemo(() => {
+    if (activeProviderInstanceId) {
+      return (
+        providerStatuses.find((status) => status.instanceId === activeProviderInstanceId) ?? null
+      );
+    }
+    const defaultInstanceId = defaultInstanceIdForDriver(selectedProvider);
+    return providerStatuses.find((status) => status.instanceId === defaultInstanceId) ?? null;
+  }, [activeProviderInstanceId, providerStatuses, selectedProvider]);
+  const threadSearchRows = useMemo(() => {
+    if (!threadSearchOpen) return EMPTY_THREAD_SEARCH_ROWS;
+    return deriveMessagesTimelineRows({
+      timelineEntries,
       completionDividerBeforeEntryId,
       completionSummary,
       isWorking,
-      latestTurnSettled,
-      revertTurnCountByUserMessageId,
-      timelineEntries,
+      activeTurnInProgress: isWorking || !latestTurnSettled,
+      activeTurnId: activeLatestTurn?.turnId ?? null,
+      activeTurnStartedAt: activeWorkStartedAt,
       turnDiffSummaryByAssistantMessageId,
-    ],
-  );
+      revertTurnCountByUserMessageId,
+    });
+  }, [
+    activeLatestTurn?.turnId,
+    activeWorkStartedAt,
+    completionDividerBeforeEntryId,
+    completionSummary,
+    isWorking,
+    latestTurnSettled,
+    revertTurnCountByUserMessageId,
+    threadSearchOpen,
+    timelineEntries,
+    turnDiffSummaryByAssistantMessageId,
+  ]);
   const deferredThreadSearchQuery = useDeferredValue(threadSearchQuery);
   const threadSearchIndex = useMemo(
     () =>
       threadSearchOpen
         ? buildThreadSearchIndex(threadSearchRows, {
             markdownCwd: gitCwd ?? undefined,
+            skills: activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS,
             workspaceRoot: activeWorkspaceRoot,
           })
         : EMPTY_THREAD_SEARCH_INDEX,
-    [activeWorkspaceRoot, gitCwd, threadSearchOpen, threadSearchRows],
+    [activeProviderStatus?.skills, activeWorkspaceRoot, gitCwd, threadSearchOpen, threadSearchRows],
   );
   const threadSearchLookupStateRef = useRef<ThreadSearchLookupState>(
     createEmptyThreadSearchLookupState(threadSearchIndex),
@@ -1752,24 +1772,6 @@ export default function ChatView(props: ChatViewProps) {
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
-  // Prefer an instance-id match so a custom Codex instance (e.g.
-  // `codex_personal`) surfaces its own status/message in the banner rather
-  // than the default Codex's. Falls back to first-match-by-kind when no
-  // saved instance id is available or the instance no longer exists.
-  const activeProviderInstanceId =
-    activeThread?.session?.providerInstanceId ??
-    activeThread?.modelSelection.instanceId ??
-    activeProject?.defaultModelSelection?.instanceId ??
-    null;
-  const activeProviderStatus = useMemo(() => {
-    if (activeProviderInstanceId) {
-      return (
-        providerStatuses.find((status) => status.instanceId === activeProviderInstanceId) ?? null
-      );
-    }
-    const defaultInstanceId = defaultInstanceIdForDriver(selectedProvider);
-    return providerStatuses.find((status) => status.instanceId === defaultInstanceId) ?? null;
-  }, [activeProviderInstanceId, providerStatuses, selectedProvider]);
   const activeTerminalLaunchContext =
     terminalLaunchContext?.threadId === activeThreadId
       ? terminalLaunchContext

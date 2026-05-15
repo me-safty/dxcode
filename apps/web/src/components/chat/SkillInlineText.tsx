@@ -13,6 +13,20 @@ const SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s|$)/g;
 
 type InlineSkill = Pick<ServerProviderSkill, "name" | "displayName">;
 
+export function collectSkillInlineTextLabels(
+  text: string,
+  skills: ReadonlyArray<InlineSkill>,
+): string[] {
+  const labels: string[] = [];
+  for (const match of text.matchAll(SKILL_TOKEN_REGEX)) {
+    const name = match[2] ?? "";
+    const skill = skills.find((candidate) => candidate.name === name);
+    if (!skill) continue;
+    labels.push(formatProviderSkillDisplayName(skill));
+  }
+  return labels;
+}
+
 export function SkillInlineText(props: { text: string; skills: ReadonlyArray<InlineSkill> }) {
   const nodes: ReactNode[] = [];
   let cursor = 0;

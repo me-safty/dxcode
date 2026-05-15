@@ -4,11 +4,13 @@ import {
   renderableWorkEntryPreview,
   type TimelineRow,
 } from "./MessagesTimeline.logic";
+import { collectSkillInlineTextLabels } from "./SkillInlineText";
 import { buildRenderedUserMessageText } from "./userMessageTerminalContexts";
 import { stripDisplayedPlanMarkdown, proposedPlanTitle } from "~/proposedPlan";
 import { markdownToPlainText } from "~/lib/markdownPlainText";
 import { deriveDisplayedUserMessageState } from "~/lib/terminalContext";
 import { collectMarkdownFileLinkLabels } from "../../markdown-links";
+import type { ServerProviderSkill } from "@t3tools/contracts";
 
 export interface ThreadSearchResult {
   rowId: string;
@@ -54,6 +56,7 @@ function countMatches(haystack: string, needle: string): number {
 interface ThreadSearchIndexOptions {
   workspaceRoot?: string | undefined;
   markdownCwd?: string | undefined;
+  skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> | undefined;
 }
 
 function collectRowSearchText(row: TimelineRow, options?: ThreadSearchIndexOptions): string[] {
@@ -76,14 +79,14 @@ function collectRowSearchText(row: TimelineRow, options?: ThreadSearchIndexOptio
           ? [
               markdownToPlainText(visibleAssistantText),
               ...collectMarkdownFileLinkLabels(visibleAssistantText, options?.markdownCwd),
+              ...collectSkillInlineTextLabels(visibleAssistantText, options?.skills ?? []),
             ]
           : [];
       if (row.message.role === "user") {
+        const visibleUserText = visibleMessageState?.visibleText ?? "";
         return [
-          buildRenderedUserMessageText(
-            visibleMessageState?.visibleText ?? "",
-            visibleMessageState?.contexts ?? [],
-          ),
+          buildRenderedUserMessageText(visibleUserText, visibleMessageState?.contexts ?? []),
+          ...collectSkillInlineTextLabels(visibleUserText, options?.skills ?? []),
           ...visibleAttachmentNames,
         ];
       }
