@@ -380,6 +380,41 @@ describe("findThreadSearchResults", () => {
     expect(findThreadSearchResults(rows, "https://example.com/thread-search")).toEqual([]);
   });
 
+  it("indexes assistant markdown file links by their rendered inline labels", () => {
+    const fileLinkRows: TimelineRow[] = [
+      {
+        kind: "message",
+        id: "assistant-file-link-row",
+        createdAt: "2026-03-28T12:00:02.000Z",
+        durationStart: "2026-03-28T12:00:02.000Z",
+        showCompletionDivider: false,
+        completionSummary: null,
+        showAssistantCopyButton: false,
+        assistantCopyStreaming: false,
+        message: {
+          id: MessageId.make("assistant-file-link-message"),
+          role: "assistant",
+          text: "Open [the component](file:///repo/apps/web/src/App.tsx#L12C3).",
+          createdAt: "2026-03-28T12:00:02.000Z",
+          streaming: false,
+          attachments: [],
+        },
+      },
+    ];
+
+    expect(
+      findThreadSearchResults(fileLinkRows, "app.tsx · l12:c3", {
+        markdownCwd: "/repo",
+      }),
+    ).toEqual([
+      {
+        rowId: "assistant-file-link-row",
+        rowIndex: 0,
+        matchCount: 1,
+      },
+    ]);
+  });
+
   it("indexes proposed plans by displayed title and body instead of raw markdown", () => {
     expect(findThreadSearchResults(rows, "seeded thread search plan")).toEqual([
       {

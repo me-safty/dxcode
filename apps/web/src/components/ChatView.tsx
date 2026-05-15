@@ -1663,6 +1663,12 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  const gitCwd = activeProject
+    ? projectScriptCwd({
+        project: { cwd: activeProject.cwd },
+        worktreePath: activeThread?.worktreePath ?? null,
+      })
+    : null;
   const threadSearchRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
@@ -1692,9 +1698,12 @@ export default function ChatView(props: ChatViewProps) {
   const threadSearchIndex = useMemo(
     () =>
       threadSearchOpen
-        ? buildThreadSearchIndex(threadSearchRows, { workspaceRoot: activeWorkspaceRoot })
+        ? buildThreadSearchIndex(threadSearchRows, {
+            markdownCwd: gitCwd ?? undefined,
+            workspaceRoot: activeWorkspaceRoot,
+          })
         : EMPTY_THREAD_SEARCH_INDEX,
-    [activeWorkspaceRoot, threadSearchOpen, threadSearchRows],
+    [activeWorkspaceRoot, gitCwd, threadSearchOpen, threadSearchRows],
   );
   const threadSearchLookupStateRef = useRef<ThreadSearchLookupState>(
     createEmptyThreadSearchLookupState(threadSearchIndex),
@@ -1725,9 +1734,9 @@ export default function ChatView(props: ChatViewProps) {
       : null;
 
   useEffect(() => {
-    const normalizedQuery = threadSearchQuery.trim();
+    const normalizedQuery = deferredThreadSearchQuery.trim();
     setActiveThreadSearchResultIndex(normalizedQuery.length > 0 ? 0 : -1);
-  }, [threadSearchQuery]);
+  }, [deferredThreadSearchQuery]);
 
   useEffect(() => {
     setActiveThreadSearchResultIndex((current) => {
@@ -1740,12 +1749,6 @@ export default function ChatView(props: ChatViewProps) {
       return Math.min(current, threadSearchResults.length - 1);
     });
   }, [threadSearchResults]);
-  const gitCwd = activeProject
-    ? projectScriptCwd({
-        project: { cwd: activeProject.cwd },
-        worktreePath: activeThread?.worktreePath ?? null,
-      })
-    : null;
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();

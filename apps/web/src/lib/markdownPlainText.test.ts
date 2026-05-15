@@ -21,6 +21,10 @@ describe("markdownToPlainText", () => {
     );
   });
 
+  it("leaves invalid surrogate numeric entities unchanged instead of throwing", () => {
+    expect(markdownToPlainText("bad &#xD800; entity")).toBe("bad &#xD800; entity");
+  });
+
   it("strips empty fenced code blocks without leaving fence syntax behind", () => {
     expect(markdownToPlainText("Before\n```\n```\nAfter")).toBe("Before\n\n\nAfter");
   });

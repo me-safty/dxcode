@@ -17,6 +17,8 @@ const EMPHASIS_REGEXES = [/(\*\*\*|___)(.*?)\1/gs, /(\*\*|__)(.*?)\1/gs, /(~~)(.
 const SINGLE_ASTERISK_EMPHASIS_REGEX = /(^|[^\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?=[^\w*]|$)/gm;
 const SINGLE_UNDERSCORE_EMPHASIS_REGEX = /(^|[^\w_])_(?!\s)([^_\n]+?)(?<!\s)_(?=[^\w_]|$)/gm;
 const MAX_UNICODE_CODE_POINT = 0x10ffff;
+const MIN_SURROGATE_CODE_POINT = 0xd800;
+const MAX_SURROGATE_CODE_POINT = 0xdfff;
 
 function decodeNumericHtmlEntity(entity: string, rawValue: string): string {
   const normalizedValue = rawValue.toLowerCase();
@@ -24,7 +26,12 @@ function decodeNumericHtmlEntity(entity: string, rawValue: string): string {
     ? Number.parseInt(normalizedValue.slice(2), 16)
     : Number.parseInt(normalizedValue.slice(1), 10);
 
-  if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > MAX_UNICODE_CODE_POINT) {
+  if (
+    !Number.isInteger(codePoint) ||
+    codePoint < 0 ||
+    codePoint > MAX_UNICODE_CODE_POINT ||
+    (codePoint >= MIN_SURROGATE_CODE_POINT && codePoint <= MAX_SURROGATE_CODE_POINT)
+  ) {
     return entity;
   }
 

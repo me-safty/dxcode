@@ -8,6 +8,7 @@ import { buildRenderedUserMessageText } from "./userMessageTerminalContexts";
 import { stripDisplayedPlanMarkdown, proposedPlanTitle } from "~/proposedPlan";
 import { markdownToPlainText } from "~/lib/markdownPlainText";
 import { deriveDisplayedUserMessageState } from "~/lib/terminalContext";
+import { collectMarkdownFileLinkLabels } from "../../markdown-links";
 
 export interface ThreadSearchResult {
   rowId: string;
@@ -52,6 +53,7 @@ function countMatches(haystack: string, needle: string): number {
 
 interface ThreadSearchIndexOptions {
   workspaceRoot?: string | undefined;
+  markdownCwd?: string | undefined;
 }
 
 function collectRowSearchText(row: TimelineRow, options?: ThreadSearchIndexOptions): string[] {
@@ -69,15 +71,23 @@ function collectRowSearchText(row: TimelineRow, options?: ThreadSearchIndexOptio
               ?.filter((attachment) => attachment.previewUrl == null)
               .map((attachment) => attachment.name) ?? [])
           : [];
-      return [
-        row.message.role === "user"
-          ? buildRenderedUserMessageText(
-              visibleMessageState?.visibleText ?? "",
-              visibleMessageState?.contexts ?? [],
-            )
-          : markdownToPlainText(visibleAssistantText),
-        ...visibleAttachmentNames,
-      ];
+      const visibleAssistantSearchText =
+        row.message.role === "assistant"
+          ? [
+              markdownToPlainText(visibleAssistantText),
+              ...collectMarkdownFileLinkLabels(visibleAssistantText, options?.markdownCwd),
+            ]
+          : [];
+      if (row.message.role === "user") {
+        return [
+          buildRenderedUserMessageText(
+            visibleMessageState?.visibleText ?? "",
+            visibleMessageState?.contexts ?? [],
+          ),
+          ...visibleAttachmentNames,
+        ];
+      }
+      return visibleAssistantSearchText;
     }
     case "proposed-plan": {
       const title = proposedPlanTitle(row.proposedPlan.planMarkdown) ?? "";

@@ -1256,7 +1256,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
-  const visibleChangedFiles = renderableWorkEntryChangedFiles(workEntry);
+  const visibleChangedFiles = renderableWorkEntryChangedFiles(workEntry, workspaceRoot);
 
   return (
     <div className="rounded-lg px-1 py-1">
@@ -1354,11 +1354,10 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       </div>
       {hasChangedFiles && !previewIsChangedFiles && (
         <div className="mt-1 flex flex-wrap gap-1 pl-6">
-          {visibleChangedFiles.map((filePath) => {
-            const displayPath = formatWorkspaceRelativePath(filePath, workspaceRoot);
+          {visibleChangedFiles.map((displayPath) => {
             return (
               <span
-                key={`${workEntry.id}:${filePath}`}
+                key={`${workEntry.id}:${displayPath}`}
                 className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
                 title={displayPath}
               >
