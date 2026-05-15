@@ -52,7 +52,7 @@ describe("renderT3Webview", () => {
     });
 
     expect(html).toContain('<meta http-equiv="Content-Security-Policy"');
-    expect(html).toContain("default-src 'none'");
+    expect(html).toContain("default-src &#39;none&#39;");
     expect(html).toContain(
       "connect-src vscode-webview: http://127.0.0.1:49111 ws://127.0.0.1:49111",
     );

@@ -57,7 +57,7 @@ When the thread-history sidebar is open in the inline desktop layout, the VS Cod
 
 The thread-history sidebar open/closed state is stored in shared `ClientSettings`. In VS Code this goes through the host bridge to `<T3 home>/userdata/client-settings.json`, so reloading the VS Code window restores the previous sidebar state.
 
-The webview startup route is reset to the T3 chat home each time the extension renders the view. This intentionally ignores any stale hash route VS Code may have retained from an earlier webview instance, then lets the authenticated backend welcome event choose the current workspace's startup thread. In VS Code, startup selection is constrained to bootstrapped workspace projects: the app prefers the active workspace folder's project, chooses the most recently visited thread within that project, falls back to that project's newest active thread, and otherwise falls back within the visible workspace project set.
+The webview startup route is reset each time the extension renders the view. Sidebar and new-thread views start at the T3 chat home, intentionally ignoring any stale hash route VS Code may have retained from an earlier webview instance, then let the authenticated backend welcome event choose the current workspace's startup thread. Custom editor resources shaped like `t3-code://route/<environmentId>/<threadId>` initialize directly to that thread's hash route. In VS Code, automatic startup selection is constrained to bootstrapped workspace projects: the app prefers the active workspace folder's project, chooses the most recently visited thread within that project, falls back to that project's newest active thread, and otherwise falls back within the visible workspace project set.
 
 ## VS Code Theme and Font Propagation
 
@@ -100,6 +100,7 @@ Implemented so far:
 - Added custom editor contribution and provider:
   - `t3code.conversationEditor`
   - virtual resources shaped like `t3-code://route/local/new`
+  - thread resources shaped like `t3-code://route/<environmentId>/<threadId>` route directly to the matching T3 thread
 - Added a backend process manager that:
   - chooses the active executable workspace folder or materialized virtual checkout as `cwd`
   - allocates a loopback port
@@ -143,6 +144,7 @@ Implemented so far:
   - show only one thread-sidebar toggle at a time
   - persist the thread-sidebar open state in shared `ClientSettings`
   - reset VS Code webview startup routing before React initializes
+  - suppress resolved terminal and project-script shortcuts when VS Code host preferences disable the embedded terminal
   - choose only a visible VS Code workspace thread during first-load navigation, preferring the active workspace project
   - read and write `ClientSettings` through `window.t3HostBridge` when no desktop bridge is present
   - support `VITE_BASE_URL` so extension-local web assets can be built with relative paths
@@ -197,7 +199,6 @@ Implemented so far:
 Deferred until there is a concrete UX need:
 
 - Chat Sessions integration, including the proposed `chatSessionsProvider`, `chatSessions/newSession` menu contribution, and listing recent T3 threads as VS Code chat session items.
-- Thread-specific route reconstruction in the custom editor. The custom editor currently opens the T3 chat index route.
 - Webview-to-extension host actions beyond client settings persistence and host appearance propagation, including adding the current file/selection to T3 Code and reveal/open file host actions.
 
 Not implemented yet:
@@ -626,19 +627,19 @@ Implementation direction:
 
 ### 2026-05-15: Defer Native Chat Session, Thread Tab, and Host Action Expansion
 
-Decision: keep the current stable webview integration as the baseline and defer Chat Sessions integration, thread-specific custom editor routing, and additional webview-to-extension host actions until real usage exposes a concrete problem those features would solve.
+Decision: keep the current stable webview integration as the baseline and defer Chat Sessions integration and additional webview-to-extension host actions until real usage exposes a concrete problem those features would solve.
 
 Reasoning:
 
 - The existing sidebar webview already presents T3 Code's native thread history and workspace-scoped thread behavior in a way that feels intuitive during current use.
 - VS Code Chat Sessions integration would mainly add native VS Code discoverability and session navigation around the same T3 threads, not fix the core T3 thread model.
-- Thread-specific custom editor routing matters most for deep links, native session items, and multiple editor tabs tied to specific threads. The current webview-first workflow does not depend on that behavior.
+- Thread-specific custom editor routing is implemented for resources shaped like `t3-code://route/<environmentId>/<threadId>`, so restored custom editor resources can reopen the matching web route.
 - Additional host actions such as add current file/selection, reveal/open file, and theme/font propagation should be driven by observed workflow friction rather than added speculatively.
 
 Deferred work:
 
 - Reassess Chat Sessions integration if users need T3 threads to appear in VS Code's native chat/session surfaces.
-- Reassess thread-specific custom editor routing if editor tabs, deep links, or restored resources need to point at exact T3 threads.
+- Reassess deeper custom editor integration if editor tabs, deep links, or restored resources need lifecycle behavior beyond route initialization.
 - Reassess host action expansion if file-context, reveal/open, command execution, or theme/font gaps become noticeable in daily use.
 
 ### 2026-05-14: Defer VS Code Native Keybinding Conflict Handling
@@ -1135,7 +1136,7 @@ t3-code://route/local/<threadId>
 When the custom editor opens, initialize the React app route to:
 
 ```text
-/_chat/<environmentId>/<threadId>
+/<environmentId>/<threadId>
 ```
 
 or the equivalent hash route.

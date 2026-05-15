@@ -341,11 +341,12 @@ async function showHostConfirmDialog(message: string): Promise<boolean> {
   return result === confirmLabel;
 }
 
-function routeFromUri(uri: vscode.Uri): string {
+export function routeFromUri(uri: vscode.Uri): string {
   const routeParts = uri.path.split("/").filter(Boolean);
+  const environmentId = routeParts.at(-2);
   const threadId = routeParts.at(-1);
-  if (!threadId || threadId === "new") {
+  if (!environmentId || !threadId || threadId === "new") {
     return "/_chat/";
   }
-  return "/_chat/";
+  return `/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`;
 }

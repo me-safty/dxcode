@@ -2739,6 +2739,8 @@ export default function ChatView(props: ChatViewProps) {
       if (!command) return;
 
       if (!terminalEnabled && isTerminalKeybindingCommand(command)) {
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
 
@@ -2795,7 +2797,11 @@ export default function ChatView(props: ChatViewProps) {
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
       if (!script) return;
-      if (!terminalEnabled) return;
+      if (!terminalEnabled) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       void runProjectScript(script);

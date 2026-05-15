@@ -33,6 +33,50 @@ export type VscodeProjectScope = {
   cwds?: readonly string[] | null | undefined;
 };
 
+type VscodeBootstrapProject = {
+  readonly projectId: ProjectId;
+  readonly cwd: string;
+  readonly isActive?: boolean;
+};
+
+export function resolveVscodeProjectScope(input: {
+  readonly serverWelcome:
+    | {
+        readonly environment: { readonly environmentId: EnvironmentId };
+        readonly bootstrapProjectId?: ProjectId | null | undefined;
+        readonly bootstrapProjects?: readonly VscodeBootstrapProject[] | null | undefined;
+        readonly cwd?: string | null | undefined;
+      }
+    | null
+    | undefined;
+  readonly serverConfig:
+    | {
+        readonly environment: { readonly environmentId: EnvironmentId };
+        readonly cwd?: string | null | undefined;
+      }
+    | null
+    | undefined;
+  readonly fallbackEnvironmentId?: EnvironmentId | null | undefined;
+}): VscodeProjectScope {
+  const bootstrapProjects = input.serverWelcome?.bootstrapProjects ?? null;
+  const bootstrapProjectId = input.serverWelcome?.bootstrapProjectId ?? null;
+  const activeBootstrapProjectId =
+    bootstrapProjects?.find((project) => project.isActive)?.projectId ?? bootstrapProjectId;
+
+  return {
+    environmentId:
+      input.serverWelcome?.environment.environmentId ??
+      input.serverConfig?.environment.environmentId ??
+      input.fallbackEnvironmentId ??
+      null,
+    projectId: bootstrapProjectId,
+    projectIds: bootstrapProjects?.map((project) => project.projectId) ?? null,
+    activeProjectId: activeBootstrapProjectId,
+    cwd: input.serverConfig?.cwd ?? input.serverWelcome?.cwd ?? null,
+    cwds: bootstrapProjects?.map((project) => project.cwd) ?? null,
+  };
+}
+
 export type ThreadTraversalDirection = "previous" | "next";
 
 export interface ThreadStatusPill {

@@ -66,10 +66,6 @@ export function shouldRenderOpenInPicker(input: {
   return input.hostShowOpenInPicker && shouldShowOpenInPicker(input);
 }
 
-export function shouldRenderTerminalToggle(input: { readonly hostShowTerminalToggle: boolean }) {
-  return input.hostShowTerminalToggle;
-}
-
 export const ChatHeader = memo(function ChatHeader({
   activeThreadEnvironmentId,
   activeThreadId,
@@ -97,9 +93,7 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const hostDisplayPreferences = useHostDisplayPreferences();
-  const showTerminalToggle = shouldRenderTerminalToggle({
-    hostShowTerminalToggle: hostDisplayPreferences.enableTerminal,
-  });
+  const showTerminalToggle = hostDisplayPreferences.enableTerminal;
 
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

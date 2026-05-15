@@ -1,11 +1,7 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import {
-  shouldRenderOpenInPicker,
-  shouldRenderTerminalToggle,
-  shouldShowOpenInPicker,
-} from "./ChatHeader";
+import { shouldRenderOpenInPicker, shouldShowOpenInPicker } from "./ChatHeader";
 
 describe("shouldShowOpenInPicker", () => {
   const primaryEnvironmentId = EnvironmentId.make("environment-primary");
@@ -74,9 +70,5 @@ describe("host display preferences", () => {
         primaryEnvironmentId,
       }),
     ).toBe(true);
-  });
-
-  it("hides the terminal toggle when the host disables terminal support", () => {
-    expect(shouldRenderTerminalToggle({ hostShowTerminalToggle: false })).toBe(false);
   });
 });

@@ -45,9 +45,14 @@ export function createClientSettingsPersistence(settingsPath: string): ClientSet
     set: async (settings) => {
       const directory = path.dirname(settingsPath);
       const tempPath = `${settingsPath}.${process.pid}.${crypto.randomBytes(8).toString("hex")}.tmp`;
-      await fs.mkdir(directory, { recursive: true });
-      await fs.writeFile(tempPath, `${JSON.stringify(settings)}\n`, "utf8");
-      await fs.rename(tempPath, settingsPath);
+      try {
+        await fs.mkdir(directory, { recursive: true });
+        await fs.writeFile(tempPath, `${JSON.stringify(settings)}\n`, "utf8");
+        await fs.rename(tempPath, settingsPath);
+      } catch (error) {
+        await fs.rm(tempPath, { force: true }).catch(() => {});
+        throw error;
+      }
     },
   };
 }

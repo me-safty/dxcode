@@ -170,6 +170,7 @@ import {
   resolveThreadListClassName,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  resolveVscodeProjectScope,
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
@@ -2900,21 +2901,14 @@ export default function Sidebar() {
   const visibleProjects = useMemo(
     () =>
       isVscodeWebview
-        ? filterProjectsForVscodeScope(projects, {
-            environmentId:
-              serverWelcome?.environment.environmentId ??
-              serverConfig?.environment.environmentId ??
-              primaryEnvironmentId,
-            projectId: serverWelcome?.bootstrapProjectId ?? null,
-            projectIds:
-              serverWelcome?.bootstrapProjects?.map((project) => project.projectId) ?? null,
-            activeProjectId:
-              serverWelcome?.bootstrapProjects?.find((project) => project.isActive)?.projectId ??
-              serverWelcome?.bootstrapProjectId ??
-              null,
-            cwd: serverConfig?.cwd ?? serverWelcome?.cwd ?? null,
-            cwds: serverWelcome?.bootstrapProjects?.map((project) => project.cwd) ?? null,
-          })
+        ? filterProjectsForVscodeScope(
+            projects,
+            resolveVscodeProjectScope({
+              serverConfig,
+              serverWelcome,
+              fallbackEnvironmentId: primaryEnvironmentId,
+            }),
+          )
         : projects,
     [primaryEnvironmentId, projects, serverConfig, serverWelcome],
   );

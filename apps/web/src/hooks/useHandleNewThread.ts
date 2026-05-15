@@ -12,6 +12,7 @@ import { newDraftId, newThreadId } from "../lib/utils";
 import {
   filterProjectsForVscodeScope,
   orderItemsByPreferredIds,
+  resolveVscodeProjectScope,
 } from "../components/Sidebar.logic";
 import { isVscodeWebview } from "../env";
 import {
@@ -176,21 +177,10 @@ export function useHandleNewThread() {
   const visibleProjects = useMemo(
     () =>
       isVscodeWebview
-        ? filterProjectsForVscodeScope(projects, {
-            environmentId:
-              serverWelcome?.environment.environmentId ??
-              serverConfig?.environment.environmentId ??
-              null,
-            projectId: serverWelcome?.bootstrapProjectId ?? null,
-            projectIds:
-              serverWelcome?.bootstrapProjects?.map((project) => project.projectId) ?? null,
-            activeProjectId:
-              serverWelcome?.bootstrapProjects?.find((project) => project.isActive)?.projectId ??
-              serverWelcome?.bootstrapProjectId ??
-              null,
-            cwd: serverConfig?.cwd ?? serverWelcome?.cwd ?? null,
-            cwds: serverWelcome?.bootstrapProjects?.map((project) => project.cwd) ?? null,
-          })
+        ? filterProjectsForVscodeScope(
+            projects,
+            resolveVscodeProjectScope({ serverConfig, serverWelcome }),
+          )
         : projects,
     [projects, serverConfig, serverWelcome],
   );
