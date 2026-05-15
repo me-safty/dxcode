@@ -11,11 +11,17 @@ export interface WebviewDisplayPreferences {
   readonly enableTerminal: boolean;
 }
 
+export interface WebviewHostAppearance {
+  readonly themeSource: "default" | "vscode";
+  readonly colorScheme: "light" | "dark";
+}
+
 export interface WebviewRenderInput {
   readonly webview: vscode.Webview;
   readonly extensionUri: vscode.Uri;
   readonly connection: BackendConnection;
   readonly displayPreferences?: WebviewDisplayPreferences;
+  readonly hostAppearance?: WebviewHostAppearance;
   readonly initialRoute?: string;
 }
 
@@ -48,6 +54,7 @@ export async function renderT3Webview(input: WebviewRenderInput): Promise<string
       bearerToken: input.connection.bearerToken,
     },
     displayPreferences: input.displayPreferences ?? DEFAULT_DISPLAY_PREFERENCES,
+    hostAppearance: input.hostAppearance ?? DEFAULT_HOST_APPEARANCE,
     initialRoute: input.initialRoute ?? "/_chat/",
   });
 
@@ -67,6 +74,11 @@ const DEFAULT_DISPLAY_PREFERENCES: WebviewDisplayPreferences = {
   enableTerminal: false,
 };
 
+const DEFAULT_HOST_APPEARANCE: WebviewHostAppearance = {
+  themeSource: "default",
+  colorScheme: "light",
+};
+
 function makeBridgeScript(input: {
   readonly bootstrap: {
     readonly label: string;
@@ -76,6 +88,7 @@ function makeBridgeScript(input: {
     readonly bearerToken: string;
   };
   readonly displayPreferences: WebviewDisplayPreferences;
+  readonly hostAppearance: WebviewHostAppearance;
   readonly initialRoute: string;
 }): string {
   return `
@@ -83,16 +96,36 @@ function makeBridgeScript(input: {
       const vscode = acquireVsCodeApi();
       const bootstrap = ${JSON.stringify(input.bootstrap)};
       let displayPreferences = ${JSON.stringify(input.displayPreferences)};
+      let hostAppearance = ${JSON.stringify(input.hostAppearance)};
       const initialRoute = ${JSON.stringify(input.initialRoute)};
       const displayPreferenceListeners = new Set();
+      const hostAppearanceListeners = new Set();
       window.__T3_IS_VSCODE_WEBVIEW = true;
       const pendingRequests = new Map();
+      function applyHostAppearance(appearance) {
+        const root = document.documentElement;
+        if (appearance && appearance.themeSource === "vscode") {
+          root.setAttribute("data-t3-host-theme", "vscode");
+          root.classList.toggle("dark", appearance.colorScheme === "dark");
+        } else {
+          root.removeAttribute("data-t3-host-theme");
+        }
+      }
+      applyHostAppearance(hostAppearance);
       window.addEventListener("message", (event) => {
         const message = event.data;
         if (message && message.type === "t3.displayPreferencesChanged") {
           displayPreferences = message.preferences;
           for (const listener of displayPreferenceListeners) {
             listener(displayPreferences);
+          }
+          return;
+        }
+        if (message && message.type === "t3.hostAppearanceChanged") {
+          hostAppearance = message.appearance;
+          applyHostAppearance(hostAppearance);
+          for (const listener of hostAppearanceListeners) {
+            listener(hostAppearance);
           }
           return;
         }
@@ -133,6 +166,15 @@ function makeBridgeScript(input: {
           displayPreferenceListeners.add(callback);
           return () => {
             displayPreferenceListeners.delete(callback);
+          };
+        },
+        getHostAppearance() {
+          return hostAppearance;
+        },
+        onHostAppearanceChanged(callback) {
+          hostAppearanceListeners.add(callback);
+          return () => {
+            hostAppearanceListeners.delete(callback);
           };
         },
         getClientSettings() {

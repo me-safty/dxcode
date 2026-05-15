@@ -1,0 +1,88 @@
+import type { T3HostAppearance } from "@t3tools/contracts";
+
+const DEFAULT_HOST_APPEARANCE: T3HostAppearance = {
+  themeSource: "default",
+  colorScheme: "light",
+};
+
+const subscribers = new Set<() => void>();
+
+function normalizeHostAppearance(
+  appearance: Partial<T3HostAppearance> | null | undefined,
+): T3HostAppearance {
+  return {
+    themeSource: appearance?.themeSource === "vscode" ? "vscode" : "default",
+    colorScheme: appearance?.colorScheme === "dark" ? "dark" : "light",
+  };
+}
+
+let currentHostAppearance = normalizeHostAppearance(
+  typeof window === "undefined" ? null : window.t3HostBridge?.getHostAppearance?.(),
+);
+
+function emitHostAppearanceChanged(nextAppearance: T3HostAppearance): void {
+  currentHostAppearance = normalizeHostAppearance(nextAppearance);
+  applyHostAppearanceToDocument(currentHostAppearance);
+  for (const subscriber of subscribers) {
+    subscriber();
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.t3HostBridge?.onHostAppearanceChanged?.(emitHostAppearanceChanged);
+}
+
+export function readHostAppearance(): T3HostAppearance {
+  return currentHostAppearance;
+}
+
+export function subscribeHostAppearance(callback: () => void): () => void {
+  subscribers.add(callback);
+  return () => {
+    subscribers.delete(callback);
+  };
+}
+
+export function resolveHostResolvedTheme(
+  appearance: T3HostAppearance | null | undefined,
+): "light" | "dark" | null {
+  const normalizedAppearance = normalizeHostAppearance(appearance ?? DEFAULT_HOST_APPEARANCE);
+  return normalizedAppearance.themeSource === "vscode" ? normalizedAppearance.colorScheme : null;
+}
+
+export function applyHostAppearanceToDocument(
+  appearance: T3HostAppearance | null | undefined,
+): "light" | "dark" | null {
+  if (typeof document === "undefined") {
+    return resolveHostResolvedTheme(appearance);
+  }
+
+  const resolvedTheme = resolveHostResolvedTheme(appearance);
+  if (resolvedTheme) {
+    setHostThemeAttribute(document.documentElement, "vscode");
+    document.documentElement.classList.toggle("dark", resolvedTheme === "dark");
+  } else {
+    setHostThemeAttribute(document.documentElement, null);
+  }
+  return resolvedTheme;
+}
+
+function setHostThemeAttribute(element: HTMLElement, value: "vscode" | null): void {
+  const dataset = element.dataset as DOMStringMap | undefined;
+  if (!element.setAttribute || !element.removeAttribute) {
+    if (dataset) {
+      if (value) {
+        dataset.t3HostTheme = value;
+      } else {
+        delete dataset.t3HostTheme;
+      }
+    }
+    return;
+  }
+
+  if (value) {
+    element.setAttribute("data-t3-host-theme", value);
+  } else {
+    element.removeAttribute("data-t3-host-theme");
+  }
+}

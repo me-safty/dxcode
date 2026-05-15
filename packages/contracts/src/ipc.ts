@@ -249,12 +249,27 @@ export const T3HostDisplayPreferencesSchema = Schema.Struct({
   enableTerminal: Schema.Boolean,
 });
 
+export type T3HostThemeSource = "default" | "vscode";
+export type T3HostColorScheme = "light" | "dark";
+
+export interface T3HostAppearance {
+  themeSource: T3HostThemeSource;
+  colorScheme: T3HostColorScheme;
+}
+
+export const T3HostAppearanceSchema = Schema.Struct({
+  themeSource: Schema.Literals(["default", "vscode"]),
+  colorScheme: Schema.Literals(["light", "dark"]),
+});
+
 export interface T3HostBridge {
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
   getDisplayPreferences?: () => T3HostDisplayPreferences | null;
   onDisplayPreferencesChanged?: (
     callback: (preferences: T3HostDisplayPreferences) => void,
   ) => () => void;
+  getHostAppearance?: () => T3HostAppearance | null;
+  onHostAppearanceChanged?: (callback: (appearance: T3HostAppearance) => void) => () => void;
   getClientSettings?: () => Promise<ClientSettings | null>;
   setClientSettings?: (settings: ClientSettings) => Promise<void>;
   postMessage?: (message: unknown) => void;

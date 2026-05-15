@@ -61,8 +61,13 @@ describe("renderT3Webview", () => {
     expect(html).toContain("window.t3HostBridge");
     expect(html).toContain("getDisplayPreferences()");
     expect(html).toContain("onDisplayPreferencesChanged(callback)");
+    expect(html).toContain("getHostAppearance()");
+    expect(html).toContain("onHostAppearanceChanged(callback)");
     expect(html).toContain('message.type === "t3.displayPreferencesChanged"');
+    expect(html).toContain('message.type === "t3.hostAppearanceChanged"');
+    expect(html).toContain('root.setAttribute("data-t3-host-theme", "vscode")');
     expect(html).toContain('"showOpenInPicker":false');
+    expect(html).toContain('"themeSource":"default"');
     expect(html).toContain("getClientSettings()");
     expect(html).toContain("setClientSettings(settings)");
     expect(html).toContain('"bootstrapToken":"bootstrap-token"');
@@ -94,23 +99,30 @@ describe("renderT3Webview", () => {
         showBranchSelector: false,
         enableTerminal: true,
       },
+      hostAppearance: {
+        themeSource: "vscode",
+        colorScheme: "dark",
+      },
     });
 
     expect(html).toContain('const initialRoute = "/_chat/"');
     expect(html).toContain('"showOpenInPicker":true');
     expect(html).toContain('"showBranchSelector":false');
     expect(html).toContain('"enableTerminal":true');
+    expect(html).toContain('"themeSource":"vscode"');
+    expect(html).toContain('"colorScheme":"dark"');
   });
 });
 
 describe("VS Code display preference settings", () => {
-  it("contributes disabled-by-default settings for each host-hidden control", () => {
+  it("contributes disabled-by-default settings for each host-hidden control and theme restore", () => {
     const properties = packageJson.contributes.configuration.properties;
 
     expect(properties["t3code.ui.showOpenInPicker"]?.default).toBe(false);
     expect(properties["t3code.ui.showCheckoutModeIndicator"]?.default).toBe(false);
     expect(properties["t3code.ui.showBranchSelector"]?.default).toBe(false);
     expect(properties["t3code.ui.enableTerminal"]?.default).toBe(false);
+    expect(properties["t3code.ui.restoreDefaultTheme"]?.default).toBe(false);
     expect("t3code.ui.showTerminalToggle" in properties).toBe(false);
   });
 });

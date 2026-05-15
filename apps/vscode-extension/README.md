@@ -51,6 +51,16 @@ The thread-history sidebar open/closed state is stored in shared `ClientSettings
 
 The webview startup route is reset to the T3 chat home each time the extension renders the view. This intentionally ignores any stale hash route VS Code may have retained from an earlier webview instance, then lets the authenticated backend welcome event choose the current workspace's startup thread. In VS Code, startup selection is constrained to bootstrapped workspace projects: the app prefers the active workspace folder's project, chooses the most recently visited thread within that project, falls back to that project's newest active thread, and otherwise falls back within the visible workspace project set.
 
+## VS Code Theme and Font Propagation
+
+VS Code webviews match the active VS Code color theme and editor fonts by default. The extension injects the current host appearance through `window.t3HostBridge.getHostAppearance()`, broadcasts changes through `window.t3HostBridge.onHostAppearanceChanged(...)`, and the React app maps its theme tokens to VS Code webview variables such as `--vscode-editor-background`, `--vscode-editor-foreground`, `--vscode-focusBorder`, `--vscode-font-family`, and `--vscode-editor-font-family`.
+
+The app still owns its normal default theme path outside VS Code. Inside VS Code, users can restore that default T3 Code theme with:
+
+- `t3code.ui.restoreDefaultTheme`
+
+This setting defaults to `false`. When it is `false`, VS Code theme/font propagation is enabled. When it is `true`, the webview removes the host theme mapping and the normal T3 Code theme preference applies again.
+
 ## Virtual Workspace Cache
 
 VS Code virtual workspace folders, such as GitHub RemoteHub folders shaped like `vscode-vfs://github/<owner>/<repo>`, do not provide a real process `cwd`. T3 materializes supported GitHub virtual folders into local partial clones under `<T3 home>/virtual-workspaces/github/<owner>-<repo>-<hash>`, starts the backend from that checkout, and keeps the original VS Code URI-derived folder key in the bootstrap metadata.
@@ -99,6 +109,7 @@ Implemented so far:
   - `T3HostBridge`
   - `window.t3HostBridge`
   - `getDisplayPreferences()` for host-level UI and capability preferences
+  - `getHostAppearance()` for host-level theme/font propagation
 - Added VS Code multi-root bootstrap metadata:
   - the extension sends every VS Code workspace folder through the desktop bootstrap envelope
   - each folder has a stable key derived from URI scheme, authority, and filesystem path
@@ -114,6 +125,8 @@ Implemented so far:
   - read bootstrap credentials from either bridge
   - use host-injected bearer auth for VS Code webview HTTP and WebSocket startup
   - hide VS Code-duplicated controls by default based on host display preferences
+  - match VS Code theme colors and font variables by default
+  - restore the normal T3 Code theme when `t3code.ui.restoreDefaultTheme` is enabled
   - keep the sidebar toggle visible at all VS Code webview widths
   - scope the sidebar to the bootstrapped VS Code workspace projects
   - hide project-management chrome in VS Code single-project mode
@@ -131,6 +144,7 @@ Implemented so far:
   - injects `window.t3HostBridge`
   - injects VS Code display preferences from extension configuration
   - broadcasts display preference changes to open T3 Code webviews
+  - injects VS Code host appearance and broadcasts theme/default-theme toggle changes to open T3 Code webviews
   - handles neutral host bridge requests for shared client settings persistence
   - initializes the hash route
   - overwrites stale retained hash routes with the requested initial route
@@ -140,6 +154,8 @@ Implemented so far:
   - `t3code.ui.showCheckoutModeIndicator`
   - `t3code.ui.showBranchSelector`
   - `t3code.ui.enableTerminal`
+- Added extension setting for restoring the default T3 Code theme instead of matching VS Code:
+  - `t3code.ui.restoreDefaultTheme`
 - Added shared T3 Code app `ClientSettings` persistence for VS Code:
   - persists to `<T3 home>/userdata/client-settings.json`
   - uses the same raw client-settings file format as desktop
@@ -163,7 +179,7 @@ Deferred until there is a concrete UX need:
 
 - Chat Sessions integration, including the proposed `chatSessionsProvider`, `chatSessions/newSession` menu contribution, and listing recent T3 threads as VS Code chat session items.
 - Thread-specific route reconstruction in the custom editor. The custom editor currently opens the T3 chat index route.
-- Webview-to-extension host actions beyond client settings persistence, including adding the current file/selection to T3 Code, reveal/open file host actions, and VS Code theme/font propagation into the web UI.
+- Webview-to-extension host actions beyond client settings persistence and host appearance propagation, including adding the current file/selection to T3 Code and reveal/open file host actions.
 
 Not implemented yet:
 
@@ -182,6 +198,31 @@ Known packaging notes:
 - The current package is not yet platform-targeted with `vsce --target`.
 
 ## Decision Log
+
+### 2026-05-15: Propagate VS Code Theme and Font Defaults
+
+Decision: make VS Code theme and font propagation the default for VS Code webviews, while providing `t3code.ui.restoreDefaultTheme` as an explicit opt-out that restores the normal T3 Code app theme path.
+
+Reasoning:
+
+- VS Code users expect embedded editor surfaces to follow the active VS Code color theme, UI font, and editor monospace font.
+- VS Code already exposes stable webview CSS variables for theme colors and fonts, so the web app can map its existing design tokens without hard-coding theme names or reading user settings directly.
+- The React app still needs to know the host-resolved light/dark mode because markdown highlighting, diff rendering, and file icons are selected from app state, not CSS alone.
+- A restore-default setting is less ambiguous than a partial theme toggle: when enabled, the VS Code host stops driving T3 Code theme tokens and the app's existing theme preference applies.
+
+Implemented:
+
+- Added `T3HostAppearance` to the neutral host bridge contract.
+- The VS Code extension injects `getHostAppearance()` and `onHostAppearanceChanged(...)` into `window.t3HostBridge`.
+- Host appearance changes are broadcast when the active VS Code color theme changes or when `t3code.ui.restoreDefaultTheme` changes.
+- The webview bridge sets `data-t3-host-theme="vscode"` and the `.dark` class before React starts when VS Code propagation is active.
+- The web app maps T3 theme tokens and body/code fonts to VS Code webview CSS variables when host propagation is active.
+- `useTheme()` uses the host-resolved light/dark mode for app-level rendering decisions while preserving the existing stored app theme for the default-theme path.
+
+Automated coverage:
+
+- VS Code webview tests cover initial host appearance injection, bridge listener wiring, and the `t3code.ui.restoreDefaultTheme` contribution.
+- Web tests cover resolving the VS Code host theme, applying base propagation to the document, and toggling back to the default theme path.
 
 ### 2026-05-14: Treat VS Code as a Single-Workspace Surface
 
