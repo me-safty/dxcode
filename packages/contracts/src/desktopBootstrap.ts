@@ -7,6 +7,7 @@ export const DesktopBootstrapWorkspaceFolder = Schema.Struct({
   name: TrimmedNonEmptyString,
   cwd: TrimmedNonEmptyString,
   uriScheme: TrimmedNonEmptyString,
+  // File URIs legitimately have an empty authority; remote and virtual hosts fill this in.
   uriAuthority: Schema.String,
 });
 export type DesktopBootstrapWorkspaceFolder = typeof DesktopBootstrapWorkspaceFolder.Type;
@@ -23,6 +24,7 @@ export const DesktopBackendBootstrap = Schema.Struct({
   otlpTracesUrl: Schema.optional(Schema.String),
   otlpMetricsUrl: Schema.optional(Schema.String),
   workspaceFolders: Schema.optional(Schema.Array(DesktopBootstrapWorkspaceFolder)),
+  // Consuming code must ignore this when it does not match a workspace folder key.
   activeWorkspaceFolderKey: Schema.optional(TrimmedNonEmptyString),
 });
 

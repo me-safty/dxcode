@@ -27,7 +27,8 @@ function parsePackageOptions(args) {
     const arg = args[index];
 
     if (arg === "--out") {
-      options.out = requireValue(args, (index += 1), arg);
+      index += 1;
+      options.out = requireValue(args, index, arg);
       continue;
     }
 
@@ -37,7 +38,8 @@ function parsePackageOptions(args) {
     }
 
     if (arg === "--target") {
-      options.target = requireValue(args, (index += 1), arg);
+      index += 1;
+      options.target = requireValue(args, index, arg);
       continue;
     }
 
@@ -80,7 +82,9 @@ try {
       `VSCE_PUBLISHER is not set; packaging a local VSIX with publisher "${publisher}".`,
     );
   }
-  writeFileSync(packageJsonPath, `${JSON.stringify({ ...packageJson, publisher }, null, 2)}\n`);
+  const packagedPackageJson = { ...packageJson, publisher };
+  delete packagedPackageJson.private;
+  writeFileSync(packageJsonPath, `${JSON.stringify(packagedPackageJson, null, 2)}\n`);
   run("bun", ["run", "build"]);
   const vsceArgs = ["x", "vsce", "package", "--no-dependencies", "--out", vsixPath];
   if (packageOptions.target) {

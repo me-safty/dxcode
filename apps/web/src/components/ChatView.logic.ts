@@ -44,10 +44,11 @@ export function terminalThreadRefsToCloseWhenDisabled(input: {
   if (input.enableTerminal) {
     return [];
   }
-  return input.openTerminalThreadKeys.flatMap((threadKey) => {
-    const threadRef = parseScopedThreadKey(threadKey);
-    return threadRef ? [threadRef] : [];
-  });
+  return input.openTerminalThreadKeys.map(parseScopedThreadKey).filter(isScopedThreadRef);
+}
+
+function isScopedThreadRef(threadRef: ScopedThreadRef | null): threadRef is ScopedThreadRef {
+  return threadRef !== null;
 }
 
 export function buildLocalDraftThread(

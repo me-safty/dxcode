@@ -61,7 +61,10 @@ type ServerAuthGateState =
 
 let bootstrapPromise: Promise<ServerAuthGateState> | null = null;
 let resolvedAuthenticatedGateState: ServerAuthGateState | null = null;
-let hostBearerToken: string | null = null;
+let hostBearerToken: {
+  readonly bootstrapCredential: string;
+  readonly sessionToken: string;
+} | null = null;
 const AUTH_SESSION_ESTABLISH_TIMEOUT_MS = 2_000;
 const AUTH_SESSION_ESTABLISH_STEP_MS = 100;
 
@@ -110,7 +113,14 @@ function getInjectedBearerToken(): string | null {
 }
 
 function getActiveBearerToken(): string | null {
-  return hostBearerToken ?? getInjectedBearerToken();
+  const bootstrapCredential = getHostBootstrapCredential();
+  if (hostBearerToken && hostBearerToken.bootstrapCredential !== bootstrapCredential) {
+    hostBearerToken = null;
+    resolvedAuthenticatedGateState = null;
+    bootstrapPromise = null;
+  }
+
+  return hostBearerToken?.sessionToken ?? getInjectedBearerToken();
 }
 
 function shouldUseBearerSessionAuth(): boolean {
@@ -127,7 +137,7 @@ function makePrimaryAuthRequestInit(input?: {
   }
 
   const bearerToken = getActiveBearerToken();
-  if (bearerToken) {
+  if (bearerToken && isValidBearerToken(bearerToken)) {
     headers.authorization = `Bearer ${bearerToken}`;
   }
 
@@ -135,7 +145,7 @@ function makePrimaryAuthRequestInit(input?: {
     ...(input?.method ? { method: input.method } : {}),
     ...(input?.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
-    ...(!bearerToken && !shouldUseBearerSessionAuth()
+    ...(!headers.authorization && !shouldUseBearerSessionAuth()
       ? { credentials: "include" as RequestCredentials }
       : {}),
   };
@@ -218,7 +228,10 @@ async function exchangeBootstrapCredentialForBearerSession(
     }
 
     const result = (await response.json()) as AuthBearerBootstrapResult;
-    hostBearerToken = result.sessionToken;
+    hostBearerToken = {
+      bootstrapCredential: credential,
+      sessionToken: result.sessionToken,
+    };
     return result;
   });
 }
@@ -256,6 +269,10 @@ async function exchangeBootstrapCredential(credential: string): Promise<AuthBoot
 }
 
 async function issuePrimaryWebSocketToken(bearerToken: string): Promise<AuthWebSocketTokenResult> {
+  if (!isValidBearerToken(bearerToken)) {
+    throw new Error("Invalid bearer token.");
+  }
+
   const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/auth/ws-token"), {
     headers: {
       authorization: `Bearer ${bearerToken}`,
@@ -270,6 +287,10 @@ async function issuePrimaryWebSocketToken(bearerToken: string): Promise<AuthWebS
   }
 
   return (await response.json()) as AuthWebSocketTokenResult;
+}
+
+function isValidBearerToken(token: string): boolean {
+  return token.trim() === token && token.length > 0 && !/[\r\n]/.test(token);
 }
 
 export async function resolvePrimaryEnvironmentWebSocketConnectionUrl(

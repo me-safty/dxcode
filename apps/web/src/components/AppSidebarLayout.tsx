@@ -14,7 +14,7 @@ const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
-  const threadSidebarOpen = useSettings((settings) => settings.threadSidebarOpen);
+  const threadSidebarOpen = useSettings((settings) => settings.threadSidebarOpen ?? true);
   const { updateSettings } = useUpdateSettings();
   const handleThreadSidebarOpenChange = useCallback(
     (open: boolean) => {

@@ -65,6 +65,7 @@ describe("renderT3Webview", () => {
     expect(html).toContain("onHostAppearanceChanged(callback)");
     expect(html).toContain('message.type === "t3.displayPreferencesChanged"');
     expect(html).toContain('message.type === "t3.hostAppearanceChanged"');
+    expect(html).toContain('message.type === "t3.backendConnectionChanged"');
     expect(html).toContain('root.setAttribute("data-t3-host-theme", "vscode")');
     expect(html).toContain('"showOpenInPicker":false');
     expect(html).toContain('"themeSource":"default"');
@@ -76,6 +77,34 @@ describe("renderT3Webview", () => {
     expect(html).toContain('"bearerToken":"bearer-token"');
     expect(html).toContain('window.history.replaceState(null, document.title, "#" + initialRoute)');
     expect(html).not.toContain("!window.location.hash");
+  });
+
+  it("injects into head tags with attributes", async () => {
+    fs.writeFileSync(
+      path.join(extensionRoot, "dist", "webview", "index.html"),
+      '<!doctype html><html><head data-test="true"><title>T3</title></head><body></body></html>',
+    );
+
+    const html = await renderT3Webview({
+      extensionUri: { fsPath: extensionRoot } as never,
+      webview: {
+        cspSource: "vscode-webview:",
+        asWebviewUri: (uri: { fsPath: string }) => ({
+          toString: () => `vscode-resource:${uri.fsPath}`,
+        }),
+      } as never,
+      connection: {
+        httpBaseUrl: "http://127.0.0.1:49111",
+        wsBaseUrl: "ws://127.0.0.1:49111",
+        bootstrapToken: "bootstrap-token",
+        bearerToken: "bearer-token",
+        cwd: "/workspace",
+        t3Home: "/home/user/.t3",
+      },
+    });
+
+    expect(html).toContain('<head data-test="true">');
+    expect(html).toContain('<meta http-equiv="Content-Security-Policy"');
   });
 
   it("defaults to the chat index route when no initial route is provided", async () => {

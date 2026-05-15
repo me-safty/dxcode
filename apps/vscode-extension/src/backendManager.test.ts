@@ -496,4 +496,28 @@ describe("BackendManager", () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
+
+  it("terminates the child process when startup fails after spawn", async () => {
+    let killMock: ReturnType<typeof vi.fn> | null = null;
+    const spawnMock = vi.fn<BackendSpawn>(() => {
+      const child = makeChildProcess(() => {});
+      killMock = child.kill as ReturnType<typeof vi.fn>;
+      return child;
+    });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }));
+    const manager = new BackendManager(
+      { extensionPath: extensionRoot } as never,
+      makeOutputChannel() as never,
+      makeDependencies({ fetch: fetchMock, spawn: spawnMock }),
+    );
+
+    await expect(manager.ensureStarted()).rejects.toThrow(
+      "Failed to create VS Code backend bearer session",
+    );
+
+    expect(killMock).toHaveBeenCalled();
+  });
 });

@@ -224,8 +224,11 @@ export interface DesktopEnvironmentBootstrap {
   httpBaseUrl: string | null;
   wsBaseUrl: string | null;
   bootstrapToken?: string;
-  bearerToken?: string;
+  /** Host-issued bearer credential. Treat as secret: never log or persist in plaintext. */
+  bearerToken?: SensitiveString;
 }
+
+export type SensitiveString = string;
 
 export const DesktopEnvironmentBootstrapSchema = Schema.Struct({
   label: Schema.String,
@@ -262,6 +265,15 @@ export const T3HostAppearanceSchema = Schema.Struct({
   colorScheme: Schema.Literals(["light", "dark"]),
 });
 
+export interface T3HostRequestMessage {
+  readonly type: "t3.hostRequest";
+  readonly id: string;
+  readonly method: "getClientSettings" | "setClientSettings" | "confirm";
+  readonly args?: readonly unknown[];
+}
+
+export type T3HostBridgePostMessage = T3HostRequestMessage;
+
 export interface T3HostBridge {
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
   getDisplayPreferences?: () => T3HostDisplayPreferences | null;
@@ -272,8 +284,9 @@ export interface T3HostBridge {
   onHostAppearanceChanged?: (callback: (appearance: T3HostAppearance) => void) => () => void;
   getClientSettings?: () => Promise<ClientSettings | null>;
   setClientSettings?: (settings: ClientSettings) => Promise<void>;
+  /** Optional because non-hosted browser surfaces fall back to `window.confirm`. */
   confirm?: (message: string) => Promise<boolean>;
-  postMessage?: (message: unknown) => void;
+  postMessage?: (message: T3HostBridgePostMessage) => void;
 }
 
 export const DesktopSshEnvironmentTargetSchema = Schema.Struct({

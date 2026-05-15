@@ -84,13 +84,11 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
     () => availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null,
     [availableEnvironments, environmentId],
   );
-  const WorkspaceIcon = showCheckoutModeIndicator
-    ? effectiveEnvMode === "worktree"
-      ? FolderGit2Icon
-      : activeWorktreePath
-        ? FolderGitIcon
-        : FolderIcon
-    : null;
+  const WorkspaceIcon = resolveMobileWorkspaceIcon({
+    activeWorktreePath,
+    effectiveEnvMode,
+    showCheckoutModeIndicator,
+  });
   const workspaceLabel = envModeLocked
     ? resolveLockedWorkspaceLabel(activeWorktreePath)
     : effectiveEnvMode === "worktree"
@@ -200,6 +198,20 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
     </Menu>
   );
 });
+
+function resolveMobileWorkspaceIcon(input: {
+  readonly activeWorktreePath: string | null;
+  readonly effectiveEnvMode: EnvMode;
+  readonly showCheckoutModeIndicator: boolean;
+}) {
+  if (!input.showCheckoutModeIndicator) {
+    return null;
+  }
+  if (input.effectiveEnvMode === "worktree") {
+    return FolderGit2Icon;
+  }
+  return input.activeWorktreePath ? FolderGitIcon : FolderIcon;
+}
 
 export const BranchToolbar = memo(function BranchToolbar({
   environmentId,

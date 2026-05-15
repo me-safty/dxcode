@@ -4,7 +4,9 @@ import * as path from "node:path";
 import type * as vscode from "vscode";
 
 export const VIRTUAL_WORKSPACE_METADATA_FILE = ".t3-virtual-workspace.json";
+/** Number of inactive days before a cache-owned virtual checkout becomes pruneable. */
 export const VIRTUAL_WORKSPACE_RETENTION_DAYS = 15;
+/** Minimum number of most-recently-used virtual checkouts retained regardless of age. */
 export const VIRTUAL_WORKSPACE_MIN_RECENT_TO_KEEP = 10;
 
 export interface GithubVirtualWorkspace {
@@ -172,7 +174,7 @@ export function pruneVirtualWorkspaceCache(input: {
     }
   }
 
-  return { deleted, kept: entries.length - deleted, errors };
+  return { deleted, kept: entries.length - deleted - errors, errors };
 }
 
 export function cleanVirtualWorkspaceCache(input: {
@@ -201,7 +203,7 @@ export function cleanVirtualWorkspaceCache(input: {
     }
   }
 
-  return { deleted, kept: entries.length - deleted, errors };
+  return { deleted, kept: entries.length - deleted - errors, errors };
 }
 
 function touchVirtualWorkspaceMetadata(input: {

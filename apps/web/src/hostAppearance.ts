@@ -1,4 +1,4 @@
-import type { T3HostAppearance } from "@t3tools/contracts";
+import type { T3HostAppearance, T3HostBridge } from "@t3tools/contracts";
 
 const DEFAULT_HOST_APPEARANCE: T3HostAppearance = {
   themeSource: "default",
@@ -6,6 +6,8 @@ const DEFAULT_HOST_APPEARANCE: T3HostAppearance = {
 };
 
 const subscribers = new Set<() => void>();
+let subscribedHostBridge: T3HostBridge | null = null;
+let unsubscribeHostAppearance: (() => void) | null = null;
 
 function normalizeHostAppearance(
   appearance: Partial<T3HostAppearance> | null | undefined,
@@ -20,6 +22,27 @@ let currentHostAppearance = normalizeHostAppearance(
   typeof window === "undefined" ? null : window.t3HostBridge?.getHostAppearance?.(),
 );
 
+function ensureHostAppearanceBridgeSubscription(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const bridge = window.t3HostBridge ?? null;
+  if (bridge === subscribedHostBridge) {
+    return;
+  }
+
+  unsubscribeHostAppearance?.();
+  subscribedHostBridge = bridge;
+  unsubscribeHostAppearance = null;
+  if (!bridge) {
+    return;
+  }
+
+  currentHostAppearance = normalizeHostAppearance(bridge.getHostAppearance?.());
+  unsubscribeHostAppearance = bridge.onHostAppearanceChanged?.(emitHostAppearanceChanged) ?? null;
+}
+
 function emitHostAppearanceChanged(nextAppearance: T3HostAppearance): void {
   currentHostAppearance = normalizeHostAppearance(nextAppearance);
   applyHostAppearanceToDocument(currentHostAppearance);
@@ -29,14 +52,16 @@ function emitHostAppearanceChanged(nextAppearance: T3HostAppearance): void {
 }
 
 if (typeof window !== "undefined") {
-  window.t3HostBridge?.onHostAppearanceChanged?.(emitHostAppearanceChanged);
+  ensureHostAppearanceBridgeSubscription();
 }
 
 export function readHostAppearance(): T3HostAppearance {
+  ensureHostAppearanceBridgeSubscription();
   return currentHostAppearance;
 }
 
 export function subscribeHostAppearance(callback: () => void): () => void {
+  ensureHostAppearanceBridgeSubscription();
   subscribers.add(callback);
   return () => {
     subscribers.delete(callback);

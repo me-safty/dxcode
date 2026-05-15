@@ -188,15 +188,7 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
       const workspaceTargets =
         serverConfig.autoBootstrapWorkspaceFolders.length > 0
           ? serverConfig.autoBootstrapWorkspaceFolders
-          : [
-              {
-                key: `cwd:${serverConfig.cwd}`,
-                name: path.basename(serverConfig.cwd) || "project",
-                cwd: serverConfig.cwd,
-                uriScheme: "file",
-                uriAuthority: "",
-              },
-            ];
+          : [makeFallbackWorkspaceTarget(serverConfig.cwd, path)];
       const activeWorkspaceKey =
         serverConfig.activeBootstrapWorkspaceFolderKey ?? workspaceTargets[0]?.key;
       const seenWorkspaceKeys = new Set<string>();
@@ -280,6 +272,25 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
     ...(bootstrapProjects.length > 0 ? { bootstrapProjects } : {}),
   } as const;
 });
+
+function makeFallbackWorkspaceTarget(
+  cwd: string,
+  path: Path.Path,
+): {
+  readonly key: string;
+  readonly name: string;
+  readonly cwd: string;
+  readonly uriScheme: string;
+  readonly uriAuthority: string;
+} {
+  return {
+    key: `cwd:${cwd}`,
+    name: path.basename(cwd) || "project",
+    cwd,
+    uriScheme: "file",
+    uriAuthority: "",
+  };
+}
 
 const resolveStartupBrowserTarget = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;

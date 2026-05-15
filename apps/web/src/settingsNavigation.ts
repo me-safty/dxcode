@@ -3,6 +3,8 @@ interface LocationSnapshot {
   readonly pathname: string;
 }
 
+// Module-local browser navigation state. Tests reset it through
+// `resetSettingsBackTargetForTests`; this module is not used for SSR rendering.
 let lastNonSettingsHref = "/";
 
 export function rememberSettingsBackTarget(location: LocationSnapshot): void {

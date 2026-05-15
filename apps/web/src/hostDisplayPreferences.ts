@@ -1,4 +1,4 @@
-import type { T3HostDisplayPreferences } from "@t3tools/contracts";
+import type { T3HostBridge, T3HostDisplayPreferences } from "@t3tools/contracts";
 import { useSyncExternalStore } from "react";
 
 import { isVscodeWebview } from "./env";
@@ -43,6 +43,8 @@ let currentDisplayPreferences = normalizeDisplayPreferences(
 );
 
 const subscribers = new Set<() => void>();
+let subscribedHostBridge: T3HostBridge | null = null;
+let unsubscribeDisplayPreferences: (() => void) | null = null;
 
 function emitDisplayPreferencesChanged(nextPreferences: T3HostDisplayPreferences): void {
   currentDisplayPreferences = normalizeDisplayPreferences(nextPreferences);
@@ -51,11 +53,34 @@ function emitDisplayPreferencesChanged(nextPreferences: T3HostDisplayPreferences
   }
 }
 
+function ensureDisplayPreferencesBridgeSubscription(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const bridge = window.t3HostBridge ?? null;
+  if (bridge === subscribedHostBridge) {
+    return;
+  }
+
+  unsubscribeDisplayPreferences?.();
+  subscribedHostBridge = bridge;
+  unsubscribeDisplayPreferences = null;
+  if (!bridge) {
+    return;
+  }
+
+  currentDisplayPreferences = normalizeDisplayPreferences(bridge.getDisplayPreferences?.());
+  unsubscribeDisplayPreferences =
+    bridge.onDisplayPreferencesChanged?.(emitDisplayPreferencesChanged) ?? null;
+}
+
 if (typeof window !== "undefined") {
-  window.t3HostBridge?.onDisplayPreferencesChanged?.(emitDisplayPreferencesChanged);
+  ensureDisplayPreferencesBridgeSubscription();
 }
 
 function subscribeDisplayPreferences(callback: () => void): () => void {
+  ensureDisplayPreferencesBridgeSubscription();
   subscribers.add(callback);
   return () => {
     subscribers.delete(callback);
@@ -63,6 +88,7 @@ function subscribeDisplayPreferences(callback: () => void): () => void {
 }
 
 export function readHostDisplayPreferences(): T3HostDisplayPreferences {
+  ensureDisplayPreferencesBridgeSubscription();
   return currentDisplayPreferences;
 }
 

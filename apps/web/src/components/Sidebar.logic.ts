@@ -349,6 +349,11 @@ export function filterProjectsForVscodeScope<
   });
 }
 
+/**
+ * Chooses the startup thread for a VS Code webview after the backend projects are known.
+ * Selection is constrained to the bootstrapped workspace scope, prefers the active
+ * workspace folder, then uses last-visited and thread recency as tie-breakers.
+ */
 export function resolveVscodeInitialThreadRef(input: {
   threads: readonly SidebarThreadSummary[];
   threadLastVisitedAtById: Readonly<Record<string, string>>;
@@ -383,6 +388,15 @@ export function resolveVscodeInitialThreadRef(input: {
   }
 
   const sorted = candidates.toSorted((left, right) => {
+    if (activeProjectId && left.projectId !== right.projectId) {
+      if (left.projectId === activeProjectId) {
+        return -1;
+      }
+      if (right.projectId === activeProjectId) {
+        return 1;
+      }
+    }
+
     const leftVisitedAt =
       toSortableTimestamp(
         input.threadLastVisitedAtById[scopedThreadKey(scopeThreadRef(left.environmentId, left.id))],

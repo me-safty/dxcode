@@ -16,6 +16,30 @@ import {
 } from "./virtualWorkspaceCache.ts";
 
 const READINESS_PATH = "/.well-known/t3/environment";
+const BOOTSTRAP_FD = 3;
+const INHERITED_ENV_ALLOWLIST = [
+  "APPDATA",
+  "COMSPEC",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LOCALAPPDATA",
+  "NODE_EXTRA_CA_CERTS",
+  "PATH",
+  "Path",
+  "PATHEXT",
+  "ProgramFiles",
+  "ProgramFiles(x86)",
+  "SystemRoot",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "USERPROFILE",
+  "WINDIR",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+] as const;
 
 interface BackendBootstrap {
   readonly mode: "desktop";
@@ -146,6 +170,7 @@ export class BackendManager {
 
   async stop(): Promise<void> {
     const child = this.#process;
+    this.#starting = null;
     this.#process = null;
     this.#connection = null;
 
@@ -193,7 +218,13 @@ export class BackendManager {
       ...(workspaceFolders.length > 0 ? { workspaceFolders } : {}),
       ...(activeWorkspaceFolder ? { activeWorkspaceFolderKey: activeWorkspaceFolder.key } : {}),
     };
-    const args = [...command.args, "--bootstrap-fd", "3", "--auto-bootstrap-project-from-cwd", cwd];
+    const args = [
+      ...command.args,
+      "--bootstrap-fd",
+      String(BOOTSTRAP_FD),
+      "--auto-bootstrap-project-from-cwd",
+      cwd,
+    ];
 
     this.#outputChannel.appendLine(`[backend] Starting: ${command.command} ${args.join(" ")}`);
 
@@ -220,50 +251,60 @@ export class BackendManager {
       }
     });
 
-    const bootstrapPipe = child.stdio[3];
-    if (!bootstrapPipe || !("write" in bootstrapPipe)) {
-      child.kill();
-      throw new Error("Failed to open backend bootstrap pipe.");
-    }
-    bootstrapPipe.end(JSON.stringify(bootstrap));
+    try {
+      const bootstrapPipe = child.stdio[BOOTSTRAP_FD];
+      if (!bootstrapPipe || !("write" in bootstrapPipe)) {
+        throw new Error("Failed to open backend bootstrap pipe.");
+      }
+      bootstrapPipe.end(JSON.stringify(bootstrap));
 
-    const httpBaseUrl = `http://${host}:${port}`;
-    const wsBaseUrl = `ws://${host}:${port}`;
-    await waitForBackendReady(httpBaseUrl, this.#dependencies.fetch);
-    const bearerToken = await exchangeBootstrapBearerSession(
-      httpBaseUrl,
-      bootstrapToken,
-      this.#dependencies.fetch,
-    );
+      const httpBaseUrl = `http://${host}:${port}`;
+      const wsBaseUrl = `ws://${host}:${port}`;
+      await waitForBackendReady(httpBaseUrl, this.#dependencies.fetch);
+      const bearerToken = await exchangeBootstrapBearerSession(
+        httpBaseUrl,
+        bootstrapToken,
+        this.#dependencies.fetch,
+      );
 
-    this.#connection = {
-      httpBaseUrl,
-      wsBaseUrl,
-      bootstrapToken,
-      bearerToken,
-      cwd,
-      t3Home,
-    };
-    void Promise.resolve().then(() => {
-      try {
-        const result = this.#dependencies.pruneVirtualWorkspaceCache({
-          t3Home,
-          activeCheckoutPaths: workspaceFolders.map((folder) => folder.cwd),
-          outputChannel: this.#outputChannel,
-        });
-        if (result.deleted > 0 || result.errors > 0) {
+      this.#connection = {
+        httpBaseUrl,
+        wsBaseUrl,
+        bootstrapToken,
+        bearerToken,
+        cwd,
+        t3Home,
+      };
+      void Promise.resolve().then(() => {
+        try {
+          const result = this.#dependencies.pruneVirtualWorkspaceCache({
+            t3Home,
+            activeCheckoutPaths: workspaceFolders.map((folder) => folder.cwd),
+            outputChannel: this.#outputChannel,
+          });
+          if (result.deleted > 0 || result.errors > 0) {
+            this.#outputChannel.appendLine(
+              `[backend] Pruned ${result.deleted} virtual workspace checkout(s); kept ${result.kept}; errors ${result.errors}.`,
+            );
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
           this.#outputChannel.appendLine(
-            `[backend] Pruned ${result.deleted} virtual workspace checkout(s); kept ${result.kept}; errors ${result.errors}.`,
+            `[backend] Failed to prune virtual workspace cache: ${message}`,
           );
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.#outputChannel.appendLine(
-          `[backend] Failed to prune virtual workspace cache: ${message}`,
-        );
+      });
+      return this.#connection;
+    } catch (error) {
+      if (this.#process === child) {
+        this.#process = null;
+        this.#connection = null;
       }
-    });
-    return this.#connection;
+      if (!child.killed) {
+        child.kill();
+      }
+      throw error;
+    }
   }
 }
 
@@ -412,20 +453,12 @@ function findDevelopmentRepoRoot(...candidates: readonly string[]): string | nul
 }
 
 function backendEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  for (const name of [
-    "T3CODE_PORT",
-    "T3CODE_MODE",
-    "T3CODE_NO_BROWSER",
-    "T3CODE_HOST",
-    "T3CODE_DESKTOP_WS_URL",
-    "T3CODE_DESKTOP_LAN_ACCESS",
-    "T3CODE_DESKTOP_LAN_HOST",
-    "T3CODE_DESKTOP_HTTPS_ENDPOINTS",
-    "T3CODE_TAILSCALE_SERVE",
-    "T3CODE_TAILSCALE_SERVE_PORT",
-  ]) {
-    delete env[name];
+  const env: NodeJS.ProcessEnv = {};
+  for (const name of INHERITED_ENV_ALLOWLIST) {
+    const value = process.env[name];
+    if (value !== undefined) {
+      env[name] = value;
+    }
   }
   env.ELECTRON_RUN_AS_NODE = "1";
   return env;

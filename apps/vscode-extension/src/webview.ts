@@ -16,6 +16,13 @@ export interface WebviewHostAppearance {
   readonly colorScheme: "light" | "dark";
 }
 
+export interface WebviewBackendConnection {
+  readonly httpBaseUrl: string;
+  readonly wsBaseUrl: string;
+  readonly bootstrapToken: string;
+  readonly bearerToken: string;
+}
+
 export interface WebviewRenderInput {
   readonly webview: vscode.Webview;
   readonly extensionUri: vscode.Uri;
@@ -58,13 +65,17 @@ export async function renderT3Webview(input: WebviewRenderInput): Promise<string
     initialRoute: input.initialRoute ?? "/_chat/",
   });
 
-  return indexHtml.replace(
-    /<head>/i,
-    `<head>
+  const html = indexHtml.replace(
+    /<head\b([^>]*)>/i,
+    `<head$1>
     <meta http-equiv="Content-Security-Policy" content="${escapeHtml(csp)}">
     <base href="${escapeHtml(webRootUri)}">
     <script nonce="${escapeHtml(nonce)}">${bridgeScript}</script>`,
   );
+  if (html === indexHtml) {
+    throw new Error("Unable to inject T3 webview host bridge: index.html is missing <head>.");
+  }
+  return html;
 }
 
 const DEFAULT_DISPLAY_PREFERENCES: WebviewDisplayPreferences = {
@@ -80,13 +91,7 @@ const DEFAULT_HOST_APPEARANCE: WebviewHostAppearance = {
 };
 
 function makeBridgeScript(input: {
-  readonly bootstrap: {
-    readonly label: string;
-    readonly httpBaseUrl: string;
-    readonly wsBaseUrl: string;
-    readonly bootstrapToken: string;
-    readonly bearerToken: string;
-  };
+  readonly bootstrap: WebviewBackendConnection & { readonly label: string };
   readonly displayPreferences: WebviewDisplayPreferences;
   readonly hostAppearance: WebviewHostAppearance;
   readonly initialRoute: string;
@@ -94,7 +99,7 @@ function makeBridgeScript(input: {
   return `
     (() => {
       const vscode = acquireVsCodeApi();
-      const bootstrap = ${JSON.stringify(input.bootstrap)};
+      let bootstrap = ${JSON.stringify(input.bootstrap)};
       let displayPreferences = ${JSON.stringify(input.displayPreferences)};
       let hostAppearance = ${JSON.stringify(input.hostAppearance)};
       const initialRoute = ${JSON.stringify(input.initialRoute)};
@@ -127,6 +132,10 @@ function makeBridgeScript(input: {
           for (const listener of hostAppearanceListeners) {
             listener(hostAppearance);
           }
+          return;
+        }
+        if (message && message.type === "t3.backendConnectionChanged") {
+          bootstrap = { ...bootstrap, ...message.connection };
           return;
         }
         if (!message || message.type !== "t3.hostResponse") {
@@ -198,6 +207,7 @@ function makeBridgeScript(input: {
 }
 
 function escapeHtml(value: string): string {
+  // Escape ampersands first so the entities introduced below are not double-encoded.
   return value
     .replaceAll("&", "&amp;")
     .replaceAll('"', "&quot;")
