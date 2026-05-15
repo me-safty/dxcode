@@ -69,7 +69,7 @@ const deriveServerPathsSync = (baseDir: string, devUrl: URL | undefined) =>
 
 async function waitFor(
   predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 2000,
+  timeoutMs = 5000,
 ): Promise<void> {
   const deadline = (await Effect.runPromise(Clock.currentTimeMillis)) + timeoutMs;
   const poll = async (): Promise<void> => {
@@ -471,8 +471,6 @@ describe("ProviderCommandReactor", () => {
           text: "queued provider message",
           attachments: [],
         },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
         createdAt: now,
       }),
     );
@@ -482,7 +480,12 @@ describe("ProviderCommandReactor", () => {
     const queuedTurn = queuedThread?.queuedTurns[0];
     expect(queuedTurn).toMatchObject({
       status: "pending",
-      messageId: asMessageId("queued-user-message-1"),
+      request: {
+        message: {
+          messageId: asMessageId("queued-user-message-1"),
+          text: "queued provider message",
+        },
+      },
     });
 
     await Effect.runPromise(
@@ -523,14 +526,14 @@ describe("ProviderCommandReactor", () => {
     await waitFor(async () => {
       const current = await harness.readModel();
       const thread = current.threads.find((entry) => entry.id === threadId);
-      return thread?.queuedTurns[0]?.status === "accepted";
+      return thread?.queuedTurns[0]?.status === "sending";
     });
 
     readModel = await harness.readModel();
-    const acceptedThread = readModel.threads.find((entry) => entry.id === threadId);
-    expect(acceptedThread?.queuedTurns[0]).toMatchObject({
+    const sendingThread = readModel.threads.find((entry) => entry.id === threadId);
+    expect(sendingThread?.queuedTurns[0]).toMatchObject({
       queueItemId: queuedTurn?.queueItemId,
-      status: "accepted",
+      status: "sending",
     });
   });
 

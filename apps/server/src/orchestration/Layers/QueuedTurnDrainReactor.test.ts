@@ -1,10 +1,13 @@
 import {
+  CommandId,
+  EventId,
   MessageId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
   TurnQueueItemId,
   type OrchestrationCommand,
+  type OrchestrationEvent,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -64,9 +67,14 @@ function makeSnapshot(input: {
         messages: [],
         queuedTurns: queuedStatuses.map((status, index) => ({
           queueItemId: TurnQueueItemId.make(`queue-item-${index + 1}`),
-          messageId: MessageId.make(`message-${index + 1}`),
-          runtimeMode: "full-access",
-          interactionMode: "default",
+          request: {
+            message: {
+              messageId: MessageId.make(`message-${index + 1}`),
+              role: "user",
+              text: `queued message ${index + 1}`,
+              attachments: [],
+            },
+          },
           status,
           failureReason: null,
           createdAt: now,
@@ -90,7 +98,11 @@ function makeSnapshot(input: {
   };
 }
 
-function makeLayer(snapshot: OrchestrationReadModel, dispatched: OrchestrationCommand[]) {
+function makeLayer(
+  snapshot: OrchestrationReadModel,
+  dispatched: OrchestrationCommand[],
+  streamDomainEvents: Stream.Stream<OrchestrationEvent> = Stream.empty,
+) {
   return QueuedTurnDrainReactorLive.pipe(
     Layer.provideMerge(
       Layer.succeed(OrchestrationEngineService, {
@@ -100,7 +112,7 @@ function makeLayer(snapshot: OrchestrationReadModel, dispatched: OrchestrationCo
             dispatched.push(command);
             return { sequence: dispatched.length };
           }),
-        streamDomainEvents: Stream.empty,
+        streamDomainEvents,
       }),
     ),
     Layer.provideMerge(
@@ -198,6 +210,59 @@ describe("QueuedTurnDrainReactor", () => {
     try {
       const reactor = await runtime.runPromise(Effect.service(QueuedTurnDrainReactor));
       await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+      expect(dispatched).toHaveLength(1);
+      expect(dispatched[0]).toMatchObject({
+        type: "thread.queued-turn.send.start",
+        mode: "recover",
+      });
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await runtime.dispose();
+    }
+  });
+
+  it("does not claim pending queued turns while another queued turn is sending", async () => {
+    const dispatched: OrchestrationCommand[] = [];
+    const sessionSetEvent: OrchestrationEvent = {
+      sequence: 1,
+      eventId: EventId.make("evt-session-set"),
+      aggregateKind: "thread",
+      aggregateId: threadId,
+      type: "thread.session-set",
+      occurredAt: now,
+      commandId: CommandId.make("cmd-session-set"),
+      causationEventId: null,
+      correlationId: CommandId.make("cmd-session-set"),
+      metadata: {},
+      payload: {
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+      },
+    };
+    const runtime = ManagedRuntime.make(
+      makeLayer(
+        makeSnapshot({
+          sessionStatus: "ready",
+          queuedStatuses: ["sending", "pending"],
+        }),
+        dispatched,
+        Stream.make(sessionSetEvent),
+      ),
+    );
+    const scope = await Effect.runPromise(Scope.make("sequential"));
+    try {
+      const reactor = await runtime.runPromise(Effect.service(QueuedTurnDrainReactor));
+      await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+      await Effect.runPromise(Effect.yieldNow);
+      await Effect.runPromise(reactor.drain);
       expect(dispatched).toHaveLength(1);
       expect(dispatched[0]).toMatchObject({
         type: "thread.queued-turn.send.start",

@@ -1,12 +1,8 @@
 import {
   IsoDateTime,
-  CanonicalModelSelection,
-  MessageId,
   OrchestrationQueuedTurnStatus,
-  OrchestrationProposedPlanId,
-  ProviderInteractionMode,
-  RuntimeMode,
   ThreadId,
+  ThreadQueuedTurnRequest,
   TurnQueueItemId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -19,13 +15,7 @@ import type { ProjectionRepositoryError } from "../Errors.ts";
 export const ProjectionQueuedTurn = Schema.Struct({
   queueItemId: TurnQueueItemId,
   threadId: ThreadId,
-  messageId: MessageId,
-  modelSelection: Schema.NullOr(CanonicalModelSelection),
-  titleSeed: Schema.NullOr(Schema.String),
-  runtimeMode: RuntimeMode,
-  interactionMode: ProviderInteractionMode,
-  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
-  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
+  request: ThreadQueuedTurnRequest,
   status: OrchestrationQueuedTurnStatus,
   failureReason: Schema.NullOr(Schema.String),
   createdAt: IsoDateTime,
@@ -43,6 +33,12 @@ export const DeleteProjectionQueuedTurnsInput = Schema.Struct({
 });
 export type DeleteProjectionQueuedTurnsInput = typeof DeleteProjectionQueuedTurnsInput.Type;
 
+export const DeleteProjectionQueuedTurnByQueueItemIdInput = Schema.Struct({
+  queueItemId: TurnQueueItemId,
+});
+export type DeleteProjectionQueuedTurnByQueueItemIdInput =
+  typeof DeleteProjectionQueuedTurnByQueueItemIdInput.Type;
+
 export interface ProjectionQueuedTurnRepositoryShape {
   readonly upsert: (row: ProjectionQueuedTurn) => Effect.Effect<void, ProjectionRepositoryError>;
   readonly getByQueueItemId: (input: {
@@ -53,6 +49,9 @@ export interface ProjectionQueuedTurnRepositoryShape {
   ) => Effect.Effect<ReadonlyArray<ProjectionQueuedTurn>, ProjectionRepositoryError>;
   readonly deleteByThreadId: (
     input: DeleteProjectionQueuedTurnsInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly deleteByQueueItemId: (
+    input: DeleteProjectionQueuedTurnByQueueItemIdInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 

@@ -143,9 +143,14 @@ describe("orchestration projector", () => {
           payload: {
             threadId: "thread-1",
             queueItemId: "queue-item-1",
-            messageId: "message-1",
-            runtimeMode: "full-access",
-            interactionMode: "default",
+            request: {
+              message: {
+                messageId: "message-1",
+                role: "user",
+                text: "queued message",
+                attachments: [],
+              },
+            },
             createdAt: now,
           },
         }),
@@ -153,7 +158,11 @@ describe("orchestration projector", () => {
     );
     expect(queued.threads[0]?.queuedTurns[0]).toMatchObject({
       queueItemId: "queue-item-1",
-      messageId: "message-1",
+      request: {
+        message: {
+          messageId: "message-1",
+        },
+      },
       status: "pending",
     });
 
@@ -202,6 +211,52 @@ describe("orchestration projector", () => {
       status: "failed",
       failureReason: "Provider rejected queued turn.",
     });
+
+    const requeued = await Effect.runPromise(
+      projectEvent(
+        failed,
+        makeEvent({
+          sequence: 5,
+          type: "thread.queued-turn-requeued",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-queued-turn-requeued",
+          payload: {
+            threadId: "thread-1",
+            queueItemId: "queue-item-1",
+            messageId: "message-1",
+            createdAt: now,
+          },
+        }),
+      ),
+    );
+    expect(requeued.threads[0]?.queuedTurns[0]).toMatchObject({
+      status: "pending",
+      failureReason: null,
+    });
+
+    const resolved = await Effect.runPromise(
+      projectEvent(
+        requeued,
+        makeEvent({
+          sequence: 6,
+          type: "thread.queued-turn-resolved",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-queued-turn-resolved",
+          payload: {
+            threadId: "thread-1",
+            queueItemId: "queue-item-1",
+            messageId: "message-1",
+            turnId: "turn-1",
+            createdAt: now,
+          },
+        }),
+      ),
+    );
+    expect(resolved.threads[0]?.queuedTurns).toEqual([]);
   });
 
   it("fails when event payload cannot be decoded by runtime schema", async () => {
@@ -733,10 +788,31 @@ describe("orchestration projector", () => {
       }),
       makeEvent({
         sequence: 10,
-        type: "thread.reverted",
+        type: "thread.turn-queued",
         aggregateKind: "thread",
         aggregateId: "thread-1",
         occurredAt: "2026-02-23T10:00:05.000Z",
+        commandId: "cmd-turn-queued-before-revert",
+        payload: {
+          threadId: "thread-1",
+          queueItemId: "queue-item-revert",
+          request: {
+            message: {
+              messageId: "message-revert-queued",
+              role: "user",
+              text: "Queued work survives revert",
+              attachments: [],
+            },
+          },
+          createdAt: "2026-02-23T10:00:05.000Z",
+        },
+      }),
+      makeEvent({
+        sequence: 11,
+        type: "thread.reverted",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        occurredAt: "2026-02-23T10:00:05.500Z",
         commandId: "cmd-revert",
         payload: {
           threadId: "thread-1",
@@ -763,6 +839,18 @@ describe("orchestration projector", () => {
     ).toEqual([{ id: "activity-1", turnId: "turn-1" }]);
     expect(thread?.checkpoints.map((checkpoint) => checkpoint.checkpointTurnCount)).toEqual([1]);
     expect(thread?.latestTurn?.turnId).toBe("turn-1");
+    expect(thread?.queuedTurns).toMatchObject([
+      {
+        queueItemId: "queue-item-revert",
+        request: {
+          message: {
+            messageId: "message-revert-queued",
+            text: "Queued work survives revert",
+          },
+        },
+        status: "pending",
+      },
+    ]);
   });
 
   it("does not fallback-retain messages tied to removed turn IDs", async () => {

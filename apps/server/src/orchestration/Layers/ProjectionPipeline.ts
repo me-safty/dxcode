@@ -1014,13 +1014,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionQueuedTurnRepository.upsert({
             queueItemId: event.payload.queueItemId,
             threadId: event.payload.threadId,
-            messageId: event.payload.messageId,
-            modelSelection: event.payload.modelSelection ?? null,
-            titleSeed: event.payload.titleSeed ?? null,
-            runtimeMode: event.payload.runtimeMode,
-            interactionMode: event.payload.interactionMode,
-            sourceProposedPlanThreadId: event.payload.sourceProposedPlan?.threadId ?? null,
-            sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
+            request: event.payload.request,
             status: "pending",
             failureReason: null,
             createdAt: event.payload.createdAt,
@@ -1037,10 +1031,16 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           return;
 
-        case "thread.queued-turn-send-accepted":
+        case "thread.queued-turn-resolved":
+          yield* projectionQueuedTurnRepository.deleteByQueueItemId({
+            queueItemId: event.payload.queueItemId,
+          });
+          return;
+
+        case "thread.queued-turn-requeued":
           yield* updateQueuedTurnStatus({
             queueItemId: event.payload.queueItemId,
-            status: "accepted",
+            status: "pending",
             failureReason: null,
             updatedAt: event.payload.createdAt,
           });
@@ -1074,6 +1074,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionTurnRepository.replacePendingTurnStart({
             threadId: event.payload.threadId,
             messageId: event.payload.messageId,
+            queueItemId: event.payload.queueItemId ?? null,
             sourceProposedPlanThreadId: event.payload.sourceProposedPlan?.threadId ?? null,
             sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
             requestedAt: event.payload.createdAt,

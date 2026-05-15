@@ -11,9 +11,7 @@ import {
   OrchestrationQueuedTurn,
   OrchestrationQueuedTurnStatus,
   OrchestrationThread,
-  ProviderInteractionMode,
   ProjectScript,
-  RuntimeMode,
   TurnId,
   TurnQueueItemId,
   type OrchestrationCheckpointSummary,
@@ -28,6 +26,7 @@ import {
   ModelSelection,
   ProjectId,
   ThreadId,
+  ThreadQueuedTurnRequest,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -92,13 +91,7 @@ const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
 const ProjectionQueuedTurnDbRowSchema = Schema.Struct({
   queueItemId: TurnQueueItemId,
   threadId: ThreadId,
-  messageId: MessageId,
-  modelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
-  titleSeed: Schema.NullOr(Schema.String),
-  runtimeMode: RuntimeMode,
-  interactionMode: ProviderInteractionMode,
-  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
-  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
+  request: Schema.fromJsonString(ThreadQueuedTurnRequest),
   status: OrchestrationQueuedTurnStatus,
   failureReason: Schema.NullOr(Schema.String),
   createdAt: IsoDateTime,
@@ -247,19 +240,7 @@ function mapQueuedTurnRow(
 ): OrchestrationQueuedTurn {
   return {
     queueItemId: row.queueItemId,
-    messageId: row.messageId,
-    ...(row.modelSelection !== null ? { modelSelection: row.modelSelection } : {}),
-    ...(row.titleSeed !== null ? { titleSeed: row.titleSeed } : {}),
-    runtimeMode: row.runtimeMode,
-    interactionMode: row.interactionMode,
-    ...(row.sourceProposedPlanThreadId !== null && row.sourceProposedPlanId !== null
-      ? {
-          sourceProposedPlan: {
-            threadId: row.sourceProposedPlanThreadId,
-            planId: row.sourceProposedPlanId,
-          },
-        }
-      : {}),
+    request: row.request,
     status: row.status,
     failureReason: row.failureReason,
     createdAt: row.createdAt,
@@ -492,21 +473,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          queue_item_id AS "queueItemId",
-          thread_id AS "threadId",
-          message_id AS "messageId",
-          model_selection_json AS "modelSelection",
-          title_seed AS "titleSeed",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
-          source_proposed_plan_id AS "sourceProposedPlanId",
-          status,
-          failure_reason AS "failureReason",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM projection_queued_turns
-        ORDER BY thread_id ASC, created_at ASC, queue_item_id ASC
+          queue.queue_item_id AS "queueItemId",
+          queue.thread_id AS "threadId",
+          queue.request_json AS "request",
+          queue.status AS status,
+          queue.failure_reason AS "failureReason",
+          queue.created_at AS "createdAt",
+          queue.updated_at AS "updatedAt"
+        FROM projection_queued_turns AS queue
+        ORDER BY queue.thread_id ASC, queue.created_at ASC, queue.queue_item_id ASC
       `,
   });
 
@@ -881,22 +856,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: ({ threadId }) =>
       sql`
         SELECT
-          queue_item_id AS "queueItemId",
-          thread_id AS "threadId",
-          message_id AS "messageId",
-          model_selection_json AS "modelSelection",
-          title_seed AS "titleSeed",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
-          source_proposed_plan_id AS "sourceProposedPlanId",
-          status,
-          failure_reason AS "failureReason",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM projection_queued_turns
-        WHERE thread_id = ${threadId}
-        ORDER BY created_at ASC, queue_item_id ASC
+          queue.queue_item_id AS "queueItemId",
+          queue.thread_id AS "threadId",
+          queue.request_json AS "request",
+          queue.status AS status,
+          queue.failure_reason AS "failureReason",
+          queue.created_at AS "createdAt",
+          queue.updated_at AS "updatedAt"
+        FROM projection_queued_turns AS queue
+        WHERE queue.thread_id = ${threadId}
+        ORDER BY queue.created_at ASC, queue.queue_item_id ASC
       `,
   });
 

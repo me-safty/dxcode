@@ -21,8 +21,9 @@ import {
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
-  ThreadQueuedTurnSendAcceptedPayload,
   ThreadQueuedTurnSendFailedPayload,
+  ThreadQueuedTurnRequeuedPayload,
+  ThreadQueuedTurnResolvedPayload,
   ThreadQueuedTurnSendStartedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
@@ -62,6 +63,13 @@ function updateQueuedTurn(
     }
     return Object.assign({}, entry, patch);
   });
+}
+
+function removeQueuedTurn(
+  queuedTurns: ReadonlyArray<OrchestrationQueuedTurn>,
+  queueItemId: OrchestrationQueuedTurn["queueItemId"],
+): OrchestrationQueuedTurn[] {
+  return queuedTurns.filter((entry) => entry.queueItemId !== queueItemId);
 }
 
 function decodeForEvent<A>(
@@ -454,16 +462,7 @@ export function projectEvent(
           OrchestrationQueuedTurn,
           {
             queueItemId: payload.queueItemId,
-            messageId: payload.messageId,
-            ...(payload.modelSelection !== undefined
-              ? { modelSelection: payload.modelSelection }
-              : {}),
-            ...(payload.titleSeed !== undefined ? { titleSeed: payload.titleSeed } : {}),
-            runtimeMode: payload.runtimeMode,
-            interactionMode: payload.interactionMode,
-            ...(payload.sourceProposedPlan !== undefined
-              ? { sourceProposedPlan: payload.sourceProposedPlan }
-              : {}),
+            request: payload.request,
             status: "pending",
             failureReason: null,
             createdAt: payload.createdAt,
@@ -516,9 +515,31 @@ export function projectEvent(
         }),
       );
 
-    case "thread.queued-turn-send-accepted":
+    case "thread.queued-turn-resolved":
       return decodeForEvent(
-        ThreadQueuedTurnSendAcceptedPayload,
+        ThreadQueuedTurnResolvedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              queuedTurns: removeQueuedTurn(thread.queuedTurns, payload.queueItemId),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.queued-turn-requeued":
+      return decodeForEvent(
+        ThreadQueuedTurnRequeuedPayload,
         event.payload,
         event.type,
         "payload",
@@ -532,7 +553,7 @@ export function projectEvent(
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               queuedTurns: updateQueuedTurn(thread.queuedTurns, payload.queueItemId, {
-                status: "accepted",
+                status: "pending",
                 failureReason: null,
                 updatedAt: payload.createdAt,
               }),

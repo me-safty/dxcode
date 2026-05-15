@@ -335,24 +335,12 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
-export const OrchestrationQueuedTurnStatus = Schema.Literals([
-  "pending",
-  "sending",
-  "accepted",
-  "failed",
-]);
+export const OrchestrationQueuedTurnStatus = Schema.Literals(["pending", "sending", "failed"]);
 export type OrchestrationQueuedTurnStatus = typeof OrchestrationQueuedTurnStatus.Type;
 
 export const OrchestrationQueuedTurn = Schema.Struct({
   queueItemId: TurnQueueItemId,
-  messageId: MessageId,
-  modelSelection: Schema.optional(ModelSelection),
-  titleSeed: Schema.optional(TrimmedNonEmptyString),
-  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
-  interactionMode: ProviderInteractionMode.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
-  ),
-  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  request: Schema.suspend(() => ThreadQueuedTurnRequest),
   status: OrchestrationQueuedTurnStatus,
   failureReason: Schema.NullOr(Schema.String).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -606,6 +594,11 @@ const ThreadTurnStartMessage = Schema.Struct({
   attachments: Schema.Array(ChatAttachment),
 });
 
+export const ThreadQueuedTurnRequest = Schema.Struct({
+  message: ThreadTurnStartMessage,
+});
+export type ThreadQueuedTurnRequest = typeof ThreadQueuedTurnRequest.Type;
+
 const ClientThreadTurnStartMessage = Schema.Struct({
   messageId: MessageId,
   role: Schema.Literal("user"),
@@ -613,41 +606,69 @@ const ClientThreadTurnStartMessage = Schema.Struct({
   attachments: Schema.Array(UploadChatAttachment),
 });
 
-export const ThreadTurnStartCommand = Schema.Struct({
+const ThreadTurnStartCommandBase = {
   type: Schema.Literal("thread.turn.start"),
   commandId: CommandId,
   threadId: ThreadId,
   message: ThreadTurnStartMessage,
+  createdAt: IsoDateTime,
+} as const;
+
+const ThreadTurnStartSteerFields = {
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
-  delivery: ProviderTurnDeliveryMode.pipe(
+  delivery: Schema.Literal(DEFAULT_PROVIDER_TURN_DELIVERY_MODE).pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed(DEFAULT_PROVIDER_TURN_DELIVERY_MODE)),
   ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
-  createdAt: IsoDateTime,
-});
+} as const;
 
-const ClientThreadTurnStartCommand = Schema.Struct({
+export const ThreadTurnStartCommand = Schema.Union([
+  Schema.Struct({
+    ...ThreadTurnStartCommandBase,
+    ...ThreadTurnStartSteerFields,
+  }),
+  Schema.Struct({
+    ...ThreadTurnStartCommandBase,
+    delivery: Schema.Literal("queue"),
+  }),
+]);
+
+const ClientThreadTurnStartCommandBase = {
   type: Schema.Literal("thread.turn.start"),
   commandId: CommandId,
   threadId: ThreadId,
   message: ClientThreadTurnStartMessage,
+  createdAt: IsoDateTime,
+} as const;
+
+const ClientThreadTurnStartSteerFields = {
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
-  delivery: ProviderTurnDeliveryMode.pipe(
+  delivery: Schema.Literal(DEFAULT_PROVIDER_TURN_DELIVERY_MODE).pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed(DEFAULT_PROVIDER_TURN_DELIVERY_MODE)),
   ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
-  createdAt: IsoDateTime,
-});
+} as const;
+
+const ClientThreadTurnStartCommand = Schema.Union([
+  Schema.Struct({
+    ...ClientThreadTurnStartCommandBase,
+    ...ClientThreadTurnStartSteerFields,
+  }),
+  Schema.Struct({
+    ...ClientThreadTurnStartCommandBase,
+    delivery: Schema.Literal("queue"),
+  }),
+]);
 
 const ThreadTurnInterruptCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.interrupt"),
@@ -672,6 +693,14 @@ const ThreadUserInputRespondCommand = Schema.Struct({
   threadId: ThreadId,
   requestId: ApprovalRequestId,
   answers: ProviderUserInputAnswers,
+  createdAt: IsoDateTime,
+});
+
+const ThreadQueuedTurnRetryCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-turn.retry"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  queueItemId: TurnQueueItemId,
   createdAt: IsoDateTime,
 });
 
@@ -703,6 +732,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
+  ThreadQueuedTurnRetryCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
@@ -724,6 +754,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
+  ThreadQueuedTurnRetryCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
@@ -804,11 +835,12 @@ const ThreadQueuedTurnSendStartCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-const ThreadQueuedTurnSendAcceptCommand = Schema.Struct({
-  type: Schema.Literal("thread.queued-turn.send.accept"),
+const ThreadQueuedTurnResolveCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-turn.resolve"),
   commandId: CommandId,
   threadId: ThreadId,
   queueItemId: TurnQueueItemId,
+  turnId: TurnId,
   createdAt: IsoDateTime,
 });
 
@@ -830,7 +862,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
   ThreadQueuedTurnSendStartCommand,
-  ThreadQueuedTurnSendAcceptCommand,
+  ThreadQueuedTurnResolveCommand,
   ThreadQueuedTurnSendFailCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
@@ -856,7 +888,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.turn-start-requested",
   "thread.turn-queued",
   "thread.queued-turn-send-started",
-  "thread.queued-turn-send-accepted",
+  "thread.queued-turn-resolved",
+  "thread.queued-turn-requeued",
   "thread.queued-turn-send-failed",
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
@@ -976,6 +1009,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  queueItemId: Schema.optional(TurnQueueItemId),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });
@@ -983,14 +1017,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
 export const ThreadTurnQueuedPayload = Schema.Struct({
   threadId: ThreadId,
   queueItemId: TurnQueueItemId,
-  messageId: MessageId,
-  modelSelection: Schema.optional(ModelSelection),
-  titleSeed: Schema.optional(TrimmedNonEmptyString),
-  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
-  interactionMode: ProviderInteractionMode.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
-  ),
-  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  request: ThreadQueuedTurnRequest,
   createdAt: IsoDateTime,
 });
 
@@ -1001,7 +1028,15 @@ export const ThreadQueuedTurnSendStartedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-export const ThreadQueuedTurnSendAcceptedPayload = Schema.Struct({
+export const ThreadQueuedTurnResolvedPayload = Schema.Struct({
+  threadId: ThreadId,
+  queueItemId: TurnQueueItemId,
+  messageId: MessageId,
+  turnId: TurnId,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadQueuedTurnRequeuedPayload = Schema.Struct({
   threadId: ThreadId,
   queueItemId: TurnQueueItemId,
   messageId: MessageId,
@@ -1172,8 +1207,13 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
-    type: Schema.Literal("thread.queued-turn-send-accepted"),
-    payload: ThreadQueuedTurnSendAcceptedPayload,
+    type: Schema.Literal("thread.queued-turn-resolved"),
+    payload: ThreadQueuedTurnResolvedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.queued-turn-requeued"),
+    payload: ThreadQueuedTurnRequeuedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

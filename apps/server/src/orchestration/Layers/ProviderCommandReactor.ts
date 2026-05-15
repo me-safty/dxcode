@@ -49,7 +49,6 @@ type ProviderIntentEvent = Extract<
     type:
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
-      | "thread.queued-turn-send-started"
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
@@ -690,18 +689,62 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
-    if (!message || message.role !== "user") {
+    const dispatchQueuedTurnFailure = (detail: string, tag: string) => {
+      const queueItemId = event.payload.queueItemId;
+      if (queueItemId === undefined) {
+        return Effect.void;
+      }
+      return effectServerCommandId(tag).pipe(
+        Effect.flatMap((commandId) =>
+          orchestrationEngine.dispatch({
+            type: "thread.queued-turn.send.fail",
+            commandId,
+            threadId: event.payload.threadId,
+            queueItemId,
+            reason: detail,
+            createdAt: event.payload.createdAt,
+          }),
+        ),
+      );
+    };
+
+    const queuedTurn =
+      event.payload.queueItemId === undefined
+        ? null
+        : (thread.queuedTurns.find((entry) => entry.queueItemId === event.payload.queueItemId) ??
+          null);
+    if (event.payload.queueItemId !== undefined && queuedTurn === null) {
+      const detail = `Queued turn '${event.payload.queueItemId}' was not found for turn start request.`;
       yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
         kind: "provider.turn.start.failed",
         summary: "Provider turn start failed",
-        detail: `User message '${event.payload.messageId}' was not found for turn start request.`,
+        detail,
         turnId: null,
         createdAt: event.payload.createdAt,
       });
       return;
     }
+    const queuedRequest = queuedTurn?.request;
+    const message =
+      queuedRequest?.message ??
+      thread.messages.find(
+        (entry) => entry.id === event.payload.messageId && entry.role === "user",
+      );
+    if (!message) {
+      const detail = `User message '${event.payload.messageId}' was not found for turn start request.`;
+      yield* appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: "provider.turn.start.failed",
+        summary: "Provider turn start failed",
+        detail,
+        turnId: null,
+        createdAt: event.payload.createdAt,
+      });
+      yield* dispatchQueuedTurnFailure(detail, "queued-turn-send-missing-message");
+      return;
+    }
+    const messageAttachments = message.attachments ?? [];
 
     const isFirstUserMessageTurn =
       thread.messages.filter((entry) => entry.role === "user").length === 1;
@@ -714,7 +757,7 @@ const make = Effect.gen(function* () {
         }) ?? process.cwd();
       const generationInput = {
         messageText: message.text,
-        ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+        ...(messageAttachments.length > 0 ? { attachments: messageAttachments } : {}),
         ...(event.payload.titleSeed !== undefined ? { titleSeed: event.payload.titleSeed } : {}),
       };
 
@@ -754,6 +797,7 @@ const make = Effect.gen(function* () {
             createdAt: event.payload.createdAt,
           }),
         ),
+        Effect.flatMap(() => dispatchQueuedTurnFailure(detail, "queued-turn-send-failed")),
         Effect.asVoid,
       );
     };
@@ -773,7 +817,7 @@ const make = Effect.gen(function* () {
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
       messageText: message.text,
-      ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+      ...(messageAttachments.length > 0 ? { attachments: messageAttachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
         : {}),
@@ -791,93 +835,6 @@ const make = Effect.gen(function* () {
     yield* providerService
       .sendTurn(sendTurnRequest.value)
       .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
-  });
-
-  const processQueuedTurnSendStarted = Effect.fn("processQueuedTurnSendStarted")(function* (
-    event: Extract<ProviderIntentEvent, { type: "thread.queued-turn-send-started" }>,
-  ) {
-    const thread = yield* resolveThread(event.payload.threadId);
-    if (!thread) {
-      return;
-    }
-    const queuedTurn = thread.queuedTurns.find(
-      (entry) => entry.queueItemId === event.payload.queueItemId,
-    );
-    const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
-    if (!queuedTurn || !message || message.role !== "user") {
-      yield* orchestrationEngine.dispatch({
-        type: "thread.queued-turn.send.fail",
-        commandId: yield* effectServerCommandId("queued-turn-send-missing-message"),
-        threadId: event.payload.threadId,
-        queueItemId: event.payload.queueItemId,
-        reason: "Queued user message was not found.",
-        createdAt: event.payload.createdAt,
-      });
-      return;
-    }
-
-    const sendTurnRequest = yield* buildSendTurnRequestForThread({
-      threadId: event.payload.threadId,
-      messageText: message.text,
-      ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
-      ...(queuedTurn.modelSelection !== undefined
-        ? { modelSelection: queuedTurn.modelSelection }
-        : {}),
-      interactionMode: queuedTurn.interactionMode,
-      createdAt: event.payload.createdAt,
-    }).pipe(
-      Effect.map(Option.some),
-      Effect.catchCause((cause) =>
-        effectServerCommandId("queued-turn-send-build-failed").pipe(
-          Effect.flatMap((commandId) =>
-            orchestrationEngine.dispatch({
-              type: "thread.queued-turn.send.fail",
-              commandId,
-              threadId: event.payload.threadId,
-              queueItemId: event.payload.queueItemId,
-              reason: formatFailureDetail(cause),
-              createdAt: event.payload.createdAt,
-            }),
-          ),
-          Effect.as(Option.none()),
-        ),
-      ),
-    );
-
-    if (Option.isNone(sendTurnRequest)) {
-      return;
-    }
-
-    yield* providerService.sendTurn(sendTurnRequest.value).pipe(
-      Effect.flatMap(() =>
-        effectServerCommandId("queued-turn-send-accepted").pipe(
-          Effect.flatMap((commandId) =>
-            orchestrationEngine.dispatch({
-              type: "thread.queued-turn.send.accept",
-              commandId,
-              threadId: event.payload.threadId,
-              queueItemId: event.payload.queueItemId,
-              createdAt: event.payload.createdAt,
-            }),
-          ),
-        ),
-      ),
-      Effect.catchCause((cause) =>
-        effectServerCommandId("queued-turn-send-failed").pipe(
-          Effect.flatMap((commandId) =>
-            orchestrationEngine.dispatch({
-              type: "thread.queued-turn.send.fail",
-              commandId,
-              threadId: event.payload.threadId,
-              queueItemId: event.payload.queueItemId,
-              reason: formatFailureDetail(cause),
-              createdAt: event.payload.createdAt,
-            }),
-          ),
-        ),
-      ),
-      Effect.forkScoped,
-    );
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
@@ -1050,9 +1007,6 @@ const make = Effect.gen(function* () {
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
         return;
-      case "thread.queued-turn-send-started":
-        yield* processQueuedTurnSendStarted(event);
-        return;
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);
         return;
@@ -1088,7 +1042,6 @@ const make = Effect.gen(function* () {
       if (
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
-        event.type === "thread.queued-turn-send-started" ||
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||

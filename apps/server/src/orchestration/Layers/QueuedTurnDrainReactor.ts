@@ -23,7 +23,7 @@ import {
 type QueueDrainTriggerEvent = Extract<
   OrchestrationEvent,
   {
-    type: "thread.turn-queued" | "thread.session-set" | "thread.queued-turn-send-failed";
+    type: "thread.turn-queued" | "thread.session-set" | "thread.queued-turn-requeued";
   }
 >;
 
@@ -35,13 +35,17 @@ type DrainMode = "normal" | "recover";
 
 const isPendingQueuedTurn = (entry: OrchestrationQueuedTurn) => entry.status === "pending";
 const isRecoverableQueuedTurn = (entry: OrchestrationQueuedTurn) => entry.status === "sending";
+const hasInFlightQueuedTurn = (thread: OrchestrationThread) =>
+  thread.queuedTurns.some(isRecoverableQueuedTurn);
 const hasPendingQueuedTurn = (thread: OrchestrationThread) =>
   thread.queuedTurns.some(isPendingQueuedTurn);
 const hasRecoverableQueuedTurn = (thread: OrchestrationThread) =>
   thread.queuedTurns.some(isRecoverableQueuedTurn);
 
 const hasQueuedTurnForDrainMode = (mode: DrainMode, thread: OrchestrationThread) =>
-  mode === "recover" ? hasRecoverableQueuedTurn(thread) : hasPendingQueuedTurn(thread);
+  mode === "recover"
+    ? hasRecoverableQueuedTurn(thread)
+    : !hasInFlightQueuedTurn(thread) && hasPendingQueuedTurn(thread);
 
 const make = Effect.fn("makeQueuedTurnDrainReactor")(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -116,6 +120,7 @@ const make = Effect.fn("makeQueuedTurnDrainReactor")(function* () {
         (thread) =>
           !recoverThreadIds.has(thread.id) &&
           thread.session?.status === "ready" &&
+          !hasInFlightQueuedTurn(thread) &&
           hasPendingQueuedTurn(thread),
       )
       .map((thread) => thread.id);
@@ -145,7 +150,7 @@ const make = Effect.fn("makeQueuedTurnDrainReactor")(function* () {
         if (
           event.type === "thread.turn-queued" ||
           event.type === "thread.session-set" ||
-          event.type === "thread.queued-turn-send-failed"
+          event.type === "thread.queued-turn-requeued"
         ) {
           return worker.enqueue(event);
         }

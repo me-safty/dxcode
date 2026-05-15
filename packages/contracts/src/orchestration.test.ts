@@ -22,7 +22,8 @@ import {
   ThreadCreatedPayload,
   ThreadTurnDiff,
   ThreadQueuedTurnSendFailedPayload,
-  ThreadQueuedTurnSendAcceptedPayload,
+  ThreadQueuedTurnRequeuedPayload,
+  ThreadQueuedTurnResolvedPayload,
   ThreadQueuedTurnSendStartedPayload,
   ThreadTurnQueuedPayload,
   ThreadTurnStartCommand,
@@ -44,8 +45,11 @@ const decodeThreadTurnQueuedPayload = Schema.decodeUnknownEffect(ThreadTurnQueue
 const decodeThreadQueuedTurnSendStartedPayload = Schema.decodeUnknownEffect(
   ThreadQueuedTurnSendStartedPayload,
 );
-const decodeThreadQueuedTurnSendAcceptedPayload = Schema.decodeUnknownEffect(
-  ThreadQueuedTurnSendAcceptedPayload,
+const decodeThreadQueuedTurnResolvedPayload = Schema.decodeUnknownEffect(
+  ThreadQueuedTurnResolvedPayload,
+);
+const decodeThreadQueuedTurnRequeuedPayload = Schema.decodeUnknownEffect(
+  ThreadQueuedTurnRequeuedPayload,
 );
 const decodeThreadQueuedTurnSendFailedPayload = Schema.decodeUnknownEffect(
   ThreadQueuedTurnSendFailedPayload,
@@ -55,12 +59,30 @@ const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(Orchestration
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
 const encodeThreadCreatedPayload = Schema.encodeEffect(ThreadCreatedPayload);
 
+function assertSteerThreadTurnStartCommand(
+  command: typeof ThreadTurnStartCommand.Type,
+): asserts command is Extract<typeof ThreadTurnStartCommand.Type, { readonly delivery: "steer" }> {
+  assert.strictEqual(command.delivery, "steer");
+}
+
 function getOptionValue(
   options: ReadonlyArray<{ id: string; value: unknown }> | undefined,
   id: string,
 ): unknown {
   return options?.find((option) => option.id === id)?.value;
 }
+
+function makeQueuedTurnRequest(messageId: string, overrides?: { text?: string }) {
+  return {
+    message: {
+      messageId,
+      role: "user" as const,
+      text: overrides?.text ?? "queued message",
+      attachments: [],
+    },
+  };
+}
+
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
@@ -232,6 +254,7 @@ it.effect("decodes thread.turn.start defaults for provider and runtime mode", ()
       },
       createdAt: "2026-01-01T00:00:00.000Z",
     });
+    assertSteerThreadTurnStartCommand(parsed);
     assert.strictEqual(parsed.modelSelection, undefined);
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
     assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
@@ -239,30 +262,56 @@ it.effect("decodes thread.turn.start defaults for provider and runtime mode", ()
   }),
 );
 
-it.effect("preserves explicit provider, runtime mode, and delivery in thread.turn.start", () =>
+it.effect(
+  "preserves explicit provider, runtime mode, and delivery in steer thread.turn.start",
+  () =>
+    Effect.gen(function* () {
+      const parsed = yield* decodeThreadTurnStartCommand({
+        type: "thread.turn.start",
+        commandId: "cmd-turn-2",
+        threadId: "thread-1",
+        message: {
+          messageId: "msg-2",
+          role: "user",
+          text: "hello",
+          attachments: [],
+        },
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5.4",
+        },
+        delivery: "steer",
+        runtimeMode: "full-access",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      assertSteerThreadTurnStartCommand(parsed);
+      assert.strictEqual(parsed.modelSelection?.instanceId, "codex");
+      assert.strictEqual(parsed.runtimeMode, "full-access");
+      assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+      assert.strictEqual(parsed.delivery, "steer");
+    }),
+);
+
+it.effect("drops steer-only fields in queue thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({
       type: "thread.turn.start",
-      commandId: "cmd-turn-2",
+      commandId: "cmd-turn-queue-invalid",
       threadId: "thread-1",
       message: {
-        messageId: "msg-2",
+        messageId: "msg-queue-invalid",
         role: "user",
         text: "hello",
         attachments: [],
-      },
-      modelSelection: {
-        provider: "codex",
-        model: "gpt-5.4",
       },
       delivery: "queue",
       runtimeMode: "full-access",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    assert.strictEqual(parsed.modelSelection?.instanceId, "codex");
-    assert.strictEqual(parsed.runtimeMode, "full-access");
-    assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
     assert.strictEqual(parsed.delivery, "queue");
+    assert.strictEqual("runtimeMode" in parsed, false);
+    assert.strictEqual("interactionMode" in parsed, false);
+    assert.strictEqual("modelSelection" in parsed, false);
   }),
 );
 
@@ -301,6 +350,7 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
       },
       createdAt: "2026-01-01T00:00:00.000Z",
     });
+    assertSteerThreadTurnStartCommand(parsed);
     assert.strictEqual(parsed.bootstrap?.createThread?.projectId, "project-1");
     assert.strictEqual(parsed.bootstrap?.prepareWorktree?.baseBranch, "main");
     assert.strictEqual(parsed.bootstrap?.runSetupScript, true);
@@ -425,6 +475,7 @@ it.effect("accepts provider-scoped model options in thread.turn.start", () =>
       },
       createdAt: "2026-01-01T00:00:00.000Z",
     });
+    assertSteerThreadTurnStartCommand(parsed);
     assert.strictEqual(parsed.modelSelection?.instanceId, "codex");
     assert.strictEqual(getOptionValue(parsed.modelSelection?.options, "reasoningEffort"), "high");
     assert.strictEqual(getOptionValue(parsed.modelSelection?.options, "fastMode"), true);
@@ -524,6 +575,7 @@ it.effect("accepts a title seed in thread.turn.start", () =>
       titleSeed: "Investigate reconnect failures",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
+    assertSteerThreadTurnStartCommand(parsed);
     assert.strictEqual(parsed.titleSeed, "Investigate reconnect failures");
   }),
 );
@@ -546,6 +598,7 @@ it.effect("accepts a source proposed plan reference in thread.turn.start", () =>
       },
       createdAt: "2026-01-01T00:00:00.000Z",
     });
+    assertSteerThreadTurnStartCommand(parsed);
     assert.deepStrictEqual(parsed.sourceProposedPlan, {
       threadId: "thread-1",
       planId: "plan-1",
@@ -599,18 +652,15 @@ it.effect("decodes thread.turn-start-requested title seed when present", () =>
   }),
 );
 
-it.effect("decodes thread.turn-queued defaults for runtime and interaction mode", () =>
+it.effect("decodes thread.turn-queued payload", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnQueuedPayload({
       threadId: "thread-1",
       queueItemId: "queue-item-1",
-      messageId: "msg-1",
+      request: makeQueuedTurnRequest("msg-1"),
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
-    assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
-    assert.strictEqual(parsed.modelSelection, undefined);
-    assert.strictEqual(parsed.sourceProposedPlan, undefined);
+    assert.strictEqual(parsed.request.message.messageId, "msg-1");
   }),
 );
 
@@ -622,11 +672,18 @@ it.effect("decodes queued turn dispatch lifecycle payloads", () =>
       messageId: "msg-1",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    const dispatchSent = yield* decodeThreadQueuedTurnSendAcceptedPayload({
+    const resolved = yield* decodeThreadQueuedTurnResolvedPayload({
       threadId: "thread-1",
       queueItemId: "queue-item-1",
       messageId: "msg-1",
+      turnId: "turn-1",
       createdAt: "2026-01-01T00:00:01.000Z",
+    });
+    const requeued = yield* decodeThreadQueuedTurnRequeuedPayload({
+      threadId: "thread-1",
+      queueItemId: "queue-item-1",
+      messageId: "msg-1",
+      createdAt: "2026-01-01T00:00:02.000Z",
     });
     const dispatchFailed = yield* decodeThreadQueuedTurnSendFailedPayload({
       threadId: "thread-1",
@@ -637,7 +694,8 @@ it.effect("decodes queued turn dispatch lifecycle payloads", () =>
     });
 
     assert.strictEqual(dispatchStarted.queueItemId, "queue-item-1");
-    assert.strictEqual(dispatchSent.messageId, "msg-1");
+    assert.strictEqual(resolved.turnId, "turn-1");
+    assert.strictEqual(requeued.messageId, "msg-1");
     assert.strictEqual(dispatchFailed.reason, "Provider session is not ready.");
   }),
 );
@@ -658,7 +716,7 @@ it.effect("decodes queued turn orchestration events", () =>
       payload: {
         threadId: "thread-1",
         queueItemId: "queue-item-1",
-        messageId: "msg-1",
+        request: makeQueuedTurnRequest("msg-1"),
         createdAt: "2026-01-01T00:00:00.000Z",
       },
     });

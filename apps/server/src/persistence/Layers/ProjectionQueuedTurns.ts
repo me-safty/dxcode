@@ -1,13 +1,14 @@
+import { ThreadId, ThreadQueuedTurnRequest, TurnQueueItemId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Struct from "effect/Struct";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-import { CanonicalModelSelection, TurnQueueItemId } from "@t3tools/contracts";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
+  DeleteProjectionQueuedTurnByQueueItemIdInput,
   DeleteProjectionQueuedTurnsInput,
   ListProjectionQueuedTurnsInput,
   ProjectionQueuedTurn,
@@ -15,17 +16,35 @@ import {
   type ProjectionQueuedTurnRepositoryShape,
 } from "../Services/ProjectionQueuedTurns.ts";
 
-const ProjectionQueuedTurnRow = ProjectionQueuedTurn.mapFields(
-  Struct.assign({
-    modelSelection: Schema.NullOr(Schema.fromJsonString(CanonicalModelSelection)),
-  }),
-);
-const encodeModelSelectionJson = Schema.encodeUnknownSync(
-  Schema.fromJsonString(CanonicalModelSelection),
-);
+const ProjectionQueuedTurnRow = Schema.Struct({
+  queueItemId: TurnQueueItemId,
+  threadId: ThreadId,
+  request: Schema.fromJsonString(ThreadQueuedTurnRequest),
+  status: ProjectionQueuedTurn.fields.status,
+  failureReason: ProjectionQueuedTurn.fields.failureReason,
+  createdAt: ProjectionQueuedTurn.fields.createdAt,
+  updatedAt: ProjectionQueuedTurn.fields.updatedAt,
+});
+
+const encodeRequestJson = Schema.encodeUnknownSync(Schema.fromJsonString(ThreadQueuedTurnRequest));
+
 const GetProjectionQueuedTurnInput = Schema.Struct({
   queueItemId: TurnQueueItemId,
 });
+
+function mapProjectionQueuedTurnRow(
+  row: Schema.Schema.Type<typeof ProjectionQueuedTurnRow>,
+): ProjectionQueuedTurn {
+  return {
+    queueItemId: row.queueItemId,
+    threadId: row.threadId,
+    request: row.request,
+    status: row.status,
+    failureReason: row.failureReason,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
 
 const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -37,13 +56,7 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
         INSERT INTO projection_queued_turns (
           queue_item_id,
           thread_id,
-          message_id,
-          model_selection_json,
-          title_seed,
-          runtime_mode,
-          interaction_mode,
-          source_proposed_plan_thread_id,
-          source_proposed_plan_id,
+          request_json,
           status,
           failure_reason,
           created_at,
@@ -52,13 +65,7 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
         VALUES (
           ${row.queueItemId},
           ${row.threadId},
-          ${row.messageId},
-          ${row.modelSelection === null ? null : encodeModelSelectionJson(row.modelSelection)},
-          ${row.titleSeed},
-          ${row.runtimeMode},
-          ${row.interactionMode},
-          ${row.sourceProposedPlanThreadId},
-          ${row.sourceProposedPlanId},
+          ${encodeRequestJson(row.request)},
           ${row.status},
           ${row.failureReason},
           ${row.createdAt},
@@ -67,13 +74,7 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
         ON CONFLICT (queue_item_id)
         DO UPDATE SET
           thread_id = excluded.thread_id,
-          message_id = excluded.message_id,
-          model_selection_json = excluded.model_selection_json,
-          title_seed = excluded.title_seed,
-          runtime_mode = excluded.runtime_mode,
-          interaction_mode = excluded.interaction_mode,
-          source_proposed_plan_thread_id = excluded.source_proposed_plan_thread_id,
-          source_proposed_plan_id = excluded.source_proposed_plan_id,
+          request_json = excluded.request_json,
           status = excluded.status,
           failure_reason = excluded.failure_reason,
           created_at = excluded.created_at,
@@ -87,21 +88,15 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
     execute: ({ queueItemId }) =>
       sql`
         SELECT
-          queue_item_id AS "queueItemId",
-          thread_id AS "threadId",
-          message_id AS "messageId",
-          model_selection_json AS "modelSelection",
-          title_seed AS "titleSeed",
-          runtime_mode AS "runtimeMode",
-          interaction_mode AS "interactionMode",
-          source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
-          source_proposed_plan_id AS "sourceProposedPlanId",
-          status,
-          failure_reason AS "failureReason",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM projection_queued_turns
-        WHERE queue_item_id = ${queueItemId}
+          queue.queue_item_id AS "queueItemId",
+          queue.thread_id AS "threadId",
+          queue.request_json AS "request",
+          queue.status AS status,
+          queue.failure_reason AS "failureReason",
+          queue.created_at AS "createdAt",
+          queue.updated_at AS "updatedAt"
+        FROM projection_queued_turns AS queue
+        WHERE queue.queue_item_id = ${queueItemId}
       `,
   });
 
@@ -112,40 +107,28 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
       input.threadId === undefined
         ? sql`
             SELECT
-              queue_item_id AS "queueItemId",
-              thread_id AS "threadId",
-              message_id AS "messageId",
-              model_selection_json AS "modelSelection",
-              title_seed AS "titleSeed",
-              runtime_mode AS "runtimeMode",
-              interaction_mode AS "interactionMode",
-              source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
-              source_proposed_plan_id AS "sourceProposedPlanId",
-              status,
-              failure_reason AS "failureReason",
-              created_at AS "createdAt",
-              updated_at AS "updatedAt"
-            FROM projection_queued_turns
-            ORDER BY created_at ASC, queue_item_id ASC
+              queue.queue_item_id AS "queueItemId",
+              queue.thread_id AS "threadId",
+              queue.request_json AS "request",
+              queue.status AS status,
+              queue.failure_reason AS "failureReason",
+              queue.created_at AS "createdAt",
+              queue.updated_at AS "updatedAt"
+            FROM projection_queued_turns AS queue
+            ORDER BY queue.created_at ASC, queue.queue_item_id ASC
           `
         : sql`
             SELECT
-              queue_item_id AS "queueItemId",
-              thread_id AS "threadId",
-              message_id AS "messageId",
-              model_selection_json AS "modelSelection",
-              title_seed AS "titleSeed",
-              runtime_mode AS "runtimeMode",
-              interaction_mode AS "interactionMode",
-              source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
-              source_proposed_plan_id AS "sourceProposedPlanId",
-              status,
-              failure_reason AS "failureReason",
-              created_at AS "createdAt",
-              updated_at AS "updatedAt"
-            FROM projection_queued_turns
-            WHERE thread_id = ${input.threadId}
-            ORDER BY created_at ASC, queue_item_id ASC
+              queue.queue_item_id AS "queueItemId",
+              queue.thread_id AS "threadId",
+              queue.request_json AS "request",
+              queue.status AS status,
+              queue.failure_reason AS "failureReason",
+              queue.created_at AS "createdAt",
+              queue.updated_at AS "updatedAt"
+            FROM projection_queued_turns AS queue
+            WHERE queue.thread_id = ${input.threadId}
+            ORDER BY queue.created_at ASC, queue.queue_item_id ASC
           `,
   });
 
@@ -158,6 +141,15 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
       `,
   });
 
+  const deleteProjectionQueuedTurnRowByQueueItemId = SqlSchema.void({
+    Request: DeleteProjectionQueuedTurnByQueueItemIdInput,
+    execute: ({ queueItemId }) =>
+      sql`
+        DELETE FROM projection_queued_turns
+        WHERE queue_item_id = ${queueItemId}
+      `,
+  });
+
   const upsert: ProjectionQueuedTurnRepositoryShape["upsert"] = (row) =>
     upsertProjectionQueuedTurnRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionQueuedTurnRepository.upsert:query")),
@@ -165,6 +157,11 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
 
   const getByQueueItemId: ProjectionQueuedTurnRepositoryShape["getByQueueItemId"] = (input) =>
     getProjectionQueuedTurnRow(input).pipe(
+      Effect.map(
+        Option.map((row: Schema.Schema.Type<typeof ProjectionQueuedTurnRow>) =>
+          mapProjectionQueuedTurnRow(row),
+        ),
+      ),
       Effect.mapError(
         toPersistenceSqlError("ProjectionQueuedTurnRepository.getByQueueItemId:query"),
       ),
@@ -172,6 +169,7 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
 
   const list: ProjectionQueuedTurnRepositoryShape["list"] = (input = {}) =>
     listProjectionQueuedTurnRows(input).pipe(
+      Effect.map((rows) => rows.map(mapProjectionQueuedTurnRow)),
       Effect.mapError(toPersistenceSqlError("ProjectionQueuedTurnRepository.list:query")),
     );
 
@@ -182,11 +180,19 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
       ),
     );
 
+  const deleteByQueueItemId: ProjectionQueuedTurnRepositoryShape["deleteByQueueItemId"] = (input) =>
+    deleteProjectionQueuedTurnRowByQueueItemId(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionQueuedTurnRepository.deleteByQueueItemId:query"),
+      ),
+    );
+
   return {
     upsert,
     getByQueueItemId,
     list,
     deleteByThreadId,
+    deleteByQueueItemId,
   } satisfies ProjectionQueuedTurnRepositoryShape;
 });
 
