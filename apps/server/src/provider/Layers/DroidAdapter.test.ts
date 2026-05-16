@@ -3,8 +3,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import {
   AutonomyLevel,
+  DroidErrorType,
   DroidInteractionMode,
   DroidMessageType,
+  DroidWorkingState,
+  type MessageOptions,
   ReasoningEffort,
   ToolConfirmationOutcome,
   ToolConfirmationType,
@@ -39,7 +42,7 @@ const threadId = ThreadId.make("thread-droid");
 function fakeSession(input: {
   readonly sessionId?: string;
   readonly messages?: ReadonlyArray<DroidMessage>;
-  readonly onStream?: () => AsyncGenerator<DroidMessage, void, undefined>;
+  readonly onStream?: (options?: MessageOptions) => AsyncGenerator<DroidMessage, void, undefined>;
   readonly onClose?: () => Promise<void>;
   readonly onInterrupt?: () => Promise<void>;
   readonly onEnterSpecMode?: (params: unknown) => void;
@@ -48,8 +51,8 @@ function fakeSession(input: {
   return {
     sessionId: input.sessionId ?? "droid-session-1",
     initResult: { sessionId: input.sessionId ?? "droid-session-1" },
-    stream: () =>
-      input.onStream?.() ??
+    stream: (_text: string, options?: MessageOptions) =>
+      input.onStream?.(options) ??
       (async function* () {
         for (const message of input.messages ?? []) {
           yield message;
@@ -337,6 +340,82 @@ it.effect("maps Droid medium access to medium autonomy", () =>
   ).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("updates Droid settings when resuming an existing session", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let updateSettingsParams: unknown;
+      const adapter = yield* makeDroidAdapter(settings, {
+        sdk: {
+          createSession: async () => fakeSession({}),
+          resumeSession: async () =>
+            fakeSession({
+              onUpdateSettings: (params) => {
+                updateSettingsParams = params;
+              },
+            }),
+        },
+      });
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("droid"),
+        runtimeMode: "medium-access",
+        resumeCursor: "droid-session-existing",
+        modelSelection: createModelSelection(ProviderInstanceId.make("droid"), "custom-model", [
+          { id: "reasoningEffort", value: "high" },
+        ]),
+      });
+
+      assert.deepEqual(updateSettingsParams, {
+        autonomyLevel: AutonomyLevel.Medium,
+        interactionMode: DroidInteractionMode.Auto,
+        modelId: "custom-model",
+        reasoningEffort: ReasoningEffort.High,
+      });
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("closes the previous Droid session before replacing a thread context", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const closedSessionIds: string[] = [];
+      let createCalls = 0;
+      const adapter = yield* makeDroidAdapter(settings, {
+        sdk: {
+          createSession: async () => {
+            createCalls += 1;
+            const sessionId = `droid-session-${createCalls}`;
+            return fakeSession({
+              sessionId,
+              onClose: async () => {
+                closedSessionIds.push(sessionId);
+              },
+            });
+          },
+          resumeSession: async () => fakeSession({}),
+        },
+      });
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("droid"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("droid"),
+        runtimeMode: "full-access",
+      });
+
+      assert.deepEqual(closedSessionIds, ["droid-session-1"]);
+      const sessions = yield* adapter.listSessions();
+      assert.equal(sessions.length, 1);
+      assert.equal(sessions[0]?.resumeCursor, "droid-session-2");
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("uses final Droid create_message content when deltas are absent", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -553,6 +632,104 @@ it.effect("ignores Droid interrupt failures after aborting the active turn", () 
   ).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("completes aborted Droid streams as interrupted", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const adapter = yield* makeDroidAdapter(settings, {
+        sdk: {
+          createSession: async () =>
+            fakeSession({
+              onStream: async function* (options) {
+                yield {
+                  type: DroidMessageType.WorkingStateChanged,
+                  state: DroidWorkingState.StreamingAssistantMessage,
+                };
+                while (!options?.abortSignal?.aborted) {
+                  await Promise.resolve();
+                }
+                throw new DOMException("The operation was aborted.", "AbortError");
+              },
+            }),
+          resumeSession: async () => fakeSession({}),
+        },
+      });
+      const completedFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "turn.completed"),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("droid"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId, input: "stop me" });
+      yield* adapter.interruptTurn(threadId);
+
+      const completed = yield* Fiber.join(completedFiber).pipe(Effect.timeout("2 seconds"));
+      assert.equal(completed._tag, "Some");
+      if (completed._tag === "Some" && completed.value.type === "turn.completed") {
+        assert.equal(completed.value.payload.state, "interrupted");
+      }
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("fails Droid turns when the SDK stream emits an error message", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const adapter = yield* makeDroidAdapter(settings, {
+        sdk: {
+          createSession: async () =>
+            fakeSession({
+              messages: [
+                {
+                  type: DroidMessageType.Error,
+                  message: "model exploded",
+                  errorType: DroidErrorType.ERROR,
+                  timestamp: "1970-01-01T00:00:00.000Z",
+                },
+                { type: DroidMessageType.TurnComplete, tokenUsage: null },
+              ],
+            }),
+          resumeSession: async () => fakeSession({}),
+        },
+      });
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            event.type !== "session.started" &&
+            event.type !== "thread.started",
+        ),
+        Stream.take(3),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("droid"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId, input: "fail" });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("2 seconds")));
+      assert.deepEqual(
+        events.map((event) => event.type),
+        ["turn.started", "runtime.error", "turn.completed"],
+      );
+      const completed = events.find((event) => event.type === "turn.completed");
+      assert.equal(completed?.type, "turn.completed");
+      if (completed?.type === "turn.completed") {
+        assert.equal(completed.payload.state, "failed");
+        assert.equal(completed.payload.errorMessage, "model exploded");
+      }
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("passes custom model reasoning into Droid spec mode", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -725,7 +902,7 @@ it.effect("continues stopping Droid sessions when one close fails", () =>
   ).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("reads and rolls back Droid thread snapshots", () =>
+it.effect("reads Droid thread snapshots and rejects unsupported rollback", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const adapter = yield* makeDroidAdapter(settings, {
@@ -753,9 +930,10 @@ it.effect("reads and rolls back Droid thread snapshots", () =>
 
       const before = yield* adapter.readThread(threadId);
       assert.equal(before.turns.length, 2);
-      const after = yield* adapter.rollbackThread(threadId, 1);
-      assert.equal(after.turns.length, 1);
-      assert.equal(after.turns[0]?.id, before.turns[0]?.id);
+      const unsupported = yield* adapter.rollbackThread(threadId, 1).pipe(Effect.exit);
+      assert.equal(unsupported._tag, "Failure");
+      const after = yield* adapter.readThread(threadId);
+      assert.equal(after.turns.length, 2);
 
       const invalid = yield* adapter.rollbackThread(threadId, 0).pipe(Effect.exit);
       assert.equal(invalid._tag, "Failure");

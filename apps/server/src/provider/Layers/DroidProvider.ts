@@ -185,13 +185,14 @@ const discoverDroidModels = (
   options?: DroidProviderStatusOptions,
 ): Effect.Effect<ReadonlyArray<ServerProviderModel>, DroidModelDiscoveryError> =>
   Effect.tryPromise({
-    try: async () => {
+    try: async (abortSignal) => {
       let session: DroidSession | undefined;
       try {
         session = await (options?.sdk ?? defaultSdk).createSession({
           cwd: tmpdir(),
           execPath: settings.binaryPath,
           env: compactEnvironment(environment),
+          abortSignal,
         });
         return buildDroidModelsFromSdkModels(session.initResult.availableModels);
       } finally {

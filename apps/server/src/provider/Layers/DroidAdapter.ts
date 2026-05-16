@@ -56,6 +56,12 @@ import {
 
 export type { DroidAdapterOptions } from "../droid/DroidAdapterTypes.ts";
 
+const INTERRUPTED_TURN_MESSAGE = "Droid turn interrupted.";
+
+function errorMessage(cause: unknown, fallback: string): string {
+  return cause instanceof Error ? cause.message : fallback;
+}
+
 export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapterOptions) {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -103,6 +109,11 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
       }
       return context;
     });
+    const closeContext = (context: DroidContext) =>
+      Effect.tryPromise(() => {
+        context.activeAbort?.abort();
+        return context.droid.close();
+      }).pipe(Effect.ignore);
 
     const startSession: DroidAdapterShape["startSession"] = Effect.fn("startDroidSession")(
       function* (input) {
@@ -158,20 +169,31 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
           permissionHandler,
           askUserHandler,
         };
+        const autonomyLevel = toAutonomyLevel(input);
         const reasoningEffort = toReasoningEffort(
           getModelSelectionStringOptionValue(modelSelection, "reasoningEffort"),
         );
         const droid = yield* Effect.tryPromise({
-          try: () =>
-            typeof input.resumeCursor === "string"
-              ? sdk.resumeSession(input.resumeCursor, sdkOptions)
-              : sdk.createSession({
-                  ...sdkOptions,
-                  ...(modelId ? { modelId } : {}),
-                  autonomyLevel: toAutonomyLevel(input),
-                  interactionMode: DroidInteractionMode.Auto,
-                  ...(reasoningEffort ? { reasoningEffort } : {}),
-                }),
+          try: async (abortSignal) => {
+            const sessionOptions = { ...sdkOptions, abortSignal };
+            if (typeof input.resumeCursor === "string") {
+              const session = await sdk.resumeSession(input.resumeCursor, sessionOptions);
+              await session.updateSettings({
+                autonomyLevel,
+                interactionMode: DroidInteractionMode.Auto,
+                ...(modelId ? { modelId } : {}),
+                ...(reasoningEffort ? { reasoningEffort } : {}),
+              });
+              return session;
+            }
+            return sdk.createSession({
+              ...sessionOptions,
+              ...(modelId ? { modelId } : {}),
+              autonomyLevel,
+              interactionMode: DroidInteractionMode.Auto,
+              ...(reasoningEffort ? { reasoningEffort } : {}),
+            });
+          },
           catch: (cause) =>
             new ProviderAdapterRequestError({
               provider: DROID_PROVIDER,
@@ -202,11 +224,16 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
           activeAssistantItems: new Map(),
           activeThinkingItems: new Map(),
           activeCompletedAssistantItems: new Set(),
+          activeTurnError: undefined,
           activeTokenUsage: undefined,
           activeTokenUsageBaseline: undefined,
           cumulativeTokenUsage: undefined,
         };
         contextRef = context;
+        const previousContext = sessions.get(input.threadId);
+        if (previousContext) {
+          yield* closeContext(previousContext);
+        }
         sessions.set(input.threadId, context);
 
         yield* emit({
@@ -251,6 +278,7 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
       context.activeAssistantItems = new Map();
       context.activeThinkingItems = new Map();
       context.activeCompletedAssistantItems = new Set();
+      context.activeTurnError = undefined;
       context.activeTokenUsage = undefined;
       context.activeTokenUsageBaseline = context.cumulativeTokenUsage;
       context.turns.push({ id: turnId, items: [] });
@@ -267,6 +295,33 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
       });
 
       yield* Effect.promise(async () => {
+        const completeInterruptedTurn = async () => {
+          updateDroidContextSession(context, { status: "ready", activeTurnId: undefined });
+          await emitNow({
+            ...eventBase(context, { turnId }),
+            type: "turn.completed",
+            payload: { state: "interrupted", stopReason: INTERRUPTED_TURN_MESSAGE },
+          });
+        };
+        const completeFailedTurn = async (message: string, emitRuntimeError: boolean) => {
+          updateDroidContextSession(context, {
+            status: "error",
+            activeTurnId: undefined,
+            lastError: message,
+          });
+          if (emitRuntimeError) {
+            await emitNow({
+              ...eventBase(context, { turnId }),
+              type: "runtime.error",
+              payload: { message, class: "provider_error" },
+            });
+          }
+          await emitNow({
+            ...eventBase(context, { turnId }),
+            type: "turn.completed",
+            payload: { state: "failed", errorMessage: message },
+          });
+        };
         try {
           const modelId = toModelId(input.modelSelection?.model);
           const reasoningEffort = toReasoningEffort(
@@ -298,6 +353,14 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
           )) {
             await handleDroidMessage({ context, turnId, message, eventBase, emitNow });
           }
+          if (abort.signal.aborted) {
+            await completeInterruptedTurn();
+            return;
+          }
+          if (context.activeTurnError) {
+            await completeFailedTurn(context.activeTurnError, false);
+            return;
+          }
           for (const [itemId, detail] of context.activeAssistantItems) {
             if (context.activeCompletedAssistantItems.has(itemId)) {
               continue;
@@ -318,22 +381,15 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
             },
           });
         } catch (cause) {
-          const message = cause instanceof Error ? cause.message : "Droid turn failed.";
-          updateDroidContextSession(context, {
-            status: "error",
-            activeTurnId: undefined,
-            lastError: message,
-          });
-          await emitNow({
-            ...eventBase(context, { turnId }),
-            type: "runtime.error",
-            payload: { message, class: "provider_error" },
-          });
-          await emitNow({
-            ...eventBase(context, { turnId }),
-            type: "turn.completed",
-            payload: { state: "failed", errorMessage: message },
-          });
+          if (abort.signal.aborted) {
+            await completeInterruptedTurn();
+            return;
+          }
+          await completeFailedTurn(errorMessage(cause, "Droid turn failed."), true);
+        } finally {
+          if (context.activeAbort === abort) {
+            context.activeAbort = undefined;
+          }
         }
       }).pipe(Effect.forkDetach);
 
@@ -345,8 +401,7 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
         const context = sessions.get(threadId);
         if (!context) return;
         sessions.delete(threadId);
-        context.activeAbort?.abort();
-        yield* Effect.tryPromise(() => context.droid.close()).pipe(Effect.ignore);
+        yield* closeContext(context);
         yield* emit({
           ...eventBase(context),
           type: "session.exited",
@@ -414,7 +469,7 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
         }),
       rollbackThread: (threadId, numTurns) =>
         Effect.gen(function* () {
-          const context = yield* requireSession(threadId);
+          yield* requireSession(threadId);
           if (!Number.isInteger(numTurns) || numTurns < 1) {
             return yield* new ProviderAdapterValidationError({
               provider: DROID_PROVIDER,
@@ -422,9 +477,12 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
               issue: "numTurns must be an integer >= 1.",
             });
           }
-          const nextLength = Math.max(0, context.turns.length - numTurns);
-          context.turns.splice(nextLength);
-          return { threadId, turns: context.turns };
+          return yield* new ProviderAdapterValidationError({
+            provider: DROID_PROVIDER,
+            operation: "rollbackThread",
+            issue:
+              "Droid rollback is not supported until T3 turns can be mapped to Droid rewind message IDs.",
+          });
         }),
       stopAll: () =>
         Effect.forEach([...sessions.keys()], stopSession, {

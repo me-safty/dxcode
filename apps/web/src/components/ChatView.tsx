@@ -1263,7 +1263,9 @@ export default function ChatView(props: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? ProviderDriverKind.make("codex"),
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
-  const runtimeMode = normalizeRuntimeModeForProvider(selectedProvider, rawRuntimeMode);
+  const runtimeMode = serverConfig
+    ? normalizeRuntimeModeForProvider(selectedProvider, rawRuntimeMode)
+    : rawRuntimeMode;
   useEffect(() => {
     if (runtimeMode === rawRuntimeMode) return;
     setComposerDraftRuntimeMode(composerDraftTarget, runtimeMode);
