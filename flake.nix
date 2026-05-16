@@ -1,11 +1,15 @@
 {
   description = "T3 Code - A harness for coding agents";
 
+  # ===== MAINTENANCE NOTES FOR MAINTAINERS =====
+  # To update to a new release:
+  #   1. Update `releaseTag` below (e.g., "v0.0.24")
+  #   2. Update `appimageHash` by running: nix hash url <download-url>
+  #   3. Optionally update `supportedSystems` if architecture support changes
+  # ==============================================
+
   inputs = {
-    # Pinned to stable to avoid breaking changes
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
-    
-    # Track upstream repo - run `nix flake update` to check for changes
     t3code-src = {
       url = "github:pingdotgg/t3code";
       flake = false;
@@ -15,54 +19,61 @@
   outputs = { self, nixpkgs, t3code-src }:
     let
       lib = nixpkgs.lib;
-      systems = [ "x86_64-linux" "aarch64-linux" ];
+
+      # ----- RELEASES -----
+      # Update this to the new version when a new release is published
+      # Format: "vX.Y.Z" (must match the GitHub release tag)
+      releaseTag = "v0.0.23";
+
+      # ----- DOWNLOAD -----
+      # Update this hash when the AppImage URL changes
+      # Run: nix hash url https://github.com/pingdotgg/t3code/releases/download/v0.0.23/T3-Code-0.0.23-x86_64.AppImage
+      appimageHash = "sha256-qMPSxQuiCwLT0As1foSDqaKoNMoLrjbKbDSwQW56T7g=";
+
+      # ----- PLATFORMS -----
+      # Currently only x86_64-linux is supported (no ARM AppImage available)
+      supportedSystems = [ "x86_64-linux" ];
+
+      # ----- DERIVATION -----
+      pkgs = import nixpkgs { system = "x86_64-linux"; };
+      version = lib.removePrefix "v" releaseTag;
+
+      appimage = pkgs.fetchurl {
+        url = "https://github.com/pingdotgg/t3code/releases/download/${releaseTag}/T3-Code-${version}-x86_64.AppImage";
+        sha256 = appimageHash;
+      };
     in
     {
-      packages = builtins.listToAttrs (
-        map (system:
-          let
-            pkgs = import nixpkgs { inherit system; };
-            
-            # Get version from upstream commit
-            version = t3code-src.shortRev or "latest";
-            
-            t3codeDerivation = pkgs.stdenv.mkDerivation {
-              pname = "t3code";
-              inherit version;
+      packages.x86_64-linux = pkgs.stdenv.mkDerivation {
+        pname = "t3code";
+        inherit version;
 
-              # Use latest release from GitHub - update hash when release changes
-              src = pkgs.fetchurl {
-                url = "https://github.com/pingdotgg/t3code/releases/download/v0.0.23/T3-Code-0.0.23-x86_64.AppImage";
-                sha256 = "sha256-qMPSxQuiCwLT0As1foSDqaKoNMoLrjbKbDSwQW56T7g=";
-              };
+        src = appimage;
 
-              # Build dependencies for appimage-run
-              nativeBuildInputs = with pkgs; [
-                appimage-run
-              ];
+        dontStrip = true;
+        dontUnpack = true;
 
-              # Don't strip - AppImages are ELF with appended squashfs
-              dontStrip = true;
-              dontBuild = true;
-              dontConfigure = true;
-              dontUnpack = true;
+        installPhase = ''
+          mkdir -p $out/bin
+          cp $src $out/bin/t3code.AppImage
+          chmod +x $out/bin/t3code.AppImage
 
-              installPhase = ''
-                mkdir -p $out
-                # Extract AppImage to $out
-                appimage-run -x $out $src
-              '';
+          # Launcher: uses appimage-run to execute the AppImage
+          cat > $out/bin/t3code << 'LAUNCHER'
+          #!/bin/sh
+          exec appimage-run "$(dirname "$0")/t3code.AppImage" "$@"
+          LAUNCHER
+          chmod +x $out/bin/t3code
+        '';
 
-              meta = {
-                description = "T3 Code - A harness for coding agents";
-                homepage = "https://t3.codes";
-                license = pkgs.lib.licenses.mit;
-                platforms = [ "x86_64-linux" "aarch64-linux" ];
-              };
-            };
-          in
-          lib.nameValuePair system t3codeDerivation
-        ) systems
-      );
+        meta = {
+          description = "T3 Code - A harness for coding agents";
+          homepage = "https://t3.codes";
+          license = pkgs.lib.licenses.mit;
+          platforms = supportedSystems;
+        };
+      };
+
+      defaultPackage = self.packages.x86_64-linux;
     };
 }
