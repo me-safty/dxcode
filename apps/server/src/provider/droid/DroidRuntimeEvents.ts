@@ -90,7 +90,7 @@ export async function handleDroidMessage(input: {
         if (text.length === 0) {
           continue;
         }
-        const itemId = block.id ?? `${message.messageId}-${index}`;
+        const itemId = `${message.messageId}-${index}`;
         if (block.type === "text") {
           const previousText = context.activeAssistantItems.get(itemId) ?? "";
           const delta = text.startsWith(previousText) ? text.slice(previousText.length) : text;

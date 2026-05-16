@@ -417,7 +417,7 @@ it.effect("does not duplicate Droid final create_message text after streaming de
                   type: DroidMessageType.CreateMessage,
                   messageId: "assistant-streamed",
                   role: "assistant",
-                  content: [{ type: "text", text: "stream" }],
+                  content: [{ type: "text", id: "sdk-text-block", text: "stream" }],
                 },
                 { type: DroidMessageType.TurnComplete, tokenUsage: null },
               ],
@@ -479,7 +479,12 @@ it.effect("does not duplicate Droid final thinking content after streaming delta
                   messageId: "assistant-thinking",
                   role: "assistant",
                   content: [
-                    { type: "thinking", signature: "test-signature", thinking: "think" },
+                    {
+                      type: "thinking",
+                      id: "sdk-thinking-block",
+                      signature: "test-signature",
+                      thinking: "think",
+                    },
                     { type: "text", text: "answer" },
                   ],
                 },
