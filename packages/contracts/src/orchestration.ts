@@ -126,9 +126,6 @@ export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 export const ProviderInteractionMode = Schema.Literals(["default", "plan"]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
-export const ProviderTurnDeliveryMode = Schema.Literals(["steer", "queue"]);
-export type ProviderTurnDeliveryMode = typeof ProviderTurnDeliveryMode.Type;
-export const DEFAULT_PROVIDER_TURN_DELIVERY_MODE: ProviderTurnDeliveryMode = "steer";
 export const ProviderRequestKind = Schema.Literals(["command", "file-read", "file-change"]);
 export type ProviderRequestKind = typeof ProviderRequestKind.Type;
 export const AssistantDeliveryMode = Schema.Literals(["buffered", "streaming"]);
@@ -621,23 +618,14 @@ const ThreadTurnStartSteerFields = {
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
-  delivery: Schema.Literal(DEFAULT_PROVIDER_TURN_DELIVERY_MODE).pipe(
-    Schema.withDecodingDefaultTypeKey(Effect.succeed(DEFAULT_PROVIDER_TURN_DELIVERY_MODE)),
-  ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
 } as const;
 
-export const ThreadTurnStartCommand = Schema.Union([
-  Schema.Struct({
-    ...ThreadTurnStartCommandBase,
-    ...ThreadTurnStartSteerFields,
-  }),
-  Schema.Struct({
-    ...ThreadTurnStartCommandBase,
-    delivery: Schema.Literal("queue"),
-  }),
-]);
+export const ThreadTurnStartCommand = Schema.Struct({
+  ...ThreadTurnStartCommandBase,
+  ...ThreadTurnStartSteerFields,
+});
 
 const ClientThreadTurnStartCommandBase = {
   type: Schema.Literal("thread.turn.start"),
@@ -652,23 +640,31 @@ const ClientThreadTurnStartSteerFields = {
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
-  delivery: Schema.Literal(DEFAULT_PROVIDER_TURN_DELIVERY_MODE).pipe(
-    Schema.withDecodingDefaultTypeKey(Effect.succeed(DEFAULT_PROVIDER_TURN_DELIVERY_MODE)),
-  ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
 } as const;
 
-const ClientThreadTurnStartCommand = Schema.Union([
-  Schema.Struct({
-    ...ClientThreadTurnStartCommandBase,
-    ...ClientThreadTurnStartSteerFields,
-  }),
-  Schema.Struct({
-    ...ClientThreadTurnStartCommandBase,
-    delivery: Schema.Literal("queue"),
-  }),
-]);
+const ClientThreadTurnStartCommand = Schema.Struct({
+  ...ClientThreadTurnStartCommandBase,
+  ...ClientThreadTurnStartSteerFields,
+});
+
+export const ThreadTurnQueueCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.queue"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  message: ThreadTurnStartMessage,
+  createdAt: IsoDateTime,
+});
+export type ThreadTurnQueueCommand = typeof ThreadTurnQueueCommand.Type;
+
+const ClientThreadTurnQueueCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.queue"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  message: ClientThreadTurnStartMessage,
+  createdAt: IsoDateTime,
+});
 
 const ThreadTurnInterruptCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.interrupt"),
@@ -731,6 +727,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
+  ThreadTurnQueueCommand,
   ThreadTurnInterruptCommand,
   ThreadQueuedTurnRetryCommand,
   ThreadApprovalRespondCommand,
@@ -753,6 +750,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
+  ClientThreadTurnQueueCommand,
   ThreadTurnInterruptCommand,
   ThreadQueuedTurnRetryCommand,
   ThreadApprovalRespondCommand,
@@ -1010,6 +1008,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   queueItemId: Schema.optional(TurnQueueItemId),
+  queuedRequest: Schema.optional(ThreadQueuedTurnRequest),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });

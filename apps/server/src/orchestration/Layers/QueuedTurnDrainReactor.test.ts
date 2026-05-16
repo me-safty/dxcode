@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { describe, expect, it } from "vitest";
@@ -267,6 +268,94 @@ describe("QueuedTurnDrainReactor", () => {
       expect(dispatched[0]).toMatchObject({
         type: "thread.queued-turn.send.start",
         mode: "recover",
+      });
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await runtime.dispose();
+    }
+  });
+
+  it("does not miss a drain trigger emitted during startup scan", async () => {
+    const dispatched: OrchestrationCommand[] = [];
+    const sessionSetEvent: OrchestrationEvent = {
+      sequence: 1,
+      eventId: EventId.make("evt-session-set-during-startup"),
+      aggregateKind: "thread",
+      aggregateId: threadId,
+      type: "thread.session-set",
+      occurredAt: now,
+      commandId: CommandId.make("cmd-session-set-during-startup"),
+      causationEventId: null,
+      correlationId: CommandId.make("cmd-session-set-during-startup"),
+      metadata: {},
+      payload: {
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+      },
+    };
+    const pubSub = Effect.runSync(PubSub.unbounded<OrchestrationEvent>());
+    let readCount = 0;
+    const layer = QueuedTurnDrainReactorLive.pipe(
+      Layer.provideMerge(
+        Layer.succeed(OrchestrationEngineService, {
+          readEvents: () => Stream.empty,
+          dispatch: (command) =>
+            Effect.sync(() => {
+              dispatched.push(command);
+              return { sequence: dispatched.length };
+            }),
+          streamDomainEvents: Stream.fromPubSub(pubSub),
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(ProjectionSnapshotQuery, {
+          getCommandReadModel: () =>
+            Effect.gen(function* () {
+              readCount += 1;
+              if (readCount === 1) {
+                yield* PubSub.publish(pubSub, sessionSetEvent);
+                return makeSnapshot({ sessionStatus: "ready", queuedStatuses: [] });
+              }
+              return makeSnapshot({ sessionStatus: "ready", queuedStatus: "pending" });
+            }),
+          getSnapshot: () => Effect.die("getSnapshot should not be called"),
+          getShellSnapshot: () => Effect.die("getShellSnapshot should not be called"),
+          getArchivedShellSnapshot: () =>
+            Effect.die("getArchivedShellSnapshot should not be called"),
+          getActiveProjectByWorkspaceRoot: () =>
+            Effect.die("getActiveProjectByWorkspaceRoot should not be called"),
+          getProjectShellById: () => Effect.die("getProjectShellById should not be called"),
+          getFirstActiveThreadIdByProjectId: () =>
+            Effect.die("getFirstActiveThreadIdByProjectId should not be called"),
+          getThreadDetailById: () => Effect.die("getThreadDetailById should not be called"),
+          getThreadCheckpointContext: () =>
+            Effect.die("getThreadCheckpointContext should not be called"),
+          getFullThreadDiffContext: () =>
+            Effect.die("getFullThreadDiffContext should not be called"),
+          getThreadShellById: () => Effect.die("getThreadShellById should not be called"),
+          getCounts: () => Effect.die("getCounts should not be called"),
+          getSnapshotSequence: () => Effect.die("getSnapshotSequence should not be called"),
+        }),
+      ),
+    );
+    const runtime = ManagedRuntime.make(layer);
+    const scope = await Effect.runPromise(Scope.make("sequential"));
+    try {
+      const reactor = await runtime.runPromise(Effect.service(QueuedTurnDrainReactor));
+      await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+      await Effect.runPromise(reactor.drain);
+      expect(dispatched).toHaveLength(1);
+      expect(dispatched[0]).toMatchObject({
+        type: "thread.queued-turn.send.start",
+        mode: "normal",
       });
     } finally {
       await Effect.runPromise(Scope.close(scope, Exit.void));

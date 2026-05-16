@@ -708,12 +708,13 @@ const make = Effect.gen(function* () {
       );
     };
 
-    const queuedTurn =
-      event.payload.queueItemId === undefined
-        ? null
-        : (thread.queuedTurns.find((entry) => entry.queueItemId === event.payload.queueItemId) ??
-          null);
-    if (event.payload.queueItemId !== undefined && queuedTurn === null) {
+    const queuedRequest =
+      event.payload.queuedRequest ??
+      (event.payload.queueItemId === undefined
+        ? undefined
+        : thread.queuedTurns.find((entry) => entry.queueItemId === event.payload.queueItemId)
+            ?.request);
+    if (event.payload.queueItemId !== undefined && queuedRequest === undefined) {
       const detail = `Queued turn '${event.payload.queueItemId}' was not found for turn start request.`;
       yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -723,9 +724,9 @@ const make = Effect.gen(function* () {
         turnId: null,
         createdAt: event.payload.createdAt,
       });
+      yield* dispatchQueuedTurnFailure(detail, "queued-turn-send-missing-request");
       return;
     }
-    const queuedRequest = queuedTurn?.request;
     const message =
       queuedRequest?.message ??
       thread.messages.find(

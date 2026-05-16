@@ -397,28 +397,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
-      if (command.delivery === "queue") {
-        const queuedRequest = {
-          message: command.message,
-        };
-        const turnQueuedEvent: Omit<OrchestrationEvent, "sequence"> = {
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          }),
-          causationEventId: userMessageEvent.eventId,
-          type: "thread.turn-queued",
-          payload: {
-            threadId: command.threadId,
-            queueItemId: yield* newTurnQueueItemId,
-            request: queuedRequest,
-            createdAt: command.createdAt,
-          },
-        };
-        return [userMessageEvent, turnQueuedEvent];
-      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
@@ -466,6 +444,53 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [userMessageEvent, turnStartRequestedEvent];
+    }
+
+    case "thread.turn.queue": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.message-sent",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.message.messageId,
+          role: "user",
+          text: command.message.text,
+          attachments: command.message.attachments,
+          turnId: null,
+          streaming: false,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+      const turnQueuedEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        causationEventId: userMessageEvent.eventId,
+        type: "thread.turn-queued",
+        payload: {
+          threadId: command.threadId,
+          queueItemId: yield* newTurnQueueItemId,
+          request: {
+            message: command.message,
+          },
+          createdAt: command.createdAt,
+        },
+      };
+      return [userMessageEvent, turnQueuedEvent];
     }
 
     case "thread.queued-turn.retry": {
@@ -550,6 +575,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           runtimeMode: thread.runtimeMode,
           interactionMode: thread.interactionMode,
           queueItemId: queuedTurn.queueItemId,
+          queuedRequest: queuedTurn.request,
           createdAt: command.createdAt,
         },
       };

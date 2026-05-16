@@ -513,8 +513,7 @@ describe("ProviderRuntimeIngestion", () => {
 
     await Effect.runPromise(
       harness.engine.dispatch({
-        type: "thread.turn.start",
-        delivery: "queue",
+        type: "thread.turn.queue",
         commandId: CommandId.make("cmd-turn-start-queued-runtime"),
         threadId,
         message: {
@@ -1129,7 +1128,6 @@ describe("ProviderRuntimeIngestion", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-plan-target"),
         threadId: targetThreadId,
         message: {
@@ -1299,7 +1297,6 @@ describe("ProviderRuntimeIngestion", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-plan-target-guarded"),
         threadId: targetThreadId,
         message: {
@@ -1462,7 +1459,6 @@ describe("ProviderRuntimeIngestion", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-plan-target-unrelated"),
         threadId: targetThreadId,
         message: {
@@ -2081,7 +2077,6 @@ describe("ProviderRuntimeIngestion", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-streaming-mode"),
         threadId: ThreadId.make("thread-1"),
         message: {

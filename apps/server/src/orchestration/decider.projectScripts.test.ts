@@ -223,7 +223,6 @@ describe("decider project scripts", () => {
       decideOrchestrationCommand({
         command: {
           type: "thread.turn.start",
-          delivery: "steer",
           commandId: CommandId.make("cmd-turn-start"),
           threadId: ThreadId.make("thread-1"),
           message: {
@@ -265,15 +264,14 @@ describe("decider project scripts", () => {
     });
   });
 
-  it("queues thread.turn.start without requesting provider send when delivery is queue", async () => {
+  it("queues thread.turn.queue without requesting provider send", async () => {
     const now = "2026-01-01T00:00:00.000Z";
     const readModel = await seedThreadReadModel(now);
 
     const result = await Effect.runPromise(
       decideOrchestrationCommand({
         command: {
-          type: "thread.turn.start",
-          delivery: "queue",
+          type: "thread.turn.queue",
           commandId: CommandId.make("cmd-turn-queue"),
           threadId: ThreadId.make("thread-1"),
           message: {
@@ -497,6 +495,12 @@ describe("decider project scripts", () => {
       threadId,
       queueItemId,
       messageId: asMessageId("message-user-queued"),
+      queuedRequest: {
+        message: {
+          messageId: asMessageId("message-user-queued"),
+          text: "queued hello",
+        },
+      },
       runtimeMode: "approval-required",
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     });

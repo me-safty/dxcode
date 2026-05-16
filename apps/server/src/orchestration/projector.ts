@@ -2,10 +2,14 @@ import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3to
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
-  OrchestrationQueuedTurn,
   OrchestrationSession,
   OrchestrationThread,
 } from "@t3tools/contracts";
+import {
+  applyQueuedTurnLifecycleEvent,
+  applyQueuedTurnLifecycleOperation,
+  getQueuedTurnLifecycleOperation,
+} from "@t3tools/shared/orchestrationQueue";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -50,26 +54,6 @@ function updateThread(
   patch: ThreadPatch,
 ): OrchestrationThread[] {
   return threads.map((thread) => (thread.id === threadId ? { ...thread, ...patch } : thread));
-}
-
-function updateQueuedTurn(
-  queuedTurns: ReadonlyArray<OrchestrationQueuedTurn>,
-  queueItemId: OrchestrationQueuedTurn["queueItemId"],
-  patch: Pick<OrchestrationQueuedTurn, "status" | "failureReason" | "updatedAt">,
-): OrchestrationQueuedTurn[] {
-  return queuedTurns.map((entry) => {
-    if (entry.queueItemId !== queueItemId) {
-      return entry;
-    }
-    return Object.assign({}, entry, patch);
-  });
-}
-
-function removeQueuedTurn(
-  queuedTurns: ReadonlyArray<OrchestrationQueuedTurn>,
-  queueItemId: OrchestrationQueuedTurn["queueItemId"],
-): OrchestrationQueuedTurn[] {
-  return queuedTurns.filter((entry) => entry.queueItemId !== queueItemId);
 }
 
 function decodeForEvent<A>(
@@ -458,32 +442,15 @@ export function projectEvent(
           return nextBase;
         }
 
-        const queuedTurn: OrchestrationQueuedTurn = yield* decodeForEvent(
-          OrchestrationQueuedTurn,
-          {
-            queueItemId: payload.queueItemId,
-            request: payload.request,
-            status: "pending",
-            failureReason: null,
-            createdAt: payload.createdAt,
-            updatedAt: payload.createdAt,
-          },
-          event.type,
-          "queuedTurn",
-        );
-
-        const queuedTurns = thread.queuedTurns.some(
-          (entry) => entry.queueItemId === queuedTurn.queueItemId,
-        )
-          ? thread.queuedTurns.map((entry) =>
-              entry.queueItemId === queuedTurn.queueItemId ? queuedTurn : entry,
-            )
-          : [...thread.queuedTurns, queuedTurn];
+        const operation = getQueuedTurnLifecycleOperation({
+          type: event.type,
+          payload,
+        });
 
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
-            queuedTurns,
+            queuedTurns: applyQueuedTurnLifecycleOperation(thread.queuedTurns, operation),
             updatedAt: event.occurredAt,
           }),
         };
@@ -504,10 +471,9 @@ export function projectEvent(
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
-              queuedTurns: updateQueuedTurn(thread.queuedTurns, payload.queueItemId, {
-                status: "sending",
-                failureReason: null,
-                updatedAt: payload.createdAt,
+              queuedTurns: applyQueuedTurnLifecycleEvent(thread.queuedTurns, {
+                type: event.type,
+                payload,
               }),
               updatedAt: event.occurredAt,
             }),
@@ -530,7 +496,10 @@ export function projectEvent(
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
-              queuedTurns: removeQueuedTurn(thread.queuedTurns, payload.queueItemId),
+              queuedTurns: applyQueuedTurnLifecycleEvent(thread.queuedTurns, {
+                type: event.type,
+                payload,
+              }),
               updatedAt: event.occurredAt,
             }),
           };
@@ -552,10 +521,9 @@ export function projectEvent(
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
-              queuedTurns: updateQueuedTurn(thread.queuedTurns, payload.queueItemId, {
-                status: "pending",
-                failureReason: null,
-                updatedAt: payload.createdAt,
+              queuedTurns: applyQueuedTurnLifecycleEvent(thread.queuedTurns, {
+                type: event.type,
+                payload,
               }),
               updatedAt: event.occurredAt,
             }),
@@ -578,10 +546,9 @@ export function projectEvent(
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
-              queuedTurns: updateQueuedTurn(thread.queuedTurns, payload.queueItemId, {
-                status: "failed",
-                failureReason: payload.reason,
-                updatedAt: payload.createdAt,
+              queuedTurns: applyQueuedTurnLifecycleEvent(thread.queuedTurns, {
+                type: event.type,
+                payload,
               }),
               updatedAt: event.occurredAt,
             }),

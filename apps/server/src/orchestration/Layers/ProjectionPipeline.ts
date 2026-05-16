@@ -1,11 +1,13 @@
 import {
-  OrchestrationQueuedTurnStatus,
   ApprovalRequestId,
   type ChatAttachment,
   type OrchestrationEvent,
   ThreadId,
-  type TurnQueueItemId,
 } from "@t3tools/contracts";
+import {
+  getQueuedTurnLifecycleOperation,
+  type QueuedTurnLifecycleOperation,
+} from "@t3tools/shared/orchestrationQueue";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -986,23 +988,18 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       });
     });
 
-    const updateQueuedTurnStatus = Effect.fn("updateQueuedTurnStatus")(function* (input: {
-      readonly queueItemId: TurnQueueItemId;
-      readonly status: OrchestrationQueuedTurnStatus;
-      readonly failureReason: string | null;
-      readonly updatedAt: string;
-    }) {
+    const updateQueuedTurnStatus = Effect.fn("updateQueuedTurnStatus")(function* (
+      operation: Extract<QueuedTurnLifecycleOperation, { kind: "update" }>,
+    ) {
       const existing = yield* projectionQueuedTurnRepository.getByQueueItemId({
-        queueItemId: input.queueItemId,
+        queueItemId: operation.queueItemId,
       });
       if (Option.isNone(existing)) {
         return;
       }
       yield* projectionQueuedTurnRepository.upsert({
         ...existing.value,
-        status: input.status,
-        failureReason: input.failureReason,
-        updatedAt: input.updatedAt,
+        ...operation.patch,
       });
     });
 
@@ -1011,49 +1008,35 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     )(function* (event, _attachmentSideEffects) {
       switch (event.type) {
         case "thread.turn-queued":
-          yield* projectionQueuedTurnRepository.upsert({
-            queueItemId: event.payload.queueItemId,
-            threadId: event.payload.threadId,
-            request: event.payload.request,
-            status: "pending",
-            failureReason: null,
-            createdAt: event.payload.createdAt,
-            updatedAt: event.payload.createdAt,
-          });
-          return;
-
         case "thread.queued-turn-send-started":
-          yield* updateQueuedTurnStatus({
-            queueItemId: event.payload.queueItemId,
-            status: "sending",
-            failureReason: null,
-            updatedAt: event.payload.createdAt,
-          });
-          return;
-
         case "thread.queued-turn-resolved":
-          yield* projectionQueuedTurnRepository.deleteByQueueItemId({
-            queueItemId: event.payload.queueItemId,
-          });
-          return;
-
         case "thread.queued-turn-requeued":
-          yield* updateQueuedTurnStatus({
-            queueItemId: event.payload.queueItemId,
-            status: "pending",
-            failureReason: null,
-            updatedAt: event.payload.createdAt,
-          });
-          return;
+        case "thread.queued-turn-send-failed": {
+          const operation = getQueuedTurnLifecycleOperation(event);
+          switch (operation.kind) {
+            case "upsert":
+              yield* projectionQueuedTurnRepository.upsert({
+                queueItemId: operation.queuedTurn.queueItemId,
+                threadId: operation.threadId,
+                request: operation.queuedTurn.request,
+                status: operation.queuedTurn.status,
+                failureReason: operation.queuedTurn.failureReason,
+                createdAt: operation.queuedTurn.createdAt,
+                updatedAt: operation.queuedTurn.updatedAt,
+              });
+              return;
 
-        case "thread.queued-turn-send-failed":
-          yield* updateQueuedTurnStatus({
-            queueItemId: event.payload.queueItemId,
-            status: "failed",
-            failureReason: event.payload.reason,
-            updatedAt: event.payload.createdAt,
-          });
-          return;
+            case "update":
+              yield* updateQueuedTurnStatus(operation);
+              return;
+
+            case "delete":
+              yield* projectionQueuedTurnRepository.deleteByQueueItemId({
+                queueItemId: operation.queueItemId,
+              });
+              return;
+          }
+        }
 
         case "thread.deleted":
           yield* projectionQueuedTurnRepository.deleteByThreadId({

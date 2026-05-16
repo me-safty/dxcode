@@ -5,7 +5,6 @@ import * as Schema from "effect/Schema";
 
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
-  DEFAULT_PROVIDER_TURN_DELIVERY_MODE,
   DEFAULT_RUNTIME_MODE,
   ModelSelection,
   OrchestrationCommand,
@@ -25,6 +24,7 @@ import {
   ThreadQueuedTurnRequeuedPayload,
   ThreadQueuedTurnResolvedPayload,
   ThreadQueuedTurnSendStartedPayload,
+  ThreadTurnQueueCommand,
   ThreadTurnQueuedPayload,
   ThreadTurnStartCommand,
   ThreadTurnStartRequestedPayload,
@@ -38,6 +38,7 @@ const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateComma
 const decodeProjectCreatedPayload = Schema.decodeUnknownEffect(ProjectCreatedPayload);
 const decodeProjectMetaUpdatedPayload = Schema.decodeUnknownEffect(ProjectMetaUpdatedPayload);
 const decodeThreadTurnStartCommand = Schema.decodeUnknownEffect(ThreadTurnStartCommand);
+const decodeThreadTurnQueueCommand = Schema.decodeUnknownEffect(ThreadTurnQueueCommand);
 const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
   ThreadTurnStartRequestedPayload,
 );
@@ -58,12 +59,6 @@ const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLa
 const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
 const encodeThreadCreatedPayload = Schema.encodeEffect(ThreadCreatedPayload);
-
-function assertSteerThreadTurnStartCommand(
-  command: typeof ThreadTurnStartCommand.Type,
-): asserts command is Extract<typeof ThreadTurnStartCommand.Type, { readonly delivery: "steer" }> {
-  assert.strictEqual(command.delivery, "steer");
-}
 
 function getOptionValue(
   options: ReadonlyArray<{ id: string; value: unknown }> | undefined,
@@ -254,64 +249,53 @@ it.effect("decodes thread.turn.start defaults for provider and runtime mode", ()
       },
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    assertSteerThreadTurnStartCommand(parsed);
     assert.strictEqual(parsed.modelSelection, undefined);
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
     assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
-    assert.strictEqual(parsed.delivery, DEFAULT_PROVIDER_TURN_DELIVERY_MODE);
   }),
 );
 
-it.effect(
-  "preserves explicit provider, runtime mode, and delivery in steer thread.turn.start",
-  () =>
-    Effect.gen(function* () {
-      const parsed = yield* decodeThreadTurnStartCommand({
-        type: "thread.turn.start",
-        commandId: "cmd-turn-2",
-        threadId: "thread-1",
-        message: {
-          messageId: "msg-2",
-          role: "user",
-          text: "hello",
-          attachments: [],
-        },
-        modelSelection: {
-          provider: "codex",
-          model: "gpt-5.4",
-        },
-        delivery: "steer",
-        runtimeMode: "full-access",
-        createdAt: "2026-01-01T00:00:00.000Z",
-      });
-      assertSteerThreadTurnStartCommand(parsed);
-      assert.strictEqual(parsed.modelSelection?.instanceId, "codex");
-      assert.strictEqual(parsed.runtimeMode, "full-access");
-      assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
-      assert.strictEqual(parsed.delivery, "steer");
-    }),
-);
-
-it.effect("drops steer-only fields in queue thread.turn.start", () =>
+it.effect("preserves explicit provider and runtime mode in thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({
       type: "thread.turn.start",
-      commandId: "cmd-turn-queue-invalid",
+      commandId: "cmd-turn-2",
       threadId: "thread-1",
       message: {
-        messageId: "msg-queue-invalid",
+        messageId: "msg-2",
         role: "user",
         text: "hello",
         attachments: [],
       },
-      delivery: "queue",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
       runtimeMode: "full-access",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    assert.strictEqual(parsed.delivery, "queue");
-    assert.strictEqual("runtimeMode" in parsed, false);
-    assert.strictEqual("interactionMode" in parsed, false);
-    assert.strictEqual("modelSelection" in parsed, false);
+    assert.strictEqual(parsed.modelSelection?.instanceId, "codex");
+    assert.strictEqual(parsed.runtimeMode, "full-access");
+    assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+  }),
+);
+
+it.effect("decodes thread.turn.queue separately from thread.turn.start", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnQueueCommand({
+      type: "thread.turn.queue",
+      commandId: "cmd-turn-queue",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-queue",
+        role: "user",
+        text: "hello",
+        attachments: [],
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.type, "thread.turn.queue");
+    assert.strictEqual(parsed.message.messageId, "msg-queue");
   }),
 );
 
@@ -350,7 +334,6 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
       },
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    assertSteerThreadTurnStartCommand(parsed);
     assert.strictEqual(parsed.bootstrap?.createThread?.projectId, "project-1");
     assert.strictEqual(parsed.bootstrap?.prepareWorktree?.baseBranch, "main");
     assert.strictEqual(parsed.bootstrap?.runSetupScript, true);
@@ -475,7 +458,6 @@ it.effect("accepts provider-scoped model options in thread.turn.start", () =>
       },
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    assertSteerThreadTurnStartCommand(parsed);
     assert.strictEqual(parsed.modelSelection?.instanceId, "codex");
     assert.strictEqual(getOptionValue(parsed.modelSelection?.options, "reasoningEffort"), "high");
     assert.strictEqual(getOptionValue(parsed.modelSelection?.options, "fastMode"), true);
@@ -575,7 +557,6 @@ it.effect("accepts a title seed in thread.turn.start", () =>
       titleSeed: "Investigate reconnect failures",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    assertSteerThreadTurnStartCommand(parsed);
     assert.strictEqual(parsed.titleSeed, "Investigate reconnect failures");
   }),
 );
@@ -598,7 +579,6 @@ it.effect("accepts a source proposed plan reference in thread.turn.start", () =>
       },
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    assertSteerThreadTurnStartCommand(parsed);
     assert.deepStrictEqual(parsed.sourceProposedPlan, {
       threadId: "thread-1",
       planId: "plan-1",
@@ -613,11 +593,15 @@ it.effect(
       const parsed = yield* decodeThreadTurnStartRequestedPayload({
         threadId: "thread-1",
         messageId: "msg-1",
+        queueItemId: "queue-item-1",
+        queuedRequest: makeQueuedTurnRequest("msg-1"),
         createdAt: "2026-01-01T00:00:00.000Z",
       });
       assert.strictEqual(parsed.modelSelection, undefined);
       assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
       assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+      assert.strictEqual(parsed.queueItemId, "queue-item-1");
+      assert.strictEqual(parsed.queuedRequest?.message.messageId, "msg-1");
       assert.strictEqual(parsed.sourceProposedPlan, undefined);
     }),
 );

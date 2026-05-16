@@ -421,7 +421,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-1"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -461,8 +460,7 @@ describe("ProviderCommandReactor", () => {
 
     await Effect.runPromise(
       harness.engine.dispatch({
-        type: "thread.turn.start",
-        delivery: "queue",
+        type: "thread.turn.queue",
         commandId: CommandId.make("cmd-queued-turn-start"),
         threadId,
         message: {
@@ -555,7 +553,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-title"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -605,7 +602,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-title-preserve"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -651,7 +647,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-title-formatted"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -713,7 +708,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-branch-model"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -743,7 +737,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-fast"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -791,7 +784,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-claude-effort"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -842,7 +834,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-claude-fast-mode"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -898,7 +889,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-plan"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -927,7 +917,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-unsupported-1"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -947,7 +936,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-unsupported-2"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -982,7 +970,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-provider-first"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1029,7 +1016,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-unchanged-1"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1050,7 +1036,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-unchanged-2"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1077,7 +1062,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-compatible-codex-1"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1101,7 +1085,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-compatible-codex-2"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1146,7 +1129,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-workspace-1"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1179,7 +1161,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-workspace-2"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1221,7 +1202,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-claude-effort-1"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1247,7 +1227,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-claude-effort-2"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1296,7 +1275,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-runtime-mode-1"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1333,7 +1311,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-runtime-mode-2"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1431,7 +1408,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-restart-failure-1"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1487,7 +1463,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-provider-switch-1"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1508,7 +1483,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-provider-switch-2"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1580,7 +1554,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-stopped-provider-switch"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1684,7 +1657,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-stale"),
         threadId: ThreadId.make("thread-1"),
         message: {
@@ -1750,7 +1722,6 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        delivery: "steer",
         commandId: CommandId.make("cmd-turn-start-missing-instance"),
         threadId: ThreadId.make("thread-1"),
         message: {

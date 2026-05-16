@@ -33,19 +33,21 @@ const serverCommandId = (tag: string) =>
 
 type DrainMode = "normal" | "recover";
 
-const isPendingQueuedTurn = (entry: OrchestrationQueuedTurn) => entry.status === "pending";
-const isRecoverableQueuedTurn = (entry: OrchestrationQueuedTurn) => entry.status === "sending";
-const hasInFlightQueuedTurn = (thread: OrchestrationThread) =>
-  thread.queuedTurns.some(isRecoverableQueuedTurn);
-const hasPendingQueuedTurn = (thread: OrchestrationThread) =>
-  thread.queuedTurns.some(isPendingQueuedTurn);
-const hasRecoverableQueuedTurn = (thread: OrchestrationThread) =>
-  thread.queuedTurns.some(isRecoverableQueuedTurn);
+function getQueuedTurnDrainMode(thread: OrchestrationThread): DrainMode | null {
+  if (thread.session?.status !== "ready") {
+    return null;
+  }
+  if (thread.queuedTurns.some((entry: OrchestrationQueuedTurn) => entry.status === "sending")) {
+    return "recover";
+  }
+  if (thread.queuedTurns.some((entry: OrchestrationQueuedTurn) => entry.status === "pending")) {
+    return "normal";
+  }
+  return null;
+}
 
-const hasQueuedTurnForDrainMode = (mode: DrainMode, thread: OrchestrationThread) =>
-  mode === "recover"
-    ? hasRecoverableQueuedTurn(thread)
-    : !hasInFlightQueuedTurn(thread) && hasPendingQueuedTurn(thread);
+const canDrainWithMode = (thread: OrchestrationThread, mode: DrainMode) =>
+  getQueuedTurnDrainMode(thread) === mode;
 
 const make = Effect.fn("makeQueuedTurnDrainReactor")(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -60,10 +62,7 @@ const make = Effect.fn("makeQueuedTurnDrainReactor")(function* () {
     if (!thread) {
       return;
     }
-    if (thread.session?.status !== "ready") {
-      return;
-    }
-    if (!hasQueuedTurnForDrainMode(mode, thread)) {
+    if (!canDrainWithMode(thread, mode)) {
       return;
     }
 
@@ -112,17 +111,11 @@ const make = Effect.fn("makeQueuedTurnDrainReactor")(function* () {
     const snapshot = yield* projectionSnapshotQuery.getCommandReadModel();
     const recoverThreadIds = new Set(
       snapshot.threads
-        .filter((thread) => thread.session?.status === "ready" && hasRecoverableQueuedTurn(thread))
+        .filter((thread) => getQueuedTurnDrainMode(thread) === "recover")
         .map((thread) => thread.id),
     );
     const normalThreadIds = snapshot.threads
-      .filter(
-        (thread) =>
-          !recoverThreadIds.has(thread.id) &&
-          thread.session?.status === "ready" &&
-          !hasInFlightQueuedTurn(thread) &&
-          hasPendingQueuedTurn(thread),
-      )
+      .filter((thread) => getQueuedTurnDrainMode(thread) === "normal")
       .map((thread) => thread.id);
 
     yield* Effect.forEach(
@@ -138,13 +131,6 @@ const make = Effect.fn("makeQueuedTurnDrainReactor")(function* () {
   });
 
   const start: QueuedTurnDrainReactorShape["start"] = Effect.fn("start")(function* () {
-    yield* enqueueInitialDrainAttempts().pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("queued turn drain reactor failed initial drain scan", {
-          cause: Cause.pretty(cause),
-        }),
-      ),
-    );
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
         if (
@@ -161,6 +147,14 @@ const make = Effect.fn("makeQueuedTurnDrainReactor")(function* () {
             cause: Cause.pretty(cause),
           }),
         ),
+      ),
+    );
+    yield* Effect.yieldNow;
+    yield* enqueueInitialDrainAttempts().pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("queued turn drain reactor failed initial drain scan", {
+          cause: Cause.pretty(cause),
+        }),
       ),
     );
   });

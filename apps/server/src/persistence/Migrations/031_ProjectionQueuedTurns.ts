@@ -5,6 +5,11 @@ export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   yield* sql`
+    ALTER TABLE projection_turns
+    ADD COLUMN queue_item_id TEXT
+  `;
+
+  yield* sql`
     CREATE TABLE IF NOT EXISTS projection_queued_turns (
       queue_item_id TEXT PRIMARY KEY,
       thread_id TEXT NOT NULL,

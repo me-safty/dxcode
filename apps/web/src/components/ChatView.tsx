@@ -2950,8 +2950,7 @@ export default function ChatView(props: ChatViewProps) {
       const turnStartCommand =
         delivery === "queue"
           ? {
-              type: "thread.turn.start" as const,
-              delivery: "queue" as const,
+              type: "thread.turn.queue" as const,
               commandId: newCommandId(),
               threadId: threadIdForSend,
               message: {
@@ -2964,7 +2963,6 @@ export default function ChatView(props: ChatViewProps) {
             }
           : {
               type: "thread.turn.start" as const,
-              delivery: "steer" as const,
               commandId: newCommandId(),
               threadId: threadIdForSend,
               message: {
@@ -3245,7 +3243,6 @@ export default function ChatView(props: ChatViewProps) {
       sendInFlightRef.current = true;
       beginLocalDispatch({
         preparingWorktree: false,
-        delivery: "steer",
         messageId: messageIdForSend,
       });
       setThreadError(threadIdForSend, null);
@@ -3285,7 +3282,6 @@ export default function ChatView(props: ChatViewProps) {
 
         await api.orchestration.dispatchCommand({
           type: "thread.turn.start",
-          delivery: "steer",
           commandId: newCommandId(),
           threadId: threadIdForSend,
           message: {
@@ -3411,7 +3407,6 @@ export default function ChatView(props: ChatViewProps) {
       .then(() => {
         return api.orchestration.dispatchCommand({
           type: "thread.turn.start",
-          delivery: "steer",
           commandId: newCommandId(),
           threadId: nextThreadId,
           message: {

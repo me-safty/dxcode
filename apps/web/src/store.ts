@@ -23,6 +23,7 @@ import { isProviderDriverKind, ProviderDriverKind } from "@t3tools/contracts";
 import type { ThreadId, TurnId, TurnQueueItemId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
+import { applyQueuedTurnLifecycleEvent } from "@t3tools/shared/orchestrationQueue";
 import { create } from "zustand";
 import {
   type ChatMessage,
@@ -260,16 +261,6 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
   };
-}
-
-function updateQueuedTurn(
-  queuedTurns: ReadonlyArray<OrchestrationQueuedTurn>,
-  queueItemId: OrchestrationQueuedTurn["queueItemId"],
-  patch: Pick<OrchestrationQueuedTurn, "status" | "failureReason" | "updatedAt">,
-): OrchestrationQueuedTurn[] {
-  return queuedTurns.map((entry) =>
-    entry.queueItemId !== queueItemId ? entry : { ...entry, ...patch },
-  );
 }
 
 function buildQueuedTurnSlice(thread: Thread): {
@@ -1384,68 +1375,13 @@ function applyEnvironmentOrchestrationEvent(
       }));
 
     case "thread.turn-queued":
-      return updateThreadState(state, event.payload.threadId, (thread) => {
-        const queuedTurn: OrchestrationQueuedTurn = {
-          queueItemId: event.payload.queueItemId,
-          request: event.payload.request,
-          status: "pending",
-          failureReason: null,
-          createdAt: event.payload.createdAt,
-          updatedAt: event.payload.createdAt,
-        };
-        const queuedTurns = thread.queuedTurns.some(
-          (entry) => entry.queueItemId === queuedTurn.queueItemId,
-        )
-          ? thread.queuedTurns.map((entry) =>
-              entry.queueItemId !== queuedTurn.queueItemId ? entry : queuedTurn,
-            )
-          : [...thread.queuedTurns, queuedTurn];
-        return {
-          ...thread,
-          queuedTurns,
-          updatedAt: event.occurredAt,
-        };
-      });
-
     case "thread.queued-turn-send-started":
-      return updateThreadState(state, event.payload.threadId, (thread) => ({
-        ...thread,
-        queuedTurns: updateQueuedTurn(thread.queuedTurns, event.payload.queueItemId, {
-          status: "sending",
-          failureReason: null,
-          updatedAt: event.payload.createdAt,
-        }),
-        updatedAt: event.occurredAt,
-      }));
-
     case "thread.queued-turn-send-failed":
-      return updateThreadState(state, event.payload.threadId, (thread) => ({
-        ...thread,
-        queuedTurns: updateQueuedTurn(thread.queuedTurns, event.payload.queueItemId, {
-          status: "failed",
-          failureReason: event.payload.reason,
-          updatedAt: event.payload.createdAt,
-        }),
-        updatedAt: event.occurredAt,
-      }));
-
     case "thread.queued-turn-requeued":
-      return updateThreadState(state, event.payload.threadId, (thread) => ({
-        ...thread,
-        queuedTurns: updateQueuedTurn(thread.queuedTurns, event.payload.queueItemId, {
-          status: "pending",
-          failureReason: null,
-          updatedAt: event.payload.createdAt,
-        }),
-        updatedAt: event.occurredAt,
-      }));
-
     case "thread.queued-turn-resolved":
       return updateThreadState(state, event.payload.threadId, (thread) => ({
         ...thread,
-        queuedTurns: thread.queuedTurns.filter(
-          (entry) => entry.queueItemId !== event.payload.queueItemId,
-        ),
+        queuedTurns: applyQueuedTurnLifecycleEvent(thread.queuedTurns, event),
         updatedAt: event.occurredAt,
       }));
 

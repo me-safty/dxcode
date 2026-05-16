@@ -46,13 +46,14 @@ function mapProjectionQueuedTurnRow(
   };
 }
 
-const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+const makeProjectionQueuedTurnRepository = Effect.fn("makeProjectionQueuedTurnRepository")(
+  function* () {
+    const sql = yield* SqlClient.SqlClient;
 
-  const upsertProjectionQueuedTurnRow = SqlSchema.void({
-    Request: ProjectionQueuedTurn,
-    execute: (row) =>
-      sql`
+    const upsertProjectionQueuedTurnRow = SqlSchema.void({
+      Request: ProjectionQueuedTurn,
+      execute: (row) =>
+        sql`
         INSERT INTO projection_queued_turns (
           queue_item_id,
           thread_id,
@@ -80,13 +81,13 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
           created_at = excluded.created_at,
           updated_at = excluded.updated_at
       `,
-  });
+    });
 
-  const getProjectionQueuedTurnRow = SqlSchema.findOneOption({
-    Request: GetProjectionQueuedTurnInput,
-    Result: ProjectionQueuedTurnRow,
-    execute: ({ queueItemId }) =>
-      sql`
+    const getProjectionQueuedTurnRow = SqlSchema.findOneOption({
+      Request: GetProjectionQueuedTurnInput,
+      Result: ProjectionQueuedTurnRow,
+      execute: ({ queueItemId }) =>
+        sql`
         SELECT
           queue.queue_item_id AS "queueItemId",
           queue.thread_id AS "threadId",
@@ -98,14 +99,14 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
         FROM projection_queued_turns AS queue
         WHERE queue.queue_item_id = ${queueItemId}
       `,
-  });
+    });
 
-  const listProjectionQueuedTurnRows = SqlSchema.findAll({
-    Request: ListProjectionQueuedTurnsInput,
-    Result: ProjectionQueuedTurnRow,
-    execute: (input) =>
-      input.threadId === undefined
-        ? sql`
+    const listProjectionQueuedTurnRows = SqlSchema.findAll({
+      Request: ListProjectionQueuedTurnsInput,
+      Result: ProjectionQueuedTurnRow,
+      execute: (input) =>
+        input.threadId === undefined
+          ? sql`
             SELECT
               queue.queue_item_id AS "queueItemId",
               queue.thread_id AS "threadId",
@@ -117,7 +118,7 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
             FROM projection_queued_turns AS queue
             ORDER BY queue.created_at ASC, queue.queue_item_id ASC
           `
-        : sql`
+          : sql`
             SELECT
               queue.queue_item_id AS "queueItemId",
               queue.thread_id AS "threadId",
@@ -130,73 +131,76 @@ const makeProjectionQueuedTurnRepository = Effect.gen(function* () {
             WHERE queue.thread_id = ${input.threadId}
             ORDER BY queue.created_at ASC, queue.queue_item_id ASC
           `,
-  });
+    });
 
-  const deleteProjectionQueuedTurnRows = SqlSchema.void({
-    Request: DeleteProjectionQueuedTurnsInput,
-    execute: ({ threadId }) =>
-      sql`
+    const deleteProjectionQueuedTurnRows = SqlSchema.void({
+      Request: DeleteProjectionQueuedTurnsInput,
+      execute: ({ threadId }) =>
+        sql`
         DELETE FROM projection_queued_turns
         WHERE thread_id = ${threadId}
       `,
-  });
+    });
 
-  const deleteProjectionQueuedTurnRowByQueueItemId = SqlSchema.void({
-    Request: DeleteProjectionQueuedTurnByQueueItemIdInput,
-    execute: ({ queueItemId }) =>
-      sql`
+    const deleteProjectionQueuedTurnRowByQueueItemId = SqlSchema.void({
+      Request: DeleteProjectionQueuedTurnByQueueItemIdInput,
+      execute: ({ queueItemId }) =>
+        sql`
         DELETE FROM projection_queued_turns
         WHERE queue_item_id = ${queueItemId}
       `,
-  });
+    });
 
-  const upsert: ProjectionQueuedTurnRepositoryShape["upsert"] = (row) =>
-    upsertProjectionQueuedTurnRow(row).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionQueuedTurnRepository.upsert:query")),
-    );
+    const upsert: ProjectionQueuedTurnRepositoryShape["upsert"] = (row) =>
+      upsertProjectionQueuedTurnRow(row).pipe(
+        Effect.mapError(toPersistenceSqlError("ProjectionQueuedTurnRepository.upsert:query")),
+      );
 
-  const getByQueueItemId: ProjectionQueuedTurnRepositoryShape["getByQueueItemId"] = (input) =>
-    getProjectionQueuedTurnRow(input).pipe(
-      Effect.map(
-        Option.map((row: Schema.Schema.Type<typeof ProjectionQueuedTurnRow>) =>
-          mapProjectionQueuedTurnRow(row),
+    const getByQueueItemId: ProjectionQueuedTurnRepositoryShape["getByQueueItemId"] = (input) =>
+      getProjectionQueuedTurnRow(input).pipe(
+        Effect.map(
+          Option.map((row: Schema.Schema.Type<typeof ProjectionQueuedTurnRow>) =>
+            mapProjectionQueuedTurnRow(row),
+          ),
         ),
-      ),
-      Effect.mapError(
-        toPersistenceSqlError("ProjectionQueuedTurnRepository.getByQueueItemId:query"),
-      ),
-    );
+        Effect.mapError(
+          toPersistenceSqlError("ProjectionQueuedTurnRepository.getByQueueItemId:query"),
+        ),
+      );
 
-  const list: ProjectionQueuedTurnRepositoryShape["list"] = (input = {}) =>
-    listProjectionQueuedTurnRows(input).pipe(
-      Effect.map((rows) => rows.map(mapProjectionQueuedTurnRow)),
-      Effect.mapError(toPersistenceSqlError("ProjectionQueuedTurnRepository.list:query")),
-    );
+    const list: ProjectionQueuedTurnRepositoryShape["list"] = (input = {}) =>
+      listProjectionQueuedTurnRows(input).pipe(
+        Effect.map((rows) => rows.map(mapProjectionQueuedTurnRow)),
+        Effect.mapError(toPersistenceSqlError("ProjectionQueuedTurnRepository.list:query")),
+      );
 
-  const deleteByThreadId: ProjectionQueuedTurnRepositoryShape["deleteByThreadId"] = (input) =>
-    deleteProjectionQueuedTurnRows(input).pipe(
-      Effect.mapError(
-        toPersistenceSqlError("ProjectionQueuedTurnRepository.deleteByThreadId:query"),
-      ),
-    );
+    const deleteByThreadId: ProjectionQueuedTurnRepositoryShape["deleteByThreadId"] = (input) =>
+      deleteProjectionQueuedTurnRows(input).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("ProjectionQueuedTurnRepository.deleteByThreadId:query"),
+        ),
+      );
 
-  const deleteByQueueItemId: ProjectionQueuedTurnRepositoryShape["deleteByQueueItemId"] = (input) =>
-    deleteProjectionQueuedTurnRowByQueueItemId(input).pipe(
-      Effect.mapError(
-        toPersistenceSqlError("ProjectionQueuedTurnRepository.deleteByQueueItemId:query"),
-      ),
-    );
+    const deleteByQueueItemId: ProjectionQueuedTurnRepositoryShape["deleteByQueueItemId"] = (
+      input,
+    ) =>
+      deleteProjectionQueuedTurnRowByQueueItemId(input).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("ProjectionQueuedTurnRepository.deleteByQueueItemId:query"),
+        ),
+      );
 
-  return {
-    upsert,
-    getByQueueItemId,
-    list,
-    deleteByThreadId,
-    deleteByQueueItemId,
-  } satisfies ProjectionQueuedTurnRepositoryShape;
-});
+    return {
+      upsert,
+      getByQueueItemId,
+      list,
+      deleteByThreadId,
+      deleteByQueueItemId,
+    } satisfies ProjectionQueuedTurnRepositoryShape;
+  },
+);
 
 export const ProjectionQueuedTurnRepositoryLive = Layer.effect(
   ProjectionQueuedTurnRepository,
-  makeProjectionQueuedTurnRepository,
+  makeProjectionQueuedTurnRepository(),
 );
