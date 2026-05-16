@@ -141,7 +141,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [CLAUDE_DRIVER_KIND]: "claude-sonnet-4-6",
   [CURSOR_DRIVER_KIND]: "auto",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
-  [OLLAMA_DRIVER_KIND]: "llama3.2",
+  [OLLAMA_DRIVER_KIND]: "qwen2.5:7b",
 };
 
 /** Per-provider text generation model defaults. */
@@ -152,7 +152,7 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   [CLAUDE_DRIVER_KIND]: "claude-haiku-4-5",
   [CURSOR_DRIVER_KIND]: "composer-2",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
-  [OLLAMA_DRIVER_KIND]: "llama3.2",
+  [OLLAMA_DRIVER_KIND]: "qwen2.5:7b",
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
