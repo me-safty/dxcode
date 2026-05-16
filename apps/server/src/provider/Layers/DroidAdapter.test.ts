@@ -676,6 +676,54 @@ it.effect("completes aborted Droid streams as interrupted", () =>
   ).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("rejects overlapping Droid turns on the same thread", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let streamCalls = 0;
+      let releaseTurn: (() => void) | undefined;
+      const turnRelease = new Promise<void>((resolve) => {
+        releaseTurn = resolve;
+      });
+      const adapter = yield* makeDroidAdapter(settings, {
+        sdk: {
+          createSession: async () =>
+            fakeSession({
+              onStream: async function* () {
+                streamCalls += 1;
+                yield {
+                  type: DroidMessageType.WorkingStateChanged,
+                  state: DroidWorkingState.StreamingAssistantMessage,
+                };
+                await turnRelease;
+                yield { type: DroidMessageType.TurnComplete, tokenUsage: null };
+              },
+            }),
+          resumeSession: async () => fakeSession({}),
+        },
+      });
+      const completedFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "turn.completed"),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("droid"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId, input: "first" });
+      const second = yield* adapter.sendTurn({ threadId, input: "second" }).pipe(Effect.exit);
+
+      assert.equal(second._tag, "Failure");
+      releaseTurn?.();
+      const completed = yield* Fiber.join(completedFiber).pipe(Effect.timeout("2 seconds"));
+      assert.equal(completed._tag, "Some");
+      assert.equal(streamCalls, 1);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("fails Droid turns when the SDK stream emits an error message", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -925,8 +973,21 @@ it.effect("reads Droid thread snapshots and rejects unsupported rollback", () =>
         provider: ProviderDriverKind.make("droid"),
         runtimeMode: "full-access",
       });
+      const firstCompletedFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "turn.completed"),
+        Stream.runHead,
+        Effect.forkChild,
+      );
       yield* adapter.sendTurn({ threadId, input: "first" });
+      yield* Fiber.join(firstCompletedFiber).pipe(Effect.timeout("2 seconds"));
+
+      const secondCompletedFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "turn.completed"),
+        Stream.runHead,
+        Effect.forkChild,
+      );
       yield* adapter.sendTurn({ threadId, input: "second" });
+      yield* Fiber.join(secondCompletedFiber).pipe(Effect.timeout("2 seconds"));
 
       const before = yield* adapter.readThread(threadId);
       assert.equal(before.turns.length, 2);

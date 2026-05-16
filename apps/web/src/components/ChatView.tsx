@@ -115,7 +115,11 @@ import {
   projectScriptIdFromCommand,
 } from "~/projectScripts";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
-import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
+import { getProviderModelCapabilities } from "../providerModels";
+import {
+  deriveProviderInstanceEntries,
+  resolveProviderDriverKindForInstanceSelection,
+} from "../providerInstances";
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -1124,6 +1128,7 @@ export default function ChatView(props: ChatViewProps) {
 
   const selectedProviderByThreadId = composerActiveProvider ?? null;
   const threadProvider =
+    activeThread?.session?.providerInstanceId ??
     activeThread?.modelSelection.instanceId ??
     activeProject?.defaultModelSelection?.instanceId ??
     null;
@@ -1258,12 +1263,24 @@ export default function ChatView(props: ChatViewProps) {
     versionMismatchServerLabel,
   ]);
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
-  const unlockedSelectedProvider = resolveSelectableProvider(
-    providerStatuses,
-    selectedProviderByThreadId ?? threadProvider ?? ProviderDriverKind.make("codex"),
+  const providerInstanceEntries = useMemo(
+    () => deriveProviderInstanceEntries(providerStatuses),
+    [providerStatuses],
   );
-  const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
-  const runtimeMode = serverConfig
+  const explicitSelectedInstanceId = selectedProviderByThreadId ?? threadProvider;
+  const resolvedUnlockedProvider = resolveProviderDriverKindForInstanceSelection(
+    providerInstanceEntries,
+    providerStatuses,
+    explicitSelectedInstanceId,
+  );
+  const selectedProvider: ProviderDriverKind =
+    lockedProvider ?? resolvedUnlockedProvider ?? ProviderDriverKind.make("codex");
+  const canNormalizeRuntimeMode =
+    serverConfig !== null &&
+    (lockedProvider !== null ||
+      explicitSelectedInstanceId === null ||
+      resolvedUnlockedProvider !== undefined);
+  const runtimeMode = canNormalizeRuntimeMode
     ? normalizeRuntimeModeForProvider(selectedProvider, rawRuntimeMode)
     : rawRuntimeMode;
   useEffect(() => {
