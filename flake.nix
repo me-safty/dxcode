@@ -20,12 +20,12 @@
       # ----- RELEASES -----
       # Update this to the new version when a new release is published
       # Format: "vX.Y.Z" (must match the GitHub release tag)
-      releaseTag = "v0.0.23";
+      releaseTag = "v0.0.24";
 
       # ----- DOWNLOAD -----
       # Update this hash when the AppImage URL changes
       # Run: nix hash url https://github.com/pingdotgg/t3code/releases/download/v0.0.23/T3-Code-0.0.23-x86_64.AppImage
-      appimageHash = "sha256-qMPSxQuiCwLT0As1foSDqaKoNMoLrjbKbDSwQW56T7g=";
+      appimageHash = "sha256-b7c29802d69029698254e3b0bc7072a2c628a9bd098b7e507b89bef06b69ffe9";
 
       # ----- PLATFORMS -----
       # Currently only x86_64-linux is supported (no ARM AppImage available)
