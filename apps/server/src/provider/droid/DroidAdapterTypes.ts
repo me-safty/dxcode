@@ -5,7 +5,6 @@ import type {
   DroidSession,
   ResumeSessionOptions,
   ToolConfirmationOutcome,
-  TokenUsageUpdate,
 } from "@factory/droid-sdk";
 import {
   ApprovalRequestId,
@@ -13,6 +12,7 @@ import {
   type CanonicalRequestType,
   type ProviderInstanceId,
   type ProviderSession,
+  type ThreadTokenUsageSnapshot,
   type TurnId,
   type UserInputQuestion,
 } from "@t3tools/contracts";
@@ -42,7 +42,7 @@ export interface DroidContext {
   activeAbort: AbortController | undefined;
   activeAssistantItems: Map<string, string>;
   activeCompletedAssistantItems: Set<string>;
-  activeTokenUsage: TokenUsageUpdate | undefined;
+  activeTokenUsage: ThreadTokenUsageSnapshot | undefined;
 }
 
 export interface DroidAdapterOptions {

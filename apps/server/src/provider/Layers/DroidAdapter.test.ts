@@ -174,6 +174,25 @@ it.effect("maps Droid SDK stream messages into canonical runtime events", () =>
           "turn.completed",
         ],
       );
+      const expectedUsage = {
+        usedTokens: 20,
+        inputTokens: 15,
+        cachedInputTokens: 3,
+        outputTokens: 5,
+        reasoningOutputTokens: 1,
+        lastInputTokens: 15,
+        lastCachedInputTokens: 3,
+        lastOutputTokens: 5,
+        lastReasoningOutputTokens: 1,
+      };
+      assert.deepEqual(
+        events.find((event) => event.type === "thread.token-usage.updated")?.payload,
+        { usage: expectedUsage },
+      );
+      assert.deepEqual(events.find((event) => event.type === "turn.completed")?.payload, {
+        state: "completed",
+        usage: expectedUsage,
+      });
     }),
   ).pipe(Effect.provide(testLayer)),
 );

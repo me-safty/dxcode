@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { DroidMessageType, type DroidMessage, type TokenUsageUpdate } from "@factory/droid-sdk";
+import { DroidMessageType, type DroidMessage } from "@factory/droid-sdk";
 import {
   EventId,
   RuntimeItemId,
@@ -183,11 +183,11 @@ export async function handleDroidMessage(input: {
         },
       });
     case DroidMessageType.TokenUsageUpdate:
-      context.activeTokenUsage = message as TokenUsageUpdate;
+      context.activeTokenUsage = toTokenUsageSnapshot(message);
       return emitNow({
         ...base(),
         type: "thread.token-usage.updated",
-        payload: { usage: toTokenUsageSnapshot(message) },
+        payload: { usage: context.activeTokenUsage },
       });
     case DroidMessageType.SessionTitleUpdated:
       return emitNow({
@@ -230,7 +230,7 @@ export async function handleDroidMessage(input: {
         payload: { message: message.message, class: "provider_error" },
       });
     case DroidMessageType.TurnComplete:
-      if (message.tokenUsage) context.activeTokenUsage = message.tokenUsage;
+      if (message.tokenUsage) context.activeTokenUsage = toTokenUsageSnapshot(message.tokenUsage);
       return;
     default:
       return;
