@@ -78,3 +78,10 @@ export function getRuntimeModeOptions(provider: ProviderDriverKind): ReadonlyArr
     ? DROID_RUNTIME_MODE_OPTIONS
     : BASE_RUNTIME_MODE_OPTIONS;
 }
+
+export function normalizeRuntimeModeForProvider(
+  provider: ProviderDriverKind,
+  runtimeMode: RuntimeMode,
+): RuntimeMode {
+  return getRuntimeModeOptions(provider).includes(runtimeMode) ? runtimeMode : "auto-accept-edits";
+}

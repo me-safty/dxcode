@@ -1,11 +1,28 @@
 import { ModelProvider, ReasoningEffort, type AvailableModelConfig } from "@factory/droid-sdk";
+import { DroidSettings } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vitest";
 
-import { buildDroidModelsFromSdkModels } from "./DroidProvider.ts";
+import { buildDroidModelsFromSdkModels, makePendingDroidProvider } from "./DroidProvider.ts";
 
 const sdkModel = (model: AvailableModelConfig): AvailableModelConfig => model;
+const decodeDroidSettings = Schema.decodeSync(DroidSettings);
 
 describe("DroidProvider", () => {
+  it("reports disabled pending provider status when Droid is disabled", async () => {
+    const settings = decodeDroidSettings({
+      enabled: false,
+      binaryPath: "fake-droid",
+    });
+    const provider = await Effect.runPromise(makePendingDroidProvider(settings));
+
+    expect(provider.enabled).toBe(false);
+    expect(provider.status).toBe("disabled");
+    expect(provider.installed).toBe(false);
+    expect(provider.message).toBe("Droid is disabled in T3 Code settings.");
+  });
+
   it("maps Droid SDK built-in and custom models into provider models", () => {
     const models = buildDroidModelsFromSdkModels([
       sdkModel({

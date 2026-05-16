@@ -231,7 +231,7 @@ export function makePendingDroidProvider(
       probe: {
         installed: settings.enabled,
         version: null,
-        status: settings.enabled ? "warning" : "warning",
+        status: "warning",
         auth: { status: "unknown" },
         message: settings.enabled
           ? "Checking Droid availability..."
