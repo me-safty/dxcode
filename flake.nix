@@ -26,48 +26,31 @@
             # Get version from upstream commit
             version = t3code-src.shortRev or "latest";
             
-            t3codePkg = pkgs.stdenv.mkDerivation {
+            t3codeDerivation = pkgs.stdenv.mkDerivation {
               pname = "t3code";
               inherit version;
 
-              src = t3code-src;
+              # Use latest release from GitHub - update hash when release changes
+              src = pkgs.fetchurl {
+                url = "https://github.com/pingdotgg/t3code/releases/download/v0.0.23/T3-Code-0.0.23-x86_64.AppImage";
+                sha256 = "sha256-qMPSxQuiCwLT0As1foSDqaKoNMoLrjbKbDSwQW56T7g=";
+              };
 
-              # Build dependencies
+              # Build dependencies for appimage-run
               nativeBuildInputs = with pkgs; [
-                bun
-                nodejs
-                git
+                appimage-run
               ];
 
-              # Allow network for bun to fetch dependencies
-              allowNetworking = true;
-              
-              configurePhase = ''
-                # Install dependencies
-                bun install
-              '';
-
-              buildPhase = ''
-                # Build the desktop app
-                bun run build:desktop
-              '';
+              # Don't strip - AppImages are ELF with appended squashfs
+              dontStrip = true;
+              dontBuild = true;
+              dontConfigure = true;
+              dontUnpack = true;
 
               installPhase = ''
                 mkdir -p $out
-                
-                # Find the built AppImage
-                APPIMAGE=$(find . -path "*/dist/*" -name "*.AppImage" -type f 2>/dev/null | head -1)
-                if [ -z "$APPIMAGE" ]; then
-                  APPIMAGE=$(find . -name "*.AppImage" -type f 2>/dev/null | head -1)
-                fi
-                
-                if [ -n "$APPIMAGE" ]; then
-                  cp "$APPIMAGE" "$out/t3code"
-                  chmod +x "$out/t3code"
-                else
-                  echo "ERROR: No AppImage found in build output" >&2
-                  exit 1
-                fi
+                # Extract AppImage to $out
+                appimage-run -x $out $src
               '';
 
               meta = {
@@ -78,7 +61,7 @@
               };
             };
           in
-          lib.nameValuePair system t3codePkg
+          lib.nameValuePair system t3codeDerivation
         ) systems
       );
     };
