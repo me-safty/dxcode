@@ -47,6 +47,7 @@ import {
   normalizeCompactToolLabel,
   renderableWorkEntryChangedFiles,
   renderableWorkEntryHeading,
+  renderableWorkEntryPreview,
   resolveAssistantMessageCopyState,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
@@ -68,7 +69,6 @@ import {
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
 import { SkillInlineText } from "./SkillInlineText";
-import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { renderHighlightedText } from "./threadSearchHighlight";
 
 // ---------------------------------------------------------------------------
@@ -290,6 +290,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     },
     [activeSearchRowId, matchedSearchRowIds, searchQuery],
   );
+  const searchExtraData = useMemo(
+    () => ({
+      activeSearchRowId,
+      matchedSearchRowIds,
+      searchQuery,
+    }),
+    [activeSearchRowId, matchedSearchRowIds, searchQuery],
+  );
 
   if (rows.length === 0 && !isWorking) {
     return (
@@ -307,6 +315,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         <LegendList<MessagesTimelineRow>
           ref={listRef}
           data={rows}
+          extraData={searchExtraData}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           estimatedItemSize={90}
@@ -1185,21 +1194,6 @@ function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
   return "text-muted-foreground/40";
 }
 
-function workEntryPreview(
-  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
-  workspaceRoot: string | undefined,
-) {
-  if (workEntry.command) return workEntry.command;
-  if (workEntry.detail) return workEntry.detail;
-  if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
-  const [firstPath] = workEntry.changedFiles ?? [];
-  if (!firstPath) return null;
-  const displayPath = formatWorkspaceRelativePath(firstPath, workspaceRoot);
-  return workEntry.changedFiles!.length === 1
-    ? displayPath
-    : `${displayPath} +${workEntry.changedFiles!.length - 1} more`;
-}
-
 function workEntryRawCommand(
   workEntry: Pick<TimelineWorkEntry, "command" | "rawCommand">,
 ): string | null {
@@ -1245,7 +1239,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = renderableWorkEntryHeading(workEntry);
-  const rawPreview = workEntryPreview(workEntry, workspaceRoot);
+  const rawPreview = renderableWorkEntryPreview(workEntry, workspaceRoot);
   const preview =
     rawPreview &&
     normalizeCompactToolLabel(rawPreview).toLowerCase() ===
