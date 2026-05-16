@@ -35,9 +35,12 @@
             git
           ];
 
+          # Allow network for bun to fetch dependencies
+          allowNetworking = true;
+          
           configurePhase = ''
             # Install dependencies
-            bun install --frozen-lockfile
+            bun install
           '';
 
           buildPhase = ''
@@ -46,10 +49,21 @@
           '';
 
           installPhase = ''
-            mkdir -p $out
-            # The build outputs to apps/desktop/dist or similar
-            find . -name "*.AppImage" -type f 2>/dev/null | head -1 | xargs -I {} cp {} $out/ || true
-            find . -name "t3code" -type f -executable 2>/dev/null | head -1 | xargs -I {} cp {} $out/bin/t3code || true
+            mkdir -p $out/bin
+            
+            # Find and copy the built AppImage
+            APPIMAGE=$(find . -path "*/dist/*" -name "*.AppImage" -type f 2>/dev/null | head -1)
+            if [ -n "$APPIMAGE" ]; then
+              cp "$APPIMAGE" "$out/t3code.AppImage"
+              chmod +x "$out/t3code.AppImage"
+            else
+              # Fallback: check other common locations
+              APPIMAGE=$(find . -name "*.AppImage" -type f 2>/dev/null | head -1)
+              if [ -n "$APPIMAGE" ]; then
+                cp "$APPIMAGE" "$out/t3code.AppImage"
+                chmod +x "$out/t3code.AppImage"
+              fi
+            fi
           '';
 
           meta = {
