@@ -10,13 +10,10 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
-    t3code-src = {
-      url = "github:pingdotgg/t3code";
-      flake = false;
-    };
   };
 
-  outputs = { self, nixpkgs, t3code-src }:
+  outputs =
+    { self, nixpkgs }:
     let
       lib = nixpkgs.lib;
 
