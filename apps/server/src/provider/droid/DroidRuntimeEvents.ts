@@ -70,12 +70,11 @@ export async function handleDroidMessage(input: {
       const itemId = `${message.messageId}-${message.blockIndex}`;
       const streamKind: RuntimeContentStreamKind =
         message.type === DroidMessageType.AssistantTextDelta ? "assistant_text" : "reasoning_text";
-      if (streamKind === "assistant_text") {
-        context.activeAssistantItems.set(
-          itemId,
-          `${context.activeAssistantItems.get(itemId) ?? ""}${message.text}`,
-        );
-      }
+      const activeItems =
+        streamKind === "assistant_text"
+          ? context.activeAssistantItems
+          : context.activeThinkingItems;
+      activeItems.set(itemId, `${activeItems.get(itemId) ?? ""}${message.text}`);
       return emitNow({
         ...base(itemId),
         type: "content.delta",
@@ -106,11 +105,16 @@ export async function handleDroidMessage(input: {
           continue;
         }
         if (block.type === "thinking") {
-          await emitNow({
-            ...base(itemId),
-            type: "content.delta",
-            payload: { streamKind: "reasoning_text", delta: text },
-          });
+          const previousText = context.activeThinkingItems.get(itemId) ?? "";
+          const delta = text.startsWith(previousText) ? text.slice(previousText.length) : text;
+          if (delta.length > 0) {
+            await emitNow({
+              ...base(itemId),
+              type: "content.delta",
+              payload: { streamKind: "reasoning_text", delta },
+            });
+          }
+          context.activeThinkingItems.set(itemId, text);
         }
       }
 

@@ -41,6 +41,7 @@ function fakeSession(input: {
   readonly messages?: ReadonlyArray<DroidMessage>;
   readonly onStream?: () => AsyncGenerator<DroidMessage, void, undefined>;
   readonly onClose?: () => Promise<void>;
+  readonly onInterrupt?: () => Promise<void>;
   readonly onEnterSpecMode?: (params: unknown) => void;
   readonly onUpdateSettings?: (params: unknown) => void;
 }): DroidSession {
@@ -65,7 +66,7 @@ function fakeSession(input: {
       structuredOutput: null,
       success: true,
     }),
-    interrupt: async () => undefined,
+    interrupt: input.onInterrupt ?? (async () => undefined),
     close: input.onClose ?? (async () => undefined),
     updateSettings: async (params: unknown) => {
       input.onUpdateSettings?.(params);
@@ -336,6 +337,100 @@ it.effect("does not duplicate Droid final create_message text after streaming de
       if (completed?.type === "item.completed") {
         assert.equal(completed.payload.detail, "stream");
       }
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("does not duplicate Droid final thinking content after streaming deltas", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const adapter = yield* makeDroidAdapter(settings, {
+        sdk: {
+          createSession: async () =>
+            fakeSession({
+              messages: [
+                {
+                  type: DroidMessageType.ThinkingTextDelta,
+                  messageId: "assistant-thinking",
+                  blockIndex: 0,
+                  text: "thi",
+                },
+                {
+                  type: DroidMessageType.ThinkingTextDelta,
+                  messageId: "assistant-thinking",
+                  blockIndex: 0,
+                  text: "nk",
+                },
+                {
+                  type: DroidMessageType.CreateMessage,
+                  messageId: "assistant-thinking",
+                  role: "assistant",
+                  content: [
+                    { type: "thinking", signature: "test-signature", thinking: "think" },
+                    { type: "text", text: "answer" },
+                  ],
+                },
+                { type: DroidMessageType.TurnComplete, tokenUsage: null },
+              ],
+            }),
+          resumeSession: async () => fakeSession({}),
+        },
+      });
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.take(8),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("droid"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId, input: "hello" });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("2 seconds")));
+      const deltas = events.filter((event) => event.type === "content.delta");
+      assert.deepEqual(
+        deltas.map((event) => (event.type === "content.delta" ? event.payload : undefined)),
+        [
+          { streamKind: "reasoning_text", delta: "thi" },
+          { streamKind: "reasoning_text", delta: "nk" },
+          { streamKind: "assistant_text", delta: "answer" },
+        ],
+      );
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("ignores Droid interrupt failures after aborting the active turn", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let interruptAttempts = 0;
+      const adapter = yield* makeDroidAdapter(settings, {
+        sdk: {
+          createSession: async () =>
+            fakeSession({
+              messages: [{ type: DroidMessageType.TurnComplete, tokenUsage: null }],
+              onInterrupt: async () => {
+                interruptAttempts += 1;
+                throw new Error("interrupt failed");
+              },
+            }),
+          resumeSession: async () => fakeSession({}),
+        },
+      });
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("droid"),
+        runtimeMode: "full-access",
+      });
+
+      const exit = yield* adapter.interruptTurn(threadId).pipe(Effect.exit);
+      assert.equal(exit._tag, "Success");
+      assert.equal(interruptAttempts, 1);
     }),
   ).pipe(Effect.provide(testLayer)),
 );

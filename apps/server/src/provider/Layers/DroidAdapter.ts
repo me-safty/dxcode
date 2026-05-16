@@ -200,6 +200,7 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
           turns: [],
           activeAbort: undefined,
           activeAssistantItems: new Map(),
+          activeThinkingItems: new Map(),
           activeCompletedAssistantItems: new Set(),
           activeTokenUsage: undefined,
         };
@@ -246,6 +247,7 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
       const abort = new AbortController();
       context.activeAbort = abort;
       context.activeAssistantItems = new Map();
+      context.activeThinkingItems = new Map();
       context.activeCompletedAssistantItems = new Set();
       context.activeTokenUsage = undefined;
       context.turns.push({ id: turnId, items: [] });
@@ -355,10 +357,11 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
       startSession,
       sendTurn,
       interruptTurn: (threadId) =>
-        Effect.promise(async () => {
+        Effect.gen(function* () {
           const context = sessions.get(threadId);
-          context?.activeAbort?.abort();
-          await context?.droid.interrupt();
+          if (!context) return;
+          context.activeAbort?.abort();
+          yield* Effect.tryPromise(() => context.droid.interrupt()).pipe(Effect.ignore);
         }),
       respondToRequest: (threadId, requestId, decision) =>
         Effect.gen(function* () {

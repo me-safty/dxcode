@@ -41,6 +41,7 @@ export interface DroidContext {
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   activeAbort: AbortController | undefined;
   activeAssistantItems: Map<string, string>;
+  activeThinkingItems: Map<string, string>;
   activeCompletedAssistantItems: Set<string>;
   activeTokenUsage: ThreadTokenUsageSnapshot | undefined;
 }
