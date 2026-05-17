@@ -25,7 +25,7 @@
       # ----- DOWNLOAD -----
       # Update this hash when the AppImage URL changes
       # Run: nix hash url https://github.com/pingdotgg/t3code/releases/download/v0.0.23/T3-Code-0.0.23-x86_64.AppImage
-      appimageHash = "sha256-b7c29802d69029698254e3b0bc7072a2c628a9bd098b7e507b89bef06b69ffe9";
+      appimageHash = "sha256-t8KYAtaQKWmCVOOwvHByosYoqb0Ji35Qe4m+8Gtp/+k=";
 
       # ----- PLATFORMS -----
       # Currently only x86_64-linux is supported (no ARM AppImage available)
