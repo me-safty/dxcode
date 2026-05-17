@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
-  Building2,
+  BotIcon,
+  CornerDownRight,
   EllipsisIcon,
   ExternalLink,
-  FolderKanban,
+  GitBranch,
+  LockIcon,
+  LockOpenIcon,
   Loader2,
+  PenLineIcon,
   Plus,
   RefreshCw,
-  Wifi,
-  WifiOff,
-  X,
 } from "lucide-react";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import { Badge } from "~/t3work/components/ui/t3work-badge";
@@ -29,22 +30,57 @@ import {
 import { AtlassianIcon } from "~/t3work/components/brand/t3work-AtlassianLogos";
 import { ProjectSidebar } from "~/t3work/components/t3work-ProjectSidebar";
 import { useBackendState } from "~/t3work/backend/t3work-index";
-import { ThreadChatView } from "~/t3work/chat/t3work-ThreadChatView";
-import { useAtlassianOAuth } from "~/t3work/hooks/t3work-useAtlassianOAuth";
-import { useCreateProject } from "~/t3work/hooks/t3work-useCreateProject";
 import { useProjectResources } from "~/t3work/hooks/t3work-useProjectResources";
 import { useProjectStore } from "~/t3work/hooks/t3work-useProjectStore";
 import { useTicketDetail } from "~/t3work/hooks/t3work-useTicketDetail";
+import {
+  ComposerPromptEditor,
+  type ComposerPromptEditorHandle,
+} from "~/components/ComposerPromptEditor";
+import { ComposerPrimaryActions } from "~/components/chat/ComposerPrimaryActions";
+import { ProviderModelPicker } from "~/components/chat/ProviderModelPicker";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
+import { Separator } from "~/components/ui/separator";
+import { cn } from "~/lib/utils";
+import { deriveProviderInstanceEntries, sortProviderInstanceEntries } from "~/providerInstances";
+import { getProviderInteractionModeToggle } from "~/providerModels";
 import { buildProjectTicketHierarchy } from "~/t3work/t3work-ticketHierarchy";
 import { TicketMetadata } from "~/t3work/components/ticket/t3work-TicketMetadata";
 import { TicketRichContent } from "~/t3work/components/ticket/t3work-TicketRichContent";
 import {
   JiraIssueTypeIcon,
+  readIssueTypeIconUrlFromSnapshotFields,
   readIssueTypeFromSnapshotFields,
 } from "~/t3work/components/ticket/t3work-JiraIssueType";
 import type { ProjectThread, ProjectTicket, ViewState } from "~/t3work/t3work-types";
 import { DEFAULT_MODEL, DEFAULT_RUNTIME_MODE, ProviderInstanceId } from "@t3tools/contracts";
-import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  ProviderInteractionMode,
+  RuntimeMode,
+  ServerProvider,
+} from "@t3tools/contracts";
+import type { LucideIcon } from "lucide-react";
+import {
+  AppProjectIcon,
+  ConnectionStatusBadge,
+  ProviderBadges,
+} from "~/t3work/t3work-AppStatusBits";
+import { buildTicketContextPrompt, formatRelativeTime } from "~/t3work/t3work-AppTicketHelpers";
+import { CreateProjectDialog } from "~/t3work/t3work-CreateProjectDialog";
+import { AppMainContent } from "~/t3work/t3work-AppMainContent";
+import {
+  TicketWorkItemCard,
+  TicketWorkItemRow,
+  ToggleGroup,
+} from "~/t3work/t3work-ProjectDashboardItemViews";
+import { TicketKickoffPanel as TicketKickoffPanelView } from "~/t3work/t3work-TicketKickoffPanel";
 
 type AppProps = {
   view?: ViewState | null;
@@ -61,6 +97,29 @@ const DEFAULT_KICKOFF_SELECTION: ModelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
   model: DEFAULT_MODEL,
 };
+
+const runtimeModeConfig: Record<
+  RuntimeMode,
+  { label: string; description: string; icon: LucideIcon }
+> = {
+  "approval-required": {
+    label: "Supervised",
+    description: "Ask before commands and file changes.",
+    icon: LockIcon,
+  },
+  "auto-accept-edits": {
+    label: "Auto-accept edits",
+    description: "Auto-approve edits, ask before other actions.",
+    icon: PenLineIcon,
+  },
+  "full-access": {
+    label: "Full access",
+    description: "Allow commands and edits without prompts.",
+    icon: LockOpenIcon,
+  },
+};
+
+const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
 
 export function App({
   view,
@@ -208,7 +267,7 @@ export function App({
       </Sidebar>
 
       <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
-        <MainContent
+        <AppMainContent
           view={activeView}
           projects={store.projects}
           getThreadsForProject={store.getThreadsForProject}
@@ -218,6 +277,19 @@ export function App({
           onThreadKickoffConsumed={handleThreadKickoffConsumed}
           onBackToDashboard={handleSelectProject}
           onCreate={() => setShowCreate(true)}
+          renderDashboard={(project) => (
+            <ProjectDashboard project={project} tickets={[]} onOpenTicket={handleSelectTicket} />
+          )}
+          renderTicketDetail={(project, ticketId) => (
+            <TicketDetailView
+              project={project}
+              ticketId={ticketId}
+              projectThreads={store.getThreadsForProject(project.id)}
+              onOpenThread={handleSelectThread}
+              onKickoffThread={handleCreateTicketKickoffThread}
+              onBack={() => handleSelectProject(project.id)}
+            />
+          )}
         />
       </SidebarInset>
 
@@ -234,200 +306,6 @@ export function App({
         />
       )}
     </SidebarProvider>
-  );
-}
-
-function ConnectionStatusBadge() {
-  const backendState = useBackendState();
-
-  if (backendState.connectionStatus === "connected") {
-    return (
-      <Badge variant="outline" className="gap-1 text-xs">
-        <Wifi className="size-3 text-emerald-500" />
-        <span className="hidden sm:inline">Connected</span>
-      </Badge>
-    );
-  }
-
-  if (backendState.connectionStatus === "connecting") {
-    return (
-      <Badge variant="outline" className="gap-1 text-xs">
-        <Loader2 className="size-3 animate-spin text-amber-500" />
-        <span className="hidden sm:inline">Connecting</span>
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant="outline" className="gap-1 text-xs">
-      <WifiOff className="size-3 text-muted-foreground" />
-      <span className="hidden sm:inline">Disconnected</span>
-    </Badge>
-  );
-}
-
-function ProviderBadges() {
-  const backendState = useBackendState();
-  const readyProviders = backendState.providers.filter((p) => p.status === "ready" && p.enabled);
-
-  if (readyProviders.length === 0) return null;
-
-  return (
-    <div className="flex items-center gap-1">
-      {readyProviders.slice(0, 2).map((provider) => (
-        <Badge
-          key={provider.instanceId}
-          variant="secondary"
-          className="hidden text-[10px] sm:inline-flex"
-        >
-          {provider.displayName ?? provider.instanceId}
-        </Badge>
-      ))}
-      {readyProviders.length > 2 && (
-        <Badge variant="secondary" className="hidden text-[10px] sm:inline-flex">
-          +{readyProviders.length - 2}
-        </Badge>
-      )}
-    </div>
-  );
-}
-
-function ProjectIcon({ project }: { project: ProjectShellProject }) {
-  const color =
-    (project.source.raw as { avatarColor?: string } | undefined)?.avatarColor ?? "#1868db";
-  const key = project.source.externalProjectKey ?? project.title;
-  const shortKey = key.slice(0, 2).toUpperCase();
-
-  return (
-    <div
-      className="flex size-6 shrink-0 items-center justify-center rounded-md"
-      style={{ background: color }}
-    >
-      <span className="text-[10px] font-semibold text-white">{shortKey}</span>
-    </div>
-  );
-}
-
-function MainContent({
-  view,
-  projects,
-  getThreadsForProject,
-  onOpenTicket,
-  onOpenThread,
-  onKickoffTicketThread,
-  onThreadKickoffConsumed,
-  onBackToDashboard,
-  onCreate,
-}: {
-  view: ViewState | null;
-  projects: ProjectShellProject[];
-  getThreadsForProject: (projectId: string) => ProjectThread[];
-  onOpenTicket: (projectId: string, ticketId: string) => void;
-  onOpenThread: (projectId: string, threadId: string) => void;
-  onKickoffTicketThread: (input: {
-    projectId: string;
-    ticketId: string;
-    ticketDisplayId: string;
-    kickoffMessage: string;
-    kickoffModelSelection: ModelSelection;
-    kickoffRuntimeMode: RuntimeMode;
-    kickoffInteractionMode: ProviderInteractionMode;
-  }) => void;
-  onThreadKickoffConsumed: (threadId: string) => void;
-  onBackToDashboard: (projectId: string) => void;
-  onCreate: () => void;
-}) {
-  if (!view) {
-    return <ProjectBrowserEmpty onCreate={onCreate} />;
-  }
-
-  if (view.type === "thread") {
-    const project = projects.find((candidate) => candidate.id === view.projectId) ?? null;
-    const thread = project
-      ? (getThreadsForProject(project.id).find((candidate) => candidate.id === view.threadId) ??
-        null)
-      : null;
-
-    return (
-      <ThreadChatView
-        threadId={view.threadId}
-        projectId={view.projectId}
-        projectTitle={project?.title ?? view.projectId}
-        {...(project?.workspace?.rootPath
-          ? { projectWorkspaceRoot: project.workspace.rootPath }
-          : {})}
-        title={thread?.title ?? "New thread"}
-        {...(thread?.kickoffPending && thread.kickoffMessage
-          ? { initialUserMessage: thread.kickoffMessage }
-          : {})}
-        {...(thread?.kickoffModelSelection
-          ? { initialModelSelection: thread.kickoffModelSelection }
-          : {})}
-        {...(thread?.kickoffRuntimeMode ? { initialRuntimeMode: thread.kickoffRuntimeMode } : {})}
-        {...(thread?.kickoffInteractionMode
-          ? { initialInteractionMode: thread.kickoffInteractionMode }
-          : {})}
-        onInitialUserMessageSent={() => {
-          if (thread) {
-            onThreadKickoffConsumed(thread.id);
-          }
-        }}
-        onBack={() => onBackToDashboard(view.projectId)}
-      />
-    );
-  }
-
-  const project = projects.find((candidate) => candidate.id === view.projectId);
-  if (!project) {
-    return <ProjectBrowserEmpty onCreate={onCreate} />;
-  }
-
-  if (view.type === "dashboard") {
-    return <ProjectDashboard project={project} tickets={[]} onOpenTicket={onOpenTicket} />;
-  }
-
-  if (view.type === "ticket") {
-    return (
-      <TicketDetailView
-        project={project}
-        ticketId={view.ticketId}
-        projectThreads={getThreadsForProject(project.id)}
-        onOpenThread={onOpenThread}
-        onKickoffThread={onKickoffTicketThread}
-        onBack={() => onBackToDashboard(project.id)}
-      />
-    );
-  }
-
-  return <ProjectBrowserEmpty onCreate={onCreate} />;
-}
-
-function ProjectBrowserEmpty({ onCreate }: { onCreate: () => void }) {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="flex h-13 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-5">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-        <span className="text-sm font-medium text-muted-foreground/70">No active project</span>
-        <div className="ml-auto flex items-center gap-2">
-          <ConnectionStatusBadge />
-        </div>
-      </header>
-      <div className="flex flex-1 items-center justify-center overflow-auto p-6">
-        <div className="w-full max-w-xl rounded-lg border border-border/70 bg-card/30 p-8 shadow-sm/5">
-          <div className="mb-5 flex size-12 items-center justify-center rounded-lg border bg-background">
-            <AtlassianIcon className="size-7" />
-          </div>
-          <h2 className="text-xl font-semibold">Start from a Jira project</h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Choose a Jira project to browse work items and run an agent with ticket context.
-          </p>
-          <Button className="mt-6 w-fit" onClick={onCreate}>
-            <Plus className="size-4" />
-            New project
-          </Button>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -596,21 +474,12 @@ function ProjectDashboard({
     Number(selectedType !== "all") +
     Number(selectedPriority !== "all") +
     Number(selectedStatus !== "all");
-  const linkedChildCount = useMemo(
-    () =>
-      parentChildGroups.roots.reduce(
-        (count, parent) =>
-          count + (parentChildGroups.childrenByParentId.get(parent.id)?.length ?? 0),
-        0,
-      ),
-    [parentChildGroups],
-  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <header className="flex h-13 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-5">
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-        <ProjectIcon project={project} />
+        <AppProjectIcon project={project} />
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
           <h2 className="min-w-0 truncate text-sm font-medium" title={project.title}>
             {project.title}
@@ -801,17 +670,6 @@ function ProjectDashboard({
               </div>
             </div>
 
-            {isHierarchyMode && filteredWorkItems.length > 0 && (
-              <div className="mb-3 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
-                Hierarchy view: {parentChildGroups.roots.length} parent
-                {parentChildGroups.roots.length === 1 ? "" : "s"}, {linkedChildCount} linked child
-                {linkedChildCount === 1 ? "" : "ren"}
-                {parentChildGroups.unresolvedChildren.length > 0
-                  ? `, ${parentChildGroups.unresolvedChildren.length} unlinked`
-                  : ""}
-              </div>
-            )}
-
             {filteredWorkItems.length === 0 ? (
               <div className="rounded-md border border-dashed border-border/80 px-4 py-8 text-sm text-muted-foreground">
                 No tickets match your current search and filters.
@@ -852,9 +710,6 @@ function ProjectDashboard({
                                 key={parent.id}
                                 className="rounded-md border border-border/70 bg-background/35 px-2.5 py-2"
                               >
-                                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                                  Parent
-                                </div>
                                 <TicketWorkItemCard
                                   ticket={parent}
                                   compact
@@ -864,9 +719,6 @@ function ProjectDashboard({
                                 />
                                 {children.length > 0 && (
                                   <div className="mt-2 ml-2 rounded-md border border-border/60 bg-muted/15 px-2 py-1.5">
-                                    <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                                      Children
-                                    </div>
                                     <div className="space-y-1.5 border-l-2 border-border/70 pl-2">
                                       {children.map((child) => (
                                         <TicketWorkItemCard
@@ -907,9 +759,6 @@ function ProjectDashboard({
                         key={parent.id}
                         className="rounded-md border border-border/70 bg-background/35 px-3 py-2.5"
                       >
-                        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                          Parent
-                        </div>
                         <TicketWorkItemRow
                           ticket={parent}
                           childCount={children.length}
@@ -918,9 +767,6 @@ function ProjectDashboard({
 
                         {children.length > 0 && (
                           <div className="mt-2 ml-3 rounded-md border border-border/60 bg-muted/15 px-2 py-1.5">
-                            <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                              Children
-                            </div>
                             <div className="space-y-1.5 border-l-2 border-border/70 pl-2">
                               {children.map((child) => (
                                 <TicketWorkItemRow
@@ -940,7 +786,7 @@ function ProjectDashboard({
                   {parentChildGroups.unresolvedChildren.length > 0 && (
                     <div className="rounded-md border border-dashed border-border/80 px-3 py-2.5">
                       <div className="mb-2 text-xs font-medium text-muted-foreground">
-                        Unlinked subtasks (parent not in current result set)
+                        Unlinked subtasks
                       </div>
                       <div className="space-y-1.5">
                         {parentChildGroups.unresolvedChildren.map((child) => (
@@ -964,9 +810,6 @@ function ProjectDashboard({
                         key={parent.id}
                         className="rounded-md border border-border/70 bg-background/35 px-2.5 py-2"
                       >
-                        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                          Parent
-                        </div>
                         <TicketWorkItemCard
                           ticket={parent}
                           flat
@@ -976,9 +819,6 @@ function ProjectDashboard({
 
                         {children.length > 0 && (
                           <div className="mt-2 ml-2 rounded-md border border-border/60 bg-muted/15 px-2 py-1.5">
-                            <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                              Children
-                            </div>
                             <div className="space-y-1.5 border-l-2 border-border/70 pl-2">
                               {children.map((child) => (
                                 <TicketWorkItemCard
@@ -1000,7 +840,7 @@ function ProjectDashboard({
                   {parentChildGroups.unresolvedChildren.length > 0 && (
                     <div className="rounded-md border border-dashed border-border/80 px-3 py-2.5">
                       <div className="mb-2 text-xs font-medium text-muted-foreground">
-                        Unlinked subtasks (parent not in current result set)
+                        Unlinked subtasks
                       </div>
                       <div className="space-y-1.5">
                         {parentChildGroups.unresolvedChildren.map((child) => (
@@ -1048,177 +888,6 @@ function ProjectDashboard({
   );
 }
 
-function TicketWorkItemCard({
-  ticket,
-  onOpen,
-  compact,
-  flat,
-  child,
-  childCount,
-}: {
-  ticket: ProjectTicket;
-  onOpen: () => void;
-  compact?: boolean;
-  flat?: boolean;
-  child?: boolean;
-  childCount?: number;
-}) {
-  return (
-    <button
-      type="button"
-      className={`block w-full text-left ${child ? "relative pl-3" : ""}`}
-      onClick={onOpen}
-    >
-      {child && <span className="absolute top-2 left-0 h-px w-2 bg-border/70" aria-hidden />}
-      <div
-        className={`h-full rounded-md border transition-colors hover:bg-accent/30 ${
-          child
-            ? "border-dashed border-border/70 bg-muted/20"
-            : flat
-              ? "border-border/60 bg-background/30"
-              : "border-border/70 bg-card/40"
-        }`}
-      >
-        <div className={`flex h-full flex-col ${compact ? "gap-2 p-2.5" : "gap-3 p-3.5"}`}>
-          <div className="flex items-start gap-2">
-            <JiraIssueTypeIcon
-              issueType={ticket.issueType}
-              issueTypeIconUrl={ticket.issueTypeIconUrl ?? ticket.ref.issueTypeIconUrl}
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs font-medium text-muted-foreground">
-                  {ticket.ref.displayId}
-                </span>
-                {child ? (
-                  <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                    Child
-                  </span>
-                ) : childCount ? (
-                  <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                    {childCount} child{childCount === 1 ? "" : "ren"}
-                  </span>
-                ) : null}
-                <Badge
-                  variant={child ? "outline" : "secondary"}
-                  className="h-5 rounded px-1.5 text-[10px]"
-                >
-                  {ticket.status}
-                </Badge>
-                {ticket.priority && (
-                  <span className="rounded bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                    {ticket.priority}
-                  </span>
-                )}
-              </div>
-              <div
-                className={`mt-1 font-medium ${compact ? "text-xs leading-4" : "text-sm leading-5"}`}
-              >
-                {ticket.ref.title}
-              </div>
-            </div>
-          </div>
-
-          {ticket.assignee && (
-            <div className="mt-auto text-xs text-muted-foreground">
-              Assigned to {ticket.assignee}
-            </div>
-          )}
-        </div>
-      </div>
-    </button>
-  );
-}
-
-function TicketWorkItemRow({
-  ticket,
-  onOpen,
-  child,
-  childCount,
-}: {
-  ticket: ProjectTicket;
-  onOpen: () => void;
-  child?: boolean;
-  childCount?: number;
-}) {
-  return (
-    <button
-      type="button"
-      className={`flex w-full items-start gap-2 text-left ${child ? "relative pl-3" : ""}`}
-      onClick={onOpen}
-    >
-      {child && <span className="absolute top-2 left-0 h-px w-2 bg-border/70" aria-hidden />}
-      <JiraIssueTypeIcon
-        issueType={ticket.issueType}
-        issueTypeIconUrl={ticket.issueTypeIconUrl ?? ticket.ref.issueTypeIconUrl}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">{ticket.ref.displayId}</span>
-          {child ? (
-            <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-              Child
-            </span>
-          ) : childCount ? (
-            <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {childCount} child{childCount === 1 ? "" : "ren"}
-            </span>
-          ) : null}
-          <Badge
-            variant={child ? "outline" : "secondary"}
-            className="h-5 rounded px-1.5 text-[10px]"
-          >
-            {ticket.status}
-          </Badge>
-          {ticket.priority && (
-            <span className="rounded bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              {ticket.priority}
-            </span>
-          )}
-        </div>
-        <div className="mt-0.5 text-sm font-medium leading-5">{ticket.ref.title}</div>
-        {ticket.assignee && (
-          <div className="text-xs text-muted-foreground">Assigned to {ticket.assignee}</div>
-        )}
-      </div>
-    </button>
-  );
-}
-
-function ToggleGroup({
-  value,
-  onChange,
-  options,
-  wrap,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  options: ReadonlyArray<{ value: string; label: string }>;
-  wrap?: boolean;
-}) {
-  return (
-    <div
-      className={`inline-flex rounded-md border border-border/80 bg-background p-0.5 ${
-        wrap ? "flex-wrap" : ""
-      }`}
-    >
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          className={`rounded px-2.5 py-1 text-xs transition-colors ${
-            value === option.value
-              ? "bg-foreground text-background"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground"
-          }`}
-          onClick={() => onChange(option.value)}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function TicketDetailView({
   project,
@@ -1250,6 +919,10 @@ function TicketDetailView({
 
   const issueType =
     ticket?.issueType ?? ticket?.ref.type ?? readIssueTypeFromSnapshotFields(snapshot?.fields);
+  const issueTypeIconUrl =
+    ticket?.issueTypeIconUrl ??
+    ticket?.ref.issueTypeIconUrl ??
+    readIssueTypeIconUrlFromSnapshotFields(snapshot?.fields);
   const displayId = ticket?.ref.displayId ?? snapshot?.ref.displayId ?? ticketId;
   const title = ticket?.ref.title ?? snapshot?.ref.title ?? "Ticket";
   const status = ticket?.status ?? (snapshot?.fields.status as string | undefined) ?? "Unknown";
@@ -1322,7 +995,7 @@ function TicketDetailView({
         <Button size="icon-xs" variant="ghost" onClick={onBack} aria-label="Back to dashboard">
           <ArrowLeft className="size-4" />
         </Button>
-        <JiraIssueTypeIcon issueType={issueType} />
+        <JiraIssueTypeIcon issueType={issueType} issueTypeIconUrl={issueTypeIconUrl} />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <div className="flex items-center gap-1 min-w-0">
             <h2 className="truncate text-sm font-medium min-w-0">{displayId}</h2>
@@ -1359,7 +1032,6 @@ function TicketDetailView({
                 snapshot={snapshot}
                 displayId={displayId}
                 title={title}
-                issueType={issueType}
                 status={status}
                 priority={priority}
                 assignee={assignee}
@@ -1410,7 +1082,7 @@ function TicketDetailView({
         </section>
 
         <aside className="flex min-h-0 flex-col overflow-hidden bg-card/35">
-          <TicketKickoffPanel
+          <TicketKickoffPanelContainer
             displayId={displayId}
             issueThreads={issueThreads}
             onOpenThread={(threadId) => onOpenThread(project.id, threadId)}
@@ -1422,7 +1094,7 @@ function TicketDetailView({
   );
 }
 
-function TicketKickoffPanel({
+function TicketKickoffPanelContainer({
   displayId,
   issueThreads,
   onOpenThread,
@@ -1438,410 +1110,289 @@ function TicketKickoffPanel({
     interactionMode: ProviderInteractionMode,
   ) => void;
 }) {
-  const [prefill, setPrefill] = useState<string | undefined>(undefined);
-
-  const recipeButtons = [
-    {
-      id: "summarize",
-      title: "Understand the request",
-      description: "Get a plain-language summary and highlight anything unclear.",
-      prompt: "Summarize this ticket and list unknowns or ambiguities.",
-    },
-    {
-      id: "implement",
-      title: "Plan the work",
-      description: "Break this into clear implementation steps with a safe rollout order.",
-      prompt: "Propose a concrete implementation plan with impacted areas and rollout order.",
-    },
-    {
-      id: "test",
-      title: "Prepare testing",
-      description: "Create practical QA and regression checks before shipping.",
-      prompt: "Create a comprehensive QA and regression test plan for this ticket.",
-    },
-    {
-      id: "comment",
-      title: "Write a Jira update",
-      description: "Draft a clear status comment you can quickly review and post.",
-      prompt: "Draft a concise Jira update comment with current assumptions and next steps.",
-    },
-  ];
-
+  const backendState = useBackendState();
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="border-b border-border px-4 py-4 sm:px-5">
-        <h3 className="text-base font-semibold">Get Help With {displayId}</h3>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-          Start a new conversation with all ticket context included automatically.
-        </p>
-      </div>
-
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-5 p-4 sm:p-5">
-          <section className="space-y-3">
-            <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
-              Quick starts
-            </h4>
-            <div className="space-y-2.5">
-              {recipeButtons.map((recipe) => (
-                <button
-                  key={recipe.id}
-                  type="button"
-                  className="w-full rounded-md border border-border/70 bg-transparent px-3 py-2.5 text-left transition-colors hover:border-border hover:bg-accent/30"
-                  onClick={() => setPrefill(recipe.prompt)}
-                >
-                  <div className="text-sm font-medium text-foreground/90">{recipe.title}</div>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground/80">
-                    {recipe.description}
-                  </p>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="space-y-2.5 pb-1">
-            <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
-              Conversations
-            </h4>
-            {issueThreads.length === 0 && (
-              <p className="px-1 py-1 text-xs text-muted-foreground/70">
-                No conversations started for this ticket yet.
-              </p>
-            )}
-            {issueThreads.map((thread) => (
-              <button
-                key={thread.id}
-                type="button"
-                className="block w-full text-left"
-                onClick={() => onOpenThread(thread.id)}
-              >
-                <Card className="border-border/70 bg-transparent transition-colors hover:bg-accent/35">
-                  <CardContent className="p-3.5">
-                    <div className="truncate text-sm font-medium">{thread.title}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {thread.messageCount} messages • {formatRelativeTime(thread.lastMessageAt)}
-                    </div>
-                  </CardContent>
-                </Card>
-              </button>
-            ))}
-          </section>
-        </div>
-      </ScrollArea>
-
-      <div className="shrink-0 border-t border-border bg-background/75 p-3 sm:p-4">
+    <TicketKickoffPanelView
+      displayId={displayId}
+      issueThreads={issueThreads}
+      onOpenThread={onOpenThread}
+      onKickoff={onKickoff}
+      renderComposer={({ prefillText, onSubmit }) => (
         <TicketKickoffComposer
-          {...(prefill ? { prefillText: prefill } : {})}
-          onSubmit={(text) => {
-            onKickoff(text, DEFAULT_KICKOFF_SELECTION, DEFAULT_RUNTIME_MODE, "default");
-            setPrefill(undefined);
-          }}
+          {...(prefillText ? { prefillText } : {})}
+          providers={backendState.providers}
+          isConnected={backendState.connectionStatus === "connected"}
+          onSubmit={onSubmit}
         />
-      </div>
-    </div>
+      )}
+    />
   );
 }
 
 function TicketKickoffComposer({
   prefillText,
+  providers,
+  isConnected,
   onSubmit,
 }: {
   prefillText?: string;
-  onSubmit: (text: string) => void;
+  providers: ReadonlyArray<ServerProvider>;
+  isConnected: boolean;
+  onSubmit: (
+    text: string,
+    selection: ModelSelection,
+    runtimeMode: RuntimeMode,
+    interactionMode: ProviderInteractionMode,
+  ) => void;
 }) {
+  const availableProviders = useMemo(
+    () =>
+      providers.filter((provider) => provider.enabled && provider.availability !== "unavailable"),
+    [providers],
+  );
+
+  const providerInstanceEntries = useMemo(
+    () => sortProviderInstanceEntries(deriveProviderInstanceEntries(availableProviders)),
+    [availableProviders],
+  );
+
+  const modelOptionsByInstance = useMemo(() => {
+    const options = new Map();
+    for (const entry of providerInstanceEntries) {
+      options.set(
+        entry.instanceId,
+        entry.models.map((model) => ({
+          slug: model.slug,
+          name: model.name,
+          isCustom: model.isCustom,
+          ...(model.subProvider ? { subProvider: model.subProvider } : {}),
+        })),
+      );
+    }
+    return options;
+  }, [providerInstanceEntries]);
+
   const [text, setText] = useState(prefillText ?? "");
+  const [cursor, setCursor] = useState((prefillText ?? "").length);
+  const [selectedInstanceId, setSelectedInstanceId] = useState(
+    DEFAULT_KICKOFF_SELECTION.instanceId,
+  );
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_KICKOFF_SELECTION.model);
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(DEFAULT_RUNTIME_MODE);
+  const [interactionMode, setInteractionMode] = useState<ProviderInteractionMode>("default");
+  const editorRef = useRef<ComposerPromptEditorHandle | null>(null);
 
   useEffect(() => {
     if (prefillText !== undefined) {
       setText(prefillText);
+      setCursor(prefillText.length);
     }
   }, [prefillText]);
 
+  useEffect(() => {
+    if (providerInstanceEntries.length === 0) {
+      return;
+    }
+    const hasCurrent = providerInstanceEntries.some(
+      (entry) => entry.instanceId === selectedInstanceId,
+    );
+    if (!hasCurrent) {
+      setSelectedInstanceId(providerInstanceEntries[0]!.instanceId);
+    }
+  }, [providerInstanceEntries, selectedInstanceId]);
+
+  const selectedProviderEntry = useMemo(
+    () => providerInstanceEntries.find((entry) => entry.instanceId === selectedInstanceId),
+    [providerInstanceEntries, selectedInstanceId],
+  );
+
+  const selectedProvider = selectedProviderEntry?.snapshot;
+  const selectedProviderModels = selectedProviderEntry?.models ?? [];
+
+  useEffect(() => {
+    const models = selectedProviderModels;
+    if (models.length === 0) {
+      setSelectedModel(DEFAULT_MODEL);
+      return;
+    }
+    if (!models.some((model) => model.slug === selectedModel)) {
+      setSelectedModel(models[0]!.slug);
+    }
+  }, [selectedModel, selectedProviderModels]);
+
+  const showInteractionModeToggle = selectedProviderEntry
+    ? getProviderInteractionModeToggle(availableProviders, selectedProviderEntry.driverKind)
+    : true;
+
   const handleSubmit = useCallback(() => {
     const next = text.trim();
-    if (!next) return;
-    onSubmit(next);
+    if (!next || !isConnected || !selectedProviderEntry) return;
+    onSubmit(
+      next,
+      {
+        instanceId: selectedProviderEntry.instanceId,
+        model: selectedModel,
+      },
+      runtimeMode,
+      interactionMode,
+    );
     setText("");
-  }, [onSubmit, text]);
+    setCursor(0);
+  }, [
+    interactionMode,
+    isConnected,
+    onSubmit,
+    runtimeMode,
+    selectedModel,
+    selectedProviderEntry,
+    text,
+  ]);
+
+  const runtimeOption = runtimeModeConfig[runtimeMode];
+  const RuntimeModeIcon = runtimeOption.icon;
+  const canSend = Boolean(text.trim()) && isConnected && Boolean(selectedProviderEntry);
 
   return (
     <form
-      className=""
       onSubmit={(event) => {
         event.preventDefault();
         handleSubmit();
       }}
+      className="mx-auto w-full min-w-0 max-w-208"
+      data-chat-composer-form="true"
     >
-      <div className="rounded-lg border border-border/70 bg-background/70">
-        <Textarea
-          rows={2}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          className="min-h-[4rem] resize-none border-0 bg-transparent px-3 py-2.5 text-sm shadow-none outline-none"
-          placeholder="What would you like help with for this ticket?"
-        />
-        <div className="flex items-center justify-end gap-2 px-2 pb-2">
-          <button
-            type="submit"
-            className="flex h-8 w-8 enabled:cursor-pointer items-center justify-center rounded-full bg-primary/90 text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105 disabled:pointer-events-none disabled:opacity-30 disabled:hover:scale-100"
-            disabled={!text.trim()}
-            aria-label="Start thread"
-            title="Start thread"
+      <div className="group rounded-[22px] p-px transition-colors duration-200">
+        <div
+          className={cn(
+            "rounded-[20px] border bg-card transition-colors duration-200 has-focus-visible:border-ring/45",
+            "border-border",
+            !isConnected ? "opacity-75" : null,
+          )}
+        >
+          <div className="relative px-3 pb-2 pt-3.5 sm:px-4 sm:pt-4">
+            <ComposerPromptEditor
+              editorRef={editorRef}
+              value={text}
+              cursor={cursor}
+              terminalContexts={[]}
+              skills={selectedProvider?.skills ?? []}
+              onRemoveTerminalContext={() => {}}
+              onChange={(nextValue, nextCursor) => {
+                setText(nextValue);
+                setCursor(nextCursor);
+              }}
+              onPaste={() => {}}
+              placeholder={
+                isConnected
+                  ? "Ask anything, @tag files/folders, $use skills, or / for commands"
+                  : "Server is disconnected"
+              }
+              disabled={!isConnected}
+            />
+          </div>
+
+          <div
+            data-chat-composer-footer="true"
+            data-chat-composer-footer-compact="false"
+            className="flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-2.5 pb-2.5 sm:gap-0 sm:px-3 sm:pb-3"
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-              <path
-                d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <ProviderModelPicker
+                activeInstanceId={selectedInstanceId}
+                model={selectedModel}
+                lockedProvider={null}
+                instanceEntries={providerInstanceEntries}
+                modelOptionsByInstance={modelOptionsByInstance}
+                disabled={!isConnected || !selectedProviderEntry}
+                onInstanceModelChange={(instanceId, model) => {
+                  setSelectedInstanceId(instanceId);
+                  setSelectedModel(model);
+                }}
               />
-            </svg>
-          </button>
+
+              {showInteractionModeToggle ? (
+                <>
+                  <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+                  <Button
+                    variant="ghost"
+                    className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                    size="sm"
+                    type="button"
+                    onClick={() =>
+                      setInteractionMode((mode) => (mode === "plan" ? "default" : "plan"))
+                    }
+                    title={
+                      interactionMode === "plan"
+                        ? "Plan mode - click to return to normal build mode"
+                        : "Default mode - click to enter plan mode"
+                    }
+                  >
+                    <BotIcon />
+                    <span className="sr-only sm:not-sr-only">
+                      {interactionMode === "plan" ? "Plan" : "Build"}
+                    </span>
+                  </Button>
+                </>
+              ) : null}
+
+              <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+              <Select value={runtimeMode} onValueChange={(value) => setRuntimeMode(value!)}>
+                <SelectTrigger
+                  variant="ghost"
+                  size="sm"
+                  className="font-medium"
+                  aria-label="Runtime mode"
+                  title={runtimeOption.description}
+                >
+                  <RuntimeModeIcon className="size-4" />
+                  <SelectValue>{runtimeOption.label}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup alignItemWithTrigger={false}>
+                  {runtimeModeOptions.map((mode) => {
+                    const option = runtimeModeConfig[mode];
+                    const OptionIcon = option.icon;
+                    return (
+                      <SelectItem key={mode} value={mode} className="min-w-64 py-2">
+                        <div className="grid min-w-0 gap-0.5">
+                          <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                            <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                            {option.label}
+                          </span>
+                          <span className="text-muted-foreground text-xs leading-4">
+                            {option.description}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectPopup>
+              </Select>
+            </div>
+
+            <div
+              data-chat-composer-actions="right"
+              data-chat-composer-primary-actions-compact="false"
+              className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
+            >
+              <ComposerPrimaryActions
+                compact={false}
+                pendingAction={null}
+                isRunning={false}
+                showPlanFollowUpPrompt={false}
+                promptHasText={text.trim().length > 0}
+                isSendBusy={false}
+                isConnecting={false}
+                isEnvironmentUnavailable={!isConnected || !selectedProviderEntry}
+                isPreparingWorktree={false}
+                hasSendableContent={canSend}
+                onPreviousPendingQuestion={() => {}}
+                onInterrupt={() => {}}
+                onImplementPlanInNewThread={() => {}}
+              />
+            </div>
+          </div>
         </div>
       </div>
     </form>
-  );
-}
-
-function buildTicketContextPrompt(input: {
-  projectTitle: string;
-  displayId: string;
-  title: string;
-  status: string;
-  priority?: string;
-  assignee?: string;
-  ticketUrl?: string;
-  description: string;
-}): string {
-  const lines = [
-    "You are helping with a Jira ticket. Use this context in your responses.",
-    `Project: ${input.projectTitle}`,
-    `Ticket: ${input.displayId}`,
-    `Title: ${input.title}`,
-    `Status: ${input.status}`,
-    input.priority ? `Priority: ${input.priority}` : "",
-    input.assignee ? `Assignee: ${input.assignee}` : "",
-    input.ticketUrl ? `URL: ${input.ticketUrl}` : "",
-    "",
-    "Description:",
-    input.description || "(No description available)",
-    "",
-    "Please summarize this ticket, identify risks, and propose a concrete implementation plan.",
-  ];
-
-  return lines.filter((line) => line.length > 0).join("\n");
-}
-
-function formatRelativeTime(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
-}
-
-function CreateProjectDialog({
-  onClose,
-  onCreated,
-}: {
-  onClose: () => void;
-  onCreated: (project: ProjectShellProject) => void;
-}) {
-  const setup = useCreateProject();
-  const oauth = useAtlassianOAuth();
-  const [siteUrl, setSiteUrl] = useState("https://");
-  const [email, setEmail] = useState("");
-  const [apiToken, setApiToken] = useState("");
-  const [projectQuery, setProjectQuery] = useState("");
-
-  useEffect(() => {
-    void setup.loadPersistedAccounts();
-  }, [setup]);
-
-  useEffect(() => {
-    if (oauth.state.kind !== "done") return;
-    void setup.loadAccountsWithOAuth(oauth.state.sites, oauth.state.token);
-  }, [oauth.state, setup]);
-
-  const filteredProjects = useMemo(() => {
-    const query = projectQuery.trim().toLowerCase();
-    if (!query) return setup.projects;
-    return setup.projects.filter((project) => {
-      const haystack = `${project.title} ${project.key ?? ""}`.toLowerCase();
-      return haystack.includes(query);
-    });
-  }, [projectQuery, setup.projects]);
-
-  const connectBasic = async () => {
-    await setup.loadAccountsWithBasic({ siteUrl, email, apiToken });
-  };
-
-  const continueWithAccount = async () => {
-    if (!setup.selectedAccount) return;
-    await setup.loadProjects(setup.selectedAccount);
-  };
-
-  const createSelectedProject = async () => {
-    if (!setup.selectedProject) return;
-    const project = await setup.createProject(setup.selectedProject);
-    onCreated(project);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 p-2 sm:items-center sm:p-4">
-      <Card className="flex h-full w-full max-w-3xl flex-col overflow-hidden sm:h-[min(40rem,calc(100dvh-2rem))]">
-        <header className="flex items-center justify-between border-b border-border px-4 py-3">
-          <div className="flex items-center gap-2">
-            <FolderKanban className="size-4 text-primary" />
-            <h2 className="text-sm font-semibold">Add Jira Project</h2>
-          </div>
-          <Button size="icon-xs" variant="ghost" onClick={onClose} aria-label="Close dialog">
-            <X className="size-4" />
-          </Button>
-        </header>
-
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="space-y-4 p-4">
-            {setup.error && (
-              <Card>
-                <CardContent className="p-3 text-sm text-destructive">{setup.error}</CardContent>
-              </Card>
-            )}
-
-            {setup.step === "source" && (
-              <Card>
-                <CardContent className="space-y-3 p-4">
-                  <h3 className="text-sm font-semibold">Connect Atlassian</h3>
-                  <Input
-                    value={siteUrl}
-                    onChange={(event) => setSiteUrl(event.target.value)}
-                    placeholder="https://your-company.atlassian.net"
-                  />
-                  <Input
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    placeholder="Email"
-                  />
-                  <Input
-                    type="password"
-                    value={apiToken}
-                    onChange={(event) => setApiToken(event.target.value)}
-                    placeholder="API token"
-                  />
-                  <div className="flex items-center gap-2">
-                    <Button
-                      onClick={() => void connectBasic()}
-                      disabled={!setup.isValidUrl(siteUrl)}
-                    >
-                      Connect with API token
-                    </Button>
-                    <Button variant="outline" onClick={() => void oauth.startOAuth()}>
-                      Connect with OAuth
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {setup.step === "account" && (
-              <Card>
-                <CardContent className="space-y-3 p-4">
-                  <h3 className="text-sm font-semibold">Select Site</h3>
-                  <div className="space-y-2">
-                    {setup.accounts.map((account) => (
-                      <button
-                        key={account.id}
-                        type="button"
-                        onClick={() => setup.setSelectedAccount(account)}
-                        className={`flex w-full items-center justify-between rounded-md border p-3 text-left ${
-                          setup.selectedAccount?.id === account.id
-                            ? "border-primary bg-primary/5"
-                            : "border-border"
-                        }`}
-                      >
-                        <span className="text-sm font-medium">{account.label}</span>
-                        <span className="text-xs text-muted-foreground">{account.provider}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" onClick={() => setup.setStep("source")}>
-                      Back
-                    </Button>
-                    <Button
-                      onClick={() => void continueWithAccount()}
-                      disabled={!setup.selectedAccount}
-                    >
-                      Continue
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {setup.step === "project" && (
-              <Card>
-                <CardContent className="space-y-3 p-4">
-                  <h3 className="text-sm font-semibold">Select Project</h3>
-                  <Input
-                    value={projectQuery}
-                    onChange={(event) => setProjectQuery(event.target.value)}
-                    placeholder="Filter projects"
-                  />
-                  <div className="space-y-2">
-                    {filteredProjects.map((project) => (
-                      <button
-                        key={project.id}
-                        type="button"
-                        onClick={() => setup.setSelectedProject(project)}
-                        className={`flex w-full items-center justify-between rounded-md border p-3 text-left ${
-                          setup.selectedProject?.id === project.id
-                            ? "border-primary bg-primary/5"
-                            : "border-border"
-                        }`}
-                      >
-                        <div>
-                          <div className="text-sm font-medium">{project.title}</div>
-                          <div className="text-xs text-muted-foreground">{project.key}</div>
-                        </div>
-                        <Building2 className="size-4 text-muted-foreground" />
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" onClick={() => setup.setStep("account")}>
-                      Back
-                    </Button>
-                    <Button
-                      onClick={() => void createSelectedProject()}
-                      disabled={!setup.selectedProject}
-                    >
-                      Add project
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {setup.step === "creating" && (
-              <Card>
-                <CardContent className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" />
-                  Creating project...
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        </ScrollArea>
-      </Card>
-    </div>
   );
 }
