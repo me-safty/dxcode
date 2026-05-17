@@ -162,6 +162,7 @@ import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
+  canNormalizeRuntimeModeForProviderSelection,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -1268,10 +1269,6 @@ export default function ChatView(props: ChatViewProps) {
     [providerStatuses],
   );
   const explicitSelectedInstanceId = selectedProviderByThreadId ?? threadProvider;
-  const explicitSelectedProviderEntry =
-    explicitSelectedInstanceId === null
-      ? undefined
-      : providerInstanceEntries.find((entry) => entry.instanceId === explicitSelectedInstanceId);
   const resolvedUnlockedProvider = resolveProviderDriverKindForInstanceSelection(
     providerInstanceEntries,
     providerStatuses,
@@ -1279,12 +1276,12 @@ export default function ChatView(props: ChatViewProps) {
   );
   const selectedProvider: ProviderDriverKind =
     lockedProvider ?? resolvedUnlockedProvider ?? ProviderDriverKind.make("codex");
-  const canNormalizeRuntimeMode =
-    serverConfig !== null &&
-    (lockedProvider !== null ||
-      explicitSelectedInstanceId === null ||
-      resolvedUnlockedProvider !== undefined ||
-      explicitSelectedProviderEntry !== undefined);
+  const canNormalizeRuntimeMode = canNormalizeRuntimeModeForProviderSelection({
+    serverConfigLoaded: serverConfig !== null,
+    lockedProvider,
+    explicitSelectedInstanceId,
+    resolvedUnlockedProvider,
+  });
   const runtimeMode = canNormalizeRuntimeMode
     ? normalizeRuntimeModeForProvider(selectedProvider, rawRuntimeMode)
     : rawRuntimeMode;
