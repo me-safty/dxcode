@@ -97,7 +97,13 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
 
     const emit = (event: ProviderRuntimeEvent) =>
       Queue.offer(runtimeEvents, event).pipe(Effect.asVoid);
-    const emitNow = (event: ProviderRuntimeEvent) => runPromise(emit(event));
+    const emitNow = async (event: ProviderRuntimeEvent) => {
+      try {
+        await runPromise(emit(event));
+      } catch {
+        // Adapter teardown may close the event queue while a detached turn is settling.
+      }
+    };
     const eventBase = makeDroidEventBase(instanceId);
     const requireSession = Effect.fn("requireDroidSession")(function* (threadId: ThreadId) {
       const context = sessions.get(threadId);
@@ -259,19 +265,27 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
           issue: `Unknown Droid thread: ${input.threadId}`,
         });
       }
-      if (context.session.status === "running" || context.activeAbort) {
+      if (context.activeAbort) {
         return yield* new ProviderAdapterValidationError({
           provider: DROID_PROVIDER,
           operation: "sendTurn",
-          issue: `Droid thread ${input.threadId} already has an active turn.`,
+          issue: `Droid thread ${input.threadId} is busy.`,
         });
       }
+      const abort = new AbortController();
+      context.activeAbort = abort;
+      const clearReservedAbort = () => {
+        if (context.activeAbort === abort) {
+          context.activeAbort = undefined;
+        }
+      };
       const text = input.input?.trim();
       const images = yield* resolveDroidImages(input.attachments ?? [], {
         attachmentsDir: serverConfig.attachmentsDir,
         fileSystem,
-      });
+      }).pipe(Effect.onError(() => Effect.sync(clearReservedAbort)));
       if (!text && images.length === 0) {
+        clearReservedAbort();
         return yield* new ProviderAdapterValidationError({
           provider: DROID_PROVIDER,
           operation: "sendTurn",
@@ -280,8 +294,6 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
       }
 
       const turnId = TurnId.make(`droid-turn-${randomUUID()}`);
-      const abort = new AbortController();
-      context.activeAbort = abort;
       context.activeAssistantItems = new Map();
       context.activeThinkingItems = new Map();
       context.activeCompletedAssistantItems = new Set();

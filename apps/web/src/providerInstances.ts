@@ -241,7 +241,7 @@ export function resolveProviderDriverKindForInstanceSelection(
   selection: ProviderInstanceId | ProviderDriverKind | null | undefined,
 ): ProviderDriverKind | undefined {
   const matchedEntry = entries.find((entry) => entry.instanceId === selection);
-  if (matchedEntry) {
+  if (matchedEntry?.enabled && matchedEntry.isAvailable) {
     return matchedEntry.driverKind;
   }
   return undefined;

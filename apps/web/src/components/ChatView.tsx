@@ -1268,6 +1268,10 @@ export default function ChatView(props: ChatViewProps) {
     [providerStatuses],
   );
   const explicitSelectedInstanceId = selectedProviderByThreadId ?? threadProvider;
+  const explicitSelectedProviderEntry =
+    explicitSelectedInstanceId === null
+      ? undefined
+      : providerInstanceEntries.find((entry) => entry.instanceId === explicitSelectedInstanceId);
   const resolvedUnlockedProvider = resolveProviderDriverKindForInstanceSelection(
     providerInstanceEntries,
     providerStatuses,
@@ -1279,7 +1283,8 @@ export default function ChatView(props: ChatViewProps) {
     serverConfig !== null &&
     (lockedProvider !== null ||
       explicitSelectedInstanceId === null ||
-      resolvedUnlockedProvider !== undefined);
+      resolvedUnlockedProvider !== undefined ||
+      explicitSelectedProviderEntry !== undefined);
   const runtimeMode = canNormalizeRuntimeMode
     ? normalizeRuntimeModeForProvider(selectedProvider, rawRuntimeMode)
     : rawRuntimeMode;

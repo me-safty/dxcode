@@ -114,6 +114,33 @@ describe("resolveProviderDriverKindForInstanceSelection", () => {
     ).toBe("claudeAgent");
   });
 
+  it("does not return disabled or unavailable provider instances", () => {
+    const providers = [
+      provider({ provider: ProviderDriverKind.make("droid"), instanceId: "droid", enabled: false }),
+      provider({
+        provider: ProviderDriverKind.make("claudeAgent"),
+        instanceId: "claudeAgent",
+        availability: "unavailable",
+      }),
+    ];
+    const entries = deriveProviderInstanceEntries(providers);
+
+    expect(
+      resolveProviderDriverKindForInstanceSelection(
+        entries,
+        providers,
+        ProviderInstanceId.make("droid"),
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveProviderDriverKindForInstanceSelection(
+        entries,
+        providers,
+        ProviderInstanceId.make("claudeAgent"),
+      ),
+    ).toBeUndefined();
+  });
+
   it("does not guess a provider kind when the instance selection is unknown", () => {
     const providers = [
       provider({ provider: ProviderDriverKind.make("codex"), instanceId: "codex", enabled: false }),

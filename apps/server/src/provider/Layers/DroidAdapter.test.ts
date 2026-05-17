@@ -18,6 +18,7 @@ import {
 } from "@factory/droid-sdk";
 import {
   ApprovalRequestId,
+  ChatAttachment,
   DroidSettings,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -37,6 +38,7 @@ const settings = Schema.decodeSync(DroidSettings)({
   enabled: true,
   binaryPath: "fake-droid",
 });
+const decodeChatAttachment = Schema.decodeSync(ChatAttachment);
 const threadId = ThreadId.make("thread-droid");
 
 function fakeSession(input: {
@@ -719,6 +721,55 @@ it.effect("rejects overlapping Droid turns on the same thread", () =>
       releaseTurn?.();
       const completed = yield* Fiber.join(completedFiber).pipe(Effect.timeout("2 seconds"));
       assert.equal(completed._tag, "Some");
+      assert.equal(streamCalls, 1);
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("releases Droid turn reservation after attachment validation failures", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let streamCalls = 0;
+      const adapter = yield* makeDroidAdapter(settings, {
+        sdk: {
+          createSession: async () =>
+            fakeSession({
+              onStream: async function* () {
+                streamCalls += 1;
+                yield { type: DroidMessageType.TurnComplete, tokenUsage: null };
+              },
+            }),
+          resumeSession: async () => fakeSession({}),
+        },
+      });
+      const unsupportedAttachment = decodeChatAttachment({
+        type: "image",
+        id: "thread-droid-tiff",
+        name: "unsupported.tiff",
+        mimeType: "image/tiff",
+        sizeBytes: 1,
+      });
+      const completedFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "turn.completed"),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("droid"),
+        runtimeMode: "full-access",
+      });
+      const failed = yield* adapter
+        .sendTurn({ threadId, input: "", attachments: [unsupportedAttachment] })
+        .pipe(Effect.exit);
+      assert.equal(failed._tag, "Failure");
+
+      const recovered = yield* adapter
+        .sendTurn({ threadId, input: "after failure" })
+        .pipe(Effect.exit);
+      assert.equal(recovered._tag, "Success");
+      yield* Fiber.join(completedFiber).pipe(Effect.timeout("2 seconds"));
       assert.equal(streamCalls, 1);
     }),
   ).pipe(Effect.provide(testLayer)),
