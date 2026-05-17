@@ -243,6 +243,11 @@ export async function handleDroidMessage(input: {
           message.tokenUsage,
           context.activeTokenUsageBaseline,
         );
+        await emitNow({
+          ...base(),
+          type: "thread.token-usage.updated",
+          payload: { usage: context.activeTokenUsage },
+        });
       }
       context.cumulativeTokenUsage = context.activeTokenUsage ?? context.cumulativeTokenUsage;
       return;

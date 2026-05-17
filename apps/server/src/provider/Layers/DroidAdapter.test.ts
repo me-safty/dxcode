@@ -414,6 +414,80 @@ it.effect("accumulates multiple Droid token usage updates within one turn", () =
   ).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("emits Droid token usage updates from turn completion usage", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const usageThreadId = ThreadId.make("thread-droid-turn-complete-token-usage");
+      const adapter = yield* makeDroidAdapter(settings, {
+        sdk: {
+          createSession: async () =>
+            fakeSession({
+              messages: [
+                {
+                  type: DroidMessageType.TurnComplete,
+                  tokenUsage: {
+                    type: DroidMessageType.TokenUsageUpdate,
+                    inputTokens: 10,
+                    outputTokens: 4,
+                    cacheCreationTokens: 2,
+                    cacheReadTokens: 3,
+                    thinkingTokens: 1,
+                  },
+                },
+              ],
+            }),
+          resumeSession: async () => fakeSession({}),
+        },
+      });
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === usageThreadId),
+        Stream.take(5),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: usageThreadId,
+        provider: ProviderDriverKind.make("droid"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: usageThreadId, input: "count final tokens" });
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("2 seconds")));
+      const expectedUsage = {
+        usedTokens: 20,
+        inputTokens: 15,
+        cachedInputTokens: 3,
+        outputTokens: 5,
+        reasoningOutputTokens: 1,
+        lastUsedTokens: 20,
+        lastInputTokens: 15,
+        lastCachedInputTokens: 3,
+        lastOutputTokens: 5,
+        lastReasoningOutputTokens: 1,
+      };
+
+      assert.deepEqual(
+        events.map((event) => event.type),
+        [
+          "session.started",
+          "thread.started",
+          "turn.started",
+          "thread.token-usage.updated",
+          "turn.completed",
+        ],
+      );
+      assert.deepEqual(
+        events.find((event) => event.type === "thread.token-usage.updated")?.payload,
+        { usage: expectedUsage },
+      );
+      assert.deepEqual(events.find((event) => event.type === "turn.completed")?.payload, {
+        state: "completed",
+        usage: expectedUsage,
+      });
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("maps Droid medium access to medium autonomy", () =>
   Effect.scoped(
     Effect.gen(function* () {
