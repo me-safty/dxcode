@@ -1,10 +1,15 @@
 import { ModelProvider, ReasoningEffort, type AvailableModelConfig } from "@factory/droid-sdk";
 import { DroidSettings } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vitest";
 
-import { buildDroidModelsFromSdkModels, makePendingDroidProvider } from "./DroidProvider.ts";
+import {
+  buildDroidModelsFromSdkModels,
+  droidDiscoveryFailureMessage,
+  makePendingDroidProvider,
+} from "./DroidProvider.ts";
 
 const sdkModel = (model: AvailableModelConfig): AvailableModelConfig => model;
 const decodeDroidSettings = Schema.decodeSync(DroidSettings);
@@ -72,5 +77,11 @@ describe("DroidProvider", () => {
         { id: "high", label: "High", isDefault: true },
       ],
     });
+  });
+
+  it("extracts Droid model discovery errors from Effect causes", () => {
+    const cause = Cause.fail(new Error("Droid auth expired"));
+
+    expect(droidDiscoveryFailureMessage(cause)).toBe("Droid auth expired");
   });
 });

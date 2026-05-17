@@ -173,15 +173,21 @@ export function toOutcome(decision: ProviderApprovalDecision): ToolConfirmationO
 export function toTokenUsageSnapshot(
   usage: TokenUsageUpdate,
   previous?: ThreadTokenUsageSnapshot,
+  turnBaseline?: ThreadTokenUsageSnapshot,
 ): ThreadTokenUsageSnapshot {
-  const lastInputTokens = usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
-  const lastOutputTokens = usage.outputTokens + usage.thinkingTokens;
-  const lastCachedInputTokens = usage.cacheReadTokens;
-  const lastReasoningOutputTokens = usage.thinkingTokens;
-  const inputTokens = (previous?.inputTokens ?? 0) + lastInputTokens;
-  const cachedInputTokens = (previous?.cachedInputTokens ?? 0) + lastCachedInputTokens;
-  const outputTokens = (previous?.outputTokens ?? 0) + lastOutputTokens;
-  const reasoningOutputTokens = (previous?.reasoningOutputTokens ?? 0) + lastReasoningOutputTokens;
+  const inputDelta = usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
+  const outputDelta = usage.outputTokens + usage.thinkingTokens;
+  const cachedInputDelta = usage.cacheReadTokens;
+  const reasoningOutputDelta = usage.thinkingTokens;
+  const inputTokens = (previous?.inputTokens ?? 0) + inputDelta;
+  const cachedInputTokens = (previous?.cachedInputTokens ?? 0) + cachedInputDelta;
+  const outputTokens = (previous?.outputTokens ?? 0) + outputDelta;
+  const reasoningOutputTokens = (previous?.reasoningOutputTokens ?? 0) + reasoningOutputDelta;
+  const lastInputTokens = inputTokens - (turnBaseline?.inputTokens ?? 0);
+  const lastCachedInputTokens = cachedInputTokens - (turnBaseline?.cachedInputTokens ?? 0);
+  const lastOutputTokens = outputTokens - (turnBaseline?.outputTokens ?? 0);
+  const lastReasoningOutputTokens =
+    reasoningOutputTokens - (turnBaseline?.reasoningOutputTokens ?? 0);
   return {
     usedTokens: inputTokens + outputTokens,
     inputTokens,

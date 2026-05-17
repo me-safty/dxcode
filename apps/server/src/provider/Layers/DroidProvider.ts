@@ -12,6 +12,7 @@ import {
   ProviderDriverKind,
   type ServerProviderModel,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -89,6 +90,11 @@ class DroidModelDiscoveryError extends Data.TaggedError("DroidModelDiscoveryErro
   readonly message: string;
   readonly cause: unknown;
 }> {}
+
+export function droidDiscoveryFailureMessage(failure: unknown): string {
+  const error = Cause.isCause(failure) ? Cause.squash(failure) : failure;
+  return error instanceof Error ? error.message : String(error);
+}
 
 const defaultSdk: DroidProviderSdk = { createSession };
 
@@ -314,7 +320,7 @@ export function checkDroidProviderStatus(
       commandResult.code === 0 &&
       (Result.isFailure(discoveredModels) || Option.isNone(discoveredModels.success));
     const discoveryMessage = Result.isFailure(discoveredModels)
-      ? discoveredModels.failure.message
+      ? droidDiscoveryFailureMessage(discoveredModels.failure)
       : modelDiscoveryFailed
         ? "Timed out while discovering Droid models."
         : undefined;

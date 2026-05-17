@@ -189,6 +189,7 @@ export async function handleDroidMessage(input: {
       context.activeTokenUsage = toTokenUsageSnapshot(
         message,
         context.activeTokenUsage ?? context.activeTokenUsageBaseline,
+        context.activeTokenUsageBaseline,
       );
       context.cumulativeTokenUsage = context.activeTokenUsage;
       return emitNow({
@@ -241,6 +242,7 @@ export async function handleDroidMessage(input: {
       if (message.tokenUsage && !context.activeTokenUsage) {
         context.activeTokenUsage = toTokenUsageSnapshot(
           message.tokenUsage,
+          context.activeTokenUsageBaseline,
           context.activeTokenUsageBaseline,
         );
         await emitNow({
