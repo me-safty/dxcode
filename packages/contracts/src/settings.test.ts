@@ -2,11 +2,43 @@ import { describe, expect, it } from "vitest";
 import * as Schema from "effect/Schema";
 
 import { ProviderInstanceId } from "./providerInstance.ts";
-import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import {
+  CodexSettings,
+  DEFAULT_SERVER_SETTINGS,
+  ServerSettings,
+  ServerSettingsPatch,
+} from "./settings.ts";
 
+const decodeCodexSettings = Schema.decodeUnknownSync(CodexSettings);
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
+
+describe("CodexSettings profile fields", () => {
+  it("decodes profile name and launch args", () => {
+    const decoded = decodeCodexSettings({
+      profileName: "work",
+      launchArgs: "--config sandbox_workspace_write.network_access=true",
+    });
+
+    expect(decoded.profileName).toBe("work");
+    expect(decoded.launchArgs).toBe("--config sandbox_workspace_write.network_access=true");
+  });
+
+  it("accepts codex profile fields in server settings patches", () => {
+    const patch = decodeServerSettingsPatch({
+      providers: {
+        codex: {
+          profileName: "work",
+          launchArgs: "--config foo=bar",
+        },
+      },
+    });
+
+    expect(patch.providers?.codex?.profileName).toBe("work");
+    expect(patch.providers?.codex?.launchArgs).toBe("--config foo=bar");
+  });
+});
 
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults to an empty record so legacy configs without the key still decode", () => {

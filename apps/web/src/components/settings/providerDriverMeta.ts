@@ -33,6 +33,8 @@ export interface ProviderClientDefinition {
   readonly badgeLabel?: string;
 }
 
+// When adding a provider or changing settings fields, update profile metadata
+// here too: Settings > General > Profiles renders from these definitions.
 export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
   {
     value: ProviderDriverKind.make("codex"),

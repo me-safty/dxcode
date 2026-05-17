@@ -34,6 +34,7 @@ import {
 import { __resetLocalApiForTests } from "../../localApi";
 import { AppAtomRegistryProvider, resetAppAtomRegistryForTests } from "../../rpc/atomRegistry";
 import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/serverState";
+import { useComposerDraftStore } from "../../composerDraftStore";
 import { useUiStateStore } from "../../uiStateStore";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { DiagnosticsSettingsPanel } from "./DiagnosticsSettings";
@@ -759,6 +760,62 @@ describe("GeneralSettingsPanel observability", () => {
         ),
       )
       .toBeInTheDocument();
+  });
+
+  it("shows enabled provider profiles, adds profiles, and switches sticky composer selection", async () => {
+    const updateSettings = vi
+      .fn<LocalApi["server"]["updateSettings"]>()
+      .mockResolvedValue(DEFAULT_SERVER_SETTINGS);
+    window.nativeApi = {
+      persistence: {
+        getClientSettings: vi.fn().mockResolvedValue(null),
+        setClientSettings: vi.fn().mockResolvedValue(undefined),
+      },
+      server: { updateSettings },
+    } as unknown as LocalApi;
+    setServerConfigSnapshot({
+      ...createBaseServerConfig(),
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        providers: {
+          ...DEFAULT_SERVER_SETTINGS.providers,
+          claudeAgent: { ...DEFAULT_SERVER_SETTINGS.providers.claudeAgent, enabled: false },
+        },
+      },
+      providers: [
+        {
+          instanceId: ProviderInstanceId.make("codex"),
+          driver: ProviderDriverKind.make("codex"),
+          enabled: true,
+          installed: true,
+          version: null,
+          status: "ready",
+          auth: { status: "authenticated" },
+          checkedAt: "2036-04-07T00:00:00.000Z",
+          models: [{ slug: "gpt-5.4", name: "GPT 5.4", capabilities: null, isCustom: false }],
+          slashCommands: [],
+          skills: [],
+        },
+      ],
+    });
+
+    mounted = await renderWithTestRouter(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByRole("heading", { name: "Profiles" })).toBeInTheDocument();
+    await expect.element(page.getByText("Codex default")).toBeInTheDocument();
+    await expect.element(page.getByText("Claude default")).not.toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Add profile" }).first().click();
+    await expect.element(page.getByText("codex_profile_1")).toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Switch" }).first().click();
+    expect(useComposerDraftStore.getState().stickyActiveProvider).toBe(
+      ProviderInstanceId.make("codex_profile_1"),
+    );
   });
 
   it("creates and shows a pairing link when network access is enabled", async () => {

@@ -3,12 +3,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
+  DEFAULT_MODEL,
+  DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
   type DesktopUpdateChannel,
   PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
   type ProviderInstanceConfig,
-  type ProviderInstanceId,
+  ProviderInstanceId,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
@@ -48,6 +50,7 @@ import { useShallow } from "zustand/react/shallow";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
+import { useComposerDraftStore } from "../../composerDraftStore";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -66,7 +69,9 @@ import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import {
   buildProviderInstanceUpdatePatch,
+  buildProviderProfileGroups,
   formatDiagnosticsDescription,
+  nextProviderProfileId,
 } from "./SettingsPanels.logic";
 import {
   SettingResetButton,
@@ -77,6 +82,7 @@ import {
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { useServerObservability, useServerProviders } from "../../rpc/serverState";
+import { ProviderSettingsForm } from "./ProviderSettingsForm";
 
 const THEME_OPTIONS = [
   {
@@ -117,9 +123,11 @@ function withoutProviderInstanceFavorites(
   return favorites.filter((favorite) => favorite.provider !== instanceId);
 }
 
-const PROVIDER_SETTINGS = DRIVER_OPTIONS.map((definition) => ({
-  provider: definition.value,
-}));
+const PROVIDER_SETTINGS = DRIVER_OPTIONS.map((definition) => ({ provider: definition.value }));
+
+function providerProfileDisplayName(instance: ProviderInstanceConfig, fallback: string): string {
+  return instance.displayName?.trim() || fallback;
+}
 
 function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }) {
   useRelativeTimeTick();
@@ -483,6 +491,8 @@ export function GeneralSettingsPanel() {
   const { updateSettings } = useUpdateSettings();
   const observability = useServerObservability();
   const serverProviders = useServerProviders();
+  const stickyActiveProvider = useComposerDraftStore((store) => store.stickyActiveProvider);
+  const setStickyModelSelection = useComposerDraftStore((store) => store.setStickyModelSelection);
   const diagnosticsDescription = formatDiagnosticsDescription({
     localTracingEnabled: observability?.localTracingEnabled ?? false,
     otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
@@ -513,9 +523,169 @@ export function GeneralSettingsPanel() {
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
+  const profileGroups = buildProviderProfileGroups({
+    settings,
+    serverProviders,
+    drivers: DRIVER_OPTIONS.map((option) => option.value),
+  });
+  const activeProfileId = stickyActiveProvider ?? ProviderInstanceId.make("codex");
+
+  const switchProfile = (instanceId: ProviderInstanceId, driver: ProviderDriverKind) => {
+    const liveProvider = serverProviders.find((provider) => provider.instanceId === instanceId);
+    setStickyModelSelection(
+      createModelSelection(
+        instanceId,
+        liveProvider?.models.find((model) => !model.isCustom)?.slug ??
+          liveProvider?.models[0]?.slug ??
+          DEFAULT_MODEL_BY_PROVIDER[driver] ??
+          DEFAULT_MODEL,
+      ),
+    );
+  };
+
+  const addProfile = (driver: ProviderDriverKind) => {
+    const driverOption = getDriverOption(driver);
+    const instanceId = nextProviderProfileId(settings.providerInstances, driver);
+    updateSettings({
+      providerInstances: {
+        ...settings.providerInstances,
+        [instanceId]: {
+          driver,
+          enabled: true,
+          displayName: `${driverOption?.label ?? String(driver)} profile`,
+        },
+      },
+    });
+  };
+
+  const updateProfile = (
+    row: {
+      readonly instanceId: ProviderInstanceId;
+      readonly instance: ProviderInstanceConfig;
+      readonly isDefault: boolean;
+    },
+    next: ProviderInstanceConfig,
+  ) => {
+    updateSettings(
+      buildProviderInstanceUpdatePatch({
+        settings,
+        instanceId: row.instanceId,
+        instance: next,
+        driver: row.instance.driver,
+        isDefault: row.isDefault,
+      }),
+    );
+  };
 
   return (
     <SettingsPageContainer>
+      <SettingsSection title="Profiles">
+        {profileGroups.map((group) => {
+          const driverOption = getDriverOption(group.driver);
+          if (!driverOption) return null;
+          return (
+            <div key={group.driver} className="border-t border-border/60 first:border-t-0">
+              <SettingsRow
+                title={driverOption.label}
+                description="Named provider presets for new composer selections."
+                control={
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => addProfile(group.driver)}
+                  >
+                    <PlusIcon className="size-3.5" />
+                    Add profile
+                  </Button>
+                }
+              />
+              <div className="grid gap-2 px-4 pb-4 sm:px-5">
+                {group.rows.map((row) => {
+                  const isActive = activeProfileId === row.instanceId;
+                  const displayName = providerProfileDisplayName(
+                    row.instance,
+                    row.isDefault ? `${driverOption.label} default` : row.instanceId,
+                  );
+                  const updateDisplayName = (value: string) => {
+                    const trimmed = value.trim();
+                    const { displayName: _displayName, ...rest } = row.instance;
+                    updateProfile(
+                      row,
+                      trimmed
+                        ? ({ ...rest, displayName: trimmed } as ProviderInstanceConfig)
+                        : (rest as ProviderInstanceConfig),
+                    );
+                  };
+                  const updateConfig = (config: Record<string, unknown> | undefined) => {
+                    const { config: _config, ...rest } = row.instance;
+                    updateProfile(
+                      row,
+                      config
+                        ? ({ ...rest, config } as ProviderInstanceConfig)
+                        : (rest as ProviderInstanceConfig),
+                    );
+                  };
+                  return (
+                    <div
+                      key={row.instanceId}
+                      className="overflow-hidden rounded-md border border-border/70 bg-background"
+                    >
+                      <div className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="truncate text-sm font-medium">{displayName}</span>
+                            <code className="truncate rounded bg-muted/60 px-1 py-0.5 text-[10px] text-muted-foreground">
+                              {row.instanceId}
+                            </code>
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {row.isDefault ? "Default profile" : "Custom profile"}
+                          </span>
+                        </div>
+                        {isActive ? (
+                          <span className="text-xs font-medium text-primary">Active</span>
+                        ) : (
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="outline"
+                            onClick={() => switchProfile(row.instanceId, group.driver)}
+                          >
+                            Switch
+                          </Button>
+                        )}
+                      </div>
+                      <div className="border-t border-border/60 px-3 py-3">
+                        <label className="block">
+                          <span className="text-xs font-medium text-foreground">Display name</span>
+                          <DraftInput
+                            className="mt-1.5"
+                            value={row.instance.displayName ?? ""}
+                            onCommit={updateDisplayName}
+                            placeholder={driverOption.label}
+                            spellCheck={false}
+                            aria-label={`${displayName} display name`}
+                          />
+                        </label>
+                      </div>
+                      <ProviderSettingsForm
+                        definition={driverOption}
+                        value={row.instance.config}
+                        idPrefix={`profile-${row.instanceId}`}
+                        variant="card"
+                        onChange={updateConfig}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </SettingsSection>
+
       <SettingsSection title="General">
         <SettingsRow
           title="Theme"
