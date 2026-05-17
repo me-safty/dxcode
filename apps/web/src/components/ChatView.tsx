@@ -3774,7 +3774,6 @@ export default function ChatView(props: ChatViewProps) {
               markdownCwd={gitCwd ?? undefined}
               workspaceRoot={activeWorkspaceRoot}
               timestampFormat={timestampFormat}
-              mode="sidebar"
               onClose={closePlanSidebar}
             />
           </div>
@@ -3809,7 +3808,6 @@ export default function ChatView(props: ChatViewProps) {
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeWorkspaceRoot}
             timestampFormat={timestampFormat}
-            mode="sheet"
             onClose={closePlanSidebar}
           />
         </RightPanelSheet>

@@ -59,7 +59,6 @@ interface PlanSidebarProps {
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
   timestampFormat: TimestampFormat;
-  mode?: "sheet" | "sidebar";
   onClose: () => void;
 }
 
