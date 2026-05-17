@@ -289,6 +289,45 @@ validationLayer("CodexAdapterLive validation", (it) => {
   );
 });
 
+it.layer(
+  Layer.effect(
+    CodexAdapter,
+    Effect.gen(function* () {
+      const codexConfig = decodeCodexSettings({
+        profileName: "work",
+        launchArgs: "--config foo=bar",
+      });
+      return yield* makeCodexAdapter(codexConfig, {
+        makeRuntime: validationRuntimeFactory.factory,
+      });
+    }),
+  ).pipe(
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(ServerSettingsService.layerTest()),
+    Layer.provideMerge(providerSessionDirectoryTestLayer),
+    Layer.provideMerge(NodeServices.layer),
+  ),
+)("CodexAdapterLive profile launch args", (it) => {
+  it.effect("passes codex profile and launch args to session runtime", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const adapter = yield* CodexAdapter;
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-profile"),
+        runtimeMode: "full-access",
+      });
+
+      assert.equal(validationRuntimeFactory.factory.mock.calls[0]?.[0].profileName, "work");
+      assert.equal(
+        validationRuntimeFactory.factory.mock.calls[0]?.[0].launchArgs,
+        "--config foo=bar",
+      );
+    }),
+  );
+});
+
 const sessionRuntimeFactory = makeRuntimeFactory();
 const sessionErrorLayer = it.layer(
   Layer.effect(

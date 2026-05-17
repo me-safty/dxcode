@@ -37,6 +37,7 @@ import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
 } from "@t3tools/shared/model";
+import { buildCodexGlobalArgs } from "../provider/Layers/CodexCliArgs.ts";
 
 const CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT = "low";
 const CODEX_TIMEOUT_MS = 180_000;
@@ -190,6 +191,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       const command = ChildProcess.make(
         codexConfig.binaryPath || "codex",
         [
+          ...buildCodexGlobalArgs(codexConfig),
           "exec",
           "--ephemeral",
           "--skip-git-repo-check",

@@ -118,6 +118,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         binaryPath: "/opt/homebrew/bin/codex",
         homePath: "/Users/julius/.codex",
         shadowHomePath: "",
+        profileName: "",
+        launchArgs: "",
         customModels: [],
       });
       assert.deepEqual(next.providers.claudeAgent, {
@@ -359,6 +361,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         binaryPath: "/opt/homebrew/bin/codex",
         homePath: "",
         shadowHomePath: "",
+        profileName: "",
+        launchArgs: "",
         customModels: [],
       });
       assert.deepEqual(next.providers.claudeAgent, {

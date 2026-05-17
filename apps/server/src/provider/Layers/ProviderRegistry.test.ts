@@ -346,6 +346,31 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
         }),
       );
 
+      it.effect("passes codex profile and launch args to the app-server probe", () =>
+        Effect.gen(function* () {
+          let probeInput:
+            | {
+                readonly profileName?: string;
+                readonly launchArgs?: string;
+              }
+            | undefined;
+          yield* checkCodexProviderStatus(
+            {
+              ...defaultCodexSettings,
+              profileName: "work",
+              launchArgs: "--config foo=bar",
+            },
+            (input) => {
+              probeInput = input;
+              return Effect.succeed(makeCodexProbeSnapshot());
+            },
+          );
+
+          assert.equal(probeInput?.profileName, "work");
+          assert.equal(probeInput?.launchArgs, "--config foo=bar");
+        }),
+      );
+
       it.effect("returns unauthenticated when app-server requires OpenAI auth", () =>
         Effect.gen(function* () {
           const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>

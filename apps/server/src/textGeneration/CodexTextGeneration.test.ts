@@ -35,6 +35,7 @@ function makeFakeCodexBinary(
     requireFastServiceTier?: boolean;
     requireReasoningEffort?: string;
     forbidReasoningEffort?: boolean;
+    requireArgPrefix?: ReadonlyArray<string>;
     stdinMustContain?: string;
     stdinMustNotContain?: string;
   },
@@ -54,6 +55,12 @@ function makeFakeCodexBinary(
         'seen_image="0"',
         'seen_fast_service_tier="0"',
         'seen_reasoning_effort=""',
+        ...(input.requireArgPrefix
+          ? input.requireArgPrefix.map(
+              (arg, index) =>
+                `[ "$${index + 1}" = ${JSON.stringify(arg)} ] || { printf "%s\\n" "missing arg prefix" >&2; exit 8; }`,
+            )
+          : []),
         "while [ $# -gt 0 ]; do",
         '  if [ "$1" = "--image" ]; then',
         "    shift",
@@ -164,6 +171,7 @@ function withFakeCodexEnv<A, E, R>(
     requireFastServiceTier?: boolean;
     requireReasoningEffort?: string;
     forbidReasoningEffort?: boolean;
+    requireArgPrefix?: ReadonlyArray<string>;
     stdinMustContain?: string;
     stdinMustNotContain?: string;
   },
@@ -173,7 +181,10 @@ function withFakeCodexEnv<A, E, R>(
     const fs = yield* FileSystem.FileSystem;
     const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-codex-text-" });
     const codexPath = yield* makeFakeCodexBinary(tempDir, input);
-    const config = decodeCodexSettings({ binaryPath: codexPath });
+    const config = decodeCodexSettings({
+      binaryPath: codexPath,
+      ...(input.requireArgPrefix ? { profileName: "work", launchArgs: "--config foo=bar" } : {}),
+    });
     const textGeneration = yield* makeCodexTextGeneration(config);
     return yield* effectFn(textGeneration);
   }).pipe(Effect.scoped);
@@ -233,6 +244,26 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             ]),
           }),
       ),
+  );
+
+  it.effect("passes codex profile and extra args before exec", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          subject: "Add important change",
+          body: "",
+        }),
+        requireArgPrefix: ["-p", "work", "--config", "foo=bar", "exec"],
+      },
+      (textGeneration) =>
+        textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/codex-effect",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        }),
+    ),
   );
 
   it.effect("defaults git text generation codex effort to low", () =>
