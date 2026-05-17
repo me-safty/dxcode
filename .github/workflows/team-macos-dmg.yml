@@ -1,0 +1,126 @@
+name: Team macOS DMG
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp into the app. Leave empty for 0.0.0-team.<run number>."
+        required: false
+        type: string
+      arch:
+        description: "Mac architecture to build."
+        required: true
+        default: arm64
+        type: choice
+        options:
+          - arm64
+          - x64
+          - universal
+      publish_release:
+        description: "Create or update a GitHub prerelease with the DMG assets."
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build macOS DMG
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Resolve build version
+        id: version
+        shell: bash
+        run: |
+          version="${{ inputs.version }}"
+          if [[ -z "$version" ]]; then
+            version="0.0.0-team.${GITHUB_RUN_NUMBER}"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=team-v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build DMG
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+        run: |
+          args=(
+            --platform mac
+            --target dmg
+            --arch "${{ inputs.arch }}"
+            --build-version "${{ steps.version.outputs.version }}"
+            --verbose
+          )
+
+          has_all() {
+            for value in "$@"; do
+              if [[ -z "$value" ]]; then
+                return 1
+              fi
+            done
+            return 0
+          }
+
+          if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER"; then
+            key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+            printf "%s" "$APPLE_API_KEY" > "$key_path"
+            export APPLE_API_KEY="$key_path"
+            echo "macOS signing and notarization enabled."
+            args+=(--signed)
+          else
+            echo "macOS signing disabled. The DMG will build, but Gatekeeper may warn users."
+          fi
+
+          bun run dist:desktop:artifact -- "${args[@]}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: t3-code-macos-${{ inputs.arch }}-${{ steps.version.outputs.version }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/*.yml
+          if-no-files-found: error
+
+      - name: Publish GitHub prerelease
+        if: inputs.publish_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Team macOS build ${{ steps.version.outputs.version }}
+          prerelease: true
+          make_latest: false
+          files: |
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/*.yml

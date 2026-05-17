@@ -1,14 +1,12 @@
-name: Release
+name: Upstream Release (disabled for fork)
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
-      - "!v*-nightly.*"
-  schedule:
-    - cron: "0 */3 * * *"
   workflow_dispatch:
     inputs:
+      confirm:
+        description: "This is the upstream release workflow. Use Team macOS DMG for fork builds."
+        required: true
+        type: string
       channel:
         description: "Release channel"
         required: false
