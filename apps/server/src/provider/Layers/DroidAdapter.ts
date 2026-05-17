@@ -21,6 +21,7 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Queue from "effect/Queue";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../../config.ts";
@@ -70,6 +71,7 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
     const instanceId = options?.instanceId ?? ProviderInstanceId.make("droid");
     const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, DroidContext>();
+    const sessionReplaceMutex = yield* Semaphore.make(1);
     const env = Object.fromEntries(
       Object.entries({ ...process.env, ...options?.environment }).filter(
         (entry): entry is [string, string] => typeof entry[1] === "string",
@@ -236,11 +238,15 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
           cumulativeTokenUsage: undefined,
         };
         contextRef = context;
-        const previousContext = sessions.get(input.threadId);
-        sessions.set(input.threadId, context);
-        if (previousContext) {
-          yield* closeContext(previousContext);
-        }
+        yield* sessionReplaceMutex.withPermit(
+          Effect.gen(function* () {
+            const previousContext = sessions.get(input.threadId);
+            sessions.set(input.threadId, context);
+            if (previousContext) {
+              yield* closeContext(previousContext);
+            }
+          }),
+        );
 
         yield* emit({
           ...eventBase(context),

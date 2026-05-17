@@ -238,7 +238,7 @@ export async function handleDroidMessage(input: {
         payload: { message: message.message, class: "provider_error" },
       });
     case DroidMessageType.TurnComplete:
-      if (message.tokenUsage) {
+      if (message.tokenUsage && !context.activeTokenUsage) {
         context.activeTokenUsage = toTokenUsageSnapshot(
           message.tokenUsage,
           context.activeTokenUsageBaseline,

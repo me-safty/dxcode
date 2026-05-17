@@ -488,6 +488,77 @@ it.effect("emits Droid token usage updates from turn completion usage", () =>
   ).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("keeps streamed Droid token usage when turn completion also reports usage", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const usageThreadId = ThreadId.make("thread-droid-streamed-and-final-token-usage");
+      const adapter = yield* makeDroidAdapter(settings, {
+        sdk: {
+          createSession: async () =>
+            fakeSession({
+              messages: [
+                {
+                  type: DroidMessageType.TokenUsageUpdate,
+                  inputTokens: 10,
+                  outputTokens: 4,
+                  cacheCreationTokens: 2,
+                  cacheReadTokens: 3,
+                  thinkingTokens: 1,
+                },
+                {
+                  type: DroidMessageType.TurnComplete,
+                  tokenUsage: {
+                    type: DroidMessageType.TokenUsageUpdate,
+                    inputTokens: 10,
+                    outputTokens: 4,
+                    cacheCreationTokens: 2,
+                    cacheReadTokens: 3,
+                    thinkingTokens: 1,
+                  },
+                },
+              ],
+            }),
+          resumeSession: async () => fakeSession({}),
+        },
+      });
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === usageThreadId),
+        Stream.take(5),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: usageThreadId,
+        provider: ProviderDriverKind.make("droid"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: usageThreadId, input: "count streamed tokens once" });
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("2 seconds")));
+      const expectedUsage = {
+        usedTokens: 20,
+        inputTokens: 15,
+        cachedInputTokens: 3,
+        outputTokens: 5,
+        reasoningOutputTokens: 1,
+        lastUsedTokens: 20,
+        lastInputTokens: 15,
+        lastCachedInputTokens: 3,
+        lastOutputTokens: 5,
+        lastReasoningOutputTokens: 1,
+      };
+      const usageEvents = events.filter((event) => event.type === "thread.token-usage.updated");
+
+      assert.equal(usageEvents.length, 1);
+      assert.deepEqual(usageEvents[0]?.payload, { usage: expectedUsage });
+      assert.deepEqual(events.find((event) => event.type === "turn.completed")?.payload, {
+        state: "completed",
+        usage: expectedUsage,
+      });
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("maps Droid medium access to medium autonomy", () =>
   Effect.scoped(
     Effect.gen(function* () {
