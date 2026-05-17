@@ -1,26 +1,18 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import {
+  candidateUpstreamCounterpartPaths,
+  classifyPrefixedLocResult,
+  countNonEmptyLines,
+  matchesAnyGlob,
+  shouldCheckLoc,
+  toSet,
+} from "./t3work-additive-guard-lib.mjs";
 
 const LOC_WARN_THRESHOLD = 150;
 const LOC_FAIL_THRESHOLD = 200;
-const LOC_CHECK_EXTENSIONS = new Set([
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".cts",
-  ".mts",
-  ".json",
-  ".md",
-  ".yml",
-  ".yaml",
-  ".css",
-  ".scss",
-  ".html",
-]);
 
 function runGit(args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -44,19 +36,6 @@ function assertBaseRef(baseRef) {
   throw new Error(
     `Could not resolve base ref '${baseRef}' or fallback refs 'origin/main'/'main'. Fetch remotes and try again.`,
   );
-}
-
-function globToRegExp(glob) {
-  const escaped = glob
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, "::DOUBLE_STAR::")
-    .replace(/\*/g, "[^/]*")
-    .replace(/::DOUBLE_STAR::/g, ".*");
-  return new RegExp(`^${escaped}$`);
-}
-
-function matchesAnyGlob(filePath, patterns) {
-  return patterns.some((pattern) => globToRegExp(pattern).test(filePath));
 }
 
 function loadConfig(cwd) {
@@ -87,17 +66,14 @@ function loadConfig(cwd) {
   };
 }
 
-function hasAnyRequiredPrefix(baseName, requiredPrefixes) {
-  return requiredPrefixes.some((prefix) => baseName.startsWith(prefix));
-}
-
-function toSet(lines) {
-  return new Set(
-    lines
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean),
-  );
+function resolveUpstreamCounterpartPath(baseRef, filePath, requiredPrefixes) {
+  const candidates = candidateUpstreamCounterpartPaths(filePath, requiredPrefixes);
+  for (const candidate of candidates) {
+    if (fileExistsInRef(baseRef, candidate)) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 function fileExistsInRef(ref, filePath) {
@@ -130,22 +106,6 @@ function collectCandidatePaths(baseRef) {
   return combined;
 }
 
-function shouldCheckLoc(filePath, requiredPrefixes) {
-  const baseName = path.basename(filePath);
-  if (!hasAnyRequiredPrefix(baseName, requiredPrefixes)) return false;
-  if (!existsSync(filePath)) return false;
-  const ext = path.extname(filePath).toLowerCase();
-  return LOC_CHECK_EXTENSIONS.has(ext);
-}
-
-function countNonEmptyLines(filePath) {
-  const text = readFileSync(filePath, "utf8");
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0).length;
-}
-
 function main() {
   const cwd = process.cwd();
   const config = loadConfig(cwd);
@@ -170,7 +130,7 @@ function main() {
     }
 
     const baseName = path.basename(filePath);
-    const hasRequiredPrefix = hasAnyRequiredPrefix(baseName, config.requiredPrefixes);
+    const hasRequiredPrefix = config.requiredPrefixes.some((prefix) => baseName.startsWith(prefix));
     const allowedUnprefixed = matchesAnyGlob(filePath, config.allowedUnprefixedNewFiles);
     if (!hasRequiredPrefix && !allowedUnprefixed) {
       violations.push(
@@ -180,14 +140,22 @@ function main() {
 
     if (shouldCheckLoc(filePath, config.requiredPrefixes)) {
       const loc = countNonEmptyLines(filePath);
-      if (config.locFailThreshold != null && loc > config.locFailThreshold) {
-        violations.push(
-          `Prefixed file exceeds ${config.locFailThreshold} LOC: ${filePath} (${loc} non-empty lines).`,
-        );
-      } else if (loc > config.locWarnThreshold) {
-        warnings.push(
-          `Prefixed file is above ${config.locWarnThreshold} LOC warning threshold: ${filePath} (${loc} non-empty lines).`,
-        );
+      const counterpartPath = resolveUpstreamCounterpartPath(
+        baseRef,
+        filePath,
+        config.requiredPrefixes,
+      );
+      const result = classifyPrefixedLocResult({
+        filePath,
+        loc,
+        locWarnThreshold: config.locWarnThreshold,
+        locFailThreshold: config.locFailThreshold,
+        counterpartPath,
+      });
+      if (result?.kind === "violation") {
+        violations.push(result.message);
+      } else if (result?.kind === "warning") {
+        warnings.push(result.message);
       }
     }
   }
@@ -221,4 +189,12 @@ function main() {
   );
 }
 
-main();
+function isCliEntry() {
+  const scriptPath = process.argv[1];
+  if (!scriptPath) return false;
+  return import.meta.url === pathToFileURL(scriptPath).href;
+}
+
+if (isCliEntry()) {
+  main();
+}
