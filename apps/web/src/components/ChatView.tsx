@@ -1274,8 +1274,17 @@ export default function ChatView(props: ChatViewProps) {
     providerStatuses,
     explicitSelectedInstanceId,
   );
+  const explicitSelectedProviderEntry =
+    explicitSelectedInstanceId === null
+      ? undefined
+      : providerInstanceEntries.find((entry) => entry.instanceId === explicitSelectedInstanceId);
   const selectedProvider: ProviderDriverKind =
     lockedProvider ?? resolvedUnlockedProvider ?? ProviderDriverKind.make("codex");
+  const runtimeModeProvider =
+    lockedProvider ??
+    resolvedUnlockedProvider ??
+    explicitSelectedProviderEntry?.driverKind ??
+    selectedProvider;
   const canNormalizeRuntimeMode = canNormalizeRuntimeModeForProviderSelection({
     serverConfigLoaded: serverConfig !== null,
     lockedProvider,
@@ -3676,6 +3685,7 @@ export default function ChatView(props: ChatViewProps) {
                   planSidebarLabel={planSidebarLabel}
                   planSidebarOpen={planSidebarOpen}
                   runtimeMode={runtimeMode}
+                  runtimeModeProvider={runtimeModeProvider}
                   interactionMode={interactionMode}
                   lockedProvider={lockedProvider}
                   providerStatuses={providerStatuses as ServerProvider[]}

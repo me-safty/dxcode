@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout as sleep } from "node:timers/promises";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import {
@@ -511,6 +512,66 @@ it.effect("closes the previous Droid session before replacing a thread context",
       const sessions = yield* adapter.listSessions();
       assert.equal(sessions.length, 1);
       assert.equal(sessions[0]?.resumeCursor, "droid-session-2");
+    }),
+  ).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("closes the losing Droid context when concurrent starts replace a thread", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const closedSessionIds: string[] = [];
+      let createCalls = 0;
+      const adapter = yield* makeDroidAdapter(settings, {
+        sdk: {
+          createSession: async () => {
+            createCalls += 1;
+            const sessionId = `droid-session-${createCalls}`;
+            return fakeSession({
+              sessionId,
+              onClose: async () => {
+                closedSessionIds.push(sessionId);
+                if (sessionId === "droid-session-1") {
+                  await sleep(10);
+                }
+              },
+            });
+          },
+          resumeSession: async () => fakeSession({}),
+        },
+      });
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("droid"),
+        runtimeMode: "full-access",
+      });
+
+      yield* Effect.all(
+        [
+          adapter.startSession({
+            threadId,
+            provider: ProviderDriverKind.make("droid"),
+            runtimeMode: "full-access",
+          }),
+          adapter.startSession({
+            threadId,
+            provider: ProviderDriverKind.make("droid"),
+            runtimeMode: "full-access",
+          }),
+        ],
+        { concurrency: "unbounded", discard: true },
+      );
+
+      const sessions = yield* adapter.listSessions();
+      assert.equal(sessions.length, 1);
+      const liveSessionId = sessions[0]?.resumeCursor;
+      assert.ok(liveSessionId === "droid-session-2" || liveSessionId === "droid-session-3");
+      assert.ok(closedSessionIds.includes("droid-session-1"));
+      assert.ok(
+        closedSessionIds.includes(
+          liveSessionId === "droid-session-2" ? "droid-session-3" : "droid-session-2",
+        ),
+      );
     }),
   ).pipe(Effect.provide(testLayer)),
 );

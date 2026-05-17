@@ -237,10 +237,10 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
         };
         contextRef = context;
         const previousContext = sessions.get(input.threadId);
+        sessions.set(input.threadId, context);
         if (previousContext) {
           yield* closeContext(previousContext);
         }
-        sessions.set(input.threadId, context);
 
         yield* emit({
           ...eventBase(context),

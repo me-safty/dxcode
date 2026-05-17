@@ -399,6 +399,7 @@ export interface ChatComposerProps {
 
   // Mode
   runtimeMode: RuntimeMode;
+  runtimeModeProvider: ProviderDriverKind;
   interactionMode: ProviderInteractionMode;
 
   // Provider / model
@@ -495,6 +496,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     planSidebarLabel,
     planSidebarOpen,
     runtimeMode,
+    runtimeModeProvider,
     interactionMode,
     lockedProvider,
     providerStatuses,
@@ -2316,7 +2318,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     interactionMode={interactionMode}
                     planSidebarLabel={planSidebarLabel}
                     planSidebarOpen={planSidebarOpen}
-                    provider={selectedProvider}
+                    provider={runtimeModeProvider}
                     runtimeMode={runtimeMode}
                     showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                     traitsMenuContent={providerTraitsMenuContent}
@@ -2335,7 +2337,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     <ComposerFooterModeControls
                       showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                       interactionMode={interactionMode}
-                      provider={selectedProvider}
+                      provider={runtimeModeProvider}
                       runtimeMode={runtimeMode}
                       showPlanToggle={showPlanSidebarToggle}
                       planSidebarLabel={planSidebarLabel}
