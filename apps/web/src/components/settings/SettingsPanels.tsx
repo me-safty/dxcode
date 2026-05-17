@@ -106,20 +106,6 @@ const TERMINAL_LAYOUT_LABELS = {
   floating: "Floating",
 } as const;
 
-type InstallProviderSettings = {
-  provider: ProviderKind;
-  title: string;
-  badgeLabel?: string;
-  binaryPlaceholder: string;
-  binaryDescription: ReactNode;
-  serverUrlPlaceholder?: string;
-  serverUrlDescription?: ReactNode;
-  serverPasswordPlaceholder?: string;
-  serverPasswordDescription?: ReactNode;
-  homePathKey?: "codexHomePath";
-  homePlaceholder?: string;
-  homeDescription?: ReactNode;
-};
 
 function withoutProviderInstanceKey<V>(
   record: Readonly<Record<ProviderInstanceId, V>> | undefined,
