@@ -21,6 +21,8 @@ T3 Code can run [Hermes Agent](https://github.com/nousresearch/hermes-agent) as 
 provider. Enable Hermes from **Settings -> Providers**, point the binary path at your local
 `hermes` executable, then select Hermes from the chat model picker.
 
+![Hermes themed chat surface](./docs/assets/hermes-chat-theme.jpg)
+
 Recommended macOS setup:
 
 ```bash
