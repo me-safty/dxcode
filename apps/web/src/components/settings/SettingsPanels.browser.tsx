@@ -265,6 +265,21 @@ function createOutdatedProvider(
   };
 }
 
+function createCurrentUpdatableProvider(driver: string, updateCommand: string): ServerProvider {
+  return {
+    ...createOutdatedProvider(driver, updateCommand),
+    versionAdvisory: {
+      status: "unknown",
+      currentVersion: "1.0.0",
+      latestVersion: null,
+      message: null,
+      checkedAt: "2026-05-04T10:00:00.000Z",
+      updateCommand,
+      canUpdate: true,
+    },
+  };
+}
+
 function makeUtc(value: string) {
   return DateTime.makeUnsafe(value);
 }
@@ -1242,6 +1257,42 @@ describe("GeneralSettingsPanel observability", () => {
     expect(updateProvider).toHaveBeenCalledWith({
       provider: ProviderDriverKind.make("codex"),
       instanceId: ProviderInstanceId.make("codex"),
+    });
+  });
+
+  it("offers provider updates in expanded settings even without an outdated advisory", async () => {
+    const updateProvider = vi.fn<LocalApi["server"]["updateProvider"]>().mockResolvedValue({
+      providers: [createCurrentUpdatableProvider("pi", "pi update")],
+    });
+    window.nativeApi = {
+      persistence: {
+        getClientSettings: vi.fn().mockResolvedValue(null),
+        setClientSettings: vi.fn().mockResolvedValue(undefined),
+      },
+      server: {
+        updateProvider,
+      },
+    } as unknown as LocalApi;
+
+    setServerConfigSnapshot({
+      ...createBaseServerConfig(),
+      providers: [createCurrentUpdatableProvider("pi", "pi update")],
+    });
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ProviderSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await page.getByRole("button", { name: "Expand Pi provider details" }).click();
+    await expect.element(page.getByText("Provider update")).toBeInTheDocument();
+    await expect.element(page.getByText("pi update")).toBeInTheDocument();
+    await page.getByRole("button", { name: "Update provider" }).click();
+
+    expect(updateProvider).toHaveBeenCalledWith({
+      provider: ProviderDriverKind.make("pi"),
+      instanceId: ProviderInstanceId.make("pi"),
     });
   });
 

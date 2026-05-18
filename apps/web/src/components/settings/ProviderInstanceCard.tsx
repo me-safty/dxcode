@@ -523,7 +523,9 @@ export function ProviderInstanceCard({
   const summary = rawSummary;
   const versionLabel = getProviderVersionLabel(liveProvider?.version);
   const versionAdvisory = getProviderVersionAdvisoryPresentation(liveProvider?.versionAdvisory);
-  const updateCommand = versionAdvisory?.updateCommand ?? null;
+  const updateCommand =
+    versionAdvisory?.updateCommand ?? liveProvider?.versionAdvisory?.updateCommand ?? null;
+  const canRunUpdate = liveProvider?.versionAdvisory?.canUpdate === true && updateCommand !== null;
   const suggestedBinaryPath = liveProvider?.suggestedBinaryPath?.trim();
   const isHermesDriver = String(instance.driver) === "hermes";
   const isPiDriver = String(instance.driver) === "pi";
@@ -845,6 +847,62 @@ export function ProviderInstanceCard({
     </div>
   ) : null;
 
+  const providerUpdateNode = canRunUpdate ? (
+    <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+      <div className="grid gap-3">
+        <div className="grid gap-1">
+          <span className="text-xs font-medium text-foreground">Provider update</span>
+          <p className="text-xs leading-snug text-muted-foreground">
+            Run the provider&apos;s update command, then refresh provider status.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {onRunUpdate ? (
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              className="w-fit"
+              disabled={isUpdating}
+              onClick={onRunUpdate}
+            >
+              {isUpdating ? <LoaderIcon className="animate-spin" /> : <DownloadIcon />}
+              {isUpdating ? "Updating" : "Update provider"}
+            </Button>
+          ) : null}
+          <div className="flex min-w-0 flex-1 items-center gap-1 rounded-md border border-border/70 bg-muted/40 py-0.5 pr-0.5 pl-2">
+            <ScrollArea scrollFade className="h-8 min-w-0 flex-1 rounded-none">
+              <code className="flex h-full w-max items-center whitespace-nowrap pr-3 font-mono text-[11px] text-foreground">
+                {updateCommand}
+              </code>
+            </ScrollArea>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    className="size-6 shrink-0 rounded-sm p-0 text-muted-foreground hover:text-foreground"
+                    onClick={() =>
+                      copyToClipboard(updateCommand, {
+                        providerName: displayName,
+                      })
+                    }
+                    aria-label="Copy update command"
+                  >
+                    <CopyIcon className="size-3" />
+                  </Button>
+                }
+              />
+              <TooltipPopup side="top">Copy command</TooltipPopup>
+            </Tooltip>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="border-t border-border/60 first:border-t-0">
       <div
@@ -1018,6 +1076,7 @@ export function ProviderInstanceCard({
 
             {hermesSetupNode}
             {piSetupNode}
+            {providerUpdateNode}
 
             {driverOption ? (
               <ProviderSettingsForm
