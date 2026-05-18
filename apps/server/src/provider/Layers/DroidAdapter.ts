@@ -37,6 +37,7 @@ import {
   type DroidAdapterShape,
   type DroidContext,
 } from "../droid/DroidAdapterTypes.ts";
+import { compactDroidEnvironment } from "../droid/DroidEnvironment.ts";
 import {
   handleDroidMessage,
   makeDroidEventBase,
@@ -72,11 +73,7 @@ export function makeDroidAdapter(settings: DroidSettings, options?: DroidAdapter
     const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, DroidContext>();
     const sessionReplaceMutex = yield* Semaphore.make(1);
-    const env = Object.fromEntries(
-      Object.entries({ ...process.env, ...options?.environment }).filter(
-        (entry): entry is [string, string] => typeof entry[1] === "string",
-      ),
-    );
+    const env = compactDroidEnvironment({ ...process.env, ...options?.environment });
     const runtimeContext = yield* Effect.context<never>();
     const runPromise = Effect.runPromiseWith(runtimeContext);
 

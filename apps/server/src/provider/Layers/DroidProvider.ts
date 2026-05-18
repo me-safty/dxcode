@@ -22,6 +22,7 @@ import * as Result from "effect/Result";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
 
+import { compactDroidEnvironment } from "../droid/DroidEnvironment.ts";
 import {
   buildSelectOptionDescriptor,
   buildServerProvider,
@@ -127,16 +128,6 @@ const modelProviderLabel = (provider: ModelProvider): string => {
   }
 };
 
-const compactEnvironment = (environment: NodeJS.ProcessEnv): Record<string, string> => {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(environment)) {
-    if (typeof value === "string") {
-      env[key] = value;
-    }
-  }
-  return env;
-};
-
 function droidModelCapabilities(model: AvailableModelConfig) {
   const options = model.supportedReasoningEfforts.map((effort) => ({
     value: effort,
@@ -215,7 +206,7 @@ const discoverDroidModels = (
         const sessionPromise = (options?.sdk ?? defaultSdk).createSession({
           cwd: tmpdir(),
           execPath: settings.binaryPath,
-          env: compactEnvironment(environment),
+          env: compactDroidEnvironment(environment),
           abortSignal: controller.signal,
         });
         sessionPromise
