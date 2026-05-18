@@ -1,5 +1,10 @@
 import type { ProjectScript } from "@t3tools/contracts";
 
+export const WORKTREE_SETUP_SCRIPT_RELATIVE_PATHS = [
+  "scripts/worktree-setup.sh",
+  ".t3code/worktree-setup.sh",
+] as const;
+
 interface ProjectScriptRuntimeEnvInput {
   project: {
     cwd: string;
@@ -34,4 +39,8 @@ export function projectScriptRuntimeEnv(
 
 export function setupProjectScript(scripts: readonly ProjectScript[]): ProjectScript | null {
   return scripts.find((script) => script.runOnWorktreeCreate) ?? null;
+}
+
+export function worktreeSetupScriptCommand(relativePath: string): string {
+  return `bash ${relativePath}`;
 }

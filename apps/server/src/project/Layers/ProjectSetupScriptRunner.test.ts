@@ -1,11 +1,12 @@
 import { ProjectId, type OrchestrationProject } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { describe, expect, it, vi } from "vitest";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { TerminalManager } from "../../terminal/Services/Manager.ts";
+import { TerminalManager, type TerminalManagerShape } from "../../terminal/Services/Manager.ts";
 import { ProjectSetupScriptRunner } from "../Services/ProjectSetupScriptRunner.ts";
 import { ProjectSetupScriptRunnerLive } from "./ProjectSetupScriptRunner.ts";
 
@@ -41,31 +42,44 @@ const makeProjectionSnapshotQueryLayer = (project: OrchestrationProject) =>
     getThreadDetailById: () => Effect.die("unused"),
   });
 
-describe("ProjectSetupScriptRunner", () => {
-  it("returns no-script when no setup script exists", async () => {
-    const open = vi.fn();
-    const write = vi.fn();
-    const project = makeProject([]);
-    const runner = await Effect.runPromise(
-      Effect.service(ProjectSetupScriptRunner).pipe(
-        Effect.provide(
-          ProjectSetupScriptRunnerLive.pipe(
-            Layer.provideMerge(makeProjectionSnapshotQueryLayer(project)),
-            Layer.provideMerge(
-              Layer.succeed(TerminalManager, {
-                open,
-                write,
-                resize: () => Effect.void,
-                clear: () => Effect.void,
-                restart: () => Effect.die(new Error("unused")),
-                close: () => Effect.void,
-                subscribe: () => Effect.succeed(() => undefined),
-              }),
-            ),
-          ),
+const makeTerminalManagerLayer = (input: {
+  open: TerminalManagerShape["open"];
+  write: TerminalManagerShape["write"];
+}) =>
+  Layer.succeed(TerminalManager, {
+    open: input.open,
+    write: input.write,
+    resize: () => Effect.void,
+    clear: () => Effect.void,
+    restart: () => Effect.die(new Error("unused")),
+    close: () => Effect.void,
+    subscribe: () => Effect.succeed(() => undefined),
+  });
+
+const makeRunner = (input: {
+  project: OrchestrationProject;
+  open: TerminalManagerShape["open"];
+  write: TerminalManagerShape["write"];
+  fileSystem?: Layer.Layer<FileSystem.FileSystem>;
+}) =>
+  Effect.runPromise(
+    Effect.service(ProjectSetupScriptRunner).pipe(
+      Effect.provide(
+        ProjectSetupScriptRunnerLive.pipe(
+          Layer.provideMerge(makeProjectionSnapshotQueryLayer(input.project)),
+          Layer.provideMerge(makeTerminalManagerLayer({ open: input.open, write: input.write })),
+          Layer.provideMerge(input.fileSystem ?? FileSystem.layerNoop({})),
         ),
       ),
-    );
+    ),
+  );
+
+describe("ProjectSetupScriptRunner", () => {
+  it("returns no-script when no setup script exists", async () => {
+    const open = vi.fn<TerminalManagerShape["open"]>();
+    const write = vi.fn<TerminalManagerShape["write"]>();
+    const project = makeProject([]);
+    const runner = await makeRunner({ project, open, write });
 
     const result = await Effect.runPromise(
       runner.runForThread({
@@ -81,7 +95,7 @@ describe("ProjectSetupScriptRunner", () => {
   });
 
   it("opens the deterministic setup terminal with worktree env and writes the command", async () => {
-    const open = vi.fn(() =>
+    const open = vi.fn<TerminalManagerShape["open"]>(() =>
       Effect.succeed({
         threadId: "thread-1",
         terminalId: "setup-setup",
@@ -95,7 +109,7 @@ describe("ProjectSetupScriptRunner", () => {
         updatedAt: "2026-01-01T00:00:00.000Z",
       }),
     );
-    const write = vi.fn(() => Effect.void);
+    const write = vi.fn<TerminalManagerShape["write"]>(() => Effect.void);
     const project = makeProject([
       {
         id: "setup",
@@ -105,26 +119,7 @@ describe("ProjectSetupScriptRunner", () => {
         runOnWorktreeCreate: true,
       },
     ]);
-    const runner = await Effect.runPromise(
-      Effect.service(ProjectSetupScriptRunner).pipe(
-        Effect.provide(
-          ProjectSetupScriptRunnerLive.pipe(
-            Layer.provideMerge(makeProjectionSnapshotQueryLayer(project)),
-            Layer.provideMerge(
-              Layer.succeed(TerminalManager, {
-                open,
-                write,
-                resize: () => Effect.void,
-                clear: () => Effect.void,
-                restart: () => Effect.die(new Error("unused")),
-                close: () => Effect.void,
-                subscribe: () => Effect.succeed(() => undefined),
-              }),
-            ),
-          ),
-        ),
-      ),
-    );
+    const runner = await makeRunner({ project, open, write });
 
     const result = await Effect.runPromise(
       runner.runForThread({
@@ -155,6 +150,65 @@ describe("ProjectSetupScriptRunner", () => {
       threadId: "thread-1",
       terminalId: "setup-setup",
       data: "bun install\r",
+    });
+  });
+
+  it("falls back to scripts/worktree-setup.sh when no explicit setup script exists", async () => {
+    const open = vi.fn<TerminalManagerShape["open"]>(() =>
+      Effect.succeed({
+        threadId: "thread-1",
+        terminalId: "setup-worktree-setup",
+        cwd: "/repo/worktrees/a",
+        worktreePath: "/repo/worktrees/a",
+        status: "running" as const,
+        pid: 123,
+        history: "",
+        exitCode: null,
+        exitSignal: null,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    const write = vi.fn<TerminalManagerShape["write"]>(() => Effect.void);
+    const project = makeProject([]);
+    const runner = await makeRunner({
+      project,
+      open,
+      write,
+      fileSystem: FileSystem.layerNoop({
+        exists: (filePath) =>
+          Effect.succeed(filePath === "/repo/worktrees/a/scripts/worktree-setup.sh"),
+      }),
+    });
+
+    const result = await Effect.runPromise(
+      runner.runForThread({
+        threadId: "thread-1",
+        projectCwd: "/repo/project",
+        worktreePath: "/repo/worktrees/a",
+      }),
+    );
+
+    expect(result).toEqual({
+      status: "started",
+      scriptId: "worktree-setup",
+      scriptName: "Worktree setup",
+      terminalId: "setup-worktree-setup",
+      cwd: "/repo/worktrees/a",
+    });
+    expect(open).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      terminalId: "setup-worktree-setup",
+      cwd: "/repo/worktrees/a",
+      worktreePath: "/repo/worktrees/a",
+      env: {
+        T3CODE_PROJECT_ROOT: "/repo/project",
+        T3CODE_WORKTREE_PATH: "/repo/worktrees/a",
+      },
+    });
+    expect(write).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      terminalId: "setup-worktree-setup",
+      data: "bash scripts/worktree-setup.sh\r",
     });
   });
 });

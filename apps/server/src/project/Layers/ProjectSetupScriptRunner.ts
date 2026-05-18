@@ -1,20 +1,57 @@
 import { ProjectId } from "@t3tools/contracts";
-import { projectScriptRuntimeEnv, setupProjectScript } from "@t3tools/shared/projectScripts";
+import {
+  projectScriptRuntimeEnv,
+  setupProjectScript,
+  WORKTREE_SETUP_SCRIPT_RELATIVE_PATHS,
+  worktreeSetupScriptCommand,
+} from "@t3tools/shared/projectScripts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { TerminalManager } from "../../terminal/Services/Manager.ts";
 import {
+  type ProjectSetupScriptRunnerInput,
   type ProjectSetupScriptRunnerShape,
   ProjectSetupScriptRunner,
   ProjectSetupScriptRunnerError,
 } from "../Services/ProjectSetupScriptRunner.ts";
 
+const joinWorktreePath = (worktreePath: string, relativePath: string) =>
+  `${worktreePath.replace(/[\\/]+$/, "")}/${relativePath}`;
+
 const makeProjectSetupScriptRunner = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const terminalManager = yield* TerminalManager;
+  const fileSystem = yield* FileSystem.FileSystem;
+
+  const resolveSetupScript = Effect.fn("ProjectSetupScriptRunner.resolveSetupScript")(function* (
+    input: ProjectSetupScriptRunnerInput,
+    scripts: Parameters<typeof setupProjectScript>[0],
+  ) {
+    const explicitScript = setupProjectScript(scripts);
+    if (explicitScript) {
+      return explicitScript;
+    }
+
+    for (const relativePath of WORKTREE_SETUP_SCRIPT_RELATIVE_PATHS) {
+      const scriptPath = joinWorktreePath(input.worktreePath, relativePath);
+      const exists = yield* fileSystem.exists(scriptPath);
+      if (exists) {
+        return {
+          id: "worktree-setup",
+          name: "Worktree setup",
+          command: worktreeSetupScriptCommand(relativePath),
+          icon: "configure",
+          runOnWorktreeCreate: true,
+        } as const;
+      }
+    }
+
+    return null;
+  });
 
   const runForThread: ProjectSetupScriptRunnerShape["runForThread"] = (input) =>
     Effect.gen(function* () {
@@ -37,7 +74,7 @@ const makeProjectSetupScriptRunner = Effect.gen(function* () {
         });
       }
 
-      const script = setupProjectScript(project.scripts);
+      const script = yield* resolveSetupScript(input, project.scripts);
       if (!script) {
         return {
           status: "no-script",
