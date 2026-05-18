@@ -206,6 +206,9 @@ const discoverDroidModels = (
       const timeoutController = new AbortController();
       const onAbort = () => controller.abort(abortSignal.reason);
       abortSignal.addEventListener("abort", onAbort, { once: true });
+      if (abortSignal.aborted) {
+        controller.abort(abortSignal.reason);
+      }
       let session: DroidSession | undefined;
       let shouldCloseLateSession = false;
       try {
