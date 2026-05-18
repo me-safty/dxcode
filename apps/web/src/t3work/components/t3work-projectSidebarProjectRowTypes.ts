@@ -18,6 +18,12 @@ export interface ProjectRowProps {
   threadSortOrder: ThreadSortOrder;
   threadPreviewCount: number;
   ticketViewMode: TicketViewMode;
+  showProjectThreads: boolean;
+  showJiraItems: boolean;
+  showGitHubActivity: boolean;
+  onShowProjectThreadsChange: (show: boolean) => void;
+  onShowJiraItemsChange: (show: boolean) => void;
+  onShowGitHubActivityChange: (show: boolean) => void;
   onSelectProject: (id: string) => void;
   onToggleExpand: (id: string) => void;
   onSelectThread: (projectId: string, threadId: string) => void;
