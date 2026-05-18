@@ -79,6 +79,8 @@ import {
   ServerProviderUpdatedPayload,
   ServerTraceDiagnosticsResult,
   ServerProcessDiagnosticsResult,
+  ServerProcessResourceHistoryInput,
+  ServerProcessResourceHistoryResult,
   ServerSignalProcessInput,
   ServerSignalProcessResult,
   ServerUpsertKeybindingInput,
@@ -179,6 +181,7 @@ export const WS_METHODS = {
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
+  serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
 
   // Source control methods
@@ -257,6 +260,14 @@ export const WsServerGetProcessDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetPro
   payload: Schema.Struct({}),
   success: ServerProcessDiagnosticsResult,
 });
+
+export const WsServerGetProcessResourceHistoryRpc = Rpc.make(
+  WS_METHODS.serverGetProcessResourceHistory,
+  {
+    payload: ServerProcessResourceHistoryInput,
+    success: ServerProcessResourceHistoryResult,
+  },
+);
 
 export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
@@ -506,6 +517,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,
+  WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
