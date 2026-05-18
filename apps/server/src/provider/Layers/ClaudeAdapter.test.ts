@@ -40,6 +40,7 @@ import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString);
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
 class ClaudeAdapter extends Context.Service<ClaudeAdapter, ClaudeAdapterShape>()(
@@ -558,7 +559,7 @@ describe("ClaudeAdapterLive", () => {
 
       writeFileSync(
         capturePath,
-        JSON.stringify({
+        encodeUnknownJsonString({
           rate_limits: {
             five_hour: {
               used_percentage: 6,

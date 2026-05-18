@@ -141,6 +141,16 @@ export interface WsRpcClient {
       typeof WS_METHODS.serverGetProcessResourceHistory
     >;
     readonly signalProcess: RpcUnaryMethod<typeof WS_METHODS.serverSignalProcess>;
+    readonly getPushConfig: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetPushConfig>;
+    readonly registerPushSubscription: RpcUnaryMethod<
+      typeof WS_METHODS.serverRegisterPushSubscription
+    >;
+    readonly unregisterPushSubscription: RpcUnaryMethod<
+      typeof WS_METHODS.serverUnregisterPushSubscription
+    >;
+    readonly sendTestPushNotification: RpcUnaryMethod<
+      typeof WS_METHODS.serverSendTestPushNotification
+    >;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
@@ -286,6 +296,14 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) =>
           client[WS_METHODS.serverSignalProcess](input).pipe(Effect.withTracerEnabled(false)),
         ),
+      getPushConfig: () =>
+        transport.request((client) => client[WS_METHODS.serverGetPushConfig]({})),
+      registerPushSubscription: (input) =>
+        transport.request((client) => client[WS_METHODS.serverRegisterPushSubscription](input)),
+      unregisterPushSubscription: (input) =>
+        transport.request((client) => client[WS_METHODS.serverUnregisterPushSubscription](input)),
+      sendTestPushNotification: (input) =>
+        transport.request((client) => client[WS_METHODS.serverSendTestPushNotification](input)),
       subscribeConfig: (listener, options) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerConfig]({}), listener, {
           ...options,

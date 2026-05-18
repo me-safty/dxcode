@@ -42,6 +42,14 @@ import type {
   ServerUpsertKeybindingResult,
 } from "./server.ts";
 import type {
+  ServerPushConfig,
+  ServerPushSendResult,
+  ServerPushSubscriptionStatus,
+  ServerRegisterPushSubscriptionInput,
+  ServerSendTestPushNotificationInput,
+  ServerUnregisterPushSubscriptionInput,
+} from "./push.ts";
+import type {
   TerminalClearInput,
   TerminalCloseInput,
   TerminalEvent,
@@ -485,6 +493,16 @@ export interface LocalApi {
       input: ServerProcessResourceHistoryInput,
     ) => Promise<ServerProcessResourceHistoryResult>;
     signalProcess: (input: ServerSignalProcessInput) => Promise<ServerSignalProcessResult>;
+    getPushConfig: () => Promise<ServerPushConfig>;
+    registerPushSubscription: (
+      input: ServerRegisterPushSubscriptionInput,
+    ) => Promise<ServerPushSubscriptionStatus>;
+    unregisterPushSubscription: (
+      input: ServerUnregisterPushSubscriptionInput,
+    ) => Promise<ServerPushSubscriptionStatus>;
+    sendTestPushNotification: (
+      input: ServerSendTestPushNotificationInput,
+    ) => Promise<ServerPushSendResult>;
   };
 }
 

@@ -89,6 +89,15 @@ import {
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
+import {
+  ServerPushConfig,
+  ServerPushNotificationError,
+  ServerPushSendResult,
+  ServerPushSubscriptionStatus,
+  ServerRegisterPushSubscriptionInput,
+  ServerSendTestPushNotificationInput,
+  ServerUnregisterPushSubscriptionInput,
+} from "./push.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   SourceControlCloneRepositoryInput,
@@ -154,6 +163,10 @@ export const WS_METHODS = {
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
+  serverGetPushConfig: "server.getPushConfig",
+  serverRegisterPushSubscription: "server.registerPushSubscription",
+  serverUnregisterPushSubscription: "server.unregisterPushSubscription",
+  serverSendTestPushNotification: "server.sendTestPushNotification",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -249,6 +262,39 @@ export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess,
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
 });
+
+export const WsServerGetPushConfigRpc = Rpc.make(WS_METHODS.serverGetPushConfig, {
+  payload: Schema.Struct({}),
+  success: ServerPushConfig,
+  error: ServerPushNotificationError,
+});
+
+export const WsServerRegisterPushSubscriptionRpc = Rpc.make(
+  WS_METHODS.serverRegisterPushSubscription,
+  {
+    payload: ServerRegisterPushSubscriptionInput,
+    success: ServerPushSubscriptionStatus,
+    error: ServerPushNotificationError,
+  },
+);
+
+export const WsServerUnregisterPushSubscriptionRpc = Rpc.make(
+  WS_METHODS.serverUnregisterPushSubscription,
+  {
+    payload: ServerUnregisterPushSubscriptionInput,
+    success: ServerPushSubscriptionStatus,
+    error: ServerPushNotificationError,
+  },
+);
+
+export const WsServerSendTestPushNotificationRpc = Rpc.make(
+  WS_METHODS.serverSendTestPushNotification,
+  {
+    payload: ServerSendTestPushNotificationInput,
+    success: ServerPushSendResult,
+    error: ServerPushNotificationError,
+  },
+);
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(
   WS_METHODS.sourceControlLookupRepository,
@@ -502,6 +548,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetProcessDiagnosticsRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
+  WsServerGetPushConfigRpc,
+  WsServerRegisterPushSubscriptionRpc,
+  WsServerUnregisterPushSubscriptionRpc,
+  WsServerSendTestPushNotificationRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,

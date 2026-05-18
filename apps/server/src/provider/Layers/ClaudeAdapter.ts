@@ -1616,14 +1616,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     );
 
   const refreshClaudeStatuslineUsageBestEffort = (context: ClaudeSessionContext) =>
-    refreshClaudeStatuslineUsage(context).pipe(
-      Effect.catch((detail) =>
-        Effect.logDebug("claude.statusline-usage.refresh.failed", {
-          threadId: context.session.threadId,
-          detail,
-        }),
-      ),
-    );
+    refreshClaudeStatuslineUsage(context);
 
   const refreshClaudeUsageBestEffort = (context: ClaudeSessionContext) =>
     Effect.all(
@@ -3231,9 +3224,24 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ? path.join(claudeStatuslineCaptureDir, `${safeFileComponent(threadId)}.json`)
         : undefined;
       if (statuslineCapturePath) {
-        yield* fileSystem.makeDirectory(path.dirname(statuslineCapturePath), {
-          recursive: true,
-        });
+        yield* fileSystem
+          .makeDirectory(path.dirname(statuslineCapturePath), {
+            recursive: true,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId,
+                  detail: toMessage(
+                    cause,
+                    "Failed to prepare Claude statusline capture directory.",
+                  ),
+                  cause,
+                }),
+            ),
+          );
       }
       const existingResumeSessionId = resumeState?.resume;
       const newSessionId =

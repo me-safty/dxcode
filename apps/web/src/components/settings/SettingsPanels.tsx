@@ -77,6 +77,7 @@ import {
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { useServerObservability, useServerProviders } from "../../rpc/serverState";
+import { PushNotificationSettingsRow } from "./PushNotificationSettings";
 
 const THEME_OPTIONS = [
   {
@@ -517,6 +518,8 @@ export function GeneralSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection title="General">
+        <PushNotificationSettingsRow />
+
         <SettingsRow
           title="Theme"
           description="Choose how T3 Code looks across the app."

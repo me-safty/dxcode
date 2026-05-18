@@ -9,6 +9,10 @@ describe("transportError", () => {
       true,
     );
     expect(isTransportConnectionErrorMessage("SocketOpenError: Timeout")).toBe(true);
+    expect(isTransportConnectionErrorMessage("All fibers interrupted without error")).toBe(true);
+    expect(
+      isTransportConnectionErrorMessage("InterruptError: All fibers interrupted without error"),
+    ).toBe(true);
   });
 
   it("preserves non-transport thread errors", () => {
@@ -20,5 +24,6 @@ describe("transportError", () => {
 
   it("drops transport failures from thread surfaces", () => {
     expect(sanitizeThreadErrorMessage("SocketCloseError: 1006")).toBeNull();
+    expect(sanitizeThreadErrorMessage("All fibers interrupted without error")).toBeNull();
   });
 });

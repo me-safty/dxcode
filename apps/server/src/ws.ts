@@ -90,6 +90,7 @@ import {
   type SessionCredentialChange,
 } from "./auth/Services/SessionCredentialService.ts";
 import { respondToAuthError } from "./auth/http.ts";
+import { WebPushService } from "./push/Services/WebPushService.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 const isWorkspacePathOutsideRootError = Schema.is(WorkspacePathOutsideRootError);
 
@@ -305,6 +306,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const sessions = yield* SessionCredentialService;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
+      const webPush = yield* WebPushService;
       const serverCommandId = (tag: string) =>
         CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
 
@@ -1058,6 +1060,34 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.serverSignalProcess, processDiagnostics.signal(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetPushConfig]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverGetPushConfig, webPush.getConfig, {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverRegisterPushSubscription]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverRegisterPushSubscription,
+            webPush.registerSubscription(currentSessionId, input),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
+        [WS_METHODS.serverUnregisterPushSubscription]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverUnregisterPushSubscription,
+            webPush.unregisterSubscription(currentSessionId, input),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
+        [WS_METHODS.serverSendTestPushNotification]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverSendTestPushNotification,
+            webPush.sendTestNotification(currentSessionId, input),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           observeRpcEffect(
             WS_METHODS.sourceControlLookupRepository,
