@@ -314,6 +314,7 @@ describe("ProviderCommandReactor", () => {
         });
       },
       rollbackConversation: () => unsupported(),
+      refreshUsage: () => Effect.void,
       get streamEvents() {
         return Stream.fromPubSub(runtimeEventPubSub);
       },

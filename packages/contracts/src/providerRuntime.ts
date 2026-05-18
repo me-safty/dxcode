@@ -24,6 +24,7 @@ const RuntimeEventRawSource = Schema.Union([
   Schema.Literal("codex.eventmsg"),
   Schema.Literal("claude.sdk.message"),
   Schema.Literal("claude.sdk.permission"),
+  Schema.Literal("claude.oauth.usage"),
   Schema.Literal("codex.sdk.thread-event"),
   Schema.Literal("opencode.sdk.event"),
   Schema.Literal("acp.jsonrpc"),
@@ -319,6 +320,7 @@ export const ThreadTokenUsageSnapshot = Schema.Struct({
   toolUses: Schema.optional(NonNegativeInt),
   durationMs: Schema.optional(NonNegativeInt),
   compactsAutomatically: Schema.optional(Schema.Boolean),
+  costUsd: Schema.optional(Schema.Number),
 });
 export type ThreadTokenUsageSnapshot = typeof ThreadTokenUsageSnapshot.Type;
 

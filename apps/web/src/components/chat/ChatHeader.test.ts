@@ -1,7 +1,43 @@
 import { EnvironmentId } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { shouldShowOpenInPicker } from "./ChatHeader";
+import { forceRefreshApp, shouldShowOpenInPicker } from "./ChatHeader";
+
+const originalWindow = globalThis.window;
+
+function installWindowStub(input: {
+  readonly forceReload?: () => Promise<void>;
+  readonly reload?: () => void;
+}) {
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      ...(input.forceReload
+        ? {
+            desktopBridge: {
+              forceReload: input.forceReload,
+            },
+          }
+        : {}),
+      location: {
+        reload: input.reload ?? vi.fn(),
+      },
+    },
+  });
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  if (originalWindow === undefined) {
+    Reflect.deleteProperty(globalThis, "window");
+    return;
+  }
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: originalWindow,
+  });
+});
 
 describe("shouldShowOpenInPicker", () => {
   const primaryEnvironmentId = EnvironmentId.make("environment-primary");
@@ -44,5 +80,39 @@ describe("shouldShowOpenInPicker", () => {
         primaryEnvironmentId,
       }),
     ).toBe(false);
+  });
+});
+
+describe("forceRefreshApp", () => {
+  it("uses the desktop force reload bridge when available", () => {
+    const forceReload = vi.fn().mockResolvedValue(undefined);
+    const reload = vi.fn();
+    installWindowStub({ forceReload, reload });
+
+    forceRefreshApp();
+
+    expect(forceReload).toHaveBeenCalledWith();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("falls back to browser reload without the desktop bridge", () => {
+    const reload = vi.fn();
+    installWindowStub({ reload });
+
+    forceRefreshApp();
+
+    expect(reload).toHaveBeenCalledWith();
+  });
+
+  it("falls back to browser reload when desktop force reload fails", async () => {
+    const forceReload = vi.fn().mockRejectedValue(new Error("ipc failed"));
+    const reload = vi.fn();
+    installWindowStub({ forceReload, reload });
+
+    forceRefreshApp();
+    await Promise.resolve();
+
+    expect(forceReload).toHaveBeenCalledWith();
+    expect(reload).toHaveBeenCalledWith();
   });
 });

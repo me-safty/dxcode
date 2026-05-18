@@ -57,7 +57,15 @@ import {
 } from "~/components/ui/dialog";
 import { Group, GroupSeparator } from "~/components/ui/group";
 import { Input } from "~/components/ui/input";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "~/components/ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Textarea } from "~/components/ui/textarea";
@@ -86,6 +94,7 @@ interface GitActionsControlProps {
   gitCwd: string | null;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
+  inMenu?: boolean;
 }
 
 interface PendingDefaultBranchAction {
@@ -949,6 +958,7 @@ export default function GitActionsControl({
   gitCwd,
   activeThreadRef,
   draftId,
+  inMenu = false,
 }: GitActionsControlProps) {
   const activeEnvironmentId = activeThreadRef?.environmentId ?? null;
   const threadToastData = useMemo(
@@ -1620,9 +1630,97 @@ export default function GitActionsControl({
 
   if (!gitCwd) return null;
 
-  return (
+  const handleGitActionsOpenChange = (open: boolean) => {
+    if (open) {
+      void refreshGitStatus({
+        environmentId: activeEnvironmentId,
+        cwd: gitCwd,
+      }).catch(() => undefined);
+    }
+  };
+
+  const gitActionMenuContent = (
     <>
-      {!isRepo ? (
+      {gitActionMenuItems.map((item) => {
+        const disabledReason = getMenuActionDisabledReason({
+          item,
+          gitStatus: gitStatusForActions,
+          isBusy: isGitActionRunning,
+          hasPrimaryRemote,
+        });
+        if (item.disabled && disabledReason) {
+          return (
+            <Popover key={`${item.id}-${item.label}`}>
+              <PopoverTrigger
+                openOnHover
+                nativeButton={false}
+                render={<span className="block w-max cursor-not-allowed" />}
+              >
+                <MenuItem className="w-full" disabled>
+                  <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
+                  {item.label}
+                </MenuItem>
+              </PopoverTrigger>
+              <PopoverPopup tooltipStyle side="left" align="center">
+                {disabledReason}
+              </PopoverPopup>
+            </Popover>
+          );
+        }
+
+        return (
+          <MenuItem
+            key={`${item.id}-${item.label}`}
+            disabled={item.disabled}
+            onClick={() => {
+              openDialogForMenuItem(item);
+            }}
+          >
+            <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
+            {item.label}
+          </MenuItem>
+        );
+      })}
+      {canPublishRepository ? (
+        <MenuItem
+          disabled={isGitActionRunning}
+          onClick={() => {
+            setIsPublishDialogOpen(true);
+          }}
+        >
+          <CloudUploadIcon />
+          Publish repository...
+        </MenuItem>
+      ) : null}
+      {gitStatusForActions?.refName === null && (
+        <p className="px-2 py-1.5 text-xs text-warning">
+          Detached HEAD: create and checkout a refName to enable push and pull request actions.
+        </p>
+      )}
+      {gitStatusForActions &&
+        gitStatusForActions.refName !== null &&
+        !gitStatusForActions.hasWorkingTreeChanges &&
+        gitStatusForActions.behindCount > 0 &&
+        gitStatusForActions.aheadCount === 0 && (
+          <p className="px-2 py-1.5 text-xs text-warning">Behind upstream. Pull/rebase first.</p>
+        )}
+      {gitStatusError && (
+        <p className="px-2 py-1.5 text-xs text-destructive">{gitStatusError.message}</p>
+      )}
+    </>
+  );
+
+  const renderControl = () => {
+    if (!isRepo) {
+      if (inMenu) {
+        return (
+          <MenuItem disabled={initMutation.isPending} onClick={() => initMutation.mutate()}>
+            <SourceControlIcon />
+            {initMutation.isPending ? "Initializing..." : "Initialize Git"}
+          </MenuItem>
+        );
+      }
+      return (
         <Button
           variant="outline"
           size="xs"
@@ -1631,140 +1729,77 @@ export default function GitActionsControl({
         >
           {initMutation.isPending ? "Initializing..." : "Initialize Git"}
         </Button>
-      ) : (
-        <Group aria-label="Git actions" className="shrink-0">
-          {quickActionDisabledReason ? (
-            <Popover>
-              <PopoverTrigger
-                openOnHover
-                render={
-                  <Button
-                    aria-disabled="true"
-                    className="cursor-not-allowed rounded-e-none border-e-0 opacity-64 before:rounded-e-none"
-                    size="xs"
-                    variant="outline"
-                  />
-                }
-              >
-                <GitQuickActionIcon
-                  quickAction={quickAction}
-                  SourceControlIcon={SourceControlIcon}
+      );
+    }
+
+    if (inMenu) {
+      return (
+        <MenuSub onOpenChange={handleGitActionsOpenChange}>
+          <MenuSubTrigger disabled={isGitActionRunning}>
+            <SourceControlIcon />
+            Git
+          </MenuSubTrigger>
+          <MenuSubPopup className="min-w-44">{gitActionMenuContent}</MenuSubPopup>
+        </MenuSub>
+      );
+    }
+
+    return (
+      <Group aria-label="Git actions" className="shrink-0">
+        {quickActionDisabledReason ? (
+          <Popover>
+            <PopoverTrigger
+              openOnHover
+              render={
+                <Button
+                  aria-disabled="true"
+                  className="cursor-not-allowed rounded-e-none border-e-0 opacity-64 before:rounded-e-none"
+                  size="xs"
+                  variant="outline"
                 />
-                <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-                  {quickAction.label}
-                </span>
-              </PopoverTrigger>
-              <PopoverPopup tooltipStyle side="bottom" align="start">
-                {quickActionDisabledReason}
-              </PopoverPopup>
-            </Popover>
-          ) : (
-            <Button
-              variant="outline"
-              size="xs"
-              disabled={isGitActionRunning || quickAction.disabled}
-              onClick={runQuickAction}
+              }
             >
               <GitQuickActionIcon quickAction={quickAction} SourceControlIcon={SourceControlIcon} />
               <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
                 {quickAction.label}
               </span>
-            </Button>
-          )}
-          <GroupSeparator className="hidden @3xl/header-actions:block" />
-          <Menu
-            onOpenChange={(open) => {
-              if (open) {
-                void refreshGitStatus({
-                  environmentId: activeEnvironmentId,
-                  cwd: gitCwd,
-                }).catch(() => undefined);
-              }
-            }}
+            </PopoverTrigger>
+            <PopoverPopup tooltipStyle side="bottom" align="start">
+              {quickActionDisabledReason}
+            </PopoverPopup>
+          </Popover>
+        ) : (
+          <Button
+            variant="outline"
+            size="xs"
+            disabled={isGitActionRunning || quickAction.disabled}
+            onClick={runQuickAction}
           >
-            <MenuTrigger
-              render={<Button aria-label="Git action options" size="icon-xs" variant="outline" />}
-              disabled={isGitActionRunning}
-            >
-              <ChevronDownIcon aria-hidden="true" className="size-4" />
-            </MenuTrigger>
-            <MenuPopup align="end" className="w-full">
-              {gitActionMenuItems.map((item) => {
-                const disabledReason = getMenuActionDisabledReason({
-                  item,
-                  gitStatus: gitStatusForActions,
-                  isBusy: isGitActionRunning,
-                  hasPrimaryRemote,
-                });
-                if (item.disabled && disabledReason) {
-                  return (
-                    <Popover key={`${item.id}-${item.label}`}>
-                      <PopoverTrigger
-                        openOnHover
-                        nativeButton={false}
-                        render={<span className="block w-max cursor-not-allowed" />}
-                      >
-                        <MenuItem className="w-full" disabled>
-                          <GitActionItemIcon
-                            icon={item.icon}
-                            SourceControlIcon={SourceControlIcon}
-                          />
-                          {item.label}
-                        </MenuItem>
-                      </PopoverTrigger>
-                      <PopoverPopup tooltipStyle side="left" align="center">
-                        {disabledReason}
-                      </PopoverPopup>
-                    </Popover>
-                  );
-                }
+            <GitQuickActionIcon quickAction={quickAction} SourceControlIcon={SourceControlIcon} />
+            <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+              {quickAction.label}
+            </span>
+          </Button>
+        )}
+        <GroupSeparator className="hidden @3xl/header-actions:block" />
+        <Menu onOpenChange={handleGitActionsOpenChange}>
+          <MenuTrigger
+            render={<Button aria-label="Git action options" size="icon-xs" variant="outline" />}
+            disabled={isGitActionRunning}
+          >
+            <ChevronDownIcon aria-hidden="true" className="size-4" />
+          </MenuTrigger>
+          <MenuPopup align="end" className="w-full">
+            {gitActionMenuContent}
+          </MenuPopup>
+        </Menu>
+      </Group>
+    );
+  };
 
-                return (
-                  <MenuItem
-                    key={`${item.id}-${item.label}`}
-                    disabled={item.disabled}
-                    onClick={() => {
-                      openDialogForMenuItem(item);
-                    }}
-                  >
-                    <GitActionItemIcon icon={item.icon} SourceControlIcon={SourceControlIcon} />
-                    {item.label}
-                  </MenuItem>
-                );
-              })}
-              {canPublishRepository ? (
-                <MenuItem
-                  disabled={isGitActionRunning}
-                  onClick={() => {
-                    setIsPublishDialogOpen(true);
-                  }}
-                >
-                  <CloudUploadIcon />
-                  Publish repository...
-                </MenuItem>
-              ) : null}
-              {gitStatusForActions?.refName === null && (
-                <p className="px-2 py-1.5 text-xs text-warning">
-                  Detached HEAD: create and checkout a refName to enable push and pull request
-                  actions.
-                </p>
-              )}
-              {gitStatusForActions &&
-                gitStatusForActions.refName !== null &&
-                !gitStatusForActions.hasWorkingTreeChanges &&
-                gitStatusForActions.behindCount > 0 &&
-                gitStatusForActions.aheadCount === 0 && (
-                  <p className="px-2 py-1.5 text-xs text-warning">
-                    Behind upstream. Pull/rebase first.
-                  </p>
-                )}
-              {gitStatusError && (
-                <p className="px-2 py-1.5 text-xs text-destructive">{gitStatusError.message}</p>
-              )}
-            </MenuPopup>
-          </Menu>
-        </Group>
-      )}
+  return (
+    <>
+      {renderControl()}
 
       <Dialog
         open={isCommitDialogOpen}

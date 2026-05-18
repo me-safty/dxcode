@@ -414,6 +414,7 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
+  forceReload: () => Promise<void>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
@@ -469,6 +470,7 @@ export interface LocalApi {
     refreshProviders: (input?: {
       readonly instanceId?: ProviderInstanceId;
     }) => Promise<ServerProviderUpdatedPayload>;
+    refreshUsageLimits: () => Promise<void>;
     updateProvider: (input: ServerProviderUpdateInput) => Promise<ServerProviderUpdatedPayload>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     removeKeybinding: (input: ServerRemoveKeybindingInput) => Promise<ServerRemoveKeybindingResult>;

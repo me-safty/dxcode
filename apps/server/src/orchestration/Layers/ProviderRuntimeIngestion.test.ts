@@ -120,6 +120,7 @@ function createProviderServiceHarness() {
       });
     },
     rollbackConversation: () => unsupported(),
+    refreshUsage: () => Effect.void,
     get streamEvents() {
       return Stream.fromPubSub(runtimeEventPubSub);
     },
@@ -805,6 +806,64 @@ describe("ProviderRuntimeIngestion", () => {
     expect(data?.toolCallId).toBe("tool-read-1");
     expect(data?.kind).toBe("read");
     expect(rawOutput?.content).toBe('import * as Effect from "effect/Effect"\n');
+  });
+
+  it("projects provider account rate-limit updates into thread activities", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "account.rate-limits.updated",
+      eventId: asEventId("evt-rate-limits-updated"),
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        rateLimits: {
+          rateLimits: {
+            primary: {
+              usedPercent: 25,
+              windowDurationMins: 300,
+            },
+            secondary: {
+              usedPercent: 10,
+              windowDurationMins: 10_080,
+            },
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-rate-limits-updated",
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-rate-limits-updated",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("account.rate-limits.updated");
+    expect(activity?.summary).toBe("Usage limits updated");
+    expect(payload?.provider).toBe("codex");
+    expect(payload?.providerInstanceId).toBe("codex");
+    expect(payload?.rateLimits).toEqual({
+      rateLimits: {
+        primary: {
+          usedPercent: 25,
+          windowDurationMins: 300,
+        },
+        secondary: {
+          usedPercent: 10,
+          windowDurationMins: 10_080,
+        },
+      },
+    });
   });
 
   it("normalizes command execution activities to ran-command summaries", async () => {

@@ -19,9 +19,11 @@ import {
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
@@ -54,6 +56,8 @@ const BENIGN_ERROR_LOG_SNIPPETS = [
   "state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back",
 ];
 const CODEX_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
+const CODEX_USAGE_REFRESH_INTERVAL = Duration.seconds(30);
+const CODEX_USAGE_REFRESH_TIMEOUT = Duration.seconds(10);
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "not found",
   "missing thread",
@@ -140,6 +144,7 @@ export interface CodexSessionRuntimeShape {
   readonly rollbackThread: (
     numTurns: number,
   ) => Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
+  readonly refreshUsage: Effect.Effect<void, CodexSessionRuntimeError>;
   readonly respondToRequest: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
@@ -790,6 +795,51 @@ export const makeCodexSessionRuntime = (
         message,
       });
 
+    const refreshAccountRateLimits = Effect.gen(function* () {
+      const response = yield* client.request("account/rateLimits/read", undefined).pipe(
+        Effect.timeoutOption(CODEX_USAGE_REFRESH_TIMEOUT),
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.fail(
+                CodexErrors.CodexAppServerRequestError.internalError(
+                  "Codex account rate-limit refresh timed out.",
+                ),
+              ),
+            onSome: (value) => Effect.succeed(value),
+          }),
+        ),
+      );
+
+      yield* emitEvent({
+        kind: "notification",
+        threadId: options.threadId,
+        method: "account/rateLimits/updated",
+        message: "Codex usage limits refreshed.",
+        payload: response,
+      });
+    });
+
+    const refreshAccountRateLimitsBestEffort = refreshAccountRateLimits.pipe(
+      Effect.catch((error) =>
+        Effect.logDebug("codex.usage.refresh.failed", {
+          threadId: options.threadId,
+          detail: error instanceof Error ? error.message : String(error),
+        }),
+      ),
+    );
+
+    const startUsageRefreshLoop = refreshAccountRateLimitsBestEffort.pipe(
+      Effect.andThen(
+        Effect.forever(
+          Effect.sleep(CODEX_USAGE_REFRESH_INTERVAL).pipe(
+            Effect.andThen(refreshAccountRateLimitsBestEffort),
+          ),
+        ),
+      ),
+      Effect.forkIn(runtimeScope),
+    );
+
     const settlePendingApprovals = (decision: ProviderApprovalDecision) =>
       Ref.get(pendingApprovalsRef).pipe(
         Effect.flatMap((pendingApprovals) =>
@@ -1214,6 +1264,7 @@ export const makeCodexSessionRuntime = (
       } satisfies ProviderSession;
       yield* Ref.set(sessionRef, session);
       yield* emitSessionEvent("session/ready", "Codex App Server session ready.");
+      yield* startUsageRefreshLoop;
       return session;
     });
 
@@ -1319,6 +1370,7 @@ export const makeCodexSessionRuntime = (
           });
           return parseThreadSnapshot(response);
         }),
+      refreshUsage: refreshAccountRateLimits,
       respondToRequest: (requestId, decision) =>
         Effect.gen(function* () {
           const pending = (yield* Ref.get(pendingApprovalsRef)).get(requestId);

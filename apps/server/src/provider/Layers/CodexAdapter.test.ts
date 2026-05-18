@@ -141,6 +141,8 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     return Effect.promise(() => this.rollbackThreadImpl(numTurns));
   }
 
+  readonly refreshUsage = Effect.void;
+
   respondToRequest(requestId: ApprovalRequestId, decision: ProviderApprovalDecision) {
     return Effect.promise(() => this.respondToRequestImpl(requestId, decision));
   }

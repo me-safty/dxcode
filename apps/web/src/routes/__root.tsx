@@ -12,6 +12,7 @@ import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import { BackNavigationBlocker } from "../components/BackNavigationBlocker";
 import { CommandPalette } from "../components/CommandPalette";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
@@ -28,6 +29,7 @@ import {
   toastManager,
 } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
+import { isStandalonePwa } from "../env";
 import { readLocalApi } from "../localApi";
 import { useSettings } from "../hooks/useSettings";
 import {
@@ -62,6 +64,7 @@ import {
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+import { shouldNavigateToStartupBootstrapThread } from "../startupNavigation";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -132,6 +135,7 @@ function RootRouteView() {
   return (
     <ToastProvider>
       <AnchoredToastProvider>
+        <BackNavigationBlocker />
         {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />
@@ -301,13 +305,14 @@ function EventRouter() {
         return;
       }
 
-      if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
+      const bootstrapProjectId = payload.bootstrapProjectId;
+      const bootstrapThreadId = payload.bootstrapThreadId;
+      if (!bootstrapProjectId || !bootstrapThreadId) {
         return;
       }
       const bootstrapEnvironmentState =
         useStore.getState().environmentStateById[payload.environment.environmentId];
-      const bootstrapProject =
-        bootstrapEnvironmentState?.projectById[payload.bootstrapProjectId] ?? null;
+      const bootstrapProject = bootstrapEnvironmentState?.projectById[bootstrapProjectId] ?? null;
       const bootstrapProjectKey =
         (bootstrapProject
           ? deriveLogicalProjectKeyFromSettings(bootstrapProject, projectGroupingSettings)
@@ -315,26 +320,28 @@ function EventRouter() {
         (serverConfig?.cwd
           ? derivePhysicalProjectKeyFromPath(payload.environment.environmentId, serverConfig.cwd)
           : null) ??
-        scopedProjectKey(
-          scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
-        );
+        scopedProjectKey(scopeProjectRef(payload.environment.environmentId, bootstrapProjectId));
       useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true);
 
-      if (readPathname() !== "/") {
-        return;
-      }
-      if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
+      if (
+        !shouldNavigateToStartupBootstrapThread({
+          pathname: readPathname(),
+          bootstrapThreadId,
+          handledBootstrapThreadId: handledBootstrapThreadIdRef.current,
+          isStandalonePwa: isStandalonePwa(),
+        })
+      ) {
         return;
       }
       await navigate({
         to: "/$environmentId/$threadId",
         params: {
           environmentId: payload.environment.environmentId,
-          threadId: payload.bootstrapThreadId,
+          threadId: bootstrapThreadId,
         },
         replace: true,
       });
-      handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
+      handledBootstrapThreadIdRef.current = bootstrapThreadId;
     })().catch(() => undefined);
   });
 

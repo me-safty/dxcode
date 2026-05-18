@@ -1684,6 +1684,21 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const hasSession: CodexAdapterShape["hasSession"] = (threadId) =>
     Effect.succeed(Boolean(sessions.get(threadId) && !sessions.get(threadId)?.stopped));
 
+  const refreshUsage: NonNullable<CodexAdapterShape["refreshUsage"]> = () =>
+    Effect.forEach(
+      Array.from(sessions.values()).filter((session) => !session.stopped),
+      (session) =>
+        session.runtime.refreshUsage.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logDebug("codex.adapter.usage.refresh-failed", {
+              threadId: session.threadId,
+              cause,
+            }),
+          ),
+        ),
+      { concurrency: "unbounded", discard: true },
+    ).pipe(Effect.asVoid);
+
   const stopAll: CodexAdapterShape["stopAll"] = () =>
     Effect.forEach(Array.from(sessions.values()), stopSessionInternal, {
       concurrency: 1,
@@ -1713,6 +1728,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     stopSession,
     listSessions,
     hasSession,
+    refreshUsage,
     stopAll,
     get streamEvents() {
       return Stream.fromQueue(runtimeEventQueue);

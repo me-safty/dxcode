@@ -67,7 +67,34 @@ const webAssetBrand = resolveWebAssetBrandForConfiguredChannel(configuredHostedA
 function webBrandAssetsPlugin(): Plugin {
   return {
     name: "t3code-web-brand-assets",
-    apply: "build",
+    configureServer(server) {
+      const devOverrides = new Map(
+        resolveWebIconOverrides("development", "").map((override) => [
+          `/${override.targetRelativePath.replace(/^\//, "")}`,
+          path.join(repoRoot, override.sourceRelativePath),
+        ]),
+      );
+      server.middlewares.use(async (req, res, next) => {
+        const urlPath = req.url?.split("?")[0];
+        if (!urlPath) {
+          next();
+          return;
+        }
+        const sourcePath = devOverrides.get(urlPath);
+        if (!sourcePath) {
+          next();
+          return;
+        }
+        try {
+          const data = await fs.readFile(sourcePath);
+          res.setHeader("Content-Type", urlPath.endsWith(".ico") ? "image/x-icon" : "image/png");
+          res.setHeader("Cache-Control", "no-cache");
+          res.end(data);
+        } catch (cause) {
+          next(cause);
+        }
+      });
+    },
     async closeBundle() {
       await Promise.all(
         resolveWebIconOverrides(webAssetBrand, "apps/web/dist").map((override) =>

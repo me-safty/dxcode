@@ -1,5 +1,6 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 
 import { openInPreferredEditor } from "./editorPreferences";
 import { readLocalApi } from "./localApi";
@@ -148,10 +149,12 @@ export async function openPathInPreferredEditorOrFilePreview(input: {
 }
 
 export function useWorkspaceFilePreviewState() {
-  return useWorkspaceFilePreviewStore((state) => ({
-    open: state.open,
-    target: state.target,
-  }));
+  return useWorkspaceFilePreviewStore(
+    useShallow((state) => ({
+      open: state.open,
+      target: state.target,
+    })),
+  );
 }
 
 export function closeWorkspaceFilePreview(): void {

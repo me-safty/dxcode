@@ -9,7 +9,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
-import { DiffIcon, EllipsisIcon, TerminalSquareIcon } from "lucide-react";
+import { DiffIcon, EllipsisIcon, RefreshCwIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
@@ -17,7 +17,7 @@ import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Button } from "../ui/button";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 
@@ -59,6 +59,18 @@ export function shouldShowOpenInPicker(input: {
   );
 }
 
+export function forceRefreshApp(): void {
+  const forceReload = window.desktopBridge?.forceReload;
+  if (typeof forceReload === "function") {
+    void forceReload().catch(() => {
+      window.location.reload();
+    });
+    return;
+  }
+
+  window.location.reload();
+}
+
 export const ChatHeader = memo(function ChatHeader({
   activeThreadEnvironmentId,
   activeThreadId,
@@ -92,26 +104,32 @@ export const ChatHeader = memo(function ChatHeader({
     primaryEnvironmentId,
   });
   const activeThreadRef = scopeThreadRef(activeThreadEnvironmentId, activeThreadId);
-  const projectScriptsControl = activeProjectScripts ? (
-    <ProjectScriptsControl
-      scripts={activeProjectScripts}
-      keybindings={keybindings}
-      preferredScriptId={preferredScriptId}
-      onRunScript={onRunProjectScript}
-      onAddScript={onAddProjectScript}
-      onUpdateScript={onUpdateProjectScript}
-      onDeleteScript={onDeleteProjectScript}
-    />
-  ) : null;
-  const gitActionsControl =
+  const renderProjectScriptsControl = (inMenu = false) =>
+    activeProjectScripts ? (
+      <ProjectScriptsControl
+        scripts={activeProjectScripts}
+        keybindings={keybindings}
+        preferredScriptId={preferredScriptId}
+        inMenu={inMenu}
+        onRunScript={onRunProjectScript}
+        onAddScript={onAddProjectScript}
+        onUpdateScript={onUpdateProjectScript}
+        onDeleteScript={onDeleteProjectScript}
+      />
+    ) : null;
+  const renderGitActionsControl = (inMenu = false) =>
     activeProjectName && gitCwd ? (
       <GitActionsControl
         gitCwd={gitCwd}
         activeThreadRef={activeThreadRef}
+        inMenu={inMenu}
         {...(draftId ? { draftId } : {})}
       />
     ) : null;
-  const showMobileOverflowActions = Boolean(projectScriptsControl || gitActionsControl);
+  const hasProjectScriptsControl = activeProjectScripts !== undefined;
+  const hasGitActionsControl = Boolean(activeProjectName && gitCwd);
+  const showCompactOverflowActions =
+    isCompactHeader && (hasProjectScriptsControl || hasGitActionsControl);
 
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
@@ -135,7 +153,7 @@ export const ChatHeader = memo(function ChatHeader({
         )}
       </div>
       <div className="flex shrink-0 items-center justify-end gap-1.5 @3xl/header-actions:gap-3">
-        {!isCompactHeader && projectScriptsControl}
+        {!isCompactHeader && renderProjectScriptsControl()}
         {!isCompactHeader && showOpenInPicker && (
           <>
             <OpenInPicker
@@ -145,32 +163,29 @@ export const ChatHeader = memo(function ChatHeader({
             />
           </>
         )}
-        {!isCompactHeader && gitActionsControl}
-        {isCompactHeader && showMobileOverflowActions ? (
-          <Popover>
-            <PopoverTrigger
-              render={<Button size="icon-xs" variant="outline" aria-label="More thread actions" />}
-            >
-              <EllipsisIcon className="size-4" />
-            </PopoverTrigger>
-            <PopoverPopup align="end" side="bottom" className="w-64 max-w-[calc(100vw-1rem)]">
-              <div className="space-y-4">
-                {projectScriptsControl ? (
-                  <section className="space-y-2">
-                    <h3 className="px-0.5 text-muted-foreground text-xs font-medium">Run</h3>
-                    <div className="flex justify-start">{projectScriptsControl}</div>
-                  </section>
-                ) : null}
-                {gitActionsControl ? (
-                  <section className="space-y-2">
-                    <h3 className="px-0.5 text-muted-foreground text-xs font-medium">Git</h3>
-                    <div className="flex justify-start">{gitActionsControl}</div>
-                  </section>
-                ) : null}
-              </div>
-            </PopoverPopup>
-          </Popover>
-        ) : null}
+        {!isCompactHeader && renderGitActionsControl()}
+        <Menu>
+          <MenuTrigger
+            render={<Button size="icon-xs" variant="outline" aria-label="More thread actions" />}
+          >
+            <EllipsisIcon className="size-4" />
+          </MenuTrigger>
+          <MenuPopup align="end" side="bottom" className="min-w-48">
+            {showCompactOverflowActions && hasProjectScriptsControl
+              ? renderProjectScriptsControl(true)
+              : null}
+            {showCompactOverflowActions && hasGitActionsControl
+              ? renderGitActionsControl(true)
+              : null}
+            {showCompactOverflowActions && (hasProjectScriptsControl || hasGitActionsControl) ? (
+              <MenuSeparator />
+            ) : null}
+            <MenuItem onClick={forceRefreshApp}>
+              <RefreshCwIcon aria-hidden="true" className="size-4" />
+              Force refresh
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
         <Tooltip>
           <TooltipTrigger
             render={

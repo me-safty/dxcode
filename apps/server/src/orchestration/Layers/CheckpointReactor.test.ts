@@ -124,6 +124,7 @@ function createProviderServiceHarness(
         },
       }),
     rollbackConversation,
+    refreshUsage: () => Effect.void,
     get streamEvents() {
       return Stream.fromPubSub(runtimeEventPubSub);
     },

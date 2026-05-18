@@ -1342,8 +1342,8 @@ describe("deriveTimelineEntries", () => {
   });
 });
 
-describe("deriveWorkLogEntries context window handling", () => {
-  it("excludes context window updates from the work log", () => {
+describe("deriveWorkLogEntries usage telemetry handling", () => {
+  it("excludes usage telemetry updates from the work log", () => {
     const entries = deriveWorkLogEntries(
       [
         makeActivity({
@@ -1351,6 +1351,13 @@ describe("deriveWorkLogEntries context window handling", () => {
           turnId: "turn-1",
           kind: "context-window.updated",
           summary: "Context window updated",
+          tone: "info",
+        }),
+        makeActivity({
+          id: "rate-limits-1",
+          turnId: "turn-1",
+          kind: "account.rate-limits.updated",
+          summary: "Usage limits updated",
           tone: "info",
         }),
         makeActivity({

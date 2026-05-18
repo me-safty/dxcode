@@ -25,6 +25,10 @@ import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
 const MAX_TCP_PORT = 65_535;
 const DESKTOP_BACKEND_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::"] as const;
+const DISABLED_CHROMIUM_OVERSCROLL_FEATURES = [
+  "OverscrollHistoryNavigation",
+  "TouchpadOverscrollHistoryNavigation",
+] as const;
 
 const makeDesktopRunId = Random.nextUUIDv4.pipe(
   Effect.map((value) => value.replaceAll("-", "").slice(0, 12)),
@@ -199,6 +203,13 @@ const startup = Effect.gen(function* () {
   yield* electronApp.setPath("userData", userDataPath);
   yield* logStartupInfo("runtime logging configured", { logDir: environment.logDir });
   yield* desktopSettings.load;
+
+  // Renderer history blockers run after Chromium has started the swipe affordance.
+  // Disable overscroll history navigation in Chromium before app ready.
+  yield* electronApp.appendCommandLineSwitch(
+    "disable-features",
+    DISABLED_CHROMIUM_OVERSCROLL_FEATURES.join(","),
+  );
 
   if (environment.platform === "linux") {
     yield* electronApp.appendCommandLineSwitch("class", environment.linuxWmClass);

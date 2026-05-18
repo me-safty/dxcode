@@ -6,3 +6,18 @@
 export const isElectron =
   typeof window !== "undefined" &&
   (window.desktopBridge !== undefined || window.nativeApi !== undefined);
+
+type NavigatorWithStandalone = Navigator & {
+  readonly standalone?: boolean;
+};
+
+export function isStandalonePwa(): boolean {
+  if (typeof window === "undefined" || isElectron) {
+    return false;
+  }
+
+  return (
+    window.matchMedia?.("(display-mode: standalone)").matches === true ||
+    (navigator as NavigatorWithStandalone).standalone === true
+  );
+}

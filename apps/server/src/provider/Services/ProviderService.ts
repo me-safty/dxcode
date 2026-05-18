@@ -106,6 +106,11 @@ export interface ProviderServiceShape {
   }) => Effect.Effect<void, ProviderServiceError>;
 
   /**
+   * Best-effort refresh for usage/rate-limit telemetry on active sessions.
+   */
+  readonly refreshUsage: () => Effect.Effect<void>;
+
+  /**
    * Canonical provider runtime event stream.
    *
    * Fan-out is owned by ProviderService (not by a standalone event-bus service).

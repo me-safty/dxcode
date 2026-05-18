@@ -79,6 +79,7 @@ import {
   ProviderRegistry,
   type ProviderRegistryShape,
 } from "./provider/Services/ProviderRegistry.ts";
+import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
@@ -318,6 +319,7 @@ const buildAppUnderTest = (options?: {
   layers?: {
     keybindings?: Partial<KeybindingsShape>;
     providerRegistry?: Partial<ProviderRegistryShape>;
+    providerService?: Partial<ProviderServiceShape>;
     serverSettings?: Partial<ServerSettingsShape>;
     open?: Partial<OpenShape>;
     vcsDriver?: Partial<VcsDriver.VcsDriverShape>;
@@ -527,6 +529,33 @@ const buildAppUnderTest = (options?: {
           setProviderMaintenanceActionState: () => Effect.succeed([]),
           streamChanges: Stream.empty,
           ...options?.layers?.providerRegistry,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProviderService)({
+          startSession: () => Effect.die("Unsupported provider service call in test"),
+          sendTurn: () => Effect.die("Unsupported provider service call in test"),
+          interruptTurn: () => Effect.die("Unsupported provider service call in test"),
+          respondToRequest: () => Effect.die("Unsupported provider service call in test"),
+          respondToUserInput: () => Effect.die("Unsupported provider service call in test"),
+          stopSession: () => Effect.die("Unsupported provider service call in test"),
+          listSessions: () => Effect.succeed([]),
+          getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+          getInstanceInfo: (instanceId) =>
+            Effect.succeed({
+              instanceId,
+              driverKind: ProviderDriverKind.make(String(instanceId)),
+              displayName: undefined,
+              enabled: true,
+              continuationIdentity: {
+                driverKind: ProviderDriverKind.make(String(instanceId)),
+                continuationKey: `${instanceId}:test`,
+              },
+            }),
+          rollbackConversation: () => Effect.die("Unsupported provider service call in test"),
+          refreshUsage: () => Effect.void,
+          streamEvents: Stream.empty,
+          ...options?.layers?.providerService,
         }),
       ),
       Layer.provide(
