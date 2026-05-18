@@ -8,6 +8,7 @@ import type {
 import { ProviderDriverKind } from "@t3tools/contracts";
 import * as NodeOS from "node:os";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -53,6 +54,12 @@ export interface PiConfigModelDefaults {
   readonly malformed: boolean;
 }
 
+export interface PiAuthState {
+  readonly status: "valid" | "expired" | "missing" | "unknown";
+  readonly provider: string | null;
+  readonly expiresAt: string | null;
+}
+
 export interface PiBinaryResolution {
   readonly binaryPath: string;
   readonly suggestedBinaryPath: string | null;
@@ -70,6 +77,11 @@ function stripQuotes(value: string): string {
 }
 
 export function parsePiConfigModelDefaults(raw: string): PiConfigModelDefaults {
+  const jsonDefaultModel = extractJsonStringField(raw, "defaultModel");
+  if (jsonDefaultModel?.trim()) {
+    return { defaultModel: jsonDefaultModel.trim(), malformed: false };
+  }
+
   const lines = raw.replace(/\r\n?/g, "\n").split("\n");
   let inModelBlock = false;
   let modelIndent = 0;
@@ -133,12 +145,90 @@ function readPiConfigModelDefaults(
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const home =
-      environment.PI_HOME?.trim() || path.join(environment.HOME || NodeOS.homedir(), ".pi");
+    const home = environment.PI_CODING_AGENT_DIR?.trim()
+      ? environment.PI_CODING_AGENT_DIR
+      : path.join(environment.HOME || NodeOS.homedir(), ".pi", "agent");
     const raw = yield* fs
-      .readFileString(path.join(home, "config.yaml"))
+      .readFileString(path.join(home, "settings.json"))
       .pipe(Effect.catch(() => Effect.succeed(null)));
     return raw ? parsePiConfigModelDefaults(raw) : { defaultModel: null, malformed: false };
+  });
+}
+
+function extractJsonStringField(raw: string, field: string): string | null {
+  const match = new RegExp(`"${field}"\\s*:\\s*"([^"]*)"`).exec(raw);
+  return match?.[1] ?? null;
+}
+
+function extractProviderObject(raw: string, provider: string): string | null {
+  const keyIndex = raw.indexOf(`"${provider}"`);
+  if (keyIndex < 0) return null;
+  const objectStart = raw.indexOf("{", keyIndex);
+  if (objectStart < 0) return null;
+  let depth = 0;
+  for (let index = objectStart; index < raw.length; index++) {
+    const char = raw[index];
+    if (char === "{") depth++;
+    if (char === "}") {
+      depth--;
+      if (depth === 0) return raw.slice(objectStart, index + 1);
+    }
+  }
+  return null;
+}
+
+function extractJsonNumberField(raw: string, field: string): number | null {
+  const match = new RegExp(`"${field}"\\s*:\\s*(\\d+)`).exec(raw);
+  if (!match?.[1]) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function readOptionalFile(
+  path: string,
+): Effect.Effect<string | null, never, FileSystem.FileSystem> {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    return yield* fs.readFileString(path).pipe(Effect.catch(() => Effect.succeed(null)));
+  });
+}
+
+function readPiAuthState(
+  environment: NodeJS.ProcessEnv,
+): Effect.Effect<PiAuthState, never, FileSystem.FileSystem | Path.Path> {
+  return Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const home = environment.PI_CODING_AGENT_DIR?.trim()
+      ? environment.PI_CODING_AGENT_DIR
+      : path.join(environment.HOME || NodeOS.homedir(), ".pi", "agent");
+    const settings = yield* readOptionalFile(path.join(home, "settings.json"));
+    const defaultProvider = settings
+      ? (extractJsonStringField(settings, "defaultProvider") ?? "")
+      : "";
+    const provider = defaultProvider.length > 0 ? defaultProvider : null;
+    const auth = yield* readOptionalFile(path.join(home, "auth.json"));
+    if (!provider || !auth) {
+      return { status: "unknown", provider, expiresAt: null };
+    }
+
+    const providerAuth = extractProviderObject(auth, provider);
+    if (!providerAuth) {
+      return { status: "missing", provider, expiresAt: null };
+    }
+
+    const expires = extractJsonNumberField(providerAuth, "expires");
+    if (expires === null) {
+      return { status: "unknown", provider, expiresAt: null };
+    }
+
+    const expiresMs = expires > 1_000_000_000_000 ? expires : expires * 1000;
+    const nowMs = yield* Clock.currentTimeMillis;
+    const expiresAt = DateTime.formatIso(DateTime.makeUnsafe(expiresMs));
+    return {
+      status: nowMs >= expiresMs ? "expired" : "valid",
+      provider,
+      expiresAt,
+    };
   });
 }
 
@@ -416,6 +506,7 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
 > {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const configDefaults = yield* readPiConfigModelDefaults(environment);
+  const authState = yield* readPiAuthState(environment);
   const models = getPiModels(piSettings, configDefaults);
   const binaryResolution = yield* resolvePiBinary(piSettings, environment);
   const piCliResolution = yield* resolvePiCliBinary(piSettings, environment);
@@ -525,6 +616,26 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
   }
 
   const parsed = parsePiAboutOutput(piProbe.success.value);
+  if (authState.status === "expired" || authState.status === "missing") {
+    const providerLabel = authState.provider ? ` for ${authState.provider}` : "";
+    const expiryLabel = authState.expiresAt ? ` expired on ${authState.expiresAt}` : " is missing";
+    return withPiHints(
+      buildServerProvider({
+        presentation: PI_PRESENTATION,
+        enabled: true,
+        checkedAt,
+        models,
+        probe: {
+          installed: true,
+          version: parsed.version,
+          status: "error",
+          auth: { status: "unauthenticated" },
+          message: `Pi authentication${providerLabel}${expiryLabel}. Run \`pi\` in a terminal to refresh the login or configure a provider API key.`,
+        },
+      }),
+    );
+  }
+
   const configMessage =
     parsed.status === "ready" && configDefaults.malformed
       ? "Pi Agent is ready, but T3 Code could not read a configured default model; add a custom model in Settings if the picker needs a specific model name."
