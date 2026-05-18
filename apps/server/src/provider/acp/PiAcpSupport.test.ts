@@ -74,4 +74,32 @@ describe("buildPiAcpSpawnInput", () => {
       },
     });
   });
+
+  it("preserves Windows root executable directories", () => {
+    expect(
+      buildPiAcpSpawnInput(
+        {
+          binaryPath: "C:\\pi-acp.cmd",
+          piBinaryPath: "C:\\pi.cmd",
+        },
+        "C:\\work\\project",
+        {},
+      ).env?.PATH,
+    ).toBe("C:\\");
+  });
+
+  it("does not add an empty PATH for relative commands without an existing path", () => {
+    expect(
+      buildPiAcpSpawnInput(
+        {
+          binaryPath: "pi-acp",
+          piBinaryPath: "pi",
+        },
+        "/tmp/project",
+        {},
+      ).env,
+    ).toEqual({
+      PI_ACP_PI_COMMAND: "pi",
+    });
+  });
 });

@@ -1233,11 +1233,13 @@ export function ProviderSettingsPanel() {
             ? providerUpdateCandidateByInstanceId.get(liveProvider.instanceId)
             : undefined;
           const isDriverUpdateRunning =
-            updateCandidate !== undefined &&
-            (updatingProviderDrivers.has(updateCandidate.driver) ||
+            liveProvider !== undefined &&
+            (updatingProviderDrivers.has(liveProvider.driver) ||
+              (updateCandidate !== undefined &&
+                updatingProviderDrivers.has(updateCandidate.driver)) ||
               serverProviders.some(
                 (provider) =>
-                  provider.driver === updateCandidate.driver && isProviderUpdateActive(provider),
+                  provider.driver === liveProvider.driver && isProviderUpdateActive(provider),
               ));
           const showInlineUpdateButton =
             liveProvider !== undefined &&

@@ -1261,9 +1261,15 @@ describe("GeneralSettingsPanel observability", () => {
   });
 
   it("offers provider updates in expanded settings even without an outdated advisory", async () => {
-    const updateProvider = vi.fn<LocalApi["server"]["updateProvider"]>().mockResolvedValue({
-      providers: [createCurrentUpdatableProvider("pi", "pi update")],
-    });
+    let resolveUpdateProvider:
+      | ((value: Awaited<ReturnType<LocalApi["server"]["updateProvider"]>>) => void)
+      | undefined;
+    const updateProvider = vi.fn<LocalApi["server"]["updateProvider"]>().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUpdateProvider = resolve;
+        }),
+    );
     window.nativeApi = {
       persistence: {
         getClientSettings: vi.fn().mockResolvedValue(null),
@@ -1289,10 +1295,14 @@ describe("GeneralSettingsPanel observability", () => {
     await expect.element(page.getByText("Provider update")).toBeInTheDocument();
     await expect.element(page.getByText("pi update")).toBeInTheDocument();
     await page.getByRole("button", { name: "Update provider" }).click();
+    await expect.element(page.getByRole("button", { name: "Updating" })).toBeDisabled();
 
     expect(updateProvider).toHaveBeenCalledWith({
       provider: ProviderDriverKind.make("pi"),
       instanceId: ProviderInstanceId.make("pi"),
+    });
+    resolveUpdateProvider?.({
+      providers: [createCurrentUpdatableProvider("pi", "pi update")],
     });
   });
 

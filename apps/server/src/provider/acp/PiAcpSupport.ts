@@ -34,10 +34,14 @@ function dirnameForExecutablePath(value: string | undefined): string | null {
     return null;
   }
   const normalized = value.replaceAll("\\", "/");
-  if (!normalized.startsWith("/") && !WINDOWS_ABSOLUTE_PATH_PATTERN.test(normalized)) {
+  const isWindowsAbsolute = WINDOWS_ABSOLUTE_PATH_PATTERN.test(normalized);
+  if (!normalized.startsWith("/") && !isWindowsAbsolute) {
     return null;
   }
   const separatorIndex = normalized.lastIndexOf("/");
+  if (isWindowsAbsolute && separatorIndex === 2) {
+    return value.slice(0, 3);
+  }
   return separatorIndex > 0 ? value.slice(0, separatorIndex) : "/";
 }
 
@@ -72,7 +76,7 @@ function buildPiAcpEnvironment(
   if (piSettings?.piBinaryPath) {
     env.PI_ACP_PI_COMMAND = piSettings.piBinaryPath;
   }
-  env[pathKey] = prependUniquePathEntries(
+  const nextPath = prependUniquePathEntries(
     env[pathKey],
     [
       dirnameForExecutablePath(piSettings?.binaryPath),
@@ -80,6 +84,9 @@ function buildPiAcpEnvironment(
     ],
     pathDelimiter,
   );
+  if (nextPath) {
+    env[pathKey] = nextPath;
+  }
   return env;
 }
 

@@ -76,7 +76,7 @@ export function parseHermesConfigModelDefaults(raw: string): HermesConfigModelDe
   let sawModelBlock = false;
 
   for (const line of lines) {
-    const withoutComment = line.replace(/\s+#.*$/, "");
+    const withoutComment = line.replace(/\s*#.*$/, "");
     if (withoutComment.trim().length === 0) continue;
 
     const indent = withoutComment.length - withoutComment.trimStart().length;

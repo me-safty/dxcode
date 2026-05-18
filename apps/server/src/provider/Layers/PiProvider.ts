@@ -36,7 +36,7 @@ const PROVIDER = ProviderDriverKind.make("pi");
 const PI_PRESENTATION = {
   displayName: "Pi",
   badgeLabel: "Early Access",
-  showInteractionModeToggle: true,
+  showInteractionModeToggle: false,
 } as const;
 const EMPTY_CAPABILITIES = createModelCapabilities({ optionDescriptors: [] });
 const PI_FALLBACK_MODEL: ServerProviderModel = {
@@ -176,8 +176,9 @@ function readPiConfigModelDefaults(
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const home = environment.PI_CODING_AGENT_DIR?.trim()
-      ? environment.PI_CODING_AGENT_DIR
+    const configuredHome = environment.PI_CODING_AGENT_DIR?.trim();
+    const home = configuredHome
+      ? configuredHome
       : path.join(environment.HOME || NodeOS.homedir(), ".pi", "agent");
     const raw = yield* fs
       .readFileString(path.join(home, "settings.json"))
@@ -231,8 +232,9 @@ function readPiAuthState(
 ): Effect.Effect<PiAuthState, never, FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const path = yield* Path.Path;
-    const home = environment.PI_CODING_AGENT_DIR?.trim()
-      ? environment.PI_CODING_AGENT_DIR
+    const configuredHome = environment.PI_CODING_AGENT_DIR?.trim();
+    const home = configuredHome
+      ? configuredHome
       : path.join(environment.HOME || NodeOS.homedir(), ".pi", "agent");
     const settings = yield* readOptionalFile(path.join(home, "settings.json"));
     const defaultProvider = settings
