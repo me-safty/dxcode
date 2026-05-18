@@ -52,6 +52,7 @@ export function App({
     handleSelectTicket,
     handleSelectThread,
     handleCreateThread,
+    handleCreateProjectKickoffThread,
     handleCreateTicketKickoffThread,
     handleCreateTicketThreadFromSidebar,
     handleThreadKickoffConsumed,
@@ -109,6 +110,7 @@ export function App({
           getThreadsForProject={store.getThreadsForProject}
           onOpenTicket={handleSelectTicket}
           onOpenThread={handleSelectThread}
+          onKickoffProjectThread={handleCreateProjectKickoffThread}
           onKickoffTicketThread={handleCreateTicketKickoffThread}
           onThreadKickoffConsumed={handleThreadKickoffConsumed}
           onBackToDashboard={handleSelectProject}

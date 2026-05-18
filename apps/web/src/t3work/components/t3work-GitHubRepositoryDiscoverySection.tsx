@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { CheckCircle2, Github, RefreshCw, Search, ShieldAlert, Sparkles } from "lucide-react";
 import { Button } from "~/t3work/components/ui/t3work-button";
 import { Input } from "~/t3work/components/ui/t3work-input";
@@ -25,12 +26,14 @@ export function GitHubRepositoryDiscoverySection({
   projectTitle,
   linkedRepositoryUrls,
   onAddSuggestedUrls,
+  onVisibleSuggestionsChange,
 }: {
   enabled?: boolean;
   projectKey: string | undefined;
   projectTitle: string | undefined;
   linkedRepositoryUrls: ReadonlyArray<string>;
   onAddSuggestedUrls: (urls: ReadonlyArray<string>) => void;
+  onVisibleSuggestionsChange?: (urls: ReadonlyArray<string>) => void;
 }) {
   const discovery = useGitHubRepositoryDiscovery({
     enabled,
@@ -42,6 +45,11 @@ export function GitHubRepositoryDiscoverySection({
   const selectedUrls = discovery.visibleSuggestedUrls.filter((url) =>
     discovery.selectedSuggestedUrls.has(url),
   );
+
+  useEffect(() => {
+    onVisibleSuggestionsChange?.(discovery.visibleSuggestedUrls);
+  }, [discovery.visibleSuggestedUrls, onVisibleSuggestionsChange]);
+
   const status = authTone(discovery.authStatus);
   const StatusIcon = status.icon;
   const showAuthSkeleton = discovery.authStatus === "checking" || discovery.loadingAuth;

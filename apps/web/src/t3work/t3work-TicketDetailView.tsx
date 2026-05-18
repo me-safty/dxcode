@@ -148,6 +148,7 @@ export function TicketDetailView({
               priority={priority}
               assignee={assignee}
               projectId={project.id}
+              project={project}
               projectTickets={ticketsWithRelated}
               ticketId={ticket?.id ?? ticketId}
               ticketParentId={ticket?.parentId}

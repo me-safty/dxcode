@@ -1,6 +1,11 @@
 import { TicketWorkItemCard, TicketWorkItemRow } from "~/t3work/t3work-ProjectDashboardItemViews";
 import { T3SurfacePanel } from "~/t3work/components/ui/t3work-surface";
 import type { ProjectTicket } from "~/t3work/t3work-types";
+import type { ProjectShellProject } from "@t3tools/project-context";
+import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
+import { useBackend } from "~/t3work/backend/t3work-index";
+import { buildComprehensiveTicketPayload } from "~/t3work/t3work-addToChatPayloadBuilders";
+import { useAddToChat } from "~/t3work/hooks/t3work-useAddToChat";
 
 type TicketHierarchy = {
   roots: readonly ProjectTicket[];
@@ -10,15 +15,47 @@ type TicketHierarchy = {
 
 export function ProjectDashboardHierarchyContent({
   viewMode,
+  project,
   parentChildGroups,
+  filteredWorkItems,
+  githubActivityByWorkItem,
   projectId,
   onOpenTicket,
 }: {
   viewMode: "grid" | "list";
+  project: ProjectShellProject;
   parentChildGroups: TicketHierarchy;
+  filteredWorkItems: readonly ProjectTicket[];
+  githubActivityByWorkItem: ReadonlyMap<string, ReadonlyArray<GitHubWorkActivityItem>>;
   projectId: string;
   onOpenTicket: (projectId: string, ticketId: string) => void;
 }) {
+  const backend = useBackend();
+  const { showAddToChatContextMenu } = useAddToChat();
+
+  const handleTicketContextMenu = (event: React.MouseEvent, ticket: ProjectTicket) => {
+    if (!backend) {
+      return;
+    }
+    const githubItems = githubActivityByWorkItem.get(ticket.ref.displayId) ?? [];
+    void showAddToChatContextMenu(event, {
+      projectId,
+      projectTitle: project.title,
+      projectWorkspaceRoot: project.workspace?.rootPath,
+      targetLabel: `${ticket.ref.displayId} ${ticket.ref.title}`,
+      targetType: "work-item",
+      summaryItems: [{ label: "Status", value: ticket.status }],
+      payload: () =>
+        buildComprehensiveTicketPayload({
+          backend,
+          project,
+          ticket,
+          projectTickets: filteredWorkItems,
+          githubActivityItems: githubItems,
+        }),
+    });
+  };
+
   if (viewMode === "list") {
     return (
       <div className="space-y-3">
@@ -29,6 +66,7 @@ export function ProjectDashboardHierarchyContent({
               <TicketWorkItemRow
                 ticket={parent}
                 childCount={children.length}
+                onContextMenu={(event) => handleTicketContextMenu(event, parent)}
                 onOpen={() => onOpenTicket(projectId, parent.id)}
               />
               {children.length > 0 ? (
@@ -39,6 +77,7 @@ export function ProjectDashboardHierarchyContent({
                         key={child.id}
                         ticket={child}
                         child
+                        onContextMenu={(event) => handleTicketContextMenu(event, child)}
                         onOpen={() => onOpenTicket(projectId, child.id)}
                       />
                     ))}
@@ -58,6 +97,7 @@ export function ProjectDashboardHierarchyContent({
                   key={child.id}
                   ticket={child}
                   child
+                  onContextMenu={(event) => handleTicketContextMenu(event, child)}
                   onOpen={() => onOpenTicket(projectId, child.id)}
                 />
               ))}
@@ -78,6 +118,7 @@ export function ProjectDashboardHierarchyContent({
               ticket={ticket}
               flat
               childCount={children.length}
+              onContextMenu={(event) => handleTicketContextMenu(event, ticket)}
               onOpen={() => onOpenTicket(projectId, ticket.id)}
             />
             {children.length > 0 ? (
@@ -90,6 +131,7 @@ export function ProjectDashboardHierarchyContent({
                       compact
                       flat
                       child
+                      onContextMenu={(event) => handleTicketContextMenu(event, child)}
                       onOpen={() => onOpenTicket(projectId, child.id)}
                     />
                   ))}

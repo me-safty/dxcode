@@ -6,19 +6,23 @@ import { LinkedRepositoryListEditor } from "~/t3work/components/t3work-LinkedRep
 export function ConfirmStep({
   selectedProject,
   linkedRepositoryUrls,
+  discoveredRepositoryUrls,
   newRepositoryUrl,
   setNewRepositoryUrl,
   onAddRepository,
   onRemoveRepository,
   onAddRepositories,
+  onDiscoveredRepositoryUrlsChange,
 }: {
   selectedProject: ExternalProject | null;
   linkedRepositoryUrls: ReadonlyArray<string>;
+  discoveredRepositoryUrls: ReadonlyArray<string>;
   newRepositoryUrl: string;
   setNewRepositoryUrl: (value: string) => void;
   onAddRepository: () => void;
   onRemoveRepository: (url: string) => void;
   onAddRepositories: (urls: ReadonlyArray<string>) => void;
+  onDiscoveredRepositoryUrlsChange: (urls: ReadonlyArray<string>) => void;
 }) {
   return (
     <section className="space-y-3">
@@ -28,6 +32,7 @@ export function ConfirmStep({
         projectTitle={selectedProject?.title ?? undefined}
         linkedRepositoryUrls={linkedRepositoryUrls}
         onAddSuggestedUrls={onAddRepositories}
+        onVisibleSuggestionsChange={onDiscoveredRepositoryUrlsChange}
       />
       <LinkedRepositoryListEditor
         repositoryUrls={linkedRepositoryUrls}
@@ -35,6 +40,7 @@ export function ConfirmStep({
         setNewRepositoryUrl={setNewRepositoryUrl}
         onAddRepository={onAddRepository}
         onRemoveRepository={onRemoveRepository}
+        searchableRepositoryOptions={discoveredRepositoryUrls}
         emptyMessage="No linked repositories yet. Add GitHub or GHE repositories if you want agent context from code."
         helpText="Linked repositories provide code context for agents and can be managed later from the project dashboard."
       />

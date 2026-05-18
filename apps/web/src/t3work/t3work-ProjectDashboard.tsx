@@ -7,7 +7,7 @@ import { SidebarTrigger } from "~/t3work/components/ui/t3work-sidebar";
 import { T3SurfacePanel, t3SurfaceBackdrops } from "~/t3work/components/ui/t3work-surface";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/t3work/components/ui/t3work-menu";
 import { AppProjectIcon, ProviderBadges } from "~/t3work/t3work-AppStatusBits";
-import { GitHubActivitySection } from "~/t3work/t3work-GitHubActivitySection";
+import { ProjectDashboardUnmatchedActivity } from "~/t3work/t3work-ProjectDashboardUnmatchedActivity";
 import { ProjectDashboardContent } from "~/t3work/t3work-ProjectDashboardContent";
 import { ProjectDashboardFilterBar } from "~/t3work/t3work-ProjectDashboardFilterBar";
 import { readLinkedRepositoryUrlsFromProject } from "~/t3work/hooks/t3work-createProjectBootstrap";
@@ -156,6 +156,7 @@ export function ProjectDashboard({
                 />
 
                 <ProjectDashboardContent
+                  project={project}
                   filteredWorkItems={filteredWorkItems}
                   viewMode={viewMode}
                   isHierarchyMode={isHierarchyMode}
@@ -168,15 +169,9 @@ export function ProjectDashboard({
               </section>
 
               <section className="mt-6">
-                <GitHubActivitySection
-                  title="Unmatched GitHub activity"
-                  items={githubActivity.unlinkedActivityItems}
-                  {...(githubActivity.warning ? { warning: githubActivity.warning } : {})}
-                  {...(githubActivity.suggestedRepositoryCount > 0
-                    ? { suggestedRepositoryCount: githubActivity.suggestedRepositoryCount }
-                    : {})}
-                  {...(githubActivity.host ? { host: githubActivity.host } : {})}
-                  {...(githubActivity.account ? { account: githubActivity.account } : {})}
+                <ProjectDashboardUnmatchedActivity
+                  project={project}
+                  githubActivity={githubActivity}
                 />
               </section>
 

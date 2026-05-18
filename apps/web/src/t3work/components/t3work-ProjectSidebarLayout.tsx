@@ -70,7 +70,10 @@ export function ProjectSidebarLayout({
             <SidebarMenuItem>
               <SidebarMenuButton
                 size="sm"
-                className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
+                disabled
+                aria-disabled="true"
+                title="Search in sidebar is not available yet"
+                className="gap-2 px-2 py-1.5 text-muted-foreground/50 focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-100"
               >
                 <SearchIcon className="size-3.5" />
                 <span className="flex-1 truncate text-left text-xs">Search</span>
@@ -162,6 +165,8 @@ export function ProjectSidebarLayout({
               size="sm"
               className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
               onClick={onOpenSettings}
+              disabled={!onOpenSettings}
+              aria-disabled={!onOpenSettings}
             >
               <SettingsIcon className="size-3.5" />
               <span className="text-xs">Settings</span>

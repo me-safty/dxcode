@@ -34,6 +34,9 @@ export function CreateProjectDialog({
   const [apiToken, setApiToken] = useState("");
   const [projectQuery, setProjectQuery] = useState("");
   const [linkedRepositoryUrls, setLinkedRepositoryUrls] = useState<ReadonlyArray<string>>([]);
+  const [discoveredRepositoryUrls, setDiscoveredRepositoryUrls] = useState<ReadonlyArray<string>>(
+    [],
+  );
   const [newRepositoryUrl, setNewRepositoryUrl] = useState("");
 
   useEffect(() => {
@@ -123,6 +126,7 @@ export function CreateProjectDialog({
               <ConfirmStep
                 selectedProject={selectedProject}
                 linkedRepositoryUrls={linkedRepositoryUrls}
+                discoveredRepositoryUrls={discoveredRepositoryUrls}
                 newRepositoryUrl={newRepositoryUrl}
                 setNewRepositoryUrl={setNewRepositoryUrl}
                 onAddRepository={addRepository}
@@ -130,6 +134,7 @@ export function CreateProjectDialog({
                 onAddRepositories={(urls: ReadonlyArray<string>) =>
                   setLinkedRepositoryUrls((current) => [...new Set([...current, ...urls])])
                 }
+                onDiscoveredRepositoryUrlsChange={setDiscoveredRepositoryUrls}
               />
             ) : null}
             {setup.step === "creating" ? <CreatingStep /> : null}

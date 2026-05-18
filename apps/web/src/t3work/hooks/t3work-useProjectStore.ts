@@ -1,6 +1,11 @@
 import { useState, useCallback } from "react";
-import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import type { ProjectShellProject } from "@t3tools/project-context";
+import { useShallow } from "zustand/react/shallow";
+import {
+  selectProjectsAcrossEnvironments,
+  selectThreadsAcrossEnvironments,
+  useStore,
+} from "~/store";
 import type {
   ProjectSortOrder,
   ThreadSortOrder,
@@ -8,10 +13,10 @@ import type {
   ProjectThread,
 } from "~/t3work/t3work-types";
 import { MOCK_THREADS } from "~/t3work/data/t3work-mockThreads";
+import { useProjectStoreQueries } from "./t3work-useProjectStoreQueries";
+import { useProjectThreadActions } from "./t3work-useProjectThreadActions";
 import {
-  buildThreadForProject,
   generateProjectId,
-  getMockTicketsForProject,
   loadStoredProjects,
   saveStoredProjects,
   upsertProjectBySource,
@@ -30,19 +35,15 @@ export function useProjectStore() {
   const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>("updated_at");
   const [threadSortOrder, setThreadSortOrder] = useState<ThreadSortOrder>("updated_at");
   const [threadPreviewCount, setThreadPreviewCount] = useState(5);
+  const liveProjects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const liveThreads = useStore(useShallow(selectThreadsAcrossEnvironments));
 
-  const getThreadsForProject = useCallback(
-    (projectId: string) => threads.filter((t) => t.projectId === projectId),
-    [threads],
-  );
-
-  const getTicketsForProject = useCallback(
-    (projectId: string) => {
-      const project = projects.find((p) => p.id === projectId);
-      return project ? getMockTicketsForProject(project) : [];
-    },
-    [projects],
-  );
+  const { getThreadsForProject, getTicketsForProject } = useProjectStoreQueries({
+    projects,
+    threads,
+    liveProjects,
+    liveThreads,
+  });
 
   const addProject = useCallback((project: ProjectShellProject) => {
     setProjects((prev) => {
@@ -114,72 +115,19 @@ export function useProjectStore() {
     setView({ type: "thread", projectId, threadId });
   }, []);
 
-  const createThread = useCallback(
-    (
-      projectId: string,
-      options?: {
-        title?: string;
-        ticketId?: string;
-        kickoffMessage?: string;
-        kickoffPending?: boolean;
-        kickoffModelSelection?: ModelSelection;
-        kickoffRuntimeMode?: RuntimeMode;
-        kickoffInteractionMode?: ProviderInteractionMode;
-      },
-    ) => {
-      const newThread = buildThreadForProject(projectId, options);
-      setThreads((prev) => [...prev, newThread]);
-      setSelectedProjectId(projectId);
-      setExpandedProjectIds((prev) => new Set(prev).add(projectId));
-      setView({ type: "thread", projectId, threadId: newThread.id });
-      return newThread;
-    },
-    [],
-  );
-
-  const createThreadForTicket = useCallback(
-    (input: {
-      projectId: string;
-      ticketId: string;
-      ticketDisplayId: string;
-      kickoffMessage: string;
-      kickoffModelSelection: ModelSelection;
-      kickoffRuntimeMode: RuntimeMode;
-      kickoffInteractionMode: ProviderInteractionMode;
-    }) => {
-      const matching = threads.filter(
-        (thread) => thread.projectId === input.projectId && thread.ticketId === input.ticketId,
-      );
-      const sequence = matching.length + 1;
-      return createThread(input.projectId, {
-        ticketId: input.ticketId,
-        title: `${input.ticketDisplayId} kickoff ${sequence}`,
-        kickoffMessage: input.kickoffMessage,
-        kickoffPending: true,
-        kickoffModelSelection: input.kickoffModelSelection,
-        kickoffRuntimeMode: input.kickoffRuntimeMode,
-        kickoffInteractionMode: input.kickoffInteractionMode,
-      });
-    },
-    [createThread, threads],
-  );
-
-  const markThreadKickoffConsumed = useCallback((threadId: string) => {
-    setThreads((prev) =>
-      prev.map((thread) =>
-        thread.id === threadId ? { ...thread, kickoffPending: false } : thread,
-      ),
-    );
-  }, []);
-
-  const deleteThread = useCallback((threadId: string) => {
-    setThreads((prev) => prev.filter((t) => t.id !== threadId));
-    setView((prev) => (prev && prev.type === "thread" && prev.threadId === threadId ? null : prev));
-  }, []);
-
-  const renameThread = useCallback((threadId: string, newTitle: string) => {
-    setThreads((prev) => prev.map((t) => (t.id === threadId ? { ...t, title: newTitle } : t)));
-  }, []);
+  const {
+    createThread,
+    createThreadForTicket,
+    markThreadKickoffConsumed,
+    deleteThread,
+    renameThread,
+  } = useProjectThreadActions({
+    threads,
+    setThreads,
+    setSelectedProjectId,
+    setExpandedProjectIds,
+    setView,
+  });
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
 

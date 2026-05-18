@@ -11,6 +11,7 @@ export function TicketWorkItemCard({
   child,
   childCount,
   extraChildren,
+  onContextMenu,
 }: {
   ticket: ProjectTicket;
   onOpen: () => void;
@@ -19,9 +20,13 @@ export function TicketWorkItemCard({
   child?: boolean;
   childCount?: number;
   extraChildren?: ReactNode;
+  onContextMenu?: (event: React.MouseEvent) => void;
 }) {
   return (
-    <div className={`block w-full text-left ${child ? "relative pl-3" : ""}`}>
+    <div
+      className={`block w-full text-left ${child ? "relative pl-3" : ""}`}
+      onContextMenu={onContextMenu}
+    >
       {child && <span className="absolute top-2 left-0 h-px w-2 bg-border/70" aria-hidden />}
       <button type="button" className="block w-full text-left" onClick={onOpen}>
         <div
@@ -94,15 +99,17 @@ export function TicketWorkItemRow({
   child,
   childCount,
   extraChildren,
+  onContextMenu,
 }: {
   ticket: ProjectTicket;
   onOpen: () => void;
   child?: boolean;
   childCount?: number;
   extraChildren?: ReactNode;
+  onContextMenu?: (event: React.MouseEvent) => void;
 }) {
   return (
-    <div className="w-full">
+    <div className="w-full" onContextMenu={onContextMenu}>
       <button
         type="button"
         className={`flex w-full items-start gap-2 rounded-md border border-transparent px-1 py-1 text-left transition-colors hover:border-border/50 hover:bg-accent/25 ${child ? "relative pl-3" : ""}`}

@@ -17,6 +17,7 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     ticketViewMode,
     expanded,
     onSelectProject,
+    onToggleExpand,
     onManageProjectRepositories,
     onDeleteProject,
     onRenameProject,
@@ -106,6 +107,14 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     onSelectProject(project.id);
   }, [onSelectProject, project.id]);
 
+  const handleToggleExpand = useCallback(
+    (e: React.SyntheticEvent) => {
+      e.stopPropagation();
+      onToggleExpand(project.id);
+    },
+    [onToggleExpand, project.id],
+  );
+
   const handleNewThread = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -185,6 +194,7 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     hiddenTicketCount,
     githubActivityByWorkItem: githubActivity.activityByWorkItem,
     handleProjectClick,
+    handleToggleExpand,
     handleNewThread,
     handleContextMenu,
     handleRenameSubmit,

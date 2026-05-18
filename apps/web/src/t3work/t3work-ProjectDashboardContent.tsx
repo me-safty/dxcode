@@ -1,9 +1,12 @@
 import { TicketWorkItemCard, TicketWorkItemRow } from "~/t3work/t3work-ProjectDashboardItemViews";
 import { ProjectDashboardHierarchyContent } from "~/t3work/t3work-ProjectDashboardHierarchyContent";
+import { ProjectDashboardChildrenCards } from "~/t3work/t3work-ProjectDashboardChildrenCards";
 import { GitHubActivityInlineList } from "~/t3work/t3work-GitHubActivityViews";
 import { T3SurfacePanel } from "~/t3work/components/ui/t3work-surface";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectTicket } from "~/t3work/t3work-types";
+import type { ProjectShellProject } from "@t3tools/project-context";
+import { useTicketAddToChatContextMenus } from "~/t3work/hooks/t3work-useTicketAddToChatContextMenus";
 
 type TicketHierarchy = {
   roots: readonly ProjectTicket[];
@@ -11,31 +14,8 @@ type TicketHierarchy = {
   childrenByParentId: ReadonlyMap<string, readonly ProjectTicket[]>;
 };
 
-function renderChildrenCards(
-  children: readonly ProjectTicket[],
-  projectId: string,
-  onOpenTicket: (projectId: string, ticketId: string) => void,
-) {
-  if (children.length === 0) return null;
-  return (
-    <T3SurfacePanel tone="inset" className="mt-2 ml-2 rounded-md px-2 py-1.5">
-      <div className="space-y-1.5 border-l-2 border-border/70 pl-2">
-        {children.map((child) => (
-          <TicketWorkItemCard
-            key={child.id}
-            ticket={child}
-            compact
-            flat
-            child
-            onOpen={() => onOpenTicket(projectId, child.id)}
-          />
-        ))}
-      </div>
-    </T3SurfacePanel>
-  );
-}
-
 export function ProjectDashboardContent({
+  project,
   filteredWorkItems,
   viewMode,
   isHierarchyMode,
@@ -45,6 +25,7 @@ export function ProjectDashboardContent({
   projectId,
   onOpenTicket,
 }: {
+  project: ProjectShellProject;
   filteredWorkItems: readonly ProjectTicket[];
   viewMode: "grid" | "list" | "kanban";
   isHierarchyMode: boolean;
@@ -60,6 +41,13 @@ export function ProjectDashboardContent({
   projectId: string;
   onOpenTicket: (projectId: string, ticketId: string) => void;
 }) {
+  const { openTicketContextMenu, openGitHubActivityContextMenu } = useTicketAddToChatContextMenus({
+    project,
+    projectId,
+    projectTickets: filteredWorkItems,
+    githubActivityByWorkItem,
+  });
+
   if (filteredWorkItems.length === 0) {
     return (
       <T3SurfacePanel tone="dashed" className="px-4 py-8 text-sm text-muted-foreground">
@@ -109,17 +97,25 @@ export function ProjectDashboardContent({
                       compact
                       flat
                       {...(isHierarchyMode ? { childCount: children.length } : {})}
+                      onContextMenu={(event) => openTicketContextMenu(event, ticket)}
                       extraChildren={
                         <GitHubActivityInlineList
                           items={githubActivityByWorkItem.get(ticket.ref.displayId) ?? []}
                           limit={3}
+                          onItemContextMenu={(event, item) =>
+                            openGitHubActivityContextMenu(event, ticket, item)
+                          }
                         />
                       }
                       onOpen={() => onOpenTicket(projectId, ticket.id)}
                     />
-                    {isHierarchyMode
-                      ? renderChildrenCards(children, projectId, onOpenTicket)
-                      : null}
+                    {isHierarchyMode ? (
+                      <ProjectDashboardChildrenCards
+                        children={children}
+                        projectId={projectId}
+                        onOpenTicket={onOpenTicket}
+                      />
+                    ) : null}
                   </T3SurfacePanel>
                 );
               })}
@@ -134,7 +130,10 @@ export function ProjectDashboardContent({
     return (
       <ProjectDashboardHierarchyContent
         viewMode={viewMode === "list" ? "list" : "grid"}
+        project={project}
         parentChildGroups={parentChildGroups}
+        filteredWorkItems={filteredWorkItems}
+        githubActivityByWorkItem={githubActivityByWorkItem}
         projectId={projectId}
         onOpenTicket={onOpenTicket}
       />
@@ -148,10 +147,14 @@ export function ProjectDashboardContent({
           <div key={ticket.id} className="px-3 py-2.5 transition-colors hover:bg-accent/30">
             <TicketWorkItemRow
               ticket={ticket}
+              onContextMenu={(event) => openTicketContextMenu(event, ticket)}
               extraChildren={
                 <GitHubActivityInlineList
                   items={githubActivityByWorkItem.get(ticket.ref.displayId) ?? []}
                   limit={2}
+                  onItemContextMenu={(event, item) =>
+                    openGitHubActivityContextMenu(event, ticket, item)
+                  }
                 />
               }
               onOpen={() => onOpenTicket(projectId, ticket.id)}
@@ -170,10 +173,14 @@ export function ProjectDashboardContent({
             <TicketWorkItemCard
               ticket={ticket}
               flat
+              onContextMenu={(event) => openTicketContextMenu(event, ticket)}
               extraChildren={
                 <GitHubActivityInlineList
                   items={githubActivityByWorkItem.get(ticket.ref.displayId) ?? []}
                   limit={3}
+                  onItemContextMenu={(event, item) =>
+                    openGitHubActivityContextMenu(event, ticket, item)
+                  }
                 />
               }
               onOpen={() => onOpenTicket(projectId, ticket.id)}

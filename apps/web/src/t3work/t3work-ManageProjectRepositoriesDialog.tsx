@@ -27,6 +27,9 @@ export function ManageProjectRepositoriesDialog({
   const backend = useBackend();
   const currentUrls = useMemo(() => readLinkedRepositoryUrlsFromProject(project), [project]);
   const [linkedRepositoryUrls, setLinkedRepositoryUrls] = useState(currentUrls);
+  const [discoveredRepositoryUrls, setDiscoveredRepositoryUrls] = useState<ReadonlyArray<string>>(
+    [],
+  );
   const [newRepositoryUrl, setNewRepositoryUrl] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -94,6 +97,7 @@ export function ManageProjectRepositoriesDialog({
                       normalizeRepositoryUrls([...current, ...urls]),
                     )
                   }
+                  onVisibleSuggestionsChange={setDiscoveredRepositoryUrls}
                 />
               </CardContent>
             </Card>
@@ -107,6 +111,7 @@ export function ManageProjectRepositoriesDialog({
                   setNewRepositoryUrl={setNewRepositoryUrl}
                   onAddRepository={addRepository}
                   onRemoveRepository={removeRepository}
+                  searchableRepositoryOptions={discoveredRepositoryUrls}
                   helpText="Saving updates this project and refreshes workspace references."
                 />
               </CardContent>
