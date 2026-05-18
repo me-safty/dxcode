@@ -60,6 +60,9 @@ pi-acp --help
 T3 Code passes the configured Pi binary to the adapter with `PI_ACP_PI_COMMAND`, which keeps the
 packaged macOS app working even when `/opt/homebrew/bin` is not on the GUI app `PATH`.
 
+For GPT-5.5, run `pi`, use `/login`, choose ChatGPT Plus/Pro Codex, and set Pi's defaults to
+`openai-codex` with `gpt-5.5`.
+
 Full setup and troubleshooting guide: [docs/providers/pi.md](./docs/providers/pi.md)
 
 ### Run without installing

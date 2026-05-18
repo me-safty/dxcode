@@ -790,8 +790,8 @@ export function ProviderInstanceCard({
         <div className="grid gap-1">
           <span className="text-xs font-medium text-foreground">Pi setup</span>
           <p className="text-xs leading-snug text-muted-foreground">
-            T3 Code starts Pi through the pi-acp adapter. Install Pi, install pi-acp, then verify
-            both commands before sending a turn.
+            T3 Code starts Pi through the pi-acp adapter. For GPT-5.5, sign into Pi with the
+            ChatGPT Plus/Pro Codex provider, then verify both commands before sending a turn.
           </p>
         </div>
         {suggestedBinaryPath ? (
@@ -820,6 +820,11 @@ export function ProviderInstanceCard({
           <ProviderSetupCommandRow
             command="pi --version"
             label="Pi verification command"
+            onCopy={(command, label) => copyToClipboard(command, { providerName: label })}
+          />
+          <ProviderSetupCommandRow
+            command="pi"
+            label="Pi login command"
             onCopy={(command, label) => copyToClipboard(command, { providerName: label })}
           />
           <ProviderSetupCommandRow

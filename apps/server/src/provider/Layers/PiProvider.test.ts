@@ -173,4 +173,51 @@ describe("checkPiProviderStatus", () => {
     expect(snapshot.message).toContain("expired");
     expect(snapshot.message).toContain("anthropic");
   });
+
+  it("explains the Codex login path for missing GPT-5.5 Pi auth", async () => {
+    const snapshot = await Effect.runPromise(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pi-codex-auth-test-" });
+        const piDir = path.join(home, ".pi", "agent");
+        yield* fs.makeDirectory(piDir, { recursive: true });
+        yield* fs.writeFileString(
+          path.join(piDir, "settings.json"),
+          [
+            "{",
+            '  "defaultProvider": "openai-codex",',
+            '  "defaultModel": "gpt-5.5"',
+            "}",
+          ].join("\n"),
+        );
+        yield* fs.writeFileString(path.join(piDir, "auth.json"), "{}");
+        const layer = Layer.merge(
+          NodeServices.layer,
+          mockSpawnerLayer((command, args) => {
+            if (args[0] === "-lc") return { stdout: "", code: 1 };
+            expect(command).toBe("/tmp/bin/pi");
+            return { stdout: "0.62.0\n", code: 0 };
+          }),
+        );
+
+        return yield* checkPiProviderStatus(
+          makePiSettings({
+            binaryPath: "/opt/homebrew/bin/pi-acp",
+            piBinaryPath: "/tmp/bin/pi",
+          }),
+          {
+            HOME: home,
+            PATH: "",
+          },
+        ).pipe(Effect.provide(layer));
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    );
+
+    expect(snapshot.status).toBe("error");
+    expect(snapshot.auth.status).toBe("unauthenticated");
+    expect(snapshot.models[0]?.slug).toBe("gpt-5.5");
+    expect(snapshot.message).toContain("openai-codex");
+    expect(snapshot.message).toContain("ChatGPT Plus/Pro (Codex)");
+  });
 });

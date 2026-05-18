@@ -619,6 +619,10 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
   if (authState.status === "expired" || authState.status === "missing") {
     const providerLabel = authState.provider ? ` for ${authState.provider}` : "";
     const expiryLabel = authState.expiresAt ? ` expired on ${authState.expiresAt}` : " is missing";
+    const loginHint =
+      authState.provider === "openai-codex"
+        ? " Run `pi`, use `/login`, and choose ChatGPT Plus/Pro (Codex) to enable GPT-5.5."
+        : " Run `pi` in a terminal to refresh the login or configure a provider API key.";
     return withPiHints(
       buildServerProvider({
         presentation: PI_PRESENTATION,
@@ -630,7 +634,7 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
           version: parsed.version,
           status: "error",
           auth: { status: "unauthenticated" },
-          message: `Pi authentication${providerLabel}${expiryLabel}. Run \`pi\` in a terminal to refresh the login or configure a provider API key.`,
+          message: `Pi authentication${providerLabel}${expiryLabel}.${loginHint}`,
         },
       }),
     );
