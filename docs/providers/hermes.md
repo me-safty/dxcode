@@ -50,6 +50,10 @@ Binary path: /Users/you/.local/bin/hermes
 Using the full path is recommended on macOS because apps launched from the Dock or a desktop shell
 may not inherit your terminal `PATH`.
 
+T3 Code also checks common Hermes locations such as `~/.local/bin/hermes`,
+`~/Projects/hermes-agent/venv/bin/hermes`, Homebrew paths, and your login-shell `PATH`. If it finds
+Hermes somewhere else, the provider card shows a detected path you can apply from Settings.
+
 ## Verify
 
 Run:
@@ -67,6 +71,8 @@ default model, the picker should show that model name rather than only `Hermes D
 ## Troubleshooting
 
 If T3 Code says Hermes is not installed, use an absolute binary path instead of `hermes`.
+
+If Settings shows a detected Hermes path, click **Use detected path** and refresh provider status.
 
 If the model picker says no models were found, refresh provider status and confirm that Hermes is
 enabled. Disabled, missing, or not-ready providers are not treated as selectable model sources.

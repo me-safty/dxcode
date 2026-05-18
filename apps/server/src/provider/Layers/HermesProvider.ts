@@ -46,9 +46,16 @@ const HERMES_FALLBACK_MODEL: ServerProviderModel = {
 };
 const HERMES_DEFAULT_MODELS: ReadonlyArray<ServerProviderModel> = [HERMES_FALLBACK_MODEL];
 const ABOUT_TIMEOUT_MS = 4_000;
+const LOGIN_SHELL_TIMEOUT_MS = 2_000;
 
 export interface HermesConfigModelDefaults {
   readonly defaultModel: string | null;
+  readonly malformed: boolean;
+}
+
+export interface HermesBinaryResolution {
+  readonly binaryPath: string;
+  readonly suggestedBinaryPath: string | null;
 }
 
 function stripQuotes(value: string): string {
@@ -66,6 +73,7 @@ export function parseHermesConfigModelDefaults(raw: string): HermesConfigModelDe
   const lines = raw.replace(/\r\n?/g, "\n").split("\n");
   let inModelBlock = false;
   let modelIndent = 0;
+  let sawModelBlock = false;
 
   for (const line of lines) {
     const withoutComment = line.replace(/\s+#.*$/, "");
@@ -76,6 +84,7 @@ export function parseHermesConfigModelDefaults(raw: string): HermesConfigModelDe
     const topLevelModelMatch = /^model\s*:\s*$/.exec(trimmed);
     if (topLevelModelMatch && indent === 0) {
       inModelBlock = true;
+      sawModelBlock = true;
       modelIndent = indent;
       continue;
     }
@@ -89,10 +98,10 @@ export function parseHermesConfigModelDefaults(raw: string): HermesConfigModelDe
     if (!defaultMatch?.[1]) continue;
 
     const value = stripQuotes(defaultMatch[1]);
-    return { defaultModel: value.length > 0 ? value : null };
+    return { defaultModel: value.length > 0 ? value : null, malformed: false };
   }
 
-  return { defaultModel: null };
+  return { defaultModel: null, malformed: sawModelBlock };
 }
 
 function formatHermesModelName(slug: string): string {
@@ -129,7 +138,90 @@ function readHermesConfigModelDefaults(
     const raw = yield* fs
       .readFileString(path.join(home, "config.yaml"))
       .pipe(Effect.catch(() => Effect.succeed(null)));
-    return raw ? parseHermesConfigModelDefaults(raw) : { defaultModel: null };
+    return raw ? parseHermesConfigModelDefaults(raw) : { defaultModel: null, malformed: false };
+  });
+}
+
+function isExplicitBinaryPath(binaryPath: string): boolean {
+  return binaryPath.includes("/") || binaryPath.includes("\\") || binaryPath.startsWith("~");
+}
+
+function commonHermesBinaryCandidates(
+  environment: NodeJS.ProcessEnv,
+): Effect.Effect<ReadonlyArray<string>, never, Path.Path> {
+  return Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const home = environment.HOME || NodeOS.homedir();
+    return [
+      path.join(home, ".local/bin/hermes"),
+      path.join(home, "Projects/hermes-agent/venv/bin/hermes"),
+      "/opt/homebrew/bin/hermes",
+      "/usr/local/bin/hermes",
+    ];
+  });
+}
+
+function expandHomePath(input: string, environment: NodeJS.ProcessEnv): string {
+  const home = environment.HOME || NodeOS.homedir();
+  if (input === "~") return home;
+  if (input.startsWith("~/") || input.startsWith("~\\")) return `${home}${input.slice(1)}`;
+  return input;
+}
+
+function firstExistingPath(
+  candidates: ReadonlyArray<string>,
+): Effect.Effect<string | null, never, FileSystem.FileSystem> {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    for (const candidate of candidates) {
+      const exists = yield* fs.exists(candidate).pipe(Effect.catch(() => Effect.succeed(false)));
+      if (exists) return candidate;
+    }
+    return null;
+  });
+}
+
+function detectHermesFromLoginShell(
+  environment: NodeJS.ProcessEnv,
+): Effect.Effect<string | null, never, ChildProcessSpawner.ChildProcessSpawner> {
+  const shell = environment.SHELL?.trim() || "/bin/zsh";
+  return runRawCommand(shell, ["-lc", "command -v hermes"], environment).pipe(
+    Effect.timeoutOption(LOGIN_SHELL_TIMEOUT_MS),
+    Effect.map((result) => {
+      if (Option.isNone(result) || result.value.code !== 0) return null;
+      const candidate = result.value.stdout.trim().split(/\r?\n/u)[0]?.trim();
+      return candidate && candidate.length > 0 ? candidate : null;
+    }),
+    Effect.catch(() => Effect.succeed(null)),
+  );
+}
+
+export function resolveHermesBinary(
+  hermesSettings: Pick<HermesSettings, "binaryPath">,
+  environment: NodeJS.ProcessEnv = process.env,
+): Effect.Effect<
+  HermesBinaryResolution,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
+> {
+  return Effect.gen(function* () {
+    const configured = hermesSettings.binaryPath.trim() || "hermes";
+    const explicitConfigured = isExplicitBinaryPath(configured);
+    const expandedConfigured = explicitConfigured
+      ? expandHomePath(configured, environment)
+      : configured;
+    const candidates = yield* commonHermesBinaryCandidates(environment);
+    const detected =
+      (yield* firstExistingPath(candidates)) ?? (yield* detectHermesFromLoginShell(environment));
+
+    if (!explicitConfigured && configured === "hermes" && detected) {
+      return { binaryPath: detected, suggestedBinaryPath: detected };
+    }
+
+    return {
+      binaryPath: expandedConfigured,
+      suggestedBinaryPath: detected && detected !== expandedConfigured ? detected : null,
+    };
   });
 }
 
@@ -218,6 +310,7 @@ function parseHermesAboutOutput(result: CommandResult): HermesAboutResult {
   const combined = `${result.stdout}\n${result.stderr}`;
   const lower = combined.toLowerCase();
   const version = extractVersion(combined);
+  const detail = stripAnsi(combined).trim();
 
   if (lower.includes("not logged in") || lower.includes("authentication required")) {
     return {
@@ -240,18 +333,20 @@ function parseHermesAboutOutput(result: CommandResult): HermesAboutResult {
     version,
     status: "warning",
     auth: { status: "unknown" },
-    message: "Hermes Agent is installed, but T3 Code could not verify its auth status.",
+    message: detail
+      ? `Hermes Agent CLI health check exited with code ${result.code}: ${detail}`
+      : "Hermes Agent is installed, but T3 Code could not verify its auth status.",
   };
 }
 
-const runHermesCommand = (
-  hermesSettings: HermesSettings,
+const runRawCommand = (
+  binaryPath: string,
   args: ReadonlyArray<string>,
   environment: NodeJS.ProcessEnv = process.env,
 ) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const command = ChildProcess.make(hermesSettings.binaryPath, [...args], {
+    const command = ChildProcess.make(binaryPath, [...args], {
       env: environment,
       shell: process.platform === "win32",
     });
@@ -267,12 +362,15 @@ const runHermesCommand = (
     return { stdout, stderr, code: exitCode } satisfies CommandResult;
   }).pipe(Effect.scoped);
 
-const runHermesAboutCommand = (
-  hermesSettings: HermesSettings,
+const runHermesCommand = (
+  binaryPath: string,
+  args: ReadonlyArray<string>,
   environment: NodeJS.ProcessEnv = process.env,
-) =>
-  runHermesCommand(hermesSettings, ["--version"], environment).pipe(
-    Effect.catch(() => runHermesCommand(hermesSettings, ["about"], environment)),
+) => runRawCommand(binaryPath, args, environment);
+
+const runHermesAboutCommand = (binaryPath: string, environment: NodeJS.ProcessEnv = process.env) =>
+  runHermesCommand(binaryPath, ["--version"], environment).pipe(
+    Effect.catch(() => runHermesCommand(binaryPath, ["about"], environment)),
   );
 
 export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(function* (
@@ -284,28 +382,35 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
-  const fallbackModels = getHermesModels(
-    hermesSettings,
-    yield* readHermesConfigModelDefaults(environment),
-  );
+  const configDefaults = yield* readHermesConfigModelDefaults(environment);
+  const models = getHermesModels(hermesSettings, configDefaults);
+  const binaryResolution = yield* resolveHermesBinary(hermesSettings, environment);
+  const withHermesHints = (snapshot: ServerProviderDraft): ServerProviderDraft => ({
+    ...snapshot,
+    ...(binaryResolution.suggestedBinaryPath
+      ? { suggestedBinaryPath: binaryResolution.suggestedBinaryPath }
+      : {}),
+  });
 
   if (!hermesSettings.enabled) {
-    return buildServerProvider({
-      presentation: HERMES_PRESENTATION,
-      enabled: false,
-      checkedAt,
-      models: fallbackModels,
-      probe: {
-        installed: false,
-        version: null,
-        status: "warning",
-        auth: { status: "unknown" },
-        message: "Hermes is disabled in T3 Code settings.",
-      },
-    });
+    return withHermesHints(
+      buildServerProvider({
+        presentation: HERMES_PRESENTATION,
+        enabled: false,
+        checkedAt,
+        models,
+        probe: {
+          installed: false,
+          version: null,
+          status: "warning",
+          auth: { status: "unknown" },
+          message: "Hermes is disabled in T3 Code settings.",
+        },
+      }),
+    );
   }
 
-  const probe = yield* runHermesAboutCommand(hermesSettings, environment).pipe(
+  const probe = yield* runHermesAboutCommand(binaryResolution.binaryPath, environment).pipe(
     Effect.timeoutOption(ABOUT_TIMEOUT_MS),
     Effect.result,
   );
@@ -315,53 +420,67 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
       probe.failure instanceof Error
         ? probe.failure
         : new Error(typeof probe.failure === "string" ? probe.failure : String(probe.failure));
-    return buildServerProvider({
-      presentation: HERMES_PRESENTATION,
-      enabled: true,
-      checkedAt,
-      models: fallbackModels,
-      probe: {
-        installed: !isCommandMissingCause(error),
-        version: null,
-        status: "error",
-        auth: { status: "unknown" },
-        message: isCommandMissingCause(error)
-          ? "Hermes Agent CLI (`hermes`) is not installed or not on PATH."
-          : `Failed to execute Hermes Agent CLI health check: ${error instanceof Error ? error.message : String(error)}.`,
-      },
-    });
+    const isMissing = isCommandMissingCause(error);
+    const missingMessage = binaryResolution.suggestedBinaryPath
+      ? `Hermes Agent CLI was not found at \`${binaryResolution.binaryPath}\`. Detected Hermes at \`${binaryResolution.suggestedBinaryPath}\`; use the detected path or update Binary path.`
+      : "Hermes Agent CLI (`hermes`) is not installed or not on PATH.";
+    return withHermesHints(
+      buildServerProvider({
+        presentation: HERMES_PRESENTATION,
+        enabled: true,
+        checkedAt,
+        models,
+        probe: {
+          installed: !isMissing,
+          version: null,
+          status: "error",
+          auth: { status: "unknown" },
+          message: isMissing
+            ? missingMessage
+            : `Failed to execute Hermes Agent CLI health check: ${error instanceof Error ? error.message : String(error)}.`,
+        },
+      }),
+    );
   }
 
   if (Option.isNone(probe.success)) {
-    return buildServerProvider({
-      presentation: HERMES_PRESENTATION,
-      enabled: true,
-      checkedAt,
-      models: fallbackModels,
-      probe: {
-        installed: true,
-        version: null,
-        status: "warning",
-        auth: { status: "unknown" },
-        message: "Hermes Agent CLI is installed but timed out during the health check.",
-      },
-    });
+    return withHermesHints(
+      buildServerProvider({
+        presentation: HERMES_PRESENTATION,
+        enabled: true,
+        checkedAt,
+        models,
+        probe: {
+          installed: true,
+          version: null,
+          status: "warning",
+          auth: { status: "unknown" },
+          message: "Hermes Agent CLI is installed but timed out during the health check.",
+        },
+      }),
+    );
   }
 
   const parsed = parseHermesAboutOutput(probe.success.value);
-  return buildServerProvider({
-    presentation: HERMES_PRESENTATION,
-    enabled: true,
-    checkedAt,
-    models: fallbackModels,
-    probe: {
-      installed: true,
-      version: parsed.version,
-      status: parsed.status,
-      auth: parsed.auth,
-      ...(parsed.message ? { message: parsed.message } : {}),
-    },
-  });
+  const configMessage =
+    parsed.status === "ready" && configDefaults.malformed
+      ? "Hermes Agent is ready, but `~/.hermes/config.yaml` has no `model.default`; run `hermes model` to choose the model T3 Code should display."
+      : parsed.message;
+  return withHermesHints(
+    buildServerProvider({
+      presentation: HERMES_PRESENTATION,
+      enabled: true,
+      checkedAt,
+      models,
+      probe: {
+        installed: true,
+        version: parsed.version,
+        status: parsed.status,
+        auth: parsed.auth,
+        ...(configMessage ? { message: configMessage } : {}),
+      },
+    }),
+  );
 });
 
 export const enrichHermesSnapshot = (input: {

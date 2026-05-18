@@ -1156,6 +1156,7 @@ describe("GeneralSettingsPanel observability", () => {
           status: "ready",
           auth: { status: "unknown" },
           checkedAt: new Date().toISOString(),
+          suggestedBinaryPath: "/opt/homebrew/bin/hermes",
           models: [],
           slashCommands: [],
           skills: [],
@@ -1184,6 +1185,15 @@ describe("GeneralSettingsPanel observability", () => {
     );
 
     await page.getByRole("button", { name: "Expand Hermes provider details" }).click();
+
+    await expect.element(page.getByText("Hermes setup", { exact: true })).toBeInTheDocument();
+    await expect.element(page.getByText("hermes model")).toBeInTheDocument();
+    await expect.element(page.getByText("hermes acp")).toBeInTheDocument();
+    await expect.element(page.getByText("Hermes setup docs")).toBeInTheDocument();
+    await expect.element(page.getByText(/Detected Hermes at/)).toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Use detected Hermes path" }))
+      .toBeInTheDocument();
 
     await vi.waitFor(() => {
       const input = Array.from(document.querySelectorAll<HTMLInputElement>("input")).find(

@@ -397,6 +397,39 @@ function ProviderEnvironmentSection(props: {
   );
 }
 
+function ProviderSetupCommandRow(props: {
+  readonly command: string;
+  readonly label: string;
+  readonly onCopy: (command: string, label: string) => void;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-1 rounded-md border border-border/70 bg-muted/30 py-0.5 pr-0.5 pl-2">
+      <ScrollArea scrollFade className="h-8 min-w-0 flex-1 rounded-none">
+        <code className="flex h-full w-max items-center whitespace-nowrap pr-3 font-mono text-[11px] text-foreground">
+          {props.command}
+        </code>
+      </ScrollArea>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              className="size-6 shrink-0 rounded-sm p-0 text-muted-foreground hover:text-foreground"
+              onClick={() => props.onCopy(props.command, props.label)}
+              aria-label={`Copy ${props.label}`}
+            >
+              <CopyIcon className="size-3" />
+            </Button>
+          }
+        />
+        <TooltipPopup side="top">Copy command</TooltipPopup>
+      </Tooltip>
+    </div>
+  );
+}
+
 interface ProviderInstanceCardProps {
   readonly instanceId: ProviderInstanceId;
   readonly instance: ProviderInstanceConfig;
@@ -491,6 +524,8 @@ export function ProviderInstanceCard({
   const versionLabel = getProviderVersionLabel(liveProvider?.version);
   const versionAdvisory = getProviderVersionAdvisoryPresentation(liveProvider?.versionAdvisory);
   const updateCommand = versionAdvisory?.updateCommand ?? null;
+  const suggestedBinaryPath = liveProvider?.suggestedBinaryPath?.trim();
+  const isHermesDriver = String(instance.driver) === "hermes";
   const FallbackIconComponent = driverOption?.icon;
   const displayName =
     instance.displayName?.trim() || driverOption?.label || String(instance.driver);
@@ -566,6 +601,12 @@ export function ProviderInstanceCard({
 
   const updateCustomModels = (next: ReadonlyArray<string>) => {
     const nextConfig = nextConfigBlobWithValue(instance.config, "customModels", [...next]);
+    const { config: _omit, ...rest } = instance;
+    onUpdate({ ...rest, config: nextConfig } as ProviderInstanceConfig);
+  };
+
+  const applySuggestedBinaryPath = (binaryPath: string) => {
+    const nextConfig = nextConfigBlobWithValue(instance.config, "binaryPath", binaryPath);
     const { config: _omit, ...rest } = instance;
     onUpdate({ ...rest, config: nextConfig } as ProviderInstanceConfig);
   };
@@ -689,6 +730,57 @@ export function ProviderInstanceCard({
 
   const versionCodeNode = versionLabel ? (
     <code className="text-xs text-muted-foreground">{versionLabel}</code>
+  ) : null;
+
+  const hermesSetupNode = isHermesDriver ? (
+    <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+      <div className="grid gap-3">
+        <div className="grid gap-1">
+          <span className="text-xs font-medium text-foreground">Hermes setup</span>
+          <p className="text-xs leading-snug text-muted-foreground">
+            T3 Code starts Hermes through ACP. Configure Hermes once, then verify the ACP command
+            before sending a turn.
+          </p>
+        </div>
+        {suggestedBinaryPath ? (
+          <div className="grid gap-2 rounded-md border border-border/70 bg-muted/20 p-2">
+            <span className="text-xs text-muted-foreground">
+              Detected Hermes at <code className="text-foreground">{suggestedBinaryPath}</code>
+            </span>
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              className="w-fit"
+              onClick={() => applySuggestedBinaryPath(suggestedBinaryPath)}
+              aria-label="Use detected Hermes path"
+            >
+              Use detected path
+            </Button>
+          </div>
+        ) : null}
+        <div className="grid gap-2">
+          <ProviderSetupCommandRow
+            command="hermes model"
+            label="Hermes setup command"
+            onCopy={(command, label) => copyToClipboard(command, { providerName: label })}
+          />
+          <ProviderSetupCommandRow
+            command="hermes acp"
+            label="Hermes ACP verification command"
+            onCopy={(command, label) => copyToClipboard(command, { providerName: label })}
+          />
+        </div>
+        <a
+          href="https://github.com/joeynyc/t3code/blob/hermes-agent-provider/docs/providers/hermes.md"
+          target="_blank"
+          rel="noreferrer"
+          className="w-fit text-xs font-medium text-primary hover:underline"
+        >
+          Hermes setup docs
+        </a>
+      </div>
+    </div>
   ) : null;
 
   return (
@@ -861,6 +953,8 @@ export function ProviderInstanceCard({
                 onChange={updateEnvironment}
               />
             </div>
+
+            {hermesSetupNode}
 
             {driverOption ? (
               <ProviderSettingsForm
