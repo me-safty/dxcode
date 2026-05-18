@@ -601,6 +601,9 @@ export function GeneralSettingsPanel() {
     });
   };
 
+  const setProfileDetailsOpen = (driver: ProviderDriverKind, open: boolean) =>
+    setOpenProfileDetails((existing) => ({ ...existing, [driver]: open }));
+
   const updateProfile = (
     row: {
       readonly instanceId: ProviderInstanceId;
@@ -623,170 +626,161 @@ export function GeneralSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection title="Profiles">
-        <div>
-          {enabledProfileDrivers.map((driverOption) => {
-            const driver = driverOption.value;
-            const detailsOpen = openProfileDetails[driver] ?? false;
-            const defaultId = defaultInstanceIdForDriver(driver);
-            const defaultConfig = legacyProviders[driver]!;
-            const defaultInstance =
-              settings.providerInstances[defaultId] ??
-              ({
-                driver,
-                enabled: defaultConfig.enabled,
-                config: defaultConfig,
-              } satisfies ProviderInstanceConfig);
-            const rows = [
-              { instanceId: defaultId, instance: defaultInstance, isDefault: true },
-              ...Object.entries(settings.providerInstances)
-                .filter(
-                  ([id, instance]) =>
-                    id !== defaultId && instance.driver === driver && (instance.enabled ?? true),
-                )
-                .map(([instanceId, instance]) => ({
-                  instanceId: instanceId as ProviderInstanceId,
-                  instance,
-                  isDefault: false,
-                })),
-            ];
-            const rowIds = rows.map((row) => row.instanceId);
-            const activeProfileId =
-              stickyActiveProvider !== null && rowIds.includes(stickyActiveProvider)
-                ? stickyActiveProvider
-                : (rows.find((row) => stickyModelSelectionByProvider[row.instanceId])?.instanceId ??
-                  defaultId);
-            const activeRow = rows.find((row) => row.instanceId === activeProfileId) ?? rows[0]!;
-            const profileName = (row: (typeof rows)[number]) =>
-              row.instance.displayName?.trim() ||
-              (row.isDefault ? `${driverOption.label} default` : row.instanceId);
-            const updateDisplayName = (value: string) => {
-              const trimmed = value.trim();
-              const { displayName: _displayName, ...rest } = activeRow.instance;
-              updateProfile(
-                activeRow,
-                trimmed
-                  ? ({ ...rest, displayName: trimmed } as ProviderInstanceConfig)
-                  : (rest as ProviderInstanceConfig),
-              );
-            };
-            const updateConfig = (config: Record<string, unknown> | undefined) => {
-              const { config: _config, ...rest } = activeRow.instance;
-              updateProfile(
-                activeRow,
-                config
-                  ? ({ ...rest, config } as ProviderInstanceConfig)
-                  : (rest as ProviderInstanceConfig),
-              );
-            };
-            return (
-              <SettingsRow
-                key={driver}
-                className="py-3.5"
-                title={driverOption.label}
-                description="Provider profile used for new composer selections."
-                control={
-                  <div className="flex w-full items-center justify-end gap-1.5 sm:w-auto">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                      onClick={() =>
-                        setOpenProfileDetails((existing) => ({
-                          ...existing,
-                          [driver]: !detailsOpen,
-                        }))
-                      }
-                      aria-expanded={detailsOpen}
-                      aria-label={`Toggle ${driverOption.label} profile details`}
-                    >
-                      <ChevronDownIcon
-                        className={`size-3.5 transition-transform ${detailsOpen ? "rotate-180" : ""}`}
-                      />
-                    </Button>
-                    <Select
-                      value={activeProfileId}
-                      onValueChange={(value) => {
-                        if (value === "__add_profile__") {
-                          const instanceId = addProfile(driver);
-                          switchProfile(instanceId, driver, [...rowIds, instanceId]);
-                          setOpenProfileDetails((existing) => ({ ...existing, [driver]: true }));
-                          return;
-                        }
-                        switchProfile(value as ProviderInstanceId, driver, rowIds);
-                      }}
-                    >
-                      <SelectTrigger
-                        size="sm"
-                        className="w-full sm:w-40"
-                        aria-label={`${driverOption.label} profile`}
-                      >
-                        <SelectValue>{profileName(activeRow)}</SelectValue>
-                      </SelectTrigger>
-                      <SelectPopup align="end" alignItemWithTrigger={false} matchTriggerWidth>
-                        {rows.map((row) => (
-                          <SelectItem hideIndicator key={row.instanceId} value={row.instanceId}>
-                            {profileName(row)}
-                          </SelectItem>
-                        ))}
-                        <SelectSeparator />
-                        <SelectItem hideIndicator value="__add_profile__">
-                          <span className="inline-flex items-center gap-1.5">
-                            <PlusIcon className="size-3.5" />
-                            Add profile
-                          </span>
-                        </SelectItem>
-                      </SelectPopup>
-                    </Select>
-                  </div>
-                }
-              >
-                <Collapsible
-                  open={detailsOpen}
-                  onOpenChange={(open) =>
-                    setOpenProfileDetails((existing) => ({ ...existing, [driver]: open }))
-                  }
-                >
-                  <CollapsibleContent>
-                    <div className="mt-3.5 border-t border-border/60 px-4 py-3 sm:px-5">
-                      <label className="block">
-                        <span className="text-xs font-medium text-foreground">Display name</span>
-                        <DraftInput
-                          className="mt-1.5"
-                          value={activeRow.instance.displayName ?? ""}
-                          onCommit={updateDisplayName}
-                          placeholder={driverOption.label}
-                          spellCheck={false}
-                          aria-label={`${profileName(activeRow)} display name`}
-                        />
-                      </label>
-                    </div>
-                    <ProviderSettingsForm
-                      definition={driverOption}
-                      value={activeRow.instance.config}
-                      idPrefix={`profile-${activeRow.instanceId}`}
-                      variant="card"
-                      onChange={updateConfig}
-                    />
-                    {!activeRow.isDefault ? (
-                      <div className="flex justify-end border-t border-border/60 px-4 py-3 sm:px-5">
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="ghost"
-                          className="gap-1.5 text-destructive hover:text-destructive"
-                          onClick={() => deleteProfile(activeRow.instanceId, driver)}
-                        >
-                          <Trash2Icon className="size-3.5" />
-                          Delete profile
-                        </Button>
-                      </div>
-                    ) : null}
-                  </CollapsibleContent>
-                </Collapsible>
-              </SettingsRow>
+        {enabledProfileDrivers.map((driverOption) => {
+          const driver = driverOption.value;
+          const detailsOpen = openProfileDetails[driver] ?? false;
+          const defaultId = defaultInstanceIdForDriver(driver);
+          const defaultConfig = legacyProviders[driver]!;
+          const defaultInstance =
+            settings.providerInstances[defaultId] ??
+            ({
+              driver,
+              enabled: defaultConfig.enabled,
+              config: defaultConfig,
+            } satisfies ProviderInstanceConfig);
+          const rows = [
+            { instanceId: defaultId, instance: defaultInstance, isDefault: true },
+            ...Object.entries(settings.providerInstances)
+              .filter(
+                ([id, instance]) =>
+                  id !== defaultId && instance.driver === driver && (instance.enabled ?? true),
+              )
+              .map(([instanceId, instance]) => ({
+                instanceId: instanceId as ProviderInstanceId,
+                instance,
+                isDefault: false,
+              })),
+          ];
+          const rowIds = rows.map((row) => row.instanceId);
+          const activeProfileId =
+            stickyActiveProvider !== null && rowIds.includes(stickyActiveProvider)
+              ? stickyActiveProvider
+              : (rows.find((row) => stickyModelSelectionByProvider[row.instanceId])?.instanceId ??
+                defaultId);
+          const activeRow = rows.find((row) => row.instanceId === activeProfileId) ?? rows[0]!;
+          const profileName = (row: (typeof rows)[number]) =>
+            row.instance.displayName?.trim() ||
+            (row.isDefault ? `${driverOption.label} default` : row.instanceId);
+          const updateDisplayName = (value: string) => {
+            const trimmed = value.trim();
+            const { displayName: _displayName, ...rest } = activeRow.instance;
+            updateProfile(
+              activeRow,
+              trimmed
+                ? ({ ...rest, displayName: trimmed } as ProviderInstanceConfig)
+                : (rest as ProviderInstanceConfig),
             );
-          })}
-        </div>
+          };
+          const updateConfig = (config: Record<string, unknown> | undefined) => {
+            const { config: _config, ...rest } = activeRow.instance;
+            updateProfile(
+              activeRow,
+              config
+                ? ({ ...rest, config } as ProviderInstanceConfig)
+                : (rest as ProviderInstanceConfig),
+            );
+          };
+          return (
+            <SettingsRow
+              key={driver}
+              className="py-3.5"
+              title={driverOption.label}
+              description="Provider profile used for new composer selections."
+              control={
+                <div className="flex w-full items-center justify-end gap-1.5 sm:w-auto">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setProfileDetailsOpen(driver, !detailsOpen)}
+                    aria-expanded={detailsOpen}
+                    aria-label={`Toggle ${driverOption.label} profile details`}
+                  >
+                    <ChevronDownIcon
+                      className={`size-3.5 transition-transform ${detailsOpen ? "rotate-180" : ""}`}
+                    />
+                  </Button>
+                  <Select
+                    value={activeProfileId}
+                    onValueChange={(value) => {
+                      if (value === "__add_profile__") {
+                        const instanceId = addProfile(driver);
+                        switchProfile(instanceId, driver, [...rowIds, instanceId]);
+                        setProfileDetailsOpen(driver, true);
+                        return;
+                      }
+                      switchProfile(value as ProviderInstanceId, driver, rowIds);
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full sm:w-40"
+                      aria-label={`${driverOption.label} profile`}
+                    >
+                      <SelectValue>{profileName(activeRow)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="end" alignItemWithTrigger={false} matchTriggerWidth>
+                      {rows.map((row) => (
+                        <SelectItem hideIndicator key={row.instanceId} value={row.instanceId}>
+                          {profileName(row)}
+                        </SelectItem>
+                      ))}
+                      <SelectSeparator />
+                      <SelectItem hideIndicator value="__add_profile__">
+                        <span className="inline-flex items-center gap-1.5">
+                          <PlusIcon className="size-3.5" />
+                          Add profile
+                        </span>
+                      </SelectItem>
+                    </SelectPopup>
+                  </Select>
+                </div>
+              }
+            >
+              <Collapsible
+                open={detailsOpen}
+                onOpenChange={(open) => setProfileDetailsOpen(driver, open)}
+              >
+                <CollapsibleContent>
+                  <div className="mt-3.5 border-t border-border/60 px-4 py-3 sm:px-5">
+                    <label className="block">
+                      <span className="text-xs font-medium text-foreground">Display name</span>
+                      <DraftInput
+                        className="mt-1.5"
+                        value={activeRow.instance.displayName ?? ""}
+                        onCommit={updateDisplayName}
+                        placeholder={driverOption.label}
+                        spellCheck={false}
+                        aria-label={`${profileName(activeRow)} display name`}
+                      />
+                    </label>
+                  </div>
+                  <ProviderSettingsForm
+                    definition={driverOption}
+                    value={activeRow.instance.config}
+                    idPrefix={`profile-${activeRow.instanceId}`}
+                    variant="card"
+                    onChange={updateConfig}
+                  />
+                  {!activeRow.isDefault ? (
+                    <div className="flex justify-end border-t border-border/60 px-4 py-3 sm:px-5">
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="ghost"
+                        className="gap-1.5 text-destructive hover:text-destructive"
+                        onClick={() => deleteProfile(activeRow.instanceId, driver)}
+                      >
+                        <Trash2Icon className="size-3.5" />
+                        Delete profile
+                      </Button>
+                    </div>
+                  ) : null}
+                </CollapsibleContent>
+              </Collapsible>
+            </SettingsRow>
+          );
+        })}
       </SettingsSection>
 
       <SettingsSection title="General">

@@ -1,10 +1,10 @@
 import type {
   ProviderDriverKind,
   ProviderInstanceConfig,
+  ProviderInstanceId,
   ServerSettings,
   UnifiedSettings,
 } from "@t3tools/contracts";
-import type { ProviderInstanceId } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 
 function collapseOtelSignalsUrl(input: {
