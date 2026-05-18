@@ -13,29 +13,49 @@ import {
 
 type PiAcpRuntimePiSettings = Pick<PiSettings, "binaryPath" | "piBinaryPath">;
 const PATH_DELIMITER = process.platform === "win32" ? ";" : ":";
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
+
+function pathDelimiterForEnvironment(environment?: NodeJS.ProcessEnv): string {
+  const pathValue = environment?.PATH ?? environment?.Path ?? environment?.path;
+  if (pathValue?.includes(";")) {
+    return ";";
+  }
+  return PATH_DELIMITER;
+}
+
+function pathKeyForEnvironment(environment?: NodeJS.ProcessEnv): "PATH" | "Path" | "path" {
+  if (environment && "Path" in environment) return "Path";
+  if (environment && "path" in environment) return "path";
+  return "PATH";
+}
 
 function dirnameForExecutablePath(value: string | undefined): string | null {
-  if (!value || !value.startsWith("/")) {
+  if (!value) {
     return null;
   }
-  const separatorIndex = value.lastIndexOf("/");
+  const normalized = value.replaceAll("\\", "/");
+  if (!normalized.startsWith("/") && !WINDOWS_ABSOLUTE_PATH_PATTERN.test(normalized)) {
+    return null;
+  }
+  const separatorIndex = normalized.lastIndexOf("/");
   return separatorIndex > 0 ? value.slice(0, separatorIndex) : "/";
 }
 
 function prependUniquePathEntries(
   currentPath: string | undefined,
   entries: ReadonlyArray<string | null>,
+  delimiter = PATH_DELIMITER,
 ): string {
   const seen = new Set<string>();
   const next: Array<string> = [];
-  for (const entry of [...entries, ...(currentPath ? currentPath.split(PATH_DELIMITER) : [])]) {
+  for (const entry of [...entries, ...(currentPath ? currentPath.split(delimiter) : [])]) {
     if (!entry || seen.has(entry)) {
       continue;
     }
     seen.add(entry);
     next.push(entry);
   }
-  return next.join(PATH_DELIMITER);
+  return next.join(delimiter);
 }
 
 function buildPiAcpEnvironment(
@@ -47,13 +67,19 @@ function buildPiAcpEnvironment(
   }
 
   const env = { ...environment };
+  const pathKey = pathKeyForEnvironment(env);
+  const pathDelimiter = pathDelimiterForEnvironment(env);
   if (piSettings?.piBinaryPath) {
     env.PI_ACP_PI_COMMAND = piSettings.piBinaryPath;
   }
-  env.PATH = prependUniquePathEntries(env.PATH, [
-    dirnameForExecutablePath(piSettings?.binaryPath),
-    dirnameForExecutablePath(piSettings?.piBinaryPath),
-  ]);
+  env[pathKey] = prependUniquePathEntries(
+    env[pathKey],
+    [
+      dirnameForExecutablePath(piSettings?.binaryPath),
+      dirnameForExecutablePath(piSettings?.piBinaryPath),
+    ],
+    pathDelimiter,
+  );
   return env;
 }
 

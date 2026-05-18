@@ -47,4 +47,31 @@ describe("buildPiAcpSpawnInput", () => {
       ).env?.PATH,
     ).toBe("/opt/homebrew/bin");
   });
+
+  it("preserves Windows Path casing and prepends cmd directories", () => {
+    const env = {
+      USERPROFILE: "C:\\Users\\me",
+      Path: "C:\\Windows\\System32;C:\\Program Files\\nodejs",
+    };
+
+    expect(
+      buildPiAcpSpawnInput(
+        {
+          binaryPath: "C:\\Users\\me\\AppData\\Roaming\\npm\\pi-acp.cmd",
+          piBinaryPath: "C:\\Users\\me\\AppData\\Roaming\\npm\\pi.cmd",
+        },
+        "C:\\work\\project",
+        env,
+      ),
+    ).toEqual({
+      command: "C:\\Users\\me\\AppData\\Roaming\\npm\\pi-acp.cmd",
+      args: [],
+      cwd: "C:\\work\\project",
+      env: {
+        ...env,
+        Path: "C:\\Users\\me\\AppData\\Roaming\\npm;C:\\Windows\\System32;C:\\Program Files\\nodejs",
+        PI_ACP_PI_COMMAND: "C:\\Users\\me\\AppData\\Roaming\\npm\\pi.cmd",
+      },
+    });
+  });
 });

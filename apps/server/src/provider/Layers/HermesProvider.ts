@@ -151,7 +151,21 @@ function commonHermesBinaryCandidates(
 ): Effect.Effect<ReadonlyArray<string>, never, Path.Path> {
   return Effect.gen(function* () {
     const path = yield* Path.Path;
-    const home = environment.HOME || NodeOS.homedir();
+    const home = environment.HOME || environment.USERPROFILE || NodeOS.homedir();
+    if (process.platform === "win32") {
+      const appData = environment.APPDATA;
+      const localAppData = environment.LOCALAPPDATA;
+      return [
+        path.join(home, ".local", "bin", "hermes.exe"),
+        path.join(home, ".local", "bin", "hermes.cmd"),
+        path.join(home, "Projects", "hermes-agent", "venv", "Scripts", "hermes.exe"),
+        path.join(home, "Projects", "hermes-agent", "venv", "Scripts", "hermes.cmd"),
+        ...(appData ? [path.join(appData, "Python", "Scripts", "hermes.exe")] : []),
+        ...(localAppData
+          ? [path.join(localAppData, "Programs", "Python", "Python312", "Scripts", "hermes.exe")]
+          : []),
+      ];
+    }
     return [
       path.join(home, ".local/bin/hermes"),
       path.join(home, "Projects/hermes-agent/venv/bin/hermes"),
@@ -162,7 +176,7 @@ function commonHermesBinaryCandidates(
 }
 
 function expandHomePath(input: string, environment: NodeJS.ProcessEnv): string {
-  const home = environment.HOME || NodeOS.homedir();
+  const home = environment.HOME || environment.USERPROFILE || NodeOS.homedir();
   if (input === "~") return home;
   if (input.startsWith("~/") || input.startsWith("~\\")) return `${home}${input.slice(1)}`;
   return input;
@@ -184,6 +198,18 @@ function firstExistingPath(
 function detectHermesFromLoginShell(
   environment: NodeJS.ProcessEnv,
 ): Effect.Effect<string | null, never, ChildProcessSpawner.ChildProcessSpawner> {
+  if (process.platform === "win32") {
+    return runRawCommand("where", ["hermes"], environment).pipe(
+      Effect.timeoutOption(LOGIN_SHELL_TIMEOUT_MS),
+      Effect.map((result) => {
+        if (Option.isNone(result) || result.value.code !== 0) return null;
+        const candidate = result.value.stdout.trim().split(/\r?\n/u)[0]?.trim();
+        return candidate && candidate.length > 0 ? candidate : null;
+      }),
+      Effect.catch(() => Effect.succeed(null)),
+    );
+  }
+
   const shell = environment.SHELL?.trim() || "/bin/zsh";
   return runRawCommand(shell, ["-lc", "command -v hermes"], environment).pipe(
     Effect.timeoutOption(LOGIN_SHELL_TIMEOUT_MS),

@@ -39,6 +39,7 @@ ln -sf ~/Projects/hermes-agent/venv/bin/hermes ~/.local/bin/hermes
 
 T3 Code auto-detects common Hermes paths such as `~/.local/bin/hermes`,
 `~/Projects/hermes-agent/venv/bin/hermes`, `/opt/homebrew/bin/hermes`, and `/usr/local/bin/hermes`.
+On Windows, use a full path such as `C:\Users\you\Projects\hermes-agent\venv\Scripts\hermes.exe`.
 Hermes manages authentication through its own CLI and local config; T3 Code starts `hermes acp`
 only when a Hermes conversation needs it.
 
@@ -60,7 +61,9 @@ pi-acp --help
 ```
 
 T3 Code passes the configured Pi binary to the adapter with `PI_ACP_PI_COMMAND`, which keeps the
-packaged macOS app working even when `/opt/homebrew/bin` is not on the GUI app `PATH`.
+packaged desktop app working even when npm's global binary directory is not on the GUI app `PATH`.
+On Windows, npm shims usually live under `C:\Users\you\AppData\Roaming\npm\pi-acp.cmd` and
+`C:\Users\you\AppData\Roaming\npm\pi.cmd`.
 Provider Settings also exposes a Pi update action, so users can run `pi update` from the same
 place they configure the provider.
 

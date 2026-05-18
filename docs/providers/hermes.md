@@ -50,6 +50,12 @@ Binary path: /Users/you/.local/bin/hermes
 Using the full path is recommended on macOS because apps launched from the Dock or a desktop shell
 may not inherit your terminal `PATH`.
 
+On Windows, use the executable or command shim from your virtual environment, for example:
+
+```text
+Binary path: C:\Users\you\Projects\hermes-agent\venv\Scripts\hermes.exe
+```
+
 T3 Code also checks common Hermes locations such as `~/.local/bin/hermes`,
 `~/Projects/hermes-agent/venv/bin/hermes`, Homebrew paths, and your login-shell `PATH`. If it finds
 Hermes somewhere else, the provider card shows a detected path you can apply from Settings.

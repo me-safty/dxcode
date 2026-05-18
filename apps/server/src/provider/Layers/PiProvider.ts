@@ -275,7 +275,16 @@ function commonPiBinaryCandidates(
 ): Effect.Effect<ReadonlyArray<string>, never, Path.Path> {
   return Effect.gen(function* () {
     const path = yield* Path.Path;
-    const home = environment.HOME || NodeOS.homedir();
+    const home = environment.HOME || environment.USERPROFILE || NodeOS.homedir();
+    if (process.platform === "win32") {
+      const appData = environment.APPDATA;
+      return [
+        ...(appData ? [path.join(appData, "npm", `${binaryName}.cmd`)] : []),
+        path.join(home, "AppData", "Roaming", "npm", `${binaryName}.cmd`),
+        path.join(home, ".local", "bin", `${binaryName}.cmd`),
+        path.join(home, ".local", "bin", `${binaryName}.exe`),
+      ];
+    }
     return [
       path.join(home, `.local/bin/${binaryName}`),
       path.join(home, `.npm-global/bin/${binaryName}`),
@@ -286,7 +295,7 @@ function commonPiBinaryCandidates(
 }
 
 function expandHomePath(input: string, environment: NodeJS.ProcessEnv): string {
-  const home = environment.HOME || NodeOS.homedir();
+  const home = environment.HOME || environment.USERPROFILE || NodeOS.homedir();
   if (input === "~") return home;
   if (input.startsWith("~/") || input.startsWith("~\\")) return `${home}${input.slice(1)}`;
   return input;
@@ -309,6 +318,18 @@ function detectPiFromLoginShell(
   binaryName: "pi" | "pi-acp",
   environment: NodeJS.ProcessEnv,
 ): Effect.Effect<string | null, never, ChildProcessSpawner.ChildProcessSpawner> {
+  if (process.platform === "win32") {
+    return runRawCommand("where", [binaryName], environment).pipe(
+      Effect.timeoutOption(LOGIN_SHELL_TIMEOUT_MS),
+      Effect.map((result) => {
+        if (Option.isNone(result) || result.value.code !== 0) return null;
+        const candidate = result.value.stdout.trim().split(/\r?\n/u)[0]?.trim();
+        return candidate && candidate.length > 0 ? candidate : null;
+      }),
+      Effect.catch(() => Effect.succeed(null)),
+    );
+  }
+
   const shell = environment.SHELL?.trim() || "/bin/zsh";
   return runRawCommand(shell, ["-lc", `command -v ${binaryName}`], environment).pipe(
     Effect.timeoutOption(LOGIN_SHELL_TIMEOUT_MS),

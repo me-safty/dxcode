@@ -57,6 +57,14 @@ Absolute paths are recommended for packaged macOS builds because GUI apps can ha
 /Users/you/.local/bin/pi
 ```
 
+On Windows, global npm installs usually create `.cmd` shims under the roaming npm directory. Common
+paths are:
+
+```text
+C:\Users\you\AppData\Roaming\npm\pi-acp.cmd
+C:\Users\you\AppData\Roaming\npm\pi.cmd
+```
+
 T3 Code passes the configured Pi binary to `pi-acp` through `PI_ACP_PI_COMMAND`, so the adapter can
 find Pi even when the app is launched outside your shell.
 
