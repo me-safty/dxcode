@@ -44,10 +44,7 @@ import {
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from "../Errors.ts";
-import {
-  acpPermissionOutcome,
-  mapAcpToAdapterError,
-} from "../acp/AcpAdapterSupport.ts";
+import { acpPermissionOutcome, mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
 import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
 import {
   makeAcpAssistantItemEvent,
@@ -153,6 +150,13 @@ function parsePiResume(raw: unknown): { sessionId: string } | undefined {
   if (raw.schemaVersion !== PI_RESUME_VERSION) return undefined;
   if (typeof raw.sessionId !== "string" || !raw.sessionId.trim()) return undefined;
   return { sessionId: raw.sessionId.trim() };
+}
+
+const PI_CLI_UPDATE_NOTICE_PATTERN =
+  /(^|\n)New version available: v[^\n]*\(installed v[^\n]*\)\. Run: npm i -g @earendil-works\/pi-coding-agent\s*/g;
+
+export function sanitizePiAssistantTextDelta(text: string): string {
+  return text.replace(PI_CLI_UPDATE_NOTICE_PATTERN, "$1");
 }
 
 function selectAutoApprovedPermissionOption(
@@ -554,7 +558,12 @@ export function makePiAdapter(piSettings: PiSettings, options?: PiAdapterLiveOpt
                       }),
                     );
                     return;
-                  case "ContentDelta":
+                  case "ContentDelta": {
+                    const text = sanitizePiAssistantTextDelta(event.text);
+                    if (text.length === 0) {
+                      return;
+                    }
+
                     yield* logNative(
                       ctx.threadId,
                       "session/update",
@@ -568,11 +577,12 @@ export function makePiAdapter(piSettings: PiSettings, options?: PiAdapterLiveOpt
                         threadId: ctx.threadId,
                         turnId: ctx.activeTurnId,
                         ...(event.itemId ? { itemId: event.itemId } : {}),
-                        text: event.text,
+                        text,
                         rawPayload: event.rawPayload,
                       }),
                     );
                     return;
+                  }
                 }
               }),
             ),

@@ -101,6 +101,12 @@ function readConfigStringArray(config: unknown, key: string): ReadonlyArray<stri
   return value.filter((entry): entry is string => typeof entry === "string");
 }
 
+function readConfigString(config: unknown, key: string): string | null {
+  if (config === null || typeof config !== "object") return null;
+  const value = (config as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
 /**
  * Set `key` to an arbitrary value on the opaque config blob. Unlike
  * provider settings field updates, does not drop empty-looking values — the
@@ -529,6 +535,8 @@ export function ProviderInstanceCard({
   const suggestedBinaryPath = liveProvider?.suggestedBinaryPath?.trim();
   const isHermesDriver = String(instance.driver) === "hermes";
   const isPiDriver = String(instance.driver) === "pi";
+  const configuredBinaryPath = readConfigString(instance.config, "binaryPath");
+  const configuredPiBinaryPath = readConfigString(instance.config, "piBinaryPath");
   const FallbackIconComponent = driverOption?.icon;
   const displayName =
     instance.displayName?.trim() || driverOption?.label || String(instance.driver);
@@ -735,6 +743,42 @@ export function ProviderInstanceCard({
     <code className="text-xs text-muted-foreground">{versionLabel}</code>
   ) : null;
 
+  const diagnosticsRows = [
+    ["Status", summary.headline],
+    ["Auth", liveProvider?.auth.status ?? "unknown"],
+    ["Version", versionLabel ?? "unknown"],
+    ["Binary", configuredBinaryPath ?? (isHermesDriver ? "hermes" : isPiDriver ? "pi-acp" : null)],
+    ...(isPiDriver ? [["Pi binary", configuredPiBinaryPath ?? "pi"]] : []),
+    ...(suggestedBinaryPath ? [["Detected path", suggestedBinaryPath]] : []),
+  ].filter((row): row is [string, string] => typeof row[1] === "string" && row[1].length > 0);
+
+  const diagnosticsNode =
+    (isHermesDriver || isPiDriver) && diagnosticsRows.length > 0 ? (
+      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+        <div className="grid gap-3">
+          <div className="grid gap-1">
+            <span className="text-xs font-medium text-foreground">Provider diagnostics</span>
+            <p className="text-xs leading-snug text-muted-foreground">
+              Quick facts for debugging local setup, packaged app launches, and installed versions.
+            </p>
+          </div>
+          <dl className="grid gap-1.5 rounded-md border border-border/70 bg-muted/20 p-2">
+            {diagnosticsRows.map(([label, value]) => (
+              <div key={label} className="grid min-w-0 grid-cols-[6.5rem_1fr] gap-2 text-xs">
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd
+                  className="min-w-0 truncate font-mono text-[11px] text-foreground"
+                  title={value}
+                >
+                  {value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </div>
+    ) : null;
+
   const hermesSetupNode = isHermesDriver ? (
     <div className="border-t border-border/60 px-4 py-3 sm:px-5">
       <div className="grid gap-3">
@@ -792,8 +836,8 @@ export function ProviderInstanceCard({
         <div className="grid gap-1">
           <span className="text-xs font-medium text-foreground">Pi setup</span>
           <p className="text-xs leading-snug text-muted-foreground">
-            T3 Code starts Pi through the pi-acp adapter. For GPT-5.5, sign into Pi with the
-            ChatGPT Plus/Pro Codex provider, then verify both commands before sending a turn.
+            T3 Code starts Pi through the pi-acp adapter. For GPT-5.5, sign into Pi with the ChatGPT
+            Plus/Pro Codex provider, then verify both commands before sending a turn.
           </p>
         </div>
         {suggestedBinaryPath ? (
@@ -1076,6 +1120,7 @@ export function ProviderInstanceCard({
 
             {hermesSetupNode}
             {piSetupNode}
+            {diagnosticsNode}
             {providerUpdateNode}
 
             {driverOption ? (
