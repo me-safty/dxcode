@@ -1186,6 +1186,13 @@ describe("GeneralSettingsPanel observability", () => {
 
     await page.getByRole("button", { name: "Expand Hermes provider details" }).click();
 
+    await expect
+      .element(
+        page.getByText(
+          "Installed and ready. Hermes manages authentication through its own CLI and local config.",
+        ),
+      )
+      .toBeInTheDocument();
     await expect.element(page.getByText("Hermes setup", { exact: true })).toBeInTheDocument();
     await expect.element(page.getByText("hermes model")).toBeInTheDocument();
     await expect.element(page.getByText("hermes acp")).toBeInTheDocument();
