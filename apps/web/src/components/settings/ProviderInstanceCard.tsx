@@ -10,7 +10,7 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import {
   isProviderDriverKind,
   type ProviderInstanceConfig,
@@ -59,6 +59,13 @@ const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 let environmentVariableDraftId = 0;
 const nextEnvironmentVariableDraftId = () => `provider-env-${environmentVariableDraftId++}`;
+
+function isInteractiveEventTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest("a,button,input,select,textarea,[role='switch']") !== null
+  );
+}
 
 type EnvironmentDraftRow = {
   readonly id: string;
@@ -573,6 +580,20 @@ export function ProviderInstanceCard({
     );
   };
 
+  const toggleExpanded = () => onExpandedChange(!isExpanded);
+
+  const handleHeaderClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (isInteractiveEventTarget(event.target)) return;
+    toggleExpanded();
+  };
+
+  const handleHeaderKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.currentTarget !== event.target) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggleExpanded();
+  };
+
   const titleIconNode = driverKind ? (
     <ProviderInstanceIcon
       driverKind={driverKind}
@@ -672,7 +693,15 @@ export function ProviderInstanceCard({
 
   return (
     <div className="border-t border-border/60 first:border-t-0">
-      <div className="px-4 py-3.5 sm:px-5">
+      <div
+        className="cursor-pointer px-4 py-3.5 outline-none transition-colors hover:bg-muted/25 focus-visible:bg-muted/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:px-5"
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
+        aria-label={`${isExpanded ? "Collapse" : "Expand"} ${displayName} provider details`}
+        onClick={handleHeaderClick}
+        onKeyDown={handleHeaderKeyDown}
+      >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 flex-1 space-y-1">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -782,7 +811,7 @@ export function ProviderInstanceCard({
               size="sm"
               variant="ghost"
               className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => onExpandedChange(!isExpanded)}
+              onClick={toggleExpanded}
               aria-label={`Toggle ${displayName} details`}
             >
               <ChevronDownIcon
