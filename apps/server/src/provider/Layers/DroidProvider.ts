@@ -114,6 +114,8 @@ const modelProviderLabel = (provider: ModelProvider): string => {
       return "xAI";
     case ModelProvider.VOYAGE:
       return "Voyage";
+    default:
+      return String(provider);
   }
 };
 

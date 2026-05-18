@@ -79,6 +79,23 @@ describe("DroidProvider", () => {
     });
   });
 
+  it("keeps unknown Droid SDK model providers displayable", () => {
+    const models = buildDroidModelsFromSdkModels([
+      sdkModel({
+        id: "new-provider-model",
+        modelId: "new-provider-model",
+        displayName: "New Provider Model",
+        shortDisplayName: "New Provider",
+        modelProvider: "NEW_PROVIDER" as ModelProvider,
+        supportedReasoningEfforts: [ReasoningEffort.None],
+        defaultReasoningEffort: ReasoningEffort.None,
+        isCustom: false,
+      }),
+    ]);
+
+    expect(models[0]?.subProvider).toBe("NEW_PROVIDER");
+  });
+
   it("extracts Droid model discovery errors from Effect causes", () => {
     const cause = Cause.fail(new Error("Droid auth expired"));
 
