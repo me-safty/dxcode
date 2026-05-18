@@ -54,6 +54,10 @@ T3 Code also checks common Hermes locations such as `~/.local/bin/hermes`,
 `~/Projects/hermes-agent/venv/bin/hermes`, Homebrew paths, and your login-shell `PATH`. If it finds
 Hermes somewhere else, the provider card shows a detected path you can apply from Settings.
 
+This is intentional for packaged macOS builds: apps launched from Finder often do not inherit your
+terminal `PATH`, so the most reliable setup is an absolute binary path such as
+`/Users/you/.local/bin/hermes`.
+
 ## Verify
 
 Run:

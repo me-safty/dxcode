@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
@@ -20,7 +21,11 @@ import {
 const encoder = new TextEncoder();
 const decodeHermesSettings = Schema.decodeSync(HermesSettings);
 
-function mockHandle(result: { stdout?: string; stderr?: string; code?: number }) {
+function mockHandle(result: {
+  stdout?: string;
+  stderr?: string;
+  code?: number;
+}) {
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(1),
     exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(result.code ?? 0)),
@@ -49,12 +54,32 @@ function mockSpawnerLayer(
         readonly command: string;
         readonly args: ReadonlyArray<string>;
       };
-      return Effect.succeed(mockHandle(handler(childProcess.command, childProcess.args)));
+      return Effect.succeed(
+        mockHandle(handler(childProcess.command, childProcess.args)),
+      );
     }),
   );
 }
 
-const makeHermesSettings = (overrides?: Partial<HermesSettings>): HermesSettings =>
+function failingSpawnerLayer(description: string) {
+  return Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make(() =>
+      Effect.fail(
+        PlatformError.systemError({
+          _tag: "NotFound",
+          module: "ChildProcess",
+          method: "spawn",
+          description,
+        }),
+      ),
+    ),
+  );
+}
+
+const makeHermesSettings = (
+  overrides?: Partial<HermesSettings>,
+): HermesSettings =>
   decodeHermesSettings({
     enabled: true,
     binaryPath: "hermes",
@@ -153,39 +178,97 @@ describe("checkHermesProviderStatus", () => {
     }),
   );
 
-  it.effect("uses the detected common macOS binary path for the default hermes command", () =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-      const home = yield* makeTempHome;
-      const binaryPath = path.join(home, ".local/bin/hermes");
-      yield* writeTestFile(binaryPath, "");
+  it.effect(
+    "uses the detected common macOS binary path for the default hermes command",
+    () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const home = yield* makeTempHome;
+        const binaryPath = path.join(home, ".local/bin/hermes");
+        yield* writeTestFile(binaryPath, "");
 
-      const resolution = yield* resolveHermesBinary(makeHermesSettings(), {
-        HOME: home,
-      });
+        const resolution = yield* resolveHermesBinary(makeHermesSettings(), {
+          HOME: home,
+        });
 
-      assert.equal(resolution.binaryPath, binaryPath);
-      assert.equal(resolution.suggestedBinaryPath, binaryPath);
-    }).pipe(Effect.provide(NodeServices.layer)),
+        assert.equal(resolution.binaryPath, binaryPath);
+        assert.equal(resolution.suggestedBinaryPath, binaryPath);
+      }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("suggests a detected path when an explicit binary path is invalid", () =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-      const home = yield* makeTempHome;
-      const binaryPath = path.join(home, ".local/bin/hermes");
-      yield* writeTestFile(binaryPath, "");
+  it.effect(
+    "detects ~/.local/bin/hermes when a packaged macOS app has an empty PATH",
+    () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const home = yield* makeTempHome;
+        const binaryPath = path.join(home, ".local/bin/hermes");
+        yield* writeTestFile(binaryPath, "");
 
-      const snapshot = yield* checkHermesProviderStatus(
-        makeHermesSettings({ binaryPath: path.join(home, "missing/hermes") }),
-        { HOME: home },
-      );
+        const layer = mockSpawnerLayer((command, args) => {
+          assert.equal(command, binaryPath);
+          assert.deepEqual(args, ["--version"]);
+          return { stdout: "Hermes Agent v0.11.0\n", code: 0 };
+        });
 
-      assert.equal(snapshot.status, "error");
-      assert.equal(snapshot.installed, false);
-      assert.equal(snapshot.suggestedBinaryPath, binaryPath);
-      assert.match(snapshot.message ?? "", /Detected Hermes/);
-    }).pipe(Effect.provide(NodeServices.layer)),
+        const snapshot = yield* checkHermesProviderStatus(
+          makeHermesSettings(),
+          {
+            HOME: home,
+            PATH: "",
+            SHELL: "/bin/zsh",
+          },
+        ).pipe(Effect.provide(layer));
+
+        assert.equal(snapshot.status, "ready");
+        assert.equal(snapshot.installed, true);
+        assert.equal(snapshot.version, "0.11.0");
+        assert.equal(snapshot.suggestedBinaryPath, binaryPath);
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "suggests a detected path when an explicit binary path is invalid",
+    () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const home = yield* makeTempHome;
+        const binaryPath = path.join(home, ".local/bin/hermes");
+        yield* writeTestFile(binaryPath, "");
+
+        const snapshot = yield* checkHermesProviderStatus(
+          makeHermesSettings({ binaryPath: path.join(home, "missing/hermes") }),
+          { HOME: home },
+        );
+
+        assert.equal(snapshot.status, "error");
+        assert.equal(snapshot.installed, false);
+        assert.equal(snapshot.suggestedBinaryPath, binaryPath);
+        assert.match(snapshot.message ?? "", /Detected Hermes/);
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "reports missing Hermes clearly for a clean install with no CLI",
+    () =>
+      Effect.gen(function* () {
+        const home = yield* makeTempHome;
+
+        const snapshot = yield* checkHermesProviderStatus(
+          makeHermesSettings(),
+          {
+            HOME: home,
+            PATH: "",
+            SHELL: "/bin/zsh",
+          },
+        ).pipe(Effect.provide(failingSpawnerLayer("spawn hermes ENOENT")));
+
+        assert.equal(snapshot.status, "error");
+        assert.equal(snapshot.installed, false);
+        assert.equal(snapshot.suggestedBinaryPath, undefined);
+        assert.equal(snapshot.models[0]?.slug, "hermes-default");
+        assert.match(snapshot.message ?? "", /not installed or not on PATH/);
+      }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("shows the configured Hermes model from config.yaml", () =>
@@ -215,6 +298,35 @@ model:
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect(
+    "keeps a clean install with Hermes installed but no config ready with fallback model",
+    () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const home = yield* makeTempHome;
+        const binaryPath = path.join(home, ".local/bin/hermes");
+        yield* writeTestFile(binaryPath, "");
+        const layer = mockSpawnerLayer((command, args) => {
+          assert.equal(command, binaryPath);
+          assert.deepEqual(args, ["--version"]);
+          return { stdout: "Hermes Agent v0.11.0\n", code: 0 };
+        });
+
+        const snapshot = yield* checkHermesProviderStatus(
+          makeHermesSettings(),
+          {
+            HOME: home,
+            PATH: "",
+          },
+        ).pipe(Effect.provide(layer));
+
+        assert.equal(snapshot.status, "ready");
+        assert.equal(snapshot.installed, true);
+        assert.equal(snapshot.models[0]?.slug, "hermes-default");
+        assert.equal(snapshot.message, undefined);
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("guides setup when Hermes config has no model.default", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
@@ -237,22 +349,30 @@ model:
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("surfaces stderr when the Hermes CLI health check exits nonzero", () =>
-    Effect.gen(function* () {
-      const layer = Layer.merge(
-        NodeServices.layer,
-        mockSpawnerLayer((_command, args) => {
-          if (args[0] === "-lc") return { stdout: "", code: 1 };
-          return { stderr: "ACP failed to start: missing provider credentials", code: 2 };
-        }),
-      );
+  it.effect(
+    "surfaces stderr when the Hermes CLI health check exits nonzero",
+    () =>
+      Effect.gen(function* () {
+        const layer = Layer.merge(
+          NodeServices.layer,
+          mockSpawnerLayer((_command, args) => {
+            if (args[0] === "-lc") return { stdout: "", code: 1 };
+            return {
+              stderr: "ACP failed to start: missing provider credentials",
+              code: 2,
+            };
+          }),
+        );
 
-      const snapshot = yield* checkHermesProviderStatus(makeHermesSettings(), {
-        HOME: "/tmp/no-hermes-config",
-      }).pipe(Effect.provide(layer));
+        const snapshot = yield* checkHermesProviderStatus(
+          makeHermesSettings(),
+          {
+            HOME: "/tmp/no-hermes-config",
+          },
+        ).pipe(Effect.provide(layer));
 
-      assert.equal(snapshot.status, "warning");
-      assert.match(snapshot.message ?? "", /ACP failed to start/);
-    }),
+        assert.equal(snapshot.status, "warning");
+        assert.match(snapshot.message ?? "", /ACP failed to start/);
+      }),
   );
 });
