@@ -32,6 +32,9 @@ export function ProjectSidebar({
   onThreadPreviewCountChange,
 }: ProjectSidebarProps) {
   const [ticketViewMode, setTicketViewMode] = useState<TicketViewMode>("tree");
+  const [showProjectThreads, setShowProjectThreads] = useState(true);
+  const [showJiraItems, setShowJiraItems] = useState(true);
+  const [showGitHubActivity, setShowGitHubActivity] = useState(true);
 
   const threadsByProject = useMemo(() => {
     const map = new Map<string, ProjectThread[]>();
@@ -62,6 +65,12 @@ export function ProjectSidebar({
       projectSortOrder={projectSortOrder}
       threadSortOrder={threadSortOrder}
       threadPreviewCount={threadPreviewCount}
+      showProjectThreads={showProjectThreads}
+      showJiraItems={showJiraItems}
+      showGitHubActivity={showGitHubActivity}
+      onShowProjectThreadsChange={setShowProjectThreads}
+      onShowJiraItemsChange={setShowJiraItems}
+      onShowGitHubActivityChange={setShowGitHubActivity}
       onSelectProject={onSelectProject}
       onSelectTicket={onSelectTicket}
       onSelectThread={onSelectThread}

@@ -25,7 +25,7 @@ export interface TicketSidebarEntryProps {
   view: ViewState | null;
   ticketThreads: readonly ProjectThread[];
   githubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
-  showGitHubActivity?: boolean;
+  showGitHubActivity: boolean;
   onSelectTicket: (projectId: string, ticketId: string) => void;
   onCreateTicketThread: (input: {
     projectId: string;
@@ -45,7 +45,7 @@ export function TicketSidebarEntry({
   view,
   ticketThreads,
   githubActivityItems,
-  showGitHubActivity = true,
+  showGitHubActivity,
   onSelectTicket,
   onCreateTicketThread,
   onSelectThread,

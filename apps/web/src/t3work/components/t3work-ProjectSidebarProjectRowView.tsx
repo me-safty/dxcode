@@ -18,6 +18,9 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
     projectStatus,
     view,
     ticketViewMode,
+    showProjectThreads,
+    showJiraItems,
+    showGitHubActivity,
     onSelectThread,
     onSelectTicket,
     onCreateTicketThread,
@@ -43,7 +46,7 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
         onNewThread={state.handleNewThread}
       />
 
-      {expanded && (
+      {expanded && showProjectThreads && (
         <SidebarMenuSub className="mx-1 mt-1 mb-1.5 w-full translate-x-0 gap-0.5 overflow-hidden px-1.5 py-0.5">
           {state.visibleThreads.map((thread) => (
             <ThreadRow
@@ -69,7 +72,7 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
         </SidebarMenuSub>
       )}
 
-      {expanded && props.projectTickets.length > 0 && (
+      {expanded && showJiraItems && props.projectTickets.length > 0 && (
         <SidebarMenuSub className="mx-1 mt-1.5 w-full translate-x-0 gap-0.5 overflow-hidden px-1.5 pb-0.5">
           {ticketViewMode === "tree"
             ? state.visibleTreeRoots.map((ticket) => (
@@ -83,6 +86,7 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
                     childrenByParentId={state.ticketHierarchy.childrenByParentId}
                     ticketThreadsById={state.ticketThreadsById}
                     githubActivityByWorkItem={state.githubActivityByWorkItem}
+                    showGitHubActivity={showGitHubActivity}
                     onSelectTicket={onSelectTicket}
                     onCreateTicketThread={onCreateTicketThread}
                     onSelectThread={onSelectThread}
@@ -103,7 +107,7 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
                     githubActivityItems={
                       state.githubActivityByWorkItem.get(ticket.ref.displayId) ?? []
                     }
-                    showGitHubActivity={false}
+                    showGitHubActivity={showGitHubActivity}
                     onSelectTicket={onSelectTicket}
                     onCreateTicketThread={onCreateTicketThread}
                     onSelectThread={onSelectThread}
@@ -130,6 +134,7 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
                     githubActivityItems={
                       state.githubActivityByWorkItem.get(ticket.ref.displayId) ?? []
                     }
+                    showGitHubActivity={showGitHubActivity}
                     onSelectTicket={onSelectTicket}
                     onCreateTicketThread={onCreateTicketThread}
                     onSelectThread={onSelectThread}

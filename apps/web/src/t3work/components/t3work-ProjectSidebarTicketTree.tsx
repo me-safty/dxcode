@@ -25,6 +25,7 @@ export function TicketTreeNode({
   childrenByParentId,
   ticketThreadsById,
   githubActivityByWorkItem,
+  showGitHubActivity,
   onSelectTicket,
   onCreateTicketThread,
   onSelectThread,
@@ -43,6 +44,7 @@ export function TicketTreeNode({
         view={view}
         ticketThreads={ticketThreadsById.get(ticket.id) ?? []}
         githubActivityItems={githubActivityByWorkItem.get(ticket.ref.displayId) ?? []}
+        showGitHubActivity={showGitHubActivity}
         onSelectTicket={onSelectTicket}
         onCreateTicketThread={onCreateTicketThread}
         onSelectThread={onSelectThread}
@@ -62,6 +64,7 @@ export function TicketTreeNode({
               childrenByParentId={childrenByParentId}
               ticketThreadsById={ticketThreadsById}
               githubActivityByWorkItem={githubActivityByWorkItem}
+              showGitHubActivity={showGitHubActivity}
               onSelectTicket={onSelectTicket}
               onCreateTicketThread={onCreateTicketThread}
               onSelectThread={onSelectThread}

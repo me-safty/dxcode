@@ -11,6 +11,7 @@ import {
   SidebarTrigger,
 } from "~/t3work/components/ui/t3work-sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/t3work/components/ui/t3work-tooltip";
+import { CommandDialogTrigger } from "~/components/ui/command";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import { ProjectSortMenu } from "./t3work-ProjectSortMenu";
 import { ProjectRowWithTickets } from "./t3work-ProjectSidebarProjectRow";
@@ -21,6 +22,12 @@ type ProjectSidebarLayoutProps = {
   sortedProjects: ProjectShellProject[];
   ticketViewMode: TicketViewMode;
   setTicketViewMode: (mode: TicketViewMode) => void;
+  showProjectThreads: boolean;
+  showJiraItems: boolean;
+  showGitHubActivity: boolean;
+  onShowProjectThreadsChange: (show: boolean) => void;
+  onShowJiraItemsChange: (show: boolean) => void;
+  onShowGitHubActivityChange: (show: boolean) => void;
   onOpenSettings: (() => void) | undefined;
 } & ProjectSidebarProps;
 
@@ -36,6 +43,12 @@ export function ProjectSidebarLayout({
   projectSortOrder,
   threadSortOrder,
   threadPreviewCount,
+  showProjectThreads,
+  showJiraItems,
+  showGitHubActivity,
+  onShowProjectThreadsChange,
+  onShowJiraItemsChange,
+  onShowGitHubActivityChange,
   onSelectProject,
   onSelectTicket,
   onSelectThread,
@@ -68,16 +81,17 @@ export function ProjectSidebarLayout({
         <SidebarGroup className="px-2 pt-2 pb-1">
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton
-                size="sm"
-                disabled
-                aria-disabled="true"
-                title="Search in sidebar is not available yet"
-                className="gap-2 px-2 py-1.5 text-muted-foreground/50 focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-100"
+              <CommandDialogTrigger
+                render={
+                  <SidebarMenuButton
+                    size="sm"
+                    className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
+                  />
+                }
               >
                 <SearchIcon className="size-3.5" />
                 <span className="flex-1 truncate text-left text-xs">Search</span>
-              </SidebarMenuButton>
+              </CommandDialogTrigger>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
@@ -132,6 +146,12 @@ export function ProjectSidebarLayout({
                     threadSortOrder={threadSortOrder}
                     threadPreviewCount={threadPreviewCount}
                     ticketViewMode={ticketViewMode}
+                    showProjectThreads={showProjectThreads}
+                    showJiraItems={showJiraItems}
+                    showGitHubActivity={showGitHubActivity}
+                    onShowProjectThreadsChange={onShowProjectThreadsChange}
+                    onShowJiraItemsChange={onShowJiraItemsChange}
+                    onShowGitHubActivityChange={onShowGitHubActivityChange}
                     onSelectProject={onSelectProject}
                     onToggleExpand={onToggleExpand}
                     onSelectThread={onSelectThread}

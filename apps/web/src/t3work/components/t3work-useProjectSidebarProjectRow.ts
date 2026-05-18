@@ -1,11 +1,14 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { buildProjectTicketHierarchy } from "~/t3work/t3work-ticketHierarchy";
-import { readLocalApi } from "~/localApi";
 import type { ProjectThread, ProjectTicket } from "~/t3work/t3work-types";
 import { sortThreads } from "./t3work-projectSidebarShared";
 import type { ProjectRowProps } from "./t3work-projectSidebarProjectRowTypes";
 import { readLinkedRepositoryUrlsFromProject } from "~/t3work/hooks/t3work-createProjectBootstrap";
 import { useProjectGitHubActivity } from "~/t3work/hooks/t3work-useProjectGitHubActivity";
+import {
+  deriveTicketVisibility,
+  showProjectContextMenu,
+} from "./t3work-projectSidebarProjectRow.helpers";
 
 export function useProjectSidebarProjectRow(props: ProjectRowProps) {
   const {
@@ -16,6 +19,12 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     threadPreviewCount,
     ticketViewMode,
     expanded,
+    showProjectThreads,
+    showJiraItems,
+    showGitHubActivity,
+    onShowProjectThreadsChange,
+    onShowJiraItemsChange,
+    onShowGitHubActivityChange,
     onSelectProject,
     onToggleExpand,
     onManageProjectRepositories,
@@ -68,40 +77,16 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     () => buildProjectTicketHierarchy(projectTickets),
     [projectTickets],
   );
-  const visibleFlatTickets = useMemo(() => projectTickets.slice(0, 5), [projectTickets]);
-  const visibleTreeRoots = useMemo(() => ticketHierarchy.roots.slice(0, 5), [ticketHierarchy]);
-
-  const visibleTreeUnresolvedChildren = useMemo(() => {
-    const availableSlots = Math.max(0, 5 - visibleTreeRoots.length);
-    return availableSlots === 0
-      ? ([] as readonly ProjectTicket[])
-      : ticketHierarchy.unresolvedChildren.slice(0, availableSlots);
-  }, [ticketHierarchy, visibleTreeRoots.length]);
-
-  const countVisibleTicketTreeNodes = useCallback(
-    (ticket: ProjectTicket): number => {
-      const children = ticketHierarchy.childrenByParentId.get(ticket.id) ?? [];
-      return 1 + children.reduce((count, child) => count + countVisibleTicketTreeNodes(child), 0);
-    },
-    [ticketHierarchy],
-  );
-
-  const hiddenTicketCount = useMemo(() => {
-    if (ticketViewMode === "flat") {
-      return Math.max(0, projectTickets.length - visibleFlatTickets.length);
-    }
-    const visibleTreeCount =
-      visibleTreeRoots.reduce((count, ticket) => count + countVisibleTicketTreeNodes(ticket), 0) +
-      visibleTreeUnresolvedChildren.length;
-    return Math.max(0, projectTickets.length - visibleTreeCount);
-  }, [
-    countVisibleTicketTreeNodes,
-    projectTickets.length,
-    ticketViewMode,
-    visibleFlatTickets.length,
-    visibleTreeRoots,
-    visibleTreeUnresolvedChildren.length,
-  ]);
+  const { visibleFlatTickets, visibleTreeRoots, visibleTreeUnresolvedChildren, hiddenTicketCount } =
+    useMemo(
+      () =>
+        deriveTicketVisibility({
+          projectTickets,
+          ticketHierarchy,
+          ticketViewMode,
+        }),
+      [projectTickets, ticketHierarchy, ticketViewMode],
+    );
 
   const handleProjectClick = useCallback(() => {
     onSelectProject(project.id);
@@ -127,33 +112,40 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     async (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      const api = readLocalApi();
-      if (!api) return;
-
-      const action = await api.contextMenu.show(
-        [
-          { id: "rename", label: "Rename project" },
-          { id: "manage-repositories", label: "Manage linked repositories" },
-          { id: "delete", label: "Delete project", destructive: true },
-        ],
-        { x: e.clientX, y: e.clientY },
-      );
-
-      if (action === "rename") {
-        setRenameTitle(project.title);
-        setIsRenaming(true);
-        requestAnimationFrame(() => {
-          renameInputRef.current?.focus();
-          renameInputRef.current?.select();
-        });
-      } else if (action === "manage-repositories") {
-        onManageProjectRepositories(project.id);
-      } else if (action === "delete") {
-        const confirmed = await api.dialogs.confirm(`Delete project "${project.title}"?`);
-        if (confirmed) onDeleteProject(project.id);
-      }
+      await showProjectContextMenu({
+        clientX: e.clientX,
+        clientY: e.clientY,
+        showProjectThreads,
+        showJiraItems,
+        showGitHubActivity,
+        projectId: project.id,
+        projectTitle: project.title,
+        onManageProjectRepositories,
+        onShowProjectThreadsChange,
+        onShowJiraItemsChange,
+        onShowGitHubActivityChange,
+        onDeleteProject,
+        onBeginRename: () => {
+          setRenameTitle(project.title);
+          setIsRenaming(true);
+          requestAnimationFrame(() => {
+            renameInputRef.current?.focus();
+            renameInputRef.current?.select();
+          });
+        },
+      });
     },
-    [onDeleteProject, onManageProjectRepositories, project],
+    [
+      onDeleteProject,
+      onManageProjectRepositories,
+      onShowGitHubActivityChange,
+      onShowJiraItemsChange,
+      onShowProjectThreadsChange,
+      project,
+      showGitHubActivity,
+      showJiraItems,
+      showProjectThreads,
+    ],
   );
 
   const handleRenameSubmit = useCallback(() => {
