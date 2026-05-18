@@ -15,6 +15,31 @@ T3 Code is a minimal web GUI for coding agents (currently Codex, Claude, OpenCod
 
 Hermes setup notes: [docs/providers/hermes.md](./docs/providers/hermes.md)
 
+## Hermes Agent support
+
+T3 Code can run [Hermes Agent](https://github.com/nousresearch/hermes-agent) as a local ACP
+provider. Enable Hermes from **Settings -> Providers**, point the binary path at your local
+`hermes` executable, then select Hermes from the chat model picker.
+
+Recommended macOS setup:
+
+```bash
+git clone https://github.com/nousresearch/hermes-agent.git ~/Projects/hermes-agent
+cd ~/Projects/hermes-agent
+python3 -m venv venv
+./venv/bin/pip install -e .
+mkdir -p ~/.local/bin
+ln -sf ~/Projects/hermes-agent/venv/bin/hermes ~/.local/bin/hermes
+~/.local/bin/hermes model
+```
+
+T3 Code auto-detects common Hermes paths such as `~/.local/bin/hermes`,
+`~/Projects/hermes-agent/venv/bin/hermes`, `/opt/homebrew/bin/hermes`, and `/usr/local/bin/hermes`.
+Hermes manages authentication through its own CLI and local config; T3 Code starts `hermes acp`
+only when a Hermes conversation needs it.
+
+Full setup and troubleshooting guide: [docs/providers/hermes.md](./docs/providers/hermes.md)
+
 ### Run without installing
 
 ```bash
