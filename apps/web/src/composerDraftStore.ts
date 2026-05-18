@@ -351,6 +351,10 @@ interface ComposerDraftStoreState {
   finalizePromotedDraftThread: (threadRef: ComposerThreadTarget) => void;
   clearDraftThread: (threadRef: ComposerThreadTarget) => void;
   setStickyModelSelection: (modelSelection: ModelSelection | null | undefined) => void;
+  setStickyModelSelectionForInstances: (
+    modelSelection: ModelSelection | null | undefined,
+    instanceIds: ReadonlyArray<ProviderInstanceId>,
+  ) => void;
   setPrompt: (threadRef: ComposerThreadTarget, prompt: string) => void;
   setTerminalContexts: (threadRef: ComposerThreadTarget, contexts: TerminalContextDraft[]) => void;
   setModelSelection: (
@@ -2259,6 +2263,29 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               stickyModelSelectionByProvider: nextMap,
               stickyActiveProvider: normalized.instanceId,
             };
+          });
+        },
+        setStickyModelSelectionForInstances: (modelSelection, instanceIds) => {
+          const normalized = normalizeModelSelection(modelSelection);
+          if (!normalized) return;
+          const replaceable = new Set(instanceIds);
+          set((state) => {
+            const nextMap: Partial<Record<ProviderInstanceId, ModelSelection>> = {};
+            for (const [instanceId, selection] of Object.entries(
+              state.stickyModelSelectionByProvider,
+            ) as Array<[ProviderInstanceId, ModelSelection]>) {
+              if (!replaceable.has(instanceId)) {
+                nextMap[instanceId] = selection;
+              }
+            }
+            nextMap[normalized.instanceId] = normalized;
+            return Equal.equals(state.stickyModelSelectionByProvider, nextMap) &&
+              state.stickyActiveProvider === normalized.instanceId
+              ? state
+              : {
+                  stickyModelSelectionByProvider: nextMap,
+                  stickyActiveProvider: normalized.instanceId,
+                };
           });
         },
         applyStickyState: (threadRef) => {

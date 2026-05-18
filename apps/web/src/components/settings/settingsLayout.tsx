@@ -53,6 +53,7 @@ export function SettingsRow({
   control,
   children,
   className,
+  contentClassName,
   ...rowProps
 }: Omit<ComponentPropsWithoutRef<"div">, "title"> & {
   title: ReactNode;
@@ -61,6 +62,7 @@ export function SettingsRow({
   resetAction?: ReactNode;
   control?: ReactNode;
   children?: ReactNode;
+  contentClassName?: string;
 }) {
   return (
     <div
@@ -71,7 +73,12 @@ export function SettingsRow({
         className,
       )}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div
+        className={cn(
+          "flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between",
+          contentClassName,
+        )}
+      >
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-h-5 items-center gap-1.5">
             <h3 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground">

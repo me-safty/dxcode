@@ -57,6 +57,11 @@ function renderWithTestRouter(children: ReactNode) {
   return render(<RouterProvider router={router} />);
 }
 
+async function chooseProfileOption(profileLabel: string, optionText: string) {
+  await page.getByRole("combobox", { name: profileLabel }).click();
+  await page.getByRole("option", { name: optionText }).click();
+}
+
 const authAccessHarness = vi.hoisted(() => {
   type Snapshot = AuthAccessSnapshot;
   let snapshot: Snapshot = {
@@ -481,6 +486,13 @@ describe("GeneralSettingsPanel observability", () => {
     resetServerStateForTests();
     await __resetLocalApiForTests();
     localStorage.clear();
+    useComposerDraftStore.setState({
+      draftsByThreadKey: {},
+      draftThreadsByThreadKey: {},
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+      stickyModelSelectionByProvider: {},
+      stickyActiveProvider: null,
+    });
     useUiStateStore.setState({ defaultAdvertisedEndpointKey: null });
     authAccessHarness.reset();
     mockConnectDesktopSshEnvironment.mockReset();
@@ -809,13 +821,66 @@ describe("GeneralSettingsPanel observability", () => {
     await expect.element(page.getByText("Codex default")).toBeInTheDocument();
     await expect.element(page.getByText("Claude default")).not.toBeInTheDocument();
 
-    await page.getByRole("button", { name: "Add profile" }).first().click();
-    await expect.element(page.getByText("codex_profile_1")).toBeInTheDocument();
-
-    await page.getByRole("button", { name: "Switch" }).first().click();
+    await chooseProfileOption("Codex profile", "Add profile");
+    await expect
+      .element(page.getByRole("combobox", { name: "Codex profile" }))
+      .toHaveTextContent("codex_profile_1");
+    await expect
+      .element(page.getByRole("button", { name: "Toggle Codex profile details" }))
+      .toHaveAttribute("aria-expanded", "true");
     expect(useComposerDraftStore.getState().stickyActiveProvider).toBe(
       ProviderInstanceId.make("codex_profile_1"),
     );
+  });
+
+  it("keeps one active profile per enabled provider", async () => {
+    setServerConfigSnapshot({
+      ...createBaseServerConfig(),
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        providerInstances: {
+          ...DEFAULT_SERVER_SETTINGS.providerInstances,
+          [ProviderInstanceId.make("codex_profile_1")]: {
+            driver: ProviderDriverKind.make("codex"),
+            enabled: true,
+          },
+          [ProviderInstanceId.make("claudeAgent_profile_1")]: {
+            driver: ProviderDriverKind.make("claudeAgent"),
+            enabled: true,
+          },
+        },
+      },
+    });
+
+    mounted = await renderWithTestRouter(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect
+      .element(page.getByRole("combobox", { name: "Codex profile" }))
+      .toHaveTextContent("Codex default");
+    await expect
+      .element(page.getByRole("combobox", { name: "Claude profile" }))
+      .toHaveTextContent("Claude default");
+    await expect
+      .element(page.getByRole("button", { name: "Toggle Codex profile details" }))
+      .toHaveAttribute("aria-expanded", "false");
+
+    await chooseProfileOption("Codex profile", "codex_profile_1");
+    await chooseProfileOption("Claude profile", "claudeAgent_profile_1");
+
+    await expect
+      .element(page.getByRole("combobox", { name: "Codex profile" }))
+      .toHaveTextContent("codex_profile_1");
+    await expect
+      .element(page.getByRole("combobox", { name: "Claude profile" }))
+      .toHaveTextContent("claudeAgent_profile_1");
+    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider).toMatchObject({
+      codex_profile_1: { instanceId: "codex_profile_1" },
+      claudeAgent_profile_1: { instanceId: "claudeAgent_profile_1" },
+    });
   });
 
   it("creates and shows a pairing link when network access is enabled", async () => {
