@@ -176,6 +176,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     return selectable;
   }, [instanceEntries, modelOptionsByInstance]);
+  const visibleRailInstanceSet = useMemo(() => {
+    const visible = new Set<ProviderInstanceId>();
+    for (const entry of instanceEntries) {
+      const models = modelOptionsByInstance.get(entry.instanceId) ?? [];
+      if (entry.enabled && entry.isAvailable && models.length > 0) {
+        visible.add(entry.instanceId);
+      }
+    }
+    return visible;
+  }, [instanceEntries, modelOptionsByInstance]);
 
   // Flatten models into a searchable array. One pass over the
   // instance-keyed map; each model carries its instance id + driver kind
@@ -227,7 +237,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const showSidebar = !isSearching && (!isLocked || showLockedInstanceSidebar);
   const sidebarInstanceEntries = showLockedInstanceSidebar
     ? lockedInstanceEntries
-    : instanceEntries.filter((entry) => selectableInstanceSet.has(entry.instanceId));
+    : instanceEntries.filter((entry) => visibleRailInstanceSet.has(entry.instanceId));
   const instanceOrder = useMemo(
     () => instanceEntries.map((entry) => entry.instanceId),
     [instanceEntries],

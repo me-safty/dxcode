@@ -272,6 +272,33 @@ function buildHermesProvider(overrides: Partial<ServerProvider> = {}): ServerPro
   };
 }
 
+function buildPiProvider(overrides: Partial<ServerProvider> = {}): ServerProvider {
+  return {
+    driver: ProviderDriverKind.make("pi"),
+    instanceId: ProviderInstanceId.make("pi"),
+    displayName: "Pi",
+    enabled: true,
+    installed: true,
+    version: "0.73.1",
+    status: "error",
+    auth: { status: "unauthenticated" },
+    checkedAt: new Date().toISOString(),
+    message:
+      "Pi authentication for openai-codex is missing. Run `pi`, use `/login`, and choose ChatGPT Plus/Pro (Codex) to enable GPT-5.5.",
+    models: [
+      {
+        slug: "gpt-5.5",
+        name: "GPT 5.5",
+        isCustom: false,
+        capabilities: createModelCapabilities({ optionDescriptors: [] }),
+      },
+    ],
+    slashCommands: [],
+    skills: [],
+    ...overrides,
+  };
+}
+
 async function mountPicker(props: {
   activeInstanceId?: ProviderInstanceId;
   model: string;
@@ -1255,6 +1282,29 @@ describe("ProviderModelPicker", () => {
 
       expect(document.querySelector('[data-model-picker-provider="hermes"]')).toBeNull();
       expect(document.body.textContent ?? "").not.toContain("No models found");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows unauthenticated providers in the sidebar without making their models selectable", async () => {
+    const mounted = await mountPicker({
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providers: [...TEST_PROVIDERS, buildPiProvider()],
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const piButton = document.querySelector<HTMLButtonElement>(
+          '[data-model-picker-provider="pi"]',
+        );
+        expect(piButton).not.toBeNull();
+        expect(piButton?.disabled).toBe(true);
+        expect(getModelPickerListText()).not.toContain("GPT 5.5");
+      });
     } finally {
       await mounted.cleanup();
     }
