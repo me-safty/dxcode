@@ -64,6 +64,7 @@ import {
 } from "../ProviderUpdateLaunchNotification.logic";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
+import { T3workWorkModeSetting } from "./t3work-WorkModeSetting";
 import {
   buildProviderInstanceUpdatePatch,
   formatDiagnosticsDescription,
@@ -483,6 +484,7 @@ export function GeneralSettingsPanel() {
   const { updateSettings } = useUpdateSettings();
   const observability = useServerObservability();
   const serverProviders = useServerProviders();
+
   const diagnosticsDescription = formatDiagnosticsDescription({
     localTracingEnabled: observability?.localTracingEnabled ?? false,
     otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
@@ -549,6 +551,9 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        {/* T3work settings insertion seam: keep this mount stable to minimize merge conflicts. */}
+        <T3workWorkModeSetting />
 
         <SettingsRow
           title="Time format"

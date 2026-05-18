@@ -29,6 +29,14 @@ Prefix policy:
   - Generated TanStack route tree update after adding `/t3work` route.
 - `apps/web/src/routes/__root.tsx`
   - Register global t3work route shell entrypoint in root routing tree.
+- `apps/web/src/components/settings/SettingsPanels.tsx`
+  - Keep a minimal insertion seam (`<T3workWorkModeSetting />`) so custom mode UI lives in prefixed files while preserving upstream settings updates.
+- `apps/web/src/components/ChatView.tsx`
+  - Add `composerContextAttachmentSlot?: ReactNode` prop to both union variants, read context attachments from store in `onSend`, and render the slot above ChatComposer. Minimal upstreamable seam enabling t3work attachment chip injection.
+- `apps/web/src/components/chat/MessagesTimeline.tsx`
+  - Parse and render context attachment chips from user message text, then strip the inline attachment block from message body rendering so timeline displays clean content.
+- `apps/web/src/composerDraftStore.ts`
+  - Add optional `contextAttachments?: ComposerContextAttachment[]` field + 3 CRUD methods (`addContextAttachment`, `removeContextAttachment`, `clearContextAttachments`) to per-thread draft state. Generic, upstreamable extension point for ephemeral context attachments.
 - `packages/t3-adapter/src/workspace.ts`
   - Move managed workspace default path from `project-shell` to `t3work`.
 - `bun.lock`
@@ -38,5 +46,6 @@ Prefix policy:
 
 - Keep this list minimal.
 - Any new entry requires a one-line reason in this document.
+- Any changed file listed in `allowedModifiedFiles` must auto-merge cleanly against `baseRef` (`upstream/main` by default). If auto-merge is not possible, additive guard fails and prints a diff; user/agent must manually merge.
 - Prefer additive `t3work-*` or `t3work.*` files over editing upstream files.
 - Remove entries when no longer needed.

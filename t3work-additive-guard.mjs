@@ -10,6 +10,7 @@ import {
   shouldCheckLoc,
   toSet,
 } from "./t3work-additive-guard-lib.mjs";
+import { maybeCheckWhitelistedAutoMerge } from "./t3work-additive-guard-merge.mjs";
 
 const LOC_WARN_THRESHOLD = 150;
 const LOC_FAIL_THRESHOLD = 200;
@@ -81,9 +82,11 @@ function fileExistsInRef(ref, filePath) {
   return listed?.split("\n").includes(filePath) ?? false;
 }
 
-function collectCandidatePaths(baseRef) {
-  const mergeBase = runGit(["merge-base", "HEAD", baseRef]);
+function isGitIgnored(filePath) {
+  return maybeRunGit(["check-ignore", filePath]) !== null;
+}
 
+function collectCandidatePaths(mergeBase) {
   const committedOrStagedOrUnstaged = maybeRunGit([
     "diff",
     "--name-only",
@@ -99,6 +102,9 @@ function collectCandidatePaths(baseRef) {
   for (const chunk of [committedOrStagedOrUnstaged, unstaged, staged, untracked]) {
     if (!chunk) continue;
     for (const filePath of toSet(chunk)) {
+      if (isGitIgnored(filePath)) {
+        continue;
+      }
       combined.add(filePath);
     }
   }
@@ -110,7 +116,8 @@ function main() {
   const cwd = process.cwd();
   const config = loadConfig(cwd);
   const baseRef = assertBaseRef(config.baseRef);
-  const candidates = collectCandidatePaths(baseRef);
+  const mergeBase = runGit(["merge-base", "HEAD", baseRef]);
+  const candidates = collectCandidatePaths(mergeBase);
 
   const violations = [];
   const warnings = [];
@@ -125,6 +132,15 @@ function main() {
         violations.push(
           `Modified upstream file not in whitelist: ${filePath}. Add it to allowedModifiedFiles only if absolutely required.`,
         );
+      } else {
+        const autoMergeViolation = maybeCheckWhitelistedAutoMerge({
+          baseRef,
+          mergeBase,
+          filePath,
+        });
+        if (autoMergeViolation) {
+          violations.push(autoMergeViolation);
+        }
       }
       continue;
     }

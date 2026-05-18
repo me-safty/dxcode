@@ -6,6 +6,7 @@
   "locFailThreshold": 200,
   "allowedModifiedFiles": [
     "AGENTS.md",
+    ".gitignore",
     "package.json",
     "bun.lock",
     "apps/server/package.json",
@@ -14,6 +15,10 @@
     "apps/web/package.json",
     "apps/web/vite.config.ts",
     "apps/web/src/routes/__root.tsx",
+    "apps/web/src/components/settings/SettingsPanels.tsx",
+    "apps/web/src/components/ChatView.tsx",
+    "apps/web/src/components/chat/MessagesTimeline.tsx",
+    "apps/web/src/composerDraftStore.ts",
     "apps/web/src/routeTree.gen.ts",
     "packages/t3-adapter/src/workspace.ts"
   ],
