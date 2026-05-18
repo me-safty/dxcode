@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,36 +7,19 @@ import {
   countNonEmptyLines,
   matchesAnyGlob,
   shouldCheckLoc,
-  toSet,
 } from "./t3work-additive-guard-lib.mjs";
 import { maybeCheckWhitelistedAutoMerge } from "./t3work-additive-guard-merge.mjs";
+import {
+  assertBaseRef,
+  assertCanonicalUpstreamRemote,
+  collectCandidatePaths,
+  enforceCanonicalBaseRef,
+  fileExistsInRef,
+  runGit,
+} from "./scripts/lib/additive-guard-core.mjs";
 
 const LOC_WARN_THRESHOLD = 150;
 const LOC_FAIL_THRESHOLD = 200;
-
-function runGit(args) {
-  return execFileSync("git", args, { encoding: "utf8" }).trim();
-}
-
-function maybeRunGit(args) {
-  try {
-    return runGit(args);
-  } catch {
-    return null;
-  }
-}
-
-function assertBaseRef(baseRef) {
-  const candidates = [baseRef, "origin/main", "main"];
-  for (const candidate of candidates) {
-    const ok = maybeRunGit(["rev-parse", "--verify", candidate]);
-    if (ok) return candidate;
-  }
-
-  throw new Error(
-    `Could not resolve base ref '${baseRef}' or fallback refs 'origin/main'/'main'. Fetch remotes and try again.`,
-  );
-}
 
 function loadConfig(cwd) {
   const configPath = path.join(cwd, ".t3work-additive-guard.json");
@@ -57,7 +39,7 @@ function loadConfig(cwd) {
   }
 
   return {
-    baseRef: parsed.baseRef ?? "upstream/main",
+    baseRef: enforceCanonicalBaseRef(parsed.baseRef),
     requiredPrefixes: parsed.requiredPrefixes ?? [parsed.requiredPrefix ?? "t3work-"],
     locWarnThreshold: parsed.locWarnThreshold ?? LOC_WARN_THRESHOLD,
     locFailThreshold: parsed.locFailThreshold ?? LOC_FAIL_THRESHOLD,
@@ -68,52 +50,15 @@ function loadConfig(cwd) {
 }
 
 function resolveUpstreamCounterpartPath(baseRef, filePath, requiredPrefixes) {
-  const candidates = candidateUpstreamCounterpartPaths(filePath, requiredPrefixes);
-  for (const candidate of candidates) {
-    if (fileExistsInRef(baseRef, candidate)) {
-      return candidate;
-    }
+  for (const candidate of candidateUpstreamCounterpartPaths(filePath, requiredPrefixes)) {
+    if (fileExistsInRef(baseRef, candidate)) return candidate;
   }
   return null;
 }
 
-function fileExistsInRef(ref, filePath) {
-  const listed = maybeRunGit(["ls-tree", "-r", "--name-only", ref, "--", filePath]);
-  return listed?.split("\n").includes(filePath) ?? false;
-}
-
-function isGitIgnored(filePath) {
-  return maybeRunGit(["check-ignore", filePath]) !== null;
-}
-
-function collectCandidatePaths(mergeBase) {
-  const committedOrStagedOrUnstaged = maybeRunGit([
-    "diff",
-    "--name-only",
-    "--diff-filter=ACMR",
-    mergeBase,
-    "--",
-  ]);
-  const unstaged = maybeRunGit(["diff", "--name-only", "--diff-filter=ACMR", "--"]);
-  const staged = maybeRunGit(["diff", "--cached", "--name-only", "--diff-filter=ACMR", "--"]);
-  const untracked = maybeRunGit(["ls-files", "--others", "--exclude-standard"]);
-
-  const combined = new Set();
-  for (const chunk of [committedOrStagedOrUnstaged, unstaged, staged, untracked]) {
-    if (!chunk) continue;
-    for (const filePath of toSet(chunk)) {
-      if (isGitIgnored(filePath)) {
-        continue;
-      }
-      combined.add(filePath);
-    }
-  }
-
-  return combined;
-}
-
 function main() {
   const cwd = process.cwd();
+  assertCanonicalUpstreamRemote();
   const config = loadConfig(cwd);
   const baseRef = assertBaseRef(config.baseRef);
   const mergeBase = runGit(["merge-base", "HEAD", baseRef]);

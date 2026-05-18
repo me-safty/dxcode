@@ -35,6 +35,10 @@
     "packages/project-context/**",
     "packages/project-recipes/**",
     "packages/t3-adapter/**",
-    "t3work-additive-guard.mjs"
+    "t3work-additive-guard.mjs",
+    ".githooks/pre-commit",
+    "scripts/setup-git-hooks.mjs",
+    "scripts/lib/additive-guard-core.mjs",
+    "scripts/lib/sync-upstream-core.mjs"
   ]
 }
