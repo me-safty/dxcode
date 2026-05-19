@@ -7,6 +7,7 @@ import {
   normalizeRelationshipKey,
 } from "~/t3work/t3work-ticketRelationshipKeys";
 import { snapshotToProjectTicket } from "~/t3work/t3work-ticketMappers";
+import { readIntegrationCache, writeIntegrationCache } from "./t3work-integrationCache";
 
 function buildTicketLookup(tickets: readonly ProjectTicket[]): Map<string, ProjectTicket> {
   const map = new Map<string, ProjectTicket>();
@@ -87,8 +88,24 @@ export function useRelatedTickets({
       }
 
       const loaded: ProjectTicket[] = [];
+      const unresolvedKeys: string[] = [];
+
+      for (const key of missingKeys) {
+        const cacheKey = `atlassian:getResource:${provider}:${accountId}:${externalProjectId}:${key}`;
+        const cachedSnapshot = readIntegrationCache<ResourceSnapshot>(cacheKey)?.value;
+        if (!cachedSnapshot) {
+          unresolvedKeys.push(key);
+          continue;
+        }
+        loaded.push(snapshotToProjectTicket(project.id, cachedSnapshot));
+      }
+
+      if (!cancelled) {
+        setRelatedTickets(loaded);
+      }
+
       await Promise.all(
-        missingKeys.map(async (key) => {
+        unresolvedKeys.map(async (key) => {
           try {
             const result = await backend.atlassian.getResource({
               accountId,
@@ -99,6 +116,10 @@ export function useRelatedTickets({
                 projectId: externalProjectId,
               },
             });
+            writeIntegrationCache(
+              `atlassian:getResource:${provider}:${accountId}:${externalProjectId}:${key}`,
+              result,
+            );
             loaded.push(snapshotToProjectTicket(project.id, result));
           } catch {
             // Ignore unavailable keys; unresolved entries are still rendered by key.

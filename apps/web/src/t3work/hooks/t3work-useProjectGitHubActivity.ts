@@ -9,6 +9,19 @@ import {
   toGitHubWorkActivityItems,
   type GitHubWorkActivityItem,
 } from "~/t3work/t3work-githubActivity";
+import {
+  normalizeCacheList,
+  readIntegrationCache,
+  writeIntegrationCache,
+} from "./t3work-integrationCache";
+
+type ProjectGitHubActivityCache = {
+  readonly host: string;
+  readonly account?: string;
+  readonly warning?: string;
+  readonly suggestedRepositoryCount: number;
+  readonly activityItems: ReadonlyArray<GitHubWorkActivityItem>;
+};
 
 type UseProjectGitHubActivityOptions = {
   readonly project: ProjectShellProject;
@@ -22,12 +35,31 @@ export function useProjectGitHubActivity({
   enabled = true,
 }: UseProjectGitHubActivityOptions) {
   const backend = useBackend();
+  const cacheKey = useMemo(
+    () =>
+      `github:projectActivity:${project.id}:${project.source.externalProjectKey ?? "none"}:${project.title}:${normalizeCacheList(linkedRepositoryUrls)}`,
+    [linkedRepositoryUrls, project.id, project.source.externalProjectKey, project.title],
+  );
+  const cached = readIntegrationCache<ProjectGitHubActivityCache>(cacheKey)?.value;
   const [loading, setLoading] = useState(false);
-  const [host, setHost] = useState<string>("github.com");
-  const [account, setAccount] = useState<string | undefined>(undefined);
-  const [warning, setWarning] = useState<string | undefined>(undefined);
-  const [suggestedRepositoryCount, setSuggestedRepositoryCount] = useState(0);
-  const [activityItems, setActivityItems] = useState<ReadonlyArray<GitHubWorkActivityItem>>([]);
+  const [host, setHost] = useState<string>(cached?.host ?? "github.com");
+  const [account, setAccount] = useState<string | undefined>(cached?.account);
+  const [warning, setWarning] = useState<string | undefined>(cached?.warning);
+  const [suggestedRepositoryCount, setSuggestedRepositoryCount] = useState(
+    cached?.suggestedRepositoryCount ?? 0,
+  );
+  const [activityItems, setActivityItems] = useState<ReadonlyArray<GitHubWorkActivityItem>>(
+    cached?.activityItems ?? [],
+  );
+
+  useEffect(() => {
+    const cachedValue = readIntegrationCache<ProjectGitHubActivityCache>(cacheKey)?.value;
+    setHost(cachedValue?.host ?? "github.com");
+    setAccount(cachedValue?.account);
+    setWarning(cachedValue?.warning);
+    setSuggestedRepositoryCount(cachedValue?.suggestedRepositoryCount ?? 0);
+    setActivityItems(cachedValue?.activityItems ?? []);
+  }, [cacheKey]);
 
   useEffect(() => {
     if (!backend) return;
@@ -38,6 +70,15 @@ export function useProjectGitHubActivity({
       setSuggestedRepositoryCount(0);
       setActivityItems([]);
       return;
+    }
+
+    const cachedValue = readIntegrationCache<ProjectGitHubActivityCache>(cacheKey)?.value;
+    if (cachedValue) {
+      setHost(cachedValue.host);
+      setAccount(cachedValue.account);
+      setWarning(cachedValue.warning);
+      setSuggestedRepositoryCount(cachedValue.suggestedRepositoryCount);
+      setActivityItems(cachedValue.activityItems);
     }
 
     let cancelled = false;
@@ -69,11 +110,20 @@ export function useProjectGitHubActivity({
         });
 
         if (cancelled) return;
-        setHost(response.host || resolvedHost);
-        setAccount(response.account ?? discoveredAccount);
-        setWarning(response.inboxWarning);
-        setSuggestedRepositoryCount(response.suggestedRepositoryUrls.length);
-        setActivityItems(toGitHubWorkActivityItems(response.inboxItems));
+        const nextAccount = response.account ?? discoveredAccount;
+        const nextCache: ProjectGitHubActivityCache = {
+          host: response.host || resolvedHost,
+          ...(nextAccount !== undefined ? { account: nextAccount } : {}),
+          ...(response.inboxWarning ? { warning: response.inboxWarning } : {}),
+          suggestedRepositoryCount: response.suggestedRepositoryUrls.length,
+          activityItems: toGitHubWorkActivityItems(response.inboxItems),
+        };
+        writeIntegrationCache(cacheKey, nextCache);
+        setHost(nextCache.host);
+        setAccount(nextCache.account);
+        setWarning(nextCache.warning);
+        setSuggestedRepositoryCount(nextCache.suggestedRepositoryCount);
+        setActivityItems(nextCache.activityItems);
       } catch (error) {
         if (cancelled) return;
         setWarning(error instanceof Error ? error.message : "Unable to load GitHub activity");
@@ -88,7 +138,14 @@ export function useProjectGitHubActivity({
     return () => {
       cancelled = true;
     };
-  }, [backend, enabled, linkedRepositoryUrls, project.source.externalProjectKey, project.title]);
+  }, [
+    backend,
+    cacheKey,
+    enabled,
+    linkedRepositoryUrls,
+    project.source.externalProjectKey,
+    project.title,
+  ]);
 
   const activityByWorkItem = useMemo(
     () => groupGitHubActivityByWorkItem(activityItems),

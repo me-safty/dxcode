@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { BackendApi } from "~/t3work/backend/t3work-types";
 import type { CreateProjectStep } from "./t3work-useCreateProject";
 import { persistLastAccountId, pickPreferredAccount } from "./t3work-createProjectUtils";
+import { readIntegrationCache, writeIntegrationCache } from "./t3work-integrationCache";
 
 type FailFn = (value: unknown, fallback: string, nextStep?: CreateProjectStep) => void;
 
@@ -22,9 +23,29 @@ export async function loadPersistedAccountsStep(input: {
   input.setError(null);
   input.setLoadingAccounts(true);
   input.setBootstrapping(true);
+
+  const cachedAccounts =
+    readIntegrationCache<ReadonlyArray<IntegrationAccount>>("atlassian:listAccounts")?.value ?? [];
+  if (cachedAccounts.length > 0) {
+    input.setAccounts(cachedAccounts);
+    const cachedPreferredAccount = pickPreferredAccount(cachedAccounts);
+    input.setSelectedAccount(cachedPreferredAccount);
+    if (cachedPreferredAccount) {
+      persistLastAccountId(cachedPreferredAccount.id);
+      const cachedProjects =
+        readIntegrationCache<ReadonlyArray<ExternalProject>>(
+          `atlassian:listProjects:${cachedPreferredAccount.provider}:${cachedPreferredAccount.id}`,
+        )?.value ?? [];
+      input.setSelectedProject(null);
+      input.setProjects(cachedProjects);
+      input.setStep(cachedAccounts.length === 1 ? "project" : "account");
+    }
+  }
+
   try {
     if (!input.backend) throw new Error("Backend not available");
     const loadedAccounts = await input.backend.atlassian.listAccounts();
+    writeIntegrationCache("atlassian:listAccounts", loadedAccounts);
     if (loadedAccounts.length === 0) return;
 
     input.setAccounts(loadedAccounts);
@@ -38,6 +59,10 @@ export async function loadPersistedAccountsStep(input: {
         id: preferredAccount.id,
         provider: preferredAccount.provider,
       });
+      writeIntegrationCache(
+        `atlassian:listProjects:${preferredAccount.provider}:${preferredAccount.id}`,
+        projects,
+      );
       input.setSelectedProject(null);
       input.setProjects(projects);
       input.setStep("project");

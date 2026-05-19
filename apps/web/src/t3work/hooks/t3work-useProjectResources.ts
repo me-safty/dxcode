@@ -1,16 +1,19 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import type {
-  ExternalResourceRef,
-  ProjectShellProject,
-  ResourcePage,
-} from "@t3tools/project-context";
-import type { ProjectTicket } from "~/t3work/t3work-types";
+import type { ProjectShellProject, ResourcePage } from "@t3tools/project-context";
 import { useBackend } from "~/t3work/backend/t3work-index";
 import { resourceRefToProjectTicket } from "~/t3work/t3work-ticketMappers";
+import { readIntegrationCache, writeIntegrationCache } from "./t3work-integrationCache";
 
 export function useProjectResources(project: ProjectShellProject) {
   const backend = useBackend();
-  const [resources, setResources] = useState<ResourcePage | null>(null);
+  const cacheKey = useMemo(
+    () =>
+      `atlassian:listResources:${project.source.provider}:${project.source.accountId ?? "none"}:${project.source.externalProjectId ?? "none"}`,
+    [project.source.accountId, project.source.externalProjectId, project.source.provider],
+  );
+  const [resources, setResources] = useState<ResourcePage | null>(
+    () => readIntegrationCache<ResourcePage>(cacheKey)?.value ?? null,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +37,7 @@ export function useProjectResources(project: ProjectShellProject) {
         externalProjectId: project.source.externalProjectId,
       });
       setResources(page);
+      writeIntegrationCache(cacheKey, page);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load resources");
     } finally {
@@ -41,10 +45,15 @@ export function useProjectResources(project: ProjectShellProject) {
     }
   }, [
     backend,
+    cacheKey,
     project.source.externalProjectId,
     project.source.accountId,
     project.source.provider,
   ]);
+
+  useEffect(() => {
+    setResources(readIntegrationCache<ResourcePage>(cacheKey)?.value ?? null);
+  }, [cacheKey]);
 
   useEffect(() => {
     load();

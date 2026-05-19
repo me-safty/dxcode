@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import type { ProjectShellProject, ResourceSnapshot } from "@t3tools/project-context";
 import { useBackend } from "~/t3work/backend/t3work-index";
+import { readIntegrationCache, writeIntegrationCache } from "./t3work-integrationCache";
 
 export interface TicketDetail {
   snapshot: ResourceSnapshot | null;
@@ -11,7 +12,14 @@ export interface TicketDetail {
 
 export function useTicketDetail(project: ProjectShellProject, ticketId: string): TicketDetail {
   const backend = useBackend();
-  const [snapshot, setSnapshot] = useState<ResourceSnapshot | null>(null);
+  const cacheKey = useMemo(
+    () =>
+      `atlassian:getResource:${project.source.provider}:${project.source.accountId ?? "none"}:${project.source.externalProjectId ?? "none"}:${ticketId}`,
+    [project.source.accountId, project.source.externalProjectId, project.source.provider, ticketId],
+  );
+  const [snapshot, setSnapshot] = useState<ResourceSnapshot | null>(
+    () => readIntegrationCache<ResourceSnapshot>(cacheKey)?.value ?? null,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,12 +45,17 @@ export function useTicketDetail(project: ProjectShellProject, ticketId: string):
         ref,
       });
       setSnapshot(result);
+      writeIntegrationCache(cacheKey, result);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load ticket details");
     } finally {
       setLoading(false);
     }
-  }, [backend, project, ticketId]);
+  }, [backend, cacheKey, project, ticketId]);
+
+  useEffect(() => {
+    setSnapshot(readIntegrationCache<ResourceSnapshot>(cacheKey)?.value ?? null);
+  }, [cacheKey]);
 
   useEffect(() => {
     load();
