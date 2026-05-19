@@ -1,42 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { SourceControlDiscoveryResult } from "@t3tools/contracts";
 import { readLocalApi } from "~/localApi";
 import { useBackend } from "~/t3work/backend/t3work-index";
-
-function parseOptionString(value: unknown): string | undefined {
-  if (typeof value === "string" && value.trim().length > 0) return value.trim();
-  if (!value || typeof value !== "object") return undefined;
-  const tagged = value as { _tag?: unknown; value?: unknown };
-  if (
-    tagged._tag === "Some" &&
-    typeof tagged.value === "string" &&
-    tagged.value.trim().length > 0
-  ) {
-    return tagged.value.trim();
-  }
-  return undefined;
-}
-
-function parseGitHubAuth(discovery: SourceControlDiscoveryResult): {
-  status: "authenticated" | "unauthenticated" | "unknown";
-  host?: string;
-  account?: string;
-  detail?: string;
-} {
-  const github = discovery.sourceControlProviders.find((provider) => provider.kind === "github");
-  if (!github) {
-    return { status: "unknown", detail: "GitHub CLI provider was not found." };
-  }
-  const host = parseOptionString(github.auth.host);
-  const account = parseOptionString(github.auth.account);
-  const detail = parseOptionString(github.auth.detail);
-  return {
-    status: github.auth.status,
-    ...(host ? { host } : {}),
-    ...(account ? { account } : {}),
-    ...(detail ? { detail } : {}),
-  };
-}
+import {
+  normalizeCacheList,
+  readIntegrationCache,
+  writeIntegrationCache,
+} from "./t3work-integrationCache";
+import {
+  parseGitHubAuth,
+  type GitHubAuthCache,
+  type GitHubDiscoveryCache,
+} from "./t3work-githubRepositoryDiscoveryUtils";
 
 export function useGitHubRepositoryDiscovery({
   enabled,
@@ -50,17 +24,47 @@ export function useGitHubRepositoryDiscovery({
   linkedRepositoryUrls: ReadonlyArray<string>;
 }) {
   const backend = useBackend();
-  const [githubHost, setGithubHost] = useState("");
-  const [githubAccount, setGithubAccount] = useState<string | undefined>(undefined);
+  const authCache = readIntegrationCache<GitHubAuthCache>("github:auth")?.value;
+  const discoveryCacheKey = useMemo(
+    () =>
+      `github:discovery:${projectKey ?? "none"}:${projectTitle ?? "none"}:${normalizeCacheList(linkedRepositoryUrls)}`,
+    [linkedRepositoryUrls, projectKey, projectTitle],
+  );
+  const discoveryCache = readIntegrationCache<GitHubDiscoveryCache>(discoveryCacheKey)?.value;
+  const [githubHost, setGithubHost] = useState(
+    discoveryCache?.githubHost ?? authCache?.githubHost ?? "",
+  );
+  const [githubAccount, setGithubAccount] = useState<string | undefined>(
+    discoveryCache?.githubAccount ?? authCache?.githubAccount,
+  );
   const [authStatus, setAuthStatus] = useState<
     "checking" | "authenticated" | "unauthenticated" | "unknown"
-  >("checking");
-  const [authDetail, setAuthDetail] = useState<string | undefined>(undefined);
+  >(authCache?.authStatus ?? "checking");
+  const [authDetail, setAuthDetail] = useState<string | undefined>(authCache?.authDetail);
   const [loadingAuth, setLoadingAuth] = useState(false);
   const [loadingDiscovery, setLoadingDiscovery] = useState(false);
-  const [suggestedUrls, setSuggestedUrls] = useState<ReadonlyArray<string>>([]);
-  const [selectedSuggestedUrls, setSelectedSuggestedUrls] = useState<Set<string>>(new Set());
-  const [discoveryWarning, setDiscoveryWarning] = useState<string | undefined>(undefined);
+  const [suggestedUrls, setSuggestedUrls] = useState<ReadonlyArray<string>>(
+    discoveryCache?.suggestedUrls ?? [],
+  );
+  const [selectedSuggestedUrls, setSelectedSuggestedUrls] = useState<Set<string>>(
+    new Set(discoveryCache?.suggestedUrls ?? []),
+  );
+  const [discoveryWarning, setDiscoveryWarning] = useState<string | undefined>(
+    discoveryCache?.discoveryWarning,
+  );
+
+  useEffect(() => {
+    const cachedAuth = readIntegrationCache<GitHubAuthCache>("github:auth")?.value;
+    const cachedDiscovery = readIntegrationCache<GitHubDiscoveryCache>(discoveryCacheKey)?.value;
+
+    setGithubHost(cachedDiscovery?.githubHost ?? cachedAuth?.githubHost ?? "");
+    setGithubAccount(cachedDiscovery?.githubAccount ?? cachedAuth?.githubAccount);
+    setAuthStatus(cachedAuth?.authStatus ?? "checking");
+    setAuthDetail(cachedAuth?.authDetail);
+    setSuggestedUrls(cachedDiscovery?.suggestedUrls ?? []);
+    setSelectedSuggestedUrls(new Set(cachedDiscovery?.suggestedUrls ?? []));
+    setDiscoveryWarning(cachedDiscovery?.discoveryWarning);
+  }, [discoveryCacheKey]);
 
   const discoverSuggestions = useCallback(
     async (host: string, account?: string) => {
@@ -74,6 +78,14 @@ export function useGitHubRepositoryDiscovery({
           ...(projectTitle ? { projectTitle } : {}),
           linkedRepositoryUrls,
         });
+        const nextAccount = response.account ?? account;
+        const nextCache: GitHubDiscoveryCache = {
+          githubHost: response.host,
+          ...(nextAccount !== undefined ? { githubAccount: nextAccount } : {}),
+          suggestedUrls: response.suggestedRepositoryUrls,
+          ...(response.inboxWarning ? { discoveryWarning: response.inboxWarning } : {}),
+        };
+        writeIntegrationCache(discoveryCacheKey, nextCache);
         setGithubHost(response.host);
         setGithubAccount(response.account ?? account);
         setSuggestedUrls(response.suggestedRepositoryUrls);
@@ -89,7 +101,7 @@ export function useGitHubRepositoryDiscovery({
         setLoadingDiscovery(false);
       }
     },
-    [backend, linkedRepositoryUrls, projectKey, projectTitle],
+    [backend, discoveryCacheKey, linkedRepositoryUrls, projectKey, projectTitle],
   );
 
   useEffect(() => {
@@ -109,6 +121,12 @@ export function useGitHubRepositoryDiscovery({
         const discovery = await api.server.discoverSourceControl();
         if (cancelled) return;
         const auth = parseGitHubAuth(discovery);
+        writeIntegrationCache("github:auth", {
+          githubHost: auth.host ?? "github.com",
+          ...(auth.account ? { githubAccount: auth.account } : {}),
+          authStatus: auth.status,
+          ...(auth.detail ? { authDetail: auth.detail } : {}),
+        });
         setAuthStatus(auth.status);
         setAuthDetail(auth.detail);
         setGithubHost(auth.host ?? "github.com");

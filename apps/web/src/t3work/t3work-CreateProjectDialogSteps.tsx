@@ -1,7 +1,7 @@
-import { Building2 } from "lucide-react";
 import type { ExternalProject, IntegrationAccount } from "@t3tools/integrations-core";
 import { Button } from "~/t3work/components/ui/t3work-button";
 import { Input } from "~/t3work/components/ui/t3work-input";
+import { ProjectAvatar } from "~/t3work/components/t3work-ProjectAvatar";
 import { Skeleton } from "~/t3work/components/ui/t3work-skeleton";
 import { ConfirmStep, CreatingStep } from "~/t3work/t3work-CreateProjectDialogConfirmStep";
 
@@ -159,11 +159,19 @@ export function ProjectStep({
                 onClick={() => onSelectProject(project)}
                 className={`flex w-full items-center justify-between rounded-md border p-3 text-left ${selectedProject?.id === project.id ? "border-primary bg-primary/5" : "border-border"}`}
               >
-                <div>
-                  <div className="text-sm font-medium">{project.title}</div>
-                  <div className="text-xs text-muted-foreground">{project.key}</div>
+                <div className="flex min-w-0 items-center gap-3">
+                  <ProjectAvatar
+                    title={project.title}
+                    projectKey={project.key}
+                    raw={project.raw}
+                    iconUrl={project.iconUrl}
+                    className="size-5 shrink-0 rounded-sm object-cover"
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{project.title}</div>
+                    <div className="text-xs text-muted-foreground">{project.key}</div>
+                  </div>
                 </div>
-                <Building2 className="size-4 text-muted-foreground" />
               </button>
             ))}
       </div>

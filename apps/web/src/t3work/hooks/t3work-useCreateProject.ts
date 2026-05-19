@@ -14,11 +14,9 @@ import {
   buildInitialRaw,
   normalizeRepositoryUrls,
 } from "./t3work-createProjectBootstrap";
-import {
-  isValidAtlassianUrl,
-  normalizeAtlassianUrl,
-  persistLastAccountId,
-} from "./t3work-createProjectUtils";
+import { isValidAtlassianUrl, normalizeAtlassianUrl } from "./t3work-createProjectUtils";
+import { writeIntegrationCache } from "./t3work-integrationCache";
+import { loadProjectsForAccount } from "./t3work-useCreateProjectAccountLoaders";
 import { applyLoadedAccounts, failWithStep } from "./t3work-useCreateProjectHelpers";
 import { loadPersistedAccountsStep } from "./t3work-useCreateProjectLoadPersisted";
 
@@ -79,7 +77,9 @@ export function useCreateProject() {
       setLoadingAccounts(true);
       try {
         if (!backend) throw new Error("Backend not available");
-        applyAccounts(await backend.atlassian.connectOAuth({ sites, token }));
+        const loadedAccounts = await backend.atlassian.connectOAuth({ sites, token });
+        writeIntegrationCache("atlassian:listAccounts", loadedAccounts);
+        applyAccounts(loadedAccounts);
       } catch (e) {
         fail(e, "Failed to connect Atlassian");
       } finally {
@@ -95,12 +95,12 @@ export function useCreateProject() {
       setLoadingAccounts(true);
       try {
         if (!backend) throw new Error("Backend not available");
-        applyAccounts(
-          await backend.atlassian.connectBasic({
-            ...credentials,
-            siteUrl: normalizeAtlassianUrl(credentials.siteUrl),
-          }),
-        );
+        const loadedAccounts = await backend.atlassian.connectBasic({
+          ...credentials,
+          siteUrl: normalizeAtlassianUrl(credentials.siteUrl),
+        });
+        writeIntegrationCache("atlassian:listAccounts", loadedAccounts);
+        applyAccounts(loadedAccounts);
       } catch (e) {
         fail(e, "Failed to connect Atlassian");
       } finally {
@@ -111,24 +111,18 @@ export function useCreateProject() {
   );
 
   const loadProjects = useCallback(
-    async (account: IntegrationAccount) => {
-      setError(null);
-      setLoadingProjects(true);
-      try {
-        if (!backend) throw new Error("Backend not available");
-        setSelectedAccount(account);
-        persistLastAccountId(account.id);
-        setSelectedProject(null);
-        setProjects(
-          await backend.atlassian.listProjects({ id: account.id, provider: account.provider }),
-        );
-        setStep("project");
-      } catch (e) {
-        fail(e, "Failed to load Jira projects", "account");
-      } finally {
-        setLoadingProjects(false);
-      }
-    },
+    async (account: IntegrationAccount) =>
+      loadProjectsForAccount({
+        backend,
+        account,
+        setError,
+        setLoadingProjects,
+        setSelectedAccount,
+        setSelectedProject,
+        setProjects,
+        setStep,
+        fail,
+      }),
     [backend, fail],
   );
 

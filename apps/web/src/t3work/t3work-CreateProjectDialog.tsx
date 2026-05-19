@@ -72,6 +72,12 @@ export function CreateProjectDialog({
     setLinkedRepositoryUrls((current) => current.filter((entry) => entry !== url));
   };
 
+  const handleDiscoveredRepositoryUrlsChange = (urls: ReadonlyArray<string>) => {
+    setDiscoveredRepositoryUrls(urls);
+    if (urls.length === 0) return;
+    setLinkedRepositoryUrls((current) => [...new Set([...current, ...urls])]);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 p-2 sm:items-center sm:p-4">
       <Card className="flex h-full w-full max-w-3xl flex-col overflow-hidden sm:h-[min(40rem,calc(100dvh-2rem))]">
@@ -134,10 +140,15 @@ export function CreateProjectDialog({
                 onAddRepositories={(urls: ReadonlyArray<string>) =>
                   setLinkedRepositoryUrls((current) => [...new Set([...current, ...urls])])
                 }
-                onDiscoveredRepositoryUrlsChange={setDiscoveredRepositoryUrls}
+                onDiscoveredRepositoryUrlsChange={handleDiscoveredRepositoryUrlsChange}
               />
             ) : null}
-            {setup.step === "creating" ? <CreatingStep /> : null}
+            {setup.step === "creating" ? (
+              <CreatingStep
+                projectTitle={selectedProject?.title}
+                repositoryCount={linkedRepositoryUrls.length}
+              />
+            ) : null}
           </div>
         </ScrollArea>
 

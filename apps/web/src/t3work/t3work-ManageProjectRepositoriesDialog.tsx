@@ -45,6 +45,12 @@ export function ManageProjectRepositoriesDialog({
     setLinkedRepositoryUrls((current) => current.filter((entry) => entry !== url));
   };
 
+  const handleDiscoveredRepositoryUrlsChange = (urls: ReadonlyArray<string>) => {
+    setDiscoveredRepositoryUrls(urls);
+    if (urls.length === 0) return;
+    setLinkedRepositoryUrls((current) => normalizeRepositoryUrls([...current, ...urls]));
+  };
+
   const saveLinkedRepositories = async () => {
     setSaveError(null);
     setSaving(true);
@@ -97,7 +103,7 @@ export function ManageProjectRepositoriesDialog({
                       normalizeRepositoryUrls([...current, ...urls]),
                     )
                   }
-                  onVisibleSuggestionsChange={setDiscoveredRepositoryUrls}
+                  onVisibleSuggestionsChange={handleDiscoveredRepositoryUrlsChange}
                 />
               </CardContent>
             </Card>
@@ -111,6 +117,9 @@ export function ManageProjectRepositoriesDialog({
                   setNewRepositoryUrl={setNewRepositoryUrl}
                   onAddRepository={addRepository}
                   onRemoveRepository={removeRepository}
+                  onAddSearchableOption={(url) =>
+                    setLinkedRepositoryUrls((current) => normalizeRepositoryUrls([...current, url]))
+                  }
                   searchableRepositoryOptions={discoveredRepositoryUrls}
                   helpText="Saving updates this project and refreshes workspace references."
                 />

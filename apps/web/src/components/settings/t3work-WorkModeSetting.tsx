@@ -1,16 +1,13 @@
-import { useState } from "react";
-
 import {
-  readT3workWorkMode,
+  useT3workWorkMode,
   writeT3workWorkMode,
   type T3workWorkMode,
 } from "../../t3work/t3work-workMode";
 
 export function T3workWorkModeSetting() {
-  const [workMode, setWorkMode] = useState<T3workWorkMode>(() => readT3workWorkMode());
+  const workMode = useT3workWorkMode();
 
   const setMode = (mode: T3workWorkMode) => {
-    setWorkMode(mode);
     writeT3workWorkMode(mode);
   };
 

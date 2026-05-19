@@ -62,7 +62,7 @@ import {
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
-import { readT3workWorkMode } from "../t3work/t3work-workMode";
+import { useT3workWorkMode } from "../t3work/t3work-workMode";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -106,8 +106,7 @@ function RootRouteView() {
   const { authGateState } = Route.useRouteContext();
   const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
 
-  // Check work mode from localStorage
-  const workMode = readT3workWorkMode();
+  const workMode = useT3workWorkMode();
 
   // Check actual route path to determine layout (t3work routes don't need sidebar)
   const isT3workRoute = pathname === "/t3work" || pathname.startsWith("/t3work/");
