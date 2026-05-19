@@ -238,6 +238,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const sidebarInstanceEntries = showLockedInstanceSidebar
     ? lockedInstanceEntries
     : instanceEntries.filter((entry) => visibleRailInstanceSet.has(entry.instanceId));
+  const selectedEntry =
+    selectedInstanceId === "favorites" ? null : (entryByInstanceId.get(selectedInstanceId) ?? null);
   const instanceOrder = useMemo(
     () => instanceEntries.map((entry) => entry.instanceId),
     [instanceEntries],
@@ -423,6 +425,27 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     (): string[] => filteredModels.map((model) => `${model.instanceId}:${model.slug}`),
     [filteredModels],
   );
+  const emptyMessage = useMemo(() => {
+    if (searchQuery.trim().length > 0) {
+      return "No models match that search";
+    }
+    if (selectedInstanceId === "favorites") {
+      return "No favorite models yet";
+    }
+    if (selectedEntry && !selectedEntry.enabled) {
+      return `${selectedEntry.displayName} is disabled in Settings`;
+    }
+    if (selectedEntry && selectedEntry.status !== "ready") {
+      const detail = selectedEntry.snapshot.message?.trim();
+      return detail
+        ? `${selectedEntry.displayName} needs setup: ${detail}`
+        : `${selectedEntry.displayName} needs setup in Settings`;
+    }
+    if (selectedEntry) {
+      return `${selectedEntry.displayName} has no models yet. Finish setup, refresh provider status, then try again.`;
+    }
+    return "No models found";
+  }, [searchQuery, selectedEntry, selectedInstanceId]);
   const filteredModelByKey = useMemo(
     (): ReadonlyMap<string, ModelPickerItem> =>
       new Map(filteredModels.map((model) => [`${model.instanceId}:${model.slug}`, model] as const)),
@@ -654,7 +677,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               </ComboboxList>
             </div>
             <ComboboxEmpty className="not-empty:py-6 empty:h-0 text-xs font-normal leading-snug">
-              No models found
+              {emptyMessage}
             </ComboboxEmpty>
           </div>
         </Combobox>

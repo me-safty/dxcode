@@ -1330,6 +1330,32 @@ describe("ProviderModelPicker", () => {
     }
   });
 
+  it("explains provider setup when the active Hermes provider has no models", async () => {
+    const mounted = await mountPicker({
+      activeInstanceId: ProviderInstanceId.make("hermes"),
+      model: "hermes-default",
+      lockedProvider: null,
+      providers: [
+        ...TEST_PROVIDERS,
+        buildHermesProvider({
+          models: [],
+        }),
+      ],
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain(
+          "Hermes has no models yet. Finish setup, refresh provider status, then try again.",
+        );
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("accepts outline trigger styling", async () => {
     const mounted = await mountPicker({
       model: "gpt-5-codex",

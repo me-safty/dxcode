@@ -75,6 +75,12 @@ type EnvironmentDraftRow = {
   readonly valueRedacted?: boolean;
 };
 
+type ProviderSetupChecklistItem = {
+  readonly label: string;
+  readonly state: "complete" | "action" | "pending";
+  readonly detail: string;
+};
+
 function makeEnvironmentDraftRow(
   variable: ProviderInstanceEnvironmentVariable,
   index: number,
@@ -105,6 +111,74 @@ function readConfigString(config: unknown, key: string): string | null {
   if (config === null || typeof config !== "object") return null;
   const value = (config as Record<string, unknown>)[key];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+export function buildProviderSetupChecklist(input: {
+  readonly displayName: string;
+  readonly isHermesDriver: boolean;
+  readonly isPiDriver: boolean;
+  readonly enabled: boolean;
+  readonly liveProvider: ServerProvider | undefined;
+  readonly configuredBinaryPath: string | null;
+  readonly configuredPiBinaryPath: string | null;
+  readonly modelCount: number;
+}): ReadonlyArray<ProviderSetupChecklistItem> {
+  const providerName = input.displayName;
+  const installed = input.liveProvider?.installed === true;
+  const authStatus = input.liveProvider?.auth.status ?? "unknown";
+  const isCliManagedAuth = input.isHermesDriver || input.isPiDriver;
+
+  return [
+    {
+      label: "Enabled",
+      state: input.enabled ? "complete" : "action",
+      detail: input.enabled
+        ? `${providerName} is enabled for new chats.`
+        : `Turn on ${providerName} before selecting it in chat.`,
+    },
+    {
+      label: input.isPiDriver ? "Adapter detected" : "CLI detected",
+      state: installed ? "complete" : "action",
+      detail: installed
+        ? `${input.configuredBinaryPath ?? (input.isPiDriver ? "pi-acp" : "hermes")} is reachable.`
+        : `Set an absolute ${input.isPiDriver ? "pi-acp adapter" : "Hermes"} path or install the CLI.`,
+    },
+    ...(input.isPiDriver
+      ? [
+          {
+            label: "Pi binary",
+            state: input.configuredPiBinaryPath ? "complete" : "pending",
+            detail: input.configuredPiBinaryPath
+              ? `${input.configuredPiBinaryPath} is configured.`
+              : "Using pi from PATH. Set an absolute path if the packaged app cannot find it.",
+          } satisfies ProviderSetupChecklistItem,
+        ]
+      : []),
+    {
+      label: "Authentication",
+      state:
+        authStatus === "authenticated" ||
+        (installed && isCliManagedAuth && authStatus === "unknown")
+          ? "complete"
+          : authStatus === "unauthenticated"
+            ? "action"
+            : "pending",
+      detail:
+        authStatus === "authenticated"
+          ? "Authentication is verified."
+          : isCliManagedAuth && installed && authStatus === "unknown"
+            ? `${providerName} manages auth in its own CLI config. Send a test message after setup.`
+            : `Finish ${providerName} login in the provider CLI, then refresh status.`,
+    },
+    {
+      label: "Model visible",
+      state: input.modelCount > 0 ? "complete" : "action",
+      detail:
+        input.modelCount > 0
+          ? `${input.modelCount} model${input.modelCount === 1 ? "" : "s"} available in the picker.`
+          : `Configure a default model in ${providerName}, then refresh provider status.`,
+    },
+  ];
 }
 
 /**
@@ -541,19 +615,23 @@ export function ProviderInstanceCard({
   const displayName =
     instance.displayName?.trim() || driverOption?.label || String(instance.driver);
   const accentColor = normalizeProviderAccentColor(instance.accentColor);
-  const { copyToClipboard } = useCopyToClipboard<{ providerName: string }>({
-    onCopy: ({ providerName }) => {
+  const { copyToClipboard } = useCopyToClipboard<{
+    successTitle: string;
+    errorTitle: string;
+    description?: string;
+  }>({
+    onCopy: ({ successTitle, description }) => {
       toastManager.add({
         type: "success",
-        title: `${providerName} update command copied`,
-        description: "Run it in a terminal when you are ready to update.",
+        title: successTitle,
+        description: description ?? "Run it in a terminal when you are ready.",
       });
     },
-    onError: (error, { providerName }) => {
+    onError: (error, { errorTitle }) => {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: `Could not copy ${providerName} update command`,
+          title: errorTitle,
           description: error.message,
         }),
       );
@@ -752,6 +830,67 @@ export function ProviderInstanceCard({
     ...(suggestedBinaryPath ? [["Detected path", suggestedBinaryPath]] : []),
   ].filter((row): row is [string, string] => typeof row[1] === "string" && row[1].length > 0);
 
+  const setupChecklist =
+    isHermesDriver || isPiDriver
+      ? buildProviderSetupChecklist({
+          displayName,
+          isHermesDriver,
+          isPiDriver,
+          enabled,
+          liveProvider,
+          configuredBinaryPath,
+          configuredPiBinaryPath,
+          modelCount: modelsForDisplay.length,
+        })
+      : [];
+
+  const diagnosticsText =
+    diagnosticsRows.length > 0
+      ? [
+          `${displayName} provider diagnostics`,
+          ...diagnosticsRows.map(([label, value]) => `${label}: ${value}`),
+          ...setupChecklist.map((item) => `${item.label}: ${item.state} - ${item.detail}`),
+        ].join("\n")
+      : null;
+
+  const setupChecklistNode =
+    setupChecklist.length > 0 ? (
+      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+        <div className="grid gap-3">
+          <div className="grid gap-1">
+            <span className="text-xs font-medium text-foreground">Setup checklist</span>
+            <p className="text-xs leading-snug text-muted-foreground">
+              Complete each row before using {displayName} in a fresh chat.
+            </p>
+          </div>
+          <div className="grid gap-1.5">
+            {setupChecklist.map((item) => (
+              <div
+                key={item.label}
+                className="grid grid-cols-[auto_1fr] gap-2 rounded-md border border-border/70 bg-muted/20 p-2 text-xs"
+              >
+                <span
+                  className={cn(
+                    "mt-0.5 size-2 rounded-full",
+                    item.state === "complete"
+                      ? "bg-success"
+                      : item.state === "action"
+                        ? "bg-warning"
+                        : "bg-muted-foreground/50",
+                  )}
+                  aria-hidden
+                />
+                <span className="min-w-0">
+                  <span className="block font-medium text-foreground">{item.label}</span>
+                  <span className="block leading-snug text-muted-foreground">{item.detail}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    ) : null;
+
   const diagnosticsNode =
     (isHermesDriver || isPiDriver) && diagnosticsRows.length > 0 ? (
       <div className="border-t border-border/60 px-4 py-3 sm:px-5">
@@ -775,6 +914,24 @@ export function ProviderInstanceCard({
               </div>
             ))}
           </dl>
+          {diagnosticsText ? (
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              className="w-fit"
+              onClick={() =>
+                copyToClipboard(diagnosticsText, {
+                  successTitle: `${displayName} diagnostics copied`,
+                  errorTitle: `Could not copy ${displayName} diagnostics`,
+                  description: "Paste this when reporting provider setup problems.",
+                })
+              }
+            >
+              <CopyIcon className="size-3" />
+              Copy diagnostics
+            </Button>
+          ) : null}
         </div>
       </div>
     ) : null;
@@ -810,12 +967,22 @@ export function ProviderInstanceCard({
           <ProviderSetupCommandRow
             command="hermes model"
             label="Hermes setup command"
-            onCopy={(command, label) => copyToClipboard(command, { providerName: label })}
+            onCopy={(command, label) =>
+              copyToClipboard(command, {
+                successTitle: `${label} copied`,
+                errorTitle: `Could not copy ${label}`,
+              })
+            }
           />
           <ProviderSetupCommandRow
             command="hermes acp"
             label="Hermes ACP verification command"
-            onCopy={(command, label) => copyToClipboard(command, { providerName: label })}
+            onCopy={(command, label) =>
+              copyToClipboard(command, {
+                successTitle: `${label} copied`,
+                errorTitle: `Could not copy ${label}`,
+              })
+            }
           />
         </div>
         <a
@@ -861,22 +1028,42 @@ export function ProviderInstanceCard({
           <ProviderSetupCommandRow
             command="npm install -g @earendil-works/pi-coding-agent pi-acp"
             label="Pi install command"
-            onCopy={(command, label) => copyToClipboard(command, { providerName: label })}
+            onCopy={(command, label) =>
+              copyToClipboard(command, {
+                successTitle: `${label} copied`,
+                errorTitle: `Could not copy ${label}`,
+              })
+            }
           />
           <ProviderSetupCommandRow
             command="pi --version"
             label="Pi verification command"
-            onCopy={(command, label) => copyToClipboard(command, { providerName: label })}
+            onCopy={(command, label) =>
+              copyToClipboard(command, {
+                successTitle: `${label} copied`,
+                errorTitle: `Could not copy ${label}`,
+              })
+            }
           />
           <ProviderSetupCommandRow
             command="pi"
             label="Pi login command"
-            onCopy={(command, label) => copyToClipboard(command, { providerName: label })}
+            onCopy={(command, label) =>
+              copyToClipboard(command, {
+                successTitle: `${label} copied`,
+                errorTitle: `Could not copy ${label}`,
+              })
+            }
           />
           <ProviderSetupCommandRow
             command="pi-acp --help"
             label="Pi ACP verification command"
-            onCopy={(command, label) => copyToClipboard(command, { providerName: label })}
+            onCopy={(command, label) =>
+              copyToClipboard(command, {
+                successTitle: `${label} copied`,
+                errorTitle: `Could not copy ${label}`,
+              })
+            }
           />
         </div>
         <a
@@ -930,7 +1117,9 @@ export function ProviderInstanceCard({
                     className="size-6 shrink-0 rounded-sm p-0 text-muted-foreground hover:text-foreground"
                     onClick={() =>
                       copyToClipboard(updateCommand, {
-                        providerName: displayName,
+                        successTitle: `${displayName} update command copied`,
+                        errorTitle: `Could not copy ${displayName} update command`,
+                        description: "Run it in a terminal when you are ready to update.",
                       })
                     }
                     aria-label="Copy update command"
@@ -1041,7 +1230,10 @@ export function ProviderInstanceCard({
                                   className="size-6 shrink-0 rounded-sm p-0 text-muted-foreground hover:text-foreground"
                                   onClick={() =>
                                     copyToClipboard(updateCommand, {
-                                      providerName: displayName,
+                                      successTitle: `${displayName} update command copied`,
+                                      errorTitle: `Could not copy ${displayName} update command`,
+                                      description:
+                                        "Run it in a terminal when you are ready to update.",
                                     })
                                   }
                                   aria-label="Copy update command"
@@ -1120,6 +1312,7 @@ export function ProviderInstanceCard({
 
             {hermesSetupNode}
             {piSetupNode}
+            {setupChecklistNode}
             {diagnosticsNode}
             {providerUpdateNode}
 

@@ -16,6 +16,7 @@ T3 Code is a minimal web GUI for coding agents (currently Codex, Claude, OpenCod
 
 Hermes setup notes: [docs/providers/hermes.md](./docs/providers/hermes.md)
 Pi setup notes: [docs/providers/pi.md](./docs/providers/pi.md)
+Release readiness checklist: [docs/providers/release-readiness.md](./docs/providers/release-readiness.md)
 
 ## Hermes Agent support
 
