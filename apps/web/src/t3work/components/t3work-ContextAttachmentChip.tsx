@@ -1,9 +1,11 @@
-import { XIcon } from "lucide-react";
+import { AlertCircleIcon, DownloadIcon, XIcon } from "lucide-react";
 import {
   FALLBACK_KIND_CONFIG,
   KIND_CONFIGS,
 } from "~/t3work/components/t3work-ContextAttachmentChipConfig";
+import { ContextAttachmentSyncTooltip } from "~/t3work/components/t3work-ContextAttachmentSyncTooltip";
 import { JiraIssueTypeIcon } from "~/t3work/components/ticket/t3work-JiraIssueType";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/t3work/components/ui/t3work-tooltip";
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
 import { cn } from "~/lib/utils";
 
@@ -15,20 +17,44 @@ type ContextAttachmentChipProps = {
 export function ContextAttachmentChip({ attachment, onRemove }: ContextAttachmentChipProps) {
   const config = KIND_CONFIGS[attachment.kind] ?? FALLBACK_KIND_CONFIG;
   const { Icon, iconClassName, chipClassName, badgeClassName } = config;
-  const detailText = attachment.kind.startsWith("github-activity")
-    ? undefined
-    : attachment.description;
+  const detailText =
+    attachment.syncStatus === "error"
+      ? attachment.syncError
+      : attachment.kind.startsWith("github-activity")
+        ? undefined
+        : attachment.description;
   const title = [
     `${config.label}: ${attachment.label}`,
+    ...(attachment.syncStatus ? [`Sync status: ${attachment.syncStatus}`] : []),
+    ...(attachment.syncPhase ? [`Sync phase: ${attachment.syncPhase}`] : []),
+    ...(attachment.syncInfo?.contentLabel
+      ? [`Sync content: ${attachment.syncInfo.contentLabel}`]
+      : []),
+    ...(attachment.syncInfo?.currentItemLabel
+      ? [
+          `Sync item: ${attachment.syncInfo.currentItemLabel}${attachment.syncInfo.currentItemDetail ? ` (${attachment.syncInfo.currentItemDetail})` : ""}`,
+        ]
+      : []),
+    ...(typeof attachment.syncProgressCurrent === "number" &&
+    typeof attachment.syncProgressTotal === "number"
+      ? [`Sync progress: ${attachment.syncProgressCurrent}/${attachment.syncProgressTotal}`]
+      : []),
+    ...(typeof attachment.syncInfo?.bytesCurrent === "number" &&
+    typeof attachment.syncInfo.bytesTotal === "number"
+      ? [`Sync size: ${attachment.syncInfo.bytesCurrent}/${attachment.syncInfo.bytesTotal} bytes`]
+      : []),
+    ...(attachment.syncError ? [`Sync error: ${attachment.syncError}`] : []),
     ...(attachment.summaryItems?.map((s) => `${s.label}: ${s.value}`) ?? []),
     ...(attachment.fileReferences?.map((r) => `${r.label}: ${r.relativePath}`) ?? []),
   ].join("\n");
+  const hasSyncIndicator = attachment.syncStatus === "syncing" || attachment.syncStatus === "error";
 
   return (
     <div
       className={cn(
         "group flex max-w-xs items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors",
         chipClassName,
+        attachment.syncStatus === "error" && "border-destructive/40 bg-destructive/5",
       )}
       title={title.length > 0 ? title : undefined}
     >
@@ -56,6 +82,31 @@ export function ContextAttachmentChip({ attachment, onRemove }: ContextAttachmen
           >
             {config.label}
           </span>
+          {hasSyncIndicator && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    className="inline-flex items-center rounded-sm text-muted-foreground/65"
+                    aria-label={
+                      attachment.syncStatus === "syncing"
+                        ? "Syncing context"
+                        : "Context sync failed"
+                    }
+                  />
+                }
+              >
+                {attachment.syncStatus === "error" ? (
+                  <AlertCircleIcon className="size-3 text-destructive/75" />
+                ) : (
+                  <DownloadIcon className="size-3 -rotate-6 animate-[pulse_3.6s_ease-in-out_infinite] text-muted-foreground/55" />
+                )}
+              </TooltipTrigger>
+              <TooltipPopup side="top" align="start" className="max-w-none">
+                <ContextAttachmentSyncTooltip attachment={attachment} />
+              </TooltipPopup>
+            </Tooltip>
+          )}
           {detailText && (
             <span className="truncate text-[10px] leading-tight text-muted-foreground/80">
               {detailText}

@@ -4,10 +4,13 @@ import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3to
 import { usePrimaryEnvironmentId } from "~/environments/primary";
 import { useThreadActions } from "~/hooks/useThreadActions";
 import { useBackend } from "~/t3work/backend/t3work-index";
+import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
+import { enqueueThreadKickoffAttachments } from "~/t3work/t3work-enqueueThreadKickoffAttachments";
 import { useAddToChat } from "~/t3work/hooks/t3work-useAddToChat";
 import { useProjectStore } from "~/t3work/hooks/t3work-useProjectStore";
-import { buildComprehensiveTicketPayload } from "~/t3work/t3work-addToChatPayloadBuilders";
+import type { AddToChatPayloadInput } from "~/t3work/t3work-addToChatUtils";
 import { buildJiraWorkItemSummary } from "~/t3work/t3work-jiraContextMetadata";
+import { buildTicketContextBundle } from "~/t3work/t3work-ticketContextBundle";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ViewState } from "~/t3work/t3work-types";
 
@@ -76,8 +79,10 @@ export function useAppHandlers({
       kickoffModelSelection: ModelSelection;
       kickoffRuntimeMode: RuntimeMode;
       kickoffInteractionMode: ProviderInteractionMode;
+      kickoffContextAttachments: ReadonlyArray<T3WorkContextAttachment>;
     }) => {
       const thread = store.createThreadForTicket(input);
+      enqueueThreadKickoffAttachments(thread.id, input.kickoffContextAttachments);
       onOpenThread?.(input.projectId, thread.id);
 
       const project = store.allProjects.find((candidate) => candidate.id === input.projectId);
@@ -106,13 +111,14 @@ export function useAppHandlers({
             ? { jiraIssueTypeIconUrl: jiraSummary.jiraIssueTypeIconUrl }
             : {}),
           summaryItems: jiraSummary.summaryItems,
-          payload: () =>
-            buildComprehensiveTicketPayload({
+          payload: (progress?: AddToChatPayloadInput) =>
+            buildTicketContextBundle({
               backend,
               project,
               ticket,
               projectTickets,
               githubActivityItems: input.githubActivityItems,
+              ...(progress?.reportProgress ? { onProgress: progress.reportProgress } : {}),
             }),
         },
         { type: "kickoff", projectId: input.projectId, ticketId: input.ticketId },
@@ -128,6 +134,7 @@ export function useAppHandlers({
       kickoffModelSelection: ModelSelection;
       kickoffRuntimeMode: RuntimeMode;
       kickoffInteractionMode: ProviderInteractionMode;
+      kickoffContextAttachments: ReadonlyArray<T3WorkContextAttachment>;
     }) => {
       const thread = store.createThread(input.projectId, {
         title: "Project kickoff",
@@ -137,6 +144,7 @@ export function useAppHandlers({
         kickoffRuntimeMode: input.kickoffRuntimeMode,
         kickoffInteractionMode: input.kickoffInteractionMode,
       });
+      enqueueThreadKickoffAttachments(thread.id, input.kickoffContextAttachments);
       onOpenThread?.(input.projectId, thread.id);
     },
     [onOpenThread, store],

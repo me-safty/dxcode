@@ -5,6 +5,7 @@ import type { ProjectThread } from "~/t3work/t3work-types";
 import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
 import { formatRelativeTime } from "./t3work-AppTicketHelpers";
+import { mergeContextAttachmentsById } from "~/t3work/t3work-contextAttachmentMerge";
 import { ContextAttachmentChip } from "~/t3work/components/t3work-ContextAttachmentChip";
 
 type TicketKickoffPanelProps = {
@@ -17,6 +18,7 @@ type TicketKickoffPanelProps = {
     selection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,
+    contextAttachments: ReadonlyArray<T3WorkContextAttachment>,
   ) => void;
   renderComposer: (props: {
     prefillText?: string;
@@ -49,13 +51,13 @@ export function TicketKickoffPanel({
     if (!injectedContextAttachments || injectedContextAttachments.length === 0) {
       return;
     }
-    setLocalContextAttachments((current) => {
-      const existingIds = new Set(current.map((a) => a.id));
-      const incoming = injectedContextAttachments.filter(
-        (a) => !existingIds.has(a.id) && !dismissedAttachmentIds.has(a.id),
-      );
-      return incoming.length > 0 ? [...current, ...incoming] : current;
-    });
+    setLocalContextAttachments((current) =>
+      mergeContextAttachmentsById({
+        current,
+        incoming: injectedContextAttachments,
+        dismissedIds: dismissedAttachmentIds,
+      }),
+    );
   }, [dismissedAttachmentIds, injectedContextAttachments]);
 
   const removeLocalContextAttachment = (id: string) => {
@@ -171,12 +173,7 @@ export function TicketKickoffPanel({
         {renderComposer({
           ...(prefill ? { prefillText: prefill } : {}),
           onSubmit: (text, selection, runtimeMode, interactionMode) => {
-            const contextPrefix =
-              localContextAttachments.length > 0
-                ? localContextAttachments.map((a) => a.contextText).join("\n\n")
-                : "";
-            const fullText = contextPrefix ? `${contextPrefix}\n\n${text}` : text;
-            onKickoff(fullText, selection, runtimeMode, interactionMode);
+            onKickoff(text, selection, runtimeMode, interactionMode, localContextAttachments);
             setPrefill(undefined);
             setLocalContextAttachments([]);
             setDismissedAttachmentIds(new Set());

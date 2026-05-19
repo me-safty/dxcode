@@ -77,6 +77,14 @@ export function createMockBackend(): BackendApi {
       listProjects: async (account) => mockIntegrationProvider.listProjects(account),
       listResources: async (input) => mockIntegrationProvider.listResources(input),
       getResource: async (ref) => mockIntegrationProvider.getResource(ref.ref),
+      downloadAsset: async (input) => {
+        const asset = await mockIntegrationProvider.downloadAsset(input.url);
+        return {
+          base64Contents: Buffer.from(asset.bytes).toString("base64"),
+          ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+          sizeBytes: asset.bytes.byteLength,
+        };
+      },
     },
 
     github: {
@@ -124,6 +132,10 @@ export function createMockBackend(): BackendApi {
           localPath: `${input.workspaceRoot}/.t3work/references/${String(index + 1).padStart(2, "0")}-reference`,
           status: "cloned" as const,
         })),
+      }),
+      writeContextFiles: async (input) => ({
+        workspaceRoot: input.workspaceRoot,
+        writtenFiles: input.files.map((file) => file.relativePath),
       }),
     },
 

@@ -18,6 +18,7 @@ import {
   readJsonBody,
   tryAtlassianPromise,
 } from "./t3work-atlassian-http.ts";
+export { t3workAtlassianAssetContentRouteLayer } from "./t3work-atlassian-asset-content-route.ts";
 
 type ResourceListInput = {
   readonly account: IntegrationAccountRef;
@@ -28,6 +29,11 @@ type ResourceListInput = {
 type ResourceGetInput = {
   readonly accountId: string;
   readonly ref: unknown;
+};
+
+type AssetGetInput = {
+  readonly accountId: string;
+  readonly url: string;
 };
 
 const mockProvider = new MockIntegrationProvider();
@@ -160,5 +166,25 @@ export const t3workAtlassianResourceRouteLayer = HttpRouter.add(
       "Failed to load Atlassian issue.",
     );
     return okJson({ snapshot });
+  }).pipe(Effect.catch(errorResponse)),
+);
+
+export const t3workAtlassianAssetRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/t3work/atlassian/asset",
+  Effect.gen(function* () {
+    const input = yield* readJsonBody<AssetGetInput>();
+    const provider = yield* providerForAccount(input.accountId);
+    const asset = yield* tryAtlassianPromise(
+      () => provider.downloadAsset(input.url),
+      "Failed to download Atlassian asset.",
+    );
+    return okJson({
+      asset: {
+        base64Contents: Buffer.from(asset.bytes).toString("base64"),
+        sizeBytes: asset.bytes.byteLength,
+        ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+      },
+    });
   }).pipe(Effect.catch(errorResponse)),
 );

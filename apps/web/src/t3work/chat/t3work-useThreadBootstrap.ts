@@ -8,6 +8,16 @@ import {
   type RuntimeMode,
 } from "@t3tools/contracts";
 import type { BackendApi } from "~/t3work/backend/t3work-types";
+import {
+  planThreadBootstrap,
+  type ThreadBootstrapDispatchState,
+} from "~/t3work/chat/t3work-threadBootstrapPlan";
+import { runThreadBootstrap } from "~/t3work/chat/t3work-runThreadBootstrap";
+import {
+  recordThreadBootstrapFailure,
+  recordThreadBootstrapPlan,
+  recordThreadBootstrapSkipped,
+} from "~/t3work/chat/t3work-threadBootstrapInstrumentation";
 
 type BackendLike = {
   dispatchCommand: BackendApi["dispatchCommand"];
@@ -20,6 +30,7 @@ type ThreadBootstrapInput = {
   projectTitle: string;
   projectWorkspaceRoot: string | undefined;
   canonicalProjectId: string;
+  projectExists: boolean;
   title: string;
   initialUserMessage: string | undefined;
   initialModelSelection: ModelSelection | undefined;
@@ -36,6 +47,7 @@ export function useThreadBootstrap({
   projectTitle,
   projectWorkspaceRoot,
   canonicalProjectId,
+  projectExists,
   title,
   initialUserMessage,
   initialModelSelection,
@@ -44,11 +56,43 @@ export function useThreadBootstrap({
   onInitialUserMessageSent,
   serverThread,
 }: ThreadBootstrapInput): void {
-  const threadCreateSentRef = useRef(false);
-  const kickoffSentRef = useRef(false);
+  const dispatchStateRef = useRef<ThreadBootstrapDispatchState | undefined>(undefined);
+  const onInitialUserMessageSentRef = useRef(onInitialUserMessageSent);
+  onInitialUserMessageSentRef.current = onInitialUserMessageSent;
 
   useEffect(() => {
     if (!backend || !environmentId) {
+      recordThreadBootstrapSkipped({
+        threadId,
+        reason: !backend ? "missing-backend" : "missing-environment",
+      });
+      return;
+    }
+
+    const bootstrapPlan = planThreadBootstrap({
+      currentState: dispatchStateRef.current,
+      threadId,
+      hasServerThread: serverThread !== undefined,
+      hasInitialUserMessage: Boolean(initialUserMessage),
+      hasProjectWorkspaceRoot: Boolean(projectWorkspaceRoot),
+      projectExists,
+    });
+    dispatchStateRef.current = bootstrapPlan.state;
+
+    recordThreadBootstrapPlan({
+      environmentId,
+      threadId,
+      canonicalProjectId,
+      projectExists,
+      action: bootstrapPlan.action,
+      shouldEnsureProject: bootstrapPlan.shouldEnsureProject,
+      hasServerThread: serverThread !== undefined,
+      hasInitialUserMessage: Boolean(initialUserMessage),
+      serverThread,
+      dispatchState: bootstrapPlan.state,
+    });
+
+    if (bootstrapPlan.action === "none") {
       return;
     }
 
@@ -61,93 +105,36 @@ export function useThreadBootstrap({
       } as ModelSelection);
     const kickoffRuntimeMode = initialRuntimeMode ?? DEFAULT_RUNTIME_MODE;
     const kickoffInteractionMode = initialInteractionMode ?? ("default" as ProviderInteractionMode);
-
-    const ensureProject = async () => {
-      if (!projectWorkspaceRoot) {
-        return;
-      }
-      try {
-        await backend.dispatchCommand({
-          type: "project.create",
-          commandId: crypto.randomUUID() as any,
-          projectId: canonicalProjectId as any,
-          title: projectTitle,
-          workspaceRoot: projectWorkspaceRoot,
-          createWorkspaceRootIfMissing: true,
-          defaultModelSelection: kickoffModelSelection,
-          createdAt,
-        });
-      } catch {
-        // Duplicate project errors are expected if it already exists.
-      }
-    };
-
-    const ensureThread = async () => {
-      await ensureProject();
-
-      if (initialUserMessage) {
-        if (kickoffSentRef.current) {
-          return;
-        }
-        kickoffSentRef.current = true;
-
-        await backend.dispatchCommand({
-          type: "thread.turn.start",
-          commandId: crypto.randomUUID() as any,
-          threadId: threadId as any,
-          message: {
-            messageId: crypto.randomUUID() as any,
-            role: "user",
-            text: initialUserMessage,
-            attachments: [],
-          },
-          modelSelection: kickoffModelSelection,
-          titleSeed: title,
-          runtimeMode: kickoffRuntimeMode,
-          interactionMode: kickoffInteractionMode,
-          bootstrap: {
-            createThread: {
-              projectId: canonicalProjectId as any,
-              title,
-              modelSelection: kickoffModelSelection,
-              runtimeMode: kickoffRuntimeMode,
-              interactionMode: kickoffInteractionMode,
-              branch: null,
-              worktreePath: null,
-              createdAt,
-            },
-          },
-          createdAt,
-        });
-        onInitialUserMessageSent?.();
-        return;
-      }
-
-      if (serverThread || threadCreateSentRef.current) {
-        return;
-      }
-
-      threadCreateSentRef.current = true;
-      await backend.dispatchCommand({
-        type: "thread.create",
-        commandId: crypto.randomUUID() as any,
-        threadId: threadId as any,
-        projectId: canonicalProjectId as any,
-        title,
-        modelSelection: kickoffModelSelection,
-        runtimeMode: kickoffRuntimeMode,
-        interactionMode: kickoffInteractionMode,
-        branch: null,
-        worktreePath: null,
-        createdAt,
+    void runThreadBootstrap({
+      backend,
+      environmentId,
+      threadId,
+      projectTitle,
+      projectWorkspaceRoot,
+      canonicalProjectId,
+      title,
+      initialUserMessage,
+      kickoffModelSelection,
+      kickoffRuntimeMode,
+      kickoffInteractionMode,
+      createdAt,
+      shouldEnsureProject: bootstrapPlan.shouldEnsureProject,
+      action: bootstrapPlan.action,
+      state: bootstrapPlan.state,
+      onInitialUserMessageSent: onInitialUserMessageSentRef.current,
+    }).catch((error) => {
+      recordThreadBootstrapFailure({
+        environmentId,
+        threadId,
+        canonicalProjectId,
+        action: bootstrapPlan.action,
+        error: error instanceof Error ? error.message : String(error),
       });
-    };
 
-    void ensureThread().catch(() => {
-      if (initialUserMessage) {
-        kickoffSentRef.current = false;
-      } else {
-        threadCreateSentRef.current = false;
+      if (bootstrapPlan.action === "kickoff") {
+        bootstrapPlan.state.kickoffSent = false;
+      } else if (bootstrapPlan.action === "create") {
+        bootstrapPlan.state.threadCreateSent = false;
       }
     });
   }, [
@@ -158,7 +145,7 @@ export function useThreadBootstrap({
     initialModelSelection,
     initialRuntimeMode,
     initialUserMessage,
-    onInitialUserMessageSent,
+    projectExists,
     projectTitle,
     projectWorkspaceRoot,
     serverThread,

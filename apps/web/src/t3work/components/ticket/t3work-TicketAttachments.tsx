@@ -7,7 +7,13 @@ import {
 import type { JiraAttachment } from "./t3work-ticketRichContentTypes";
 import { formatFileSize } from "./t3work-ticketRichContentUtils";
 
-export function TicketAttachments({ attachments }: { attachments: JiraAttachment[] }) {
+export function TicketAttachments({
+  attachments,
+  resolveAssetUrl,
+}: {
+  attachments: JiraAttachment[];
+  resolveAssetUrl?: (url: string) => string;
+}) {
   if (attachments.length === 0) return null;
 
   return (
@@ -18,9 +24,13 @@ export function TicketAttachments({ attachments }: { attachments: JiraAttachment
           {attachments.map((attachment, index) => {
             const name = attachment.filename?.trim() || `Attachment ${index + 1}`;
             const mime = attachment.mimeType ?? "file";
-            const href = attachment.content ?? attachment.thumbnail ?? "";
+            const rawHref = attachment.content ?? attachment.thumbnail ?? "";
+            const href = rawHref && resolveAssetUrl ? resolveAssetUrl(rawHref) : rawHref;
             const isImage = mime.startsWith("image/");
             const sizeText = formatFileSize(attachment.size);
+            const previewSrc = attachment.thumbnail ?? attachment.content ?? "";
+            const imageSrc =
+              previewSrc && resolveAssetUrl ? resolveAssetUrl(previewSrc) : previewSrc;
 
             return (
               <T3SurfacePanel
@@ -40,7 +50,7 @@ export function TicketAttachments({ attachments }: { attachments: JiraAttachment
                   </div>
                   {isImage && href && (
                     <img
-                      src={attachment.thumbnail ?? href}
+                      src={imageSrc || href}
                       alt={name}
                       className="mb-2 max-h-44 w-full rounded-md border border-border/75 bg-muted/20 object-cover"
                       loading="lazy"

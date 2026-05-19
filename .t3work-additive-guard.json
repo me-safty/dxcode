@@ -24,6 +24,7 @@
   ],
   "allowedUnprefixedNewFiles": [
     ".t3work-additive-guard.json",
+    ".github/skills/t3code-runtime-investigation/SKILL.md",
     ".claude/**",
     "docs/t3work-mvp/**",
     "docs/t3work-additive-whitelist.md",

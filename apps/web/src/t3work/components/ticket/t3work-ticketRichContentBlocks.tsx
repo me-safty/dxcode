@@ -11,8 +11,19 @@ export function MarkdownBlock({ content }: { content: string }) {
   );
 }
 
-export function HtmlBlock({ content, baseUrl }: { content: string; baseUrl?: string }) {
-  const sanitized = useMemo(() => sanitizeJiraHtml(content, baseUrl), [baseUrl, content]);
+export function HtmlBlock({
+  content,
+  baseUrl,
+  resolveAssetUrl,
+}: {
+  content: string;
+  baseUrl?: string;
+  resolveAssetUrl?: (url: string) => string;
+}) {
+  const sanitized = useMemo(
+    () => sanitizeJiraHtml(content, baseUrl, resolveAssetUrl),
+    [baseUrl, content, resolveAssetUrl],
+  );
   return (
     <div
       className="chat-markdown text-sm leading-6"

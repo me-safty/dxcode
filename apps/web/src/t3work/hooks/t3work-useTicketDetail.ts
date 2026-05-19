@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import type { ProjectShellProject, ResourceSnapshot } from "@t3tools/project-context";
 import { useBackend } from "~/t3work/backend/t3work-index";
-import { readIntegrationCache, writeIntegrationCache } from "./t3work-integrationCache";
+import {
+  buildAtlassianResourceCacheKey,
+  loadAtlassianResourceSnapshot,
+  readCachedAtlassianResourceSnapshot,
+} from "~/t3work/t3work-atlassianResourceSnapshotCache";
 
 export interface TicketDetail {
   snapshot: ResourceSnapshot | null;
@@ -14,11 +18,19 @@ export function useTicketDetail(project: ProjectShellProject, ticketId: string):
   const backend = useBackend();
   const cacheKey = useMemo(
     () =>
-      `atlassian:getResource:${project.source.provider}:${project.source.accountId ?? "none"}:${project.source.externalProjectId ?? "none"}:${ticketId}`,
+      buildAtlassianResourceCacheKey({
+        provider: project.source.provider,
+        accountId: project.source.accountId,
+        externalProjectId: project.source.externalProjectId,
+        key: ticketId,
+      }),
     [project.source.accountId, project.source.externalProjectId, project.source.provider, ticketId],
   );
-  const [snapshot, setSnapshot] = useState<ResourceSnapshot | null>(
-    () => readIntegrationCache<ResourceSnapshot>(cacheKey)?.value ?? null,
+  const [snapshot, setSnapshot] = useState<ResourceSnapshot | null>(() =>
+    readCachedAtlassianResourceSnapshot({
+      project,
+      key: ticketId,
+    }),
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,33 +41,28 @@ export function useTicketDetail(project: ProjectShellProject, ticketId: string):
 
     try {
       if (!backend) throw new Error("Backend not available");
-      if (!project.source.accountId) {
-        throw new Error(
-          "Missing Atlassian account for this project. Reconnect and re-add the project.",
-        );
-      }
-      const ref = {
-        id: ticketId,
-        provider: project.source.provider,
-        kind: "issue",
-        projectId: project.source.externalProjectId,
-      };
-      const result = await backend.atlassian.getResource({
-        accountId: project.source.accountId,
-        ref,
+      const result = await loadAtlassianResourceSnapshot({
+        backend,
+        project,
+        key: ticketId,
+        refreshOnCacheHit: true,
       });
       setSnapshot(result);
-      writeIntegrationCache(cacheKey, result);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load ticket details");
     } finally {
       setLoading(false);
     }
-  }, [backend, cacheKey, project, ticketId]);
+  }, [backend, project, ticketId]);
 
   useEffect(() => {
-    setSnapshot(readIntegrationCache<ResourceSnapshot>(cacheKey)?.value ?? null);
-  }, [cacheKey]);
+    setSnapshot(
+      readCachedAtlassianResourceSnapshot({
+        project,
+        key: ticketId,
+      }),
+    );
+  }, [cacheKey, project, ticketId]);
 
   useEffect(() => {
     load();

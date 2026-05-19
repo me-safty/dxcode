@@ -220,6 +220,13 @@ export class MockIntegrationProvider implements IntegrationProvider {
     return snapshot;
   }
 
+  async downloadAsset(url: string): Promise<{ bytes: Uint8Array; mimeType?: string }> {
+    return {
+      bytes: new TextEncoder().encode(url),
+      mimeType: "application/octet-stream",
+    };
+  }
+
   async search(_input: IntegrationSearchInput): Promise<ReadonlyArray<ResourceSearchResult>> {
     return [];
   }

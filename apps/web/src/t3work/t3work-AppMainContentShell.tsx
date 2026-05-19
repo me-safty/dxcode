@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { Plus } from "lucide-react";
 import type { ProjectShellProject } from "@t3tools/project-context";
+import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
 
 import { AtlassianIcon } from "~/t3work/components/brand/t3work-AtlassianLogos";
 import { Button } from "~/t3work/components/ui/t3work-button";
@@ -38,7 +39,7 @@ export function useSyncActiveChatTarget(input: {
   homeChatProject: ProjectShellProject | null;
   homeChatThreadId: string | null;
 }) {
-  const { view, getThreadsForProject, homeChatProject, homeChatThreadId } = input;
+  const { view } = input;
   const setActiveChatTarget = useT3WorkActiveChatStore((state) => state.setTarget);
 
   useEffect(() => {
@@ -65,16 +66,8 @@ export function useSyncActiveChatTarget(input: {
       return;
     }
 
-    const projectThread = getThreadsForProject(view.projectId).toSorted(
-      (left, right) =>
-        new Date(right.lastMessageAt).getTime() - new Date(left.lastMessageAt).getTime(),
-    )[0];
-    setActiveChatTarget({
-      type: "thread",
-      projectId: view.projectId,
-      threadId: projectThread?.id ?? `project-${view.projectId}-chat`,
-    });
-  }, [getThreadsForProject, setActiveChatTarget, view]);
+    setActiveChatTarget(null);
+  }, [setActiveChatTarget, view]);
 }
 
 function ProjectBrowserEmpty({ onCreate }: { onCreate: () => void }) {
@@ -125,6 +118,7 @@ export function ProjectBrowserEmptyWithChat({
     kickoffModelSelection: import("@t3tools/contracts").ModelSelection,
     kickoffRuntimeMode: import("@t3tools/contracts").RuntimeMode,
     kickoffInteractionMode: import("@t3tools/contracts").ProviderInteractionMode,
+    kickoffContextAttachments: ReadonlyArray<T3WorkContextAttachment>,
   ) => void;
   heading?: string;
   description?: string;

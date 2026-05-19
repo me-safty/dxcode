@@ -347,6 +347,10 @@ type ChatViewProps =
       composerContextAttachmentSlot?: React.ReactNode;
       /** Optional ephemeral context attachments prepended on send by host surfaces. */
       composerContextAttachments?: ReadonlyArray<{ contextText: string }>;
+      /** Optional hook to refresh host-managed context attachments before send. */
+      prepareComposerContextAttachments?:
+        | (() => Promise<ReadonlyArray<{ contextText: string }>>)
+        | undefined;
       /** Optional callback fired after a send consumes composer context attachments. */
       onComposerContextAttachmentsConsumed?: (() => void) | undefined;
     }
@@ -361,6 +365,10 @@ type ChatViewProps =
       composerContextAttachmentSlot?: React.ReactNode;
       /** Optional ephemeral context attachments prepended on send by host surfaces. */
       composerContextAttachments?: ReadonlyArray<{ contextText: string }>;
+      /** Optional hook to refresh host-managed context attachments before send. */
+      prepareComposerContextAttachments?:
+        | (() => Promise<ReadonlyArray<{ contextText: string }>>)
+        | undefined;
       /** Optional callback fired after a send consumes composer context attachments. */
       onComposerContextAttachmentsConsumed?: (() => void) | undefined;
     };
@@ -625,6 +633,7 @@ export default function ChatView(props: ChatViewProps) {
     reserveTitleBarControlInset = true,
     composerContextAttachmentSlot,
     composerContextAttachments = [],
+    prepareComposerContextAttachments,
     onComposerContextAttachmentsConsumed,
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
@@ -709,6 +718,8 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
+  const [isPreparingComposerContextAttachments, setIsPreparingComposerContextAttachments] =
+    useState(false);
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     ApprovalRequestId[]
@@ -2630,6 +2641,7 @@ export default function ChatView(props: ChatViewProps) {
       !api ||
       !activeThread ||
       isSendBusy ||
+      isPreparingComposerContextAttachments ||
       isConnecting ||
       activeEnvironmentUnavailable ||
       sendInFlightRef.current
@@ -2706,6 +2718,23 @@ export default function ChatView(props: ChatViewProps) {
     }
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
+    let preparedContextAttachments = composerContextAttachments;
+    if (composerContextAttachments.length > 0 && prepareComposerContextAttachments) {
+      sendInFlightRef.current = true;
+      setIsPreparingComposerContextAttachments(true);
+      try {
+        preparedContextAttachments = await prepareComposerContextAttachments();
+      } catch (error) {
+        setThreadError(
+          threadIdForSend,
+          error instanceof Error ? error.message : "Failed to sync attached context.",
+        );
+        sendInFlightRef.current = false;
+        return;
+      } finally {
+        setIsPreparingComposerContextAttachments(false);
+      }
+    }
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
@@ -2727,8 +2756,8 @@ export default function ChatView(props: ChatViewProps) {
     const composerImagesSnapshot = [...composerImages];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const contextAttachmentPrefix =
-      composerContextAttachments.length > 0
-        ? composerContextAttachments.map((a) => a.contextText).join("\n\n")
+      preparedContextAttachments.length > 0
+        ? preparedContextAttachments.map((a) => a.contextText).join("\n\n")
         : "";
     const promptWithContext = contextAttachmentPrefix
       ? `${contextAttachmentPrefix}\n\n${promptForSend}`
@@ -3650,7 +3679,7 @@ export default function ChatView(props: ChatViewProps) {
                   isLocalDraftThread={isLocalDraftThread}
                   phase={phase}
                   isConnecting={isConnecting}
-                  isSendBusy={isSendBusy}
+                  isSendBusy={isSendBusy || isPreparingComposerContextAttachments}
                   isPreparingWorktree={isPreparingWorktree}
                   environmentUnavailable={activeEnvironmentUnavailableState}
                   activePendingApproval={activePendingApproval}

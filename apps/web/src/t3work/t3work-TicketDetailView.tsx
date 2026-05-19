@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
 import { ScrollArea } from "~/t3work/components/ui/t3work-scroll-area";
 import { t3SurfaceBackdrops } from "~/t3work/components/ui/t3work-surface";
 import { useBackendState } from "~/t3work/backend/t3work-index";
@@ -13,14 +14,12 @@ import { useProjectGitHubActivity } from "~/t3work/hooks/t3work-useProjectGitHub
 import { useProjectResources } from "~/t3work/hooks/t3work-useProjectResources";
 import { useRelatedTickets } from "~/t3work/hooks/t3work-useRelatedTickets";
 import { useTicketDetail } from "~/t3work/hooks/t3work-useTicketDetail";
-import { buildTicketContextPrompt } from "~/t3work/t3work-AppTicketHelpers";
 import { ResizableRightSidebarLayout } from "~/t3work/t3work-ResizableRightSidebarLayout";
 import { TicketDetailHeader } from "~/t3work/t3work-TicketDetailHeader";
 import { TicketDetailKickoffAside } from "~/t3work/t3work-TicketDetailKickoffAside";
 import { TicketDetailMainColumn } from "~/t3work/t3work-TicketDetailMainColumn";
 import {
   asRecordArray,
-  buildGithubActivitySummary,
   resolveHtmlBaseUrl,
   sortCommentItems,
 } from "~/t3work/t3work-ticketDetailUtils";
@@ -50,6 +49,7 @@ export function TicketDetailView({
     kickoffModelSelection: ModelSelection;
     kickoffRuntimeMode: RuntimeMode;
     kickoffInteractionMode: ProviderInteractionMode;
+    kickoffContextAttachments: ReadonlyArray<T3WorkContextAttachment>;
   }) => void;
   onBack: () => void;
 }) {
@@ -98,30 +98,6 @@ export function TicketDetailView({
     () => githubActivity.activityByWorkItem.get(displayId) ?? [],
     [displayId, githubActivity.activityByWorkItem],
   );
-  const kickoffContext = useMemo(() => {
-    const githubActivitySummary = buildGithubActivitySummary(matchedGitHubActivityItems);
-    return buildTicketContextPrompt({
-      projectTitle: project.title,
-      displayId,
-      title,
-      status,
-      ...(priority ? { priority } : {}),
-      ...(assignee ? { assignee } : {}),
-      ...(ticketUrl ? { ticketUrl } : {}),
-      description: descriptionMarkdown ?? "",
-      ...(githubActivitySummary ? { githubActivitySummary } : {}),
-    });
-  }, [
-    project.title,
-    displayId,
-    title,
-    status,
-    priority,
-    assignee,
-    ticketUrl,
-    descriptionMarkdown,
-    matchedGitHubActivityItems,
-  ]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -187,7 +163,6 @@ export function TicketDetailView({
             issueThreads={issueThreads}
             projectId={project.id}
             ticketId={ticketId}
-            kickoffContext={kickoffContext}
             githubActivityItems={matchedGitHubActivityItems}
             providers={backendState.providers}
             isConnected={backendState.connectionStatus === "connected"}

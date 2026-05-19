@@ -11,12 +11,11 @@ import { TicketDetailGitHubSection } from "~/t3work/t3work-TicketDetailGitHubSec
 import type { TicketDetailMainColumnProps } from "~/t3work/t3work-TicketDetailMainColumn.types";
 import {
   buildParentContextMenuData,
-  buildReferenceContextMenuData,
   createSectionContextMenuHandler,
+  createReferenceContextMenuHandler,
   normalizeTicketAttachments,
   normalizeTicketComments,
 } from "~/t3work/t3work-ticketDetailMainColumn.helpers";
-import type { RelationshipEntry } from "~/t3work/t3work-ticketRelationships-helpers";
 
 export function TicketDetailMainColumn({
   snapshot,
@@ -71,25 +70,11 @@ export function TicketDetailMainColumn({
     displayId,
     parentEntry: relationshipData.parentEntry,
   });
-  const handleReferenceContextMenu = (event: MouseEvent, entry: RelationshipEntry) => {
-    const referenceContextMenuData = buildReferenceContextMenuData({ entry, projectId, ticketId });
-    handleSectionContextMenu(
-      event,
-      "relationships",
-      referenceContextMenuData.label,
-      referenceContextMenuData.summaryItems,
-      {
-        kind: referenceContextMenuData.kind,
-        dedupeKey: referenceContextMenuData.dedupeKey,
-        ...(referenceContextMenuData.jiraIssueType
-          ? { jiraIssueType: referenceContextMenuData.jiraIssueType }
-          : {}),
-        ...(referenceContextMenuData.jiraIssueTypeIconUrl
-          ? { jiraIssueTypeIconUrl: referenceContextMenuData.jiraIssueTypeIconUrl }
-          : {}),
-      },
-    );
-  };
+  const handleReferenceContextMenu = createReferenceContextMenuHandler({
+    handleSectionContextMenu,
+    projectId,
+    ticketId,
+  });
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4 px-3 py-4 sm:px-5">
@@ -169,6 +154,10 @@ export function TicketDetailMainColumn({
         {...(descriptionMarkdown ? { descriptionMarkdown } : {})}
         {...(descriptionHtml ? { descriptionHtml } : {})}
         {...(htmlBaseUrl ? { htmlBaseUrl } : {})}
+        projectId={projectId}
+        ticketKey={displayId}
+        {...(project.source.accountId ? { accountId: project.source.accountId } : {})}
+        {...(project.workspace?.rootPath ? { workspaceRoot: project.workspace.rootPath } : {})}
         onDescriptionContextMenu={(event) =>
           handleSectionContextMenu(event, "description", `${displayId} description`, [
             {

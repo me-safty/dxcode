@@ -55,16 +55,39 @@ export class JiraApiClient {
     return `Basic ${encoded}`;
   }
 
-  private async fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
+  private resolveUrl(pathOrUrl: string): { url: string; path: string } {
+    const base = new URL(`${this.baseUrl}/`);
+    const resolved = new URL(pathOrUrl, base);
+    if (resolved.origin !== base.origin) {
+      throw new AtlassianApiError({
+        status: 400,
+        message: "Refusing to fetch Atlassian asset outside the authenticated origin.",
+        path: pathOrUrl,
+      });
+    }
+    return {
+      url: resolved.toString(),
+      path: `${resolved.pathname}${resolved.search}`,
+    };
+  }
+
+  private async fetchResponse(
+    pathOrUrl: string,
+    init?: RequestInit,
+    options?: {
+      accept?: string;
+      contentType?: string;
+    },
+  ): Promise<{ response: Response; path: string }> {
+    const { url, path } = this.resolveUrl(pathOrUrl);
     let response: Response;
     try {
       response = await fetch(url, {
         ...init,
         headers: {
           Authorization: this.authHeader,
-          Accept: "application/json",
-          "Content-Type": "application/json",
+          ...(options?.accept ? { Accept: options.accept } : {}),
+          ...(options?.contentType ? { "Content-Type": options.contentType } : {}),
           ...init?.headers,
         },
       });
@@ -88,15 +111,36 @@ export class JiraApiClient {
       });
     }
 
+    return { response, path };
+  }
+
+  private async fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+    const { response, path: resolvedPath } = await this.fetchResponse(path, init, {
+      accept: "application/json",
+      contentType: "application/json",
+    });
+
     try {
       return (await response.json()) as T;
     } catch (cause) {
       throw new AtlassianApiError({
         status: response.status,
         message: `Invalid JSON response: ${cause instanceof Error ? cause.message : String(cause)}`,
-        path,
+        path: resolvedPath,
       });
     }
+  }
+
+  async downloadAsset(url: string): Promise<{ bytes: Uint8Array; mimeType?: string }> {
+    const { response } = await this.fetchResponse(url, undefined, {
+      accept: "*/*",
+    });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const mimeType = response.headers.get("content-type")?.split(";")[0]?.trim();
+    return {
+      bytes,
+      ...(mimeType ? { mimeType } : {}),
+    };
   }
 
   async getMyself(): Promise<JiraMyself> {

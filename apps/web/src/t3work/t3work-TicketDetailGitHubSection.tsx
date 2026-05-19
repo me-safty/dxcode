@@ -2,11 +2,12 @@ import { GitHubActivitySection } from "~/t3work/t3work-GitHubActivitySection";
 import type { MouseEvent } from "react";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectShellProject } from "@t3tools/project-context";
-import { buildComprehensiveTicketPayload } from "~/t3work/t3work-addToChatPayloadBuilders";
 import {
   buildGitHubActivityContextBundle,
   buildGitHubActivityDisplay,
 } from "~/t3work/t3work-githubActivityContextPayload";
+import type { AddToChatPayloadInput, AddToChatRequest } from "~/t3work/t3work-addToChatUtils";
+import { buildTicketContextBundle } from "~/t3work/t3work-ticketContextBundle";
 import type { ProjectTicket } from "~/t3work/t3work-types";
 import type { BackendApi } from "~/t3work/backend/t3work-types";
 
@@ -18,7 +19,7 @@ export function TicketDetailGitHubSection({
   project,
   ticket,
   projectTickets,
-  displayId,
+  displayId: _displayId,
   githubActivityItems,
   showAddToChatContextMenu,
   githubActivityLoading,
@@ -35,20 +36,7 @@ export function TicketDetailGitHubSection({
   projectTickets: ReadonlyArray<ProjectTicket>;
   displayId: string;
   githubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
-  showAddToChatContextMenu: (
-    event: MouseEvent,
-    request: {
-      projectId: string;
-      projectTitle: string;
-      projectWorkspaceRoot?: string;
-      targetLabel: string;
-      targetType: string;
-      kind?: string;
-      dedupeKey?: string;
-      payload: unknown | (() => Promise<unknown>);
-      summaryItems?: ReadonlyArray<{ label: string; value: string }>;
-    },
-  ) => Promise<void>;
+  showAddToChatContextMenu: (event: MouseEvent, request: AddToChatRequest) => Promise<void>;
   githubActivityLoading?: boolean;
   githubActivityWarning?: string;
   githubHost?: string;
@@ -69,22 +57,23 @@ export function TicketDetailGitHubSection({
           kind: display.activityKind,
           dedupeKey: `${projectId}:github-activity:${item.id}`,
           summaryItems: display.summaryItems,
-          payload: async () => {
-            const linkedTicketContext =
+          payload: async (input?: AddToChatPayloadInput) => {
+            const linkedTicketBundle =
               backend && ticket
-                ? await buildComprehensiveTicketPayload({
+                ? await buildTicketContextBundle({
                     backend,
                     project,
                     ticket,
                     projectTickets,
                     githubActivityItems,
+                    ...(input?.reportProgress ? { onProgress: input.reportProgress } : {}),
                   })
                 : undefined;
             return buildGitHubActivityContextBundle({
               project,
               item,
               linkedWorkItem: ticket ?? null,
-              ...(linkedTicketContext ? { linkedTicketContext } : {}),
+              ...(linkedTicketBundle ? { linkedTicketBundle } : {}),
             });
           },
         });

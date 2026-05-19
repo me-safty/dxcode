@@ -7,7 +7,10 @@ import {
   normalizeRelationshipKey,
 } from "~/t3work/t3work-ticketRelationshipKeys";
 import { snapshotToProjectTicket } from "~/t3work/t3work-ticketMappers";
-import { readIntegrationCache, writeIntegrationCache } from "./t3work-integrationCache";
+import {
+  fetchAtlassianResourceSnapshot,
+  readCachedAtlassianResourceSnapshot,
+} from "~/t3work/t3work-atlassianResourceSnapshotCache";
 
 function buildTicketLookup(tickets: readonly ProjectTicket[]): Map<string, ProjectTicket> {
   const map = new Map<string, ProjectTicket>();
@@ -65,10 +68,6 @@ export function useRelatedTickets({
         setRelatedTickets([]);
         return;
       }
-      const accountId = project.source.accountId;
-      const externalProjectId = project.source.externalProjectId;
-      const provider = project.source.provider;
-
       const lookup = buildTicketLookup(projectTickets);
       const ignoredKeys = new Set(
         [currentTicketId, currentDisplayId, snapshot.ref.id, snapshot.ref.displayId]
@@ -91,8 +90,10 @@ export function useRelatedTickets({
       const unresolvedKeys: string[] = [];
 
       for (const key of missingKeys) {
-        const cacheKey = `atlassian:getResource:${provider}:${accountId}:${externalProjectId}:${key}`;
-        const cachedSnapshot = readIntegrationCache<ResourceSnapshot>(cacheKey)?.value;
+        const cachedSnapshot = readCachedAtlassianResourceSnapshot({
+          project,
+          key,
+        });
         if (!cachedSnapshot) {
           unresolvedKeys.push(key);
           continue;
@@ -107,19 +108,11 @@ export function useRelatedTickets({
       await Promise.all(
         unresolvedKeys.map(async (key) => {
           try {
-            const result = await backend.atlassian.getResource({
-              accountId,
-              ref: {
-                id: key,
-                provider,
-                kind: "issue",
-                projectId: externalProjectId,
-              },
+            const result = await fetchAtlassianResourceSnapshot({
+              backend,
+              project,
+              key,
             });
-            writeIntegrationCache(
-              `atlassian:getResource:${provider}:${accountId}:${externalProjectId}:${key}`,
-              result,
-            );
             loaded.push(snapshotToProjectTicket(project.id, result));
           } catch {
             // Ignore unavailable keys; unresolved entries are still rendered by key.
@@ -140,10 +133,7 @@ export function useRelatedTickets({
     backend,
     currentDisplayId,
     currentTicketId,
-    project.id,
-    project.source.accountId,
-    project.source.externalProjectId,
-    project.source.provider,
+    project,
     projectTickets,
     relationshipKeys,
     snapshot,

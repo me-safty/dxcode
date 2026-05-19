@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { useShallow } from "zustand/react/shallow";
@@ -7,10 +7,22 @@ import { usePrimaryEnvironmentId } from "~/environments/primary";
 import { selectProjectsAcrossEnvironments, useStore } from "~/store";
 import { createThreadSelectorByRef } from "~/storeSelectors";
 import { useBackend } from "~/t3work/backend/t3work-index";
+import { summarizeT3WorkServerThread } from "~/t3work/chat/t3work-threadDebug";
+import { useThreadChatDebug } from "~/t3work/chat/t3work-useThreadChatDebug";
+import {
+  shouldShowThreadKickoffPlaceholder,
+  ThreadKickoffPlaceholder,
+} from "~/t3work/chat/t3work-threadKickoffPlaceholder";
+import { ThreadPendingChat } from "~/t3work/chat/t3work-threadPendingChat";
 import { ContextAttachmentStrip } from "~/t3work/components/t3work-ContextAttachmentChip";
 import { useThreadBootstrap } from "~/t3work/chat/t3work-useThreadBootstrap";
 import { resolveCanonicalProjectIdForWorkspaceRoot } from "~/t3work/hooks/t3work-threadBridge";
+import { buildContextAttachment } from "~/t3work/t3work-addToChatUtils";
 import { useT3WorkAddToChatStore } from "~/t3work/t3work-addToChatStore";
+import {
+  resolveContextAttachmentRequest,
+  syncContextAttachmentFromRequest,
+} from "~/t3work/t3work-contextAttachmentSync";
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
 
 const EMPTY_ATTACHMENTS: T3WorkContextAttachment[] = [];
@@ -23,6 +35,7 @@ export interface ThreadChatViewProps {
   title: string;
   onBack?: () => void;
   hideHeader?: boolean;
+  kickoffMessage?: string;
   initialUserMessage?: string;
   initialModelSelection?: ModelSelection;
   initialRuntimeMode?: RuntimeMode;
@@ -36,6 +49,7 @@ export function ThreadChatView({
   projectTitle,
   projectWorkspaceRoot,
   title,
+  kickoffMessage,
   initialUserMessage,
   initialModelSelection,
   initialRuntimeMode,
@@ -49,11 +63,23 @@ export function ThreadChatView({
     () => resolveCanonicalProjectIdForWorkspaceRoot(projectWorkspaceRoot, projectId, liveProjects),
     [liveProjects, projectId, projectWorkspaceRoot],
   );
+  const projectExists = useMemo(
+    () => liveProjects.some((candidate) => candidate.id === canonicalProjectId),
+    [canonicalProjectId, liveProjects],
+  );
   const threadRef = useMemo(
     () => (environmentId ? scopeThreadRef(environmentId, threadId as never) : null),
     [environmentId, threadId],
   );
   const serverThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
+  const hasServerThread = serverThread !== undefined;
+  const serverThreadSummary = summarizeT3WorkServerThread(serverThread);
+  const serverMessageCount =
+    typeof serverThreadSummary?.messageCount === "number" ? serverThreadSummary.messageCount : 0;
+  const showKickoffPlaceholder = shouldShowThreadKickoffPlaceholder({
+    kickoffMessage,
+    serverMessageCount,
+  });
 
   useThreadBootstrap({
     backend,
@@ -62,6 +88,7 @@ export function ThreadChatView({
     projectTitle,
     projectWorkspaceRoot,
     canonicalProjectId,
+    projectExists,
     title,
     initialUserMessage,
     initialModelSelection,
@@ -69,6 +96,19 @@ export function ThreadChatView({
     initialInteractionMode,
     onInitialUserMessageSent,
     serverThread,
+  });
+
+  useThreadChatDebug({
+    backend,
+    environmentId,
+    projectId,
+    threadId,
+    projectWorkspaceRoot,
+    canonicalProjectId,
+    projectExists,
+    hasInitialUserMessage: Boolean(initialUserMessage),
+    hasServerThread,
+    serverThreadSummary,
   });
 
   const pendingProjectContextCount = useT3WorkAddToChatStore(
@@ -96,6 +136,48 @@ export function ThreadChatView({
   const removeContextAttachment = useT3WorkAddToChatStore((state) => state.removeThreadAttachment);
   const clearThreadAttachments = useT3WorkAddToChatStore((state) => state.clearThreadAttachments);
 
+  const prepareComposerContextAttachments = useCallback(async () => {
+    const current = useT3WorkAddToChatStore.getState().threadAttachmentsByThreadId[threadId] ?? [];
+    const nextAttachments: T3WorkContextAttachment[] = [];
+
+    for (const attachment of current) {
+      const request = resolveContextAttachmentRequest(attachment.id);
+      if (!request) {
+        nextAttachments.push(attachment);
+        continue;
+      }
+
+      try {
+        const nextAttachment = await syncContextAttachmentFromRequest({
+          attachmentId: attachment.id,
+          request,
+          ...(backend ? { backend } : {}),
+          forceRefresh: true,
+        });
+        useT3WorkAddToChatStore
+          .getState()
+          .replaceThreadAttachment(threadId, attachment.id, nextAttachment);
+        nextAttachments.push(nextAttachment);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to sync attached context.";
+        const failedAttachment = buildContextAttachment({
+          id: attachment.id,
+          request,
+          syncStatus: "error",
+          syncError: message,
+        });
+        useT3WorkAddToChatStore
+          .getState()
+          .replaceThreadAttachment(threadId, attachment.id, failedAttachment);
+        throw new Error(`Failed to sync attached context "${attachment.label}": ${message}`, {
+          cause: error,
+        });
+      }
+    }
+
+    return nextAttachments;
+  }, [backend, threadId]);
+
   const contextAttachmentSlot =
     contextAttachments.length > 0 ? (
       <ContextAttachmentStrip
@@ -109,13 +191,23 @@ export function ThreadChatView({
   }
 
   return (
-    <ChatView
-      environmentId={environmentId}
-      threadId={threadId as never}
-      routeKind="server"
-      composerContextAttachmentSlot={contextAttachmentSlot}
-      composerContextAttachments={contextAttachments}
-      onComposerContextAttachmentsConsumed={() => clearThreadAttachments(threadId)}
-    />
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
+      {showKickoffPlaceholder && kickoffMessage ? (
+        <ThreadKickoffPlaceholder message={kickoffMessage} />
+      ) : null}
+      {hasServerThread ? (
+        <ChatView
+          environmentId={environmentId}
+          threadId={threadId as never}
+          routeKind="server"
+          composerContextAttachmentSlot={contextAttachmentSlot}
+          composerContextAttachments={contextAttachments}
+          prepareComposerContextAttachments={prepareComposerContextAttachments}
+          onComposerContextAttachmentsConsumed={() => clearThreadAttachments(threadId)}
+        />
+      ) : (
+        <ThreadPendingChat />
+      )}
+    </div>
   );
 }

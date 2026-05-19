@@ -3,12 +3,13 @@ import type { ProjectShellProject } from "@t3tools/project-context";
 
 import { useBackend } from "~/t3work/backend/t3work-index";
 import { useAddToChat } from "~/t3work/hooks/t3work-useAddToChat";
-import { buildComprehensiveTicketPayload } from "~/t3work/t3work-addToChatPayloadBuilders";
+import type { AddToChatPayloadInput } from "~/t3work/t3work-addToChatUtils";
 import {
   buildGitHubActivityContextBundle,
   buildGitHubActivityDisplay,
 } from "~/t3work/t3work-githubActivityContextPayload";
 import { buildJiraWorkItemSummary } from "~/t3work/t3work-jiraContextMetadata";
+import { buildTicketContextBundle } from "~/t3work/t3work-ticketContextBundle";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectTicket } from "~/t3work/t3work-types";
 
@@ -41,13 +42,14 @@ export function useTicketAddToChatContextMenus(input: {
         ? { jiraIssueTypeIconUrl: jiraSummary.jiraIssueTypeIconUrl }
         : {}),
       summaryItems: jiraSummary.summaryItems,
-      payload: () =>
-        buildComprehensiveTicketPayload({
+      payload: (input?: AddToChatPayloadInput) =>
+        buildTicketContextBundle({
           backend,
           project,
           ticket,
           projectTickets,
           githubActivityItems: githubItems,
+          ...(input?.reportProgress ? { onProgress: input.reportProgress } : {}),
         }),
     });
   };
@@ -68,21 +70,22 @@ export function useTicketAddToChatContextMenus(input: {
       kind: display.activityKind,
       dedupeKey: `${projectId}:github-activity:${item.id}`,
       summaryItems: display.summaryItems,
-      payload: async () => {
-        const linkedTicketContext = backend
-          ? await buildComprehensiveTicketPayload({
+      payload: async (input?: AddToChatPayloadInput) => {
+        const linkedTicketBundle = backend
+          ? await buildTicketContextBundle({
               backend,
               project,
               ticket,
               projectTickets,
               githubActivityItems: githubItems,
+              ...(input?.reportProgress ? { onProgress: input.reportProgress } : {}),
             })
           : undefined;
         return buildGitHubActivityContextBundle({
           project,
           item,
           linkedWorkItem: ticket,
-          ...(linkedTicketContext ? { linkedTicketContext } : {}),
+          ...(linkedTicketBundle ? { linkedTicketBundle } : {}),
         });
       },
     });

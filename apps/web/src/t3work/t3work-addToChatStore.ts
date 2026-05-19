@@ -1,55 +1,15 @@
 import { create } from "zustand";
-import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
-
-export type PendingChatContextItem = {
-  projectId: string;
-  attachment: T3WorkContextAttachment;
-  createdAt: string;
-};
-
-export type PendingKickoffContextItem = {
-  projectId: string;
-  ticketId: string;
-  attachment: T3WorkContextAttachment;
-  createdAt: string;
-};
-
-function buildKickoffQueueKey(projectId: string, ticketId: string): string {
-  return `${projectId}:${ticketId}`;
-}
-
-function hasDuplicateByDedupeKey<T extends { attachment: T3WorkContextAttachment }>(
-  list: ReadonlyArray<T>,
-  attachment: T3WorkContextAttachment,
-): boolean {
-  if (!attachment.dedupeKey) {
-    return false;
-  }
-  return list.some((item) => item.attachment.dedupeKey === attachment.dedupeKey);
-}
-
-function hasThreadDuplicateByDedupeKey(
-  list: ReadonlyArray<T3WorkContextAttachment>,
-  attachment: T3WorkContextAttachment,
-): boolean {
-  if (!attachment.dedupeKey) {
-    return false;
-  }
-  return list.some((item) => item.dedupeKey === attachment.dedupeKey);
-}
-
-type T3WorkAddToChatState = {
-  pendingByProjectId: Record<string, PendingChatContextItem[]>;
-  pendingByKickoffKey: Record<string, PendingKickoffContextItem[]>;
-  threadAttachmentsByThreadId: Record<string, T3WorkContextAttachment[]>;
-  enqueue: (item: PendingChatContextItem) => void;
-  enqueueKickoff: (item: PendingKickoffContextItem) => void;
-  enqueueThreadAttachment: (threadId: string, attachment: T3WorkContextAttachment) => void;
-  removeThreadAttachment: (threadId: string, attachmentId: string) => void;
-  clearThreadAttachments: (threadId: string) => void;
-  drainProject: (projectId: string) => PendingChatContextItem[];
-  drainKickoff: (projectId: string, ticketId: string) => PendingKickoffContextItem[];
-};
+import { forgetContextAttachmentRequest } from "~/t3work/t3work-contextAttachmentSync";
+import {
+  buildKickoffQueueKey,
+  deleteRecordEntry,
+  hasQueuedAttachmentDuplicate,
+  hasThreadAttachmentDuplicate,
+  removeThreadAttachmentList,
+  replaceQueuedAttachment,
+  replaceThreadAttachmentList,
+} from "~/t3work/t3work-addToChatStoreHelpers";
+import type { T3WorkAddToChatState } from "~/t3work/t3work-addToChatStore.types";
 
 export const useT3WorkAddToChatStore = create<T3WorkAddToChatState>((set, get) => ({
   pendingByProjectId: {},
@@ -58,9 +18,7 @@ export const useT3WorkAddToChatStore = create<T3WorkAddToChatState>((set, get) =
   enqueue: (item) => {
     set((state) => {
       const current = state.pendingByProjectId[item.projectId] ?? [];
-      if (hasDuplicateByDedupeKey(current, item.attachment)) {
-        return state;
-      }
+      if (hasQueuedAttachmentDuplicate(current, item.attachment)) return state;
       return {
         pendingByProjectId: {
           ...state.pendingByProjectId,
@@ -73,9 +31,7 @@ export const useT3WorkAddToChatStore = create<T3WorkAddToChatState>((set, get) =
     set((state) => {
       const key = buildKickoffQueueKey(item.projectId, item.ticketId);
       const current = state.pendingByKickoffKey[key] ?? [];
-      if (hasDuplicateByDedupeKey(current, item.attachment)) {
-        return state;
-      }
+      if (hasQueuedAttachmentDuplicate(current, item.attachment)) return state;
       return {
         pendingByKickoffKey: {
           ...state.pendingByKickoffKey,
@@ -87,12 +43,8 @@ export const useT3WorkAddToChatStore = create<T3WorkAddToChatState>((set, get) =
   enqueueThreadAttachment: (threadId, attachment) => {
     set((state) => {
       const current = state.threadAttachmentsByThreadId[threadId] ?? [];
-      if (current.some((candidate) => candidate.id === attachment.id)) {
-        return state;
-      }
-      if (hasThreadDuplicateByDedupeKey(current, attachment)) {
-        return state;
-      }
+      if (current.some((candidate) => candidate.id === attachment.id)) return state;
+      if (hasThreadAttachmentDuplicate(current, attachment)) return state;
       return {
         threadAttachmentsByThreadId: {
           ...state.threadAttachmentsByThreadId,
@@ -101,30 +53,114 @@ export const useT3WorkAddToChatStore = create<T3WorkAddToChatState>((set, get) =
       };
     });
   },
-  removeThreadAttachment: (threadId, attachmentId) => {
+  replaceProjectAttachment: (projectId, attachmentId, attachment) => {
+    let replaced = false;
     set((state) => {
-      const current = state.threadAttachmentsByThreadId[threadId] ?? [];
-      if (current.length === 0) {
+      const current = state.pendingByProjectId[projectId] ?? [];
+      if (current.length === 0) return state;
+      const nextForProject = replaceQueuedAttachment({
+        list: current,
+        attachmentId,
+        buildReplacement: (item) => ({
+          projectId: item.projectId,
+          attachment,
+          createdAt: item.createdAt,
+        }),
+      });
+      if (!nextForProject.changed) {
         return state;
       }
-      const nextForThread = current.filter((attachment) => attachment.id !== attachmentId);
-      const next = { ...state.threadAttachmentsByThreadId };
-      if (nextForThread.length === 0) {
-        delete next[threadId];
-      } else {
-        next[threadId] = nextForThread;
+      replaced = true;
+      return {
+        pendingByProjectId: {
+          ...state.pendingByProjectId,
+          [projectId]: nextForProject.items,
+        },
+      };
+    });
+    return replaced;
+  },
+  replaceKickoffAttachment: (projectId, ticketId, attachmentId, attachment) => {
+    const key = buildKickoffQueueKey(projectId, ticketId);
+    let replaced = false;
+    set((state) => {
+      const current = state.pendingByKickoffKey[key] ?? [];
+      if (current.length === 0) return state;
+      const nextForKickoff = replaceQueuedAttachment({
+        list: current,
+        attachmentId,
+        buildReplacement: (item) => ({
+          projectId: item.projectId,
+          ticketId: item.ticketId,
+          attachment,
+          createdAt: item.createdAt,
+        }),
+      });
+      if (!nextForKickoff.changed) {
+        return state;
       }
-      return { threadAttachmentsByThreadId: next };
+      replaced = true;
+      return {
+        pendingByKickoffKey: {
+          ...state.pendingByKickoffKey,
+          [key]: nextForKickoff.items,
+        },
+      };
+    });
+    return replaced;
+  },
+  replaceThreadAttachment: (threadId, attachmentId, attachment) => {
+    set((state) => {
+      const current = state.threadAttachmentsByThreadId[threadId] ?? [];
+      if (current.length === 0) return state;
+      const nextForThread = replaceThreadAttachmentList({
+        list: current,
+        attachmentId,
+        attachment,
+      });
+      if (!nextForThread.changed) {
+        return state;
+      }
+      return {
+        threadAttachmentsByThreadId: {
+          ...state.threadAttachmentsByThreadId,
+          [threadId]: nextForThread.items,
+        },
+      };
+    });
+  },
+  removeThreadAttachment: (threadId, attachmentId) => {
+    forgetContextAttachmentRequest(attachmentId);
+    set((state) => {
+      const current = state.threadAttachmentsByThreadId[threadId] ?? [];
+      if (current.length === 0) return state;
+      const nextForThread = removeThreadAttachmentList(current, attachmentId);
+      if (nextForThread.length === 0) {
+        return {
+          threadAttachmentsByThreadId: deleteRecordEntry(
+            state.threadAttachmentsByThreadId,
+            threadId,
+          ),
+        };
+      }
+      return {
+        threadAttachmentsByThreadId: {
+          ...state.threadAttachmentsByThreadId,
+          [threadId]: nextForThread,
+        },
+      };
     });
   },
   clearThreadAttachments: (threadId) => {
     set((state) => {
-      if (!state.threadAttachmentsByThreadId[threadId]) {
-        return state;
+      const current = state.threadAttachmentsByThreadId[threadId];
+      if (!current) return state;
+      for (const attachment of current) {
+        forgetContextAttachmentRequest(attachment.id);
       }
-      const next = { ...state.threadAttachmentsByThreadId };
-      delete next[threadId];
-      return { threadAttachmentsByThreadId: next };
+      return {
+        threadAttachmentsByThreadId: deleteRecordEntry(state.threadAttachmentsByThreadId, threadId),
+      };
     });
   },
   drainProject: (projectId) => {
@@ -133,9 +169,7 @@ export const useT3WorkAddToChatStore = create<T3WorkAddToChatState>((set, get) =
       if (!state.pendingByProjectId[projectId]) {
         return state;
       }
-      const next = { ...state.pendingByProjectId };
-      delete next[projectId];
-      return { pendingByProjectId: next };
+      return { pendingByProjectId: deleteRecordEntry(state.pendingByProjectId, projectId) };
     });
     return current;
   },
@@ -146,9 +180,7 @@ export const useT3WorkAddToChatStore = create<T3WorkAddToChatState>((set, get) =
       if (!state.pendingByKickoffKey[key]) {
         return state;
       }
-      const next = { ...state.pendingByKickoffKey };
-      delete next[key];
-      return { pendingByKickoffKey: next };
+      return { pendingByKickoffKey: deleteRecordEntry(state.pendingByKickoffKey, key) };
     });
     return current;
   },

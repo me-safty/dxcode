@@ -144,4 +144,47 @@ describe("AtlassianIntegrationProvider", () => {
     expect(page.items.map((item) => item.displayId)).toEqual(["PROJ-2", "PROJ-1"]);
     expect(page.totalCount).toBe(2);
   });
+
+  it("downloads Jira attachment assets with the authenticated client", async () => {
+    const bytes = Uint8Array.from([137, 80, 78, 71]);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+
+      if (url === "https://test.atlassian.net/secure/attachment/10000/example.png") {
+        return new Response(bytes, {
+          status: 200,
+          headers: {
+            "content-type": "image/png",
+          },
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const provider = new AtlassianIntegrationProvider({
+      siteUrl: "https://test.atlassian.net",
+      email: "user@example.com",
+      apiToken: "token",
+    });
+
+    const asset = await provider.downloadAsset(
+      "https://test.atlassian.net/secure/attachment/10000/example.png",
+    );
+
+    expect(asset).toEqual({
+      bytes,
+      mimeType: "image/png",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://test.atlassian.net/secure/attachment/10000/example.png",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: "*/*",
+        }),
+      }),
+    );
+  });
 });

@@ -90,6 +90,8 @@ import {
 } from "./orchestration/http.ts";
 import {
   t3workAtlassianAccountsRouteLayer,
+  t3workAtlassianAssetRouteLayer,
+  t3workAtlassianAssetContentRouteLayer,
   t3workAtlassianConnectBasicRouteLayer,
   t3workAtlassianConnectOAuthRouteLayer,
   t3workAtlassianProjectsRouteLayer,
@@ -97,6 +99,7 @@ import {
   t3workAtlassianResourcesRouteLayer,
 } from "./t3work-atlassian-routes.ts";
 import { t3workProjectWorkspaceBootstrapRouteLayer } from "./t3work-project-repository-routes.ts";
+import { t3workProjectWorkspaceWriteContextFilesRouteLayer } from "./t3work-project-workspace-write-routes.ts";
 import { t3workGitHubInboxRouteLayer } from "./t3work-github-routes.ts";
 import * as NetService from "@t3tools/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
@@ -318,6 +321,8 @@ export const makeT3workRoutesLayer = Layer.mergeAll(
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
   t3workAtlassianAccountsRouteLayer,
+  t3workAtlassianAssetRouteLayer,
+  t3workAtlassianAssetContentRouteLayer,
   t3workAtlassianConnectBasicRouteLayer,
   t3workAtlassianConnectOAuthRouteLayer,
   t3workAtlassianProjectsRouteLayer,
@@ -325,6 +330,7 @@ export const makeT3workRoutesLayer = Layer.mergeAll(
   t3workAtlassianResourcesRouteLayer,
   t3workGitHubInboxRouteLayer,
   t3workProjectWorkspaceBootstrapRouteLayer,
+  t3workProjectWorkspaceWriteContextFilesRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,

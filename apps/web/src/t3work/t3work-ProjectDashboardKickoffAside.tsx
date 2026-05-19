@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SearchIcon } from "lucide-react";
 import type {
   ModelSelection,
@@ -10,8 +10,12 @@ import type { ProjectShellProject } from "@t3tools/project-context";
 import { Card, CardContent } from "~/t3work/components/ui/t3work-card";
 import { Input } from "~/t3work/components/ui/t3work-input";
 import { ScrollArea } from "~/t3work/components/ui/t3work-scroll-area";
-import { TicketKickoffComposer } from "~/t3work/t3work-TicketKickoffComposer";
+import { useT3WorkAddToChatStore } from "~/t3work/t3work-addToChatStore";
+import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
 import { formatRelativeTime } from "~/t3work/t3work-AppTicketHelpers";
+import { mergeContextAttachmentsById } from "~/t3work/t3work-contextAttachmentMerge";
+import { ProjectDashboardKickoffComposer } from "~/t3work/t3work-ProjectDashboardKickoffComposer";
+import { PROJECT_DASHBOARD_KICKOFF_QUICK_STARTS } from "~/t3work/t3work-projectDashboardKickoffQuickStarts";
 import type { ProjectThread } from "~/t3work/t3work-types";
 
 export function ProjectDashboardKickoffAside({
@@ -32,10 +36,49 @@ export function ProjectDashboardKickoffAside({
     kickoffModelSelection: ModelSelection,
     kickoffRuntimeMode: RuntimeMode,
     kickoffInteractionMode: ProviderInteractionMode,
+    kickoffContextAttachments: ReadonlyArray<T3WorkContextAttachment>,
   ) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [prefillText, setPrefillText] = useState<string | undefined>(undefined);
+  const [injectedContextAttachments, setInjectedContextAttachments] = useState<
+    readonly T3WorkContextAttachment[]
+  >([]);
+  const [dismissedAttachmentIds, setDismissedAttachmentIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
+  const pendingProjectContextCount = useT3WorkAddToChatStore(
+    (state) => (state.pendingByProjectId[project.id] ?? []).length,
+  );
+
+  useEffect(() => {
+    if (pendingProjectContextCount === 0) {
+      return;
+    }
+    const drained = useT3WorkAddToChatStore.getState().drainProject(project.id);
+    if (drained.length === 0) {
+      return;
+    }
+    setInjectedContextAttachments((current) =>
+      mergeContextAttachmentsById({
+        current,
+        incoming: drained.map((item) => item.attachment),
+        dismissedIds: dismissedAttachmentIds,
+      }),
+    );
+  }, [dismissedAttachmentIds, pendingProjectContextCount, project.id]);
+
+  const removeContextAttachment = (id: string) => {
+    setInjectedContextAttachments((current) =>
+      current.filter((attachment) => attachment.id !== id),
+    );
+    setDismissedAttachmentIds((current) => {
+      const next = new Set(current);
+      next.add(id);
+      return next;
+    });
+  };
 
   const recentThreads = useMemo(
     () =>
@@ -58,26 +101,6 @@ export function ProjectDashboardKickoffAside({
     });
   }, [normalizedQuery, recentThreads]);
 
-  const quickStarts = [
-    {
-      id: "plan",
-      title: "Plan project priorities",
-      prompt:
-        "Review the active work and propose a prioritized execution plan with dependencies and risk notes.",
-    },
-    {
-      id: "status",
-      title: "Generate status update",
-      prompt:
-        "Draft a concise project status update with what is done, in progress, blocked, and next.",
-    },
-    {
-      id: "next",
-      title: "Suggest next best task",
-      prompt: "Based on project context, recommend the next highest-leverage task to execute now.",
-    },
-  ];
-
   return (
     <aside className="flex min-h-0 flex-col overflow-hidden border-l border-border/70">
       <div className="border-b border-border px-4 py-4 sm:px-5">
@@ -94,7 +117,7 @@ export function ProjectDashboardKickoffAside({
               Quick starts
             </h4>
             <div className="space-y-2.5">
-              {quickStarts.map((quickStart) => (
+              {PROJECT_DASHBOARD_KICKOFF_QUICK_STARTS.map((quickStart) => (
                 <button
                   key={quickStart.id}
                   type="button"
@@ -152,17 +175,25 @@ export function ProjectDashboardKickoffAside({
         </div>
       </ScrollArea>
 
-      <div className="shrink-0 border-t border-border bg-background/75 p-3 sm:p-4">
-        <TicketKickoffComposer
-          {...(prefillText ? { prefillText } : {})}
-          providers={providers}
-          isConnected={isConnected}
-          onSubmit={(text, selection, runtimeMode, interactionMode) => {
-            onKickoffThread(text, selection, runtimeMode, interactionMode);
-            setPrefillText(undefined);
-          }}
-        />
-      </div>
+      <ProjectDashboardKickoffComposer
+        {...(prefillText ? { prefillText } : {})}
+        providers={providers}
+        isConnected={isConnected}
+        injectedContextAttachments={injectedContextAttachments}
+        onRemoveContextAttachment={removeContextAttachment}
+        onSubmit={(text, selection, runtimeMode, interactionMode) => {
+          onKickoffThread(
+            text,
+            selection,
+            runtimeMode,
+            interactionMode,
+            injectedContextAttachments,
+          );
+          setPrefillText(undefined);
+          setInjectedContextAttachments([]);
+          setDismissedAttachmentIds(new Set());
+        }}
+      />
     </aside>
   );
 }

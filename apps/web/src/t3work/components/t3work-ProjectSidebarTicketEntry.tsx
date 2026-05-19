@@ -5,14 +5,15 @@ import type { MouseEvent } from "react";
 import { SidebarMenuSubButton } from "~/t3work/components/ui/t3work-sidebar";
 import { JiraIssueTypeIcon } from "~/t3work/components/ticket/t3work-JiraIssueType";
 import { useBackend } from "~/t3work/backend/t3work-index";
-import { buildComprehensiveTicketPayload } from "~/t3work/t3work-addToChatPayloadBuilders";
 import { GitHubActivityInlineList } from "~/t3work/t3work-GitHubActivityViews";
 import {
   buildGitHubActivityContextBundle,
   buildGitHubActivityDisplay,
 } from "~/t3work/t3work-githubActivityContextPayload";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
+import type { AddToChatPayloadInput } from "~/t3work/t3work-addToChatUtils";
 import { useAddToChat } from "~/t3work/hooks/t3work-useAddToChat";
+import { buildTicketContextBundle } from "~/t3work/t3work-ticketContextBundle";
 import { ThreadRow } from "./t3work-ProjectSidebarThreadRow";
 import { buildTicketSidebarAddToChatRequest } from "./t3work-projectSidebarAddToChatRequests";
 import type { ProjectThread, ProjectTicket, ViewState } from "~/t3work/t3work-types";
@@ -181,21 +182,22 @@ export function TicketSidebarEntry({
                 kind: display.activityKind,
                 dedupeKey: `${projectId}:github-activity:${item.id}`,
                 summaryItems: display.summaryItems,
-                payload: async () => {
-                  const linkedTicketContext = backend
-                    ? await buildComprehensiveTicketPayload({
+                payload: async (input?: AddToChatPayloadInput) => {
+                  const linkedTicketBundle = backend
+                    ? await buildTicketContextBundle({
                         backend,
                         project,
                         ticket,
                         projectTickets,
                         githubActivityItems,
+                        ...(input?.reportProgress ? { onProgress: input.reportProgress } : {}),
                       })
                     : undefined;
                   return buildGitHubActivityContextBundle({
                     project,
                     item,
                     linkedWorkItem: ticket,
-                    ...(linkedTicketContext ? { linkedTicketContext } : {}),
+                    ...(linkedTicketBundle ? { linkedTicketBundle } : {}),
                   });
                 },
               });

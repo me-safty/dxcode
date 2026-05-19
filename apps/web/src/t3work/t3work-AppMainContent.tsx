@@ -1,5 +1,6 @@
 import type { ProjectShellProject } from "@t3tools/project-context";
 import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
 import { ThreadChatView } from "~/t3work/chat/t3work-ThreadChatView";
 import { useBackendState } from "~/t3work/backend/t3work-index";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
@@ -7,6 +8,7 @@ import type { ProjectThread, ViewState } from "~/t3work/t3work-types";
 import { ProjectDashboardKickoffAside } from "~/t3work/t3work-ProjectDashboardKickoffAside";
 import { ResizableRightSidebarLayout } from "~/t3work/t3work-ResizableRightSidebarLayout";
 import { isHomeProjectId } from "~/t3work/t3work-homeProject";
+import { useThreadResolutionDebug } from "~/t3work/t3work-useThreadResolutionDebug";
 import {
   ProjectBrowserEmptyWithChat,
   useHomeProjectChat,
@@ -26,6 +28,7 @@ type MainContentProps = {
     kickoffModelSelection: ModelSelection;
     kickoffRuntimeMode: RuntimeMode;
     kickoffInteractionMode: ProviderInteractionMode;
+    kickoffContextAttachments: ReadonlyArray<T3WorkContextAttachment>;
   }) => void;
   onKickoffTicketThread: (input: {
     projectId: string;
@@ -36,6 +39,7 @@ type MainContentProps = {
     kickoffModelSelection: ModelSelection;
     kickoffRuntimeMode: RuntimeMode;
     kickoffInteractionMode: ProviderInteractionMode;
+    kickoffContextAttachments: ReadonlyArray<T3WorkContextAttachment>;
   }) => void;
   onThreadKickoffConsumed: (threadId: string) => void;
   onBackToDashboard: (projectId: string) => void;
@@ -77,6 +81,7 @@ export function AppMainContent({
         kickoffModelSelection,
         kickoffRuntimeMode,
         kickoffInteractionMode,
+        kickoffContextAttachments,
       ) => {
         if (!homeChatProject) return;
         onKickoffProjectThread({
@@ -85,6 +90,7 @@ export function AppMainContent({
           kickoffModelSelection,
           kickoffRuntimeMode,
           kickoffInteractionMode,
+          kickoffContextAttachments,
         });
       }}
     />
@@ -96,40 +102,57 @@ export function AppMainContent({
     homeChatThreadId,
   });
 
-  if (!view) {
-    return renderHomeBrowserEmpty();
-  }
+  const threadView = view?.type === "thread" ? view : null;
+  const threadProject = threadView
+    ? (allProjects.find((candidate) => candidate.id === threadView.projectId) ??
+      (isHomeProjectId(threadView.projectId) ? homeChatProject : null))
+    : null;
+  const threadProjectThreads = threadProject ? getThreadsForProject(threadProject.id) : [];
+  const resolvedThread = threadView
+    ? (threadProjectThreads.find((candidate) => candidate.id === threadView.threadId) ?? null)
+    : null;
+
+  useThreadResolutionDebug({
+    routeProjectId: threadView?.projectId ?? null,
+    routeThreadId: threadView?.threadId ?? null,
+    resolvedProjectId: threadProject?.id ?? null,
+    resolvedProjectWorkspaceRoot: threadProject?.workspace?.rootPath ?? null,
+    projectThreadCount: threadProjectThreads.length,
+    resolvedThreadId: resolvedThread?.id ?? null,
+    resolvedThreadProjectId: resolvedThread?.projectId ?? null,
+    resolvedThreadStatus: resolvedThread?.status ?? null,
+    kickoffPending: resolvedThread?.kickoffPending ?? null,
+  });
+
+  if (!view) return renderHomeBrowserEmpty();
 
   if (view.type === "thread") {
-    const project =
-      allProjects.find((candidate) => candidate.id === view.projectId) ??
-      (isHomeProjectId(view.projectId) ? homeChatProject : null);
-    const thread = project
-      ? (getThreadsForProject(project.id).find((candidate) => candidate.id === view.threadId) ??
-        null)
-      : null;
-
     return (
       <ThreadChatView
         threadId={view.threadId}
         projectId={view.projectId}
-        projectTitle={project?.title ?? view.projectId}
-        {...(project?.workspace?.rootPath
-          ? { projectWorkspaceRoot: project.workspace.rootPath }
+        projectTitle={threadProject?.title ?? view.projectId}
+        {...(threadProject?.workspace?.rootPath
+          ? { projectWorkspaceRoot: threadProject.workspace.rootPath }
           : {})}
-        title={thread?.title ?? "New thread"}
-        {...(thread?.kickoffPending && thread.kickoffMessage
-          ? { initialUserMessage: thread.kickoffMessage }
+        title={resolvedThread?.title ?? "New thread"}
+        {...(resolvedThread?.kickoffMessage
+          ? { kickoffMessage: resolvedThread.kickoffMessage }
           : {})}
-        {...(thread?.kickoffModelSelection
-          ? { initialModelSelection: thread.kickoffModelSelection }
+        {...(resolvedThread?.kickoffPending && resolvedThread.kickoffMessage
+          ? { initialUserMessage: resolvedThread.kickoffMessage }
           : {})}
-        {...(thread?.kickoffRuntimeMode ? { initialRuntimeMode: thread.kickoffRuntimeMode } : {})}
-        {...(thread?.kickoffInteractionMode
-          ? { initialInteractionMode: thread.kickoffInteractionMode }
+        {...(resolvedThread?.kickoffModelSelection
+          ? { initialModelSelection: resolvedThread.kickoffModelSelection }
+          : {})}
+        {...(resolvedThread?.kickoffRuntimeMode
+          ? { initialRuntimeMode: resolvedThread.kickoffRuntimeMode }
+          : {})}
+        {...(resolvedThread?.kickoffInteractionMode
+          ? { initialInteractionMode: resolvedThread.kickoffInteractionMode }
           : {})}
         onInitialUserMessageSent={() => {
-          if (thread) onThreadKickoffConsumed(thread.id);
+          if (resolvedThread) onThreadKickoffConsumed(resolvedThread.id);
         }}
         onBack={() => onBackToDashboard(view.projectId)}
       />
@@ -164,6 +187,7 @@ export function AppMainContent({
               kickoffModelSelection,
               kickoffRuntimeMode,
               kickoffInteractionMode,
+              kickoffContextAttachments,
             ) => {
               onKickoffProjectThread({
                 projectId: project.id,
@@ -171,6 +195,7 @@ export function AppMainContent({
                 kickoffModelSelection,
                 kickoffRuntimeMode,
                 kickoffInteractionMode,
+                kickoffContextAttachments,
               });
             }}
           />
@@ -179,9 +204,7 @@ export function AppMainContent({
     );
   }
 
-  if (view.type === "ticket") {
-    return <>{renderTicketDetail(project, view.ticketId)}</>;
-  }
+  if (view.type === "ticket") return <>{renderTicketDetail(project, view.ticketId)}</>;
 
   return renderHomeBrowserEmpty();
 }

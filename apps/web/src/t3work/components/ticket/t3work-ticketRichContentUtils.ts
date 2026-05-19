@@ -28,7 +28,11 @@ function resolveUrlAgainstBase(url: string, baseUrl?: string): string {
   }
 }
 
-export function sanitizeJiraHtml(unsafeHtml: string, baseUrl?: string): string {
+export function sanitizeJiraHtml(
+  unsafeHtml: string,
+  baseUrl?: string,
+  resolveAssetUrl?: (url: string) => string,
+): string {
   if (typeof window === "undefined") return unsafeHtml;
 
   const parser = new DOMParser();
@@ -56,7 +60,7 @@ export function sanitizeJiraHtml(unsafeHtml: string, baseUrl?: string): string {
       if (name === "href" || name === "src") {
         const resolved = resolveUrlAgainstBase(value, baseUrl);
         if (resolved.length > 0) {
-          element.setAttribute(attr.name, resolved);
+          element.setAttribute(attr.name, resolveAssetUrl ? resolveAssetUrl(resolved) : resolved);
         }
       }
     }

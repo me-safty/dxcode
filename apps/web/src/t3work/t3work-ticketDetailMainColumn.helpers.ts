@@ -2,15 +2,19 @@ import type { ProjectShellProject, ResourceSnapshot } from "@t3tools/project-con
 import type { MouseEvent } from "react";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectTicket } from "~/t3work/t3work-types";
+import type { AddToChatPayloadInput, AddToChatRequest } from "~/t3work/t3work-addToChatUtils";
 import type { BackendApi } from "~/t3work/backend/t3work-types";
 import { buildTicketDetailContextBundle } from "~/t3work/t3work-ticketDetailContextBundle";
 import type { TicketDetailContextTarget } from "~/t3work/t3work-ticketDetailContextBundle";
+import { normalizeTicketAttachments } from "~/t3work/t3work-ticketAttachmentUtils";
 import {
   toRelationshipTicket,
   type RelationshipEntry,
 } from "~/t3work/t3work-ticketRelationships-helpers";
 
 type SummaryItem = { label: string; value: string };
+
+export { normalizeTicketAttachments };
 
 export function createSectionContextMenuHandler(input: {
   backend: BackendApi | undefined;
@@ -20,22 +24,7 @@ export function createSectionContextMenuHandler(input: {
   projectTickets: ReadonlyArray<ProjectTicket>;
   githubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
   snapshot: ResourceSnapshot | null;
-  showAddToChatContextMenu: (
-    event: MouseEvent,
-    request: {
-      projectId: string;
-      projectTitle: string;
-      projectWorkspaceRoot?: string | undefined;
-      targetLabel: string;
-      targetType: string;
-      kind?: string;
-      jiraIssueType?: string;
-      jiraIssueTypeIconUrl?: string;
-      dedupeKey?: string;
-      payload: unknown | (() => Promise<unknown>);
-      summaryItems?: ReadonlyArray<SummaryItem>;
-    },
-  ) => Promise<void>;
+  showAddToChatContextMenu: (event: MouseEvent, request: AddToChatRequest) => Promise<void>;
 }) {
   return (
     event: MouseEvent,
@@ -66,7 +55,7 @@ export function createSectionContextMenuHandler(input: {
         : {}),
       dedupeKey: resolvedDedupeKey,
       ...(summaryItems ? { summaryItems } : {}),
-      payload: () =>
+      payload: (progress?: AddToChatPayloadInput) =>
         buildTicketDetailContextBundle({
           backend: input.backend as BackendApi,
           project: input.project,
@@ -77,20 +66,10 @@ export function createSectionContextMenuHandler(input: {
           targetLabel,
           ...(summaryItems ? { summaryItems } : {}),
           primarySnapshot: input.snapshot,
+          ...(progress?.reportProgress ? { onProgress: progress.reportProgress } : {}),
         }),
     });
   };
-}
-
-export function normalizeTicketAttachments(attachments: Array<Record<string, unknown>>) {
-  return attachments.map((attachment) => ({
-    id: typeof attachment.id === "string" ? attachment.id : undefined,
-    filename: typeof attachment.filename === "string" ? attachment.filename : undefined,
-    mimeType: typeof attachment.mimeType === "string" ? attachment.mimeType : undefined,
-    content: typeof attachment.content === "string" ? attachment.content : undefined,
-    thumbnail: typeof attachment.thumbnail === "string" ? attachment.thumbnail : undefined,
-    size: typeof attachment.size === "number" ? attachment.size : undefined,
-  }));
 }
 
 export function normalizeTicketComments(sortedComments: Array<Record<string, unknown>>) {
@@ -166,5 +145,35 @@ export function buildReferenceContextMenuData(input: {
         }
       : {}),
     dedupeKey: `${input.projectId}:${input.ticketId}:relationships:${referenceTicket.ref.displayId}`,
+  };
+}
+
+export function createReferenceContextMenuHandler(input: {
+  handleSectionContextMenu: ReturnType<typeof createSectionContextMenuHandler>;
+  projectId: string;
+  ticketId: string;
+}) {
+  return (event: MouseEvent, entry: RelationshipEntry) => {
+    const referenceContextMenuData = buildReferenceContextMenuData({
+      entry,
+      projectId: input.projectId,
+      ticketId: input.ticketId,
+    });
+    input.handleSectionContextMenu(
+      event,
+      "relationships",
+      referenceContextMenuData.label,
+      referenceContextMenuData.summaryItems,
+      {
+        kind: referenceContextMenuData.kind,
+        dedupeKey: referenceContextMenuData.dedupeKey,
+        ...(referenceContextMenuData.jiraIssueType
+          ? { jiraIssueType: referenceContextMenuData.jiraIssueType }
+          : {}),
+        ...(referenceContextMenuData.jiraIssueTypeIconUrl
+          ? { jiraIssueTypeIconUrl: referenceContextMenuData.jiraIssueTypeIconUrl }
+          : {}),
+      },
+    );
   };
 }

@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
+import { useMemo } from "react";
 import { Badge } from "~/t3work/components/ui/t3work-badge";
 import { T3SurfaceCard, T3SurfaceCardContent } from "~/t3work/components/ui/t3work-surface";
+import { createJiraTicketAssetUrlResolver } from "./t3work-ticketAssetUrls";
 import { HtmlBlock, MarkdownBlock } from "./t3work-ticketRichContentBlocks";
 import { TicketAttachments } from "./t3work-TicketAttachments";
 import { TicketComments } from "./t3work-TicketComments";
@@ -10,6 +12,10 @@ export function TicketRichContent({
   descriptionMarkdown,
   descriptionHtml,
   htmlBaseUrl,
+  projectId,
+  ticketKey,
+  accountId,
+  workspaceRoot,
   afterDescription,
   attachments,
   comments,
@@ -20,6 +26,10 @@ export function TicketRichContent({
   descriptionMarkdown?: string;
   descriptionHtml?: string;
   htmlBaseUrl?: string;
+  projectId: string;
+  ticketKey: string;
+  accountId?: string;
+  workspaceRoot?: string;
   afterDescription?: ReactNode;
   attachments: JiraAttachment[];
   comments: JiraCommentItem[];
@@ -27,6 +37,19 @@ export function TicketRichContent({
   onAttachmentsContextMenu?: (event: React.MouseEvent) => void;
   onCommentsContextMenu?: (event: React.MouseEvent) => void;
 }) {
+  const resolveAssetUrl = useMemo(
+    () =>
+      createJiraTicketAssetUrlResolver({
+        projectId,
+        ticketKey,
+        ...(accountId ? { accountId } : {}),
+        ...(workspaceRoot ? { workspaceRoot } : {}),
+        ...(htmlBaseUrl ? { baseUrl: htmlBaseUrl } : {}),
+        attachments,
+      }),
+    [accountId, attachments, htmlBaseUrl, projectId, ticketKey, workspaceRoot],
+  );
+
   return (
     <div className="space-y-4">
       <div onContextMenu={onDescriptionContextMenu}>
@@ -42,6 +65,7 @@ export function TicketRichContent({
               <HtmlBlock
                 content={descriptionHtml}
                 {...(htmlBaseUrl ? { baseUrl: htmlBaseUrl } : {})}
+                {...(resolveAssetUrl ? { resolveAssetUrl } : {})}
               />
             ) : descriptionMarkdown && descriptionMarkdown.trim().length > 0 ? (
               <MarkdownBlock content={descriptionMarkdown} />
@@ -55,10 +79,17 @@ export function TicketRichContent({
       {afterDescription}
 
       <div onContextMenu={onAttachmentsContextMenu}>
-        <TicketAttachments attachments={attachments} />
+        <TicketAttachments
+          attachments={attachments}
+          {...(resolveAssetUrl ? { resolveAssetUrl } : {})}
+        />
       </div>
       <div onContextMenu={onCommentsContextMenu}>
-        <TicketComments comments={comments} {...(htmlBaseUrl ? { htmlBaseUrl } : {})} />
+        <TicketComments
+          comments={comments}
+          {...(htmlBaseUrl ? { htmlBaseUrl } : {})}
+          {...(resolveAssetUrl ? { resolveAssetUrl } : {})}
+        />
       </div>
     </div>
   );

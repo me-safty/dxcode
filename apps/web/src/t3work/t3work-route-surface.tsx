@@ -5,6 +5,7 @@ import { BackendProvider, createT3Backend } from "~/t3work/backend/t3work-index"
 import { App as T3workApp } from "~/t3work/t3work-App";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import type { ViewState } from "~/t3work/t3work-types";
+import { recordT3WorkThreadDebug } from "~/t3work/chat/t3work-threadDebug";
 
 import "~/t3work/t3work-index.css";
 
@@ -72,6 +73,10 @@ export function T3workRouteSurface() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const view = parseT3workViewFromPath(pathname);
   const isCreateRoute = pathname === T3WORK_CREATE_PATH;
+  const viewType = view?.type ?? null;
+  const viewProjectId = view?.projectId ?? null;
+  const viewThreadId = view?.type === "thread" ? view.threadId : null;
+  const viewTicketId = view?.type === "ticket" ? view.ticketId : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +109,18 @@ export function T3workRouteSurface() {
       void backend.disconnect();
     };
   }, [authState, backend]);
+
+  useEffect(() => {
+    recordT3WorkThreadDebug("route-surface.state", {
+      pathname,
+      authState,
+      isCreateRoute,
+      viewType,
+      viewProjectId,
+      viewThreadId,
+      viewTicketId,
+    });
+  }, [authState, isCreateRoute, pathname, viewProjectId, viewThreadId, viewTicketId, viewType]);
 
   if (authState === "checking") {
     return <div className="flex min-h-0 flex-1 items-center justify-center bg-background" />;

@@ -1,3 +1,6 @@
+import * as OS from "node:os";
+import path from "node:path";
+
 import { T3workAtlassianError } from "./t3work-atlassian-http.ts";
 
 export type BootstrapWorkspaceRequest = {
@@ -17,6 +20,22 @@ export type BootstrapWorkspaceResponse = {
   readonly workspaceRepositoryInitialized: boolean;
   readonly referencesRoot: string;
   readonly linkedRepositories: ReadonlyArray<LinkedRepositoryBootstrapResult>;
+};
+
+export type ContextWorkspaceFile = {
+  readonly relativePath: string;
+  readonly contents: string;
+  readonly encoding?: "utf8" | "base64";
+};
+
+export type WriteContextFilesRequest = {
+  readonly workspaceRoot: string;
+  readonly files: ReadonlyArray<ContextWorkspaceFile>;
+};
+
+export type WriteContextFilesResponse = {
+  readonly workspaceRoot: string;
+  readonly writtenFiles: ReadonlyArray<string>;
 };
 
 export const HIDDEN_T3WORK_DIR = ".t3work";
@@ -43,6 +62,17 @@ export function normalizeRepositoryUrls(
   return [...deduped.values()];
 }
 
+export function normalizeT3workWorkspaceRoot(workspaceRoot: string): string {
+  const trimmed = workspaceRoot.trim();
+  if (trimmed === "~") {
+    return OS.homedir();
+  }
+  if (trimmed.startsWith("~/") || trimmed.startsWith("~\\")) {
+    return path.join(OS.homedir(), trimmed.slice(2));
+  }
+  return path.resolve(trimmed);
+}
+
 function sanitizeSlugSegment(value: string): string {
   return value
     .toLowerCase()
@@ -56,7 +86,7 @@ export function deriveReferenceDirectoryName(url: string): string {
   if (sshMatch) {
     const host = sanitizeSlugSegment(sshMatch[1] ?? "host");
     const pathPart = sanitizeSlugSegment((sshMatch[2] ?? "repo").replace(/\.git$/i, ""));
-    return `${host}-${pathPart}` || "repo";
+    return `${host}-${pathPart}`;
   }
 
   const shorthandMatch = /^([a-z0-9_.-]+)\/([a-z0-9_.-]+)$/i.exec(trimmed);
@@ -72,7 +102,7 @@ export function deriveReferenceDirectoryName(url: string): string {
     const pathname = sanitizeSlugSegment(
       parsed.pathname.replace(/^\/+/, "").replace(/\.git$/i, ""),
     );
-    return `${host}-${pathname}` || "repo";
+    return `${host}-${pathname}`;
   } catch {
     const fallback = sanitizeSlugSegment(trimmed.replace(/\.git$/i, ""));
     return fallback || "repo";

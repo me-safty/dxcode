@@ -1,28 +1,20 @@
 import type { ProjectShellProject } from "@t3tools/project-context";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectTicket } from "~/t3work/t3work-types";
-import type { ComprehensiveTicketPayload } from "~/t3work/t3work-addToChatPayloadBuilders";
-
-type T3WorkDirectoryBundlePayload = {
-  kind: "t3work-directory-bundle";
-  dedupeKey: string;
-  bundleRootRelativePath: string;
-  files: ReadonlyArray<{ relativePath: string; contents: string }>;
-  fileReferences: ReadonlyArray<{ label: string; relativePath: string }>;
-  lightweightItem: unknown;
-};
-
-function sanitizePathSegment(input: string): string {
-  const value = input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return value.length > 0 ? value.slice(0, 80) : "item";
-}
-
-function stringify(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
+import {
+  buildContextManifestPath,
+  buildContextMetadataPath,
+  buildGitHubActivityCacheRoot,
+  buildGitHubActivityEntryPoint,
+  buildJiraTicketEntryPoint,
+} from "~/t3work/t3work-contextCachePaths";
+import {
+  compactJson,
+  dedupeDirectoryBundleFiles,
+  dedupeDirectoryBundleReferences,
+  type T3WorkDirectoryBundlePayload,
+} from "~/t3work/t3work-contextDirectoryBundle";
+import { resolveTicketContextKey } from "~/t3work/t3work-ticketContextKey";
 
 function formatReason(reason: string): string {
   return reason.replaceAll("_", " ");
@@ -87,44 +79,48 @@ export function buildGitHubActivityContextBundle(input: {
   project: ProjectShellProject;
   item: GitHubWorkActivityItem;
   linkedWorkItem?: ProjectTicket | null;
-  linkedTicketContext?: ComprehensiveTicketPayload;
+  linkedTicketBundle?: T3WorkDirectoryBundlePayload;
 }): T3WorkDirectoryBundlePayload {
   const display = buildGitHubActivityDisplay({ item: input.item });
-  const root = `.t3work/context-cache/github/${sanitizePathSegment(input.project.id)}/${sanitizePathSegment(
-    input.item.repository,
-  )}/${sanitizePathSegment(input.item.id)}`;
+  const root = buildGitHubActivityCacheRoot({
+    projectId: input.project.id,
+    repository: input.item.repository,
+    activityId: input.item.id,
+  });
   const files: Array<{ relativePath: string; contents: string }> = [];
-  const fileReferences: Array<{ label: string; relativePath: string }> = [];
 
-  const write = (label: string, relativePath: string, value: unknown) => {
-    files.push({ relativePath, contents: stringify(value) });
-    fileReferences.push({ label, relativePath });
+  const write = (relativePath: string, value: unknown) => {
+    files.push({ relativePath, contents: compactJson(value) });
   };
 
-  write("Manifest", `${root}/manifest.json`, {
+  const entryPoint = buildGitHubActivityEntryPoint({
+    projectId: input.project.id,
+    repository: input.item.repository,
+    activityId: input.item.id,
+  });
+  const linkedTicketEntryPoint = input.linkedWorkItem
+    ? buildJiraTicketEntryPoint(input.project.id, resolveTicketContextKey(input.linkedWorkItem))
+    : null;
+
+  write(buildContextManifestPath(root), {
     kind: "github-activity-context-manifest",
-    generatedAt: new Date().toISOString(),
+    syncedAt: new Date().toISOString(),
     activityKind: display.activityKind,
     activityLabel: display.targetType,
     activityId: input.item.id,
-    references: {
-      activity: `${root}/activity/item.json`,
-      repository: `${root}/repository/context.json`,
-      project: `${root}/project/context.json`,
-      linkedWorkItem: `${root}/linked-work-item/context.json`,
-      linkedWorkItemFullContext: `${root}/linked-work-item/full-ticket-context.json`,
-    },
+    entryPointRelativePath: entryPoint,
+    linkedWorkItemEntryPointRelativePath: linkedTicketEntryPoint,
   });
 
-  write("Activity item", `${root}/activity/item.json`, {
+  write(`${root}/activity/item.json`, {
     activityKind: display.activityKind,
     item: input.item,
   });
-  write("Repository context", `${root}/repository/context.json`, {
+  write(`${root}/repository/context.json`, {
     repository: input.item.repository,
     ...(input.item.repositoryUrl ? { repositoryUrl: input.item.repositoryUrl } : {}),
   });
-  write("Project context", `${root}/project/context.json`, {
+  write(`${root}/project/context.json`, {
     id: input.project.id,
     title: input.project.title,
     source: input.project.source,
@@ -132,29 +128,48 @@ export function buildGitHubActivityContextBundle(input: {
       ? { workspaceRoot: input.project.workspace.rootPath }
       : {}),
   });
-  write("Linked work item", `${root}/linked-work-item/context.json`, {
+  write(`${root}/linked-work-item/context.json`, {
+    linkedWorkItem: input.linkedWorkItem ?? null,
+    ...(linkedTicketEntryPoint
+      ? { linkedTicketEntryPointRelativePath: linkedTicketEntryPoint }
+      : {}),
+  });
+  write(buildContextMetadataPath(root), {
+    item: input.item,
     linkedWorkItem: input.linkedWorkItem ?? null,
   });
-  if (input.linkedTicketContext) {
-    write("Linked work item full context", `${root}/linked-work-item/full-ticket-context.json`, {
-      ticketContext: input.linkedTicketContext,
-    });
-  }
+  write(entryPoint, {
+    kind: display.activityKind,
+    label: display.targetLabel,
+    summaryItems: display.summaryItems,
+    paths: {
+      manifest: buildContextManifestPath(root),
+      metadata: buildContextMetadataPath(root),
+      activity: `${root}/activity/item.json`,
+      repository: `${root}/repository/context.json`,
+      project: `${root}/project/context.json`,
+      linkedWorkItem: `${root}/linked-work-item/context.json`,
+    },
+  });
+
+  const fileReferences = dedupeDirectoryBundleReferences([
+    { label: "Activity entrypoint", relativePath: entryPoint },
+    ...(linkedTicketEntryPoint
+      ? [{ label: "Linked ticket entrypoint", relativePath: linkedTicketEntryPoint }]
+      : []),
+  ]);
 
   return {
     kind: "t3work-directory-bundle",
     dedupeKey: `${input.project.id}:github-activity:${input.item.id}`,
     bundleRootRelativePath: root,
-    files,
+    files: dedupeDirectoryBundleFiles([...files, ...(input.linkedTicketBundle?.files ?? [])]),
     fileReferences,
     lightweightItem: {
       kind: display.activityKind,
       label: display.targetLabel,
       summaryItems: display.summaryItems,
-      references: [
-        { label: "Manifest", relativePath: `${root}/manifest.json` },
-        { label: "Activity item", relativePath: `${root}/activity/item.json` },
-      ],
+      references: fileReferences,
     },
   };
 }

@@ -9,6 +9,7 @@ import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment"
 import { TicketKickoffComposer } from "~/t3work/t3work-TicketKickoffComposer";
 import { TicketKickoffPanel } from "~/t3work/t3work-TicketKickoffPanel";
 import { useT3WorkAddToChatStore, buildKickoffQueueKey } from "~/t3work/t3work-addToChatStore";
+import { mergeContextAttachmentsById } from "~/t3work/t3work-contextAttachmentMerge";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectThread } from "~/t3work/t3work-types";
 
@@ -17,7 +18,6 @@ export function TicketDetailKickoffAside({
   issueThreads,
   projectId,
   ticketId,
-  kickoffContext,
   githubActivityItems,
   providers,
   isConnected,
@@ -28,7 +28,6 @@ export function TicketDetailKickoffAside({
   issueThreads: ProjectThread[];
   projectId: string;
   ticketId: string;
-  kickoffContext: string;
   githubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
   providers: ReadonlyArray<ServerProvider>;
   isConnected: boolean;
@@ -42,6 +41,7 @@ export function TicketDetailKickoffAside({
     kickoffModelSelection: ModelSelection;
     kickoffRuntimeMode: RuntimeMode;
     kickoffInteractionMode: ProviderInteractionMode;
+    kickoffContextAttachments: ReadonlyArray<T3WorkContextAttachment>;
   }) => void;
 }) {
   const [injectedContextAttachments, setInjectedContextAttachments] = useState<
@@ -63,10 +63,12 @@ export function TicketDetailKickoffAside({
     if (drained.length === 0) {
       return;
     }
-    setInjectedContextAttachments((current) => [
-      ...current,
-      ...drained.map((item) => item.attachment),
-    ]);
+    setInjectedContextAttachments((current) =>
+      mergeContextAttachmentsById({
+        current,
+        incoming: drained.map((item) => item.attachment),
+      }),
+    );
   }, [pendingKickoffCount, projectId, ticketId]);
 
   return (
@@ -81,16 +83,18 @@ export function TicketDetailKickoffAside({
           kickoffModelSelection,
           kickoffRuntimeMode,
           kickoffInteractionMode,
+          kickoffContextAttachments,
         ) => {
           onKickoffThread({
             projectId,
             ticketId,
             ticketDisplayId: displayId,
             githubActivityItems,
-            kickoffMessage: `${kickoffContext}\n\nTask:\n${instruction}`,
+            kickoffMessage: instruction,
             kickoffModelSelection,
             kickoffRuntimeMode,
             kickoffInteractionMode,
+            kickoffContextAttachments,
           });
         }}
         renderComposer={({ prefillText, onSubmit }) => (

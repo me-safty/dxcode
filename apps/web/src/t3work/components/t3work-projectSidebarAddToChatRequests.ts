@@ -1,10 +1,10 @@
 import type { ProjectShellProject } from "@t3tools/project-context";
 import type { BackendApi } from "~/t3work/backend/t3work-types";
-import { buildComprehensiveTicketPayload } from "~/t3work/t3work-addToChatPayloadBuilders";
-import type { AddToChatRequest } from "~/t3work/t3work-addToChatUtils";
+import type { AddToChatPayloadInput, AddToChatRequest } from "~/t3work/t3work-addToChatUtils";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import { buildJiraWorkItemSummary } from "~/t3work/t3work-jiraContextMetadata";
-import { buildProjectContextPayload } from "~/t3work/t3work-projectContextPayload";
+import { buildProjectContextBundle } from "~/t3work/t3work-projectContextBundle";
+import { buildTicketContextBundle } from "~/t3work/t3work-ticketContextBundle";
 import type { ProjectTicket } from "~/t3work/t3work-types";
 
 export function buildTicketSidebarAddToChatRequest(input: {
@@ -25,13 +25,14 @@ export function buildTicketSidebarAddToChatRequest(input: {
     targetType: "work-item",
     kind: "jira-work-item",
     ...jiraSummary,
-    payload: () =>
-      buildComprehensiveTicketPayload({
+    payload: (input?: AddToChatPayloadInput) =>
+      buildTicketContextBundle({
         backend,
         project,
         ticket,
         projectTickets,
         githubActivityItems,
+        ...(input?.reportProgress ? { onProgress: input.reportProgress } : {}),
       }),
   };
 }
@@ -54,6 +55,6 @@ export function buildProjectSidebarAddToChatRequest(input: {
       { label: "Work items", value: String(projectTickets.length) },
       { label: "Linked repositories", value: String(linkedRepositoryUrls.length) },
     ],
-    payload: buildProjectContextPayload({ project, linkedRepositoryUrls, projectTickets }),
+    payload: buildProjectContextBundle({ project, linkedRepositoryUrls, projectTickets }),
   };
 }

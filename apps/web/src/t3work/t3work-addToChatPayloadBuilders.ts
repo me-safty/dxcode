@@ -6,10 +6,7 @@ import {
   extractRelationshipKeys,
   normalizeRelationshipKey,
 } from "~/t3work/t3work-ticketRelationshipKeys";
-import {
-  readIntegrationCache,
-  writeIntegrationCache,
-} from "~/t3work/hooks/t3work-integrationCache";
+import { loadAtlassianResourceSnapshot } from "~/t3work/t3work-atlassianResourceSnapshotCache";
 
 export type ComprehensiveTicketPayload = {
   kind: "jira-work-item";
@@ -44,48 +41,6 @@ function buildTicketLookup(
   return lookup;
 }
 
-async function fetchSnapshotByKey(input: {
-  backend: BackendApi;
-  project: ProjectShellProject;
-  accountId: string;
-  externalProjectId: string;
-  key: string;
-}): Promise<ResourceSnapshot> {
-  const cacheKey = `atlassian:getResource:${input.project.source.provider}:${input.accountId}:${input.externalProjectId}:${input.key}`;
-  const cachedSnapshot = readIntegrationCache<ResourceSnapshot>(cacheKey)?.value;
-  if (cachedSnapshot) {
-    void input.backend.atlassian
-      .getResource({
-        accountId: input.accountId,
-        ref: {
-          id: input.key,
-          provider: input.project.source.provider,
-          kind: "issue",
-          projectId: input.externalProjectId,
-        },
-      })
-      .then((freshSnapshot) => {
-        writeIntegrationCache(cacheKey, freshSnapshot);
-      })
-      .catch(() => {
-        // Keep cached value on background refresh failures.
-      });
-    return cachedSnapshot;
-  }
-
-  const snapshot = await input.backend.atlassian.getResource({
-    accountId: input.accountId,
-    ref: {
-      id: input.key,
-      provider: input.project.source.provider,
-      kind: "issue",
-      projectId: input.externalProjectId,
-    },
-  });
-  writeIntegrationCache(cacheKey, snapshot);
-  return snapshot;
-}
-
 export async function buildComprehensiveTicketPayload(input: {
   backend: BackendApi;
   project: ProjectShellProject;
@@ -97,17 +52,14 @@ export async function buildComprehensiveTicketPayload(input: {
   const { backend, project, ticket, projectTickets, githubActivityItems, primarySnapshot } = input;
 
   const canFetch = Boolean(project.source.accountId && project.source.externalProjectId);
-  const accountId = project.source.accountId;
-  const externalProjectId = project.source.externalProjectId;
   const snapshot =
     primarySnapshot ??
     (canFetch
-      ? await fetchSnapshotByKey({
+      ? await loadAtlassianResourceSnapshot({
           backend,
           project,
-          accountId: accountId as string,
-          externalProjectId: externalProjectId as string,
           key: ticket.ref.id,
+          refreshOnCacheHit: true,
         })
       : null);
 
@@ -145,12 +97,11 @@ export async function buildComprehensiveTicketPayload(input: {
     await Promise.all(
       fetchKeys.map(async (key) => {
         try {
-          const relatedSnapshot = await fetchSnapshotByKey({
+          const relatedSnapshot = await loadAtlassianResourceSnapshot({
             backend,
             project,
-            accountId: accountId as string,
-            externalProjectId: externalProjectId as string,
             key,
+            refreshOnCacheHit: true,
           });
           fetchedRelatedSnapshots.push({ key, snapshot: relatedSnapshot });
         } catch (error) {

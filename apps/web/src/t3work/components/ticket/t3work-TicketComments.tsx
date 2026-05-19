@@ -11,9 +11,11 @@ import { formatTimestamp } from "./t3work-ticketRichContentUtils";
 export function TicketComments({
   comments,
   htmlBaseUrl,
+  resolveAssetUrl,
 }: {
   comments: JiraCommentItem[];
   htmlBaseUrl?: string;
+  resolveAssetUrl?: (url: string) => string;
 }) {
   if (comments.length === 0) return null;
 
@@ -47,6 +49,7 @@ export function TicketComments({
                   <HtmlBlock
                     content={commentHtml}
                     {...(htmlBaseUrl ? { baseUrl: htmlBaseUrl } : {})}
+                    {...(resolveAssetUrl ? { resolveAssetUrl } : {})}
                   />
                 ) : commentBody ? (
                   <MarkdownBlock content={commentBody} />

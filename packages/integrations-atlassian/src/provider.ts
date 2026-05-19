@@ -225,6 +225,12 @@ export class AtlassianIntegrationProvider implements IntegrationProvider {
     return normalizeIssue(issue, entry.siteUrl);
   }
 
+  async downloadAsset(url: string): Promise<{ bytes: Uint8Array; mimeType?: string }> {
+    const entry = this.getDefaultClient();
+    if (!entry) throw new Error("No Jira client available");
+    return entry.client.downloadAsset(url);
+  }
+
   async search(input: IntegrationSearchInput): Promise<ReadonlyArray<ResourceSearchResult>> {
     const entry = this.getClientForAccount(input.account.id) ?? this.getDefaultClient();
     if (!entry) return [];

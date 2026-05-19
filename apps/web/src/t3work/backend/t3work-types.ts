@@ -52,11 +52,26 @@ export type ProjectWorkspaceBootstrapResult = {
   readonly linkedRepositories: ReadonlyArray<LinkedRepositorySyncResult>;
 };
 
+export type ProjectWorkspaceContextFile = {
+  readonly relativePath: string;
+  readonly contents: string;
+  readonly encoding?: "utf8" | "base64";
+};
+
+export type ProjectWorkspaceWriteContextFilesResult = {
+  readonly workspaceRoot: string;
+  readonly writtenFiles: ReadonlyArray<string>;
+};
+
 export interface ProjectWorkspaceBackendApi {
   readonly bootstrapWorkspace: (input: {
     readonly workspaceRoot: string;
     readonly linkedRepositoryUrls?: ReadonlyArray<string>;
   }) => Promise<ProjectWorkspaceBootstrapResult>;
+  readonly writeContextFiles: (input: {
+    readonly workspaceRoot: string;
+    readonly files: ReadonlyArray<ProjectWorkspaceContextFile>;
+  }) => Promise<ProjectWorkspaceWriteContextFilesResult>;
 }
 
 export type GitHubRepositoryCandidate = {
@@ -119,6 +134,12 @@ export type AtlassianOAuthConnectInput = {
   readonly token: TokenExchangeResult;
 };
 
+export type AtlassianDownloadedAsset = {
+  readonly base64Contents: string;
+  readonly mimeType?: string;
+  readonly sizeBytes: number;
+};
+
 export interface AtlassianBackendApi {
   readonly listAccounts: () => Promise<ReadonlyArray<IntegrationAccount>>;
   readonly connectBasic: (
@@ -139,6 +160,10 @@ export interface AtlassianBackendApi {
     readonly accountId: string;
     readonly ref: unknown;
   }) => Promise<ResourceSnapshot>;
+  readonly downloadAsset: (input: {
+    readonly accountId: string;
+    readonly url: string;
+  }) => Promise<AtlassianDownloadedAsset>;
 }
 
 export interface T3WorkEnvironmentConnection {

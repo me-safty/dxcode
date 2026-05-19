@@ -19,6 +19,7 @@ import {
 import {
   deriveReferenceDirectoryName,
   HIDDEN_T3WORK_DIR,
+  normalizeT3workWorkspaceRoot,
   normalizeRepositoryUrls,
   REFERENCES_DIR_NAME,
   toT3workError,
@@ -37,9 +38,10 @@ export const t3workProjectWorkspaceBootstrapRouteLayer = HttpRouter.add(
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const input = yield* readJsonBody<BootstrapWorkspaceRequest>();
-    const workspaceRoot = input.workspaceRoot?.trim() ?? "";
-    if (workspaceRoot.length === 0)
+    const workspaceRootInput = input.workspaceRoot?.trim() ?? "";
+    if (workspaceRootInput.length === 0)
       return yield* new T3workAtlassianError({ message: "workspaceRoot is required." });
+    const workspaceRoot = normalizeT3workWorkspaceRoot(workspaceRootInput);
 
     yield* fileSystem
       .makeDirectory(workspaceRoot, { recursive: true })
