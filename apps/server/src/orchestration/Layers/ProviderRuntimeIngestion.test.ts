@@ -2636,6 +2636,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(checkpoint?.status).toBe("missing");
     expect(checkpoint?.assistantMessageId).toBe("assistant:item-p1-assistant");
     expect(checkpoint?.checkpointRef).toBe("provider-diff:evt-turn-diff-updated");
+    expect(thread.latestTurn?.state).not.toBe("completed");
   });
 
   it("projects context window updates into normalized thread activities", async () => {

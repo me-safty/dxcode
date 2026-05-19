@@ -1,6 +1,7 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import {
   EnvironmentId,
+  MessageId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -19,6 +20,7 @@ import {
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
+  shouldShowThreadDetailLoading,
   shouldWriteThreadErrorToCurrentServerThread,
   waitForStartedServerThread,
 } from "./ChatView.logic";
@@ -214,6 +216,11 @@ describe("shouldWriteThreadErrorToCurrentServerThread", () => {
 
 const makeThread = (input?: {
   id?: ThreadId;
+  messages?: Thread["messages"];
+  activities?: Thread["activities"];
+  proposedPlans?: Thread["proposedPlans"];
+  turnDiffSummaries?: Thread["turnDiffSummaries"];
+  session?: Thread["session"];
   latestTurn?: {
     turnId: TurnId;
     state: "running" | "completed";
@@ -230,9 +237,9 @@ const makeThread = (input?: {
   modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
   runtimeMode: "full-access" as const,
   interactionMode: "default" as const,
-  session: null,
-  messages: [],
-  proposedPlans: [],
+  session: input?.session ?? null,
+  messages: input?.messages ?? [],
+  proposedPlans: input?.proposedPlans ?? [],
   error: null,
   createdAt: "2026-03-29T00:00:00.000Z",
   archivedAt: null,
@@ -245,8 +252,8 @@ const makeThread = (input?: {
     : null,
   branch: null,
   worktreePath: null,
-  turnDiffSummaries: [],
-  activities: [],
+  turnDiffSummaries: input?.turnDiffSummaries ?? [],
+  activities: input?.activities ?? [],
 });
 
 function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) {
@@ -359,6 +366,55 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   setStoreThreads([]);
+});
+
+describe("shouldShowThreadDetailLoading", () => {
+  it("keeps a started thread shell in a loading state until detail rows arrive", () => {
+    expect(
+      shouldShowThreadDetailLoading(
+        makeThread({
+          latestTurn: {
+            turnId: TurnId.make("turn-complete"),
+            state: "completed",
+            requestedAt: "2026-03-29T00:00:01.000Z",
+            startedAt: "2026-03-29T00:00:02.000Z",
+            completedAt: "2026-03-29T00:00:10.000Z",
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not show detail loading for genuinely unstarted draft threads", () => {
+    expect(shouldShowThreadDetailLoading(makeThread())).toBe(false);
+  });
+
+  it("does not show detail loading after conversation detail content arrives", () => {
+    expect(
+      shouldShowThreadDetailLoading(
+        makeThread({
+          latestTurn: {
+            turnId: TurnId.make("turn-complete"),
+            state: "completed",
+            requestedAt: "2026-03-29T00:00:01.000Z",
+            startedAt: "2026-03-29T00:00:02.000Z",
+            completedAt: "2026-03-29T00:00:10.000Z",
+          },
+          messages: [
+            {
+              id: MessageId.make("message-1"),
+              role: "assistant",
+              text: "Done.",
+              createdAt: "2026-03-29T00:00:10.000Z",
+              completedAt: "2026-03-29T00:00:10.000Z",
+              streaming: false,
+              turnId: TurnId.make("turn-complete"),
+            },
+          ],
+        }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("waitForStartedServerThread", () => {

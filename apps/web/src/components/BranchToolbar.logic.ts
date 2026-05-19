@@ -97,6 +97,13 @@ export function resolveBranchToolbarValue(input: {
   return currentGitBranch ?? activeThreadBranch;
 }
 
+export function shouldLoadBranchSearchRefs(input: {
+  branchCwd: string | null;
+  isBranchMenuOpen: boolean;
+}): boolean {
+  return input.branchCwd !== null && input.isBranchMenuOpen;
+}
+
 export function resolveBranchSelectionTarget(input: {
   activeProjectCwd: string;
   activeWorktreePath: string | null;

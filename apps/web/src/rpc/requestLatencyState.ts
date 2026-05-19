@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { ORCHESTRATION_WS_METHODS, WS_METHODS } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import { appAtomRegistry } from "./atomRegistry";
@@ -21,6 +22,11 @@ interface PendingRpcAckRequest {
 }
 
 const pendingRpcAckRequests = new Map<string, PendingRpcAckRequest>();
+const SNAPSHOT_SUBSCRIPTION_ACK_TAGS = new Set<string>([
+  ORCHESTRATION_WS_METHODS.subscribeShell,
+  ORCHESTRATION_WS_METHODS.subscribeThread,
+  WS_METHODS.subscribeServerConfig,
+]);
 
 const slowRpcAckRequestsAtom = Atom.make<ReadonlyArray<SlowRpcAckRequest>>([]).pipe(
   Atom.keepAlive,
@@ -36,6 +42,9 @@ function getSlowRpcAckRequestsValue(): ReadonlyArray<SlowRpcAckRequest> {
 }
 
 function shouldTrackRpcAck(tag: string): boolean {
+  if (SNAPSHOT_SUBSCRIPTION_ACK_TAGS.has(tag)) {
+    return true;
+  }
   return !tag.includes("subscribe");
 }
 
@@ -60,8 +69,7 @@ export function trackRpcRequestSent(requestId: string, tag: string): void {
     thresholdMs: slowRpcAckThresholdMs,
   };
   const timeoutId = setTimeout(() => {
-    pendingRpcAckRequests.delete(requestId);
-    appendSlowRpcAckRequest(request);
+    markRpcRequestSlowIfStillPending(requestId, request);
   }, slowRpcAckThresholdMs);
 
   pendingRpcAckRequests.set(requestId, {
@@ -96,6 +104,16 @@ function clearTrackedRpcRequest(requestId: string): void {
 
   clearTimeout(pending.timeoutId);
   pendingRpcAckRequests.delete(requestId);
+}
+
+function markRpcRequestSlowIfStillPending(requestId: string, request: SlowRpcAckRequest): void {
+  const pending = pendingRpcAckRequests.get(requestId);
+  if (!pending || pending.request !== request) {
+    return;
+  }
+
+  pendingRpcAckRequests.delete(requestId);
+  appendSlowRpcAckRequest(request);
 }
 
 function appendSlowRpcAckRequest(request: SlowRpcAckRequest): void {

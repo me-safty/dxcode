@@ -175,6 +175,7 @@ import {
 import { sortThreads } from "../lib/threadSort";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { SidebarUsageIndicator } from "./sidebar/SidebarUsageIndicator";
+import { SidebarConnectionStatus } from "./ConnectionStatusIndicator";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
 import { readEnvironmentApi } from "../environmentApi";
@@ -2502,6 +2503,7 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
       <SidebarProviderUpdatePill />
       <SidebarUpdatePill />
       <SidebarUsageIndicator />
+      <SidebarConnectionStatus />
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton

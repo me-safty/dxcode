@@ -82,6 +82,18 @@ interface AttachmentSideEffects {
   readonly prunedThreadRelativePaths: Map<string, Set<string>>;
 }
 
+function checkpointStatusToProjectionTurnState(
+  status: "ready" | "missing" | "error",
+): ProjectionTurn["state"] {
+  if (status === "error") {
+    return "error";
+  }
+  if (status === "missing") {
+    return "interrupted";
+  }
+  return "completed";
+}
+
 const materializeAttachmentsForProjection = Effect.fn("materializeAttachmentsForProjection")(
   (input: { readonly attachments: ReadonlyArray<ChatAttachment> }) =>
     Effect.succeed(input.attachments.length === 0 ? [] : input.attachments),
@@ -1163,7 +1175,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             threadId: event.payload.threadId,
             turnId: event.payload.turnId,
           });
-          const nextState = event.payload.status === "error" ? "error" : "completed";
+          const nextState = checkpointStatusToProjectionTurnState(event.payload.status);
           yield* projectionTurnRepository.clearCheckpointTurnConflict({
             threadId: event.payload.threadId,
             turnId: event.payload.turnId,

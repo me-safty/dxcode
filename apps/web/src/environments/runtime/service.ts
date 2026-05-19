@@ -92,6 +92,9 @@ type ThreadDetailSubscriptionEntry = {
   unsubscribe: () => void;
   unsubscribeConnectionListener: (() => void) | null;
   refCount: number;
+  latestDetailSequence: number | null;
+  refreshTargetSequence: number | null;
+  refreshTimeoutId: ReturnType<typeof setTimeout> | null;
   lastAccessedAt: number;
   evictionTimeoutId: ReturnType<typeof setTimeout> | null;
 };
@@ -120,12 +123,17 @@ interface ProjectionRecovery {
   promise: Promise<void>;
 }
 
+interface RecoveredEventBatchOptions {
+  readonly preserveShellFields?: boolean;
+}
+
 const pendingSavedEnvironmentConnections = new Map<
   EnvironmentId,
   PendingSavedEnvironmentConnection
 >();
 const environmentConnectionListeners = new Set<() => void>();
 const threadDetailSubscriptions = new Map<string, ThreadDetailSubscriptionEntry>();
+const browserResumeReconciliationByEnvironment = new Map<EnvironmentId, Promise<void>>();
 const lastAppliedProjectionVersionByEnvironment = new Map<
   EnvironmentId,
   {
@@ -138,7 +146,7 @@ const projectionRecoveryByEnvironment = new Map<EnvironmentId, ProjectionRecover
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
 let lastBrowserHiddenAt: number | null = null;
-let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
+let lastBrowserResumeReconcileAt = Number.NEGATIVE_INFINITY;
 
 // Thread detail subscription cache policy:
 // - Active consumers keep a subscription retained via refCount.
@@ -149,7 +157,9 @@ let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 // - Capacity eviction only targets idle cached subscriptions.
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
-const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
+const THREAD_DETAIL_REFRESH_AFTER_SHELL_ADVANCE_MS = 250;
+const BROWSER_RESUME_RECONCILE_COOLDOWN_MS = 2_000;
+const BROWSER_RESUME_RECONCILE_TIMEOUT_MS = 5_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
 const NOOP = () => undefined;
 const SSH_HTTP_STATUS_RE = /^\[ssh_http:(\d+)\]\s/u;
@@ -167,6 +177,39 @@ function createDeferredPromise<T>() {
       resolve = null;
     },
   };
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  createError: () => Error,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  return new Promise<T>((resolve, reject) => {
+    const clear = () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
+    timeoutId = setTimeout(() => {
+      timeoutId = null;
+      reject(createError());
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clear();
+        resolve(value);
+      },
+      (error) => {
+        clear();
+        reject(error);
+      },
+    );
+  });
 }
 
 async function waitForConfigSnapshot(
@@ -342,6 +385,7 @@ function applyRecoveredProjectionEventBatch(
 
   applyRecoveredEventBatch(events, environmentId);
   markAppliedProjectionEvent(environmentId, events.at(-1)?.sequence ?? 0);
+  reconcileThreadDetailSubscriptionsAfterRecoveredEvents(events, environmentId);
 }
 
 function selectContiguousReplayEvents(
@@ -367,6 +411,45 @@ function selectContiguousReplayEvents(
   }
 
   return contiguousEvents;
+}
+
+function getOrchestrationEventThreadId(event: OrchestrationEvent): ThreadId | null {
+  return "threadId" in event.payload ? event.payload.threadId : null;
+}
+
+function isThreadDetailReplayEvent(event: OrchestrationEvent): boolean {
+  return (
+    event.type === "thread.message-sent" ||
+    event.type === "thread.proposed-plan-upserted" ||
+    event.type === "thread.activity-appended" ||
+    event.type === "thread.turn-diff-completed" ||
+    event.type === "thread.reverted" ||
+    event.type === "thread.session-set"
+  );
+}
+
+function reconcileThreadDetailSubscriptionsAfterRecoveredEvents(
+  events: ReadonlyArray<OrchestrationEvent>,
+  environmentId: EnvironmentId,
+): void {
+  for (const event of events) {
+    const threadId = getOrchestrationEventThreadId(event);
+    if (threadId === null) {
+      continue;
+    }
+
+    const entry = threadDetailSubscriptions.get(
+      getThreadDetailSubscriptionKey(environmentId, threadId),
+    );
+    if (!entry) {
+      continue;
+    }
+
+    if (isThreadDetailReplayEvent(event)) {
+      markThreadDetailSequence(entry, event.sequence);
+    }
+    scheduleThreadDetailRefreshIfBehind(environmentId, threadId, event.sequence);
+  }
 }
 
 async function recoverProjectionSequenceGap(
@@ -467,6 +550,41 @@ function clearThreadDetailSubscriptionEviction(
   return entry;
 }
 
+function clearThreadDetailSubscriptionRefresh(entry: ThreadDetailSubscriptionEntry): void {
+  if (entry.refreshTimeoutId !== null) {
+    clearTimeout(entry.refreshTimeoutId);
+    entry.refreshTimeoutId = null;
+  }
+  entry.refreshTargetSequence = null;
+}
+
+function markThreadDetailSequence(entry: ThreadDetailSubscriptionEntry, sequence: number): void {
+  entry.latestDetailSequence =
+    entry.latestDetailSequence === null ? sequence : Math.max(entry.latestDetailSequence, sequence);
+
+  if (
+    entry.refreshTargetSequence !== null &&
+    entry.latestDetailSequence >= entry.refreshTargetSequence
+  ) {
+    clearThreadDetailSubscriptionRefresh(entry);
+  }
+}
+
+function hasThreadDetailSequenceAlreadyBeenSeen(
+  entry: ThreadDetailSubscriptionEntry,
+  sequence: number,
+): boolean {
+  return entry.latestDetailSequence !== null && sequence <= entry.latestDetailSequence;
+}
+
+function shouldPreserveThreadDetailShellFields(
+  environmentId: EnvironmentId,
+  sequence: number,
+): boolean {
+  const currentProjectionVersion = readLastAppliedProjectionVersion(environmentId);
+  return currentProjectionVersion !== null && sequence < currentProjectionVersion.sequence;
+}
+
 function isNonIdleThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): boolean {
   const threadRef = scopeThreadRef(entry.environmentId, entry.threadId);
   const state = useStore.getState();
@@ -516,6 +634,10 @@ function shouldEvictThreadDetailSubscription(entry: ThreadDetailSubscriptionEntr
   return entry.refCount === 0 && !isNonIdleThreadDetailSubscription(entry);
 }
 
+function shouldRefreshRetainedThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry) {
+  return entry.refCount > 0 || isNonIdleThreadDetailSubscription(entry);
+}
+
 function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): boolean {
   if (entry.unsubscribeConnectionListener !== null) {
     entry.unsubscribeConnectionListener();
@@ -534,14 +656,97 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
     { threadId: entry.threadId },
     (item) => {
       if (item.kind === "snapshot") {
-        useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
+        if (
+          entry.latestDetailSequence !== null &&
+          item.snapshot.snapshotSequence < entry.latestDetailSequence
+        ) {
+          return;
+        }
+        markThreadDetailSequence(entry, item.snapshot.snapshotSequence);
+        useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId, {
+          preserveShellFields: shouldPreserveThreadDetailShellFields(
+            entry.environmentId,
+            item.snapshot.snapshotSequence,
+          ),
+        });
         scheduleEnvironmentStartupCacheWrite(entry.environmentId, [entry.threadId]);
         return;
       }
+      if (hasThreadDetailSequenceAlreadyBeenSeen(entry, item.event.sequence)) {
+        return;
+      }
+      markThreadDetailSequence(entry, item.event.sequence);
       applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
     },
   );
   return true;
+}
+
+function refreshThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): boolean {
+  clearThreadDetailSubscriptionRefresh(entry);
+  if (entry.unsubscribe !== NOOP) {
+    entry.unsubscribe();
+    entry.unsubscribe = NOOP;
+  }
+
+  if (attachThreadDetailSubscription(entry)) {
+    return true;
+  }
+
+  watchThreadDetailSubscriptionConnection(entry);
+  return false;
+}
+
+function scheduleThreadDetailRefreshIfBehind(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  sequence: number,
+): void {
+  const entry = threadDetailSubscriptions.get(
+    getThreadDetailSubscriptionKey(environmentId, threadId),
+  );
+  if (!entry || !shouldRefreshRetainedThreadDetailSubscription(entry)) {
+    return;
+  }
+
+  if (entry.latestDetailSequence !== null && entry.latestDetailSequence >= sequence) {
+    return;
+  }
+
+  if (entry.refreshTargetSequence !== null && entry.refreshTargetSequence >= sequence) {
+    return;
+  }
+
+  if (entry.refreshTimeoutId !== null) {
+    clearTimeout(entry.refreshTimeoutId);
+  }
+  entry.refreshTargetSequence = sequence;
+  entry.refreshTimeoutId = setTimeout(() => {
+    entry.refreshTimeoutId = null;
+    const targetSequence = entry.refreshTargetSequence;
+    entry.refreshTargetSequence = null;
+    if (targetSequence === null) {
+      return;
+    }
+    if (entry.latestDetailSequence !== null && entry.latestDetailSequence >= targetSequence) {
+      return;
+    }
+    refreshThreadDetailSubscription(entry);
+  }, THREAD_DETAIL_REFRESH_AFTER_SHELL_ADVANCE_MS);
+}
+
+function scheduleThreadDetailRefreshToCurrentProjectionIfBehind(
+  entry: ThreadDetailSubscriptionEntry,
+): void {
+  const currentProjectionSequence = readLastAppliedProjectionVersion(entry.environmentId)?.sequence;
+  if (currentProjectionSequence === undefined) {
+    return;
+  }
+  scheduleThreadDetailRefreshIfBehind(
+    entry.environmentId,
+    entry.threadId,
+    currentProjectionSequence,
+  );
 }
 
 function watchThreadDetailSubscriptionConnection(entry: ThreadDetailSubscriptionEntry): void {
@@ -563,6 +768,7 @@ function disposeThreadDetailSubscriptionByKey(key: string): boolean {
     return false;
   }
 
+  clearThreadDetailSubscriptionRefresh(entry);
   clearThreadDetailSubscriptionEviction(entry);
   entry.unsubscribeConnectionListener?.();
   entry.unsubscribeConnectionListener = null;
@@ -701,6 +907,7 @@ export function retainThreadDetailSubscription(
     if (!attachThreadDetailSubscription(existing)) {
       watchThreadDetailSubscriptionConnection(existing);
     }
+    scheduleThreadDetailRefreshToCurrentProjectionIfBehind(existing);
     let released = false;
     return () => {
       if (released) {
@@ -722,6 +929,9 @@ export function retainThreadDetailSubscription(
     unsubscribe: NOOP,
     unsubscribeConnectionListener: null,
     refCount: 1,
+    latestDetailSequence: null,
+    refreshTargetSequence: null,
+    refreshTimeoutId: null,
     lastAccessedAt: Date.now(),
     evictionTimeoutId: null,
   };
@@ -1135,8 +1345,9 @@ function scheduleEnvironmentStartupCacheWrite(
 function collectThreadIdsFromEvents(events: ReadonlyArray<OrchestrationEvent>): ThreadId[] {
   const threadIds = new Set<ThreadId>();
   for (const event of events) {
-    if ("threadId" in event.payload) {
-      threadIds.add(event.payload.threadId);
+    const threadId = getOrchestrationEventThreadId(event);
+    if (threadId !== null) {
+      threadIds.add(threadId);
     }
   }
   return [...threadIds];
@@ -1156,6 +1367,7 @@ export function shouldApplyTerminalEvent(input: {
 function applyRecoveredEventBatch(
   events: ReadonlyArray<OrchestrationEvent>,
   environmentId: EnvironmentId,
+  options: RecoveredEventBatchOptions = {},
 ) {
   if (events.length === 0) {
     return;
@@ -1175,7 +1387,9 @@ function applyRecoveredEventBatch(
     void activeService?.queryInvalidationThrottler.maybeExecute();
   }
 
-  useStore.getState().applyOrchestrationEvents(uiEvents, environmentId);
+  useStore.getState().applyOrchestrationEvents(uiEvents, environmentId, {
+    preserveShellFields: options.preserveShellFields ?? false,
+  });
   if (needsProjectUiSync) {
     const projects = selectProjectsAcrossEnvironments(useStore.getState());
     const clientSettings = getClientSettings();
@@ -1228,7 +1442,9 @@ export function applyEnvironmentThreadDetailEvent(
   event: OrchestrationEvent,
   environmentId: EnvironmentId,
 ) {
-  applyRecoveredEventBatch([event], environmentId);
+  applyRecoveredEventBatch([event], environmentId, {
+    preserveShellFields: shouldPreserveThreadDetailShellFields(environmentId, event.sequence),
+  });
 }
 
 function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) {
@@ -1270,6 +1486,7 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
       return;
     case "thread-upserted":
       syncThreadUiFromStore();
+      scheduleThreadDetailRefreshIfBehind(environmentId, event.thread.id, event.sequence);
       if (!previousThread && threadRef) {
         markPromotedDraftThreadByRef(threadRef);
       }
@@ -1697,24 +1914,92 @@ function stopActiveService() {
   activeService = null;
 }
 
-function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void {
-  const now = Date.now();
-  if (now - lastBrowserResumeReconnectAt < BROWSER_RESUME_RECONNECT_COOLDOWN_MS) {
+async function reconcileEnvironmentConnectionAfterBrowserResume(
+  connection: EnvironmentConnection,
+  reason: string,
+): Promise<void> {
+  const environmentId = connection.environmentId;
+  const currentSequence = readLastAppliedProjectionVersion(environmentId)?.sequence;
+  if (currentSequence === undefined) {
     return;
   }
 
-  for (const connection of environmentConnections.values()) {
-    if (connection.client.isHeartbeatFresh()) {
-      continue;
+  try {
+    const replayedEvents = await withTimeout(
+      connection.client.orchestration.replayEvents({
+        fromSequenceExclusive: currentSequence,
+      }),
+      BROWSER_RESUME_RECONCILE_TIMEOUT_MS,
+      () => new Error("Browser resume reconciliation timed out."),
+    );
+    if (readEnvironmentConnection(environmentId) !== connection) {
+      return;
     }
-    lastBrowserResumeReconnectAt = now;
-    void connection.reconnect().catch((error) => {
+
+    const latestSequence =
+      readLastAppliedProjectionVersion(environmentId)?.sequence ?? currentSequence;
+    const contiguousEvents = selectContiguousReplayEvents(replayedEvents, latestSequence);
+    applyRecoveredProjectionEventBatch(contiguousEvents, environmentId);
+
+    const recoveredSequence =
+      readLastAppliedProjectionVersion(environmentId)?.sequence ?? latestSequence;
+    const highestReplayedSequence = replayedEvents.reduce(
+      (highest, event) => Math.max(highest, event.sequence),
+      latestSequence,
+    );
+    if (highestReplayedSequence > recoveredSequence) {
+      queueProjectionRecovery(environmentId, highestReplayedSequence);
+    }
+  } catch (error) {
+    if (readEnvironmentConnection(environmentId) !== connection) {
+      return;
+    }
+
+    console.warn("Environment reconciliation after browser resume failed; reconnecting", {
+      environmentId,
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await connection.reconnect();
+  }
+}
+
+function queueEnvironmentBrowserResumeReconciliation(
+  connection: EnvironmentConnection,
+  reason: string,
+): void {
+  const environmentId = connection.environmentId;
+  if (browserResumeReconciliationByEnvironment.has(environmentId)) {
+    return;
+  }
+
+  const promise = reconcileEnvironmentConnectionAfterBrowserResume(connection, reason).catch(
+    (error) => {
       console.warn("Environment reconnect after browser resume failed", {
-        environmentId: connection.environmentId,
+        environmentId,
         reason,
         error: error instanceof Error ? error.message : String(error),
       });
-    });
+    },
+  );
+
+  browserResumeReconciliationByEnvironment.set(environmentId, promise);
+  void promise.finally(() => {
+    if (browserResumeReconciliationByEnvironment.get(environmentId) === promise) {
+      browserResumeReconciliationByEnvironment.delete(environmentId);
+    }
+  });
+}
+
+function reconcileEnvironmentConnectionsAfterBrowserResume(reason: string): void {
+  const now = Date.now();
+  if (now - lastBrowserResumeReconcileAt < BROWSER_RESUME_RECONCILE_COOLDOWN_MS) {
+    return;
+  }
+  lastBrowserResumeReconcileAt = now;
+
+  for (const connection of environmentConnections.values()) {
+    queueEnvironmentBrowserResumeReconciliation(connection, reason);
   }
 }
 
@@ -1730,14 +2015,14 @@ function subscribeBrowserResumeReconnects(): () => void {
     }
     if (document.visibilityState === "visible" && lastBrowserHiddenAt !== null) {
       lastBrowserHiddenAt = null;
-      reconnectEnvironmentConnectionsAfterBrowserResume("visibilitychange");
+      reconcileEnvironmentConnectionsAfterBrowserResume("visibilitychange");
     }
   };
 
   const handlePageShow = (event: PageTransitionEvent) => {
     if (event.persisted || lastBrowserHiddenAt !== null) {
       lastBrowserHiddenAt = null;
-      reconnectEnvironmentConnectionsAfterBrowserResume("pageshow");
+      reconcileEnvironmentConnectionsAfterBrowserResume("pageshow");
     }
   };
 
@@ -2033,7 +2318,8 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
 export async function resetEnvironmentServiceForTests(): Promise<void> {
   stopActiveService();
   lastBrowserHiddenAt = null;
-  lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
+  lastBrowserResumeReconcileAt = Number.NEGATIVE_INFINITY;
+  browserResumeReconciliationByEnvironment.clear();
   lastAppliedProjectionVersionByEnvironment.clear();
   projectionRecoveryByEnvironment.clear();
   pendingSavedEnvironmentConnections.clear();

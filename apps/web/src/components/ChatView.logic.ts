@@ -227,6 +227,24 @@ export function threadHasStarted(thread: Thread | null | undefined): boolean {
   );
 }
 
+export function shouldShowThreadDetailLoading(thread: Thread | null | undefined): boolean {
+  if (!thread) {
+    return false;
+  }
+
+  const hasTurnOrMessages = thread.latestTurn !== null || thread.messages.length > 0;
+  if (!hasTurnOrMessages) {
+    return false;
+  }
+
+  return (
+    thread.messages.length === 0 &&
+    thread.activities.length === 0 &&
+    thread.proposedPlans.length === 0 &&
+    thread.turnDiffSummaries.length === 0
+  );
+}
+
 // `threadProvider` is the open branded driver kind carried by the session.
 // Unknown driver kinds degrade to `null` (i.e. "unlocked"), which is the safe
 // rollback / fork behavior — the routing layer is the right place to surface

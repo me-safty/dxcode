@@ -11,6 +11,7 @@ import {
   resolveEnvModeLabel,
   resolveBranchToolbarValue,
   resolveLockedWorkspaceLabel,
+  shouldLoadBranchSearchRefs,
   shouldIncludeBranchPickerItem,
 } from "./BranchToolbar.logic";
 
@@ -81,6 +82,32 @@ describe("resolveBranchToolbarValue", () => {
         currentGitBranch: "main",
       }),
     ).toBe("main");
+  });
+});
+
+describe("shouldLoadBranchSearchRefs", () => {
+  it("does not load refs while the branch menu is closed", () => {
+    expect(
+      shouldLoadBranchSearchRefs({
+        branchCwd: "/repo",
+        isBranchMenuOpen: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("loads refs only when a cwd is available and the menu is open", () => {
+    expect(
+      shouldLoadBranchSearchRefs({
+        branchCwd: "/repo",
+        isBranchMenuOpen: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldLoadBranchSearchRefs({
+        branchCwd: null,
+        isBranchMenuOpen: true,
+      }),
+    ).toBe(false);
   });
 });
 

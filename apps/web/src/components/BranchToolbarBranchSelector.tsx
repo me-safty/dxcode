@@ -30,6 +30,7 @@ import {
   resolveBranchToolbarValue,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
+  shouldLoadBranchSearchRefs,
   shouldIncludeBranchPickerItem,
 } from "./BranchToolbar.logic";
 import { Button } from "./ui/button";
@@ -204,13 +205,17 @@ export function BranchToolbarBranchSelector({
   const branchStatusQuery = useGitStatus({ environmentId, cwd: branchCwd });
   const trimmedBranchQuery = branchQuery.trim();
   const deferredTrimmedBranchQuery = deferredBranchQuery.trim();
+  const shouldQueryBranchRefs = shouldLoadBranchSearchRefs({
+    branchCwd,
+    isBranchMenuOpen,
+  });
 
   useEffect(() => {
-    if (!branchCwd) return;
+    if (!shouldQueryBranchRefs || !branchCwd) return;
     void queryClient.prefetchInfiniteQuery(
       gitBranchSearchInfiniteQueryOptions({ environmentId, cwd: branchCwd, query: "" }),
     );
-  }, [branchCwd, environmentId, queryClient]);
+  }, [branchCwd, environmentId, queryClient, shouldQueryBranchRefs]);
 
   const {
     data: branchesSearchData,
@@ -223,6 +228,7 @@ export function BranchToolbarBranchSelector({
       environmentId,
       cwd: branchCwd,
       query: deferredTrimmedBranchQuery,
+      enabled: shouldQueryBranchRefs,
     }),
   );
   const refs = useMemo(

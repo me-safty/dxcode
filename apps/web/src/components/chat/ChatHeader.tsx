@@ -8,6 +8,7 @@ import {
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
+import { ConnectionStatusDot } from "../ConnectionStatusIndicator";
 import { type DraftId } from "~/composerDraftStore";
 import { DiffIcon, EllipsisIcon, RefreshCwIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
@@ -17,6 +18,10 @@ import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
+import {
+  useSavedEnvironmentRegistryStore,
+  useSavedEnvironmentRuntimeStore,
+} from "../../environments/runtime";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Button } from "../ui/button";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -104,6 +109,17 @@ export const ChatHeader = memo(function ChatHeader({
     primaryEnvironmentId,
   });
   const activeThreadRef = scopeThreadRef(activeThreadEnvironmentId, activeThreadId);
+  const isRemoteThread =
+    primaryEnvironmentId !== null && activeThreadEnvironmentId !== primaryEnvironmentId;
+  const remoteEnvRuntimeLabel = useSavedEnvironmentRuntimeStore(
+    (state) => state.byId[activeThreadEnvironmentId]?.descriptor?.label ?? null,
+  );
+  const remoteEnvSavedLabel = useSavedEnvironmentRegistryStore(
+    (state) => state.byId[activeThreadEnvironmentId]?.label ?? null,
+  );
+  const threadEnvironmentLabel = isRemoteThread
+    ? (remoteEnvRuntimeLabel ?? remoteEnvSavedLabel ?? "Remote")
+    : null;
   const renderProjectScriptsControl = (inMenu = false) =>
     activeProjectScripts ? (
       <ProjectScriptsControl
@@ -135,24 +151,44 @@ export const ChatHeader = memo(function ChatHeader({
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden sm:gap-3">
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-        <h2
-          className="min-w-0 shrink truncate text-sm font-medium text-foreground"
-          title={activeThreadTitle}
-        >
-          {activeThreadTitle}
-        </h2>
-        {activeProjectName && (
-          <Badge variant="outline" className="min-w-0 shrink overflow-hidden">
-            <span className="min-w-0 truncate">{activeProjectName}</span>
-          </Badge>
-        )}
-        {activeProjectName && !isGitRepo && (
-          <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
-            No Git
-          </Badge>
-        )}
+        <div className="flex min-w-0 flex-col justify-center">
+          <h2
+            className="min-w-0 truncate text-sm font-medium leading-tight text-foreground"
+            title={activeThreadTitle}
+          >
+            {activeThreadTitle}
+          </h2>
+          {(activeProjectName || threadEnvironmentLabel) && (
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs leading-tight text-muted-foreground">
+              {activeProjectName && (
+                <span className="min-w-0 truncate" title={activeProjectName}>
+                  {activeProjectName}
+                </span>
+              )}
+              {activeProjectName && threadEnvironmentLabel && (
+                <span aria-hidden className="shrink-0 text-muted-foreground/50">
+                  •
+                </span>
+              )}
+              {threadEnvironmentLabel && (
+                <span className="min-w-0 shrink truncate" title={threadEnvironmentLabel}>
+                  {threadEnvironmentLabel}
+                </span>
+              )}
+              {activeProjectName && !isGitRepo && (
+                <Badge
+                  variant="outline"
+                  className="ml-0.5 shrink-0 px-1 py-0 text-[10px] text-amber-700"
+                >
+                  No Git
+                </Badge>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       <div className="flex shrink-0 items-center justify-end gap-1.5 @3xl/header-actions:gap-3">
+        <ConnectionStatusDot />
         {!isCompactHeader && renderProjectScriptsControl()}
         {!isCompactHeader && showOpenInPicker && (
           <>
