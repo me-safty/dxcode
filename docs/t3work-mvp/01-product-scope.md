@@ -80,7 +80,8 @@ They need help with:
 
 ## Deferred Scope
 
-- automatic skill generation
+- personal or company-wide recipe collections
+- silent autonomous recipe creation
 - autonomous project memory writes
 - Confluence-heavy knowledge workbench
 - multi-integration dependency graphs

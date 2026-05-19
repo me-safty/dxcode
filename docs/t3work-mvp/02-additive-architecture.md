@@ -95,12 +95,15 @@ Default layout:
 ```text
 ~/Library/Application Support/T3 Code/t3work/projects/<project-id>/
   project.json
+  recipes/
   sources/
   plans/
   documents/
   cache/
   memory/
   runs/
+    <run-id>/
+      recipe/
 ```
 
 T3 can still receive a real `workspaceRoot`; the user-facing shell simply treats it as

@@ -58,14 +58,21 @@ Deliverables:
 
 - recipe registry
 - applicability matcher
+- project-scoped action recipe template registry
+- pre-launch recipe metadata rendering for dashboard and side panel actions
+- recipe instantiation into `runs/<run-id>/recipe/`
+- `context.json`, `context.schema.json`, and `context-map.md` generation
 - recipe cards on project and issue pages
 - recipe launch into T3 thread
+- special recipe launch timeline message
 - structured context attachment
 - simple-language profile
 
 Validation:
 
 - issue page shows context-relevant recipes
+- rendered action labels use selected issue data before launch
+- launched recipe creates an instantiated recipe directory
 - recipe output references the selected issue
 - chat is no longer the first blank surface
 

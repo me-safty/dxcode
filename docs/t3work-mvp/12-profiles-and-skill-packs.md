@@ -32,8 +32,8 @@ Profiles affect:
 
 ### Skill Pack
 
-A skill pack is a bundle of recipes, prompt blocks, artifact templates, and tool
-permissions for a type of work.
+A skill pack is a bundle of recipes, action recipe templates, prompt blocks, artifact
+templates, and tool permissions for a type of work.
 
 Examples:
 
@@ -104,6 +104,7 @@ type T3WorkSkillPack = {
   description: string;
   defaultProfileId?: string;
   recipeIds: string[];
+  actionRecipeIds?: string[];
   promptBlockIds: string[];
   artifactTemplateIds: string[];
   allowedToolGroups: string[];

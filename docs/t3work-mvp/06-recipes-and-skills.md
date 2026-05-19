@@ -3,7 +3,12 @@
 ## Purpose
 
 Recipes turn blank chat into contextual actions. A recipe is a visible UI launcher backed
-by a skill.
+by a skill or project-local action recipe.
+
+Action recipes are the stronger project-scoped form: a trusted directory template with
+metadata, MDX action UI, templated files, optional visibility script, and optional init
+script. When launched, the shell instantiates the directory into the current run and
+gives the agent only the instantiated recipe path.
 
 ## Recipe Model
 
@@ -17,6 +22,26 @@ type Recipe = {
   skillRef: SkillRef;
   outputPreference: RichOutputPreference;
   suggestedActions?: RecipeFollowup[];
+};
+```
+
+For action recipes, the flat recipe model becomes the UI-facing projection of a
+template directory:
+
+```ts
+type ActionRecipeTemplate = {
+  id: string;
+  version: string;
+  scope: "project";
+  displayName: TemplateExpression<string>;
+  shortDescription?: TemplateExpression<string>;
+  icon?: TemplateExpression<string>;
+  surfaces: ("project.dashboard" | "workitem.detail.sidepanel")[];
+  visibleWhen?: RecipeVisibilityRule;
+  actionView?: string;
+  prompt: string;
+  files?: string[];
+  initScript?: string;
 };
 ```
 
@@ -53,6 +78,10 @@ Examples:
 - Use our QA signoff format
 - Draft comment using our team tone
 
+Project-scoped action recipes should be the first editable recipe scope. They live under
+the managed project workspace in `recipes/<recipe-id>/` and are instantiated into
+`runs/<run-id>/recipe/` when launched.
+
 ### Workspace-Scoped Recipes
 
 Attached to a local repo/workspace.
@@ -82,6 +111,11 @@ Outputs:
 - ranked recipes
 - reason for applicability
 - missing context warnings
+
+Action recipe matching also renders pre-launch metadata such as display name, icon,
+description, rank, and MDX action view from the current project or work item context.
+This is needed because the dashboard and side panel show actions before a recipe is
+instantiated.
 
 ## Initial Recipes
 
@@ -143,6 +177,19 @@ A recipe launch should provide the skill with:
 
 Skills should save durable artifacts by default and return a concise chat summary only
 as a companion.
+
+An action recipe launch should additionally write these files into the instantiated
+recipe directory:
+
+- `context.json`
+- `context.schema.json`
+- `context-map.md`
+- rendered `recipe.json`
+- rendered prompt and subfiles
+- optional `init-result.json`
+
+The schema and context map are part of the authoring contract. Agents creating new
+project recipes should inspect them before writing template expressions.
 
 ## Product Positioning
 

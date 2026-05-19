@@ -27,3 +27,4 @@ squashfs-root/
 dist-electron/
 .electron-runtime/
 apps/server/~/.t3code/
+~/.t3code/

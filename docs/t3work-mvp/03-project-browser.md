@@ -49,6 +49,7 @@ Shows:
 - connected sources
 - current Jira issues or other resources
 - suggested recipes
+- project-scoped action recipes rendered from current project context
 - recent artifacts
 - recent agent runs
 - project memory shortcuts
@@ -74,6 +75,8 @@ For a Jira issue:
 - linked issues
 - cached/generated artifacts
 - context-relevant recipes
+- action recipes in the right side panel, with labels and visibility rendered from the
+  selected resource context
 - mutation drafts
 
 ## UX Requirements

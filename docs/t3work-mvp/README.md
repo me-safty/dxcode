@@ -58,6 +58,8 @@ The user should be able to:
 - [Epic 12: Profiles And Skill Packs](./12-profiles-and-skill-packs.md)
 - [Epic 13: Resource References](./13-resource-references.md)
 - [Epic 14: Native Provider Tool Injection](./14-native-provider-tool-injection.md)
+- [Epic 16: Action Recipes](./16-action-recipes.md)
+- [Epic 17: Build-Time Localization Spike](./17-build-time-localization.md)
 
 ## Supporting Docs
 
@@ -70,7 +72,7 @@ The user should be able to:
 - Do not fork T3 Code into a separate long-lived product.
 - Do not build a full Jira replacement.
 - Do not require every project to have a Git repository.
-- Do not make autonomous memory or skill creation default behavior.
+- Do not silently create autonomous memory or recipes without user confirmation.
 - Do not let skills mutate external systems without a reviewable UI.
 
 ## Success Criteria
