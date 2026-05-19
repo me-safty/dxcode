@@ -20,6 +20,7 @@ export const ExternalProject = Schema.Struct({
   title: Schema.String,
   key: Schema.optional(Schema.String),
   url: Schema.optional(Schema.String),
+  iconUrl: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
   raw: Schema.optional(Schema.Unknown),
 });

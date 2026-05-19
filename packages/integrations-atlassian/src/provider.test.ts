@@ -69,4 +69,79 @@ describe("AtlassianIntegrationProvider", () => {
       "Check that the site URL is correct, the local backend can reach Atlassian, and the API token has Jira access.",
     );
   });
+
+  it("includes parent issues for assigned subtasks", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+
+      if (url.includes("/rest/api/3/project/search")) {
+        return Response.json({
+          values: [{ id: "project-1", key: "PROJ" }],
+        });
+      }
+
+      if (url.includes("/rest/api/3/search/jql")) {
+        if (url.includes(encodeURIComponent("assignee = currentUser()"))) {
+          return Response.json({
+            total: 1,
+            issues: [
+              {
+                key: "PROJ-2",
+                fields: {
+                  summary: "Assigned subtask",
+                  parent: { key: "PROJ-1" },
+                  issuetype: { name: "Sub-task" },
+                  status: { name: "In Progress" },
+                  priority: { name: "Medium" },
+                  assignee: { displayName: "Me" },
+                  project: { id: "project-1" },
+                  updated: "2026-05-19T00:00:00.000Z",
+                },
+              },
+            ],
+          });
+        }
+
+        if (url.includes(encodeURIComponent('key in ("PROJ-1")'))) {
+          return Response.json({
+            total: 1,
+            issues: [
+              {
+                key: "PROJ-1",
+                fields: {
+                  summary: "Parent story",
+                  issuetype: { name: "Story" },
+                  status: { name: "To Do" },
+                  priority: { name: "High" },
+                  project: { id: "project-1" },
+                  updated: "2026-05-18T00:00:00.000Z",
+                },
+              },
+            ],
+          });
+        }
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const provider = new AtlassianIntegrationProvider({
+      siteUrl: "https://test.atlassian.net",
+      email: "user@example.com",
+      apiToken: "token",
+    });
+
+    const page = await provider.listResources({
+      account: {
+        id: "https://test.atlassian.net",
+        provider: "atlassian",
+      },
+      externalProjectId: "project-1",
+    });
+
+    expect(page.items.map((item) => item.displayId)).toEqual(["PROJ-2", "PROJ-1"]);
+    expect(page.totalCount).toBe(2);
+  });
 });

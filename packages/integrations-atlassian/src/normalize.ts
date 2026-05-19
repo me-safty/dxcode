@@ -64,17 +64,19 @@ export function normalizeAccountRef(siteUrl: string): IntegrationAccountRef {
 }
 
 export function normalizeProject(project: JiraProject, siteUrl: string): ExternalProject {
+  const iconUrl = pickAvatarUrl(project.avatarUrls);
   return {
     id: project.id,
     provider: "atlassian",
     title: project.name,
     key: project.key,
     url: project.self ?? `${siteUrl}/browse/${project.key}`,
+    iconUrl,
     description: undefined,
     raw: {
       siteUrl,
       projectTypeKey: project.projectTypeKey,
-      avatarUrl: pickAvatarUrl(project.avatarUrls),
+      avatarUrl: iconUrl,
     },
   };
 }

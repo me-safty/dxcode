@@ -142,7 +142,20 @@ export class AtlassianIntegrationProvider implements IntegrationProvider {
     const entry = this.getClientForAccount(account.id) ?? this.getDefaultClient();
     if (!entry) return [];
     const response = await entry.client.searchProjects();
-    return response.values.map((project) => normalizeProject(project, entry.siteUrl));
+    const enrichedProjects = await Promise.all(
+      response.values.map(async (project) => {
+        if (project.avatarUrls && Object.keys(project.avatarUrls).length > 0) {
+          return project;
+        }
+        try {
+          return await entry.client.getProject(project.id);
+        } catch {
+          return project;
+        }
+      }),
+    );
+
+    return enrichedProjects.map((project) => normalizeProject(project, entry.siteUrl));
   }
 
   async listResources(input: ListResourcesInput): Promise<ResourcePage> {
@@ -155,13 +168,46 @@ export class AtlassianIntegrationProvider implements IntegrationProvider {
     }
 
     const projectKey = project.key.replace(/"/g, '\\"');
-    const jql = `project = "${projectKey}" AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC`;
-    const response = await entry.client.searchIssues(jql, input.limit ?? 50);
-    const items = normalizeIssueSearch(response, entry.siteUrl);
+    const assignedJql = `project = "${projectKey}" AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC`;
+    const assignedResponse = await entry.client.searchIssues(assignedJql, input.limit ?? 50);
+    const assignedItems = normalizeIssueSearch(assignedResponse, entry.siteUrl);
+
+    const parentKeys = new Set<string>();
+    for (const issue of assignedResponse.issues) {
+      if (!issue || typeof issue !== "object") continue;
+      const fields = (issue as { fields?: unknown }).fields;
+      if (!fields || typeof fields !== "object") continue;
+      const parent = (fields as { parent?: unknown }).parent;
+      if (!parent || typeof parent !== "object") continue;
+      const parentKey = (parent as { key?: unknown }).key;
+      if (typeof parentKey === "string" && parentKey.trim().length > 0) {
+        parentKeys.add(parentKey);
+      }
+    }
+
+    const assignedDisplayIds = new Set(assignedItems.map((item) => item.displayId));
+    const missingParentKeys = [...parentKeys].filter((key) => !assignedDisplayIds.has(key));
+
+    let parentItems: ReadonlyArray<(typeof assignedItems)[number]> = [];
+    if (missingParentKeys.length > 0) {
+      const quotedParentKeys = missingParentKeys.map((key) => `"${key.replace(/"/g, '\\"')}"`);
+      const parentJql = `key in (${quotedParentKeys.join(", ")}) ORDER BY updated DESC`;
+      const parentResponse = await entry.client.searchIssues(parentJql, missingParentKeys.length);
+      parentItems = normalizeIssueSearch(parentResponse, entry.siteUrl);
+    }
+
+    const itemsById = new Map<string, (typeof assignedItems)[number]>();
+    for (const item of assignedItems) {
+      itemsById.set(item.id, item);
+    }
+    for (const item of parentItems) {
+      itemsById.set(item.id, item);
+    }
+    const items = [...itemsById.values()];
 
     return {
       items,
-      totalCount: response.total,
+      totalCount: items.length,
     };
   }
 

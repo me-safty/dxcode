@@ -11,6 +11,7 @@ import {
   type JiraIssue,
   type JiraIssueSearchResponse,
   type JiraMyself,
+  type JiraProject,
   type JiraProjectSearchResponse,
 } from "./client.ts";
 
@@ -106,6 +107,11 @@ export class JiraApiClient {
     return this.fetchJson<JiraProjectSearchResponse>(
       "/rest/api/3/project/search?maxResults=100&orderBy=name",
     );
+  }
+
+  async getProject(projectIdOrKey: string): Promise<JiraProject> {
+    const encoded = encodeURIComponent(projectIdOrKey);
+    return this.fetchJson<JiraProject>(`/rest/api/3/project/${encoded}`);
   }
 
   async searchIssues(jql: string, maxResults = 50): Promise<JiraIssueSearchResponse> {
