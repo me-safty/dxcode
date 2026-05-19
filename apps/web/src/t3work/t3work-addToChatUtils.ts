@@ -1,5 +1,15 @@
 import { randomUUID } from "~/lib/utils";
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
+import {
+  ADDED_CONTEXT_FOOTER,
+  ADDED_CONTEXT_HEADING,
+  inferContextAttachmentKindFromType,
+  normalizeContextAttachmentKind,
+} from "~/t3work/t3work-contextAttachmentPrimitives";
+import {
+  appendJiraContextMetadataLines,
+  resolveJiraContextAttachmentMetadata,
+} from "~/t3work/t3work-jiraContextMetadata";
 
 export type AddToChatRequest = {
   projectId: string;
@@ -7,6 +17,9 @@ export type AddToChatRequest = {
   projectWorkspaceRoot?: string | undefined;
   targetLabel: string;
   targetType: string;
+  kind?: string;
+  jiraIssueType?: string;
+  jiraIssueTypeIconUrl?: string;
   dedupeKey?: string;
   payload: unknown | (() => Promise<unknown>);
   summaryItems?: ReadonlyArray<{ label: string; value: string }>;
@@ -84,21 +97,26 @@ export function isDirectoryBundlePayload(
 }
 
 function resolveAttachmentKind(request: AddToChatRequest, payload: unknown): string {
+  const explicitRequestKind = normalizeContextAttachmentKind(request.kind);
+  if (explicitRequestKind) {
+    return explicitRequestKind;
+  }
   if (isDirectoryBundlePayload(payload)) {
     const lightweight = payload.lightweightItem;
     if (lightweight && typeof lightweight === "object" && "kind" in lightweight) {
-      const k = (lightweight as Record<string, unknown>).kind;
-      if (typeof k === "string") return k;
+      const k = normalizeContextAttachmentKind(
+        (lightweight as Record<string, unknown>).kind as string | undefined,
+      );
+      if (k) return k;
     }
   }
   if (payload && typeof payload === "object" && "kind" in payload) {
-    const k = (payload as Record<string, unknown>).kind;
-    if (typeof k === "string" && k !== "t3work-directory-bundle") return k;
+    const k = normalizeContextAttachmentKind(
+      (payload as Record<string, unknown>).kind as string | undefined,
+    );
+    if (k) return k;
   }
-  const targetType = request.targetType.trim().toLowerCase();
-  if (targetType.includes("jira") || targetType.includes("ticket")) return "jira-work-item";
-  if (targetType.includes("github")) return "github-activity";
-  return "context";
+  return inferContextAttachmentKindFromType(request.targetType);
 }
 
 function buildContextText(input: {
@@ -109,7 +127,7 @@ function buildContextText(input: {
   const { request, relativePath, payload } = input;
   const kind = resolveAttachmentKind(request, payload);
   const lines: string[] = [];
-  lines.push(`### Added Context: ${request.targetLabel}`);
+  lines.push(`${ADDED_CONTEXT_HEADING} ${request.targetLabel}`);
   lines.push("");
   lines.push(`- Kind: ${kind}`);
   lines.push(`- Type: ${request.targetType}`);
@@ -130,9 +148,23 @@ function buildContextText(input: {
       lines.push(`- ${item.label}: ${item.value}`);
     }
   }
+  const jiraMetadata = resolveJiraContextAttachmentMetadata({
+    ...(request.kind ? { kind: request.kind } : {}),
+    ...(request.jiraIssueType ? { jiraIssueType: request.jiraIssueType } : {}),
+    ...(request.jiraIssueTypeIconUrl ? { jiraIssueTypeIconUrl: request.jiraIssueTypeIconUrl } : {}),
+    ...(request.summaryItems ? { summaryItems: request.summaryItems } : {}),
+  });
+  appendJiraContextMetadataLines({
+    lines,
+    ...(request.summaryItems ? { summaryItems: request.summaryItems } : {}),
+    ...(jiraMetadata.jiraIssueType ? { jiraIssueType: jiraMetadata.jiraIssueType } : {}),
+    ...(jiraMetadata.jiraIssueTypeIconUrl
+      ? { jiraIssueTypeIconUrl: jiraMetadata.jiraIssueTypeIconUrl }
+      : {}),
+  });
 
   lines.push("");
-  lines.push("Use the referenced workspace files for full context details.");
+  lines.push(ADDED_CONTEXT_FOOTER);
   return lines.join("\n");
 }
 
@@ -143,6 +175,12 @@ export function buildContextAttachment(input: {
 }): T3WorkContextAttachment {
   const { request, relativePath, payload } = input;
   const kind = resolveAttachmentKind(request, payload);
+  const jiraMetadata = resolveJiraContextAttachmentMetadata({
+    ...(request.kind ? { kind: request.kind } : {}),
+    ...(request.jiraIssueType ? { jiraIssueType: request.jiraIssueType } : {}),
+    ...(request.jiraIssueTypeIconUrl ? { jiraIssueTypeIconUrl: request.jiraIssueTypeIconUrl } : {}),
+    ...(request.summaryItems ? { summaryItems: request.summaryItems } : {}),
+  });
   const dedupeKey =
     request.dedupeKey ?? (isDirectoryBundlePayload(payload) ? payload.dedupeKey : undefined);
   const description = request.summaryItems?.[0]
@@ -152,6 +190,10 @@ export function buildContextAttachment(input: {
     id: randomUUID(),
     kind,
     label: request.targetLabel,
+    ...(jiraMetadata.jiraIssueType ? { jiraIssueType: jiraMetadata.jiraIssueType } : {}),
+    ...(jiraMetadata.jiraIssueTypeIconUrl
+      ? { jiraIssueTypeIconUrl: jiraMetadata.jiraIssueTypeIconUrl }
+      : {}),
     ...(dedupeKey ? { dedupeKey } : {}),
     ...(description ? { description } : {}),
     ...(request.summaryItems ? { summaryItems: request.summaryItems } : {}),

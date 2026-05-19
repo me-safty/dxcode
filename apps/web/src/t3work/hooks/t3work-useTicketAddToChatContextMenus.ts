@@ -8,6 +8,7 @@ import {
   buildGitHubActivityContextBundle,
   buildGitHubActivityDisplay,
 } from "~/t3work/t3work-githubActivityContextPayload";
+import { buildJiraWorkItemSummary } from "~/t3work/t3work-jiraContextMetadata";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectTicket } from "~/t3work/t3work-types";
 
@@ -27,17 +28,19 @@ export function useTicketAddToChatContextMenus(input: {
     }
 
     const githubItems = githubActivityByWorkItem.get(ticket.ref.displayId) ?? [];
+    const jiraSummary = buildJiraWorkItemSummary(ticket);
     void showAddToChatContextMenu(event, {
       projectId,
       projectTitle: project.title,
       projectWorkspaceRoot: project.workspace?.rootPath,
       targetLabel: `${ticket.ref.displayId} ${ticket.ref.title}`,
       targetType: "work-item",
-      summaryItems: [
-        { label: "Status", value: ticket.status },
-        ...(ticket.priority ? [{ label: "Priority", value: ticket.priority }] : []),
-        ...(ticket.assignee ? [{ label: "Assignee", value: ticket.assignee }] : []),
-      ],
+      kind: "jira-work-item",
+      ...(jiraSummary.jiraIssueType ? { jiraIssueType: jiraSummary.jiraIssueType } : {}),
+      ...(jiraSummary.jiraIssueTypeIconUrl
+        ? { jiraIssueTypeIconUrl: jiraSummary.jiraIssueTypeIconUrl }
+        : {}),
+      summaryItems: jiraSummary.summaryItems,
       payload: () =>
         buildComprehensiveTicketPayload({
           backend,
@@ -62,6 +65,7 @@ export function useTicketAddToChatContextMenus(input: {
       projectWorkspaceRoot: project.workspace?.rootPath,
       targetLabel: display.targetLabel,
       targetType: display.targetType,
+      kind: display.activityKind,
       dedupeKey: `${projectId}:github-activity:${item.id}`,
       summaryItems: display.summaryItems,
       payload: async () => {

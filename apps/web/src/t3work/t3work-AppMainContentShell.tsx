@@ -2,25 +2,23 @@ import { useEffect, useMemo } from "react";
 import { Plus } from "lucide-react";
 import type { ProjectShellProject } from "@t3tools/project-context";
 
-import { ThreadChatView } from "~/t3work/chat/t3work-ThreadChatView";
 import { AtlassianIcon } from "~/t3work/components/brand/t3work-AtlassianLogos";
 import { Button } from "~/t3work/components/ui/t3work-button";
 import { SidebarTrigger } from "~/t3work/components/ui/t3work-sidebar";
 import { useT3WorkActiveChatStore } from "~/t3work/t3work-activeChatStore";
+import { createHomeProject } from "~/t3work/t3work-homeProject";
+import { ProjectDashboardKickoffAside } from "~/t3work/t3work-ProjectDashboardKickoffAside";
+import { ResizableRightSidebarLayout } from "~/t3work/t3work-ResizableRightSidebarLayout";
 import type { ProjectThread, ViewState } from "~/t3work/t3work-types";
-import { ConnectionStatusBadge } from "./t3work-AppStatusBits";
 
 export function useHomeProjectChat(input: {
   projects: ProjectShellProject[];
   getThreadsForProject: (projectId: string) => ProjectThread[];
 }) {
-  const { projects, getThreadsForProject } = input;
+  const { getThreadsForProject } = input;
 
-  const homeChatProject = projects[0] ?? null;
+  const homeChatProject = useMemo(() => createHomeProject(), []);
   const homeChatThreadId = useMemo(() => {
-    if (!homeChatProject) {
-      return null;
-    }
     const existing = getThreadsForProject(homeChatProject.id).toSorted(
       (left, right) =>
         new Date(right.lastMessageAt).getTime() - new Date(left.lastMessageAt).getTime(),
@@ -45,14 +43,6 @@ export function useSyncActiveChatTarget(input: {
 
   useEffect(() => {
     if (!view) {
-      if (homeChatProject && homeChatThreadId) {
-        setActiveChatTarget({
-          type: "thread",
-          projectId: homeChatProject.id,
-          threadId: homeChatThreadId,
-        });
-        return;
-      }
       setActiveChatTarget(null);
       return;
     }
@@ -84,18 +74,15 @@ export function useSyncActiveChatTarget(input: {
       projectId: view.projectId,
       threadId: projectThread?.id ?? `project-${view.projectId}-chat`,
     });
-  }, [getThreadsForProject, homeChatProject, homeChatThreadId, setActiveChatTarget, view]);
+  }, [getThreadsForProject, setActiveChatTarget, view]);
 }
 
 function ProjectBrowserEmpty({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="flex h-13 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-5">
+      <header className="drag-region flex h-13 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-5 wco:h-[env(titlebar-area-height)] wco:pl-[calc(env(titlebar-area-x)+1em)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]">
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
         <span className="text-sm font-medium text-muted-foreground/70">No active project</span>
-        <div className="ml-auto flex items-center gap-2">
-          <ConnectionStatusBadge />
-        </div>
       </header>
       <div className="flex flex-1 items-center justify-center overflow-auto p-6">
         <div className="w-full max-w-xl rounded-lg border border-border/70 bg-card/30 p-8 shadow-sm/5">
@@ -119,34 +106,51 @@ function ProjectBrowserEmpty({ onCreate }: { onCreate: () => void }) {
 export function ProjectBrowserEmptyWithChat({
   onCreate,
   project,
-  chatThreadId,
+  projectThreads,
+  providers,
+  isConnected,
+  onOpenThread,
+  onKickoffThread,
+  heading,
+  description,
 }: {
   onCreate: () => void;
   project: ProjectShellProject | null;
-  chatThreadId: string | null;
+  projectThreads: ProjectThread[];
+  providers: ReadonlyArray<import("@t3tools/contracts").ServerProvider>;
+  isConnected: boolean;
+  onOpenThread: (threadId: string) => void;
+  onKickoffThread: (
+    kickoffMessage: string,
+    kickoffModelSelection: import("@t3tools/contracts").ModelSelection,
+    kickoffRuntimeMode: import("@t3tools/contracts").RuntimeMode,
+    kickoffInteractionMode: import("@t3tools/contracts").ProviderInteractionMode,
+  ) => void;
+  heading?: string;
+  description?: string;
 }) {
   return (
-    <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(26rem,38%)]">
-      <ProjectBrowserEmpty onCreate={onCreate} />
-      <aside className="flex min-h-0 h-full border-l border-border/70">
-        {project && chatThreadId ? (
-          <div className="flex min-h-0 flex-1">
-            <ThreadChatView
-              threadId={chatThreadId}
-              projectId={project.id}
-              projectTitle={project.title}
-              {...(project.workspace?.rootPath
-                ? { projectWorkspaceRoot: project.workspace.rootPath }
-                : {})}
-              title={`${project.title} chat`}
-            />
-          </div>
+    <ResizableRightSidebarLayout
+      storageKey="t3work_home_right_sidebar"
+      defaultAsideWidth={28 * 16}
+      minAsideWidth={24 * 16}
+      main={<ProjectBrowserEmpty onCreate={onCreate} />}
+      aside={
+        project ? (
+          <ProjectDashboardKickoffAside
+            project={project}
+            projectThreads={projectThreads}
+            providers={providers}
+            isConnected={isConnected}
+            onOpenThread={onOpenThread}
+            onKickoffThread={onKickoffThread}
+          />
         ) : (
-          <div className="flex min-h-0 h-full flex-1 items-center justify-center bg-background px-6 text-center text-sm text-muted-foreground">
+          <aside className="flex min-h-0 h-full flex-1 items-center justify-center border-l border-border/70 bg-background px-6 text-center text-sm text-muted-foreground">
             Create a project to start chatting.
-          </div>
-        )}
-      </aside>
-    </div>
+          </aside>
+        )
+      }
+    />
   );
 }

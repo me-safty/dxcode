@@ -1,27 +1,10 @@
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
-
-const ADDED_CONTEXT_HEADING = "### Added Context:";
-const ADDED_CONTEXT_FOOTER = "Use the referenced workspace files for full context details.";
-
-function inferKindFromType(typeValue: string | undefined): string {
-  const value = (typeValue ?? "").toLowerCase();
-  if (value.includes("jira") || value.includes("ticket")) {
-    return "jira-work-item";
-  }
-  if (value.includes("github")) {
-    return "github-activity";
-  }
-  return "context";
-}
-
-function normalizeKind(kindValue: string | undefined): string | undefined {
-  const value = (kindValue ?? "").trim().toLowerCase();
-  if (!value) return undefined;
-  if (value.startsWith("jira-") || value.startsWith("github-") || value === "context") {
-    return value;
-  }
-  return undefined;
-}
+import {
+  ADDED_CONTEXT_FOOTER,
+  ADDED_CONTEXT_HEADING,
+  inferContextAttachmentKindFromType,
+  normalizeContextAttachmentKind,
+} from "~/t3work/t3work-contextAttachmentPrimitives";
 
 function normalizeVisibleText(text: string): string {
   return text.replace(/\n{3,}/g, "\n\n").trim();
@@ -61,6 +44,8 @@ function parseContextBlock(text: string, start: number, index: number): ParsedCo
   const lines = detailsBody.split("\n");
   let inferredType: string | undefined;
   let explicitKind: string | undefined;
+  let jiraIssueType: string | undefined;
+  let jiraIssueTypeIconUrl: string | undefined;
   const summaryItems: Array<{ label: string; value: string }> = [];
   const fileReferences: Array<{ label: string; relativePath: string }> = [];
   let inReferences = false;
@@ -96,12 +81,18 @@ function parseContextBlock(text: string, start: number, index: number): ParsedCo
     const itemLabel = itemMatch[1]!.trim();
     const itemValue = itemMatch[2]!.trim();
     if (itemLabel.toLowerCase() === "kind") {
-      explicitKind = normalizeKind(itemValue);
+      explicitKind = normalizeContextAttachmentKind(itemValue);
       continue;
     }
     if (itemLabel.toLowerCase() === "type") {
       inferredType = itemValue;
       continue;
+    }
+    if (itemLabel.toLowerCase() === "issue type") {
+      jiraIssueType = itemValue;
+    }
+    if (itemLabel.toLowerCase() === "issue type icon url") {
+      jiraIssueTypeIconUrl = itemValue;
     }
     if (
       itemLabel.toLowerCase() === "project" ||
@@ -115,8 +106,10 @@ function parseContextBlock(text: string, start: number, index: number): ParsedCo
 
   const attachment: T3WorkContextAttachment = {
     id: `sent-context-${index}-${headingStart}`,
-    kind: explicitKind ?? inferKindFromType(inferredType),
+    kind: explicitKind ?? inferContextAttachmentKindFromType(inferredType),
     label,
+    ...(jiraIssueType ? { jiraIssueType } : {}),
+    ...(jiraIssueTypeIconUrl ? { jiraIssueTypeIconUrl } : {}),
     ...(summaryItems[0]
       ? { description: `${summaryItems[0].label}: ${summaryItems[0].value}` }
       : {}),

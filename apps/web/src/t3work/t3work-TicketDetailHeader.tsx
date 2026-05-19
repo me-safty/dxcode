@@ -23,7 +23,7 @@ export function TicketDetailHeader({
   ticketUrl: string | undefined;
 }) {
   return (
-    <header className="flex h-13 shrink-0 items-center gap-2 border-b border-border bg-gradient-to-b from-background to-muted/12 px-3 sm:px-5">
+    <header className="drag-region flex h-13 shrink-0 items-center gap-2 border-b border-border bg-gradient-to-b from-background to-muted/12 px-3 sm:px-5 wco:h-[env(titlebar-area-height)] wco:pl-[calc(env(titlebar-area-x)+1em)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]">
       <SidebarTrigger className="size-7 shrink-0 md:hidden" />
       <Button size="icon-xs" variant="ghost" onClick={onBack} aria-label="Back to dashboard">
         <ArrowLeft className="size-4" />

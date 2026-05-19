@@ -2,6 +2,8 @@ export type T3WorkContextAttachment = {
   id: string;
   kind: string;
   label: string;
+  jiraIssueType?: string;
+  jiraIssueTypeIconUrl?: string;
   dedupeKey?: string;
   description?: string;
   summaryItems?: ReadonlyArray<{ label: string; value: string }>;

@@ -1,6 +1,14 @@
+import { scopeThreadRef } from "@t3tools/client-runtime";
 import { useCallback } from "react";
 import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import { usePrimaryEnvironmentId } from "~/environments/primary";
+import { useThreadActions } from "~/hooks/useThreadActions";
+import { useBackend } from "~/t3work/backend/t3work-index";
+import { useAddToChat } from "~/t3work/hooks/t3work-useAddToChat";
 import { useProjectStore } from "~/t3work/hooks/t3work-useProjectStore";
+import { buildComprehensiveTicketPayload } from "~/t3work/t3work-addToChatPayloadBuilders";
+import { buildJiraWorkItemSummary } from "~/t3work/t3work-jiraContextMetadata";
+import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ViewState } from "~/t3work/t3work-types";
 
 type AppHandlersInput = {
@@ -20,6 +28,11 @@ export function useAppHandlers({
   onOpenTicket,
   onOpenThread,
 }: AppHandlersInput) {
+  const environmentId = usePrimaryEnvironmentId();
+  const backend = useBackend();
+  const { addToChatFromRequest } = useAddToChat();
+  const { deleteThread: deleteLiveThread } = useThreadActions();
+
   const handleSelectProject = useCallback(
     (projectId: string) => {
       store.selectProject(projectId);
@@ -48,15 +61,17 @@ export function useAppHandlers({
     (projectId: string) => {
       const thread = store.createThread(projectId);
       onOpenThread?.(projectId, thread.id);
+      return thread.id;
     },
     [onOpenThread, store],
   );
 
   const handleCreateTicketKickoffThread = useCallback(
-    (input: {
+    async (input: {
       projectId: string;
       ticketId: string;
       ticketDisplayId: string;
+      githubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
       kickoffMessage: string;
       kickoffModelSelection: ModelSelection;
       kickoffRuntimeMode: RuntimeMode;
@@ -64,8 +79,46 @@ export function useAppHandlers({
     }) => {
       const thread = store.createThreadForTicket(input);
       onOpenThread?.(input.projectId, thread.id);
+
+      const project = store.allProjects.find((candidate) => candidate.id === input.projectId);
+      const ticket = store
+        .getTicketsForProject(input.projectId)
+        .find((candidate) => candidate.id === input.ticketId);
+
+      if (!backend || !project || !ticket) {
+        return;
+      }
+
+      const jiraSummary = buildJiraWorkItemSummary(ticket);
+      const projectTickets = store.getTicketsForProject(input.projectId);
+      await addToChatFromRequest(
+        {
+          projectId: input.projectId,
+          projectTitle: project.title,
+          ...(project.workspace?.rootPath
+            ? { projectWorkspaceRoot: project.workspace.rootPath }
+            : {}),
+          targetLabel: `${ticket.ref.displayId} ${ticket.ref.title}`,
+          targetType: "work-item",
+          kind: "jira-work-item",
+          ...(jiraSummary.jiraIssueType ? { jiraIssueType: jiraSummary.jiraIssueType } : {}),
+          ...(jiraSummary.jiraIssueTypeIconUrl
+            ? { jiraIssueTypeIconUrl: jiraSummary.jiraIssueTypeIconUrl }
+            : {}),
+          summaryItems: jiraSummary.summaryItems,
+          payload: () =>
+            buildComprehensiveTicketPayload({
+              backend,
+              project,
+              ticket,
+              projectTickets,
+              githubActivityItems: input.githubActivityItems,
+            }),
+        },
+        { type: "kickoff", projectId: input.projectId, ticketId: input.ticketId },
+      );
     },
-    [onOpenThread, store],
+    [addToChatFromRequest, backend, onOpenThread, store],
   );
 
   const handleCreateProjectKickoffThread = useCallback(
@@ -100,6 +153,7 @@ export function useAppHandlers({
         title: `${input.ticketDisplayId} thread ${sequence}`,
       });
       onOpenThread?.(input.projectId, thread.id);
+      return thread.id;
     },
     [onOpenThread, store],
   );
@@ -121,13 +175,25 @@ export function useAppHandlers({
   );
 
   const handleDeleteThread = useCallback(
-    (threadId: string) => {
+    async (threadId: string) => {
       const thread = store.threads.find((candidate) => candidate.id === threadId);
       const deletedWasActive = activeView?.type === "thread" && activeView.threadId === threadId;
+
+      if (environmentId) {
+        await deleteLiveThread(scopeThreadRef(environmentId, threadId as never));
+      }
+
+      // Keep local t3work shadow state in sync with live thread deletions.
       store.deleteThread(threadId);
-      if (deletedWasActive && thread) onOpenDashboard?.(thread.projectId);
+
+      if (deletedWasActive) {
+        const projectId = activeView?.projectId ?? thread?.projectId;
+        if (projectId) {
+          onOpenDashboard?.(projectId);
+        }
+      }
     },
-    [activeView, onOpenDashboard, store],
+    [activeView, deleteLiveThread, environmentId, onOpenDashboard, store],
   );
 
   return {

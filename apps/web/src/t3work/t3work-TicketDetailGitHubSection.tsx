@@ -43,6 +43,7 @@ export function TicketDetailGitHubSection({
       projectWorkspaceRoot?: string;
       targetLabel: string;
       targetType: string;
+      kind?: string;
       dedupeKey?: string;
       payload: unknown | (() => Promise<unknown>);
       summaryItems?: ReadonlyArray<{ label: string; value: string }>;
@@ -65,6 +66,7 @@ export function TicketDetailGitHubSection({
           ...(projectWorkspaceRoot ? { projectWorkspaceRoot } : {}),
           targetLabel: display.targetLabel,
           targetType: display.targetType,
+          kind: display.activityKind,
           dedupeKey: `${projectId}:github-activity:${item.id}`,
           summaryItems: display.summaryItems,
           payload: async () => {

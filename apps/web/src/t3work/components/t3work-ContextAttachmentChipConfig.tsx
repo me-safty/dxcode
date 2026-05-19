@@ -63,7 +63,7 @@ export const KIND_CONFIGS: Record<string, KindConfig> = {
     label: "Links",
   },
   "jira-ticket-parent": {
-    Icon: GitBranchIcon,
+    Icon: JiraIcon as React.ComponentType<{ className?: string; label?: string }>,
     iconClassName: "text-[#44546f]",
     chipClassName: "border-[#44546f]/20 bg-[#44546f]/5 hover:border-[#44546f]/30",
     badgeClassName: "bg-[#44546f]/10 text-[#44546f]",

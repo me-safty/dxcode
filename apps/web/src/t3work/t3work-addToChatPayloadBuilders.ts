@@ -6,6 +6,10 @@ import {
   extractRelationshipKeys,
   normalizeRelationshipKey,
 } from "~/t3work/t3work-ticketRelationshipKeys";
+import {
+  readIntegrationCache,
+  writeIntegrationCache,
+} from "~/t3work/hooks/t3work-integrationCache";
 
 export type ComprehensiveTicketPayload = {
   kind: "jira-work-item";
@@ -47,7 +51,29 @@ async function fetchSnapshotByKey(input: {
   externalProjectId: string;
   key: string;
 }): Promise<ResourceSnapshot> {
-  return input.backend.atlassian.getResource({
+  const cacheKey = `atlassian:getResource:${input.project.source.provider}:${input.accountId}:${input.externalProjectId}:${input.key}`;
+  const cachedSnapshot = readIntegrationCache<ResourceSnapshot>(cacheKey)?.value;
+  if (cachedSnapshot) {
+    void input.backend.atlassian
+      .getResource({
+        accountId: input.accountId,
+        ref: {
+          id: input.key,
+          provider: input.project.source.provider,
+          kind: "issue",
+          projectId: input.externalProjectId,
+        },
+      })
+      .then((freshSnapshot) => {
+        writeIntegrationCache(cacheKey, freshSnapshot);
+      })
+      .catch(() => {
+        // Keep cached value on background refresh failures.
+      });
+    return cachedSnapshot;
+  }
+
+  const snapshot = await input.backend.atlassian.getResource({
     accountId: input.accountId,
     ref: {
       id: input.key,
@@ -56,6 +82,8 @@ async function fetchSnapshotByKey(input: {
       projectId: input.externalProjectId,
     },
   });
+  writeIntegrationCache(cacheKey, snapshot);
+  return snapshot;
 }
 
 export async function buildComprehensiveTicketPayload(input: {

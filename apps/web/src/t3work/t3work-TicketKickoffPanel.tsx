@@ -41,6 +41,9 @@ export function TicketKickoffPanel({
   const [localContextAttachments, setLocalContextAttachments] = useState<
     ReadonlyArray<T3WorkContextAttachment>
   >([]);
+  const [dismissedAttachmentIds, setDismissedAttachmentIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   useEffect(() => {
     if (!injectedContextAttachments || injectedContextAttachments.length === 0) {
@@ -48,13 +51,20 @@ export function TicketKickoffPanel({
     }
     setLocalContextAttachments((current) => {
       const existingIds = new Set(current.map((a) => a.id));
-      const incoming = injectedContextAttachments.filter((a) => !existingIds.has(a.id));
+      const incoming = injectedContextAttachments.filter(
+        (a) => !existingIds.has(a.id) && !dismissedAttachmentIds.has(a.id),
+      );
       return incoming.length > 0 ? [...current, ...incoming] : current;
     });
-  }, [injectedContextAttachments]);
+  }, [dismissedAttachmentIds, injectedContextAttachments]);
 
   const removeLocalContextAttachment = (id: string) => {
     setLocalContextAttachments((current) => current.filter((a) => a.id !== id));
+    setDismissedAttachmentIds((current) => {
+      const next = new Set(current);
+      next.add(id);
+      return next;
+    });
   };
 
   const recipeButtons = [
@@ -169,6 +179,7 @@ export function TicketKickoffPanel({
             onKickoff(fullText, selection, runtimeMode, interactionMode);
             setPrefill(undefined);
             setLocalContextAttachments([]);
+            setDismissedAttachmentIds(new Set());
           },
         })}
       </div>

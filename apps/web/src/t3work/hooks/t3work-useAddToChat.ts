@@ -20,13 +20,17 @@ function addContextAttachmentToThread(threadId: string, attachment: T3WorkContex
   useT3WorkAddToChatStore.getState().enqueueThreadAttachment(threadId, attachment);
 }
 
+type AddToChatTarget =
+  | { type: "thread"; threadId: string }
+  | { type: "kickoff"; projectId: string; ticketId: string };
+
 export function useAddToChat() {
   const environmentId = usePrimaryEnvironmentId();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const activeChatTarget = useT3WorkActiveChatStore((state) => state.target);
 
   const addToChatFromRequest = useCallback(
-    async (request: AddToChatRequest) => {
+    async (request: AddToChatRequest, target?: AddToChatTarget) => {
       const payload =
         typeof request.payload === "function" ? await request.payload() : request.payload;
 
@@ -67,6 +71,21 @@ export function useAddToChat() {
       }
 
       const attachment = buildContextAttachment({ request, relativePath, payload });
+
+      if (target?.type === "thread") {
+        addContextAttachmentToThread(target.threadId, attachment);
+        return;
+      }
+
+      if (target?.type === "kickoff") {
+        useT3WorkAddToChatStore.getState().enqueueKickoff({
+          projectId: target.projectId,
+          ticketId: target.ticketId,
+          attachment,
+          createdAt: new Date().toISOString(),
+        });
+        return;
+      }
 
       if (activeChatTarget && activeChatTarget.projectId === request.projectId) {
         if (activeChatTarget.type === "thread") {

@@ -9,6 +9,7 @@ import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment"
 import { TicketKickoffComposer } from "~/t3work/t3work-TicketKickoffComposer";
 import { TicketKickoffPanel } from "~/t3work/t3work-TicketKickoffPanel";
 import { useT3WorkAddToChatStore, buildKickoffQueueKey } from "~/t3work/t3work-addToChatStore";
+import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectThread } from "~/t3work/t3work-types";
 
 export function TicketDetailKickoffAside({
@@ -17,6 +18,7 @@ export function TicketDetailKickoffAside({
   projectId,
   ticketId,
   kickoffContext,
+  githubActivityItems,
   providers,
   isConnected,
   onOpenThread,
@@ -27,6 +29,7 @@ export function TicketDetailKickoffAside({
   projectId: string;
   ticketId: string;
   kickoffContext: string;
+  githubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
   providers: ReadonlyArray<ServerProvider>;
   isConnected: boolean;
   onOpenThread: (projectId: string, threadId: string) => void;
@@ -34,6 +37,7 @@ export function TicketDetailKickoffAside({
     projectId: string;
     ticketId: string;
     ticketDisplayId: string;
+    githubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
     kickoffMessage: string;
     kickoffModelSelection: ModelSelection;
     kickoffRuntimeMode: RuntimeMode;
@@ -82,6 +86,7 @@ export function TicketDetailKickoffAside({
             projectId,
             ticketId,
             ticketDisplayId: displayId,
+            githubActivityItems,
             kickoffMessage: `${kickoffContext}\n\nTask:\n${instruction}`,
             kickoffModelSelection,
             kickoffRuntimeMode,

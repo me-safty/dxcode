@@ -1,4 +1,5 @@
 import { Loader2 } from "lucide-react";
+import type { MouseEvent } from "react";
 import { T3SurfaceCard, T3SurfaceCardContent } from "~/t3work/components/ui/t3work-surface";
 import { TicketMetadata } from "~/t3work/components/ticket/t3work-TicketMetadata";
 import { TicketRichContent } from "~/t3work/components/ticket/t3work-TicketRichContent";
@@ -9,10 +10,13 @@ import { useAddToChat } from "~/t3work/hooks/t3work-useAddToChat";
 import { TicketDetailGitHubSection } from "~/t3work/t3work-TicketDetailGitHubSection";
 import type { TicketDetailMainColumnProps } from "~/t3work/t3work-TicketDetailMainColumn.types";
 import {
+  buildParentContextMenuData,
+  buildReferenceContextMenuData,
   createSectionContextMenuHandler,
   normalizeTicketAttachments,
   normalizeTicketComments,
 } from "~/t3work/t3work-ticketDetailMainColumn.helpers";
+import type { RelationshipEntry } from "~/t3work/t3work-ticketRelationships-helpers";
 
 export function TicketDetailMainColumn({
   snapshot,
@@ -63,6 +67,29 @@ export function TicketDetailMainColumn({
     snapshot,
     showAddToChatContextMenu,
   });
+  const parentContextMenuData = buildParentContextMenuData({
+    displayId,
+    parentEntry: relationshipData.parentEntry,
+  });
+  const handleReferenceContextMenu = (event: MouseEvent, entry: RelationshipEntry) => {
+    const referenceContextMenuData = buildReferenceContextMenuData({ entry, projectId, ticketId });
+    handleSectionContextMenu(
+      event,
+      "relationships",
+      referenceContextMenuData.label,
+      referenceContextMenuData.summaryItems,
+      {
+        kind: referenceContextMenuData.kind,
+        dedupeKey: referenceContextMenuData.dedupeKey,
+        ...(referenceContextMenuData.jiraIssueType
+          ? { jiraIssueType: referenceContextMenuData.jiraIssueType }
+          : {}),
+        ...(referenceContextMenuData.jiraIssueTypeIconUrl
+          ? { jiraIssueTypeIconUrl: referenceContextMenuData.jiraIssueTypeIconUrl }
+          : {}),
+      },
+    );
+  };
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4 px-3 py-4 sm:px-5">
@@ -80,12 +107,21 @@ export function TicketDetailMainColumn({
 
       <div
         onContextMenu={(event) =>
-          handleSectionContextMenu(event, "parent", `${displayId} parent`, [
+          handleSectionContextMenu(
+            event,
+            "parent",
+            parentContextMenuData.label,
+            parentContextMenuData.summaryItems,
             {
-              label: "Has parent",
-              value: relationshipData.parentEntry ? "Yes" : "No",
+              kind: parentContextMenuData.kind,
+              ...(parentContextMenuData.jiraIssueType
+                ? { jiraIssueType: parentContextMenuData.jiraIssueType }
+                : {}),
+              ...(parentContextMenuData.jiraIssueTypeIconUrl
+                ? { jiraIssueTypeIconUrl: parentContextMenuData.jiraIssueTypeIconUrl }
+                : {}),
             },
-          ])
+          )
         }
       >
         <TicketParentSummary
@@ -152,22 +188,13 @@ export function TicketDetailMainColumn({
           ])
         }
         afterDescription={
-          <div
-            onContextMenu={(event) =>
-              handleSectionContextMenu(event, "relationships", `${displayId} relationships`, [
-                { label: "Child links", value: String(relationshipData.childEntries.length) },
-                {
-                  label: "Reference links",
-                  value: String(relationshipData.referencedEntries.length),
-                },
-              ])
-            }
-          >
+          <div>
             <TicketRelatedLinks
               projectId={projectId}
               onOpenTicket={onOpenTicket}
               childEntries={relationshipData.childEntries}
               referencedEntries={relationshipData.referencedEntries}
+              onReferenceContextMenu={handleReferenceContextMenu}
             />
           </div>
         }

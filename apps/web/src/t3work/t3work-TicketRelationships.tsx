@@ -45,11 +45,15 @@ export function TicketRelatedLinks({
   onOpenTicket,
   childEntries,
   referencedEntries,
+  onChildContextMenu,
+  onReferenceContextMenu,
 }: {
   projectId: string;
   onOpenTicket: (projectId: string, ticketId: string) => void;
   childEntries: RelationshipEntry[];
   referencedEntries: RelationshipEntry[];
+  onChildContextMenu?: (event: React.MouseEvent, entry: RelationshipEntry) => void;
+  onReferenceContextMenu?: (event: React.MouseEvent, entry: RelationshipEntry) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -65,6 +69,12 @@ export function TicketRelatedLinks({
                   key={`child-${entry.key}`}
                   ticket={toRelationshipTicket(entry, projectId)}
                   onOpen={() => onOpenTicket(projectId, entry.ticket?.id ?? entry.key)}
+                  {...(onChildContextMenu
+                    ? {
+                        onContextMenu: (event: React.MouseEvent) =>
+                          onChildContextMenu(event, entry),
+                      }
+                    : {})}
                 />
               ))}
             </div>
@@ -86,6 +96,12 @@ export function TicketRelatedLinks({
                   key={`ref-${entry.key}`}
                   ticket={toRelationshipTicket(entry, projectId)}
                   onOpen={() => onOpenTicket(projectId, entry.ticket?.id ?? entry.key)}
+                  {...(onReferenceContextMenu
+                    ? {
+                        onContextMenu: (event: React.MouseEvent) =>
+                          onReferenceContextMenu(event, entry),
+                      }
+                    : {})}
                 />
               ))}
             </div>

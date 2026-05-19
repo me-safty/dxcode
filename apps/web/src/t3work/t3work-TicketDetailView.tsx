@@ -14,6 +14,7 @@ import { useProjectResources } from "~/t3work/hooks/t3work-useProjectResources";
 import { useRelatedTickets } from "~/t3work/hooks/t3work-useRelatedTickets";
 import { useTicketDetail } from "~/t3work/hooks/t3work-useTicketDetail";
 import { buildTicketContextPrompt } from "~/t3work/t3work-AppTicketHelpers";
+import { ResizableRightSidebarLayout } from "~/t3work/t3work-ResizableRightSidebarLayout";
 import { TicketDetailHeader } from "~/t3work/t3work-TicketDetailHeader";
 import { TicketDetailKickoffAside } from "~/t3work/t3work-TicketDetailKickoffAside";
 import { TicketDetailMainColumn } from "~/t3work/t3work-TicketDetailMainColumn";
@@ -23,6 +24,7 @@ import {
   resolveHtmlBaseUrl,
   sortCommentItems,
 } from "~/t3work/t3work-ticketDetailUtils";
+import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectThread } from "~/t3work/t3work-types";
 
 export function TicketDetailView({
@@ -43,6 +45,7 @@ export function TicketDetailView({
     projectId: string;
     ticketId: string;
     ticketDisplayId: string;
+    githubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
     kickoffMessage: string;
     kickoffModelSelection: ModelSelection;
     kickoffRuntimeMode: RuntimeMode;
@@ -133,57 +136,66 @@ export function TicketDetailView({
         ticketUrl={ticketUrl}
       />
 
-      <div
-        className={`grid min-h-0 flex-1 ${t3SurfaceBackdrops.ticketContent} lg:grid-cols-[minmax(0,1fr)_minmax(22rem,36%)]`}
-      >
-        <section
-          className={`min-h-0 border-b border-border ${t3SurfaceBackdrops.ticketMainColumn} lg:border-r lg:border-b-0`}
-        >
-          <ScrollArea className="h-full">
-            <TicketDetailMainColumn
-              snapshot={snapshot}
-              displayId={displayId}
-              title={title}
-              status={status}
-              priority={priority}
-              assignee={assignee}
-              projectId={project.id}
-              project={project}
-              projectTickets={ticketsWithRelated}
-              ticketId={ticket?.id ?? ticketId}
-              ticketParentId={ticket?.parentId}
-              snapshotParentId={
-                typeof snapshot?.ref.parentId === "string" ? snapshot.ref.parentId : undefined
-              }
-              snapshotRaw={snapshot?.raw}
-              onOpenTicket={onOpenTicket}
-              loading={loading}
-              error={error}
-              descriptionMarkdown={descriptionMarkdown}
-              descriptionHtml={descriptionHtml}
-              htmlBaseUrl={htmlBaseUrl}
-              attachments={attachments}
-              sortedComments={sortedComments}
-              githubActivityItems={matchedGitHubActivityItems}
-              githubActivityLoading={githubActivity.loading}
-              {...(githubActivity.warning ? { githubActivityWarning: githubActivity.warning } : {})}
-              {...(githubActivity.host ? { githubHost: githubActivity.host } : {})}
-              {...(githubActivity.account ? { githubAccount: githubActivity.account } : {})}
-            />
-          </ScrollArea>
-        </section>
-        <TicketDetailKickoffAside
-          displayId={displayId}
-          issueThreads={issueThreads}
-          projectId={project.id}
-          ticketId={ticketId}
-          kickoffContext={kickoffContext}
-          providers={backendState.providers}
-          isConnected={backendState.connectionStatus === "connected"}
-          onOpenThread={onOpenThread}
-          onKickoffThread={onKickoffThread}
-        />
-      </div>
+      <ResizableRightSidebarLayout
+        storageKey="t3work_ticket_right_sidebar"
+        className={t3SurfaceBackdrops.ticketContent}
+        minAsideWidth={22 * 16}
+        defaultAsideWidth={24 * 16}
+        main={
+          <section
+            className={`flex h-full min-h-0 flex-col border-b border-border ${t3SurfaceBackdrops.ticketMainColumn} lg:border-r lg:border-b-0`}
+          >
+            <ScrollArea className="h-full">
+              <TicketDetailMainColumn
+                snapshot={snapshot}
+                displayId={displayId}
+                title={title}
+                status={status}
+                priority={priority}
+                assignee={assignee}
+                projectId={project.id}
+                project={project}
+                projectTickets={ticketsWithRelated}
+                ticketId={ticket?.id ?? ticketId}
+                ticketParentId={ticket?.parentId}
+                snapshotParentId={
+                  typeof snapshot?.ref.parentId === "string" ? snapshot.ref.parentId : undefined
+                }
+                snapshotRaw={snapshot?.raw}
+                onOpenTicket={onOpenTicket}
+                loading={loading}
+                error={error}
+                descriptionMarkdown={descriptionMarkdown}
+                descriptionHtml={descriptionHtml}
+                htmlBaseUrl={htmlBaseUrl}
+                attachments={attachments}
+                sortedComments={sortedComments}
+                githubActivityItems={matchedGitHubActivityItems}
+                githubActivityLoading={githubActivity.loading}
+                {...(githubActivity.warning
+                  ? { githubActivityWarning: githubActivity.warning }
+                  : {})}
+                {...(githubActivity.host ? { githubHost: githubActivity.host } : {})}
+                {...(githubActivity.account ? { githubAccount: githubActivity.account } : {})}
+              />
+            </ScrollArea>
+          </section>
+        }
+        aside={
+          <TicketDetailKickoffAside
+            displayId={displayId}
+            issueThreads={issueThreads}
+            projectId={project.id}
+            ticketId={ticketId}
+            kickoffContext={kickoffContext}
+            githubActivityItems={matchedGitHubActivityItems}
+            providers={backendState.providers}
+            isConnected={backendState.connectionStatus === "connected"}
+            onOpenThread={onOpenThread}
+            onKickoffThread={onKickoffThread}
+          />
+        }
+      />
     </div>
   );
 }

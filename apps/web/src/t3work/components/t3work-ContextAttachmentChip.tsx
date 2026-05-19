@@ -3,6 +3,7 @@ import {
   FALLBACK_KIND_CONFIG,
   KIND_CONFIGS,
 } from "~/t3work/components/t3work-ContextAttachmentChipConfig";
+import { JiraIssueTypeIcon } from "~/t3work/components/ticket/t3work-JiraIssueType";
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
 import { cn } from "~/lib/utils";
 
@@ -31,7 +32,17 @@ export function ContextAttachmentChip({ attachment, onRemove }: ContextAttachmen
       )}
       title={title.length > 0 ? title : undefined}
     >
-      <Icon className={cn("size-3.5 shrink-0", iconClassName)} />
+      {attachment.kind.startsWith("jira-") && attachment.jiraIssueType ? (
+        <JiraIssueTypeIcon
+          issueType={attachment.jiraIssueType}
+          {...(attachment.jiraIssueTypeIconUrl
+            ? { issueTypeIconUrl: attachment.jiraIssueTypeIconUrl }
+            : {})}
+          className="size-3.5 rounded-[3px]"
+        />
+      ) : (
+        <Icon className={cn("size-3.5 shrink-0", iconClassName)} />
+      )}
       <span className="flex min-w-0 flex-col gap-px">
         <span className="truncate font-medium leading-tight text-foreground/90">
           {attachment.label}
