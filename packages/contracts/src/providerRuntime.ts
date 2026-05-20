@@ -193,6 +193,7 @@ const ProviderRuntimeEventType = Schema.Literals([
   "config.warning",
   "deprecation.notice",
   "files.persisted",
+  "image.generated",
   "runtime.warning",
   "runtime.error",
 ]);
@@ -243,6 +244,7 @@ const ModelReroutedType = Schema.Literal("model.rerouted");
 const ConfigWarningType = Schema.Literal("config.warning");
 const DeprecationNoticeType = Schema.Literal("deprecation.notice");
 const FilesPersistedType = Schema.Literal("files.persisted");
+const ImageGeneratedType = Schema.Literal("image.generated");
 const RuntimeWarningType = Schema.Literal("runtime.warning");
 const RuntimeErrorType = Schema.Literal("runtime.error");
 
@@ -592,6 +594,12 @@ const FilesPersistedPayload = Schema.Struct({
 });
 export type FilesPersistedPayload = typeof FilesPersistedPayload.Type;
 
+const ImageGeneratedPayload = Schema.Struct({
+  dataUrl: TrimmedNonEmptyStringSchema,
+  name: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type ImageGeneratedPayload = typeof ImageGeneratedPayload.Type;
+
 const RuntimeWarningPayload = Schema.Struct({
   message: TrimmedNonEmptyStringSchema,
   detail: Schema.optional(Schema.Unknown),
@@ -937,6 +945,13 @@ const ProviderRuntimeFilesPersistedEvent = Schema.Struct({
 });
 export type ProviderRuntimeFilesPersistedEvent = typeof ProviderRuntimeFilesPersistedEvent.Type;
 
+const ProviderRuntimeImageGeneratedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: ImageGeneratedType,
+  payload: ImageGeneratedPayload,
+});
+export type ProviderRuntimeImageGeneratedEvent = typeof ProviderRuntimeImageGeneratedEvent.Type;
+
 const ProviderRuntimeWarningEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: RuntimeWarningType,
@@ -997,6 +1012,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeConfigWarningEvent,
   ProviderRuntimeDeprecationNoticeEvent,
   ProviderRuntimeFilesPersistedEvent,
+  ProviderRuntimeImageGeneratedEvent,
   ProviderRuntimeWarningEvent,
   ProviderRuntimeErrorEvent,
 ]);

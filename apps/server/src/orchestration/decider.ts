@@ -20,6 +20,22 @@ import { projectEvent } from "./projector.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
+function mergeMessageAttachments<TAttachment extends { readonly id: string }>(
+  existing: ReadonlyArray<TAttachment> | undefined,
+  next: ReadonlyArray<TAttachment>,
+): TAttachment[] {
+  const merged: TAttachment[] = [];
+  const seenIds = new Set<string>();
+  for (const attachment of [...(existing ?? []), ...next]) {
+    if (seenIds.has(attachment.id)) {
+      continue;
+    }
+    seenIds.add(attachment.id);
+    merged.push(attachment);
+  }
+  return merged;
+}
+
 function withEventBase(
   input: Pick<OrchestrationCommand, "commandId"> & {
     readonly aggregateKind: OrchestrationEvent["aggregateKind"];
@@ -628,6 +644,53 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           turnId: command.turnId ?? null,
           streaming: false,
           createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.message.attachments.add": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const existingMessage = thread.messages.find((entry) => entry.id === command.messageId);
+      if (existingMessage && existingMessage.role !== command.role) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Message '${command.messageId}' already exists with role '${existingMessage.role}'.`,
+        });
+      }
+
+      const latestTurn = thread.latestTurn;
+      const isActiveTurnMessage =
+        command.turnId !== undefined &&
+        latestTurn !== null &&
+        latestTurn.turnId === command.turnId &&
+        latestTurn.state === "running";
+      const attachments = mergeMessageAttachments(
+        existingMessage?.attachments,
+        command.attachments,
+      );
+
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.message-sent",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          role: command.role,
+          text: "",
+          attachments,
+          turnId: existingMessage?.turnId ?? command.turnId ?? null,
+          streaming: existingMessage?.streaming ?? isActiveTurnMessage,
+          createdAt: existingMessage?.createdAt ?? command.createdAt,
           updatedAt: command.createdAt,
         },
       };

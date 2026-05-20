@@ -14,7 +14,7 @@ import {
   type OrchestrationThreadDetailSnapshot,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   applyOrchestrationEvent,
@@ -27,10 +27,15 @@ import {
   setThreadBranch,
   mergeServerThreadDetailPage,
   selectThreadsAcrossEnvironments,
+  syncServerThreadDetail,
   type AppState,
   type EnvironmentState,
 } from "./store";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
+import {
+  resetSavedEnvironmentRegistryStoreForTests,
+  useSavedEnvironmentRegistryStore,
+} from "./environments/runtime";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 const remoteEnvironmentId = EnvironmentId.make("environment-remote");
@@ -166,6 +171,17 @@ function makeOrchestrationThread(
       id: message.id,
       role: message.role,
       text: message.text,
+      ...(message.attachments
+        ? {
+            attachments: message.attachments.map((attachment) => ({
+              type: attachment.type,
+              id: attachment.id,
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              sizeBytes: attachment.sizeBytes,
+            })),
+          }
+        : {}),
       turnId: message.turnId ?? null,
       streaming: message.streaming,
       createdAt: message.createdAt,
@@ -381,6 +397,10 @@ function projectsOf(state: AppState) {
   return selectProjectsAcrossEnvironments(state);
 }
 
+afterEach(() => {
+  resetSavedEnvironmentRegistryStoreForTests();
+});
+
 function threadsOf(state: AppState) {
   return selectThreadsAcrossEnvironments(state);
 }
@@ -568,6 +588,77 @@ describe("thread selection memoization", () => {
 });
 
 describe("thread detail pagination", () => {
+  it("maps persisted user image attachments to environment attachment preview URLs", () => {
+    const originalWindow = globalThis.window;
+    Reflect.set(globalThis, "window", {
+      desktopBridge: undefined,
+      location: { origin: "http://primary.test" },
+    });
+    useSavedEnvironmentRegistryStore.setState({
+      byId: {
+        [localEnvironmentId]: {
+          environmentId: localEnvironmentId,
+          label: "Local",
+          httpBaseUrl: "http://environment.test",
+          wsBaseUrl: "ws://environment.test",
+          createdAt: "2026-02-13T00:00:00.000Z",
+          lastConnectedAt: null,
+        },
+      },
+    });
+    try {
+      const threadId = ThreadId.make("thread-attachments");
+      const messageId = MessageId.make("message-attachments");
+      const sourceThread = makeThread({
+        id: threadId,
+        messages: [
+          {
+            id: messageId,
+            role: "user",
+            text: "inspect this",
+            turnId: null,
+            createdAt: "2026-02-13T00:00:00.000Z",
+            completedAt: "2026-02-13T00:00:00.000Z",
+            streaming: false,
+            attachments: [
+              {
+                type: "image",
+                id: "thread-attachments-file-1",
+                name: "photo.png",
+                mimeType: "image/png",
+                sizeBytes: 4,
+              },
+            ],
+          },
+        ],
+      });
+
+      const next = syncServerThreadDetail(
+        makeEmptyState(),
+        makeOrchestrationThread(sourceThread),
+        localEnvironmentId,
+      );
+      const thread = selectThreadByRef(next, scopeThreadRef(localEnvironmentId, threadId));
+
+      expect(thread?.messages[0]?.attachments).toEqual([
+        {
+          type: "image",
+          id: "thread-attachments-file-1",
+          name: "photo.png",
+          mimeType: "image/png",
+          sizeBytes: 4,
+          previewUrl: "http://environment.test/attachments/thread-attachments-file-1",
+        },
+      ]);
+    } finally {
+      if (originalWindow === undefined) {
+        Reflect.deleteProperty(globalThis, "window");
+      } else {
+        Reflect.set(globalThis, "window", originalWindow);
+      }
+    }
+  });
+
   it("prepends older detail pages without replacing the visible recent page", () => {
     const threadId = ThreadId.make("thread-paged");
     const currentThread = makeThread({

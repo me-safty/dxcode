@@ -16,6 +16,7 @@ import {
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
   OrchestrationSession,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ProjectCreateCommand,
   ThreadMetaUpdatedPayload,
   ThreadTurnStartCommand,
@@ -220,6 +221,79 @@ it.effect("decodes thread.turn.start defaults for provider and runtime mode", ()
     assert.strictEqual(parsed.modelSelection, undefined);
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
     assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+  }),
+);
+
+it.effect("decodes internal attachment add commands for assistant images", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationCommand({
+      type: "thread.message.attachments.add",
+      commandId: "cmd-attachments-add",
+      threadId: "thread-1",
+      messageId: "assistant:item-1",
+      role: "assistant",
+      attachments: [
+        {
+          type: "image",
+          id: "thread-1-attachment-1",
+          name: "result.png",
+          mimeType: "image/png",
+          sizeBytes: 4,
+        },
+      ],
+      turnId: "turn-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.type, "thread.message.attachments.add");
+    assert.strictEqual(parsed.role, "assistant");
+    assert.strictEqual(parsed.attachments[0]?.id, "thread-1-attachment-1");
+  }),
+);
+
+it.effect("rejects invalid assistant image attachment metadata", () =>
+  Effect.gen(function* () {
+    const invalidMime = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.message.attachments.add",
+        commandId: "cmd-attachments-bad-mime",
+        threadId: "thread-1",
+        messageId: "assistant:item-1",
+        role: "assistant",
+        attachments: [
+          {
+            type: "image",
+            id: "thread-1-attachment-1",
+            name: "result.txt",
+            mimeType: "text/plain",
+            sizeBytes: 4,
+          },
+        ],
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    const oversized = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.message.attachments.add",
+        commandId: "cmd-attachments-oversized",
+        threadId: "thread-1",
+        messageId: "assistant:item-1",
+        role: "assistant",
+        attachments: [
+          {
+            type: "image",
+            id: "thread-1-attachment-1",
+            name: "result.png",
+            mimeType: "image/png",
+            sizeBytes: PROVIDER_SEND_TURN_MAX_IMAGE_BYTES + 1,
+          },
+        ],
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    assert.strictEqual(invalidMime._tag, "Failure");
+    assert.strictEqual(oversized._tag, "Failure");
   }),
 );
 

@@ -1,6 +1,7 @@
 import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
+  type ChatAttachment,
   CommandId,
   MessageId,
   type OrchestrationEvent,
@@ -8,6 +9,7 @@ import {
   type OrchestrationProposedPlanId,
   CheckpointRef,
   isToolLifecycleItemType,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ThreadId,
   type ThreadTokenUsageSnapshot,
   TurnId,
@@ -21,8 +23,10 @@ import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -37,6 +41,14 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ServerConfig } from "../../config.ts";
+import { createAttachmentId, resolveAttachmentPath } from "../../attachmentStore.ts";
+import {
+  imageMimeTypeFromFileName,
+  inferImageExtension,
+  parseBase64DataUrl,
+} from "../../imageMime.ts";
+import { WorkspacePaths } from "../../workspace/Services/WorkspacePaths.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
@@ -633,6 +645,10 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const serverConfig = yield* ServerConfig;
+  const workspacePaths = yield* WorkspacePaths;
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -672,6 +688,164 @@ const make = Effect.gen(function* () {
       .getThreadShellById(threadId)
       .pipe(Effect.map(Option.getOrUndefined));
   });
+
+  const relativePathForPersistedFile = (workspaceRoot: string, filename: string) => {
+    const trimmedFilename = filename.trim();
+    if (trimmedFilename.length === 0 || trimmedFilename.includes("\0")) {
+      return null;
+    }
+
+    if (!path.isAbsolute(trimmedFilename)) {
+      return trimmedFilename;
+    }
+
+    const root = path.resolve(workspaceRoot);
+    const absoluteFilePath = path.resolve(trimmedFilename);
+    const normalizedRoot = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+    if (!absoluteFilePath.startsWith(normalizedRoot)) {
+      return null;
+    }
+
+    const relativePath = path.relative(root, absoluteFilePath).replaceAll("\\", "/");
+    return relativePath.length > 0 ? relativePath : null;
+  };
+
+  const materializePersistedImageFile = (input: {
+    threadId: ThreadId;
+    workspaceRoot: string;
+    filename: string;
+  }): Effect.Effect<ChatAttachment | null> =>
+    Effect.gen(function* () {
+      const relativePath = relativePathForPersistedFile(input.workspaceRoot, input.filename);
+      if (!relativePath) {
+        return null;
+      }
+
+      const mimeType = imageMimeTypeFromFileName(relativePath);
+      if (!mimeType) {
+        return null;
+      }
+
+      const target = yield* workspacePaths
+        .resolveRelativePathWithinRoot({
+          workspaceRoot: input.workspaceRoot,
+          relativePath,
+        })
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!target) {
+        return null;
+      }
+
+      const fileInfo = yield* fileSystem
+        .stat(target.absolutePath)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!fileInfo || fileInfo.type !== "File") {
+        return null;
+      }
+      const fileSize = Number(fileInfo.size);
+      if (fileSize <= 0 || fileSize > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+        return null;
+      }
+
+      const attachmentId = createAttachmentId(input.threadId);
+      if (!attachmentId) {
+        return null;
+      }
+
+      const attachment: ChatAttachment = {
+        type: "image",
+        id: attachmentId,
+        name: path.basename(target.relativePath),
+        mimeType,
+        sizeBytes: fileSize,
+      };
+      const attachmentPath = resolveAttachmentPath({
+        attachmentsDir: serverConfig.attachmentsDir,
+        attachment,
+      });
+      if (!attachmentPath) {
+        return null;
+      }
+
+      const bytes = yield* fileSystem
+        .readFile(target.absolutePath)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!bytes || bytes.byteLength === 0) {
+        return null;
+      }
+
+      yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true });
+      yield* fileSystem.writeFile(attachmentPath, bytes);
+      return attachment;
+    }).pipe(Effect.catch(() => Effect.succeed(null)));
+
+  const generatedImageName = (input: { name: string | undefined; mimeType: string }) => {
+    const extension = inferImageExtension({
+      mimeType: input.mimeType,
+      ...(input.name ? { fileName: input.name } : {}),
+    });
+    const fallback = extension === ".bin" ? "generated-image.png" : `generated-image${extension}`;
+    const baseName = input.name
+      ? path
+          .basename(input.name)
+          .replaceAll("\0", " ")
+          .replaceAll("\r", " ")
+          .replaceAll("\n", " ")
+          .replaceAll("\t", " ")
+          .trim()
+      : "";
+    const candidate = baseName.length > 0 ? baseName : fallback;
+    const withExtension = /\.[a-z0-9]{1,8}$/i.test(candidate)
+      ? candidate
+      : `${candidate}${extension}`;
+    return withExtension.length <= 255
+      ? withExtension
+      : `${withExtension.slice(0, Math.max(1, 255 - extension.length))}${extension}`;
+  };
+
+  const materializeGeneratedImage = (input: {
+    threadId: ThreadId;
+    dataUrl: string;
+    name?: string;
+  }): Effect.Effect<ChatAttachment | null> =>
+    Effect.gen(function* () {
+      const parsed = parseBase64DataUrl(input.dataUrl);
+      if (!parsed || !parsed.mimeType.startsWith("image/")) {
+        return null;
+      }
+
+      const bytes = Buffer.from(parsed.base64, "base64");
+      if (bytes.byteLength <= 0 || bytes.byteLength > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+        return null;
+      }
+
+      const attachmentId = createAttachmentId(input.threadId);
+      if (!attachmentId) {
+        return null;
+      }
+
+      const attachment: ChatAttachment = {
+        type: "image",
+        id: attachmentId,
+        name: generatedImageName({
+          name: input.name,
+          mimeType: parsed.mimeType,
+        }),
+        mimeType: parsed.mimeType,
+        sizeBytes: bytes.byteLength,
+      };
+      const attachmentPath = resolveAttachmentPath({
+        attachmentsDir: serverConfig.attachmentsDir,
+        attachment,
+      });
+      if (!attachmentPath) {
+        return null;
+      }
+
+      yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true });
+      yield* fileSystem.writeFile(attachmentPath, bytes);
+      return attachment;
+    }).pipe(Effect.catch(() => Effect.succeed(null)));
 
   const rememberAssistantMessageId = (threadId: ThreadId, turnId: TurnId, messageId: MessageId) =>
     Cache.getOption(turnMessageIdsByTurnKey, providerTurnKey(threadId, turnId)).pipe(
@@ -1393,6 +1567,80 @@ const make = Effect.gen(function* () {
             threadId: thread.id,
             messageId: assistantMessageId,
             delta: assistantDelta,
+            ...(turnId ? { turnId } : {}),
+            createdAt: now,
+          });
+        }
+      }
+
+      if (event.type === "files.persisted" && event.payload.files.length > 0) {
+        const checkpointContextOption = yield* projectionSnapshotQuery
+          .getThreadCheckpointContext(thread.id)
+          .pipe(Effect.catch(() => Effect.succeed(Option.none())));
+        const checkpointContext = Option.getOrUndefined(checkpointContextOption);
+        const workspaceRoot = checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot;
+        if (workspaceRoot) {
+          const attachments = (yield* Effect.forEach(
+            event.payload.files,
+            (file) =>
+              materializePersistedImageFile({
+                threadId: thread.id,
+                workspaceRoot,
+                filename: file.filename,
+              }),
+            { concurrency: 1 },
+          )).filter((attachment): attachment is ChatAttachment => attachment !== null);
+
+          if (attachments.length > 0) {
+            const turnId = toTurnId(event.turnId);
+            const assistantMessageId = yield* getOrCreateAssistantMessageId({
+              threadId: thread.id,
+              event,
+              ...(turnId ? { turnId } : {}),
+            });
+            if (turnId) {
+              yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
+            }
+
+            yield* orchestrationEngine.dispatch({
+              type: "thread.message.attachments.add",
+              commandId: providerCommandId(event, "assistant-attachments-add"),
+              threadId: thread.id,
+              messageId: assistantMessageId,
+              role: "assistant",
+              attachments,
+              ...(turnId ? { turnId } : {}),
+              createdAt: now,
+            });
+          }
+        }
+      }
+
+      if (event.type === "image.generated") {
+        const attachment = yield* materializeGeneratedImage({
+          threadId: thread.id,
+          dataUrl: event.payload.dataUrl,
+          ...(event.payload.name ? { name: event.payload.name } : {}),
+        });
+
+        if (attachment) {
+          const turnId = toTurnId(event.turnId);
+          const assistantMessageId = yield* getOrCreateAssistantMessageId({
+            threadId: thread.id,
+            event,
+            ...(turnId ? { turnId } : {}),
+          });
+          if (turnId) {
+            yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
+          }
+
+          yield* orchestrationEngine.dispatch({
+            type: "thread.message.attachments.add",
+            commandId: providerCommandId(event, "assistant-generated-image-add"),
+            threadId: thread.id,
+            messageId: assistantMessageId,
+            role: "assistant",
+            attachments: [attachment],
             ...(turnId ? { turnId } : {}),
             createdAt: now,
           });

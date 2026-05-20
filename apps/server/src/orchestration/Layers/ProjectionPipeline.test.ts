@@ -14,6 +14,7 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -33,6 +34,7 @@ import {
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../config.ts";
 
 const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
@@ -51,6 +53,16 @@ const exists = (filePath: string) =>
   });
 
 const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-test-");
+const ProjectionReadTestLayer = Layer.mergeAll(
+  OrchestrationProjectionPipelineLive,
+  OrchestrationProjectionSnapshotQueryLive,
+).pipe(
+  Layer.provideMerge(OrchestrationEventStoreLive),
+  Layer.provideMerge(RepositoryIdentityResolverLive),
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-projection-read-" })),
+  Layer.provideMerge(SqlitePersistenceMemory),
+  Layer.provideMerge(NodeServices.layer),
+);
 
 it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   it.effect("bootstraps all projection states and writes projection rows", () =>
@@ -241,6 +253,130 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(
     );
   },
 );
+
+it.layer(Layer.fresh(ProjectionReadTestLayer))("OrchestrationProjectionPipeline", (it) => {
+  it.effect("replays user image attachments into thread detail projections", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-01-01T00:00:00.000Z";
+
+      yield* Effect.forEach(
+        [
+          {
+            type: "project.created",
+            eventId: EventId.make("evt-projection-read-project"),
+            aggregateKind: "project",
+            aggregateId: ProjectId.make("project-projection-read"),
+            occurredAt: now,
+            commandId: CommandId.make("cmd-projection-read-project"),
+            causationEventId: null,
+            correlationId: CommandId.make("cmd-projection-read-project"),
+            metadata: {},
+            payload: {
+              projectId: ProjectId.make("project-projection-read"),
+              title: "Projection Read",
+              workspaceRoot: "/tmp/projection-read",
+              defaultModelSelection: null,
+              scripts: [],
+              createdAt: now,
+              updatedAt: now,
+            },
+          },
+          {
+            type: "thread.created",
+            eventId: EventId.make("evt-projection-read-thread"),
+            aggregateKind: "thread",
+            aggregateId: ThreadId.make("thread-projection-read"),
+            occurredAt: now,
+            commandId: CommandId.make("cmd-projection-read-thread"),
+            causationEventId: null,
+            correlationId: CommandId.make("cmd-projection-read-thread"),
+            metadata: {},
+            payload: {
+              threadId: ThreadId.make("thread-projection-read"),
+              projectId: ProjectId.make("project-projection-read"),
+              title: "Thread",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-5-codex",
+              },
+              interactionMode: "default",
+              runtimeMode: "full-access",
+              branch: null,
+              worktreePath: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+          },
+          {
+            type: "thread.message-sent",
+            eventId: EventId.make("evt-projection-read-message"),
+            aggregateKind: "thread",
+            aggregateId: ThreadId.make("thread-projection-read"),
+            occurredAt: now,
+            commandId: CommandId.make("cmd-projection-read-message"),
+            causationEventId: null,
+            correlationId: CommandId.make("cmd-projection-read-message"),
+            metadata: {},
+            payload: {
+              threadId: ThreadId.make("thread-projection-read"),
+              messageId: MessageId.make("message-projection-read"),
+              role: "user",
+              text: "Inspect this",
+              attachments: [
+                {
+                  type: "image",
+                  id: "thread-projection-read-att-1",
+                  name: "example.png",
+                  mimeType: "image/png",
+                  sizeBytes: 5,
+                },
+              ],
+              turnId: null,
+              streaming: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+          },
+        ] as const,
+        (event) => eventStore.append(event),
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid);
+
+      yield* projectionPipeline.bootstrap;
+
+      const rows = yield* sql<{
+        readonly attachmentsJson: string | null;
+      }>`
+        SELECT attachments_json AS "attachmentsJson"
+        FROM projection_thread_messages
+        WHERE message_id = 'message-projection-read'
+      `;
+      assert.equal(rows.length, 1);
+      assert.isString(rows[0]?.attachmentsJson);
+
+      const detail = yield* snapshotQuery.getThreadDetailById(
+        ThreadId.make("thread-projection-read"),
+      );
+      assert.isTrue(Option.isSome(detail));
+      const message = Option.isSome(detail)
+        ? detail.value.messages.find((entry) => entry.id === "message-projection-read")
+        : undefined;
+      assert.deepEqual(message?.attachments, [
+        {
+          type: "image",
+          id: "thread-projection-read-att-1",
+          name: "example.png",
+          mimeType: "image/png",
+          sizeBytes: 5,
+        },
+      ]);
+    }),
+  );
+});
 
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-attachments-safe-")))(
   "OrchestrationProjectionPipeline",

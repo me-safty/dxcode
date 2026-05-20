@@ -298,6 +298,31 @@ function itemDetail(item: CodexLifecycleItem): string | undefined {
   return undefined;
 }
 
+function imageGenerationPayloadFromItem(
+  item: unknown,
+): { readonly name: string; readonly dataUrl: string } | undefined {
+  if (!item || typeof item !== "object") {
+    return undefined;
+  }
+
+  const record = item as Record<string, unknown>;
+  if (record.type !== "imageGeneration" && record.type !== "image_generation_call") {
+    return undefined;
+  }
+
+  const result = trimText(typeof record.result === "string" ? record.result : undefined);
+  if (!result) {
+    return undefined;
+  }
+
+  const id = trimText(typeof record.id === "string" ? record.id : undefined);
+  const baseName = id ? `${id}.png` : "generated-image.png";
+  return {
+    name: baseName,
+    dataUrl: /^data:image\//i.test(result) ? result : `data:image/png;base64,${result}`,
+  };
+}
+
 function toRequestTypeFromMethod(method: string): CanonicalRequestType {
   switch (method) {
     case "item/commandExecution/requestApproval":
@@ -840,6 +865,25 @@ function mapToRuntimeEvents(
     ];
   }
 
+  if (event.method === "rawResponseItem/completed") {
+    const payload = readPayload(
+      EffectCodexSchema.V2RawResponseItemCompletedNotification,
+      event.payload,
+    );
+    const generatedImage = imageGenerationPayloadFromItem(payload?.item);
+    if (!generatedImage) {
+      return [];
+    }
+
+    return [
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        type: "image.generated",
+        payload: generatedImage,
+      },
+    ];
+  }
+
   if (event.method === "item/started") {
     const started = mapItemLifecycle(event, canonicalThreadId, "item.started");
     return started ? [started] : [];
@@ -867,8 +911,20 @@ function mapToRuntimeEvents(
         },
       ];
     }
+    const generatedImage = imageGenerationPayloadFromItem(item);
     const completed = mapItemLifecycle(event, canonicalThreadId, "item.completed");
-    return completed ? [completed] : [];
+    return [
+      ...(generatedImage
+        ? [
+            {
+              ...runtimeEventBase(event, canonicalThreadId),
+              type: "image.generated" as const,
+              payload: generatedImage,
+            },
+          ]
+        : []),
+      ...(completed ? [completed] : []),
+    ];
   }
 
   if (

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { inferImageExtension, parseBase64DataUrl } from "./imageMime.ts";
+import {
+  imageMimeTypeFromFileName,
+  inferImageExtension,
+  isSafeImageFileName,
+  parseBase64DataUrl,
+} from "./imageMime.ts";
 
 describe("imageMime", () => {
   it("parses base64 data URL with mime type", () => {
@@ -34,5 +39,16 @@ describe("imageMime", () => {
 
   it("does not read inherited keys from mime extension map", () => {
     expect(inferImageExtension({ mimeType: "constructor" })).toBe(".bin");
+  });
+
+  it("infers safe image MIME types from file names", () => {
+    expect(imageMimeTypeFromFileName("result.PNG")).toBe("image/png");
+    expect(imageMimeTypeFromFileName("photo.jpeg")).toBe("image/jpeg");
+    expect(imageMimeTypeFromFileName("notes.txt")).toBeNull();
+  });
+
+  it("identifies safe image file names", () => {
+    expect(isSafeImageFileName("diagram.svg")).toBe(true);
+    expect(isSafeImageFileName("archive.zip")).toBe(false);
   });
 });

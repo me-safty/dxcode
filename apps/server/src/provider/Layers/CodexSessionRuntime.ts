@@ -561,6 +561,16 @@ function readRouteFields(notification: CodexServerNotification): {
         turnId: undefined,
         itemId: undefined,
       };
+    case "rawResponseItem/completed": {
+      const rawItemId =
+        "id" in notification.params.item && typeof notification.params.item.id === "string"
+          ? notification.params.item.id
+          : undefined;
+      return {
+        turnId: TurnId.make(notification.params.turnId),
+        itemId: rawItemId ? ProviderItemId.make(rawItemId) : undefined,
+      };
+    }
     case "item/started":
     case "item/completed":
       return {

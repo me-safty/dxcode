@@ -48,9 +48,21 @@ const INTERACTIVE_TARGET_SELECTOR = [
 ].join(",");
 
 export function isInteractiveTouchTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) {
+  if (!target) {
     return false;
   }
+
+  const ownerDocument =
+    typeof target === "object" && "ownerDocument" in target
+      ? (target.ownerDocument as Document | null | undefined)
+      : undefined;
+  const ElementConstructor =
+    ownerDocument?.defaultView?.Element ?? (typeof Element === "undefined" ? undefined : Element);
+
+  if (!ElementConstructor || !(target instanceof ElementConstructor)) {
+    return false;
+  }
+
   return target.closest(INTERACTIVE_TARGET_SELECTOR) !== null;
 }
 

@@ -181,4 +181,26 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.usage.maxTokens).toBe(200000);
     expect(parsed.payload.usage.usedTokens).toBe(31251);
   });
+
+  it("decodes generated image payloads", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "image.generated",
+      eventId: "event-image-generated-1",
+      provider: "codex",
+      createdAt: "2026-02-28T00:00:05.000Z",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      payload: {
+        name: "generated.png",
+        dataUrl: "data:image/png;base64,aGVsbG8=",
+      },
+    });
+
+    expect(parsed.type).toBe("image.generated");
+    if (parsed.type !== "image.generated") {
+      throw new Error("expected image.generated");
+    }
+    expect(parsed.payload.name).toBe("generated.png");
+    expect(parsed.payload.dataUrl).toBe("data:image/png;base64,aGVsbG8=");
+  });
 });

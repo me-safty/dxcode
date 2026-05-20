@@ -79,7 +79,17 @@ function buildLongUserMessageText(tail = "deep hidden detail only after expand")
   ).join("\n");
 }
 
-function buildUserTimelineEntry(text: string) {
+function buildUserTimelineEntry(
+  text: string,
+  attachments?: Array<{
+    type: "image";
+    id: string;
+    name: string;
+    mimeType: string;
+    sizeBytes: number;
+    previewUrl?: string;
+  }>,
+) {
   return {
     id: "entry-1",
     kind: "message" as const,
@@ -90,6 +100,33 @@ function buildUserTimelineEntry(text: string) {
       text,
       createdAt: MESSAGE_CREATED_AT,
       streaming: false,
+      ...(attachments ? { attachments } : {}),
+    },
+  };
+}
+
+function buildAssistantTimelineEntry(
+  text: string,
+  attachments?: Array<{
+    type: "image";
+    id: string;
+    name: string;
+    mimeType: string;
+    sizeBytes: number;
+    previewUrl?: string;
+  }>,
+) {
+  return {
+    id: "entry-1",
+    kind: "message" as const,
+    createdAt: MESSAGE_CREATED_AT,
+    message: {
+      id: "message-assistant-1" as never,
+      role: "assistant" as const,
+      text,
+      createdAt: MESSAGE_CREATED_AT,
+      streaming: false,
+      ...(attachments ? { attachments } : {}),
     },
   };
 }
@@ -308,6 +345,90 @@ describe("MessagesTimeline", () => {
 
       const messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("renders user image thumbnails and expands all previewable images", async () => {
+    const props = buildProps();
+    const onImageExpand = vi.fn();
+    const screen = await render(
+      <MessagesTimeline
+        {...props}
+        onImageExpand={onImageExpand}
+        timelineEntries={[
+          buildUserTimelineEntry("See these", [
+            {
+              type: "image",
+              id: "image-1",
+              name: "first.png",
+              mimeType: "image/png",
+              sizeBytes: 4,
+              previewUrl: "/attachments/image-1",
+            },
+            {
+              type: "image",
+              id: "image-2",
+              name: "second.png",
+              mimeType: "image/png",
+              sizeBytes: 5,
+              previewUrl: "/attachments/image-2",
+            },
+          ]),
+        ]}
+      />,
+    );
+
+    try {
+      await expect.element(page.getByAltText("first.png")).toBeVisible();
+      await expect.element(page.getByAltText("second.png")).toBeVisible();
+
+      await page.getByRole("button", { name: "Preview second.png" }).click();
+
+      expect(onImageExpand).toHaveBeenCalledWith({
+        images: [
+          { src: "/attachments/image-1", name: "first.png" },
+          { src: "/attachments/image-2", name: "second.png" },
+        ],
+        index: 1,
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("renders assistant image-only messages without the empty-response fallback", async () => {
+    const props = buildProps();
+    const onImageExpand = vi.fn();
+    const screen = await render(
+      <MessagesTimeline
+        {...props}
+        onImageExpand={onImageExpand}
+        timelineEntries={[
+          buildAssistantTimelineEntry("", [
+            {
+              type: "image",
+              id: "assistant-image-1",
+              name: "generated.png",
+              mimeType: "image/png",
+              sizeBytes: 4,
+              previewUrl: "/attachments/assistant-image-1",
+            },
+          ]),
+        ]}
+      />,
+    );
+
+    try {
+      await expect.element(page.getByAltText("generated.png")).toBeInTheDocument();
+      await expect.element(page.getByText("(empty response)")).not.toBeInTheDocument();
+
+      await page.getByRole("button", { name: "Preview generated.png" }).click();
+      expect(onImageExpand).toHaveBeenCalledWith({
+        images: [{ src: "/attachments/assistant-image-1", name: "generated.png" }],
+        index: 0,
+      });
     } finally {
       await screen.unmount();
     }

@@ -1,4 +1,5 @@
 import Mime from "@effect/platform-node/Mime";
+import { PROVIDER_SEND_TURN_MAX_IMAGE_BYTES } from "@t3tools/contracts";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -28,15 +29,18 @@ import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolve
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { respondToAuthError } from "./auth/http.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
+import { imageMimeTypeFromFileName } from "./imageMime.ts";
 import {
   browserApiCorsAllowedHeaders,
   browserApiCorsAllowedMethods,
   browserApiCorsHeaders,
 } from "./httpCors.ts";
+import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
+export const WORKSPACE_IMAGE_ROUTE_PATH = "/api/workspace-image";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 
 export const browserApiCorsLayer = HttpRouter.cors({
@@ -229,6 +233,69 @@ export const projectFaviconRouteLayer = HttpRouter.add(
         Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
       ),
     );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const workspaceImageRouteLayer = HttpRouter.add(
+  "GET",
+  WORKSPACE_IMAGE_ROUTE_PATH,
+  Effect.gen(function* () {
+    yield* requireAuthenticatedRequest;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+
+    const cwd = url.value.searchParams.get("cwd")?.trim();
+    const relativePath = url.value.searchParams.get("relativePath")?.trim();
+    if (!cwd || !relativePath) {
+      return HttpServerResponse.text("Missing workspace image parameters", { status: 400 });
+    }
+
+    const mimeType = imageMimeTypeFromFileName(relativePath);
+    if (!mimeType) {
+      return HttpServerResponse.text("Unsupported workspace image type", { status: 415 });
+    }
+
+    const workspacePaths = yield* WorkspacePaths;
+    const target = yield* workspacePaths
+      .resolveRelativePathWithinRoot({
+        workspaceRoot: cwd,
+        relativePath,
+      })
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!target) {
+      return HttpServerResponse.text("Invalid workspace image path", { status: 400 });
+    }
+
+    const fileSystem = yield* FileSystem.FileSystem;
+    const fileInfo = yield* fileSystem
+      .stat(target.absolutePath)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!fileInfo || fileInfo.type !== "File") {
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    const fileSize = Number(fileInfo.size);
+    if (fileSize <= 0 || fileSize > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+      return HttpServerResponse.text("Workspace image is empty or too large", { status: 413 });
+    }
+
+    const bytes = yield* fileSystem
+      .readFile(target.absolutePath)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!bytes) {
+      return HttpServerResponse.text("Internal Server Error", { status: 500 });
+    }
+
+    return HttpServerResponse.uint8Array(bytes, {
+      status: 200,
+      contentType: mimeType,
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

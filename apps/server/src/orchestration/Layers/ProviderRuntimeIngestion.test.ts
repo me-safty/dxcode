@@ -50,6 +50,7 @@ import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeInge
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { WorkspacePathsLive } from "../../workspace/Layers/WorkspacePaths.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
 function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
@@ -221,6 +222,8 @@ describe("ProviderRuntimeIngestion", () => {
 
   async function createHarness(options?: { serverSettings?: Partial<ServerSettings> }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
+    const serverBaseDir = makeTempDir("t3-provider-server-");
+    const attachmentsDir = path.join(serverBaseDir, "userdata", "attachments");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
     const provider = createProviderServiceHarness();
     const orchestrationLayer = OrchestrationEngineLive.pipe(
@@ -241,7 +244,8 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), serverBaseDir)),
+      Layer.provideMerge(WorkspacePathsLive),
       Layer.provideMerge(NodeServices.layer),
     );
     runtime = ManagedRuntime.make(layer);
@@ -313,6 +317,8 @@ describe("ProviderRuntimeIngestion", () => {
 
     return {
       engine,
+      workspaceRoot,
+      attachmentsDir,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       emit: provider.emit,
       setProviderSession: provider.setSession,
@@ -962,6 +968,92 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(message?.text).toBe("assistant-only final text");
     expect(message?.streaming).toBe(false);
+  });
+
+  it("copies persisted provider image files into assistant message attachments", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const imagePath = path.join(harness.workspaceRoot, "outputs", "pizza-cat.png");
+    fs.mkdirSync(path.dirname(imagePath), { recursive: true });
+    fs.writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+    harness.emit({
+      type: "files.persisted",
+      eventId: asEventId("evt-files-persisted-image"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-image"),
+      itemId: asItemId("item-image"),
+      payload: {
+        files: [
+          {
+            filename: "outputs/pizza-cat.png",
+            fileId: "file-image",
+          },
+        ],
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-image" && (message.attachments?.length ?? 0) === 1,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-image",
+    );
+    const attachment = message?.attachments?.[0];
+    expect(message?.role).toBe("assistant");
+    expect(message?.text).toBe("");
+    expect(attachment).toMatchObject({
+      type: "image",
+      name: "pizza-cat.png",
+      mimeType: "image/png",
+      sizeBytes: 4,
+    });
+    expect(fs.existsSync(path.join(harness.attachmentsDir, `${attachment?.id}.png`))).toBe(true);
+  });
+
+  it("copies generated provider image payloads into assistant message attachments", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "image.generated",
+      eventId: asEventId("evt-generated-image"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-generated-image"),
+      itemId: asItemId("item-generated-image"),
+      payload: {
+        name: "generated-cat.png",
+        dataUrl: "data:image/png;base64,aGVsbG8=",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-generated-image" &&
+          (message.attachments?.length ?? 0) === 1,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-generated-image",
+    );
+    const attachment = message?.attachments?.[0];
+    expect(message?.role).toBe("assistant");
+    expect(message?.text).toBe("");
+    expect(attachment).toMatchObject({
+      type: "image",
+      name: "generated-cat.png",
+      mimeType: "image/png",
+      sizeBytes: 5,
+    });
+    expect(fs.existsSync(path.join(harness.attachmentsDir, `${attachment?.id}.png`))).toBe(true);
   });
 
   it("preserves completed tool metadata on projected tool activities", async () => {

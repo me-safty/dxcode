@@ -1,16 +1,28 @@
 import "../index.css";
 
+import { EnvironmentId } from "@t3tools/contracts";
 import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
-const { openInPreferredEditorMock, readLocalApiMock } = vi.hoisted(() => ({
-  openInPreferredEditorMock: vi.fn(async () => "vscode"),
-  readLocalApiMock: vi.fn(() => ({
-    server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
-    shell: { openInEditor: vi.fn(async () => undefined) },
-  })),
-}));
+const { openInPreferredEditorMock, readLocalApiMock, resolveEnvironmentHttpUrlMock } = vi.hoisted(
+  () => ({
+    openInPreferredEditorMock: vi.fn(async () => "vscode"),
+    readLocalApiMock: vi.fn(() => ({
+      server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
+      shell: { openInEditor: vi.fn(async () => undefined) },
+    })),
+    resolveEnvironmentHttpUrlMock: vi.fn(
+      (input: { pathname: string; searchParams?: Record<string, string> }) => {
+        const url = new URL(`http://environment.test${input.pathname}`);
+        if (input.searchParams) {
+          url.search = new URLSearchParams(input.searchParams).toString();
+        }
+        return url.toString();
+      },
+    ),
+  }),
+);
 
 vi.mock("../editorPreferences", () => ({
   openInPreferredEditor: openInPreferredEditorMock,
@@ -23,12 +35,17 @@ vi.mock("../localApi", () => ({
   readLocalApi: readLocalApiMock,
 }));
 
+vi.mock("../environments/runtime", () => ({
+  resolveEnvironmentHttpUrl: resolveEnvironmentHttpUrlMock,
+}));
+
 import ChatMarkdown from "./ChatMarkdown";
 
 describe("ChatMarkdown", () => {
   afterEach(() => {
     openInPreferredEditorMock.mockClear();
     readLocalApiMock.mockClear();
+    resolveEnvironmentHttpUrlMock.mockClear();
     localStorage.clear();
     document.body.innerHTML = "";
   });
@@ -134,6 +151,59 @@ describe("ChatMarkdown", () => {
       await expect.element(link).toBeInTheDocument();
       await expect.element(link).toHaveAttribute("href", "https://openai.com/docs");
       await expect.element(link).toHaveAttribute("target", "_blank");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("renders explicit workspace markdown images through the workspace image route", async () => {
+    const onImageExpand = vi.fn();
+    const screen = await render(
+      <ChatMarkdown
+        text="![Generated chart](outputs/chart.png)"
+        cwd="/repo/project"
+        environmentId={EnvironmentId.make("environment-local")}
+        onImageExpand={onImageExpand}
+      />,
+    );
+
+    try {
+      const image = page.getByAltText("Generated chart");
+      await expect.element(image).toBeVisible();
+      await expect
+        .element(image)
+        .toHaveAttribute(
+          "src",
+          "http://environment.test/api/workspace-image?cwd=%2Frepo%2Fproject&relativePath=outputs%2Fchart.png",
+        );
+
+      await page.getByRole("button", { name: "Preview Generated chart" }).click();
+      expect(onImageExpand).toHaveBeenCalledWith({
+        images: [
+          {
+            src: "http://environment.test/api/workspace-image?cwd=%2Frepo%2Fproject&relativePath=outputs%2Fchart.png",
+            name: "Generated chart",
+          },
+        ],
+        index: 0,
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("does not auto-render non-image markdown file links as images", async () => {
+    const screen = await render(
+      <ChatMarkdown
+        text="![Source file](src/index.ts)"
+        cwd="/repo/project"
+        environmentId={EnvironmentId.make("environment-local")}
+      />,
+    );
+
+    try {
+      await expect.element(page.getByAltText("Source file")).not.toBeInTheDocument();
+      expect(resolveEnvironmentHttpUrlMock).not.toHaveBeenCalled();
     } finally {
       await screen.unmount();
     }

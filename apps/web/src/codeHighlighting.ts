@@ -3,7 +3,6 @@ import {
   getSharedHighlighter,
   type DiffsHighlighter,
   type SupportedLanguages,
-  type ThemedToken,
 } from "@pierre/diffs";
 
 import { fnv1a32, resolveDiffThemeName, type DiffThemeName } from "./lib/diffRendering";
@@ -12,21 +11,13 @@ import { LRUCache } from "./lib/lruCache";
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
-const MAX_TOKEN_CACHE_ENTRIES = 120;
-const MAX_TOKEN_CACHE_MEMORY_BYTES = 24 * 1024 * 1024;
 
 export const FILE_PREVIEW_HIGHLIGHT_MAX_BYTES = 256 * 1024;
 export const CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH = 1_000;
 
-export type HighlightedTokenLines = ReadonlyArray<ReadonlyArray<ThemedToken>>;
-
 const highlightedCodeHtmlCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_ENTRIES,
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
-);
-const highlightedCodeTokenLinesCache = new LRUCache<HighlightedTokenLines>(
-  MAX_TOKEN_CACHE_ENTRIES,
-  MAX_TOKEN_CACHE_MEMORY_BYTES,
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
 
@@ -67,39 +58,12 @@ export function estimateHighlightedHtmlSize(html: string, code: string): number 
   return Math.max(html.length * 2, code.length * 3);
 }
 
-export function estimateHighlightedTokenLinesSize(
-  tokenLines: HighlightedTokenLines,
-  code: string,
-): number {
-  let tokenCount = 0;
-  for (const line of tokenLines) {
-    tokenCount += line.length;
-  }
-  return Math.max(code.length * 3, tokenCount * 96);
-}
-
 export function getCachedHighlightedCodeHtml(cacheKey: string): string | null {
   return highlightedCodeHtmlCache.get(cacheKey);
 }
 
 export function setCachedHighlightedCodeHtml(cacheKey: string, html: string, code: string): void {
   highlightedCodeHtmlCache.set(cacheKey, html, estimateHighlightedHtmlSize(html, code));
-}
-
-export function getCachedHighlightedCodeTokenLines(cacheKey: string): HighlightedTokenLines | null {
-  return highlightedCodeTokenLinesCache.get(cacheKey);
-}
-
-export function setCachedHighlightedCodeTokenLines(
-  cacheKey: string,
-  tokenLines: HighlightedTokenLines,
-  code: string,
-): void {
-  highlightedCodeTokenLinesCache.set(
-    cacheKey,
-    tokenLines,
-    estimateHighlightedTokenLinesSize(tokenLines, code),
-  );
 }
 
 export function getCodeHighlighterPromise(language: string): Promise<DiffsHighlighter> {
@@ -140,31 +104,5 @@ export function highlightCodeToHtml(input: {
       error instanceof Error ? error.message : error,
     );
     return input.highlighter.codeToHtml(input.code, { lang: "text", theme: input.themeName });
-  }
-}
-
-export function highlightCodeToTokenLines(input: {
-  highlighter: DiffsHighlighter;
-  code: string;
-  language: string;
-  themeName: DiffThemeName;
-}): HighlightedTokenLines {
-  const language = normalizeCodeHighlightLanguage(input.language);
-  try {
-    return input.highlighter.codeToTokens(input.code, {
-      lang: language as SupportedLanguages,
-      theme: input.themeName,
-      tokenizeMaxLineLength: CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH,
-    }).tokens;
-  } catch (error) {
-    console.warn(
-      `Code tokenization failed for language "${language}", falling back to plain text.`,
-      error instanceof Error ? error.message : error,
-    );
-    return input.highlighter.codeToTokens(input.code, {
-      lang: "text",
-      theme: input.themeName,
-      tokenizeMaxLineLength: CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH,
-    }).tokens;
   }
 }

@@ -37,11 +37,12 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
-import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
+import { type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { MessageImageGrid } from "./MessageImageGrid";
 import {
   computeStableMessagesTimelineRows,
   MAX_VISIBLE_WORK_LOG_ENTRIES,
@@ -354,8 +355,6 @@ function keyExtractor(item: MessagesTimelineRow) {
 // TimelineRowContent — the actual row component
 // ---------------------------------------------------------------------------
 
-type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
-type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
@@ -392,39 +391,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   return (
     <div className="flex justify-end">
       <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
-        {userImages.length > 0 && (
-          <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-            {userImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-              <div
-                key={image.id}
-                className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-              >
-                {image.previewUrl ? (
-                  <button
-                    type="button"
-                    className="h-full w-full cursor-zoom-in"
-                    aria-label={`Preview ${image.name}`}
-                    onClick={() => {
-                      const preview = buildExpandedImagePreview(userImages, image.id);
-                      if (!preview) return;
-                      ctx.onImageExpand(preview);
-                    }}
-                  >
-                    <img
-                      src={image.previewUrl}
-                      alt={image.name}
-                      className="block h-auto max-h-[220px] w-full object-cover"
-                    />
-                  </button>
-                ) : (
-                  <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                    {image.name}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        <MessageImageGrid images={userImages} onImageExpand={ctx.onImageExpand} className="mb-2" />
         <CollapsibleUserMessageBody
           text={displayedUserMessage.visibleText}
           terminalContexts={terminalContexts}
@@ -468,7 +435,10 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const assistantImages = row.message.attachments ?? [];
+  const hasAssistantImages = assistantImages.length > 0;
+  const messageText =
+    row.message.text || (row.message.streaming || hasAssistantImages ? "" : "(empty response)");
 
   return (
     <>
@@ -476,12 +446,20 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         <AssistantCompletionDivider completionSummary={row.completionSummary} />
       )}
       <div className="min-w-0 px-1 py-0.5">
-        <ChatMarkdown
-          text={messageText}
-          cwd={ctx.markdownCwd}
-          environmentId={ctx.activeThreadEnvironmentId}
-          isStreaming={Boolean(row.message.streaming)}
-          skills={ctx.skills}
+        {messageText.length > 0 ? (
+          <ChatMarkdown
+            text={messageText}
+            cwd={ctx.markdownCwd}
+            environmentId={ctx.activeThreadEnvironmentId}
+            isStreaming={Boolean(row.message.streaming)}
+            skills={ctx.skills}
+            onImageExpand={ctx.onImageExpand}
+          />
+        ) : null}
+        <MessageImageGrid
+          images={assistantImages}
+          onImageExpand={ctx.onImageExpand}
+          className={messageText.length > 0 ? "mt-2 mb-2" : "mb-2"}
         />
         <AssistantChangedFilesSection
           turnSummary={row.assistantTurnDiffSummary}

@@ -53,11 +53,9 @@ const DiffLoadingFallback = (props: { mode: DiffPanelMode }) => {
 
 const LazyDiffPanel = (props: { mode: DiffPanelMode }) => {
   return (
-    <DiffWorkerPoolProvider>
-      <Suspense fallback={<DiffLoadingFallback mode={props.mode} />}>
-        <DiffPanel mode={props.mode} />
-      </Suspense>
-    </DiffWorkerPoolProvider>
+    <Suspense fallback={<DiffLoadingFallback mode={props.mode} />}>
+      <DiffPanel mode={props.mode} />
+    </Suspense>
   );
 };
 
@@ -339,19 +337,11 @@ function ChatThreadRouteView() {
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
   const shouldRenderFilePreviewContent = filePreviewOpen || filePreview.target !== null;
+  const shouldRenderCodePanelProvider = shouldRenderDiffContent || shouldRenderFilePreviewContent;
 
   if (!shouldUseDiffSheet) {
-    return (
+    const rightPanels = (
       <>
-        <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
-          <ChatView
-            environmentId={threadRef.environmentId}
-            threadId={threadRef.threadId}
-            onDiffPanelOpen={markDiffOpened}
-            reserveTitleBarControlInset={!diffOpen}
-            routeKind="server"
-          />
-        </SidebarInset>
         <DiffPanelInlineSidebar
           diffOpen={diffOpen}
           onCloseDiff={closeDiff}
@@ -364,7 +354,39 @@ function ChatThreadRouteView() {
         />
       </>
     );
+
+    return (
+      <>
+        <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
+          <ChatView
+            environmentId={threadRef.environmentId}
+            threadId={threadRef.threadId}
+            onDiffPanelOpen={markDiffOpened}
+            reserveTitleBarControlInset={!diffOpen}
+            routeKind="server"
+          />
+        </SidebarInset>
+        {shouldRenderCodePanelProvider ? (
+          <DiffWorkerPoolProvider>{rightPanels}</DiffWorkerPoolProvider>
+        ) : (
+          rightPanels
+        )}
+      </>
+    );
   }
+
+  const rightPanelSheets = (
+    <>
+      <RightPanelSheet open={diffOpen} onClose={closeDiff}>
+        {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
+      </RightPanelSheet>
+      <RightPanelSheet open={filePreviewOpen} onClose={closeWorkspaceFilePreview}>
+        {shouldRenderFilePreviewContent ? (
+          <WorkspaceFilePreviewPanel mode="sheet" target={filePreview.target} />
+        ) : null}
+      </RightPanelSheet>
+    </>
+  );
 
   return (
     <>
@@ -376,14 +398,11 @@ function ChatThreadRouteView() {
           routeKind="server"
         />
       </SidebarInset>
-      <RightPanelSheet open={diffOpen} onClose={closeDiff}>
-        {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
-      </RightPanelSheet>
-      <RightPanelSheet open={filePreviewOpen} onClose={closeWorkspaceFilePreview}>
-        {shouldRenderFilePreviewContent ? (
-          <WorkspaceFilePreviewPanel mode="sheet" target={filePreview.target} />
-        ) : null}
-      </RightPanelSheet>
+      {shouldRenderCodePanelProvider ? (
+        <DiffWorkerPoolProvider>{rightPanelSheets}</DiffWorkerPoolProvider>
+      ) : (
+        rightPanelSheets
+      )}
     </>
   );
 }

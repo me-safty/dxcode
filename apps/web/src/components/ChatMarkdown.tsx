@@ -32,6 +32,8 @@ import {
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
 import { openPathInPreferredEditorOrFilePreview } from "../workspaceFilePreview";
+import { resolveWorkspaceFilePreviewTarget } from "../workspaceFilePreview";
+import { resolveEnvironmentHttpUrl } from "../environments/runtime";
 import {
   createCodeHighlightCacheKey,
   getCachedHighlightedCodeHtml,
@@ -40,6 +42,7 @@ import {
   resolveCodeHighlightLanguageFromFenceClass,
   setCachedHighlightedCodeHtml,
 } from "../codeHighlighting";
+import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -68,6 +71,7 @@ interface ChatMarkdownProps {
   environmentId?: EnvironmentId | undefined;
   isStreaming?: boolean;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
@@ -240,6 +244,22 @@ const MARKDOWN_FILE_LINK_CLASS_NAME =
   "chat-markdown-file-link relative top-[2px] max-w-full no-underline";
 const MARKDOWN_FILE_LINK_ICON_CLASS_NAME = "chat-markdown-file-link-icon size-3.5 shrink-0";
 const MARKDOWN_FILE_LINK_LABEL_CLASS_NAME = "chat-markdown-file-link-label truncate";
+const MARKDOWN_WORKSPACE_IMAGE_PATHNAME = "/api/workspace-image";
+const MARKDOWN_ATTACHMENTS_ROUTE_PREFIX = "/attachments/";
+const SAFE_MARKDOWN_IMAGE_EXTENSIONS = new Set([
+  ".avif",
+  ".bmp",
+  ".gif",
+  ".heic",
+  ".heif",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".svg",
+  ".tiff",
+  ".webp",
+]);
 
 function pathParentSegments(path: string): string[] {
   const normalized = path.replaceAll("\\", "/");
@@ -314,6 +334,87 @@ function extractMarkdownLinkHrefs(text: string): string[] {
 function normalizeMarkdownLinkHrefKey(href: string): string {
   const normalizedHref = normalizeMarkdownLinkDestination(href);
   return rewriteMarkdownFileUriHref(normalizedHref) ?? normalizedHref;
+}
+
+function imageExtensionFromPath(path: string): string | null {
+  const extensionMatch = /\.([a-z0-9]{1,8})$/i.exec(path.trim());
+  const extension = extensionMatch ? `.${extensionMatch[1]!.toLowerCase()}` : "";
+  return SAFE_MARKDOWN_IMAGE_EXTENSIONS.has(extension) ? extension : null;
+}
+
+function basenameFromPath(path: string): string {
+  const normalizedPath = path.replaceAll("\\", "/");
+  const separatorIndex = normalizedPath.lastIndexOf("/");
+  return separatorIndex >= 0 ? normalizedPath.slice(separatorIndex + 1) : normalizedPath;
+}
+
+function resolveEnvironmentPathUrl(input: {
+  environmentId: EnvironmentId | undefined;
+  pathname: string;
+  searchParams?: Record<string, string>;
+}): string | null {
+  if (!input.environmentId) {
+    return null;
+  }
+  try {
+    return resolveEnvironmentHttpUrl({
+      environmentId: input.environmentId,
+      pathname: input.pathname,
+      ...(input.searchParams ? { searchParams: input.searchParams } : {}),
+    });
+  } catch {
+    return null;
+  }
+}
+
+function resolveMarkdownImagePreview(input: {
+  src: string | undefined;
+  alt: string | undefined;
+  cwd: string | undefined;
+  environmentId: EnvironmentId | undefined;
+}): { src: string; name: string } | null {
+  if (!input.src) {
+    return null;
+  }
+
+  const href = normalizeMarkdownLinkHrefKey(input.src);
+  if (href.startsWith(MARKDOWN_ATTACHMENTS_ROUTE_PREFIX)) {
+    const resolvedSrc = resolveEnvironmentPathUrl({
+      environmentId: input.environmentId,
+      pathname: href,
+    });
+    return resolvedSrc ? { src: resolvedSrc, name: input.alt || basenameFromPath(href) } : null;
+  }
+
+  const fileLinkMeta = resolveMarkdownFileLinkMeta(href, input.cwd);
+  if (!fileLinkMeta || !input.cwd || !input.environmentId) {
+    return null;
+  }
+  if (!imageExtensionFromPath(fileLinkMeta.filePath)) {
+    return null;
+  }
+
+  const previewTarget = resolveWorkspaceFilePreviewTarget({
+    environmentId: input.environmentId,
+    cwd: input.cwd,
+    targetPath: fileLinkMeta.targetPath,
+    displayPath: fileLinkMeta.displayPath,
+  });
+  if (!previewTarget) {
+    return null;
+  }
+
+  const resolvedSrc = resolveEnvironmentPathUrl({
+    environmentId: previewTarget.environmentId,
+    pathname: MARKDOWN_WORKSPACE_IMAGE_PATHNAME,
+    searchParams: {
+      cwd: previewTarget.cwd,
+      relativePath: previewTarget.relativePath,
+    },
+  });
+  return resolvedSrc
+    ? { src: resolvedSrc, name: input.alt || fileLinkMeta.basename || previewTarget.displayPath }
+    : null;
 }
 
 const MarkdownFileLink = memo(function MarkdownFileLink({
@@ -467,6 +568,7 @@ function ChatMarkdown({
   environmentId,
   isStreaming = false,
   skills = EMPTY_MARKDOWN_SKILLS,
+  onImageExpand,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
@@ -532,6 +634,38 @@ function ChatMarkdown({
           />
         );
       },
+      img({ node: _node, src, alt }) {
+        const image = resolveMarkdownImagePreview({
+          src,
+          alt,
+          cwd,
+          environmentId,
+        });
+        if (!image) {
+          return null;
+        }
+
+        const preview = {
+          images: [{ src: image.src, name: image.name }],
+          index: 0,
+        } satisfies ExpandedImagePreview;
+
+        return (
+          <button
+            type="button"
+            className="chat-markdown-image-button"
+            aria-label={`Preview ${image.name}`}
+            onClick={() => onImageExpand?.(preview)}
+          >
+            <img
+              src={image.src}
+              alt={alt ?? image.name}
+              className="chat-markdown-image"
+              loading="lazy"
+            />
+          </button>
+        );
+      },
       pre({ node: _node, children, ...props }) {
         const codeBlock = extractCodeBlock(children);
         if (!codeBlock) {
@@ -560,6 +694,7 @@ function ChatMarkdown({
       environmentId,
       isStreaming,
       markdownFileLinkMetaByHref,
+      onImageExpand,
       cwd,
       resolvedTheme,
       skills,

@@ -45,6 +45,11 @@ import {
   expandCollapsedComposerCursor,
   replaceTextRange,
 } from "../../composer-logic";
+import {
+  COMPOSER_NATIVE_INPUT_SETTLE_MS,
+  type ComposerNativeInputChangeMetadata,
+  isComposerNativeComposingKeyEvent,
+} from "../../composerNativeInput";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
   type ComposerImageAttachment,
@@ -185,6 +190,10 @@ const terminalContextIdListsEqual = (
   ids: ReadonlyArray<string>,
 ): boolean =>
   contexts.length === ids.length && contexts.every((context, index) => context.id === ids[index]);
+
+function composerNowMs(): number {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
 
 function isInsideComposerFloatingLayer(element: Element): boolean {
   return element.closest(COMPOSER_FLOATING_LAYER_SELECTOR) !== null;
@@ -876,6 +885,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const mobileComposerExpandFrameRef = useRef<number | null>(null);
   const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
   const mobileComposerExpandInFlightRef = useRef(false);
+  const nativeInputTriggerDetectionTimeoutRef = useRef<number | null>(null);
+  const nativeInputCommandSuppressUntilRef = useRef(0);
   const dragDepthRef = useRef(0);
 
   // ------------------------------------------------------------------
@@ -1403,6 +1414,51 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   // Callbacks: prompt change
   // ------------------------------------------------------------------
+  const clearNativeInputTriggerDetectionTimeout = useCallback(() => {
+    if (nativeInputTriggerDetectionTimeoutRef.current === null) {
+      return;
+    }
+    window.clearTimeout(nativeInputTriggerDetectionTimeoutRef.current);
+    nativeInputTriggerDetectionTimeoutRef.current = null;
+  }, []);
+
+  const scheduleTriggerDetectionAfterNativeInput = useCallback(
+    (fallbackPrompt: string, fallbackExpandedCursor: number) => {
+      clearNativeInputTriggerDetectionTimeout();
+      nativeInputTriggerDetectionTimeoutRef.current = window.setTimeout(() => {
+        nativeInputTriggerDetectionTimeoutRef.current = null;
+        const snapshot = composerEditorRef.current?.readSnapshot();
+        const nextPrompt = snapshot?.value ?? promptRef.current;
+        const nextExpandedCursor = snapshot?.expandedCursor ?? fallbackExpandedCursor;
+        setComposerTrigger(detectComposerTrigger(nextPrompt, nextExpandedCursor));
+      }, COMPOSER_NATIVE_INPUT_SETTLE_MS);
+    },
+    [clearNativeInputTriggerDetectionTimeout, promptRef],
+  );
+
+  const updateComposerTriggerForPromptChange = useCallback(
+    (
+      nextPrompt: string,
+      expandedCursor: number,
+      cursorAdjacentToMention: boolean,
+      metadata: ComposerNativeInputChangeMetadata,
+    ) => {
+      if (metadata.suppressTriggerDetection) {
+        nativeInputCommandSuppressUntilRef.current =
+          composerNowMs() + COMPOSER_NATIVE_INPUT_SETTLE_MS;
+        setComposerTrigger(null);
+        scheduleTriggerDetectionAfterNativeInput(nextPrompt, expandedCursor);
+        return;
+      }
+
+      clearNativeInputTriggerDetectionTimeout();
+      setComposerTrigger(
+        cursorAdjacentToMention ? null : detectComposerTrigger(nextPrompt, expandedCursor),
+      );
+    },
+    [clearNativeInputTriggerDetectionTimeout, scheduleTriggerDetectionAfterNativeInput],
+  );
+
   const onPromptChange = useCallback(
     (
       nextPrompt: string,
@@ -1410,11 +1466,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       expandedCursor: number,
       cursorAdjacentToMention: boolean,
       terminalContextIds: string[],
+      metadata: ComposerNativeInputChangeMetadata,
     ) => {
       if (activePendingProgress?.activeQuestion && pendingUserInputs.length > 0) {
         setComposerCursor(nextCursor);
-        setComposerTrigger(
-          cursorAdjacentToMention ? null : detectComposerTrigger(nextPrompt, expandedCursor),
+        updateComposerTriggerForPromptChange(
+          nextPrompt,
+          expandedCursor,
+          cursorAdjacentToMention,
+          metadata,
         );
         onChangeActivePendingUserInputCustomAnswer(
           activePendingProgress.activeQuestion.id,
@@ -1434,8 +1494,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         );
       }
       setComposerCursor(nextCursor);
-      setComposerTrigger(
-        cursorAdjacentToMention ? null : detectComposerTrigger(nextPrompt, expandedCursor),
+      updateComposerTriggerForPromptChange(
+        nextPrompt,
+        expandedCursor,
+        cursorAdjacentToMention,
+        metadata,
       );
     },
     [
@@ -1447,6 +1510,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerDraftTarget,
       composerTerminalContexts,
       setComposerDraftTerminalContexts,
+      updateComposerTriggerForPromptChange,
     ],
   );
 
@@ -1486,6 +1550,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         setPrompt(next.text);
       }
       setComposerCursor(nextCursor);
+      clearNativeInputTriggerDetectionTimeout();
       setComposerTrigger(detectComposerTrigger(next.text, nextExpandedCursor));
       if (options?.focusEditorAfterReplace !== false) {
         window.requestAnimationFrame(() => {
@@ -1497,6 +1562,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [
       activePendingProgress?.activeQuestion,
       activePendingUserInput,
+      clearNativeInputTriggerDetectionTimeout,
       onChangeActivePendingUserInputCustomAnswer,
       promptRef,
       setPrompt,
@@ -1715,6 +1781,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
     event: KeyboardEvent,
   ) => {
+    if (
+      isComposerNativeComposingKeyEvent(event) ||
+      composerNowMs() < nativeInputCommandSuppressUntilRef.current
+    ) {
+      return false;
+    }
     if (key === "Tab" && event.shiftKey) {
       toggleInteractionMode();
       return true;
@@ -1881,6 +1953,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   useEffect(() => {
     return () => {
+      clearNativeInputTriggerDetectionTimeout();
       if (composerBlurFrameRef.current !== null) {
         window.cancelAnimationFrame(composerBlurFrameRef.current);
       }
@@ -1891,7 +1964,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         window.cancelAnimationFrame(mobileComposerExpandReleaseFrameRef.current);
       }
     };
-  }, []);
+  }, [clearNativeInputTriggerDetectionTimeout]);
 
   // ------------------------------------------------------------------
   // Imperative handle
@@ -1924,6 +1997,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         const cursor = clampCollapsedComposerCursor(promptForState, options?.cursor ?? 0);
         setComposerHighlightedItemId(null);
         setComposerCursor(cursor);
+        clearNativeInputTriggerDetectionTimeout();
         setComposerTrigger(
           options?.detectTrigger
             ? detectComposerTrigger(
@@ -1963,6 +2037,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (!inserted) return;
         promptRef.current = insertion.prompt;
         setComposerCursor(nextCollapsedCursor);
+        clearNativeInputTriggerDetectionTimeout();
         setComposerTrigger(detectComposerTrigger(insertion.prompt, insertion.cursor));
         window.requestAnimationFrame(() => {
           composerEditorRef.current?.focusAt(nextCollapsedCursor);
@@ -1982,6 +2057,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }),
     [
       activeThread,
+      clearNativeInputTriggerDetectionTimeout,
       composerDraftTarget,
       composerCursor,
       composerTerminalContexts,

@@ -1,34 +1,71 @@
+import { File, Virtualizer, type FileContents } from "@pierre/diffs/react";
 import { useQuery } from "@tanstack/react-query";
 import { CheckIcon, CopyIcon, PanelRightCloseIcon, TextWrapIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import {
+  CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH,
   createCodeHighlightCacheKey,
   FILE_PREVIEW_HIGHLIGHT_MAX_BYTES,
-  getCachedHighlightedCodeTokenLines,
-  getCodeHighlighterPromise,
-  highlightCodeToTokenLines,
   resolveCodeHighlightLanguageFromPath,
-  setCachedHighlightedCodeTokenLines,
-  type HighlightedTokenLines,
 } from "../codeHighlighting";
 import { readEnvironmentApi } from "../environmentApi";
 import { formatWorkspaceRelativePath } from "../filePathDisplay";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useTheme } from "../hooks/useTheme";
-import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
-import { cn } from "../lib/utils";
+import { resolveDiffThemeName } from "../lib/diffRendering";
 import type { WorkspaceFilePreviewTarget } from "../workspaceFilePreview";
 import { closeWorkspaceFilePreview } from "../workspaceFilePreview";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { Button } from "./ui/button";
 
-const EMPTY_FILE_LINES = [""];
-const SHIKI_FONT_STYLE_ITALIC = 1;
-const SHIKI_FONT_STYLE_BOLD = 2;
-const SHIKI_FONT_STYLE_UNDERLINE = 4;
-const SHIKI_FONT_STYLE_STRIKETHROUGH = 8;
+const FILE_PREVIEW_LINE_HEIGHT = 20;
+const FILE_PREVIEW_VIRTUALIZER_CLASS_NAME = "workspace-file-preview-virtualizer";
+
+const FILE_PREVIEW_RENDER_STYLE = {
+  "--diffs-font-size": "12px",
+  "--diffs-line-height": `${FILE_PREVIEW_LINE_HEIGHT}px`,
+  "--diffs-font-family":
+    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+} as CSSProperties;
+
+const FILE_PREVIEW_UNSAFE_CSS = `
+[data-file],
+[data-virtualizer-buffer] {
+  --diffs-bg: var(--background) !important;
+  --diffs-light-bg: var(--background) !important;
+  --diffs-dark-bg: var(--background) !important;
+  --diffs-token-light-bg: transparent;
+  --diffs-token-dark-bg: transparent;
+  --diffs-bg-context-override: var(--background);
+  --diffs-bg-hover-override: color-mix(in srgb, var(--background) 94%, var(--foreground));
+  --diffs-bg-buffer-override: var(--background);
+  background-color: var(--background) !important;
+}
+
+[data-file] {
+  --diffs-grid-number-column-width: 3.5rem;
+  color: color-mix(in srgb, var(--foreground) 85%, transparent);
+}
+
+[data-column-number] {
+  padding-right: 0.75rem !important;
+  color: color-mix(in srgb, var(--muted-foreground) 45%, transparent) !important;
+  user-select: none;
+}
+
+[data-line],
+[data-column-number],
+[data-gutter-buffer] {
+  min-height: ${FILE_PREVIEW_LINE_HEIGHT}px;
+}
+
+[data-line][data-selected-line],
+[data-column-number][data-selected-line] {
+  --diffs-line-bg: color-mix(in srgb, var(--background) 88%, var(--primary)) !important;
+}
+`;
 
 function basenameOfPath(path: string): string {
   const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
@@ -43,11 +80,6 @@ function formatBytes(bytes: number): string {
 
 function normalizePreviewContents(contents: string): string {
   return contents.replace(/\r\n/g, "\n");
-}
-
-function splitFileLines(contents: string): string[] {
-  if (contents.length === 0) return EMPTY_FILE_LINES;
-  return contents.split("\n");
 }
 
 function workspaceFilePreviewQueryOptions(target: WorkspaceFilePreviewTarget | null) {
@@ -75,134 +107,8 @@ function workspaceFilePreviewQueryOptions(target: WorkspaceFilePreviewTarget | n
   };
 }
 
-function useHighlightedFilePreview(input: {
-  cacheKey: string | null;
-  code: string;
-  enabled: boolean;
-  language: string;
-  themeName: DiffThemeName;
-}): HighlightedTokenLines | null {
-  const cachedTokenLines = input.cacheKey
-    ? getCachedHighlightedCodeTokenLines(input.cacheKey)
-    : null;
-  const [highlighted, setHighlighted] = useState<{
-    cacheKey: string;
-    tokenLines: HighlightedTokenLines;
-  } | null>(() =>
-    input.cacheKey && cachedTokenLines
-      ? { cacheKey: input.cacheKey, tokenLines: cachedTokenLines }
-      : null,
-  );
-
-  useEffect(() => {
-    if (!input.enabled || !input.cacheKey) {
-      setHighlighted(null);
-      return;
-    }
-    const cacheKey = input.cacheKey;
-
-    const cached = getCachedHighlightedCodeTokenLines(cacheKey);
-    if (cached) {
-      setHighlighted({ cacheKey, tokenLines: cached });
-      return;
-    }
-
-    let cancelled = false;
-    setHighlighted(null);
-
-    void getCodeHighlighterPromise(input.language)
-      .then((highlighter) => {
-        if (cancelled) return;
-        const tokenLines = highlightCodeToTokenLines({
-          highlighter,
-          code: input.code,
-          language: input.language,
-          themeName: input.themeName,
-        });
-        setCachedHighlightedCodeTokenLines(cacheKey, tokenLines, input.code);
-        if (!cancelled) {
-          setHighlighted({ cacheKey, tokenLines });
-        }
-      })
-      .catch((error) => {
-        console.warn(
-          "File preview syntax highlighting failed; falling back to plain text.",
-          error instanceof Error ? error.message : error,
-        );
-        if (!cancelled) {
-          setHighlighted(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [input.cacheKey, input.code, input.enabled, input.language, input.themeName]);
-
-  if (!input.enabled || !input.cacheKey || highlighted?.cacheKey !== input.cacheKey) {
-    return cachedTokenLines;
-  }
-  return highlighted.tokenLines;
-}
-
-function shikiTokenStyle(token: HighlightedTokenLines[number][number]): CSSProperties | undefined {
-  if (token.htmlStyle) {
-    return token.htmlStyle as CSSProperties;
-  }
-
-  const style: CSSProperties = {};
-  if (token.color) {
-    style.color = token.color;
-  }
-  if (token.bgColor) {
-    style.backgroundColor = token.bgColor;
-  }
-
-  const fontStyle = token.fontStyle ?? 0;
-  if ((fontStyle & SHIKI_FONT_STYLE_ITALIC) !== 0) {
-    style.fontStyle = "italic";
-  }
-  if ((fontStyle & SHIKI_FONT_STYLE_BOLD) !== 0) {
-    style.fontWeight = 600;
-  }
-
-  const decorations: string[] = [];
-  if ((fontStyle & SHIKI_FONT_STYLE_UNDERLINE) !== 0) {
-    decorations.push("underline");
-  }
-  if ((fontStyle & SHIKI_FONT_STYLE_STRIKETHROUGH) !== 0) {
-    decorations.push("line-through");
-  }
-  if (decorations.length > 0) {
-    style.textDecorationLine = decorations.join(" ");
-  }
-
-  return Object.keys(style).length > 0 ? style : undefined;
-}
-
-function FilePreviewCodeLine(props: {
-  line: string;
-  tokenLine: HighlightedTokenLines[number] | undefined;
-  wordWrap: boolean;
-}) {
-  return (
-    <code
-      className={cn(
-        "min-w-0 whitespace-pre text-foreground/85",
-        props.wordWrap && "whitespace-pre-wrap break-words",
-      )}
-    >
-      {props.tokenLine && props.tokenLine.length > 0
-        ? props.tokenLine.map((token) => (
-            <span key={token.offset} style={shikiTokenStyle(token)}>
-              {token.content}
-            </span>
-          ))
-        : props.line.length > 0
-          ? props.line
-          : " "}
-    </code>
-  );
+function getFilePreviewScrollElement(root: HTMLElement | null): HTMLElement | null {
+  return root?.querySelector<HTMLElement>(`.${FILE_PREVIEW_VIRTUALIZER_CLASS_NAME}`) ?? null;
 }
 
 export function WorkspaceFilePreviewPanel(props: {
@@ -213,36 +119,39 @@ export function WorkspaceFilePreviewPanel(props: {
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
   const [wordWrap, setWordWrap] = useState(true);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRootRef = useRef<HTMLDivElement>(null);
+  const lastAutoScrollKeyRef = useRef<string | null>(null);
   const query = useQuery(workspaceFilePreviewQueryOptions(props.target));
   const fileContents = query.data?.contents ?? "";
   const previewContents = useMemo(() => normalizePreviewContents(fileContents), [fileContents]);
-  const fileLines = useMemo(() => splitFileLines(previewContents), [previewContents]);
   const highlightLanguage = useMemo(
     () => (props.target ? resolveCodeHighlightLanguageFromPath(props.target.relativePath) : "text"),
     [props.target],
   );
   const highlightEnabled =
     query.data !== undefined && query.data.sizeBytes <= FILE_PREVIEW_HIGHLIGHT_MAX_BYTES;
-  const highlightCacheKey = useMemo(
+  const renderLanguage = highlightEnabled ? highlightLanguage : "text";
+  const previewFile = useMemo<FileContents | null>(
     () =>
-      highlightEnabled
-        ? createCodeHighlightCacheKey(
-            previewContents,
-            highlightLanguage,
-            diffThemeName,
-            "file-preview",
-          )
+      query.data
+        ? {
+            name: query.data.relativePath,
+            contents: previewContents,
+            lang: renderLanguage,
+            cacheKey: createCodeHighlightCacheKey(
+              previewContents,
+              renderLanguage,
+              diffThemeName,
+              "file-preview",
+            ),
+          }
         : null,
-    [diffThemeName, highlightEnabled, highlightLanguage, previewContents],
+    [diffThemeName, previewContents, query.data, renderLanguage],
   );
-  const highlightedTokenLines = useHighlightedFilePreview({
-    cacheKey: highlightCacheKey,
-    code: previewContents,
-    enabled: highlightEnabled,
-    language: highlightLanguage,
-    themeName: diffThemeName,
-  });
+  const selectedLines = useMemo<{ start: number; end: number } | null>(
+    () => (props.target?.line ? { start: props.target.line, end: props.target.line } : null),
+    [props.target?.line],
+  );
   const targetLine = props.target?.line ?? null;
   const displayPath = props.target
     ? formatWorkspaceRelativePath(props.target.relativePath, props.target.cwd)
@@ -251,12 +160,44 @@ export function WorkspaceFilePreviewPanel(props: {
   const subtitle = props.target?.displayPath ?? displayPath;
 
   useEffect(() => {
-    if (!targetLine || !scrollRef.current || !query.data) {
+    if (!targetLine || !props.target || !query.data) {
       return;
     }
-    const element = scrollRef.current.querySelector<HTMLElement>(`[data-line="${targetLine}"]`);
-    element?.scrollIntoView({ block: "center" });
-  }, [query.data, targetLine]);
+    const autoScrollKey = [
+      props.target.environmentId,
+      props.target.cwd,
+      query.data.relativePath,
+      targetLine,
+      query.data.sizeBytes,
+      previewContents.length,
+    ].join(":");
+    if (lastAutoScrollKeyRef.current === autoScrollKey) {
+      return;
+    }
+    lastAutoScrollKeyRef.current = autoScrollKey;
+
+    const scrollElement = getFilePreviewScrollElement(scrollRootRef.current);
+    if (!scrollElement) {
+      return;
+    }
+
+    scrollElement.scrollTop = Math.max(0, (targetLine - 1) * FILE_PREVIEW_LINE_HEIGHT);
+
+    let secondFrameId: number | null = null;
+    const firstFrameId = window.requestAnimationFrame(() => {
+      secondFrameId = window.requestAnimationFrame(() => {
+        const element = scrollElement.querySelector<HTMLElement>(`[data-line="${targetLine}"]`);
+        element?.scrollIntoView({ block: "center" });
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(firstFrameId);
+      if (secondFrameId !== null) {
+        window.cancelAnimationFrame(secondFrameId);
+      }
+    };
+  }, [previewContents.length, props.target, query.data, targetLine]);
 
   const copyFile = useCallback(() => {
     if (!query.data) return;
@@ -327,32 +268,32 @@ export function WorkspaceFilePreviewPanel(props: {
               Preview truncated. File size: {formatBytes(query.data.sizeBytes)}.
             </div>
           ) : null}
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-background">
-            <div className="min-w-full py-2 font-mono text-[12px] leading-5">
-              {fileLines.map((line, index) => {
-                const lineNumber = index + 1;
-                const highlighted = lineNumber === targetLine;
-                return (
-                  <div
-                    key={lineNumber}
-                    data-line={lineNumber}
-                    className={cn(
-                      "grid min-w-full grid-cols-[3.5rem_minmax(0,1fr)] px-2",
-                      highlighted && "bg-primary/10",
-                    )}
-                  >
-                    <span className="select-none pr-3 text-right text-muted-foreground/45">
-                      {lineNumber}
-                    </span>
-                    <FilePreviewCodeLine
-                      line={line}
-                      tokenLine={highlightedTokenLines?.[index]}
-                      wordWrap={wordWrap}
-                    />
-                  </div>
-                );
-              })}
-            </div>
+          <div ref={scrollRootRef} className="min-h-0 flex-1 bg-background">
+            {previewFile ? (
+              <Virtualizer
+                className={`${FILE_PREVIEW_VIRTUALIZER_CLASS_NAME} h-full min-h-0 overflow-auto`}
+                contentClassName="min-w-full py-2"
+                config={{
+                  overscrollSize: 600,
+                  intersectionObserverMargin: 1200,
+                }}
+              >
+                <File
+                  className="workspace-file-preview-render min-w-full"
+                  file={previewFile}
+                  selectedLines={selectedLines}
+                  style={FILE_PREVIEW_RENDER_STYLE}
+                  options={{
+                    disableFileHeader: true,
+                    overflow: wordWrap ? "wrap" : "scroll",
+                    theme: diffThemeName,
+                    themeType: resolvedTheme,
+                    tokenizeMaxLineLength: CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH,
+                    unsafeCSS: FILE_PREVIEW_UNSAFE_CSS,
+                  }}
+                />
+              </Virtualizer>
+            ) : null}
           </div>
         </div>
       ) : (

@@ -55,6 +55,13 @@ import {
   isCollapsedCursorAdjacentToInlineToken,
 } from "~/composer-logic";
 import {
+  COMPOSER_NATIVE_INPUT_SETTLE_MS,
+  type ComposerNativeInputChangeMetadata,
+  isComposerNativeComposingKeyEvent,
+  shouldLetBrowserHandleComposerBeforeInput,
+  shouldSuppressComposerTriggerForNativeInputType,
+} from "~/composerNativeInput";
+import {
   selectionTouchesMentionBoundary,
   splitPromptIntoComposerSegments,
 } from "~/composer-editor-mentions";
@@ -480,6 +487,43 @@ function clampExpandedCursor(value: string, cursor: number): number {
   return Math.max(0, Math.min(value.length, Math.floor(cursor)));
 }
 
+type ComposerNativeInputTracker = {
+  isComposing: boolean;
+  lastInputType: string | null;
+  suppressTriggerDetectionUntil: number;
+};
+
+function nowMs(): number {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+function createComposerNativeInputTracker(): ComposerNativeInputTracker {
+  return {
+    isComposing: false,
+    lastInputType: null,
+    suppressTriggerDetectionUntil: 0,
+  };
+}
+
+function markComposerNativeInputSuppression(
+  tracker: ComposerNativeInputTracker,
+  inputType: string | null,
+): void {
+  tracker.lastInputType = inputType;
+  tracker.suppressTriggerDetectionUntil = nowMs() + COMPOSER_NATIVE_INPUT_SETTLE_MS;
+}
+
+function readComposerNativeInputChangeMetadata(
+  tracker: ComposerNativeInputTracker,
+): ComposerNativeInputChangeMetadata {
+  return {
+    suppressTriggerDetection:
+      tracker.isComposing || nowMs() < tracker.suppressTriggerDetectionUntil,
+    isComposing: tracker.isComposing,
+    inputType: tracker.lastInputType,
+  };
+}
+
 function getComposerInlineTokenTextLength(_node: ComposerInlineTokenNode): 1 {
   return 1;
 }
@@ -892,6 +936,7 @@ interface ComposerPromptEditorProps {
     expandedCursor: number,
     cursorAdjacentToMention: boolean,
     terminalContextIds: string[],
+    metadata: ComposerNativeInputChangeMetadata,
   ) => void;
   onCommandKeyDown?: (
     key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
@@ -1114,6 +1159,88 @@ function ComposerInlineTokenBackspacePlugin() {
       COMMAND_PRIORITY_HIGH,
     );
   }, [editor, onRemoveTerminalContext]);
+
+  return null;
+}
+
+function ComposerNativeInputPlugin(props: {
+  nativeInputTrackerRef: React.RefObject<ComposerNativeInputTracker>;
+}) {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    const markInputType = (inputType: string | null) => {
+      const tracker = props.nativeInputTrackerRef.current;
+      if (!tracker) return;
+      tracker.lastInputType = inputType;
+      if (shouldSuppressComposerTriggerForNativeInputType(inputType)) {
+        markComposerNativeInputSuppression(tracker, inputType);
+      }
+    };
+
+    const onBeforeInput = (event: InputEvent) => {
+      markInputType(event.inputType);
+      if (!shouldLetBrowserHandleComposerBeforeInput(event.inputType)) {
+        return;
+      }
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+
+    const onInput = (event: Event) => {
+      const inputEvent = event as InputEvent;
+      markInputType(inputEvent.inputType ?? null);
+    };
+
+    const onCompositionStart = () => {
+      const tracker = props.nativeInputTrackerRef.current;
+      if (!tracker) return;
+      tracker.isComposing = true;
+      markComposerNativeInputSuppression(tracker, tracker.lastInputType);
+    };
+
+    const onCompositionEnd = () => {
+      const tracker = props.nativeInputTrackerRef.current;
+      if (!tracker) return;
+      tracker.isComposing = false;
+      markComposerNativeInputSuppression(tracker, tracker.lastInputType);
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isComposerNativeComposingKeyEvent(event)) {
+        return;
+      }
+      const tracker = props.nativeInputTrackerRef.current;
+      if (!tracker) return;
+      markComposerNativeInputSuppression(tracker, tracker.lastInputType);
+    };
+
+    let activeRootElement: HTMLElement | null = null;
+    const unregisterRootListener = editor.registerRootListener((rootElement, prevRootElement) => {
+      prevRootElement?.removeEventListener("beforeinput", onBeforeInput, true);
+      prevRootElement?.removeEventListener("input", onInput);
+      prevRootElement?.removeEventListener("compositionstart", onCompositionStart);
+      prevRootElement?.removeEventListener("compositionend", onCompositionEnd);
+      prevRootElement?.removeEventListener("keydown", onKeyDown, true);
+      rootElement?.addEventListener("beforeinput", onBeforeInput, true);
+      rootElement?.addEventListener("input", onInput);
+      rootElement?.addEventListener("compositionstart", onCompositionStart);
+      rootElement?.addEventListener("compositionend", onCompositionEnd);
+      rootElement?.addEventListener("keydown", onKeyDown, true);
+      activeRootElement = rootElement;
+    });
+
+    return () => {
+      if (activeRootElement) {
+        activeRootElement.removeEventListener("beforeinput", onBeforeInput, true);
+        activeRootElement.removeEventListener("input", onInput);
+        activeRootElement.removeEventListener("compositionstart", onCompositionStart);
+        activeRootElement.removeEventListener("compositionend", onCompositionEnd);
+        activeRootElement.removeEventListener("keydown", onKeyDown, true);
+      }
+      unregisterRootListener();
+    };
+  }, [editor, props.nativeInputTrackerRef]);
 
   return null;
 }
@@ -1412,6 +1539,7 @@ function ComposerPromptEditorInner({
     expandedCursor: expandCollapsedComposerCursor(value, initialCursor),
     terminalContextIds: terminalContexts.map((context) => context.id),
   });
+  const nativeInputTrackerRef = useRef(createComposerNativeInputTracker());
   const isApplyingControlledUpdateRef = useRef(false);
   const terminalContextActions = useMemo(
     () => ({ onRemoveTerminalContext }),
@@ -1496,6 +1624,7 @@ function ComposerPromptEditorInner({
         snapshotRef.current.expandedCursor,
         false,
         snapshotRef.current.terminalContextIds,
+        readComposerNativeInputChangeMetadata(nativeInputTrackerRef.current),
       );
     },
     [editor],
@@ -1600,6 +1729,7 @@ function ComposerPromptEditorInner({
         nextExpandedCursor,
         cursorAdjacentToMention,
         terminalContextIds,
+        readComposerNativeInputChangeMetadata(nativeInputTrackerRef.current),
       );
     });
   }, []);
@@ -1615,9 +1745,14 @@ function ComposerPromptEditorInner({
                 className,
               )}
               data-testid="composer-editor"
+              ariaMultiline
               aria-placeholder={placeholder}
+              autoCapitalize="sentences"
+              autoCorrect="on"
+              inputMode="text"
               placeholder={<span />}
               onPaste={onPaste}
+              spellCheck
             />
           }
           placeholder={
@@ -1632,6 +1767,7 @@ function ComposerPromptEditorInner({
         <OnChangePlugin onChange={handleEditorChange} />
         <ComposerCommandKeyPlugin {...(onCommandKeyDown ? { onCommandKeyDown } : {})} />
         <ComposerSurroundSelectionPlugin terminalContexts={terminalContexts} skills={skills} />
+        <ComposerNativeInputPlugin nativeInputTrackerRef={nativeInputTrackerRef} />
         <ComposerInlineTokenArrowPlugin />
         <ComposerInlineTokenSelectionNormalizePlugin />
         <ComposerInlineTokenBackspacePlugin />

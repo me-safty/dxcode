@@ -18,6 +18,62 @@ const asEventId = (value: string): EventId => EventId.make(value);
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
 
+async function createReadModelWithThread(now: string) {
+  const initial = createEmptyReadModel(now);
+  const withProject = await Effect.runPromise(
+    projectEvent(initial, {
+      sequence: 1,
+      eventId: asEventId("evt-project-create-shared"),
+      aggregateKind: "project",
+      aggregateId: asProjectId("project-1"),
+      type: "project.created",
+      occurredAt: now,
+      commandId: CommandId.make("cmd-project-create-shared"),
+      causationEventId: null,
+      correlationId: CommandId.make("cmd-project-create-shared"),
+      metadata: {},
+      payload: {
+        projectId: asProjectId("project-1"),
+        title: "Project",
+        workspaceRoot: "/tmp/project",
+        defaultModelSelection: null,
+        scripts: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+    }),
+  );
+  return Effect.runPromise(
+    projectEvent(withProject, {
+      sequence: 2,
+      eventId: asEventId("evt-thread-create-shared"),
+      aggregateKind: "thread",
+      aggregateId: ThreadId.make("thread-1"),
+      type: "thread.created",
+      occurredAt: now,
+      commandId: CommandId.make("cmd-thread-create-shared"),
+      causationEventId: null,
+      correlationId: CommandId.make("cmd-thread-create-shared"),
+      metadata: {},
+      payload: {
+        threadId: ThreadId.make("thread-1"),
+        projectId: asProjectId("project-1"),
+        title: "Thread",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    }),
+  );
+}
+
 describe("decider project scripts", () => {
   it("emits empty scripts on project.create", async () => {
     const now = "2026-01-01T00:00:00.000Z";
@@ -358,6 +414,56 @@ describe("decider project scripts", () => {
         threadId: ThreadId.make("thread-1"),
         interactionMode: "plan",
       },
+    });
+  });
+
+  it("emits assistant message updates when attachments are added", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const readModel = await createReadModelWithThread(now);
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.message.attachments.add",
+          commandId: CommandId.make("cmd-attachments-add"),
+          threadId: ThreadId.make("thread-1"),
+          messageId: asMessageId("assistant:item-image"),
+          role: "assistant",
+          attachments: [
+            {
+              type: "image",
+              id: "thread-1-attachment-1",
+              name: "result.png",
+              mimeType: "image/png",
+              sizeBytes: 4,
+            },
+          ],
+          createdAt: now,
+        },
+        readModel,
+      }),
+    );
+
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event.type).toBe("thread.message-sent");
+    if (event.type !== "thread.message-sent") {
+      return;
+    }
+    expect(event.payload).toMatchObject({
+      threadId: ThreadId.make("thread-1"),
+      messageId: asMessageId("assistant:item-image"),
+      role: "assistant",
+      text: "",
+      streaming: false,
+      attachments: [
+        {
+          type: "image",
+          id: "thread-1-attachment-1",
+          name: "result.png",
+          mimeType: "image/png",
+          sizeBytes: 4,
+        },
+      ],
     });
   });
 });

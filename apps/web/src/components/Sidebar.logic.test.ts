@@ -556,13 +556,47 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Completed", pulse: false });
   });
 
-  it("does not show working when a stale running session still points at the completed turn", () => {
+  it("keeps working while the running session still owns a completed latest turn", () => {
     expect(
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
           interactionMode: "default",
           latestTurn: makeLatestTurn(),
+        },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("keeps working when a different active turn is running after the latest projected turn completed", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          session: {
+            ...baseThread.session,
+            activeTurnId: "turn-2" as never,
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("shows completed once the session leaves running after the latest turn completed", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+            activeTurnId: undefined,
+          },
         },
       }),
     ).toMatchObject({ label: "Completed", pulse: false });

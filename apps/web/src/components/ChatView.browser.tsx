@@ -512,7 +512,17 @@ function updateThreadSessionInSnapshot(
 function appendUserMessageToThreadSnapshot(
   snapshot: OrchestrationReadModel,
   threadId: ThreadId,
-  input: { id: MessageId; text: string },
+  input: {
+    id: MessageId;
+    text: string;
+    attachments?: Array<{
+      type: "image";
+      id: string;
+      name: string;
+      mimeType: string;
+      sizeBytes: number;
+    }>;
+  },
 ): OrchestrationReadModel {
   const createdAt = isoAt(snapshot.snapshotSequence + 1);
   return {
@@ -530,6 +540,7 @@ function appendUserMessageToThreadSnapshot(
                   id: input.id,
                   text: input.text,
                   offsetSeconds: snapshot.snapshotSequence + 1,
+                  ...(input.attachments ? { attachments: input.attachments } : {}),
                 }),
                 createdAt,
                 updatedAt: isoAt(snapshot.snapshotSequence + 2),
@@ -1313,6 +1324,23 @@ async function waitForComposerText(expectedText: string): Promise<void> {
   );
 }
 
+async function pasteComposerFile(file: File): Promise<void> {
+  const composerEditor = await waitForComposerEditor();
+  composerEditor.focus();
+  const pasteEvent = new Event("paste", {
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperty(pasteEvent, "clipboardData", {
+    value: {
+      files: [file],
+      types: ["Files"],
+    },
+  });
+  composerEditor.dispatchEvent(pasteEvent);
+  await waitForLayout();
+}
+
 async function setComposerSelectionByTextOffsets(options: {
   start: number;
   end: number;
@@ -1412,6 +1440,68 @@ async function waitForComposerMenuItem(itemId: string): Promise<HTMLElement> {
     () => document.querySelector<HTMLElement>(`[data-composer-item-id="${itemId}"]`),
     `Unable to find composer menu item "${itemId}".`,
   );
+}
+
+async function expectNoComposerMenuItem(itemId: string): Promise<void> {
+  await waitForLayout();
+  expect(document.querySelector<HTMLElement>(`[data-composer-item-id="${itemId}"]`)).toBeNull();
+}
+
+async function dispatchComposerBeforeInput(inputType: string, data: string): Promise<InputEvent> {
+  const composerEditor = await waitForComposerEditor();
+  composerEditor.focus();
+  const beforeInputEvent = new InputEvent("beforeinput", {
+    data,
+    inputType,
+    bubbles: true,
+    cancelable: true,
+  });
+  composerEditor.dispatchEvent(beforeInputEvent);
+  await waitForLayout();
+  return beforeInputEvent;
+}
+
+async function insertComposerNativeText(inputType: string, data: string): Promise<InputEvent> {
+  const composerEditor = await waitForComposerEditor();
+  composerEditor.focus();
+  composerEditor.dispatchEvent(
+    new CompositionEvent("compositionstart", {
+      data: "",
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  const beforeInputEvent = await dispatchComposerBeforeInput(inputType, data);
+  if (!beforeInputEvent.defaultPrevented) {
+    if (
+      typeof document.execCommand === "function" &&
+      document.execCommand("insertText", false, data)
+    ) {
+      await waitForLayout();
+      return beforeInputEvent;
+    }
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      throw new Error("Unable to resolve composer selection for native text input.");
+    }
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const textNode = document.createTextNode(data);
+    range.insertNode(textNode);
+    range.setStartAfter(textNode);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    composerEditor.dispatchEvent(
+      new InputEvent("input", {
+        data,
+        inputType,
+        bubbles: true,
+      }),
+    );
+  }
+  await waitForLayout();
+  return beforeInputEvent;
 }
 async function waitForSendButton(): Promise<HTMLButtonElement> {
   return waitForElement(
@@ -3550,6 +3640,32 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("does not prevent native replacement beforeinput from the composer", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "speling");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-native-replacement" as MessageId,
+        targetText: "native replacement",
+      }),
+    });
+
+    try {
+      await waitForComposerText("speling");
+      await setComposerSelectionByTextOffsets({ start: 0, end: "speling".length });
+
+      const beforeInputEvent = await dispatchComposerBeforeInput(
+        "insertReplacementText",
+        "spelling",
+      );
+
+      expect(beforeInputEvent.defaultPrevented).toBe(false);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("surrounds text after a mention using the correct expanded offsets", async () => {
     useComposerDraftStore.getState().setPrompt(THREAD_REF, "hi @package.json there");
 
@@ -4039,6 +4155,223 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await expect.element(page.getByText(sentText)).toBeInTheDocument();
     } finally {
       await mounted.cleanup();
+    }
+  });
+
+  it("sends pasted image attachments with upload metadata", async () => {
+    const originalCreateObjectUrl = URL.createObjectURL;
+    const originalRevokeObjectUrl = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:chat-pizza-preview");
+    URL.revokeObjectURL = vi.fn();
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-attachment-send-test" as MessageId,
+        targetText: "attachment send test",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const imageFile = new File([new Uint8Array([1, 2, 3, 4, 5])], "pizza.png", {
+        type: "image/png",
+      });
+      await pasteComposerFile(imageFile);
+
+      await expect.element(page.getByAltText("pizza.png")).toBeInTheDocument();
+
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "Image attached");
+      await waitForLayout();
+
+      const sendButton = await waitForSendButton();
+      expect(sendButton.disabled).toBe(false);
+      await sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const turnStartRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.turn.start",
+          ) as
+            | {
+                _tag: string;
+                type?: string;
+                message?: {
+                  attachments?: Array<{
+                    type?: string;
+                    name?: string;
+                    mimeType?: string;
+                    sizeBytes?: number;
+                    dataUrl?: string;
+                  }>;
+                };
+              }
+            | undefined;
+
+          expect(turnStartRequest?.message?.attachments).toHaveLength(1);
+          expect(turnStartRequest?.message?.attachments?.[0]).toMatchObject({
+            type: "image",
+            name: "pizza.png",
+            mimeType: "image/png",
+            sizeBytes: 5,
+          });
+          expect(turnStartRequest?.message?.attachments?.[0]?.dataUrl).toMatch(
+            /^data:image\/png;base64,/,
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+      URL.createObjectURL = originalCreateObjectUrl;
+      URL.revokeObjectURL = originalRevokeObjectUrl;
+    }
+  });
+
+  it("keeps optimistic image blobs until persisted previews preload", async () => {
+    const originalCreateObjectUrl = URL.createObjectURL;
+    const originalRevokeObjectUrl = URL.revokeObjectURL;
+    const originalImage = window.Image;
+    const preloadLoadCallbacks: Array<() => void> = [];
+
+    class DeferredImage {
+      private readonly listeners = new Map<string, Array<() => void>>();
+      private source = "";
+
+      addEventListener(type: string, listener: () => void) {
+        const listeners = this.listeners.get(type) ?? [];
+        listeners.push(listener);
+        this.listeners.set(type, listeners);
+      }
+
+      set src(value: string) {
+        this.source = value;
+        if (value.length > 0) {
+          preloadLoadCallbacks.push(() => {
+            for (const listener of this.listeners.get("load") ?? []) {
+              listener();
+            }
+          });
+        }
+      }
+
+      get src() {
+        return this.source;
+      }
+    }
+
+    URL.createObjectURL = vi.fn(() => "blob:chat-handoff-preview");
+    URL.revokeObjectURL = vi.fn();
+    vi.stubGlobal("Image", DeferredImage);
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-handoff-test" as MessageId,
+        targetText: "handoff test",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const imageFile = new File([new Uint8Array([9, 8, 7, 6])], "handoff.png", {
+        type: "image/png",
+      });
+      await pasteComposerFile(imageFile);
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "Image handoff");
+      await waitForLayout();
+
+      const sendButton = await waitForSendButton();
+      expect(sendButton.disabled).toBe(false);
+      await sendButton.click();
+
+      let sentMessageId: MessageId | null = null;
+      await vi.waitFor(
+        () => {
+          const turnStartRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.turn.start",
+          ) as
+            | {
+                message?: {
+                  messageId?: MessageId;
+                  attachments?: unknown[];
+                };
+              }
+            | undefined;
+          expect(turnStartRequest?.message?.attachments).toHaveLength(1);
+          sentMessageId = turnStartRequest?.message?.messageId ?? null;
+          expect(sentMessageId).not.toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await vi.waitFor(() => {
+        const image = document.querySelector<HTMLImageElement>('img[alt="handoff.png"]');
+        expect(image?.getAttribute("src")).toBe("blob:chat-handoff-preview");
+      });
+
+      fixture.snapshot = appendUserMessageToThreadSnapshot(fixture.snapshot, THREAD_ID, {
+        id: sentMessageId!,
+        text: "Image handoff",
+        attachments: [
+          {
+            type: "image",
+            id: "server-handoff-image",
+            name: "handoff.png",
+            mimeType: "image/png",
+            sizeBytes: 4,
+          },
+        ],
+      });
+      rpcHarness.emitStreamValue(ORCHESTRATION_WS_METHODS.subscribeThread, {
+        kind: "snapshot",
+        snapshot: {
+          snapshotSequence: fixture.snapshot.snapshotSequence,
+          thread: fixture.snapshot.threads.find((thread) => thread.id === THREAD_ID)!,
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(preloadLoadCallbacks.length).toBeGreaterThan(0);
+        const image = document.querySelector<HTMLImageElement>('img[alt="handoff.png"]');
+        expect(image?.getAttribute("src")).toBe("blob:chat-handoff-preview");
+      });
+      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith("blob:chat-handoff-preview");
+
+      for (const load of preloadLoadCallbacks.splice(0)) {
+        load();
+      }
+
+      await vi.waitFor(
+        () => {
+          const image = document.querySelector<HTMLImageElement>('img[alt="handoff.png"]');
+          expect(image?.getAttribute("src")).toContain("/attachments/server-handoff-image");
+          expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:chat-handoff-preview");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+      URL.createObjectURL = originalCreateObjectUrl;
+      URL.revokeObjectURL = originalRevokeObjectUrl;
+      vi.stubGlobal("Image", originalImage);
     }
   });
 
@@ -6111,6 +6444,25 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("does not open the slash-command menu during native composition input", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-composition-slash-target" as MessageId,
+        targetText: "composition slash menu thread",
+      }),
+    });
+
+    try {
+      await waitForComposerEditor();
+      await insertComposerNativeText("insertCompositionText", "/");
+
+      await expectNoComposerMenuItem("slash:model");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("opens the model picker when selecting /model", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -6145,6 +6497,82 @@ describe("ChatView timeline estimator parity (full app)", () => {
         expect(searchInput).not.toBeNull();
         expect(document.activeElement).toBe(searchInput);
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("does not open the skills menu during native composition input", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-composition-skill-target" as MessageId,
+        targetText: "composition skill menu thread",
+      }),
+      configureFixture: (nextFixture) => {
+        const provider = nextFixture.serverConfig.providers[0];
+        if (!provider) {
+          throw new Error("Expected default provider in test fixture.");
+        }
+        (
+          provider as {
+            skills: ServerConfig["providers"][number]["skills"];
+          }
+        ).skills = [
+          {
+            name: "agent-browser",
+            displayName: "Agent Browser",
+            description: "Open pages, click around, and inspect web apps.",
+            path: "/Users/test/.agents/skills/agent-browser/SKILL.md",
+            enabled: true,
+          },
+        ];
+      },
+    });
+
+    try {
+      await waitForComposerEditor();
+      await insertComposerNativeText("insertCompositionText", "$");
+
+      await expectNoComposerMenuItem("skill:codex:agent-browser");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("still opens the skills menu after normal settled typing", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-normal-skill-target" as MessageId,
+        targetText: "normal skill menu thread",
+      }),
+      configureFixture: (nextFixture) => {
+        const provider = nextFixture.serverConfig.providers[0];
+        if (!provider) {
+          throw new Error("Expected default provider in test fixture.");
+        }
+        (
+          provider as {
+            skills: ServerConfig["providers"][number]["skills"];
+          }
+        ).skills = [
+          {
+            name: "agent-browser",
+            displayName: "Agent Browser",
+            description: "Open pages, click around, and inspect web apps.",
+            path: "/Users/test/.agents/skills/agent-browser/SKILL.md",
+            enabled: true,
+          },
+        ];
+      },
+    });
+
+    try {
+      await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("$agent");
+
+      await waitForComposerMenuItem("skill:codex:agent-browser");
     } finally {
       await mounted.cleanup();
     }

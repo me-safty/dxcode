@@ -153,9 +153,6 @@ export function hasActiveSessionWork(
     return false;
   }
   if (session.activeTurnId !== undefined && session.activeTurnId !== null) {
-    if (latestTurn?.turnId === session.activeTurnId && latestTurn.completedAt) {
-      return false;
-    }
     return true;
   }
   return latestTurn !== null && !latestTurn.completedAt;
