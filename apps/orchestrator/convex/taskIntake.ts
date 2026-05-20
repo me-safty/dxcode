@@ -27,6 +27,7 @@ import {
 import { api, internal } from "./_generated/api.js";
 import type { Id } from "./_generated/dataModel.js";
 import { internalAction } from "./_generated/server.js";
+import { assistantMessageRelayPhase } from "./taskEvents.js";
 
 const headerArg = v.object({
   name: v.string(),
@@ -1433,6 +1434,7 @@ export const postTaskRuntimeAssistantMessage = internalAction({
           claimEventKey: claim.claimEventKey,
           linkId: claim.linkId,
           sourceEventId: args.eventId,
+          relayPhase: assistantMessageRelayPhase(args.eventId),
           t3MessageId: args.t3MessageId,
           ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
           externalMessageId: posted.id,

@@ -39,6 +39,16 @@ export function taskAssistantMessageReplyEventKey(input: {
   return `task-assistant-message-reply:${input.workSessionId}:${input.sourceEventId}:${input.t3MessageId}:${input.linkId}`;
 }
 
+export function assistantMessageRelayPhase(sourceEventId: string) {
+  if (sourceEventId.endsWith(":assistant-first")) {
+    return "first" as const;
+  }
+  if (sourceEventId.endsWith(":assistant-final")) {
+    return "final" as const;
+  }
+  return "unknown" as const;
+}
+
 export function taskUserInputRequestEventKey(input: {
   readonly workSessionId: string;
   readonly requestId: string;
@@ -196,7 +206,7 @@ function hasDeliveredFinalAssistantMessageReply(input: {
         String(payload.workSessionId) === input.workSessionId &&
         String(payload.linkId) === input.linkId &&
         typeof payload.sourceEventId === "string" &&
-        payload.sourceEventId.endsWith(":assistant-final")
+        assistantMessageRelayPhase(payload.sourceEventId) === "final"
       );
     } catch {
       return false;
@@ -802,6 +812,7 @@ export const claimTaskAssistantMessageReplies = internalMutation({
           externalId: link.externalId,
           occurredAt: args.occurredAt,
           sourceEventId: args.eventId,
+          relayPhase: assistantMessageRelayPhase(args.eventId),
           t3ThreadId: args.t3ThreadId,
           t3MessageId: args.t3MessageId,
           ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
@@ -1454,6 +1465,7 @@ export const recordTaskAssistantMessageReplyDelivered = internalMutation({
     claimEventKey: v.string(),
     linkId: v.id("taskExternalLinks"),
     sourceEventId: v.string(),
+    relayPhase: v.union(v.literal("first"), v.literal("final"), v.literal("unknown")),
     t3MessageId: v.string(),
     t3TurnId: v.optional(v.string()),
     externalMessageId: v.optional(v.string()),
@@ -1479,6 +1491,7 @@ export const recordTaskAssistantMessageReplyDelivered = internalMutation({
         workSessionId: args.workSessionId,
         linkId: args.linkId,
         sourceEventId: args.sourceEventId,
+        relayPhase: args.relayPhase,
         t3MessageId: args.t3MessageId,
         ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
         ...(args.externalMessageId !== undefined

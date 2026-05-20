@@ -20,6 +20,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -66,20 +67,45 @@ function postToOrchestrator(path: string, body: unknown) {
         return;
       }
 
-      const response = await fetch(`${config.baseUrl}${path}`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${config.sharedSecret}`,
-        },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) {
+      const maxAttempts = 4;
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        let response: Response;
+        try {
+          response = await fetch(`${config.baseUrl}${path}`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${config.sharedSecret}`,
+            },
+            body: JSON.stringify(body),
+          });
+        } catch (error) {
+          lastError = error;
+          if (attempt === maxAttempts) {
+            throw error;
+          }
+          await sleep(250 * 2 ** (attempt - 1));
+          continue;
+        }
+
+        if (response.ok) {
+          return;
+        }
+
         const detail = await response.text();
-        throw new Error(
+        const error = new Error(
           `Execution bridge callback rejected (${response.status}): ${detail || "Unknown error"}`,
         );
+        const retryable = response.status === 429 || response.status >= 500;
+        if (!retryable || attempt === maxAttempts) {
+          throw error;
+        }
+        lastError = error;
+
+        await sleep(250 * 2 ** (attempt - 1));
       }
+      throw lastError;
     },
     catch: (error) =>
       new ExecutionBridgeCallbackError({
@@ -312,7 +338,6 @@ function postFirstTaskRuntimeAssistantMessage(input: {
   if (forwardedTurnKeys.has(turnKey)) {
     return Effect.void;
   }
-  forwardedTurnKeys.add(turnKey);
 
   return postTaskRuntimeAssistantMessageEvent({
     eventId: `${String(event.eventId)}:assistant-first`,
@@ -324,6 +349,11 @@ function postFirstTaskRuntimeAssistantMessage(input: {
     t3TurnId: event.payload.turnId,
     assistantMessage: assistantResponse,
   }).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        forwardedTurnKeys.add(turnKey);
+      }),
+    ),
     Effect.catch((error: Error) =>
       Effect.logWarning("execution bridge failed to forward first assistant message", {
         eventId: String(event.eventId),
