@@ -33,6 +33,7 @@ describe("Task Intake prompts", () => {
 
     expect(prompt).toContain("<agent_prompt>");
     expect(prompt).toContain("System context and operating rules:");
+    expect(prompt).toContain("bash scripts/worktree-setup.sh");
     expect(prompt).toContain("commit them and push the branch");
     expect(prompt).toContain("pull request targeting `dev`");
     expect(prompt).toContain("</agent_prompt>\n\nUser request:\n<@BOT> fix checkout");
