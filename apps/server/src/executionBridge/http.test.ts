@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   cacheAssistantMessageForLifecycle,
   readCachedAssistantResponse,
+  shouldRelayFinalAssistantResponse,
   shouldForwardLifecycleCheckpoint,
 } from "./http.ts";
 import type { TrackedExecutionRun } from "./runStart.ts";
@@ -174,6 +175,40 @@ describe("execution bridge task runtime lifecycle forwarding", () => {
           ...taskRun,
           startedEventId: "started-event",
           lastTurnId: TurnId.make("turn-1"),
+        },
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("execution bridge task runtime assistant relay boundaries", () => {
+  it("does not relay a final response when the turn only produced the already relayed first message", () => {
+    expect(
+      shouldRelayFinalAssistantResponse({
+        firstRelay: {
+          messageId: "assistant-message-1",
+          text: "Done.",
+        },
+        finalResponse: {
+          messageId: "assistant-message-1",
+          turnId: "turn-1",
+          text: "Done.",
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("relays a final response when it is a distinct assistant message", () => {
+    expect(
+      shouldRelayFinalAssistantResponse({
+        firstRelay: {
+          messageId: "assistant-message-1",
+          text: "Starting.",
+        },
+        finalResponse: {
+          messageId: "assistant-message-2",
+          turnId: "turn-1",
+          text: "Done.",
         },
       }),
     ).toBe(true);

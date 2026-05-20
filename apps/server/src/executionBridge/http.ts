@@ -140,6 +140,11 @@ interface AssistantResponseCacheEntry {
   readonly text: string;
 }
 
+interface FirstAssistantRelayEntry {
+  readonly messageId: string;
+  readonly text: string;
+}
+
 function normalizeAssistantResponse(text: string) {
   const trimmed = text.trim();
   if (trimmed.length === 0) {
@@ -271,6 +276,25 @@ function firstAssistantMessageTurnKey(input: {
   return `${String(input.threadId)}:${String(input.turnId)}`;
 }
 
+export function shouldRelayFinalAssistantResponse(input: {
+  readonly firstRelay?: FirstAssistantRelayEntry;
+  readonly finalResponse?: AssistantResponseCacheEntry;
+}) {
+  if (input.finalResponse === undefined) {
+    return false;
+  }
+  if (input.firstRelay === undefined) {
+    return true;
+  }
+  if (input.firstRelay.messageId === input.finalResponse.messageId) {
+    return false;
+  }
+  if (input.firstRelay.text === input.finalResponse.text) {
+    return false;
+  }
+  return true;
+}
+
 function postTaskRuntimeAssistantMessageObservation(input: {
   readonly event: Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
   readonly trackedRun: TrackedExecutionRun;
@@ -313,7 +337,7 @@ function postTaskRuntimeAssistantMessageObservation(input: {
 function postFirstTaskRuntimeAssistantMessage(input: {
   readonly event: Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
   readonly trackedRun: TrackedExecutionRun;
-  readonly forwardedTurnKeys: Set<string>;
+  readonly forwardedTurnKeys: Map<string, FirstAssistantRelayEntry>;
 }) {
   const { event, forwardedTurnKeys, trackedRun } = input;
   if (
@@ -351,7 +375,10 @@ function postFirstTaskRuntimeAssistantMessage(input: {
   }).pipe(
     Effect.tap(() =>
       Effect.sync(() => {
-        forwardedTurnKeys.add(turnKey);
+        forwardedTurnKeys.set(turnKey, {
+          messageId: String(event.payload.messageId),
+          text: assistantResponse,
+        });
       }),
     ),
     Effect.catch((error: Error) =>
@@ -715,7 +742,7 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
     const orchestrationEngine = yield* OrchestrationEngineService;
     const runRegistry = yield* ExecutionBridgeRunRegistry;
     const assistantResponseCache = new Map<string, AssistantResponseCacheEntry[]>();
-    const firstAssistantMessageTurnKeys = new Set<string>();
+    const firstAssistantMessageTurnKeys = new Map<string, FirstAssistantRelayEntry>();
 
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
@@ -874,18 +901,32 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
                     ...(completedTurnId !== undefined ? { turnId: completedTurnId } : {}),
                   })
                 : undefined;
-            if (lifecycle.type === "completed") {
+            const firstRelay =
+              completedTurnId !== undefined
+                ? firstAssistantMessageTurnKeys.get(
+                    firstAssistantMessageTurnKey({
+                      threadId: event.payload.threadId,
+                      turnId: completedTurnId,
+                    }),
+                  )
+                : undefined;
+            const shouldRelayFinal =
+              lifecycle.type === "completed"
+                ? shouldRelayFinalAssistantResponse({
+                    ...(firstRelay !== undefined ? { firstRelay } : {}),
+                    ...(assistantResponseEntry !== undefined
+                      ? { finalResponse: assistantResponseEntry }
+                      : {}),
+                  })
+                : false;
+            if (lifecycle.type === "completed" && shouldRelayFinal) {
               yield* postFinalTaskRuntimeAssistantMessage({
                 eventId: `${String(event.eventId)}:assistant-final`,
                 occurredAt: event.occurredAt,
                 trackedRun,
                 ...(completedTurnId !== undefined ? { turnId: completedTurnId } : {}),
-                ...(assistantResponseEntry !== undefined
-                  ? {
-                      assistantMessageId: assistantResponseEntry.messageId,
-                      assistantResponse: assistantResponseEntry.text,
-                    }
-                  : {}),
+                assistantMessageId: assistantResponseEntry!.messageId,
+                assistantResponse: assistantResponseEntry!.text,
               });
             }
             const payload = buildTaskRuntimeLifecycleEvent({
@@ -897,7 +938,7 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
               ...(lifecycle.failureSummary !== undefined
                 ? { failureSummary: lifecycle.failureSummary }
                 : {}),
-              ...(assistantResponseEntry !== undefined
+              ...(shouldRelayFinal && assistantResponseEntry !== undefined
                 ? { assistantResponse: assistantResponseEntry.text }
                 : {}),
             });
