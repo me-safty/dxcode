@@ -55,6 +55,9 @@ const IGNORED_DIRECTORY_NAMES = new Set([
 interface WorkspaceIndex {
   scannedAt: number;
   entries: SearchableWorkspaceEntry[];
+  grams: Map<string, Uint32Array>;
+  entryIdByPath: Map<string, number>;
+  pathTree: WorkspacePathNode;
   truncated: boolean;
   source: ProjectSearchIndexSource;
   fullIndexing: boolean;
@@ -66,6 +69,13 @@ interface SearchableWorkspaceEntry extends ProjectEntry {
 }
 
 type RankedWorkspaceEntry = RankedSearchResult<SearchableWorkspaceEntry>;
+
+interface WorkspacePathNode {
+  name: string;
+  path: string;
+  entryId: number | null;
+  children: Map<string, WorkspacePathNode>;
+}
 
 interface WorkspaceIndexOptions {
   readonly cwd: string;
@@ -125,6 +135,167 @@ function toSearchableWorkspaceEntry(entry: ProjectEntry): SearchableWorkspaceEnt
   };
 }
 
+function buildWorkspaceSearchIndex(
+  entries: SearchableWorkspaceEntry[],
+): Pick<WorkspaceIndex, "entries" | "grams" | "entryIdByPath" | "pathTree"> {
+  const entryIdByPath = new Map(entries.map((entry, entryId) => [entry.path, entryId]));
+
+  return {
+    entries,
+    grams: buildGramIndex(entries),
+    entryIdByPath,
+    pathTree: buildWorkspacePathTree(entries, entryIdByPath),
+  };
+}
+
+function addGramsForText(grams: Set<string>, text: string) {
+  for (let index = 0; index < text.length; index += 1) {
+    const one = text.slice(index, index + 1);
+    const two = text.slice(index, index + 2);
+    const three = text.slice(index, index + 3);
+
+    if (one.length === 1) grams.add(one);
+    if (two.length === 2) grams.add(two);
+    if (three.length === 3) grams.add(three);
+  }
+}
+
+function gramsForEntry(entry: SearchableWorkspaceEntry): string[] {
+  const grams = new Set<string>();
+  addGramsForText(grams, entry.normalizedName);
+  addGramsForText(grams, entry.normalizedPath);
+  return [...grams];
+}
+
+function gramsForQuery(query: string): string[] {
+  if (query.length <= 3) {
+    return query ? [query] : [];
+  }
+
+  const grams = new Set<string>();
+  for (let index = 0; index <= query.length - 3; index += 1) {
+    grams.add(query.slice(index, index + 3));
+  }
+  return [...grams];
+}
+
+function buildGramIndex(entries: SearchableWorkspaceEntry[]): Map<string, Uint32Array> {
+  const mutableGrams = new Map<string, number[]>();
+
+  for (const [entryId, entry] of entries.entries()) {
+    for (const gram of gramsForEntry(entry)) {
+      const ids = mutableGrams.get(gram);
+      if (ids) {
+        ids.push(entryId);
+      } else {
+        mutableGrams.set(gram, [entryId]);
+      }
+    }
+  }
+
+  return new Map(
+    [...mutableGrams].map(([gram, ids]) => [gram, Uint32Array.from(ids.toSorted((a, b) => a - b))]),
+  );
+}
+
+function makeWorkspacePathNode(
+  name: string,
+  pathValue: string,
+  entryId: number | null,
+): WorkspacePathNode {
+  return {
+    name,
+    path: pathValue,
+    entryId,
+    children: new Map(),
+  };
+}
+
+function buildWorkspacePathTree(
+  entries: SearchableWorkspaceEntry[],
+  entryIdByPath: ReadonlyMap<string, number>,
+): WorkspacePathNode {
+  const root = makeWorkspacePathNode("", "", null);
+
+  for (const entry of entries) {
+    const segments = entry.path.split("/");
+    let current = root;
+    let currentPath = "";
+
+    for (const segment of segments) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+      const child =
+        current.children.get(segment) ??
+        makeWorkspacePathNode(segment, currentPath, entryIdByPath.get(currentPath) ?? null);
+      current.children.set(segment, child);
+      current = child;
+    }
+
+    current.entryId = entryIdByPath.get(entry.path) ?? null;
+  }
+
+  return root;
+}
+
+function intersectSortedEntryIds(left: Uint32Array, right: Uint32Array): Uint32Array {
+  const result: number[] = [];
+  let leftIndex = 0;
+  let rightIndex = 0;
+
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftId = left[leftIndex];
+    const rightId = right[rightIndex];
+
+    if (leftId === undefined || rightId === undefined) {
+      break;
+    }
+
+    if (leftId === rightId) {
+      result.push(leftId);
+      leftIndex += 1;
+      rightIndex += 1;
+    } else if (leftId < rightId) {
+      leftIndex += 1;
+    } else {
+      rightIndex += 1;
+    }
+  }
+
+  return Uint32Array.from(result);
+}
+
+function getCandidateEntryIds(index: WorkspaceIndex, query: string): Uint32Array {
+  if (!query) {
+    return Uint32Array.from(index.entries.map((_, entryId) => entryId));
+  }
+
+  const queryGrams = gramsForQuery(query);
+  if (queryGrams.length === 0) {
+    return new Uint32Array();
+  }
+
+  const postingLists = queryGrams
+    .map((gram) => index.grams.get(gram))
+    .filter((postingList): postingList is Uint32Array => postingList !== undefined)
+    .toSorted((left, right) => left.length - right.length);
+
+  if (postingLists.length !== queryGrams.length) {
+    return new Uint32Array();
+  }
+
+  const firstPostingList = postingLists[0];
+  if (!firstPostingList) {
+    return new Uint32Array();
+  }
+
+  return postingLists
+    .slice(1)
+    .reduce(
+      (candidateIds, postingList) => intersectSortedEntryIds(candidateIds, postingList),
+      firstPostingList,
+    );
+}
+
 function scoreEntry(entry: SearchableWorkspaceEntry, query: string): number | null {
   if (!query) {
     return entry.kind === "directory" ? 0 : 1;
@@ -139,7 +310,6 @@ function scoreEntry(entry: SearchableWorkspaceEntry, query: string): number | nu
       exactBase: 0,
       prefixBase: 2,
       includesBase: 5,
-      fuzzyBase: 100,
     }),
     scoreQueryMatch({
       value: normalizedPath,
@@ -148,7 +318,6 @@ function scoreEntry(entry: SearchableWorkspaceEntry, query: string): number | nu
       prefixBase: 3,
       boundaryBase: 4,
       includesBase: 6,
-      fuzzyBase: 200,
       boundaryMarkers: ["/"],
     }),
   ].filter((score): score is number => score !== null);
@@ -295,9 +464,10 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const now = yield* DateTime.now;
       const entries = [...directoryEntries, ...fileEntries];
       const entryLimit = workspaceIndexEntryLimit(fullIndexing);
+      const indexedEntries = entryLimit === null ? entries : entries.slice(0, entryLimit);
       return {
         scannedAt: now.epochMilliseconds,
-        entries: entryLimit === null ? entries : entries.slice(0, entryLimit),
+        ...buildWorkspaceSearchIndex(indexedEntries),
         truncated: listedFiles.truncated || (entryLimit !== null && entries.length > entryLimit),
         source: vcs.driver.capabilities.kind,
         fullIndexing,
@@ -422,9 +592,10 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     }
 
     const now = yield* DateTime.now;
+    const indexedEntries = entryLimit === null ? entries : entries.slice(0, entryLimit);
     return {
       scannedAt: now.epochMilliseconds,
-      entries: entryLimit === null ? entries : entries.slice(0, entryLimit),
+      ...buildWorkspaceSearchIndex(indexedEntries),
       truncated,
       source: "filesystem" as const,
       fullIndexing,
@@ -435,11 +606,21 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     cacheKey: string,
   ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
     const options = parseWorkspaceIndexCacheKey(cacheKey);
-    const vcsIndexed = yield* buildWorkspaceIndexFromVcs(options);
-    if (vcsIndexed) {
-      return vcsIndexed;
-    }
-    return yield* buildWorkspaceIndexFromFilesystem(options);
+    const startedAt = yield* DateTime.now;
+    const index =
+      (yield* buildWorkspaceIndexFromVcs(options)) ??
+      (yield* buildWorkspaceIndexFromFilesystem(options));
+    const endedAt = yield* DateTime.now;
+    const durationMs = Math.max(0, endedAt.epochMilliseconds - startedAt.epochMilliseconds);
+    yield* Effect.logInfo("workspace search index built", {
+      cwd: options.cwd,
+      durationMs,
+      entries: index.entries.length,
+      fullIndexing: index.fullIndexing,
+      source: index.source,
+      truncated: index.truncated,
+    });
+    return index;
   });
 
   const workspaceIndexCache = yield* Cache.makeWith<string, WorkspaceIndex, WorkspaceEntriesError>(
@@ -555,12 +736,14 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
           const limit = Math.max(0, Math.floor(input.limit));
           const rankedEntries: RankedWorkspaceEntry[] = [];
           let matchedEntryCount = 0;
+          const candidateEntryIds = getCandidateEntryIds(index, normalizedQuery);
 
-          for (const entry of index.entries) {
+          for (const entryId of candidateEntryIds) {
+            const entry = index.entries[entryId];
+            if (!entry) continue;
+
             const score = scoreEntry(entry, normalizedQuery);
-            if (score === null) {
-              continue;
-            }
+            if (score === null) continue;
 
             matchedEntryCount += 1;
             insertRankedSearchResult(
