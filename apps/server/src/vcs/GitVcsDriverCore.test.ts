@@ -313,6 +313,90 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("remote operations", () => {
+    it.effect("disables interactive auth prompts for push commands", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const tempDir = yield* makeTmpDir("git-vcs-driver-push-env-");
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        const sshLogPath = pathService.join(tempDir, "ssh-env.txt");
+        const sshWrapperPath = pathService.join(tempDir, "ssh-wrapper.sh");
+        const previousGitSsh = process.env.GIT_SSH;
+        const previousAskpassRequire = process.env.SSH_ASKPASS_REQUIRE;
+        const previousTerminalPrompt = process.env.GIT_TERMINAL_PROMPT;
+        const previousGcmInteractive = process.env.GCM_INTERACTIVE;
+        const previousAskpassLog = process.env.T3_TEST_SSH_ASKPASS_LOG;
+
+        yield* fileSystem.writeFileString(
+          sshWrapperPath,
+          [
+            "#!/bin/sh",
+            'printf "SSH_ASKPASS_REQUIRE=%s\\n" "${SSH_ASKPASS_REQUIRE:-}" >> "$T3_TEST_SSH_ASKPASS_LOG"',
+            'printf "GIT_TERMINAL_PROMPT=%s\\n" "${GIT_TERMINAL_PROMPT:-}" >> "$T3_TEST_SSH_ASKPASS_LOG"',
+            'printf "GCM_INTERACTIVE=%s\\n" "${GCM_INTERACTIVE:-}" >> "$T3_TEST_SSH_ASKPASS_LOG"',
+            'printf "ARGS=%s\\n" "$*" >> "$T3_TEST_SSH_ASKPASS_LOG"',
+            "exit 1",
+            "",
+          ].join("\n"),
+        );
+        yield* fileSystem.chmod(sshWrapperPath, 0o755);
+        yield* git(cwd, ["remote", "add", "origin", "ssh://example.invalid/repo.git"]);
+        yield* driver.createRef({ cwd, refName: "feature/push-auth" });
+        yield* driver.switchRef({ cwd, refName: "feature/push-auth" });
+        yield* writeTextFile(cwd, "feature.txt", "feature\n");
+        yield* driver.prepareCommitContext(cwd);
+        yield* driver.commit(cwd, "Add feature", "");
+
+        yield* Effect.gen(function* () {
+          process.env.GIT_SSH = sshWrapperPath;
+          process.env.SSH_ASKPASS_REQUIRE = "force";
+          process.env.GIT_TERMINAL_PROMPT = "1";
+          process.env.GCM_INTERACTIVE = "always";
+          process.env.T3_TEST_SSH_ASKPASS_LOG = sshLogPath;
+
+          yield* driver.pushCurrentBranch(cwd, null).pipe(Effect.flip);
+
+          const loggedEnvironment = yield* fileSystem.readFileString(sshLogPath);
+          assert.include(loggedEnvironment, "SSH_ASKPASS_REQUIRE=never");
+          assert.include(loggedEnvironment, "GIT_TERMINAL_PROMPT=0");
+          assert.include(loggedEnvironment, "GCM_INTERACTIVE=Never");
+          assert.include(loggedEnvironment, "git-receive-pack");
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (previousGitSsh === undefined) {
+                delete process.env.GIT_SSH;
+              } else {
+                process.env.GIT_SSH = previousGitSsh;
+              }
+              if (previousAskpassRequire === undefined) {
+                delete process.env.SSH_ASKPASS_REQUIRE;
+              } else {
+                process.env.SSH_ASKPASS_REQUIRE = previousAskpassRequire;
+              }
+              if (previousTerminalPrompt === undefined) {
+                delete process.env.GIT_TERMINAL_PROMPT;
+              } else {
+                process.env.GIT_TERMINAL_PROMPT = previousTerminalPrompt;
+              }
+              if (previousGcmInteractive === undefined) {
+                delete process.env.GCM_INTERACTIVE;
+              } else {
+                process.env.GCM_INTERACTIVE = previousGcmInteractive;
+              }
+              if (previousAskpassLog === undefined) {
+                delete process.env.T3_TEST_SSH_ASKPASS_LOG;
+              } else {
+                process.env.T3_TEST_SSH_ASKPASS_LOG = previousAskpassLog;
+              }
+            }),
+          ),
+        );
+      }),
+    );
+
     it.effect("pushes with upstream setup and skips when already up to date", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

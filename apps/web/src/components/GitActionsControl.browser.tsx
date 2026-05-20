@@ -252,6 +252,11 @@ vi.mock("~/store", () => ({
 
 vi.mock("~/terminal-links", () => ({
   resolvePathLinkTarget: vi.fn(),
+  splitPathAndPosition: vi.fn((value: string) => ({
+    path: value,
+    line: undefined,
+    column: undefined,
+  })),
 }));
 
 import GitActionsControl from "./GitActionsControl";
@@ -347,6 +352,46 @@ describe("GitActionsControl thread-scoped progress toast", () => {
       activeRunStackedActionDeferredRef.current.reject(new Error("test cleanup"));
       await Promise.resolve();
       vi.useRealTimers();
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("updates the header action toast with the rejected git error", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <GitActionsControl
+        gitCwd={GIT_CWD}
+        activeThreadRef={scopeThreadRef(ENVIRONMENT_A, SHARED_THREAD_ID)}
+      />,
+      {
+        container: host,
+      },
+    );
+
+    try {
+      const quickActionButton = findButtonByText("Push & create PR");
+      expect(quickActionButton, 'Unable to find button containing "Push & create PR"').toBeTruthy();
+      if (!(quickActionButton instanceof HTMLButtonElement)) {
+        throw new Error('Unable to find button containing "Push & create PR"');
+      }
+
+      quickActionButton.click();
+      activeRunStackedActionDeferredRef.current.reject(new Error("Permission denied (publickey)."));
+
+      await vi.waitFor(() => {
+        expect(toastUpdateSpy).toHaveBeenCalledWith(
+          "toast-1",
+          expect.objectContaining({
+            data: { threadRef: scopeThreadRef(ENVIRONMENT_A, SHARED_THREAD_ID) },
+            description: "Permission denied (publickey).",
+            title: "Action failed",
+            type: "error",
+          }),
+        );
+      });
+    } finally {
       await screen.unmount();
       host.remove();
     }

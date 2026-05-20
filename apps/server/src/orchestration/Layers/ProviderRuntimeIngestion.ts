@@ -1259,16 +1259,31 @@ const make = Effect.gen(function* () {
         event.type === "turn.started" ||
         event.type === "turn.completed"
       ) {
+        const sessionStateStatus =
+          event.type === "session.state.changed"
+            ? orchestrationSessionStatusFromRuntimeState(event.payload.state)
+            : null;
+        const sessionStateReferencesCompletedLatestTurn =
+          sessionStateStatus === "running" &&
+          activeTurnId === null &&
+          eventTurnId !== undefined &&
+          sameId(thread.latestTurn?.turnId, eventTurnId) &&
+          thread.latestTurn?.completedAt != null;
         const nextActiveTurnId =
           event.type === "turn.started"
             ? (eventTurnId ?? null)
             : event.type === "turn.completed" || event.type === "session.exited"
               ? null
-              : activeTurnId;
+              : sessionStateStatus === "running"
+                ? (activeTurnId ??
+                  (sessionStateReferencesCompletedLatestTurn ? null : (eventTurnId ?? null)))
+                : activeTurnId;
         const status = (() => {
           switch (event.type) {
             case "session.state.changed":
-              return orchestrationSessionStatusFromRuntimeState(event.payload.state);
+              return (sessionStateStatus ?? "ready") === "running" && nextActiveTurnId === null
+                ? "ready"
+                : (sessionStateStatus ?? "ready");
             case "turn.started":
               return "running";
             case "session.exited":

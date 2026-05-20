@@ -145,15 +145,29 @@ export function formatElapsed(startIso: string, endIso: string | undefined): str
 type LatestTurnTiming = Pick<OrchestrationLatestTurn, "turnId" | "startedAt" | "completedAt">;
 type SessionActivityState = Pick<ThreadSession, "orchestrationStatus" | "activeTurnId">;
 
+export function hasActiveSessionWork(
+  latestTurn: LatestTurnTiming | null,
+  session: SessionActivityState | null,
+): boolean {
+  if (session?.orchestrationStatus !== "running") {
+    return false;
+  }
+  if (session.activeTurnId !== undefined && session.activeTurnId !== null) {
+    if (latestTurn?.turnId === session.activeTurnId && latestTurn.completedAt) {
+      return false;
+    }
+    return true;
+  }
+  return latestTurn !== null && !latestTurn.completedAt;
+}
+
 export function isLatestTurnSettled(
   latestTurn: LatestTurnTiming | null,
   session: SessionActivityState | null,
 ): boolean {
   if (!latestTurn?.startedAt) return false;
   if (!latestTurn.completedAt) return false;
-  if (!session) return true;
-  if (session.orchestrationStatus === "running") return false;
-  return true;
+  return !hasActiveSessionWork(latestTurn, session);
 }
 
 export function deriveActiveWorkStartedAt(
@@ -161,8 +175,9 @@ export function deriveActiveWorkStartedAt(
   session: SessionActivityState | null,
   sendStartedAt: string | null,
 ): string | null {
-  const runningTurnId =
-    session?.orchestrationStatus === "running" ? (session.activeTurnId ?? null) : null;
+  const runningTurnId = hasActiveSessionWork(latestTurn, session)
+    ? (session?.activeTurnId ?? null)
+    : null;
   if (runningTurnId !== null) {
     if (latestTurn?.turnId === runningTurnId) {
       return latestTurn.startedAt ?? sendStartedAt;
@@ -1245,9 +1260,14 @@ export function inferCheckpointTurnCountByTurnId(
   return result;
 }
 
-export function derivePhase(session: ThreadSession | null): SessionPhase {
+export function derivePhase(
+  session: ThreadSession | null,
+  latestTurn: LatestTurnTiming | null = null,
+): SessionPhase {
   if (!session || session.status === "closed") return "disconnected";
   if (session.status === "connecting") return "connecting";
-  if (session.status === "running") return "running";
+  if (session.status === "running" && hasActiveSessionWork(latestTurn, session)) {
+    return "running";
+  }
   return "ready";
 }

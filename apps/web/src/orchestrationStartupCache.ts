@@ -74,6 +74,8 @@ function isEnvironmentStateLike(value: unknown): value is EnvironmentState {
     isRecord(value.proposedPlanByThreadId) &&
     isRecord(value.turnDiffIdsByThreadId) &&
     isRecord(value.turnDiffSummaryByThreadId) &&
+    (value.threadDetailPageInfoByThreadId === undefined ||
+      isRecord(value.threadDetailPageInfoByThreadId)) &&
     isRecord(value.sidebarThreadSummaryById)
   );
 }
@@ -118,6 +120,9 @@ function readDocument(): CachedOrchestrationDocument {
         updatedAt: entry.updatedAt,
         state: {
           ...entry.state,
+          threadDetailPageInfoByThreadId: isRecord(entry.state.threadDetailPageInfoByThreadId)
+            ? entry.state.threadDetailPageInfoByThreadId
+            : {},
           bootstrapComplete: false,
         },
       };
@@ -415,6 +420,10 @@ function createCachedEnvironmentState(
     proposedPlanByThreadId:
       proposedPlanState.byThreadId as EnvironmentState["proposedPlanByThreadId"],
     ...turnDiffState,
+    threadDetailPageInfoByThreadId: pickThreadRecord(
+      state.threadDetailPageInfoByThreadId,
+      detailThreadIds,
+    ),
     sidebarThreadSummaryById: pickThreadRecord(state.sidebarThreadSummaryById, retainedThreadIdSet),
     bootstrapComplete: false,
   };

@@ -89,6 +89,7 @@ import { useGitStatus } from "../lib/gitStatusState";
 import { readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useLongPressContextMenu } from "../hooks/useLongPressContextMenu";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 
 import { useThreadActions } from "../hooks/useThreadActions";
@@ -426,28 +427,42 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     },
     [navigateToThread, threadRef],
   );
-  const handleRowContextMenu = useCallback(
-    (event: React.MouseEvent) => {
-      event.preventDefault();
+  const openRowContextMenu = useCallback(
+    (position: { x: number; y: number }) => {
       const hasSelection = useThreadSelectionStore.getState().hasSelection();
       if (hasSelection && isSelected) {
-        void handleMultiSelectContextMenu({
-          x: event.clientX,
-          y: event.clientY,
-        });
+        void handleMultiSelectContextMenu(position);
         return;
       }
 
       if (hasSelection) {
         clearSelection();
       }
-      void handleThreadContextMenu(threadRef, {
+      void handleThreadContextMenu(threadRef, position);
+    },
+    [clearSelection, handleMultiSelectContextMenu, handleThreadContextMenu, isSelected, threadRef],
+  );
+  const handleRowContextMenu = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      openRowContextMenu({
         x: event.clientX,
         y: event.clientY,
       });
     },
-    [clearSelection, handleMultiSelectContextMenu, handleThreadContextMenu, isSelected, threadRef],
+    [openRowContextMenu],
   );
+  const {
+    onClickCapture: handleRowLongPressClickCapture,
+    onContextMenuCapture: handleRowLongPressContextMenuCapture,
+    onPointerCancelCapture: handleRowLongPressPointerCancelCapture,
+    onPointerDownCapture: handleRowLongPressPointerDownCapture,
+    onPointerMoveCapture: handleRowLongPressPointerMoveCapture,
+    onPointerUpCapture: handleRowLongPressPointerUpCapture,
+  } = useLongPressContextMenu<HTMLAnchorElement>({
+    enabled: renamingThreadKey !== threadKey,
+    onLongPress: openRowContextMenu,
+  });
   const handlePrClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       if (!prStatus) return;
@@ -557,8 +572,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           isSelected,
         })} relative isolate`}
         onClick={handleRowClick}
+        onClickCapture={handleRowLongPressClickCapture}
+        onContextMenuCapture={handleRowLongPressContextMenuCapture}
         onKeyDown={handleRowKeyDown}
         onContextMenu={handleRowContextMenu}
+        onPointerCancelCapture={handleRowLongPressPointerCancelCapture}
+        onPointerDownCapture={handleRowLongPressPointerDownCapture}
+        onPointerMoveCapture={handleRowLongPressPointerMoveCapture}
+        onPointerUpCapture={handleRowLongPressPointerUpCapture}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
           {prStatus && (
@@ -1425,100 +1446,94 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [memberThreadCountByPhysicalKey, removeProject],
   );
 
-  const handleProjectButtonContextMenu = useCallback(
-    (event: React.MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
+  const openProjectContextMenu = useCallback(
+    async (position: { x: number; y: number }) => {
       suppressProjectClickForContextMenuRef.current = true;
-      void (async () => {
-        const api = readLocalApi();
-        if (!api) return;
+      const api = readLocalApi();
+      if (!api) return;
 
-        const actionHandlers = new Map<string, () => Promise<void> | void>();
-        const makeLeaf = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
-          member: SidebarProjectGroupMember,
-          options?: {
-            destructive?: boolean;
-            disabled?: boolean;
-          },
-        ): ContextMenuItem<string> => {
-          const id = `${action}:${member.physicalProjectKey}`;
-          actionHandlers.set(id, () => {
-            switch (action) {
-              case "rename":
-                openProjectRenameDialog(member);
-                return;
-              case "grouping":
-                openProjectGroupingDialog(member);
-                return;
-              case "copy-path":
-                copyPathToClipboard(member.cwd, { path: member.cwd });
-                return;
-              case "delete":
-                return handleRemoveProject(member);
-            }
-          });
-
-          return {
-            id,
-            label: formatProjectMemberActionLabel(member, project.groupedProjectCount),
-            ...(options?.destructive ? { destructive: true } : {}),
-            ...(options?.disabled ? { disabled: true } : {}),
-          };
-        };
-
-        const buildTargetedItem = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
-          label: string,
-          options?: {
-            destructive?: boolean;
-            isDisabled?: (member: SidebarProjectGroupMember) => boolean;
-          },
-        ): ContextMenuItem<string> => {
-          if (project.memberProjects.length === 1) {
-            const singleMember = project.memberProjects[0]!;
-            return {
-              ...makeLeaf(action, singleMember, {
-                ...(options?.destructive ? { destructive: true } : {}),
-                ...(options?.isDisabled?.(singleMember) ? { disabled: true } : {}),
-              }),
-              label,
-            };
+      const actionHandlers = new Map<string, () => Promise<void> | void>();
+      const makeLeaf = (
+        action: "rename" | "grouping" | "copy-path" | "delete",
+        member: SidebarProjectGroupMember,
+        options?: {
+          destructive?: boolean;
+          disabled?: boolean;
+        },
+      ): ContextMenuItem<string> => {
+        const id = `${action}:${member.physicalProjectKey}`;
+        actionHandlers.set(id, () => {
+          switch (action) {
+            case "rename":
+              openProjectRenameDialog(member);
+              return;
+            case "grouping":
+              openProjectGroupingDialog(member);
+              return;
+            case "copy-path":
+              copyPathToClipboard(member.cwd, { path: member.cwd });
+              return;
+            case "delete":
+              return handleRemoveProject(member);
           }
+        });
 
-          return {
-            id: `${action}:submenu`,
-            label,
-            children: project.memberProjects.map((member) =>
-              makeLeaf(action, member, {
-                ...(options?.destructive ? { destructive: true } : {}),
-                ...(options?.isDisabled?.(member) ? { disabled: true } : {}),
-              }),
-            ),
-          };
+        return {
+          id,
+          label: formatProjectMemberActionLabel(member, project.groupedProjectCount),
+          ...(options?.destructive ? { destructive: true } : {}),
+          ...(options?.disabled ? { disabled: true } : {}),
         };
+      };
 
-        const clicked = await api.contextMenu.show(
-          [
-            buildTargetedItem("rename", "Rename project"),
-            buildTargetedItem("grouping", "Project grouping…"),
-            buildTargetedItem("copy-path", "Copy Project Path"),
-            buildTargetedItem("delete", "Remove project", {
-              destructive: true,
+      const buildTargetedItem = (
+        action: "rename" | "grouping" | "copy-path" | "delete",
+        label: string,
+        options?: {
+          destructive?: boolean;
+          isDisabled?: (member: SidebarProjectGroupMember) => boolean;
+        },
+      ): ContextMenuItem<string> => {
+        if (project.memberProjects.length === 1) {
+          const singleMember = project.memberProjects[0]!;
+          return {
+            ...makeLeaf(action, singleMember, {
+              ...(options?.destructive ? { destructive: true } : {}),
+              ...(options?.isDisabled?.(singleMember) ? { disabled: true } : {}),
             }),
-          ],
-          {
-            x: event.clientX,
-            y: event.clientY,
-          },
-        );
-
-        if (!clicked) {
-          return;
+            label,
+          };
         }
 
-        await actionHandlers.get(clicked)?.();
-      })();
+        return {
+          id: `${action}:submenu`,
+          label,
+          children: project.memberProjects.map((member) =>
+            makeLeaf(action, member, {
+              ...(options?.destructive ? { destructive: true } : {}),
+              ...(options?.isDisabled?.(member) ? { disabled: true } : {}),
+            }),
+          ),
+        };
+      };
+
+      const clicked = await api.contextMenu.show(
+        [
+          buildTargetedItem("rename", "Rename project"),
+          buildTargetedItem("grouping", "Project grouping…"),
+          buildTargetedItem("copy-path", "Copy Project Path"),
+          buildTargetedItem("delete", "Remove project", {
+            destructive: true,
+          }),
+        ],
+        position,
+      );
+
+      if (!clicked) {
+        return;
+      }
+
+      await actionHandlers.get(clicked)?.();
     },
     [
       copyPathToClipboard,
@@ -1529,6 +1544,35 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       project.memberProjects,
       suppressProjectClickForContextMenuRef,
     ],
+  );
+
+  const handleProjectButtonContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      void openProjectContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+      });
+    },
+    [openProjectContextMenu],
+  );
+  const {
+    onClickCapture: handleProjectLongPressClickCapture,
+    onContextMenuCapture: handleProjectLongPressContextMenuCapture,
+    onPointerCancelCapture: handleProjectLongPressPointerCancelCapture,
+    onPointerDownCapture: handleProjectLongPressPointerDownCapture,
+    onPointerMoveCapture: handleProjectLongPressPointerMoveCapture,
+    onPointerUpCapture: handleProjectLongPressPointerUpCapture,
+  } = useLongPressContextMenu<HTMLButtonElement>({
+    onLongPress: openProjectContextMenu,
+  });
+
+  const handleProjectButtonPointerDownWithLongPressCapture = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      handleProjectLongPressPointerDownCapture(event);
+      handleProjectButtonPointerDownCapture(event);
+    },
+    [handleProjectButtonPointerDownCapture, handleProjectLongPressPointerDownCapture],
   );
 
   const navigateToThread = useCallback(
@@ -1989,7 +2033,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           }`}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.listeners : {})}
-          onPointerDownCapture={handleProjectButtonPointerDownCapture}
+          onClickCapture={handleProjectLongPressClickCapture}
+          onContextMenuCapture={handleProjectLongPressContextMenuCapture}
+          onPointerCancelCapture={handleProjectLongPressPointerCancelCapture}
+          onPointerDownCapture={handleProjectButtonPointerDownWithLongPressCapture}
+          onPointerMoveCapture={handleProjectLongPressPointerMoveCapture}
+          onPointerUpCapture={handleProjectLongPressPointerUpCapture}
           onClick={handleProjectButtonClick}
           onKeyDown={handleProjectButtonKeyDown}
           onContextMenu={handleProjectButtonContextMenu}

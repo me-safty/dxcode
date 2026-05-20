@@ -483,11 +483,26 @@ export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.
   error: OrchestrationReplayEventsError,
 });
 
+export const WsOrchestrationProbeSyncRpc = Rpc.make(ORCHESTRATION_WS_METHODS.probeSync, {
+  payload: OrchestrationRpcSchemas.probeSync.input,
+  success: OrchestrationRpcSchemas.probeSync.output,
+  error: OrchestrationGetSnapshotError,
+});
+
 export const WsOrchestrationGetArchivedShellSnapshotRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot,
   {
     payload: OrchestrationRpcSchemas.getArchivedShellSnapshot.input,
     success: OrchestrationRpcSchemas.getArchivedShellSnapshot.output,
+    error: OrchestrationGetSnapshotError,
+  },
+);
+
+export const WsOrchestrationGetThreadDetailPageRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getThreadDetailPage,
+  {
+    payload: OrchestrationRpcSchemas.getThreadDetailPage.input,
+    success: OrchestrationRpcSchemas.getThreadDetailPage.output,
     error: OrchestrationGetSnapshotError,
   },
 );
@@ -585,8 +600,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
+  WsOrchestrationProbeSyncRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
+  WsOrchestrationGetThreadDetailPageRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
 );

@@ -133,6 +133,7 @@ export class WsTransport {
         }
 
         const session = this.session;
+        let attemptReceivedValue = false;
         try {
           const runningStream = this.runStreamOnSession(
             session,
@@ -154,6 +155,7 @@ export class WsTransport {
             },
             () => active,
             () => {
+              attemptReceivedValue = true;
               this.hasReportedTransportDisconnect = false;
               hasReceivedValue = true;
             },
@@ -161,6 +163,9 @@ export class WsTransport {
           cancelCurrentStream = runningStream.cancel;
           await runningStream.completed;
           cancelCurrentStream = NOOP;
+          if (!attemptReceivedValue && active && !this.disposed) {
+            await sleep(retryDelayMs);
+          }
         } catch (error) {
           cancelCurrentStream = NOOP;
           if (!active || this.disposed) {

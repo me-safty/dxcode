@@ -1,5 +1,8 @@
 import {
+  EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
   type EnvironmentId,
+  type OrchestrationThreadDetailPageCursors,
+  type OrchestrationThreadDetailPageInfo,
   isProviderDriverKind,
   ProjectId,
   type ModelSelection,
@@ -50,6 +53,7 @@ export function buildLocalDraftThread(
     turnDiffSummaries: [],
     activities: [],
     proposedPlans: [],
+    detailPageInfo: EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
   };
 }
 
@@ -227,12 +231,18 @@ export function threadHasStarted(thread: Thread | null | undefined): boolean {
   );
 }
 
-export function shouldShowThreadDetailLoading(thread: Thread | null | undefined): boolean {
+export function shouldShowThreadDetailLoading(
+  thread: Thread | null | undefined,
+  options?: { readonly hasKnownConversationContent?: boolean },
+): boolean {
   if (!thread) {
     return false;
   }
 
-  const hasTurnOrMessages = thread.latestTurn !== null || thread.messages.length > 0;
+  const hasTurnOrMessages =
+    thread.latestTurn !== null ||
+    thread.messages.length > 0 ||
+    options?.hasKnownConversationContent === true;
   if (!hasTurnOrMessages) {
     return false;
   }
@@ -243,6 +253,40 @@ export function shouldShowThreadDetailLoading(thread: Thread | null | undefined)
     thread.proposedPlans.length === 0 &&
     thread.turnDiffSummaries.length === 0
   );
+}
+
+export function hasOlderThreadDetailPage(
+  pageInfo: OrchestrationThreadDetailPageInfo | null | undefined,
+): boolean {
+  if (!pageInfo) {
+    return false;
+  }
+  return (
+    (pageInfo.messages.hasMoreBefore && pageInfo.messages.startCursor !== null) ||
+    (pageInfo.proposedPlans.hasMoreBefore && pageInfo.proposedPlans.startCursor !== null) ||
+    (pageInfo.activities.hasMoreBefore && pageInfo.activities.startCursor !== null) ||
+    (pageInfo.checkpoints.hasMoreBefore && pageInfo.checkpoints.startCursor !== null)
+  );
+}
+
+export function buildOlderThreadDetailPageCursors(
+  pageInfo: OrchestrationThreadDetailPageInfo,
+): OrchestrationThreadDetailPageCursors | null {
+  const before: OrchestrationThreadDetailPageCursors = {
+    ...(pageInfo.messages.hasMoreBefore && pageInfo.messages.startCursor !== null
+      ? { messages: pageInfo.messages.startCursor }
+      : {}),
+    ...(pageInfo.proposedPlans.hasMoreBefore && pageInfo.proposedPlans.startCursor !== null
+      ? { proposedPlans: pageInfo.proposedPlans.startCursor }
+      : {}),
+    ...(pageInfo.activities.hasMoreBefore && pageInfo.activities.startCursor !== null
+      ? { activities: pageInfo.activities.startCursor }
+      : {}),
+    ...(pageInfo.checkpoints.hasMoreBefore && pageInfo.checkpoints.startCursor !== null
+      ? { checkpoints: pageInfo.checkpoints.startCursor }
+      : {}),
+  };
+  return Object.keys(before).length === 0 ? null : before;
 }
 
 // `threadProvider` is the open branded driver kind carried by the session.

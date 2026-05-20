@@ -45,6 +45,7 @@ import {
   type ThreadTerminalGroup,
 } from "../types";
 import { readEnvironmentApi } from "~/environmentApi";
+import { useIsMobile } from "~/hooks/useMediaQuery";
 import { readLocalApi } from "~/localApi";
 import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalStateStore";
 import { openPathInPreferredEditorOrFilePreview } from "../workspaceFilePreview";
@@ -1067,6 +1068,7 @@ export default function ThreadTerminalDrawer({
   onAddTerminalContext,
   keybindings,
 }: ThreadTerminalDrawerProps) {
+  const isMobile = useIsMobile();
   const [drawerHeight, setDrawerHeight] = useState(() => clampDrawerHeight(height));
   const [keyboardViewport, setKeyboardViewport] = useState<TerminalKeyboardViewport>(
     EMPTY_TERMINAL_KEYBOARD_VIEWPORT,
@@ -1393,39 +1395,68 @@ export default function ThreadTerminalDrawer({
         onPointerCancel={handleResizePointerEnd}
       />
 
-      {!hasTerminalSidebar && (
-        <div className="pointer-events-none absolute right-2 top-2 z-20">
-          <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background/70">
+      {!hasTerminalSidebar &&
+        (isMobile ? (
+          <div className="flex shrink-0 items-center justify-end gap-1 border-b border-border/60 bg-background px-2 pb-1 pt-1.5">
             <TerminalActionButton
-              className={`p-1 text-foreground/90 transition-colors ${
+              className={`inline-flex size-8 items-center justify-center rounded-md text-foreground/90 transition-colors ${
                 hasReachedSplitLimit
-                  ? "cursor-not-allowed opacity-45 hover:bg-transparent"
-                  : "hover:bg-accent"
+                  ? "cursor-not-allowed opacity-45"
+                  : "hover:bg-accent active:bg-accent"
               }`}
               onClick={onSplitTerminalAction}
               label={splitTerminalActionLabel}
             >
-              <SquareSplitHorizontal className="size-3.25" />
+              <SquareSplitHorizontal className="size-4" />
             </TerminalActionButton>
-            <div className="h-4 w-px bg-border/80" />
             <TerminalActionButton
-              className="p-1 text-foreground/90 transition-colors hover:bg-accent"
+              className="inline-flex size-8 items-center justify-center rounded-md text-foreground/90 transition-colors hover:bg-accent active:bg-accent"
               onClick={onNewTerminalAction}
               label={newTerminalActionLabel}
             >
-              <Plus className="size-3.25" />
+              <Plus className="size-4" />
             </TerminalActionButton>
-            <div className="h-4 w-px bg-border/80" />
             <TerminalActionButton
-              className="p-1 text-foreground/90 transition-colors hover:bg-accent"
+              className="inline-flex size-8 items-center justify-center rounded-md text-foreground/90 transition-colors hover:bg-accent active:bg-accent"
               onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
               label={closeTerminalActionLabel}
             >
-              <Trash2 className="size-3.25" />
+              <Trash2 className="size-4" />
             </TerminalActionButton>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="pointer-events-none absolute right-2 top-2 z-20">
+            <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background/70">
+              <TerminalActionButton
+                className={`p-1 text-foreground/90 transition-colors ${
+                  hasReachedSplitLimit
+                    ? "cursor-not-allowed opacity-45 hover:bg-transparent"
+                    : "hover:bg-accent"
+                }`}
+                onClick={onSplitTerminalAction}
+                label={splitTerminalActionLabel}
+              >
+                <SquareSplitHorizontal className="size-3.25" />
+              </TerminalActionButton>
+              <div className="h-4 w-px bg-border/80" />
+              <TerminalActionButton
+                className="p-1 text-foreground/90 transition-colors hover:bg-accent"
+                onClick={onNewTerminalAction}
+                label={newTerminalActionLabel}
+              >
+                <Plus className="size-3.25" />
+              </TerminalActionButton>
+              <div className="h-4 w-px bg-border/80" />
+              <TerminalActionButton
+                className="p-1 text-foreground/90 transition-colors hover:bg-accent"
+                onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
+                label={closeTerminalActionLabel}
+              >
+                <Trash2 className="size-3.25" />
+              </TerminalActionButton>
+            </div>
+          </div>
+        ))}
 
       <div className="min-h-0 w-full flex-1">
         <div className={`flex h-full min-h-0 ${hasTerminalSidebar ? "gap-1.5" : ""}`}>
@@ -1494,33 +1525,47 @@ export default function ThreadTerminalDrawer({
           </div>
 
           {hasTerminalSidebar && (
-            <aside className="flex w-36 min-w-36 flex-col border border-border/70 bg-muted/10">
-              <div className="flex h-[22px] items-stretch justify-end border-b border-border/70">
+            <aside
+              className={`flex flex-col border border-border/70 bg-muted/10 ${
+                isMobile ? "w-32 min-w-32" : "w-36 min-w-36"
+              }`}
+            >
+              <div
+                className={`flex items-stretch justify-end border-b border-border/70 ${
+                  isMobile ? "h-9" : "h-[22px]"
+                }`}
+              >
                 <div className="inline-flex h-full items-stretch">
                   <TerminalActionButton
-                    className={`inline-flex h-full items-center px-1 text-foreground/90 transition-colors ${
+                    className={`inline-flex h-full items-center ${
+                      isMobile ? "px-2" : "px-1"
+                    } text-foreground/90 transition-colors ${
                       hasReachedSplitLimit
                         ? "cursor-not-allowed opacity-45 hover:bg-transparent"
-                        : "hover:bg-accent/70"
+                        : "hover:bg-accent/70 active:bg-accent/70"
                     }`}
                     onClick={onSplitTerminalAction}
                     label={splitTerminalActionLabel}
                   >
-                    <SquareSplitHorizontal className="size-3.25" />
+                    <SquareSplitHorizontal className={isMobile ? "size-4" : "size-3.25"} />
                   </TerminalActionButton>
                   <TerminalActionButton
-                    className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
+                    className={`inline-flex h-full items-center border-l border-border/70 ${
+                      isMobile ? "px-2" : "px-1"
+                    } text-foreground/90 transition-colors hover:bg-accent/70 active:bg-accent/70`}
                     onClick={onNewTerminalAction}
                     label={newTerminalActionLabel}
                   >
-                    <Plus className="size-3.25" />
+                    <Plus className={isMobile ? "size-4" : "size-3.25"} />
                   </TerminalActionButton>
                   <TerminalActionButton
-                    className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
+                    className={`inline-flex h-full items-center border-l border-border/70 ${
+                      isMobile ? "px-2" : "px-1"
+                    } text-foreground/90 transition-colors hover:bg-accent/70 active:bg-accent/70`}
                     onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
                     label={closeTerminalActionLabel}
                   >
-                    <Trash2 className="size-3.25" />
+                    <Trash2 className={isMobile ? "size-4" : "size-3.25"} />
                   </TerminalActionButton>
                 </div>
               </div>

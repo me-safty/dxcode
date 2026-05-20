@@ -41,9 +41,12 @@ const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
-const STATUS_UPSTREAM_REFRESH_ENV = Object.freeze({
+const NON_INTERACTIVE_GIT_AUTH_ENV = Object.freeze({
   SSH_ASKPASS_REQUIRE: "never",
+  GIT_TERMINAL_PROMPT: "0",
+  GCM_INTERACTIVE: "Never",
 } satisfies NodeJS.ProcessEnv);
+const STATUS_UPSTREAM_REFRESH_ENV = NON_INTERACTIVE_GIT_AUTH_ENV;
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
 const GIT_LIST_BRANCHES_DEFAULT_LIMIT = 100;
 const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitVcsDriver.GitStatusDetails>({
@@ -1425,6 +1428,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const pushCurrentBranch: GitVcsDriver.GitVcsDriverShape["pushCurrentBranch"] = Effect.fn(
     "pushCurrentBranch",
   )(function* (cwd, fallbackBranch, options) {
+    const runPush = (
+      operation: string,
+      args: readonly string[],
+    ): Effect.Effect<void, GitCommandError> =>
+      executeGit(operation, cwd, args, { env: NON_INTERACTIVE_GIT_AUTH_ENV }).pipe(Effect.asVoid);
+
     const details = yield* statusDetails(cwd);
     const branch = details.branch ?? fallbackBranch;
     if (!branch) {
@@ -1439,7 +1448,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const requestedRemoteName = options?.remoteName?.trim() || null;
     if (requestedRemoteName) {
       const publishBranch = yield* resolvePublishBranchName(cwd, branch);
-      yield* runGit("GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote", cwd, [
+      yield* runPush("GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote", [
         "push",
         "-u",
         requestedRemoteName,
@@ -1500,7 +1509,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         );
       }
       const publishBranch = yield* resolvePublishBranchName(cwd, branch);
-      yield* runGit("GitVcsDriver.pushCurrentBranch.pushWithUpstream", cwd, [
+      yield* runPush("GitVcsDriver.pushCurrentBranch.pushWithUpstream", [
         "push",
         "-u",
         publishRemoteName,
@@ -1518,7 +1527,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       Effect.catch(() => Effect.succeed(null)),
     );
     if (currentUpstream) {
-      yield* runGit("GitVcsDriver.pushCurrentBranch.pushUpstream", cwd, [
+      yield* runPush("GitVcsDriver.pushCurrentBranch.pushUpstream", [
         "push",
         currentUpstream.remoteName,
         `HEAD:refs/heads/${currentUpstream.branchName}`,
@@ -1531,7 +1540,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    yield* runGit("GitVcsDriver.pushCurrentBranch.push", cwd, ["push"]);
+    yield* runPush("GitVcsDriver.pushCurrentBranch.push", ["push"]);
     return {
       status: "pushed" as const,
       branch,

@@ -73,7 +73,9 @@ import {
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
 import {
+  type AppState,
   selectProjectsAcrossEnvironments,
+  selectSidebarThreadSummaryByRef,
   selectThreadsAcrossEnvironments,
   useStore,
 } from "../store";
@@ -164,6 +166,7 @@ import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
+  buildOlderThreadDetailPageCursors,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -174,6 +177,7 @@ import {
   PullRequestDialogState,
   cloneComposerImageForRetry,
   deriveLockedProvider,
+  hasOlderThreadDetailPage,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
@@ -635,6 +639,13 @@ export default function ChatView(props: ChatViewProps) {
       [routeKind, routeThreadRef],
     ),
   );
+  const serverThreadSummary = useStore(
+    useMemo(
+      () => (state: AppState) =>
+        routeKind === "server" ? selectSidebarThreadSummaryByRef(state, routeThreadRef) : undefined,
+      [routeKind, routeThreadRef],
+    ),
+  );
   const setStoreThreadError = useStore((store) => store.setError);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const activeThreadLastVisitedAt = useUiStateStore((store) =>
@@ -822,7 +833,10 @@ export default function ChatView(props: ChatViewProps) {
   const isServerThread = routeKind === "server" && serverThread !== undefined;
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const isInitialThreadDetailLoading =
-    routeKind === "server" && shouldShowThreadDetailLoading(activeThread);
+    routeKind === "server" &&
+    shouldShowThreadDetailLoading(activeThread, {
+      hasKnownConversationContent: serverThreadSummary?.latestUserMessageAt != null,
+    });
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
     composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
@@ -1278,7 +1292,7 @@ export default function ChatView(props: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? ProviderDriverKind.make("codex"),
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
-  const phase = derivePhase(activeThread?.session ?? null);
+  const phase = derivePhase(activeThread?.session ?? null, activeLatestTurn);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
@@ -1794,6 +1808,47 @@ export default function ChatView(props: ChatViewProps) {
     },
     [draftId, routeThreadRef, serverThread, setStoreThreadError],
   );
+  const [isLoadingOlderThreadDetail, setIsLoadingOlderThreadDetail] = useState(false);
+  const hasOlderThreadDetail = hasOlderThreadDetailPage(activeThread?.detailPageInfo);
+  const loadOlderThreadDetail = useCallback(async () => {
+    if (!activeThread || isLoadingOlderThreadDetail) {
+      return;
+    }
+
+    const pageInfo = activeThread.detailPageInfo;
+    if (!pageInfo) {
+      return;
+    }
+    const before = buildOlderThreadDetailPageCursors(pageInfo);
+    if (!before) {
+      return;
+    }
+
+    const api = readEnvironmentApi(activeThread.environmentId);
+    if (!api) {
+      setThreadError(activeThread.id, "Reconnect this environment before loading older messages.");
+      return;
+    }
+
+    setIsLoadingOlderThreadDetail(true);
+    try {
+      const snapshot = await api.orchestration.getThreadDetailPage({
+        threadId: activeThread.id,
+        page: { before },
+      });
+      useStore.getState().mergeServerThreadDetailPage(snapshot, activeThread.environmentId);
+    } catch (error) {
+      setThreadError(
+        activeThread.id,
+        error instanceof Error ? error.message : "Failed to load older messages.",
+      );
+    } finally {
+      setIsLoadingOlderThreadDetail(false);
+    }
+  }, [activeThread, isLoadingOlderThreadDetail, setThreadError]);
+  useEffect(() => {
+    setIsLoadingOlderThreadDetail(false);
+  }, [activeThreadKey]);
 
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
@@ -2468,7 +2523,7 @@ export default function ChatView(props: ChatViewProps) {
     });
     resetLocalDispatch();
     setExpandedImage(null);
-  }, [draftId, resetLocalDispatch, threadId]);
+  }, [activeThreadKey, resetLocalDispatch]);
 
   const closeExpandedImage = useCallback(() => {
     setExpandedImage(null);
@@ -3736,6 +3791,9 @@ export default function ChatView(props: ChatViewProps) {
               timestampFormat={timestampFormat}
               workspaceRoot={activeWorkspaceRoot}
               skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
+              hasOlderThreadDetail={hasOlderThreadDetail}
+              isLoadingOlderThreadDetail={isLoadingOlderThreadDetail}
+              onLoadOlderThreadDetail={loadOlderThreadDetail}
               onIsAtEndChange={onIsAtEndChange}
               onUserScrollIntent={onTimelineUserScrollIntent}
             />

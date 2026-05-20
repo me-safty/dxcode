@@ -221,6 +221,9 @@ function createMockEnvironmentApi(input: {
       getFullThreadDiff: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getFullThreadDiff"],
+      getThreadDetailPage: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["getThreadDetailPage"],
       getArchivedShellSnapshot: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getArchivedShellSnapshot"],
@@ -506,6 +509,39 @@ function updateThreadSessionInSnapshot(
   };
 }
 
+function appendUserMessageToThreadSnapshot(
+  snapshot: OrchestrationReadModel,
+  threadId: ThreadId,
+  input: { id: MessageId; text: string },
+): OrchestrationReadModel {
+  const createdAt = isoAt(snapshot.snapshotSequence + 1);
+  return {
+    ...snapshot,
+    snapshotSequence: snapshot.snapshotSequence + 1,
+    updatedAt: createdAt,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === threadId
+        ? {
+            ...thread,
+            messages: [
+              ...thread.messages,
+              {
+                ...createUserMessage({
+                  id: input.id,
+                  text: input.text,
+                  offsetSeconds: snapshot.snapshotSequence + 1,
+                }),
+                createdAt,
+                updatedAt: isoAt(snapshot.snapshotSequence + 2),
+              },
+            ],
+            updatedAt: createdAt,
+          }
+        : thread,
+    ),
+  };
+}
+
 function sendShellThreadUpsert(
   threadId: ThreadId,
   options?: {
@@ -611,6 +647,10 @@ async function startPromotedServerThreadViaDomainEvent(threadId: ThreadId): Prom
 
 async function promoteDraftThreadViaDomainEvent(threadId: ThreadId): Promise<void> {
   await materializePromotedDraftThreadViaDomainEvent(threadId);
+  fixture.snapshot = appendUserMessageToThreadSnapshot(fixture.snapshot, threadId, {
+    id: `msg-promoted-${threadId}` as MessageId,
+    text: "Promoted draft message",
+  });
   await startPromotedServerThreadViaDomainEvent(threadId);
   await vi.waitFor(
     () => {
@@ -1026,6 +1066,26 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
         },
       ],
     };
+  }
+  if (tag === ORCHESTRATION_WS_METHODS.probeSync) {
+    const clientSequence = typeof body.clientSequence === "number" ? body.clientSequence : 0;
+    return {
+      clientSequence,
+      serverSequence: fixture.snapshot.snapshotSequence,
+      behind: fixture.snapshot.snapshotSequence > clientSequence,
+    };
+  }
+  if (tag === ORCHESTRATION_WS_METHODS.replayEvents) {
+    return [];
+  }
+  if (tag === ORCHESTRATION_WS_METHODS.getThreadDetailPage) {
+    const thread = fixture.snapshot.threads.find((entry) => entry.id === body.threadId);
+    return thread
+      ? {
+          snapshotSequence: fixture.snapshot.snapshotSequence,
+          thread,
+        }
+      : {};
   }
   if (tag === WS_METHODS.vcsListRefs) {
     return {
@@ -3881,8 +3941,23 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(mounted.router.state.location.pathname).toBe(newThreadPath);
       await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
 
-      // Once the server thread starts, the route should canonicalize.
+      // A running shell-only promotion should keep the draft route mounted
+      // until thread detail has carried the submitted message.
       await startPromotedServerThreadViaDomainEvent(newThreadId);
+      expect(mounted.router.state.location.pathname).toBe(newThreadPath);
+      await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
+
+      fixture.snapshot = appendUserMessageToThreadSnapshot(fixture.snapshot, newThreadId, {
+        id: "msg-user-promoted-canonicalize" as MessageId,
+        text: "Promoted draft detail",
+      });
+      rpcHarness.emitStreamValue(ORCHESTRATION_WS_METHODS.subscribeThread, {
+        kind: "snapshot",
+        snapshot: {
+          snapshotSequence: fixture.snapshot.snapshotSequence,
+          thread: fixture.snapshot.threads.find((thread) => thread.id === newThreadId)!,
+        },
+      });
       await vi.waitFor(
         () => {
           expect(useComposerDraftStore.getState().draftThreadsByThreadKey[newDraftId]).toBe(
@@ -3900,9 +3975,56 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
 
       // The composer should remain usable after canonicalization, regardless of
-      // whether the promoted thread is still visibly empty or has already
-      // entered the running state.
+      // whether the promoted thread is still running.
       await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps a sent draft message visible while promotion waits for thread detail", async () => {
+    const sentText = "Keep this visible after promotion";
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-draft-send-visibility-test" as MessageId,
+        targetText: "draft send visibility test",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const newThreadButton = page.getByTestId("new-thread-button");
+      await expect.element(newThreadButton).toBeInTheDocument();
+      await newThreadButton.click();
+
+      const newThreadPath = await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should have changed to a new draft thread UUID.",
+      );
+      const newDraftId = draftIdFromPath(newThreadPath);
+      const newThreadId = draftThreadIdFor(newDraftId);
+
+      await page.getByTestId("composer-editor").fill(sentText);
+      const sendButton = await waitForSendButton();
+      expect(sendButton.disabled).toBe(false);
+      await sendButton.click();
+
+      await expect.element(page.getByText(sentText)).toBeInTheDocument();
+      await materializePromotedDraftThreadViaDomainEvent(newThreadId);
+      await startPromotedServerThreadViaDomainEvent(newThreadId);
+      await waitForLayout();
+
+      expect(mounted.router.state.location.pathname).toBe(newThreadPath);
+      await expect.element(page.getByText(sentText)).toBeInTheDocument();
     } finally {
       await mounted.cleanup();
     }

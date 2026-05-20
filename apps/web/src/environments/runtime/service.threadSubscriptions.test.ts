@@ -1,11 +1,14 @@
 import { QueryClient } from "@tanstack/react-query";
 import {
   CommandId,
+  EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
   EnvironmentId,
   EventId,
   MessageId,
   type OrchestrationEvent,
   type OrchestrationThread,
+  type OrchestrationThreadDetailPageInfo,
+  type OrchestrationThreadDetailSnapshot,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -16,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSubscribeThread = vi.fn();
 const mockThreadUnsubscribe = vi.fn();
+const mockProbeSync = vi.fn();
 const mockReplayEvents = vi.fn();
 const mockCreateEnvironmentConnection = vi.fn();
 const mockCreateWsRpcClient = vi.fn();
@@ -201,6 +205,7 @@ function makeThreadDetailSnapshot(params: {
   readonly threadId: ThreadId;
   readonly updatedAt?: string;
   readonly messages?: OrchestrationThread["messages"];
+  readonly pageInfo?: OrchestrationThreadDetailPageInfo;
   readonly sessionStatus?:
     | "idle"
     | "starting"
@@ -209,7 +214,7 @@ function makeThreadDetailSnapshot(params: {
     | "interrupted"
     | "stopped"
     | "error";
-}): { readonly snapshotSequence: number; readonly thread: OrchestrationThread } {
+}): OrchestrationThreadDetailSnapshot {
   const shellThread = makeThreadShellSnapshot({
     threadId: params.threadId,
     ...(params.sessionStatus !== undefined ? { sessionStatus: params.sessionStatus } : {}),
@@ -237,6 +242,7 @@ function makeThreadDetailSnapshot(params: {
             }
           : shellThread.session,
     },
+    pageInfo: params.pageInfo ?? EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
   };
 }
 
@@ -329,6 +335,19 @@ describe("retainThreadDetailSubscription", () => {
     vi.useFakeTimers();
     vi.resetModules();
     vi.clearAllMocks();
+    mockSubscribeThread.mockReset();
+    mockThreadUnsubscribe.mockReset();
+    mockProbeSync.mockReset();
+    mockReplayEvents.mockReset();
+    mockCreateEnvironmentConnection.mockReset();
+    mockCreateWsRpcClient.mockReset();
+    mockWaitForSavedEnvironmentRegistryHydration.mockReset();
+    mockListSavedEnvironmentRecords.mockReset();
+    mockGetSavedEnvironmentRecord.mockReset();
+    mockReadSavedEnvironmentBearerToken.mockReset();
+    mockSavedEnvironmentRegistrySubscribe.mockReset();
+    mockGetPrimaryKnownEnvironment.mockReset();
+    mockFetchRemoteSessionState.mockReset();
     mockGetPrimaryKnownEnvironment.mockReturnValue({
       id: "env-1",
       label: "Primary environment",
@@ -357,6 +376,7 @@ describe("retainThreadDetailSubscription", () => {
       isHeartbeatFresh: vi.fn(() => true),
       orchestration: {
         subscribeThread: mockSubscribeThread,
+        probeSync: mockProbeSync,
         replayEvents: mockReplayEvents,
       },
     });
@@ -391,6 +411,11 @@ describe("retainThreadDetailSubscription", () => {
       role: "client",
     });
     mockConnectionReconnects.length = 0;
+    mockProbeSync.mockResolvedValue({
+      clientSequence: 1,
+      serverSequence: 1,
+      behind: false,
+    });
     mockReplayEvents.mockResolvedValue([]);
   });
 
@@ -791,6 +816,7 @@ describe("retainThreadDetailSubscription", () => {
           activities: [],
           checkpoints: [],
         },
+        pageInfo: EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
       },
     });
 
@@ -798,6 +824,71 @@ describe("retainThreadDetailSubscription", () => {
 
     expect(thread?.session?.status).toBe("ready");
     expect(thread?.latestTurn?.state).toBe("completed");
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("stores thread detail pagination cursors from subscription snapshots", async () => {
+    const {
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectEnvironmentState, selectThreadByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-page-info");
+    const pageInfo: OrchestrationThreadDetailPageInfo = {
+      ...EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+      messages: {
+        hasMoreBefore: true,
+        startCursor: {
+          id: "message-10",
+          createdAt: "2026-04-13T00:00:10.000Z",
+        },
+      },
+    };
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "ready",
+      }),
+      environmentId,
+    );
+
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    const detailListener = mockSubscribeThread.mock.calls[0]?.[1] as
+      | ((item: {
+          readonly kind: "snapshot";
+          readonly snapshot: ReturnType<typeof makeThreadDetailSnapshot>;
+        }) => void)
+      | undefined;
+    expect(detailListener).toBeDefined();
+    detailListener?.({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        pageInfo,
+      }),
+    });
+
+    const state = useStore.getState();
+    const thread = selectThreadByRef(state, scopeThreadRef(environmentId, threadId));
+    const environmentState = selectEnvironmentState(state, environmentId);
+
+    expect(thread?.detailPageInfo).toEqual(pageInfo);
+    expect(environmentState.threadDetailPageInfoByThreadId[threadId]).toEqual(pageInfo);
 
     release();
     stop();
@@ -967,6 +1058,11 @@ describe("retainThreadDetailSubscription", () => {
 
     const release = retainThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    mockProbeSync.mockResolvedValueOnce({
+      clientSequence: 1,
+      serverSequence: 2,
+      behind: true,
+    });
     mockReplayEvents.mockResolvedValueOnce([makeThreadArchivedEvent({ sequence: 2, threadId })]);
 
     visibilityState = "hidden";
@@ -979,6 +1075,100 @@ describe("retainThreadDetailSubscription", () => {
     });
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(300);
+    await vi.waitFor(() => {
+      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
+      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
+    });
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("periodically reconciles a retained active thread that missed completion events", async () => {
+    const {
+      retainThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectThreadByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-reconcile");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    mockProbeSync.mockResolvedValueOnce({
+      clientSequence: 1,
+      serverSequence: 2,
+      behind: true,
+    });
+    mockReplayEvents.mockResolvedValueOnce([
+      makeThreadSessionSetEvent({
+        sequence: 2,
+        threadId,
+        status: "ready",
+      }),
+    ]);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+      expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
+    });
+
+    const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
+    expect(thread?.session?.status).toBe("ready");
+    expect(thread?.session?.activeTurnId).toBeUndefined();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("refreshes a retained active thread detail subscription when the initial snapshot stalls", async () => {
+    const {
+      retainThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-initial-snapshot-stalled");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(300);
+
     await vi.waitFor(() => {
       expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
       expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
@@ -1086,8 +1276,461 @@ describe("retainThreadDetailSubscription", () => {
     visibilityState = "visible";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
     await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+    });
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("probes the backend cursor on browser resume and skips replay when current", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-current-probe-resume");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "ready",
+      }),
+      environmentId,
+    );
+
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    visibilityState = "visible";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+    });
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("replays from the current cursor when the browser resume probe reports the backend is ahead", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+    mockProbeSync.mockResolvedValueOnce({
+      clientSequence: 1,
+      serverSequence: 2,
+      behind: true,
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectThreadByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-behind-probe-resume");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+    mockReplayEvents.mockResolvedValueOnce([
+      makeThreadSessionSetEvent({
+        sequence: 2,
+        threadId,
+        status: "ready",
+      }),
+    ]);
+
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    visibilityState = "visible";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
       expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
     });
+    const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
+    expect(thread?.session?.status).toBe("ready");
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not reconcile on foreground focus without a prior background signal", async () => {
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      visibilityState: "visible",
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects).toHaveLength(1);
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-primary-focus-resume");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    windowTarget.dispatchEvent(new Event("focus"));
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockProbeSync).not.toHaveBeenCalled();
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("reconciles a retained thread on foreground focus without a prior background signal", async () => {
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      visibilityState: "visible",
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+
+    const {
+      retainThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectThreadByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects).toHaveLength(1);
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-primary-focus-visible-resume");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    mockProbeSync.mockResolvedValueOnce({
+      clientSequence: 1,
+      serverSequence: 2,
+      behind: true,
+    });
+    mockReplayEvents.mockResolvedValueOnce([
+      makeThreadSessionSetEvent({
+        sequence: 2,
+        threadId,
+        status: "ready",
+      }),
+    ]);
+
+    windowTarget.dispatchEvent(new Event("focus"));
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+      expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
+    });
+    const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
+    expect(thread?.session?.status).toBe("ready");
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not reconnect a retained thread on foreground focus when the backend cursor is current", async () => {
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      visibilityState: "visible",
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+
+    const {
+      retainThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects).toHaveLength(1);
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-primary-focus-current");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+
+    windowTarget.dispatchEvent(new Event("focus"));
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+    });
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not reconcile on normal pageshow without a prior background signal", async () => {
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      visibilityState: "visible",
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects).toHaveLength(1);
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-primary-pageshow-resume");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    windowTarget.dispatchEvent(new Event("pageshow"));
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockProbeSync).not.toHaveBeenCalled();
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("reconciles a retained thread on normal pageshow without a prior background signal", async () => {
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      visibilityState: "visible",
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+
+    const {
+      retainThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectThreadByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects).toHaveLength(1);
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-primary-pageshow-visible-resume");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    mockProbeSync.mockResolvedValueOnce({
+      clientSequence: 1,
+      serverSequence: 2,
+      behind: true,
+    });
+    mockReplayEvents.mockResolvedValueOnce([
+      makeThreadSessionSetEvent({
+        sequence: 2,
+        threadId,
+        status: "ready",
+      }),
+    ]);
+
+    windowTarget.dispatchEvent(new Event("pageshow"));
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+      expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
+    });
+    const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
+    expect(thread?.session?.status).toBe("ready");
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("reconciles the primary environment cursor after bfcache pageshow", async () => {
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      visibilityState: "visible",
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects).toHaveLength(1);
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-primary-bfcache-resume");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    const pageshow = new Event("pageshow") as PageTransitionEvent;
+    Object.defineProperty(pageshow, "persisted", { value: true });
+    windowTarget.dispatchEvent(pageshow);
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+    });
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("reconciles the primary environment cursor after pagehide and pageshow", async () => {
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      visibilityState: "visible",
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects).toHaveLength(1);
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-primary-pagehide-resume");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    windowTarget.dispatchEvent(new Event("pagehide"));
+    windowTarget.dispatchEvent(new Event("pageshow"));
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+    });
+    expect(mockReplayEvents).not.toHaveBeenCalled();
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     stop();
@@ -1166,10 +1809,11 @@ describe("retainThreadDetailSubscription", () => {
     visibilityState = "visible";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
     await vi.waitFor(() => {
-      expect(mockReplayEvents).toHaveBeenCalledTimes(2);
+      expect(mockProbeSync).toHaveBeenCalledTimes(2);
     });
-    expect(mockReplayEvents).toHaveBeenNthCalledWith(1, { fromSequenceExclusive: 1 });
-    expect(mockReplayEvents).toHaveBeenNthCalledWith(2, { fromSequenceExclusive: 1 });
+    expect(mockProbeSync).toHaveBeenNthCalledWith(1, { clientSequence: 1 });
+    expect(mockProbeSync).toHaveBeenNthCalledWith(2, { clientSequence: 1 });
+    expect(mockReplayEvents).not.toHaveBeenCalled();
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
     expect(mockConnectionReconnects[1]).not.toHaveBeenCalled();
 
@@ -1204,11 +1848,17 @@ describe("retainThreadDetailSubscription", () => {
           },
         })),
       },
-      isHeartbeatFresh: vi.fn(() => false),
+      isHeartbeatFresh: vi.fn(() => true),
       orchestration: {
         subscribeThread: mockSubscribeThread,
+        probeSync: mockProbeSync,
         replayEvents: mockReplayEvents,
       },
+    });
+    mockProbeSync.mockResolvedValueOnce({
+      clientSequence: 1,
+      serverSequence: 2,
+      behind: true,
     });
     mockReplayEvents.mockRejectedValueOnce(new Error("stale stream"));
 
@@ -1239,6 +1889,124 @@ describe("retainThreadDetailSubscription", () => {
       expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
       expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
     });
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("reconnects when the browser resume sync probe fails", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+    mockProbeSync.mockRejectedValueOnce(new Error("stale socket"));
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects).toHaveLength(1);
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-stale-probe-resume");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "ready",
+      }),
+      environmentId,
+    );
+
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    visibilityState = "visible";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("reconnects immediately on browser resume when the heartbeat is stale", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+    mockCreateWsRpcClient.mockReturnValue({
+      server: {
+        getConfig: vi.fn(async () => ({
+          environment: {
+            environmentId: EnvironmentId.make("env-remote"),
+            label: "Remote env",
+            platform: { os: "darwin", arch: "arm64" },
+            serverVersion: "0.0.0-test",
+            capabilities: { repositoryIdentity: true },
+          },
+        })),
+      },
+      isHeartbeatFresh: vi.fn(() => false),
+      orchestration: {
+        subscribeThread: mockSubscribeThread,
+        probeSync: mockProbeSync,
+        replayEvents: mockReplayEvents,
+      },
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects).toHaveLength(1);
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-stale-heartbeat-resume");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "ready",
+      }),
+      environmentId,
+    );
+
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    visibilityState = "visible";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+    expect(mockProbeSync).not.toHaveBeenCalled();
+    expect(mockReplayEvents).not.toHaveBeenCalled();
 
     stop();
     await resetEnvironmentServiceForTests();

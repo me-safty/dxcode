@@ -3331,6 +3331,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         layers: {
           projectionSnapshotQuery: {
             getSnapshot: () => Effect.succeed(snapshot),
+            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 9 }),
           },
           orchestrationEngine: {
             dispatch: () => Effect.succeed({ sequence: 7 }),
@@ -3397,6 +3398,19 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
       assert.deepEqual(replayResult, []);
+
+      const syncProbe = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.probeSync]({
+            clientSequence: 5,
+          }),
+        ),
+      );
+      assert.deepEqual(syncProbe, {
+        clientSequence: 5,
+        serverSequence: 9,
+        behind: true,
+      });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

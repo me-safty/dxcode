@@ -1,5 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import {
+  EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
   EnvironmentId,
   MessageId,
   ProjectId,
@@ -15,8 +16,10 @@ import { type Thread } from "../types";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
+  buildOlderThreadDetailPageCursors,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
+  hasOlderThreadDetailPage,
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
@@ -351,6 +354,7 @@ function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) 
         Object.fromEntries(thread.turnDiffSummaries.map((summary) => [summary.turnId, summary])),
       ]),
     ),
+    threadDetailPageInfoByThreadId: {},
     sidebarThreadSummaryById: {},
     bootstrapComplete: true,
   };
@@ -389,6 +393,14 @@ describe("shouldShowThreadDetailLoading", () => {
     expect(shouldShowThreadDetailLoading(makeThread())).toBe(false);
   });
 
+  it("shows detail loading for a known existing shell thread before detail rows arrive", () => {
+    expect(
+      shouldShowThreadDetailLoading(makeThread(), {
+        hasKnownConversationContent: true,
+      }),
+    ).toBe(true);
+  });
+
   it("does not show detail loading after conversation detail content arrives", () => {
     expect(
       shouldShowThreadDetailLoading(
@@ -414,6 +426,76 @@ describe("shouldShowThreadDetailLoading", () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("thread detail pagination cursors", () => {
+  it("does not offer older detail loading when no collection has a usable cursor", () => {
+    expect(hasOlderThreadDetailPage(null)).toBe(false);
+    expect(hasOlderThreadDetailPage(EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO)).toBe(false);
+    expect(
+      hasOlderThreadDetailPage({
+        ...EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+        messages: {
+          hasMoreBefore: true,
+          startCursor: null,
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("builds a request cursor only for collections with older rows", () => {
+    const pageInfo = {
+      ...EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+      messages: {
+        hasMoreBefore: true,
+        startCursor: {
+          id: "message-4",
+          createdAt: "2026-03-29T00:00:04.000Z",
+        },
+      },
+      proposedPlans: {
+        hasMoreBefore: false,
+        startCursor: {
+          id: "plan-4",
+          createdAt: "2026-03-29T00:00:04.000Z",
+        },
+      },
+      activities: {
+        hasMoreBefore: true,
+        startCursor: {
+          id: "activity-4",
+          createdAt: "2026-03-29T00:00:04.000Z",
+          sequence: 4,
+        },
+      },
+      checkpoints: {
+        hasMoreBefore: true,
+        startCursor: {
+          id: "turn-4",
+          createdAt: "2026-03-29T00:00:04.000Z",
+          checkpointTurnCount: 4,
+        },
+      },
+    };
+
+    expect(hasOlderThreadDetailPage(pageInfo)).toBe(true);
+    expect(buildOlderThreadDetailPageCursors(pageInfo)).toEqual({
+      messages: {
+        id: "message-4",
+        createdAt: "2026-03-29T00:00:04.000Z",
+      },
+      activities: {
+        id: "activity-4",
+        createdAt: "2026-03-29T00:00:04.000Z",
+        sequence: 4,
+      },
+      checkpoints: {
+        id: "turn-4",
+        createdAt: "2026-03-29T00:00:04.000Z",
+        checkpointTurnCount: 4,
+      },
+    });
   });
 });
 

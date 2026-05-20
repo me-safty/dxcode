@@ -1,4 +1,9 @@
-import type { MessageId, ThreadId, TurnId } from "@t3tools/contracts";
+import {
+  EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+  type MessageId,
+  type ThreadId,
+  type TurnId,
+} from "@t3tools/contracts";
 import type { EnvironmentState } from "./store";
 import type {
   ChatMessage,
@@ -29,6 +34,7 @@ const threadCache = new WeakMap<
     activities: Thread["activities"];
     proposedPlans: Thread["proposedPlans"];
     turnDiffSummaries: Thread["turnDiffSummaries"];
+    detailPageInfo: Thread["detailPageInfo"];
     thread: Thread;
   }
 >();
@@ -113,6 +119,8 @@ export function getThreadFromEnvironmentState(
   const activities = selectThreadActivities(state, threadId);
   const proposedPlans = selectThreadProposedPlans(state, threadId);
   const turnDiffSummaries = selectThreadTurnDiffSummaries(state, threadId);
+  const detailPageInfo =
+    state.threadDetailPageInfoByThreadId[threadId] ?? EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO;
   const cached = threadCache.get(shell);
 
   if (
@@ -122,7 +130,8 @@ export function getThreadFromEnvironmentState(
     cached.messages === messages &&
     cached.activities === activities &&
     cached.proposedPlans === proposedPlans &&
-    cached.turnDiffSummaries === turnDiffSummaries
+    cached.turnDiffSummaries === turnDiffSummaries &&
+    cached.detailPageInfo === detailPageInfo
   ) {
     return cached.thread;
   }
@@ -136,6 +145,7 @@ export function getThreadFromEnvironmentState(
     activities,
     proposedPlans,
     turnDiffSummaries,
+    detailPageInfo,
   };
 
   threadCache.set(shell, {
@@ -145,6 +155,7 @@ export function getThreadFromEnvironmentState(
     activities,
     proposedPlans,
     turnDiffSummaries,
+    detailPageInfo,
     thread,
   });
 

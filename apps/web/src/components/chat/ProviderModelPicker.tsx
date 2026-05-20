@@ -1,6 +1,7 @@
 import {
   type ProviderInstanceId,
   type ProviderDriverKind,
+  type ProviderOptionSelection,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { memo, useEffect, useMemo, useState } from "react";
@@ -21,6 +22,23 @@ import { setModelPickerOpen } from "../../modelPickerOpenState";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 
+const REASONING_MODEL_OPTION_IDS = new Set(["reasoningEffort", "reasoning", "effort"]);
+
+function getReasoningLevelValue(
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+): string | null {
+  for (const selection of selections ?? []) {
+    if (!REASONING_MODEL_OPTION_IDS.has(selection.id) || typeof selection.value !== "string") {
+      continue;
+    }
+    const trimmed = selection.value.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+  return null;
+}
+
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
    * The instance currently selected in the composer. Drives the trigger
@@ -34,6 +52,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
+  modelOptionSelections?: ReadonlyArray<ProviderOptionSelection> | null | undefined;
   activeProviderIconClassName?: string;
   compact?: boolean;
   disabled?: boolean;
@@ -72,7 +91,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     selectedInstanceOptions[0];
   const triggerTitle = selectedModel ? getTriggerDisplayModelName(selectedModel) : props.model;
   const triggerSubtitle = selectedModel?.subProvider;
-  const triggerLabel = selectedModel ? getTriggerDisplayModelLabel(selectedModel) : props.model;
+  const triggerReasoningLevel = getReasoningLevelValue(props.modelOptionSelections);
+  const triggerBaseLabel = selectedModel ? getTriggerDisplayModelLabel(selectedModel) : props.model;
+  const triggerLabel = triggerReasoningLevel
+    ? `${triggerBaseLabel} ${triggerReasoningLevel}`
+    : triggerBaseLabel;
   const duplicateDriverCount = props.instanceEntries.filter(
     (entry) => activeEntry !== null && entry.driverKind === activeEntry.driverKind,
   ).length;
@@ -158,8 +181,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                   className={cn(
                     "min-w-0 flex-1 overflow-hidden",
                     triggerSubtitle
-                      ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1"
-                      : "truncate",
+                      ? triggerReasoningLevel
+                        ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-1"
+                        : "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1"
+                      : "flex items-center gap-1",
                   )}
                 />
               }
@@ -171,9 +196,21 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                     ·
                   </span>
                   <span className="min-w-0 truncate">{triggerTitle}</span>
+                  {triggerReasoningLevel ? (
+                    <span className="shrink-0 text-muted-foreground/60">
+                      {triggerReasoningLevel}
+                    </span>
+                  ) : null}
                 </>
               ) : (
-                triggerTitle
+                <>
+                  <span className="min-w-0 truncate">{triggerTitle}</span>
+                  {triggerReasoningLevel ? (
+                    <span className="shrink-0 text-muted-foreground/60">
+                      {triggerReasoningLevel}
+                    </span>
+                  ) : null}
+                </>
               )}
             </TooltipTrigger>
             <TooltipPopup side="top">{triggerLabel}</TooltipPopup>

@@ -12,13 +12,19 @@ import type {
   OrchestrationSession,
   OrchestrationSessionStatus,
   OrchestrationThread,
+  OrchestrationThreadDetailPageInfo,
+  OrchestrationThreadDetailSnapshot,
   OrchestrationThreadShell,
   OrchestrationThreadActivity,
   ProjectId,
   ScopedProjectRef,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import { isProviderDriverKind, ProviderDriverKind } from "@t3tools/contracts";
+import {
+  EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+  isProviderDriverKind,
+  ProviderDriverKind,
+} from "@t3tools/contracts";
 import type { ThreadId, TurnId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
@@ -77,6 +83,7 @@ export interface EnvironmentState {
   proposedPlanByThreadId: Record<ThreadId, Record<string, ProposedPlan>>;
   turnDiffIdsByThreadId: Record<ThreadId, TurnId[]>;
   turnDiffSummaryByThreadId: Record<ThreadId, Record<TurnId, TurnDiffSummary>>;
+  threadDetailPageInfoByThreadId: Record<ThreadId, OrchestrationThreadDetailPageInfo>;
 
   // ---------------------------------------------------------------------------
   // Sidebar summary — written ONLY by the shell stream
@@ -111,6 +118,7 @@ const initialEnvironmentState: EnvironmentState = {
   proposedPlanByThreadId: {},
   turnDiffIdsByThreadId: {},
   turnDiffSummaryByThreadId: {},
+  threadDetailPageInfoByThreadId: {},
   sidebarThreadSummaryById: {},
   bootstrapComplete: false,
 };
@@ -122,6 +130,7 @@ const initialState: AppState = {
 
 interface ThreadDetailWriteOptions {
   readonly preserveShellFields?: boolean;
+  readonly pageInfo?: OrchestrationThreadDetailPageInfo;
 }
 
 const MAX_THREAD_MESSAGES = 2_000;
@@ -234,7 +243,11 @@ function mapProject(
   };
 }
 
-function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): Thread {
+function mapThread(
+  thread: OrchestrationThread,
+  environmentId: EnvironmentId,
+  pageInfo: OrchestrationThreadDetailPageInfo = EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+): Thread {
   return {
     id: thread.id,
     environmentId,
@@ -257,6 +270,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     worktreePath: thread.worktreePath,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
+    detailPageInfo: pageInfo,
   };
 }
 
@@ -436,6 +450,43 @@ function threadTurnStatesEqual(left: ThreadTurnState | undefined, right: ThreadT
     left !== undefined &&
     latestTurnsEqual(left.latestTurn, right.latestTurn) &&
     sourceProposedPlansEqual(left.pendingSourceProposedPlan, right.pendingSourceProposedPlan)
+  );
+}
+
+function threadDetailPageCursorsEqual(
+  left: OrchestrationThreadDetailPageInfo["messages"]["startCursor"],
+  right: OrchestrationThreadDetailPageInfo["messages"]["startCursor"],
+): boolean {
+  if (left === right) return true;
+  if (left === null || right === null) return false;
+  return (
+    left.id === right.id &&
+    left.createdAt === right.createdAt &&
+    left.sequence === right.sequence &&
+    left.checkpointTurnCount === right.checkpointTurnCount
+  );
+}
+
+function threadDetailCollectionPageInfosEqual(
+  left: OrchestrationThreadDetailPageInfo["messages"],
+  right: OrchestrationThreadDetailPageInfo["messages"],
+): boolean {
+  return (
+    left.hasMoreBefore === right.hasMoreBefore &&
+    threadDetailPageCursorsEqual(left.startCursor, right.startCursor)
+  );
+}
+
+function threadDetailPageInfosEqual(
+  left: OrchestrationThreadDetailPageInfo | undefined,
+  right: OrchestrationThreadDetailPageInfo,
+): boolean {
+  return (
+    left !== undefined &&
+    threadDetailCollectionPageInfosEqual(left.messages, right.messages) &&
+    threadDetailCollectionPageInfosEqual(left.proposedPlans, right.proposedPlans) &&
+    threadDetailCollectionPageInfosEqual(left.activities, right.activities) &&
+    threadDetailCollectionPageInfosEqual(left.checkpoints, right.checkpoints)
   );
 }
 
@@ -692,6 +743,20 @@ function writeThreadState(
     };
   }
 
+  const nextPageInfo =
+    options.pageInfo ?? nextThread.detailPageInfo ?? EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO;
+  if (
+    !threadDetailPageInfosEqual(state.threadDetailPageInfoByThreadId[nextThread.id], nextPageInfo)
+  ) {
+    nextState = {
+      ...nextState,
+      threadDetailPageInfoByThreadId: {
+        ...nextState.threadDetailPageInfoByThreadId,
+        [nextThread.id]: nextPageInfo,
+      },
+    };
+  }
+
   return nextState;
 }
 
@@ -820,6 +885,8 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
   const { [threadId]: _removedTurnDiffIds, ...turnDiffIdsByThreadId } = state.turnDiffIdsByThreadId;
   const { [threadId]: _removedTurnDiffs, ...turnDiffSummaryByThreadId } =
     state.turnDiffSummaryByThreadId;
+  const { [threadId]: _removedPageInfo, ...threadDetailPageInfoByThreadId } =
+    state.threadDetailPageInfoByThreadId;
   const { [threadId]: _removedSidebarSummary, ...sidebarThreadSummaryById } =
     state.sidebarThreadSummaryById;
 
@@ -838,6 +905,7 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
     proposedPlanByThreadId,
     turnDiffIdsByThreadId,
     turnDiffSummaryByThreadId,
+    threadDetailPageInfoByThreadId,
     sidebarThreadSummaryById,
   };
 }
@@ -1121,6 +1189,10 @@ function syncEnvironmentShellSnapshot(
       state.turnDiffSummaryByThreadId,
       nextThreadIds,
     ),
+    threadDetailPageInfoByThreadId: retainThreadScopedRecord(
+      state.threadDetailPageInfoByThreadId,
+      nextThreadIds,
+    ),
     bootstrapComplete: true,
   };
 
@@ -1158,7 +1230,71 @@ export function syncServerThreadDetail(
   return commitEnvironmentState(
     state,
     environmentId,
-    writeThreadState(environmentState, mapThread(thread, environmentId), previousThread, options),
+    writeThreadState(
+      environmentState,
+      mapThread(thread, environmentId, options?.pageInfo),
+      previousThread,
+      options,
+    ),
+  );
+}
+
+function mergeOlderItems<TItem, TId extends string>(
+  olderItems: readonly TItem[],
+  currentItems: readonly TItem[],
+  getId: (item: TItem) => TId,
+): TItem[] {
+  const seen = new Set<TId>();
+  const merged: TItem[] = [];
+  for (const item of [...olderItems, ...currentItems]) {
+    const id = getId(item);
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    merged.push(item);
+  }
+  return merged;
+}
+
+export function mergeServerThreadDetailPage(
+  state: AppState,
+  snapshot: OrchestrationThreadDetailSnapshot,
+  environmentId: EnvironmentId,
+): AppState {
+  const environmentState = getStoredEnvironmentState(state, environmentId);
+  const previousThread = getThreadFromEnvironmentState(environmentState, snapshot.thread.id);
+  const pageThread = mapThread(snapshot.thread, environmentId, snapshot.pageInfo);
+  const nextThread: Thread = previousThread
+    ? {
+        ...pageThread,
+        messages: mergeOlderItems(
+          pageThread.messages,
+          previousThread.messages,
+          (message) => message.id,
+        ),
+        proposedPlans: mergeOlderItems(
+          pageThread.proposedPlans,
+          previousThread.proposedPlans,
+          (plan) => plan.id,
+        ),
+        activities: mergeOlderItems(
+          pageThread.activities,
+          previousThread.activities,
+          (activity) => activity.id,
+        ),
+        turnDiffSummaries: mergeOlderItems(
+          pageThread.turnDiffSummaries,
+          previousThread.turnDiffSummaries,
+          (summary) => summary.turnId,
+        ),
+      }
+    : pageThread;
+
+  return commitEnvironmentState(
+    state,
+    environmentId,
+    writeThreadState(environmentState, nextThread, previousThread, { pageInfo: snapshot.pageInfo }),
   );
 }
 
@@ -2069,6 +2205,10 @@ interface AppStore extends AppState {
     environmentId: EnvironmentId,
     options?: ThreadDetailWriteOptions,
   ) => void;
+  mergeServerThreadDetailPage: (
+    snapshot: OrchestrationThreadDetailSnapshot,
+    environmentId: EnvironmentId,
+  ) => void;
   applyOrchestrationEvent: (event: OrchestrationEvent, environmentId: EnvironmentId) => void;
   applyOrchestrationEvents: (
     events: ReadonlyArray<OrchestrationEvent>,
@@ -2096,6 +2236,8 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => syncServerShellSnapshot(state, snapshot, environmentId)),
   syncServerThreadDetail: (thread, environmentId, options) =>
     set((state) => syncServerThreadDetail(state, thread, environmentId, options)),
+  mergeServerThreadDetailPage: (snapshot, environmentId) =>
+    set((state) => mergeServerThreadDetailPage(state, snapshot, environmentId)),
   applyOrchestrationEvent: (event, environmentId) =>
     set((state) => applyOrchestrationEvent(state, event, environmentId)),
   applyOrchestrationEvents: (events, environmentId, options) =>

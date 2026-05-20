@@ -92,6 +92,7 @@ import {
 import { respondToAuthError } from "./auth/http.ts";
 import { WebPushService } from "./push/Services/WebPushService.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isOrchestrationGetSnapshotError = Schema.is(OrchestrationGetSnapshotError);
 const isWorkspacePathOutsideRootError = Schema.is(WorkspacePathOutsideRootError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -835,6 +836,25 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.probeSync]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.probeSync,
+            projectionSnapshotQuery.getSnapshotSequence().pipe(
+              Effect.map(({ snapshotSequence }) => ({
+                clientSequence: input.clientSequence,
+                serverSequence: snapshotSequence,
+                behind: snapshotSequence > input.clientSequence,
+              })),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: "Failed to probe orchestration sync state",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.subscribeShell]: (_input) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeShell,
@@ -901,12 +921,37 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.getThreadDetailPage]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getThreadDetailPage,
+            projectionSnapshotQuery.getThreadDetailSnapshotById(input.threadId, input.page).pipe(
+              Effect.flatMap((snapshot) =>
+                Option.isSome(snapshot)
+                  ? Effect.succeed(snapshot.value)
+                  : Effect.fail(
+                      new OrchestrationGetSnapshotError({
+                        message: `Thread ${input.threadId} was not found`,
+                        cause: input.threadId,
+                      }),
+                    ),
+              ),
+              Effect.mapError((cause) =>
+                isOrchestrationGetSnapshotError(cause)
+                  ? cause
+                  : new OrchestrationGetSnapshotError({
+                      message: `Failed to load thread ${input.threadId}`,
+                      cause,
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.subscribeThread]: (input) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeThread,
             Effect.gen(function* () {
               const threadDetailSnapshot = yield* projectionSnapshotQuery
-                .getThreadDetailSnapshotById(input.threadId)
+                .getThreadDetailSnapshotById(input.threadId, input.page ?? {})
                 .pipe(
                   Effect.mapError(
                     (cause) =>

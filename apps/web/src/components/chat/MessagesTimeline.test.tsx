@@ -139,6 +139,39 @@ function buildAssistantTimelineEntry(text: string) {
 }
 
 describe("MessagesTimeline", () => {
+  it("renders an older-page control when thread detail has more history", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        hasOlderThreadDetail
+        onLoadOlderThreadDetail={() => {}}
+        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
+      />,
+    );
+
+    expect(markup).toContain("Older");
+    expect(markup).toContain("lucide-chevron-up");
+    expect(markup).not.toContain('disabled=""');
+  });
+
+  it("shows the older-page control as busy while loading history", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        hasOlderThreadDetail
+        isLoadingOlderThreadDetail
+        onLoadOlderThreadDetail={() => {}}
+        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
+      />,
+    );
+
+    expect(markup).toContain("Older");
+    expect(markup).toContain("lucide-loader-circle");
+    expect(markup).toContain("disabled");
+  });
+
   it("renders collapse controls for long user messages", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

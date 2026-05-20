@@ -20,6 +20,7 @@ function DraftChatThreadRouteView() {
     ),
   );
   const serverThreadStarted = threadHasStarted(serverThread);
+  const serverThreadHasSubmittedMessage = Boolean(serverThread && serverThread.messages.length > 0);
   const canonicalThreadRef = useMemo(
     () =>
       draftSession?.promotedTo
@@ -34,9 +35,12 @@ function DraftChatThreadRouteView() {
           : null,
     [draftSession?.promotedTo, serverThread, serverThreadStarted],
   );
+  const shouldNavigateToCanonicalThread = Boolean(
+    canonicalThreadRef && (!draftSession?.promotedTo || serverThreadHasSubmittedMessage),
+  );
 
   useEffect(() => {
-    if (!canonicalThreadRef) {
+    if (!canonicalThreadRef || !shouldNavigateToCanonicalThread) {
       return;
     }
     void navigate({
@@ -44,7 +48,7 @@ function DraftChatThreadRouteView() {
       params: buildThreadRouteParams(canonicalThreadRef),
       replace: true,
     });
-  }, [canonicalThreadRef, navigate]);
+  }, [canonicalThreadRef, navigate, shouldNavigateToCanonicalThread]);
 
   useEffect(() => {
     if (draftSession || canonicalThreadRef) {

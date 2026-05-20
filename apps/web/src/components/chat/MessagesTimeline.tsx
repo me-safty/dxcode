@@ -22,11 +22,13 @@ import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
+  ChevronUpIcon,
   CheckIcon,
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
   HammerIcon,
+  LoaderCircleIcon,
   type LucideIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -126,6 +128,9 @@ interface MessagesTimelineProps {
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  hasOlderThreadDetail?: boolean;
+  isLoadingOlderThreadDetail?: boolean;
+  onLoadOlderThreadDetail?: () => void;
   onIsAtEndChange: (isAtEnd: boolean) => void;
   onUserScrollIntent?: () => void;
 }
@@ -157,6 +162,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timestampFormat,
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
+  hasOlderThreadDetail = false,
+  isLoadingOlderThreadDetail = false,
+  onLoadOlderThreadDetail,
   onIsAtEndChange,
   onUserScrollIntent,
 }: MessagesTimelineProps) {
@@ -197,6 +205,30 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const handleUserScrollIntent = useCallback(() => {
     onUserScrollIntent?.();
   }, [onUserScrollIntent]);
+  const listHeader = useMemo(() => {
+    if (!hasOlderThreadDetail) {
+      return TIMELINE_LIST_HEADER;
+    }
+    return (
+      <div className="flex h-12 items-center justify-center">
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          disabled={isLoadingOlderThreadDetail}
+          onClick={onLoadOlderThreadDetail}
+          className="gap-1.5 text-muted-foreground"
+        >
+          {isLoadingOlderThreadDetail ? (
+            <LoaderCircleIcon className="size-3 animate-spin" />
+          ) : (
+            <ChevronUpIcon className="size-3" />
+          )}
+          Older
+        </Button>
+      </div>
+    );
+  }, [hasOlderThreadDetail, isLoadingOlderThreadDetail, onLoadOlderThreadDetail]);
 
   const previousRowCountRef = useRef(rows.length);
   useEffect(() => {
@@ -296,10 +328,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             initialScrollAtEnd
             maintainScrollAtEnd
             maintainScrollAtEndThreshold={0.1}
-            maintainVisibleContentPosition
+            maintainVisibleContentPosition={{ data: false, size: true }}
             onScroll={handleScroll}
             className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            ListHeaderComponent={listHeader}
             ListFooterComponent={TIMELINE_LIST_FOOTER}
           />
         </div>

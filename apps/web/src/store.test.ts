@@ -9,6 +9,9 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
+  type OrchestrationThread,
+  type OrchestrationThreadDetailPageInfo,
+  type OrchestrationThreadDetailSnapshot,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
@@ -22,6 +25,7 @@ import {
   selectThreadByRef,
   selectThreadExistsByRef,
   setThreadBranch,
+  mergeServerThreadDetailPage,
   selectThreadsAcrossEnvironments,
   type AppState,
   type EnvironmentState,
@@ -84,6 +88,165 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     branch: null,
     worktreePath: null,
     ...overrides,
+  };
+}
+
+function makeMessage(index: number): Thread["messages"][number] {
+  const id = MessageId.make(`message-${index}`);
+  const turnId = TurnId.make(`turn-${index}`);
+  const createdAt = `2026-02-13T00:0${index}:00.000Z`;
+  return {
+    id,
+    role: index % 2 === 0 ? "assistant" : "user",
+    text: `message ${index}`,
+    turnId,
+    createdAt,
+    completedAt: createdAt,
+    streaming: false,
+  };
+}
+
+function makeActivity(index: number): Thread["activities"][number] {
+  return {
+    id: EventId.make(`activity-${index}`),
+    tone: "info",
+    kind: "step",
+    summary: `activity ${index}`,
+    payload: {},
+    turnId: TurnId.make(`turn-${index}`),
+    sequence: index,
+    createdAt: `2026-02-13T00:0${index}:30.000Z`,
+  };
+}
+
+function makePlan(index: number): Thread["proposedPlans"][number] {
+  const createdAt = `2026-02-13T00:0${index}:15.000Z`;
+  return {
+    id: `plan-${index}` as never,
+    turnId: TurnId.make(`turn-${index}`),
+    planMarkdown: `plan ${index}`,
+    implementedAt: null,
+    implementationThreadId: null,
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+function makeTurnDiffSummary(index: number): Thread["turnDiffSummaries"][number] {
+  return {
+    turnId: TurnId.make(`turn-${index}`),
+    completedAt: `2026-02-13T00:0${index}:45.000Z`,
+    status: "ready",
+    checkpointTurnCount: index,
+    checkpointRef: CheckpointRef.make(`checkpoint-${index}`),
+    assistantMessageId: MessageId.make(`message-${index}`),
+    files: [],
+  };
+}
+
+function makeOrchestrationThread(
+  thread: Thread,
+  overrides: Partial<OrchestrationThread> = {},
+): OrchestrationThread {
+  return {
+    id: thread.id,
+    projectId: thread.projectId,
+    title: thread.title,
+    modelSelection: thread.modelSelection,
+    runtimeMode: thread.runtimeMode,
+    interactionMode: thread.interactionMode,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    latestTurn: thread.latestTurn,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt ?? thread.createdAt,
+    archivedAt: thread.archivedAt,
+    deletedAt: null,
+    messages: thread.messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: message.text,
+      turnId: message.turnId ?? null,
+      streaming: message.streaming,
+      createdAt: message.createdAt,
+      updatedAt: message.completedAt ?? message.createdAt,
+    })),
+    proposedPlans: thread.proposedPlans.map((plan) => ({ ...plan })),
+    activities: thread.activities.map((activity) => ({ ...activity })),
+    checkpoints: thread.turnDiffSummaries.map((summary) => ({
+      turnId: summary.turnId,
+      checkpointTurnCount: summary.checkpointTurnCount ?? 0,
+      checkpointRef: summary.checkpointRef ?? CheckpointRef.make(`checkpoint-${summary.turnId}`),
+      status:
+        summary.status === "ready" || summary.status === "missing" || summary.status === "error"
+          ? summary.status
+          : "ready",
+      files: summary.files.map((file) => ({
+        path: file.path,
+        kind: file.kind ?? "modified",
+        additions: file.additions ?? 0,
+        deletions: file.deletions ?? 0,
+      })),
+      assistantMessageId: summary.assistantMessageId ?? null,
+      completedAt: summary.completedAt,
+    })),
+    session: thread.session
+      ? {
+          threadId: thread.id,
+          status:
+            thread.session.status === "running"
+              ? "running"
+              : thread.session.status === "ready"
+                ? "ready"
+                : thread.session.status === "connecting"
+                  ? "starting"
+                  : "error",
+          providerName: "codex",
+          runtimeMode: thread.runtimeMode,
+          activeTurnId: null,
+          lastError: thread.error,
+          updatedAt: thread.updatedAt ?? thread.createdAt,
+        }
+      : null,
+    ...overrides,
+  };
+}
+
+function makePageInfo(input: {
+  hasMoreBefore: boolean;
+  startIndex: number;
+}): OrchestrationThreadDetailPageInfo {
+  return {
+    messages: {
+      hasMoreBefore: input.hasMoreBefore,
+      startCursor: {
+        id: `message-${input.startIndex}`,
+        createdAt: `2026-02-13T00:0${input.startIndex}:00.000Z`,
+      },
+    },
+    proposedPlans: {
+      hasMoreBefore: input.hasMoreBefore,
+      startCursor: {
+        id: `plan-${input.startIndex}`,
+        createdAt: `2026-02-13T00:0${input.startIndex}:15.000Z`,
+      },
+    },
+    activities: {
+      hasMoreBefore: input.hasMoreBefore,
+      startCursor: {
+        id: `activity-${input.startIndex}`,
+        createdAt: `2026-02-13T00:0${input.startIndex}:30.000Z`,
+        sequence: input.startIndex,
+      },
+    },
+    checkpoints: {
+      hasMoreBefore: input.hasMoreBefore,
+      startCursor: {
+        id: `turn-${input.startIndex}`,
+        createdAt: `2026-02-13T00:0${input.startIndex}:45.000Z`,
+        checkpointTurnCount: input.startIndex,
+      },
+    },
   };
 }
 
@@ -173,6 +336,7 @@ function makeState(thread: Thread): AppState {
         thread.turnDiffSummaries.map((summary) => [summary.turnId, summary] as const),
       ) as EnvironmentState["turnDiffSummaryByThreadId"][ThreadId],
     },
+    threadDetailPageInfoByThreadId: {},
     sidebarThreadSummaryById: {},
     bootstrapComplete: true,
   };
@@ -198,6 +362,7 @@ function makeEmptyState(overrides: Partial<AppState & EnvironmentState> = {}): A
     proposedPlanByThreadId: {},
     turnDiffIdsByThreadId: {},
     turnDiffSummaryByThreadId: {},
+    threadDetailPageInfoByThreadId: {},
     sidebarThreadSummaryById: {},
     bootstrapComplete: true,
   };
@@ -399,6 +564,129 @@ describe("thread selection memoization", () => {
       ),
     ).toBe(false);
     expect(selectThreadExistsByRef(state, null)).toBe(false);
+  });
+});
+
+describe("thread detail pagination", () => {
+  it("prepends older detail pages without replacing the visible recent page", () => {
+    const threadId = ThreadId.make("thread-paged");
+    const currentThread = makeThread({
+      id: threadId,
+      messages: [makeMessage(3), makeMessage(4)],
+      proposedPlans: [makePlan(3), makePlan(4)],
+      activities: [makeActivity(3), makeActivity(4)],
+      turnDiffSummaries: [makeTurnDiffSummary(3), makeTurnDiffSummary(4)],
+    });
+    const olderPageThread = makeThread({
+      id: threadId,
+      messages: [makeMessage(1), makeMessage(2), makeMessage(3)],
+      proposedPlans: [makePlan(1), makePlan(2), makePlan(3)],
+      activities: [makeActivity(1), makeActivity(2), makeActivity(3)],
+      turnDiffSummaries: [makeTurnDiffSummary(1), makeTurnDiffSummary(2), makeTurnDiffSummary(3)],
+    });
+    const pageInfo = makePageInfo({ hasMoreBefore: false, startIndex: 1 });
+    const snapshot: OrchestrationThreadDetailSnapshot = {
+      snapshotSequence: 4,
+      thread: makeOrchestrationThread(olderPageThread),
+      pageInfo,
+    };
+
+    const next = mergeServerThreadDetailPage(
+      makeState(currentThread),
+      snapshot,
+      localEnvironmentId,
+    );
+    const thread = selectThreadByRef(next, scopeThreadRef(localEnvironmentId, threadId));
+    const environmentState = localEnvironmentStateOf(next);
+
+    expect(thread?.messages.map((message) => message.id)).toEqual([
+      MessageId.make("message-1"),
+      MessageId.make("message-2"),
+      MessageId.make("message-3"),
+      MessageId.make("message-4"),
+    ]);
+    expect(thread?.proposedPlans.map((plan) => plan.id)).toEqual([
+      "plan-1",
+      "plan-2",
+      "plan-3",
+      "plan-4",
+    ]);
+    expect(thread?.activities.map((activity) => activity.id)).toEqual([
+      EventId.make("activity-1"),
+      EventId.make("activity-2"),
+      EventId.make("activity-3"),
+      EventId.make("activity-4"),
+    ]);
+    expect(thread?.turnDiffSummaries.map((summary) => summary.turnId)).toEqual([
+      TurnId.make("turn-1"),
+      TurnId.make("turn-2"),
+      TurnId.make("turn-3"),
+      TurnId.make("turn-4"),
+    ]);
+    expect(environmentState.messageIdsByThreadId[threadId]).toEqual([
+      MessageId.make("message-1"),
+      MessageId.make("message-2"),
+      MessageId.make("message-3"),
+      MessageId.make("message-4"),
+    ]);
+    expect(environmentState.threadDetailPageInfoByThreadId[threadId]).toEqual(pageInfo);
+    expect(thread?.detailPageInfo).toEqual(pageInfo);
+  });
+
+  it("keeps a paged snapshot isolated to its environment", () => {
+    const sharedThreadId = ThreadId.make("thread-shared-page");
+    const localThread = makeThread({
+      id: sharedThreadId,
+      messages: [makeMessage(4)],
+    });
+    const remoteThread = makeThread({
+      id: sharedThreadId,
+      environmentId: remoteEnvironmentId,
+      messages: [makeMessage(9)],
+    });
+    const remoteState = environmentStateOf(makeState(remoteThread), remoteEnvironmentId);
+    const localState = environmentStateOf(makeState(localThread), localEnvironmentId);
+    const state: AppState = {
+      activeEnvironmentId: localEnvironmentId,
+      environmentStateById: {
+        [localEnvironmentId]: localState,
+        [remoteEnvironmentId]: remoteState,
+      },
+    };
+    const pageInfo = makePageInfo({ hasMoreBefore: true, startIndex: 1 });
+
+    const next = mergeServerThreadDetailPage(
+      state,
+      {
+        snapshotSequence: 2,
+        thread: makeOrchestrationThread(
+          makeThread({
+            id: sharedThreadId,
+            environmentId: remoteEnvironmentId,
+            messages: [makeMessage(8), makeMessage(9)],
+          }),
+        ),
+        pageInfo,
+      },
+      remoteEnvironmentId,
+    );
+
+    expect(
+      selectThreadByRef(next, scopeThreadRef(localEnvironmentId, sharedThreadId))?.messages.map(
+        (message) => message.id,
+      ),
+    ).toEqual([MessageId.make("message-4")]);
+    expect(
+      selectThreadByRef(next, scopeThreadRef(remoteEnvironmentId, sharedThreadId))?.messages.map(
+        (message) => message.id,
+      ),
+    ).toEqual([MessageId.make("message-8"), MessageId.make("message-9")]);
+    expect(
+      environmentStateOf(next, localEnvironmentId).threadDetailPageInfoByThreadId[sharedThreadId],
+    ).toBeUndefined();
+    expect(
+      environmentStateOf(next, remoteEnvironmentId).threadDetailPageInfoByThreadId[sharedThreadId],
+    ).toEqual(pageInfo);
   });
 });
 

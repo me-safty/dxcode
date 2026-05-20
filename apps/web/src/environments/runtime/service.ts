@@ -95,6 +95,7 @@ type ThreadDetailSubscriptionEntry = {
   latestDetailSequence: number | null;
   refreshTargetSequence: number | null;
   refreshTimeoutId: ReturnType<typeof setTimeout> | null;
+  activeReconcileIntervalId: ReturnType<typeof setInterval> | null;
   lastAccessedAt: number;
   evictionTimeoutId: ReturnType<typeof setTimeout> | null;
 };
@@ -158,8 +159,9 @@ let lastBrowserResumeReconcileAt = Number.NEGATIVE_INFINITY;
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
 const THREAD_DETAIL_REFRESH_AFTER_SHELL_ADVANCE_MS = 250;
+const THREAD_DETAIL_ACTIVE_RECONCILE_INTERVAL_MS = 5_000;
 const BROWSER_RESUME_RECONCILE_COOLDOWN_MS = 2_000;
-const BROWSER_RESUME_RECONCILE_TIMEOUT_MS = 5_000;
+const BROWSER_RESUME_RECONCILE_TIMEOUT_MS = 1_500;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
 const NOOP = () => undefined;
 const SSH_HTTP_STATUS_RE = /^\[ssh_http:(\d+)\]\s/u;
@@ -558,6 +560,13 @@ function clearThreadDetailSubscriptionRefresh(entry: ThreadDetailSubscriptionEnt
   entry.refreshTargetSequence = null;
 }
 
+function clearThreadDetailSubscriptionActiveReconcile(entry: ThreadDetailSubscriptionEntry): void {
+  if (entry.activeReconcileIntervalId !== null) {
+    clearInterval(entry.activeReconcileIntervalId);
+    entry.activeReconcileIntervalId = null;
+  }
+}
+
 function markThreadDetailSequence(entry: ThreadDetailSubscriptionEntry, sequence: number): void {
   entry.latestDetailSequence =
     entry.latestDetailSequence === null ? sequence : Math.max(entry.latestDetailSequence, sequence);
@@ -638,6 +647,21 @@ function shouldRefreshRetainedThreadDetailSubscription(entry: ThreadDetailSubscr
   return entry.refCount > 0 || isNonIdleThreadDetailSubscription(entry);
 }
 
+function shouldActivelyReconcileThreadDetailSubscription(
+  entry: ThreadDetailSubscriptionEntry,
+): boolean {
+  return entry.refCount > 0 && isNonIdleThreadDetailSubscription(entry);
+}
+
+function hasRetainedThreadDetailSubscription(): boolean {
+  for (const entry of threadDetailSubscriptions.values()) {
+    if (entry.refCount > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): boolean {
   if (entry.unsubscribeConnectionListener !== null) {
     entry.unsubscribeConnectionListener();
@@ -664,12 +688,14 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
         }
         markThreadDetailSequence(entry, item.snapshot.snapshotSequence);
         useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId, {
+          pageInfo: item.snapshot.pageInfo,
           preserveShellFields: shouldPreserveThreadDetailShellFields(
             entry.environmentId,
             item.snapshot.snapshotSequence,
           ),
         });
         scheduleEnvironmentStartupCacheWrite(entry.environmentId, [entry.threadId]);
+        reconcileThreadDetailSubscriptionEvictionState(entry);
         return;
       }
       if (hasThreadDetailSequenceAlreadyBeenSeen(entry, item.event.sequence)) {
@@ -677,6 +703,7 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
       }
       markThreadDetailSequence(entry, item.event.sequence);
       applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
+      reconcileThreadDetailSubscriptionEvictionState(entry);
     },
   );
   return true;
@@ -749,6 +776,41 @@ function scheduleThreadDetailRefreshToCurrentProjectionIfBehind(
   );
 }
 
+function reconcileActiveThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): void {
+  const connection = readEnvironmentConnection(entry.environmentId);
+  if (connection) {
+    queueEnvironmentBrowserResumeReconciliation(connection, "active-thread-detail");
+  }
+  scheduleThreadDetailRefreshToCurrentProjectionIfBehind(entry);
+}
+
+function reconcileThreadDetailSubscriptionActiveReconcileState(
+  entry: ThreadDetailSubscriptionEntry,
+): void {
+  if (!shouldActivelyReconcileThreadDetailSubscription(entry)) {
+    clearThreadDetailSubscriptionActiveReconcile(entry);
+    return;
+  }
+
+  if (entry.activeReconcileIntervalId !== null) {
+    return;
+  }
+
+  entry.activeReconcileIntervalId = setInterval(() => {
+    const currentEntry = threadDetailSubscriptions.get(
+      getThreadDetailSubscriptionKey(entry.environmentId, entry.threadId),
+    );
+    if (!currentEntry) {
+      return;
+    }
+    if (!shouldActivelyReconcileThreadDetailSubscription(currentEntry)) {
+      clearThreadDetailSubscriptionActiveReconcile(currentEntry);
+      return;
+    }
+    reconcileActiveThreadDetailSubscription(currentEntry);
+  }, THREAD_DETAIL_ACTIVE_RECONCILE_INTERVAL_MS);
+}
+
 function watchThreadDetailSubscriptionConnection(entry: ThreadDetailSubscriptionEntry): void {
   if (entry.unsubscribeConnectionListener !== null) {
     return;
@@ -770,6 +832,7 @@ function disposeThreadDetailSubscriptionByKey(key: string): boolean {
 
   clearThreadDetailSubscriptionRefresh(entry);
   clearThreadDetailSubscriptionEviction(entry);
+  clearThreadDetailSubscriptionActiveReconcile(entry);
   entry.unsubscribeConnectionListener?.();
   entry.unsubscribeConnectionListener = null;
   threadDetailSubscriptions.delete(key);
@@ -861,6 +924,7 @@ function evictIdleThreadDetailSubscriptionsToCapacity(): void {
 function reconcileThreadDetailSubscriptionEvictionState(
   entry: ThreadDetailSubscriptionEntry,
 ): void {
+  reconcileThreadDetailSubscriptionActiveReconcileState(entry);
   clearThreadDetailSubscriptionEviction(entry);
   if (!shouldEvictThreadDetailSubscription(entry)) {
     return;
@@ -908,6 +972,7 @@ export function retainThreadDetailSubscription(
       watchThreadDetailSubscriptionConnection(existing);
     }
     scheduleThreadDetailRefreshToCurrentProjectionIfBehind(existing);
+    reconcileThreadDetailSubscriptionEvictionState(existing);
     let released = false;
     return () => {
       if (released) {
@@ -916,10 +981,8 @@ export function retainThreadDetailSubscription(
       released = true;
       existing.refCount = Math.max(0, existing.refCount - 1);
       existing.lastAccessedAt = Date.now();
-      if (existing.refCount === 0) {
-        reconcileThreadDetailSubscriptionEvictionState(existing);
-        evictIdleThreadDetailSubscriptionsToCapacity();
-      }
+      reconcileThreadDetailSubscriptionEvictionState(existing);
+      evictIdleThreadDetailSubscriptionsToCapacity();
     };
   }
 
@@ -932,6 +995,7 @@ export function retainThreadDetailSubscription(
     latestDetailSequence: null,
     refreshTargetSequence: null,
     refreshTimeoutId: null,
+    activeReconcileIntervalId: null,
     lastAccessedAt: Date.now(),
     evictionTimeoutId: null,
   };
@@ -939,6 +1003,7 @@ export function retainThreadDetailSubscription(
   if (!attachThreadDetailSubscription(entry)) {
     watchThreadDetailSubscriptionConnection(entry);
   }
+  reconcileThreadDetailSubscriptionEvictionState(entry);
   evictIdleThreadDetailSubscriptionsToCapacity();
 
   let released = false;
@@ -949,10 +1014,8 @@ export function retainThreadDetailSubscription(
     released = true;
     entry.refCount = Math.max(0, entry.refCount - 1);
     entry.lastAccessedAt = Date.now();
-    if (entry.refCount === 0) {
-      reconcileThreadDetailSubscriptionEvictionState(entry);
-      evictIdleThreadDetailSubscriptionsToCapacity();
-    }
+    reconcileThreadDetailSubscriptionEvictionState(entry);
+    evictIdleThreadDetailSubscriptionsToCapacity();
   };
 }
 
@@ -1919,15 +1982,30 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
   reason: string,
 ): Promise<void> {
   const environmentId = connection.environmentId;
+
+  // Fast path: if the heartbeat pong is stale, the underlying socket is
+  // almost certainly dead (common on iOS PWA after backgrounding, where
+  // the JS `WebSocket` may still report OPEN even though TCP is gone).
+  // Skip the probe round-trip and reconnect immediately so thread detail
+  // subscriptions re-attach on the new session.
+  if (!connection.client.isHeartbeatFresh()) {
+    console.warn("Environment heartbeat stale on browser resume; reconnecting", {
+      environmentId,
+      reason,
+    });
+    await connection.reconnect();
+    return;
+  }
+
   const currentSequence = readLastAppliedProjectionVersion(environmentId)?.sequence;
   if (currentSequence === undefined) {
     return;
   }
 
   try {
-    const replayedEvents = await withTimeout(
-      connection.client.orchestration.replayEvents({
-        fromSequenceExclusive: currentSequence,
+    const syncProbe = await withTimeout(
+      connection.client.orchestration.probeSync({
+        clientSequence: currentSequence,
       }),
       BROWSER_RESUME_RECONCILE_TIMEOUT_MS,
       () => new Error("Browser resume reconciliation timed out."),
@@ -1935,9 +2013,25 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
     if (readEnvironmentConnection(environmentId) !== connection) {
       return;
     }
+    const latestSequenceAfterProbe =
+      readLastAppliedProjectionVersion(environmentId)?.sequence ?? currentSequence;
+    if (!syncProbe.behind || syncProbe.serverSequence <= latestSequenceAfterProbe) {
+      return;
+    }
+
+    const replayedEvents = await withTimeout(
+      connection.client.orchestration.replayEvents({
+        fromSequenceExclusive: latestSequenceAfterProbe,
+      }),
+      BROWSER_RESUME_RECONCILE_TIMEOUT_MS,
+      () => new Error("Browser resume replay timed out."),
+    );
+    if (readEnvironmentConnection(environmentId) !== connection) {
+      return;
+    }
 
     const latestSequence =
-      readLastAppliedProjectionVersion(environmentId)?.sequence ?? currentSequence;
+      readLastAppliedProjectionVersion(environmentId)?.sequence ?? latestSequenceAfterProbe;
     const contiguousEvents = selectContiguousReplayEvents(replayedEvents, latestSequence);
     applyRecoveredProjectionEventBatch(contiguousEvents, environmentId);
 
@@ -1945,7 +2039,7 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
       readLastAppliedProjectionVersion(environmentId)?.sequence ?? latestSequence;
     const highestReplayedSequence = replayedEvents.reduce(
       (highest, event) => Math.max(highest, event.sequence),
-      latestSequence,
+      syncProbe.serverSequence,
     );
     if (highestReplayedSequence > recoveredSequence) {
       queueProjectionRecovery(environmentId, highestReplayedSequence);
@@ -2019,18 +2113,49 @@ function subscribeBrowserResumeReconnects(): () => void {
     }
   };
 
+  const handlePageHide = () => {
+    lastBrowserHiddenAt = Date.now();
+  };
+
   const handlePageShow = (event: PageTransitionEvent) => {
-    if (event.persisted || lastBrowserHiddenAt !== null) {
-      lastBrowserHiddenAt = null;
-      reconcileEnvironmentConnectionsAfterBrowserResume("pageshow");
+    const hadPriorBackgroundSignal = lastBrowserHiddenAt !== null;
+    const shouldReconcile =
+      event.persisted || hadPriorBackgroundSignal || hasRetainedThreadDetailSubscription();
+    lastBrowserHiddenAt = null;
+    if (shouldReconcile) {
+      reconcileEnvironmentConnectionsAfterBrowserResume(
+        event.persisted
+          ? "pageshow:bfcache"
+          : hadPriorBackgroundSignal
+            ? "pageshow"
+            : "pageshow:visible",
+      );
     }
   };
 
+  const handleWindowFocus = () => {
+    if (document.visibilityState !== "visible") {
+      return;
+    }
+    const hadPriorBackgroundSignal = lastBrowserHiddenAt !== null;
+    if (!hadPriorBackgroundSignal && !hasRetainedThreadDetailSubscription()) {
+      return;
+    }
+    lastBrowserHiddenAt = null;
+    reconcileEnvironmentConnectionsAfterBrowserResume(
+      hadPriorBackgroundSignal ? "focus" : "focus:visible",
+    );
+  };
+
   document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("pagehide", handlePageHide);
   window.addEventListener("pageshow", handlePageShow);
+  window.addEventListener("focus", handleWindowFocus);
   return () => {
     document.removeEventListener("visibilitychange", handleVisibilityChange);
+    window.removeEventListener("pagehide", handlePageHide);
     window.removeEventListener("pageshow", handlePageShow);
+    window.removeEventListener("focus", handleWindowFocus);
   };
 }
 
