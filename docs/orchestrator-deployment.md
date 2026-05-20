@@ -276,6 +276,8 @@ If Convex reports schema incompatibilities during local bring-up, clear the affe
 
 ## Updating T3 Code Server From Upstream
 
+Detailed update/restart runbook: [t3code-production-update.md](./t3code-production-update.md).
+
 The Windows services run the files in this checkout. The scripted update path is
 the preferred runbook:
 
@@ -295,8 +297,18 @@ The script:
 - fetches and merges `pingdotgg/main` by default
 - runs `bun install`
 - runs `bun run build`
-- restarts the `t3code-server` Windows service
+- restarts the active `t3code-server` path
 - runs `bun run health:orchestrator`
+
+If the update is initiated from inside T3/Slack, use detached restart mode:
+
+```powershell
+.\scripts\update-t3code-server.ps1 -Remote origin -Branch main -DetachedRestart
+```
+
+Detached mode queues a hidden helper to restart the server after the foreground
+command exits. This prevents the server from killing the agent before it can send
+the final response.
 
 Equivalent manual flow:
 

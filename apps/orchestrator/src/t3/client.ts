@@ -34,6 +34,7 @@ const decodeTaskPullRequestEnsureResponse = Schema.decodeUnknownSync(TaskPullReq
 const decodeTaskRuntimeUserInputRespondResponse = Schema.decodeUnknownSync(
   TaskRuntimeUserInputRespondResponse,
 );
+const MAX_BRIDGE_ERROR_DETAIL_CHARS = 500;
 
 function requiredEnv(name: "T3_EXECUTION_BRIDGE_BASE_URL" | "T3_EXECUTION_BRIDGE_SHARED_SECRET") {
   const value = process.env[name]?.trim();
@@ -41,6 +42,43 @@ function requiredEnv(name: "T3_EXECUTION_BRIDGE_BASE_URL" | "T3_EXECUTION_BRIDGE
     throw new Error(`Missing required orchestrator environment variable: ${name}`);
   }
   return value;
+}
+
+function isHtmlResponseDetail(input: {
+  readonly contentType: string | null;
+  readonly detail: string;
+}) {
+  const contentType = input.contentType?.toLowerCase() ?? "";
+  const trimmed = input.detail.trimStart().toLowerCase();
+  return (
+    contentType.includes("text/html") ||
+    trimmed.startsWith("<!doctype html") ||
+    trimmed.startsWith("<html")
+  );
+}
+
+async function formatBridgeErrorDetail(response: Response) {
+  const detail = await response.text().catch(() => "");
+  const statusLabel = response.statusText
+    ? `${response.status} ${response.statusText}`
+    : `${response.status}`;
+  if (!detail.trim()) {
+    return `HTTP ${statusLabel}`;
+  }
+
+  if (
+    isHtmlResponseDetail({
+      contentType: response.headers.get("content-type"),
+      detail,
+    })
+  ) {
+    return `HTTP ${statusLabel}`;
+  }
+
+  const normalized = detail.replace(/\s+/g, " ").trim();
+  return normalized.length > MAX_BRIDGE_ERROR_DETAIL_CHARS
+    ? `${normalized.slice(0, MAX_BRIDGE_ERROR_DETAIL_CHARS).trimEnd()}...`
+    : normalized;
 }
 
 export interface T3ExecutionBridgeClient {
@@ -97,7 +135,7 @@ export function createT3ExecutionBridgeClient(
       const response = await authedPost("/api/execution/runs", request);
 
       if (!response.ok) {
-        const detail = await response.text();
+        const detail = await formatBridgeErrorDetail(response);
         throw new Error(
           `T3 execution bridge rejected run create (${response.status}): ${detail || "Unknown error"}`,
         );
@@ -110,7 +148,7 @@ export function createT3ExecutionBridgeClient(
       const response = await authedPost("/api/execution/runs/status", query);
 
       if (!response.ok) {
-        const detail = await response.text();
+        const detail = await formatBridgeErrorDetail(response);
         throw new Error(
           `T3 execution bridge status query failed (${response.status}): ${detail || "Unknown error"}`,
         );
@@ -123,7 +161,7 @@ export function createT3ExecutionBridgeClient(
       const response = await authedPost("/api/execution/runs/continue", request);
 
       if (!response.ok) {
-        const detail = await response.text();
+        const detail = await formatBridgeErrorDetail(response);
         throw new Error(
           `T3 execution bridge rejected run continue (${response.status}): ${detail || "Unknown error"}`,
         );
@@ -136,7 +174,7 @@ export function createT3ExecutionBridgeClient(
       const response = await authedPost("/api/execution/runs/interrupt", request);
 
       if (!response.ok) {
-        const detail = await response.text();
+        const detail = await formatBridgeErrorDetail(response);
         throw new Error(
           `T3 execution bridge rejected run interrupt (${response.status}): ${detail || "Unknown error"}`,
         );
@@ -149,7 +187,7 @@ export function createT3ExecutionBridgeClient(
       const response = await authedPost("/api/tasks/materialize", request);
 
       if (!response.ok) {
-        const detail = await response.text();
+        const detail = await formatBridgeErrorDetail(response);
         throw new Error(
           `T3 task runtime bridge rejected materialization (${response.status}): ${detail || "Unknown error"}`,
         );
@@ -162,7 +200,7 @@ export function createT3ExecutionBridgeClient(
       const response = await authedPost("/api/tasks/pull-request/ensure", request);
 
       if (!response.ok) {
-        const detail = await response.text();
+        const detail = await formatBridgeErrorDetail(response);
         throw new Error(
           `T3 task runtime bridge rejected pull request ensure (${response.status}): ${detail || "Unknown error"}`,
         );
@@ -175,7 +213,7 @@ export function createT3ExecutionBridgeClient(
       const response = await authedPost("/api/tasks/user-input/respond", request);
 
       if (!response.ok) {
-        const detail = await response.text();
+        const detail = await formatBridgeErrorDetail(response);
         throw new Error(
           `T3 task runtime bridge rejected user input response (${response.status}): ${detail || "Unknown error"}`,
         );

@@ -247,6 +247,46 @@ async function checkWindowsService(serviceName: string, timeoutMs: number): Prom
   };
 }
 
+async function checkT3ServerRuntime(config: HealthCheckConfig): Promise<CheckResult> {
+  if (process.platform !== "win32") {
+    return {
+      name: "T3 server runtime",
+      ok: true,
+      details: "skipped on non-Windows platform",
+    };
+  }
+
+  const result = await runCommand(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-Command",
+      [
+        `$service = Get-Service -Name '${config.serverServiceName.replaceAll("'", "''")}' -ErrorAction SilentlyContinue`,
+        `$task = Get-ScheduledTask -TaskName '${config.serverServiceName.replaceAll("'", "''")}' -ErrorAction SilentlyContinue`,
+        "$listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 3773 -State Listen -ErrorAction SilentlyContinue",
+        "$processes = @(Get-CimInstance Win32_Process -Filter \"name = 'node.exe'\" | Where-Object { $_.CommandLine -like '*apps\\server\\dist\\bin.mjs*' })",
+        "$serviceStatus = if ($service) { [string]$service.Status } else { 'missing' }",
+        "$taskState = if ($task) { [string]$task.State } else { 'missing' }",
+        "$listenerStatus = if ($listener) { 'listening' } else { 'not-listening' }",
+        "$processStatus = if ($processes.Count -gt 0) { 'process-running' } else { 'process-missing' }",
+        'Write-Output "service=$serviceStatus task=$taskState listener=$listenerStatus process=$processStatus"',
+        "exit ([int](-not ($listener -and $processes.Count -gt 0)))",
+      ].join("; "),
+    ],
+    { timeoutMs: config.timeoutMs },
+  );
+
+  return {
+    name: "T3 server runtime",
+    ok: result.code === 0,
+    details:
+      result.code === 0
+        ? result.stdout.trim() || "server process is running and port 3773 is listening"
+        : (result.stderr || result.stdout || `powershell exited ${result.code}`).trim(),
+  };
+}
+
 async function checkConvex(config: HealthCheckConfig): Promise<ReadonlyArray<CheckResult>> {
   const results: CheckResult[] = [];
   if (config.convexSiteUrl !== undefined) {
@@ -290,7 +330,7 @@ function summarizeConvexRun(output: string) {
 
 export async function runHealthChecks(config: HealthCheckConfig) {
   const results: CheckResult[] = [];
-  results.push(await checkWindowsService(config.serverServiceName, config.timeoutMs));
+  results.push(await checkT3ServerRuntime(config));
   results.push(await checkWindowsService(config.tunnelServiceName, config.timeoutMs));
   results.push(await checkFetch("local T3", config.localBaseUrl, config.timeoutMs));
   results.push(await checkFetch("public T3", config.publicBaseUrl, config.timeoutMs));

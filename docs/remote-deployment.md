@@ -73,6 +73,8 @@ Expected unauthenticated bridge response:
 
 ## Updating The Server
 
+Detailed update/restart runbook: [t3code-production-update.md](./t3code-production-update.md).
+
 Use the scripted update path from an elevated PowerShell:
 
 ```powershell
@@ -85,6 +87,13 @@ By default this fetches and merges `pingdotgg/main`, runs `bun install`, runs
 `bun run build`, restarts the `t3code-server` service, and runs the orchestrator
 health check. It refuses to merge over a dirty worktree unless `-AllowDirty` is
 passed.
+
+If this update is initiated from inside T3 itself, use detached restart mode so
+the agent can finish its response before the server process is killed:
+
+```powershell
+.\scripts\update-t3code-server.ps1 -Remote origin -Branch main -DetachedRestart
+```
 
 ## Provider Auth
 

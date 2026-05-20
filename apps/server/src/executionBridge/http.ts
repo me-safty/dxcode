@@ -1,6 +1,8 @@
 import {
   type ExecutionRunActivityEvent,
   type ExecutionRunLifecycleEvent,
+  MessageId,
+  type TaskRuntimeAssistantMessageEvent,
   type TaskRuntimeUserInputRequestEvent,
   ExecutionRunContinueRequest,
   ExecutionRunCreateRequest,
@@ -96,6 +98,9 @@ const postActivityEvent = (event: ExecutionRunActivityEvent) =>
 
 const postTaskRuntimeLifecycleEvent = (event: ReturnType<typeof buildTaskRuntimeLifecycleEvent>) =>
   postToOrchestrator("/t3/task-runtime-events", event);
+
+const postTaskRuntimeAssistantMessageEvent = (event: TaskRuntimeAssistantMessageEvent) =>
+  postToOrchestrator("/t3/task-runtime-assistant-messages", event);
 
 const postTaskRuntimeUserInputRequestEvent = (event: TaskRuntimeUserInputRequestEvent) =>
   postToOrchestrator("/t3/task-runtime-user-input-requests", event);
@@ -208,7 +213,46 @@ function resolveAssistantResponse(input: {
     return normalizeAssistantResponse(
       thread.value.messages.findLast((message) => message.role === "assistant")?.text ?? "",
     );
-  }).pipe(Effect.catch(() => Effect.void));
+  }).pipe(Effect.catch(() => Effect.sync(() => undefined)));
+}
+
+function postFinalTaskRuntimeAssistantMessage(input: {
+  readonly eventId: string;
+  readonly occurredAt: string;
+  readonly trackedRun: TrackedExecutionRun;
+  readonly assistantMessageId?: string | null;
+  readonly turnId?: TurnId;
+  readonly assistantResponse?: string;
+}) {
+  if (
+    input.trackedRun.taskId === null ||
+    input.trackedRun.workSessionId === null ||
+    input.assistantResponse === undefined
+  ) {
+    return Effect.void;
+  }
+
+  return postTaskRuntimeAssistantMessageEvent({
+    eventId: input.eventId,
+    taskId: input.trackedRun.taskId,
+    workSessionId: input.trackedRun.workSessionId,
+    occurredAt: input.occurredAt,
+    t3ThreadId: input.trackedRun.threadId,
+    t3MessageId:
+      input.assistantMessageId !== undefined && input.assistantMessageId !== null
+        ? MessageId.make(input.assistantMessageId)
+        : MessageId.make(`final-response:${input.eventId}`),
+    ...(input.turnId !== undefined ? { t3TurnId: input.turnId } : {}),
+    assistantMessage: input.assistantResponse,
+  }).pipe(
+    Effect.catch((error: Error) =>
+      Effect.logWarning("execution bridge failed to forward final assistant message", {
+        eventId: input.eventId,
+        threadId: String(input.trackedRun.threadId),
+        message: error.message,
+      }),
+    ),
+  );
 }
 
 function toLifecycleCheckpoint(
@@ -577,6 +621,11 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
             if (trackedRun === null) {
               return;
             }
+            if (trackedRun.kind === "task") {
+              // Checkpoint diff completion can reference a non-final assistant message.
+              // Task runtimes relay their final response when the provider session returns to ready.
+              return;
+            }
             const lifecycle = {
               type: "completed" as const,
               turnId: event.payload.turnId,
@@ -590,35 +639,14 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
               return;
             }
 
-            if (trackedRun.kind === "task") {
-              const assistantResponse = yield* resolveAssistantResponse({
-                cache: assistantResponseCache,
-                threadId: event.payload.threadId,
-                turnId: event.payload.turnId,
-                assistantMessageId:
-                  event.payload.assistantMessageId === null
-                    ? null
-                    : String(event.payload.assistantMessageId),
-              });
-              const payload = buildTaskRuntimeLifecycleEvent({
-                trackedRun,
-                type: lifecycle.type,
-                eventId: event.eventId,
-                occurredAt: event.occurredAt,
-                t3TurnId: lifecycle.turnId,
-                ...(assistantResponse !== undefined ? { assistantResponse } : {}),
-              });
-              yield* postTaskRuntimeLifecycleEvent(payload);
-            } else {
-              const payload = buildLifecycleEvent({
-                trackedRun,
-                type: lifecycle.type,
-                eventId: event.eventId,
-                occurredAt: event.occurredAt,
-                t3TurnId: lifecycle.turnId,
-              });
-              yield* postLifecycleEvent(payload);
-            }
+            const payload = buildLifecycleEvent({
+              trackedRun,
+              type: lifecycle.type,
+              eventId: event.eventId,
+              occurredAt: event.occurredAt,
+              t3TurnId: lifecycle.turnId,
+            });
+            yield* postLifecycleEvent(payload);
 
             yield* runRegistry.markLifecycleDelivered({
               threadId: trackedRun.threadId,
@@ -664,26 +692,34 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
           }
 
           if (trackedRun.kind === "task") {
-            if (lifecycle.type === "completed" && lifecycle.turnId === undefined) {
-              // Claude can mark the session ready before the turn completion identifies the
-              // assistant message. Wait for the turn event so intake replies use the AI output.
-              return;
-            }
+            const completedTurnId =
+              lifecycle.type === "completed"
+                ? (lifecycle.turnId ?? trackedRun.lastTurnId ?? undefined)
+                : undefined;
 
             const assistantResponse =
               lifecycle.type === "completed"
                 ? yield* resolveAssistantResponse({
                     cache: assistantResponseCache,
                     threadId: event.payload.threadId,
-                    ...(lifecycle.turnId !== undefined ? { turnId: lifecycle.turnId } : {}),
+                    ...(completedTurnId !== undefined ? { turnId: completedTurnId } : {}),
                   })
                 : undefined;
+            if (lifecycle.type === "completed") {
+              yield* postFinalTaskRuntimeAssistantMessage({
+                eventId: `${String(event.eventId)}:assistant-final`,
+                occurredAt: event.occurredAt,
+                trackedRun,
+                ...(completedTurnId !== undefined ? { turnId: completedTurnId } : {}),
+                ...(assistantResponse !== undefined ? { assistantResponse } : {}),
+              });
+            }
             const payload = buildTaskRuntimeLifecycleEvent({
               trackedRun,
               type: lifecycle.type,
               eventId: event.eventId,
               occurredAt: event.occurredAt,
-              ...(lifecycle.turnId !== undefined ? { t3TurnId: lifecycle.turnId } : {}),
+              ...(completedTurnId !== undefined ? { t3TurnId: completedTurnId } : {}),
               ...(lifecycle.failureSummary !== undefined
                 ? { failureSummary: lifecycle.failureSummary }
                 : {}),
@@ -708,7 +744,13 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
             threadId: trackedRun.threadId,
             type: lifecycle.type,
             eventId: event.eventId,
-            ...(lifecycle.turnId !== undefined ? { turnId: lifecycle.turnId } : {}),
+            ...(lifecycle.turnId !== undefined
+              ? { turnId: lifecycle.turnId }
+              : trackedRun.kind === "task" &&
+                  lifecycle.type === "completed" &&
+                  trackedRun.lastTurnId !== null
+                ? { turnId: trackedRun.lastTurnId }
+                : {}),
           });
         }).pipe(
           Effect.catch((error: Error) =>
