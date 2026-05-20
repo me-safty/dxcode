@@ -892,9 +892,9 @@ export function makeStandardAcpAdapter(
         const ctx = yield* requireSession(threadId);
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
         yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
-        if (!ctx.activePrompt) return;
         // ACP owns prompt termination. Keep the turn active until the prompt
-        // call returns so late deltas cannot arrive after a local completion.
+        // call returns; still forward cancel when local prompt state is missing
+        // because a resumed provider may have remote work in flight.
         yield* Effect.ignore(
           ctx.acp.cancel.pipe(
             Effect.mapError((error) =>
