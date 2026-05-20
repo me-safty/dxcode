@@ -153,6 +153,48 @@ describe("ProjectSetupScriptRunner", () => {
     });
   });
 
+  it("runs explicit shell setup scripts through bash in the PowerShell terminal", async () => {
+    const open = vi.fn<TerminalManagerShape["open"]>(() =>
+      Effect.succeed({
+        threadId: "thread-1",
+        terminalId: "setup-setup",
+        cwd: "/repo/worktrees/a",
+        worktreePath: "/repo/worktrees/a",
+        status: "running" as const,
+        pid: 123,
+        history: "",
+        exitCode: null,
+        exitSignal: null,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    const write = vi.fn<TerminalManagerShape["write"]>(() => Effect.void);
+    const project = makeProject([
+      {
+        id: "setup",
+        name: "Setup",
+        command: "./scripts/worktree-setup.sh",
+        icon: "configure",
+        runOnWorktreeCreate: true,
+      },
+    ]);
+    const runner = await makeRunner({ project, open, write });
+
+    await Effect.runPromise(
+      runner.runForThread({
+        threadId: "thread-1",
+        projectCwd: "/repo/project",
+        worktreePath: "/repo/worktrees/a",
+      }),
+    );
+
+    expect(write).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      terminalId: "setup-setup",
+      data: "bash scripts/worktree-setup.sh\r",
+    });
+  });
+
   it("falls back to scripts/worktree-setup.sh when no explicit setup script exists", async () => {
     const open = vi.fn<TerminalManagerShape["open"]>(() =>
       Effect.succeed({

@@ -45,27 +45,35 @@ The script:
 
 ## Update From T3 Or Slack
 
-Use detached restart mode:
+Use the safe wrapper. It queues the full rebuild in a detached PowerShell process and returns before the server restarts:
 
 ```powershell
 cd C:\Users\Vivek\Affil\t3code
-.\scripts\update-t3code-server.ps1 -Remote origin -Branch main -DetachedRestart
+.\scripts\rebuild-t3code-production-safe.ps1 -Remote origin -Branch main
+```
+
+Equivalent package script:
+
+```powershell
+bun run server:update:safe -- -Remote origin -Branch main
 ```
 
 If the code is already pulled and only needs rebuilding/restarting:
 
 ```powershell
-.\scripts\update-t3code-server.ps1 -SkipGitUpdate -DetachedRestart
+.\scripts\rebuild-t3code-production-safe.ps1 -SkipGitUpdate
 ```
 
-The foreground command builds and then queues a hidden restart helper. The helper waits a few seconds, restarts T3, and writes logs here:
+After running this wrapper, immediately tell the user that the rebuild was queued and include the log paths printed by the script. Do not keep doing long work in that same T3 session.
+
+The wrapper writes timestamped update logs under `logs\`, then the updater queues a restart helper. The restart helper waits a few seconds, restarts T3, verifies local and Cloudflare reachability, and writes logs here:
 
 ```text
 logs\t3code-server-detached-restart.log
 logs\t3code-server-detached-restart.err.log
 ```
 
-After queueing the detached restart, the agent should immediately tell the user that the restart has been queued. Do not keep doing long work in that same T3 session.
+Do not use `.\scripts\update-t3code-server.ps1` directly from a T3/Slack-launched session unless you explicitly pass `-DetachedRestart`. The wrapper exists so agents have a one-command safe path.
 
 ## Restart Only
 

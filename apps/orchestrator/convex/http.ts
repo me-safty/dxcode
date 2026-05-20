@@ -560,7 +560,30 @@ http.route({
           readonly summary?: string;
         }
       | undefined;
+    let commitPush:
+      | {
+          readonly status: "waiting_for_changes" | "pushed" | "failed" | "skipped";
+          readonly commitSha?: string;
+          readonly commitSubject?: string;
+          readonly branch?: string;
+          readonly upstreamBranch?: string;
+          readonly summary?: string;
+        }
+      | undefined;
     if (payload.type === "completed" || payload.type === "failed") {
+      try {
+        commitPush = await ctx.runAction(api.t3Runtime.commitPushTaskRuntime, {
+          taskId: payload.taskId as Id<"tasks">,
+          workSessionId: payload.workSessionId as Id<"workSessions">,
+          reason: `runtime-${payload.type}`,
+        });
+      } catch (error) {
+        commitPush = {
+          status: "failed",
+          summary: error instanceof Error ? error.message : String(error),
+        };
+      }
+
       try {
         pullRequest = await ctx.runAction(api.t3Runtime.ensureTaskPullRequest, {
           taskId: payload.taskId as Id<"tasks">,
@@ -575,6 +598,27 @@ http.route({
       }
 
       try {
+        if (payload.type === "completed" && payload.assistantResponse !== undefined) {
+          try {
+            intakeReply = await ctx.runAction(internal.taskIntake.postTaskRuntimeLifecycleReply, {
+              taskId: payload.taskId as Id<"tasks">,
+              workSessionId: payload.workSessionId as Id<"workSessions">,
+              status: payload.type,
+              occurredAt: payload.occurredAt,
+              ...(payload.t3ThreadId !== undefined
+                ? { t3ThreadId: String(payload.t3ThreadId) }
+                : {}),
+              ...(payload.t3TurnId !== undefined ? { t3TurnId: String(payload.t3TurnId) } : {}),
+              assistantResponse: payload.assistantResponse,
+            });
+          } catch (error) {
+            intakeReply = {
+              posted: false,
+              reason: error instanceof Error ? error.message : String(error),
+            };
+          }
+        }
+
         if (
           payload.type === "completed" &&
           pullRequest?.status !== "failed" &&
@@ -633,6 +677,7 @@ http.route({
     return Response.json({
       accepted: true,
       ...result,
+      ...(commitPush !== undefined ? { commitPush } : {}),
       ...(pullRequest !== undefined ? { pullRequest } : {}),
       ...(intakeReply !== undefined ? { intakeReply } : {}),
     });

@@ -14,6 +14,9 @@ import {
   type TaskRuntimeMaterializeRequest,
   TaskRuntimeMaterializeResponse,
   type TaskRuntimeMaterializeResponse as TaskRuntimeMaterializeResponseType,
+  type TaskRuntimeCommitPushRequest,
+  TaskRuntimeCommitPushResponse,
+  type TaskRuntimeCommitPushResponse as TaskRuntimeCommitPushResponseType,
   type TaskRuntimeUserInputRespondRequest,
   TaskRuntimeUserInputRespondResponse,
   type TaskRuntimeUserInputRespondResponse as TaskRuntimeUserInputRespondResponseType,
@@ -30,6 +33,7 @@ const decodeExecutionRunStatusResponse = Schema.decodeUnknownSync(ExecutionRunSt
 const decodeTaskRuntimeMaterializeResponse = Schema.decodeUnknownSync(
   TaskRuntimeMaterializeResponse,
 );
+const decodeTaskRuntimeCommitPushResponse = Schema.decodeUnknownSync(TaskRuntimeCommitPushResponse);
 const decodeTaskPullRequestEnsureResponse = Schema.decodeUnknownSync(TaskPullRequestEnsureResponse);
 const decodeTaskRuntimeUserInputRespondResponse = Schema.decodeUnknownSync(
   TaskRuntimeUserInputRespondResponse,
@@ -100,6 +104,9 @@ export interface T3ExecutionBridgeClient {
   readonly ensureTaskPullRequest: (
     request: TaskPullRequestEnsureRequest,
   ) => Promise<TaskPullRequestEnsureResponseType>;
+  readonly commitPushTaskRuntime: (
+    request: TaskRuntimeCommitPushRequest,
+  ) => Promise<TaskRuntimeCommitPushResponseType>;
   readonly respondToTaskRuntimeUserInput: (
     request: TaskRuntimeUserInputRespondRequest,
   ) => Promise<TaskRuntimeUserInputRespondResponseType>;
@@ -207,6 +214,19 @@ export function createT3ExecutionBridgeClient(
       }
 
       return decodeTaskPullRequestEnsureResponse(await response.json());
+    },
+
+    async commitPushTaskRuntime(request) {
+      const response = await authedPost("/api/tasks/commit-push", request);
+
+      if (!response.ok) {
+        const detail = await formatBridgeErrorDetail(response);
+        throw new Error(
+          `T3 task runtime bridge rejected commit/push (${response.status}): ${detail || "Unknown error"}`,
+        );
+      }
+
+      return decodeTaskRuntimeCommitPushResponse(await response.json());
     },
 
     async respondToTaskRuntimeUserInput(request) {

@@ -13,13 +13,17 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ServerConfig, type ServerConfigShape } from "../config.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
+import { GitManager } from "../git/GitManager.ts";
+import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScriptRunner.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import {
   collectTaskPullRequestPreviewLinks,
+  commitPushTaskRuntime,
   ExecutionBridgeRunRegistryLive,
+  ensureTaskPullRequest,
   materializeTaskRuntime,
   sortTaskPullRequestPreviewLinks,
   taskRuntimeWorktreeCreateInput,
@@ -243,6 +247,252 @@ describe("task runtime worktree creation", () => {
       newRefName: expect.stringMatching(/^t3code\//),
       path: null,
       refreshBaseFromOrigin: true,
+    });
+  });
+});
+
+function makeSuccessfulRunStackedActionResult(action: "create_pr" | "commit_push_pr") {
+  return {
+    action,
+    branch: { status: "skipped_not_requested" as const },
+    commit:
+      action === "commit_push_pr"
+        ? {
+            status: "created" as const,
+            commitSha: "1234567890abcdef",
+            subject: "Improve task flow",
+          }
+        : { status: "skipped_not_requested" as const },
+    push: {
+      status: "pushed" as const,
+      branch: "t3code/task-branch",
+      upstreamBranch: "origin/t3code/task-branch",
+      setUpstream: true,
+    },
+    pr: {
+      status: "created" as const,
+      url: "https://github.com/acme/app/pull/42",
+      number: 42,
+      baseBranch: "main",
+      headBranch: "t3code/task-branch",
+      title: "Fix task",
+    },
+    toast: {
+      title: "Created PR",
+      cta: {
+        kind: "open_pr" as const,
+        label: "Open PR",
+        url: "https://github.com/acme/app/pull/42",
+      },
+    },
+  };
+}
+
+function ensureTaskPullRequestRequest() {
+  return {
+    taskId: "task-1",
+    workSessionId: "session-1",
+    branch: "t3code/task-branch",
+    worktreePath: "C:\\Users\\Vivek\\Affil\\app-worktree",
+    project: {
+      githubOwner: "acme",
+      githubRepo: "app",
+      defaultBranch: "main",
+    },
+    title: "Fix task",
+    idempotencyKey: "task-pr:task-1:session-1:t3code/task-branch",
+  };
+}
+
+describe("task pull request ensure", () => {
+  function makeExecuteMock(aheadCount: number) {
+    return vi.fn((input: { readonly args: readonly string[] }) => {
+      if (input.args[0] === "rev-list") {
+        return Effect.succeed({
+          exitCode: 0,
+          stdout: `${aheadCount}\n`,
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        });
+      }
+      return Effect.succeed({
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      });
+    });
+  }
+
+  function makeTaskPullRequestLayer(input: {
+    readonly hasWorkingTreeChanges: boolean;
+    readonly aheadCount: number;
+    readonly runStackedAction: ReturnType<typeof vi.fn>;
+  }) {
+    return Layer.mergeAll(
+      Layer.mock(GitVcsDriver)({
+        statusDetails: () =>
+          Effect.succeed({
+            isRepo: true,
+            hasOriginRemote: true,
+            isDefaultBranch: false,
+            branch: "t3code/task-branch",
+            upstreamRef: null,
+            hasWorkingTreeChanges: input.hasWorkingTreeChanges,
+            workingTree: {
+              files: input.hasWorkingTreeChanges
+                ? [{ path: "src/app.ts", insertions: 4, deletions: 1 }]
+                : [],
+              insertions: input.hasWorkingTreeChanges ? 4 : 0,
+              deletions: input.hasWorkingTreeChanges ? 1 : 0,
+            },
+            hasUpstream: false,
+            aheadCount: 0,
+            behindCount: 0,
+            aheadOfDefaultCount: input.aheadCount,
+          }),
+        execute: makeExecuteMock(input.aheadCount) as any,
+      }),
+      Layer.mock(GitManager)({
+        runStackedAction: input.runStackedAction as any,
+      }),
+    );
+  }
+
+  it("uses T3's generated commit-message flow for dirty worktrees", async () => {
+    const runStackedAction = vi.fn(() =>
+      Effect.succeed(makeSuccessfulRunStackedActionResult("commit_push_pr")),
+    );
+
+    const response = await Effect.runPromise(
+      ensureTaskPullRequest(ensureTaskPullRequestRequest()).pipe(
+        Effect.provide(
+          makeTaskPullRequestLayer({
+            hasWorkingTreeChanges: true,
+            aheadCount: 0,
+            runStackedAction,
+          }),
+        ),
+      ),
+    );
+
+    expect(response.status).toBe("created");
+    expect(runStackedAction).toHaveBeenCalledWith(
+      {
+        actionId: "task-pr:task-1:session-1:t3code/task-branch",
+        cwd: "C:\\Users\\Vivek\\Affil\\app-worktree",
+        action: "commit_push_pr",
+        sourceControlRepository: "acme/app",
+      },
+      { draftPullRequest: true },
+    );
+  });
+
+  it("uses T3's push and PR flow for clean local commits without an upstream", async () => {
+    const runStackedAction = vi.fn(() =>
+      Effect.succeed(makeSuccessfulRunStackedActionResult("create_pr")),
+    );
+
+    const response = await Effect.runPromise(
+      ensureTaskPullRequest(ensureTaskPullRequestRequest()).pipe(
+        Effect.provide(
+          makeTaskPullRequestLayer({
+            hasWorkingTreeChanges: false,
+            aheadCount: 1,
+            runStackedAction,
+          }),
+        ),
+      ),
+    );
+
+    expect(response.status).toBe("created");
+    expect((response as any).pullRequest?.url).toBe("https://github.com/acme/app/pull/42");
+    expect(runStackedAction).toHaveBeenCalledWith(
+      {
+        actionId: "task-pr:task-1:session-1:t3code/task-branch",
+        cwd: "C:\\Users\\Vivek\\Affil\\app-worktree",
+        action: "create_pr",
+        sourceControlRepository: "acme/app",
+      },
+      { draftPullRequest: true },
+    );
+  });
+});
+
+describe("task runtime commit and push", () => {
+  it("uses T3's commit/push workflow without supplying a commit message", async () => {
+    const runStackedAction = vi.fn(() =>
+      Effect.succeed({
+        action: "commit_push" as const,
+        branch: { status: "skipped_not_requested" as const },
+        commit: {
+          status: "created" as const,
+          commitSha: "1234567890abcdef",
+          subject: "Improve billing chart",
+        },
+        push: {
+          status: "pushed" as const,
+          branch: "t3code/bilt-compare-chart-bug",
+          upstreamBranch: "origin/t3code/bilt-compare-chart-bug",
+          setUpstream: true,
+        },
+        pr: { status: "skipped_not_requested" as const },
+        toast: {
+          title: "Pushed 1234567",
+          cta: { kind: "none" as const },
+        },
+      }),
+    );
+
+    const layer = Layer.mergeAll(
+      Layer.mock(GitVcsDriver)({
+        statusDetails: () =>
+          Effect.succeed({
+            isRepo: true,
+            hasOriginRemote: true,
+            isDefaultBranch: false,
+            branch: "t3code/bilt-compare-chart-bug",
+            upstreamRef: null,
+            hasWorkingTreeChanges: true,
+            workingTree: {
+              files: [{ path: "src/chart.ts", insertions: 12, deletions: 2 }],
+              insertions: 12,
+              deletions: 2,
+            },
+            hasUpstream: false,
+            aheadCount: 0,
+            behindCount: 0,
+            aheadOfDefaultCount: 0,
+          }),
+      }),
+      Layer.mock(GitWorkflowService)({
+        runStackedAction: runStackedAction as any,
+      }),
+    );
+
+    const response = await Effect.runPromise(
+      commitPushTaskRuntime({
+        taskId: "task-1",
+        workSessionId: "session-1",
+        branch: "t3code/bilt-compare-chart-bug",
+        worktreePath: "C:\\Users\\Vivek\\Affil\\app-worktree",
+        idempotencyKey: "task-commit-push:task-1:session-1:t3code/bilt-compare-chart-bug",
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(response).toMatchObject({
+      status: "pushed",
+      commitSha: "1234567890abcdef",
+      commitSubject: "Improve billing chart",
+      branch: "t3code/bilt-compare-chart-bug",
+      upstreamBranch: "origin/t3code/bilt-compare-chart-bug",
+    });
+    expect(runStackedAction).toHaveBeenCalledWith({
+      actionId: "task-commit-push:task-1:session-1:t3code/bilt-compare-chart-bug",
+      cwd: "C:\\Users\\Vivek\\Affil\\app-worktree",
+      action: "commit_push",
     });
   });
 });

@@ -233,6 +233,29 @@ export const TaskRuntimeUserInputRespondResponse = Schema.Struct({
 });
 export type TaskRuntimeUserInputRespondResponse = typeof TaskRuntimeUserInputRespondResponse.Type;
 
+export const TaskRuntimeCommitPushRequest = Schema.Struct({
+  taskId: TrimmedNonEmptyString,
+  workSessionId: TaskRuntimeMaterializationId,
+  environmentId: Schema.optional(TrimmedNonEmptyString),
+  branch: TrimmedNonEmptyString,
+  worktreePath: TrimmedNonEmptyString,
+  idempotencyKey: TrimmedNonEmptyString,
+});
+export type TaskRuntimeCommitPushRequest = typeof TaskRuntimeCommitPushRequest.Type;
+
+export const TaskRuntimeCommitPushResponse = Schema.Struct({
+  taskId: TrimmedNonEmptyString,
+  workSessionId: TaskRuntimeMaterializationId,
+  status: Schema.Literals(["waiting_for_changes", "pushed", "failed"]),
+  checkedAt: IsoDateTime,
+  commitSha: Schema.optional(TrimmedNonEmptyString),
+  commitSubject: Schema.optional(TrimmedNonEmptyString),
+  branch: Schema.optional(TrimmedNonEmptyString),
+  upstreamBranch: Schema.optional(TrimmedNonEmptyString),
+  summary: Schema.optional(TrimmedNonEmptyString),
+});
+export type TaskRuntimeCommitPushResponse = typeof TaskRuntimeCommitPushResponse.Type;
+
 export const TaskPullRequestEnsureRequest = Schema.Struct({
   taskId: TrimmedNonEmptyString,
   workSessionId: TaskRuntimeMaterializationId,

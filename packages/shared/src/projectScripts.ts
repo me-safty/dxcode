@@ -41,6 +41,21 @@ export function setupProjectScript(scripts: readonly ProjectScript[]): ProjectSc
   return scripts.find((script) => script.runOnWorktreeCreate) ?? null;
 }
 
+export function setupProjectScriptCommand(command: string): string {
+  const trimmed = command.trim();
+  if (/^(?:bash|sh)\s+/iu.test(trimmed)) {
+    return trimmed;
+  }
+
+  const shellScript = /^(?:\.\/)?(?<path>[^\s"'`]+\.sh)(?<args>\s+.*)?$/u.exec(trimmed);
+  const scriptPath = shellScript?.groups?.path;
+  if (scriptPath !== undefined) {
+    return `bash ${scriptPath}${shellScript?.groups?.args ?? ""}`;
+  }
+
+  return trimmed;
+}
+
 export function worktreeSetupScriptCommand(relativePath: string): string {
   return `bash ${relativePath}`;
 }

@@ -38,7 +38,7 @@ export interface HealthMonitorState {
 export type HealthAlertStatus = "failing" | "recovered";
 
 function envValue(env: NodeJS.ProcessEnv, name: string) {
-  const value = env[name]?.trim();
+  const value = env[name] === undefined ? undefined : stripInlineEnvComment(env[name]).trim();
   return value && value.length > 0 ? value : undefined;
 }
 
@@ -183,11 +183,12 @@ async function checkBridge(config: HealthCheckConfig): Promise<CheckResult> {
 function runCommand(
   command: string,
   args: ReadonlyArray<string>,
-  options: { readonly cwd?: string; readonly timeoutMs: number },
+  options: { readonly cwd?: string; readonly timeoutMs: number; readonly env?: NodeJS.ProcessEnv },
 ): Promise<{ readonly code: number | null; readonly stdout: string; readonly stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
+      env: options.env,
       shell: false,
       windowsHide: true,
     });
@@ -287,6 +288,21 @@ async function checkT3ServerRuntime(config: HealthCheckConfig): Promise<CheckRes
   };
 }
 
+function convexDeploymentFromSiteUrl(siteUrl: string | undefined) {
+  if (siteUrl === undefined) {
+    return undefined;
+  }
+  try {
+    const host = new URL(siteUrl).hostname;
+    const deploymentName = host.endsWith(".convex.site")
+      ? host.slice(0, -".convex.site".length)
+      : "";
+    return deploymentName.length > 0 ? `prod:${deploymentName}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function checkConvex(config: HealthCheckConfig): Promise<ReadonlyArray<CheckResult>> {
   const results: CheckResult[] = [];
   if (config.convexSiteUrl !== undefined) {
@@ -305,10 +321,23 @@ async function checkConvex(config: HealthCheckConfig): Promise<ReadonlyArray<Che
     });
   }
 
+  const convexEnv = {
+    ...process.env,
+    ...(convexDeploymentFromSiteUrl(config.convexSiteUrl) !== undefined
+      ? { CONVEX_DEPLOYMENT: convexDeploymentFromSiteUrl(config.convexSiteUrl) }
+      : {}),
+  };
   const events = await runCommand(
     "bunx",
-    ["convex", "run", "observability:listRecent", "--", '{ "severity": "error", "limit": 5 }'],
-    { cwd: config.orchestratorDir, timeoutMs: config.timeoutMs },
+    [
+      "convex",
+      "run",
+      "--prod",
+      "observability:listRecent",
+      "--",
+      '{ "severity": "error", "limit": 5 }',
+    ],
+    { cwd: config.orchestratorDir, timeoutMs: config.timeoutMs, env: convexEnv },
   );
   results.push({
     name: "recent orchestrator errors",

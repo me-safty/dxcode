@@ -14,6 +14,7 @@ import type * as githubData from "../githubData.js";
 import type * as http from "../http.js";
 import type * as observability from "../observability.js";
 import type * as ops from "../ops.js";
+import type * as opsData from "../opsData.js";
 import type * as projects from "../projects.js";
 import type * as supportEmail from "../supportEmail.js";
 import type * as t3Runtime from "../t3Runtime.js";
@@ -33,6 +34,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   observability: typeof observability;
   ops: typeof ops;
+  opsData: typeof opsData;
   projects: typeof projects;
   supportEmail: typeof supportEmail;
   t3Runtime: typeof t3Runtime;

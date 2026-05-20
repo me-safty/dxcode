@@ -13,6 +13,8 @@ import {
   type TaskPullRequestEnsureRequest,
   type TaskPullRequestEnsureResponse,
   type TaskRuntimeLifecycleEvent,
+  type TaskRuntimeCommitPushRequest,
+  type TaskRuntimeCommitPushResponse,
   type TaskRuntimeMaterializeRequest,
   type TaskRuntimeMaterializeResponse,
   type TaskRuntimeUserInputRespondRequest,
@@ -32,6 +34,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import { GitManager } from "../git/GitManager.ts";
+import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { normalizeUploadChatAttachments } from "../orchestration/Normalizer.ts";
@@ -1021,16 +1024,6 @@ export const ensureTaskPullRequest = (request: TaskPullRequestEnsureRequest) =>
       });
     }
 
-    if (!details.hasWorkingTreeChanges && !details.hasUpstream && details.aheadCount === 0) {
-      return {
-        taskId: request.taskId,
-        workSessionId: request.workSessionId,
-        status: "waiting_for_changes",
-        checkedAt,
-        summary: "No task changes have been committed or staged yet.",
-      } satisfies TaskPullRequestEnsureResponse;
-    }
-
     const baseBranch = request.project.defaultBranch;
     yield* detachTaskPullRequestBaseUpstream(git, request.worktreePath, branch, baseBranch);
     yield* configureTaskPullRequestBaseBranch(git, request.worktreePath, branch, baseBranch);
@@ -1058,7 +1051,6 @@ export const ensureTaskPullRequest = (request: TaskPullRequestEnsureRequest) =>
         actionId: request.idempotencyKey,
         cwd: request.worktreePath,
         action,
-        commitMessage: request.title,
         sourceControlRepository: `${request.project.githubOwner}/${request.project.githubRepo}`,
       },
       { draftPullRequest: true },
@@ -1131,6 +1123,57 @@ export const ensureTaskPullRequest = (request: TaskPullRequestEnsureRequest) =>
           summary:
             cause instanceof Error ? cause.message : "Failed to ensure a GitHub pull request.",
         } satisfies TaskPullRequestEnsureResponse;
+      }),
+    ),
+  );
+
+export const commitPushTaskRuntime = (request: TaskRuntimeCommitPushRequest) =>
+  Effect.gen(function* () {
+    const git = yield* GitVcsDriver;
+    const gitWorkflow = yield* GitWorkflowService;
+    const checkedAt = yield* currentIsoTimestamp;
+    const details = yield* git.statusDetails(request.worktreePath);
+    const branch = details.branch ?? request.branch;
+
+    const result = yield* gitWorkflow.runStackedAction({
+      actionId: request.idempotencyKey,
+      cwd: request.worktreePath,
+      action: "commit_push",
+    });
+
+    if (result.push.status === "pushed") {
+      return {
+        taskId: request.taskId,
+        workSessionId: request.workSessionId,
+        status: "pushed",
+        checkedAt,
+        ...(result.commit.commitSha !== undefined ? { commitSha: result.commit.commitSha } : {}),
+        ...(result.commit.subject !== undefined ? { commitSubject: result.commit.subject } : {}),
+        branch: result.push.branch ?? branch,
+        ...(result.push.upstreamBranch !== undefined
+          ? { upstreamBranch: result.push.upstreamBranch }
+          : {}),
+      } satisfies TaskRuntimeCommitPushResponse;
+    }
+
+    return {
+      taskId: request.taskId,
+      workSessionId: request.workSessionId,
+      status: "waiting_for_changes",
+      checkedAt,
+      summary: "No task changes were committed or pushed.",
+    } satisfies TaskRuntimeCommitPushResponse;
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.gen(function* () {
+        const checkedAt = yield* currentIsoTimestamp;
+        return {
+          taskId: request.taskId,
+          workSessionId: request.workSessionId,
+          status: "failed",
+          checkedAt,
+          summary: cause instanceof Error ? cause.message : "Failed to commit and push task work.",
+        } satisfies TaskRuntimeCommitPushResponse;
       }),
     ),
   );

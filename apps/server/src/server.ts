@@ -91,6 +91,7 @@ import {
   executionBridgeRunCreateRouteLayer,
   executionBridgeStatusQueryRouteLayer,
   taskPullRequestEnsureRouteLayer,
+  taskRuntimeCommitPushRouteLayer,
   taskRuntimeMaterializeRouteLayer,
   taskRuntimeUserInputRespondRouteLayer,
 } from "./executionBridge/http.ts";
@@ -326,6 +327,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
   taskPullRequestEnsureRouteLayer,
+  taskRuntimeCommitPushRouteLayer,
   taskRuntimeMaterializeRouteLayer,
   taskRuntimeUserInputRespondRouteLayer,
   staticAndDevRouteLayer,

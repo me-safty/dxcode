@@ -2,6 +2,7 @@ import { ProjectId } from "@t3tools/contracts";
 import {
   projectScriptRuntimeEnv,
   setupProjectScript,
+  setupProjectScriptCommand,
   WORKTREE_SETUP_SCRIPT_RELATIVE_PATHS,
   worktreeSetupScriptCommand,
 } from "@t3tools/shared/projectScripts";
@@ -80,6 +81,7 @@ const makeProjectSetupScriptRunner = Effect.gen(function* () {
           status: "no-script",
         } as const;
       }
+      const command = setupProjectScriptCommand(script.command);
 
       const terminalId = input.preferredTerminalId ?? `setup-${script.id}`;
       const cwd = input.worktreePath;
@@ -98,7 +100,7 @@ const makeProjectSetupScriptRunner = Effect.gen(function* () {
       yield* terminalManager.write({
         threadId: input.threadId,
         terminalId,
-        data: `${script.command}\r`,
+        data: `${command}\r`,
       });
 
       return {

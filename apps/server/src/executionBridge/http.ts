@@ -9,6 +9,7 @@ import {
   ExecutionRunInterruptRequest,
   ExecutionRunStatusQuery,
   TaskPullRequestEnsureRequest,
+  TaskRuntimeCommitPushRequest,
   TaskRuntimeMaterializeRequest,
   TaskRuntimeUserInputRespondRequest,
   type OrchestrationEvent,
@@ -28,6 +29,7 @@ import { authenticateExecutionBridgeRequest, ExecutionBridgeAuthError } from "./
 import {
   buildLifecycleEvent,
   buildTaskRuntimeLifecycleEvent,
+  commitPushTaskRuntime,
   continueExecutionRun,
   ensureTaskPullRequest,
   ExecutionBridgeRunRegistry,
@@ -157,29 +159,38 @@ export function readCachedAssistantResponse(input: {
   readonly turnId?: TurnId;
   readonly assistantMessageId?: string | null;
 }) {
-  const entries = input.cache.get(String(input.threadId)) ?? [];
-  if (input.assistantMessageId !== undefined && input.assistantMessageId !== null) {
-    const byMessage = entries.find((entry) => entry.messageId === String(input.assistantMessageId));
-    if (byMessage !== undefined) {
-      return byMessage.text;
-    }
-  }
-  if (input.turnId !== undefined) {
-    const byTurn = entries.findLast((entry) => entry.turnId === String(input.turnId));
-    if (byTurn !== undefined) {
-      return byTurn.text;
-    }
-  }
-  return entries.at(-1)?.text;
+  return readCachedAssistantResponseEntry(input)?.text;
 }
 
-function resolveAssistantResponse(input: {
+function readCachedAssistantResponseEntry(input: {
   readonly cache: Map<string, AssistantResponseCacheEntry[]>;
   readonly threadId: ThreadId;
   readonly turnId?: TurnId;
   readonly assistantMessageId?: string | null;
 }) {
-  const cached = readCachedAssistantResponse(input);
+  const entries = input.cache.get(String(input.threadId)) ?? [];
+  if (input.assistantMessageId !== undefined && input.assistantMessageId !== null) {
+    const byMessage = entries.find((entry) => entry.messageId === String(input.assistantMessageId));
+    if (byMessage !== undefined) {
+      return byMessage;
+    }
+  }
+  if (input.turnId !== undefined) {
+    const byTurn = entries.findLast((entry) => entry.turnId === String(input.turnId));
+    if (byTurn !== undefined) {
+      return byTurn;
+    }
+  }
+  return entries.at(-1);
+}
+
+function resolveAssistantResponseEntry(input: {
+  readonly cache: Map<string, AssistantResponseCacheEntry[]>;
+  readonly threadId: ThreadId;
+  readonly turnId?: TurnId;
+  readonly assistantMessageId?: string | null;
+}) {
+  const cached = readCachedAssistantResponseEntry(input);
   if (cached !== undefined) {
     return Effect.succeed(cached);
   }
@@ -196,7 +207,14 @@ function resolveAssistantResponse(input: {
         (message) => String(message.id) === String(input.assistantMessageId),
       );
       if (byMessage !== undefined) {
-        return normalizeAssistantResponse(byMessage.text);
+        const text = normalizeAssistantResponse(byMessage.text);
+        return text === undefined
+          ? undefined
+          : {
+              messageId: String(byMessage.id),
+              turnId: byMessage.turnId === null ? null : String(byMessage.turnId),
+              text,
+            };
       }
     }
 
@@ -206,14 +224,84 @@ function resolveAssistantResponse(input: {
           message.role === "assistant" && String(message.turnId) === String(input.turnId),
       );
       if (byTurn !== undefined) {
-        return normalizeAssistantResponse(byTurn.text);
+        const text = normalizeAssistantResponse(byTurn.text);
+        return text === undefined
+          ? undefined
+          : {
+              messageId: String(byTurn.id),
+              turnId: byTurn.turnId === null ? null : String(byTurn.turnId),
+              text,
+            };
       }
     }
 
-    return normalizeAssistantResponse(
-      thread.value.messages.findLast((message) => message.role === "assistant")?.text ?? "",
-    );
+    const latest = thread.value.messages.findLast((message) => message.role === "assistant");
+    const text = normalizeAssistantResponse(latest?.text ?? "");
+    return text === undefined || latest === undefined
+      ? undefined
+      : {
+          messageId: String(latest.id),
+          turnId: latest.turnId === null ? null : String(latest.turnId),
+          text,
+        };
   }).pipe(Effect.catch(() => Effect.sync(() => undefined)));
+}
+
+function firstAssistantMessageTurnKey(input: {
+  readonly threadId: ThreadId;
+  readonly turnId: TurnId;
+}) {
+  return `${String(input.threadId)}:${String(input.turnId)}`;
+}
+
+function postFirstTaskRuntimeAssistantMessage(input: {
+  readonly event: Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
+  readonly trackedRun: TrackedExecutionRun;
+  readonly forwardedTurnKeys: Set<string>;
+}) {
+  const { event, forwardedTurnKeys, trackedRun } = input;
+  if (
+    trackedRun.kind !== "task" ||
+    trackedRun.taskId === null ||
+    trackedRun.workSessionId === null ||
+    event.payload.role !== "assistant" ||
+    event.payload.turnId === null
+  ) {
+    return Effect.void;
+  }
+
+  const assistantResponse = normalizeAssistantResponse(event.payload.text);
+  if (assistantResponse === undefined) {
+    return Effect.void;
+  }
+
+  const turnKey = firstAssistantMessageTurnKey({
+    threadId: event.payload.threadId,
+    turnId: event.payload.turnId,
+  });
+  if (forwardedTurnKeys.has(turnKey)) {
+    return Effect.void;
+  }
+  forwardedTurnKeys.add(turnKey);
+
+  return postTaskRuntimeAssistantMessageEvent({
+    eventId: `${String(event.eventId)}:assistant-first`,
+    taskId: trackedRun.taskId,
+    workSessionId: trackedRun.workSessionId,
+    occurredAt: event.occurredAt,
+    t3ThreadId: trackedRun.threadId,
+    t3MessageId: event.payload.messageId,
+    t3TurnId: event.payload.turnId,
+    assistantMessage: assistantResponse,
+  }).pipe(
+    Effect.catch((error: Error) =>
+      Effect.logWarning("execution bridge failed to forward first assistant message", {
+        eventId: String(event.eventId),
+        threadId: String(trackedRun.threadId),
+        message: error.message,
+      }),
+    ),
+  );
 }
 
 function postFinalTaskRuntimeAssistantMessage(input: {
@@ -355,6 +443,21 @@ export const taskRuntimeMaterializeRouteLayer = HttpRouter.add(
       Effect.succeed(respondToExecutionBridgeError(error)),
     ),
     Effect.catchTag("ExecutionBridgeRunStartError", (error) =>
+      Effect.succeed(respondToExecutionBridgeError(error)),
+    ),
+  ),
+);
+
+export const taskRuntimeCommitPushRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/tasks/commit-push",
+  Effect.gen(function* () {
+    yield* authenticateExecutionBridgeRequest;
+    const request = yield* HttpServerRequest.schemaBodyJson(TaskRuntimeCommitPushRequest);
+    const result = yield* commitPushTaskRuntime(request);
+    return HttpServerResponse.jsonUnsafe(result, { status: 202 });
+  }).pipe(
+    Effect.catchTag("ExecutionBridgeAuthError", (error) =>
       Effect.succeed(respondToExecutionBridgeError(error)),
     ),
   ),
@@ -572,6 +675,7 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
     const orchestrationEngine = yield* OrchestrationEngineService;
     const runRegistry = yield* ExecutionBridgeRunRegistry;
     const assistantResponseCache = new Map<string, AssistantResponseCacheEntry[]>();
+    const firstAssistantMessageTurnKeys = new Set<string>();
 
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
@@ -580,7 +684,17 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
             cache: assistantResponseCache,
             event,
           });
-          return Effect.void;
+          return Effect.gen(function* () {
+            const trackedRun = yield* runRegistry.getTrackedRun(event.payload.threadId);
+            if (trackedRun === null) {
+              return;
+            }
+            yield* postFirstTaskRuntimeAssistantMessage({
+              event,
+              trackedRun,
+              forwardedTurnKeys: firstAssistantMessageTurnKeys,
+            });
+          });
         }
 
         if (event.type === "thread.activity-appended") {
@@ -697,9 +811,9 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
                 ? (lifecycle.turnId ?? trackedRun.lastTurnId ?? undefined)
                 : undefined;
 
-            const assistantResponse =
+            const assistantResponseEntry =
               lifecycle.type === "completed"
-                ? yield* resolveAssistantResponse({
+                ? yield* resolveAssistantResponseEntry({
                     cache: assistantResponseCache,
                     threadId: event.payload.threadId,
                     ...(completedTurnId !== undefined ? { turnId: completedTurnId } : {}),
@@ -711,7 +825,12 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
                 occurredAt: event.occurredAt,
                 trackedRun,
                 ...(completedTurnId !== undefined ? { turnId: completedTurnId } : {}),
-                ...(assistantResponse !== undefined ? { assistantResponse } : {}),
+                ...(assistantResponseEntry !== undefined
+                  ? {
+                      assistantMessageId: assistantResponseEntry.messageId,
+                      assistantResponse: assistantResponseEntry.text,
+                    }
+                  : {}),
               });
             }
             const payload = buildTaskRuntimeLifecycleEvent({
@@ -723,7 +842,9 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
               ...(lifecycle.failureSummary !== undefined
                 ? { failureSummary: lifecycle.failureSummary }
                 : {}),
-              ...(assistantResponse !== undefined ? { assistantResponse } : {}),
+              ...(assistantResponseEntry !== undefined
+                ? { assistantResponse: assistantResponseEntry.text }
+                : {}),
             });
             yield* postTaskRuntimeLifecycleEvent(payload);
           } else {

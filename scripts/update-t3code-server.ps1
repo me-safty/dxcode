@@ -1,5 +1,5 @@
 param(
-  [string]$Remote = "pingdotgg",
+  [string]$Remote = "origin",
   [string]$Branch = "main",
   [switch]$SkipGitUpdate,
   [switch]$AllowDirty,
@@ -97,14 +97,35 @@ function Assert-HttpStatus {
   param(
     [string]$Name,
     [string]$Url,
-    [int[]]$ExpectedStatuses = @(200)
+    [int[]]$ExpectedStatuses = @(200),
+    [int]$TimeoutSeconds = 60
   )
 
-  $status = Get-HttpStatus -Url $Url
-  if ($ExpectedStatuses -notcontains $status) {
-    throw "$Name failed: $Url returned HTTP $status."
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $lastError = $null
+  $lastStatus = $null
+
+  do {
+    try {
+      $status = Get-HttpStatus -Url $Url -TimeoutSeconds 10
+      $lastStatus = $status
+      $lastError = $null
+      if ($ExpectedStatuses -contains $status) {
+        Write-Host "$Name ok: $Url -> HTTP $status"
+        return
+      }
+    } catch {
+      $lastError = $_.Exception.Message
+    }
+
+    Start-Sleep -Seconds 2
+  } while ((Get-Date) -lt $deadline)
+
+  if ($lastError) {
+    throw "$Name failed: $Url did not return HTTP $($ExpectedStatuses -join '/') within $TimeoutSeconds seconds. Last error: $lastError"
   }
-  Write-Host "$Name ok: $Url -> HTTP $status"
+
+  throw "$Name failed: $Url returned HTTP $lastStatus; expected $($ExpectedStatuses -join '/') within $TimeoutSeconds seconds."
 }
 
 function Assert-T3CodeReachable {

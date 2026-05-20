@@ -717,6 +717,85 @@ export const ensureTaskPullRequest = action({
   },
 });
 
+export const commitPushTaskRuntime = action({
+  args: {
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+    reason: v.optional(v.string()),
+  },
+  returns: v.object({
+    status: v.union(
+      v.literal("waiting_for_changes"),
+      v.literal("pushed"),
+      v.literal("failed"),
+      v.literal("skipped"),
+    ),
+    commitSha: v.optional(v.string()),
+    commitSubject: v.optional(v.string()),
+    branch: v.optional(v.string()),
+    upstreamBranch: v.optional(v.string()),
+    summary: v.optional(v.string()),
+  }),
+  handler: async (ctx, args) => {
+    const seed = await ctx.runQuery(internal.t3Runtime.getTaskPullRequestSeed, {
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+    });
+    if (seed === null) {
+      return { status: "skipped" as const, summary: "Task runtime is not materialized yet." };
+    }
+
+    const idempotencyKey = `task-commit-push:${String(args.taskId)}:${String(args.workSessionId)}:${seed.branch}`;
+    await logOrchestratorEvent(ctx, {
+      kind: "t3.runtime.commit-push-requested",
+      summary: "Preparing to call local T3 bridge to commit and push task changes.",
+      eventKey: `${idempotencyKey}:bridge-requested`,
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      payload: {
+        reason: args.reason ?? "unspecified",
+        branch: seed.branch,
+        worktreePath: seed.worktreePath,
+      },
+    });
+
+    const client = createT3ExecutionBridgeClient();
+    const response = await client.commitPushTaskRuntime({
+      taskId: String(args.taskId),
+      workSessionId: String(args.workSessionId),
+      ...(seed.environmentId !== undefined ? { environmentId: seed.environmentId } : {}),
+      branch: seed.branch,
+      worktreePath: seed.worktreePath,
+      idempotencyKey,
+    });
+
+    await logOrchestratorEvent(ctx, {
+      kind: "t3.runtime.commit-push-completed",
+      summary: "Local T3 bridge completed task commit/push.",
+      eventKey: `${idempotencyKey}:bridge-completed:${response.status}`,
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      payload: {
+        status: response.status,
+        summary: response.summary,
+        commitSha: response.commitSha,
+        commitSubject: response.commitSubject,
+        branch: response.branch,
+        upstreamBranch: response.upstreamBranch,
+      },
+    });
+
+    return {
+      status: response.status,
+      ...(response.commitSha !== undefined ? { commitSha: response.commitSha } : {}),
+      ...(response.commitSubject !== undefined ? { commitSubject: response.commitSubject } : {}),
+      ...(response.branch !== undefined ? { branch: response.branch } : {}),
+      ...(response.upstreamBranch !== undefined ? { upstreamBranch: response.upstreamBranch } : {}),
+      ...(response.summary !== undefined ? { summary: response.summary } : {}),
+    };
+  },
+});
+
 export const getTaskPullRequestSeed = internalQuery({
   args: {
     taskId: v.id("tasks"),
