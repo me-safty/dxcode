@@ -1,7 +1,12 @@
 import { EventId, MessageId, ThreadId, TurnId, type OrchestrationEvent } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { cacheAssistantMessageForLifecycle, readCachedAssistantResponse } from "./http.ts";
+import {
+  cacheAssistantMessageForLifecycle,
+  readCachedAssistantResponse,
+  shouldForwardLifecycleCheckpoint,
+} from "./http.ts";
+import type { TrackedExecutionRun } from "./runStart.ts";
 
 function assistantMessageEvent(input: {
   readonly eventId: string;
@@ -134,5 +139,43 @@ describe("execution bridge assistant response cache", () => {
         threadId: ThreadId.make("thread-1"),
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("execution bridge task runtime lifecycle forwarding", () => {
+  const taskRun = {
+    kind: "task",
+    controlThreadId: "task-1",
+    executionRunId: "session-1",
+    taskId: "task-1",
+    workSessionId: "session-1",
+    threadId: ThreadId.make("thread-1"),
+    startedEventId: null,
+    completedEventId: null,
+    failedEventId: null,
+    interruptedEventId: null,
+    lastTurnId: null,
+  } satisfies TrackedExecutionRun;
+
+  it("does not treat initial ready session state as task completion before a turn starts", () => {
+    expect(
+      shouldForwardLifecycleCheckpoint({
+        type: "completed",
+        trackedRun: taskRun,
+      }),
+    ).toBe(false);
+  });
+
+  it("forwards task completion after a turn has been observed", () => {
+    expect(
+      shouldForwardLifecycleCheckpoint({
+        type: "completed",
+        trackedRun: {
+          ...taskRun,
+          startedEventId: "started-event",
+          lastTurnId: TurnId.make("turn-1"),
+        },
+      }),
+    ).toBe(true);
   });
 });

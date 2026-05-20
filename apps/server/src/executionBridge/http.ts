@@ -460,7 +460,17 @@ function hasLifecycleAlreadyBeenDelivered(input: {
 export function shouldForwardLifecycleCheckpoint(input: {
   readonly type: ExecutionLifecycleCheckpoint;
   readonly trackedRun: TrackedExecutionRun;
+  readonly turnId?: TurnId;
 }) {
+  if (
+    input.trackedRun.kind === "task" &&
+    input.type === "completed" &&
+    input.turnId === undefined &&
+    input.trackedRun.lastTurnId === null
+  ) {
+    return false;
+  }
+
   if (hasLifecycleAlreadyBeenDelivered(input)) {
     return false;
   }
@@ -794,6 +804,7 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
               !shouldForwardLifecycleCheckpoint({
                 type: lifecycle.type,
                 trackedRun,
+                turnId: lifecycle.turnId,
               })
             ) {
               return;
@@ -840,14 +851,12 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
             return;
           }
           if (
-            hasLifecycleAlreadyBeenDelivered({
+            !shouldForwardLifecycleCheckpoint({
               type: lifecycle.type,
               trackedRun,
+              ...(lifecycle.turnId !== undefined ? { turnId: lifecycle.turnId } : {}),
             })
           ) {
-            return;
-          }
-          if (!shouldForwardLifecycleCheckpoint({ type: lifecycle.type, trackedRun })) {
             return;
           }
 
