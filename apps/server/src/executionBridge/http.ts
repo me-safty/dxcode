@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -144,6 +145,18 @@ interface FirstAssistantRelayEntry {
   readonly messageId: string;
   readonly text: string;
 }
+
+interface FinalAssistantRelayEntry {
+  readonly messageId: string;
+  readonly text: string;
+}
+
+const FINAL_ASSISTANT_RELAY_RETRY_DELAYS = [
+  "500 millis",
+  "2 seconds",
+  "5 seconds",
+  "10 seconds",
+] as const;
 
 function normalizeAssistantResponse(text: string) {
   const trimmed = text.trim();
@@ -278,16 +291,17 @@ function firstAssistantMessageTurnKey(input: {
 
 export function shouldRelayFinalAssistantResponse(input: {
   readonly firstRelay?: FirstAssistantRelayEntry;
+  readonly finalRelay?: FinalAssistantRelayEntry;
   readonly finalResponse?: AssistantResponseCacheEntry;
 }) {
   if (input.finalResponse === undefined) {
     return false;
   }
+  if (input.finalRelay !== undefined) {
+    return false;
+  }
   if (input.firstRelay === undefined) {
     return true;
-  }
-  if (input.firstRelay.messageId === input.finalResponse.messageId) {
-    return false;
   }
   if (input.firstRelay.text === input.finalResponse.text) {
     return false;
@@ -398,13 +412,13 @@ function postFinalTaskRuntimeAssistantMessage(input: {
   readonly assistantMessageId?: string | null;
   readonly turnId?: TurnId;
   readonly assistantResponse?: string;
-}) {
+}): Effect.Effect<boolean, never, never> {
   if (
     input.trackedRun.taskId === null ||
     input.trackedRun.workSessionId === null ||
     input.assistantResponse === undefined
   ) {
-    return Effect.void;
+    return Effect.succeed(false);
   }
 
   return postTaskRuntimeAssistantMessageEvent({
@@ -420,14 +434,114 @@ function postFinalTaskRuntimeAssistantMessage(input: {
     ...(input.turnId !== undefined ? { t3TurnId: input.turnId } : {}),
     assistantMessage: input.assistantResponse,
   }).pipe(
+    Effect.as(true),
     Effect.catch((error: Error) =>
       Effect.logWarning("execution bridge failed to forward final assistant message", {
         eventId: input.eventId,
         threadId: String(input.trackedRun.threadId),
         message: error.message,
-      }),
+      }).pipe(Effect.as(false)),
     ),
   );
+}
+
+function postResolvedFinalTaskRuntimeAssistantMessage(input: {
+  readonly cache: Map<string, AssistantResponseCacheEntry[]>;
+  readonly trackedRun: TrackedExecutionRun;
+  readonly eventId: string;
+  readonly occurredAt: string;
+  readonly turnId?: TurnId;
+  readonly firstRelays: Map<string, FirstAssistantRelayEntry>;
+  readonly finalRelays: Map<string, FinalAssistantRelayEntry>;
+  readonly finalRelayMutex: Semaphore.Semaphore;
+}) {
+  if (input.trackedRun.kind !== "task" || input.turnId === undefined) {
+    return Effect.succeed(false);
+  }
+  const turnId = input.turnId;
+
+  const turnKey = firstAssistantMessageTurnKey({
+    threadId: input.trackedRun.threadId,
+    turnId,
+  });
+
+  return Effect.gen(function* () {
+    const assistantResponseEntry = yield* resolveAssistantResponseEntry({
+      cache: input.cache,
+      threadId: input.trackedRun.threadId,
+      turnId,
+    });
+    const firstRelay = input.firstRelays.get(turnKey);
+    const finalRelay = input.finalRelays.get(turnKey);
+    const shouldRelayFinal = shouldRelayFinalAssistantResponse({
+      ...(firstRelay !== undefined ? { firstRelay } : {}),
+      ...(finalRelay !== undefined ? { finalRelay } : {}),
+      ...(assistantResponseEntry !== undefined ? { finalResponse: assistantResponseEntry } : {}),
+    });
+    if (!shouldRelayFinal || assistantResponseEntry === undefined) {
+      return false;
+    }
+
+    const delivered = yield* postFinalTaskRuntimeAssistantMessage({
+      eventId: input.eventId,
+      occurredAt: input.occurredAt,
+      trackedRun: input.trackedRun,
+      turnId,
+      assistantMessageId: assistantResponseEntry.messageId,
+      assistantResponse: assistantResponseEntry.text,
+    });
+    if (!delivered) {
+      return false;
+    }
+    input.finalRelays.set(turnKey, {
+      messageId: assistantResponseEntry.messageId,
+      text: assistantResponseEntry.text,
+    });
+    return true;
+  }).pipe(input.finalRelayMutex.withPermits(1));
+}
+
+function scheduleFinalTaskRuntimeAssistantMessageRetries(input: {
+  readonly cache: Map<string, AssistantResponseCacheEntry[]>;
+  readonly getTrackedRun: (
+    threadId: ThreadId,
+  ) => Effect.Effect<TrackedExecutionRun | null, never, never>;
+  readonly threadId: ThreadId;
+  readonly turnId?: TurnId;
+  readonly completionEventId: string;
+  readonly occurredAt: string;
+  readonly firstRelays: Map<string, FirstAssistantRelayEntry>;
+  readonly finalRelays: Map<string, FinalAssistantRelayEntry>;
+  readonly finalRelayMutex: Semaphore.Semaphore;
+}) {
+  if (input.turnId === undefined) {
+    return Effect.void;
+  }
+  const turnId = input.turnId;
+
+  return Effect.gen(function* () {
+    for (let index = 0; index < FINAL_ASSISTANT_RELAY_RETRY_DELAYS.length; index += 1) {
+      yield* Effect.sleep(FINAL_ASSISTANT_RELAY_RETRY_DELAYS[index]!);
+      const latestTrackedRun = yield* input.getTrackedRun(input.threadId);
+      if (latestTrackedRun === null || latestTrackedRun.kind !== "task") {
+        return;
+      }
+
+      const relayed = yield* postResolvedFinalTaskRuntimeAssistantMessage({
+        cache: input.cache,
+        trackedRun: latestTrackedRun,
+        eventId: `${input.completionEventId}:assistant-final`,
+        occurredAt: input.occurredAt,
+        turnId,
+        firstRelays: input.firstRelays,
+        finalRelays: input.finalRelays,
+        finalRelayMutex: input.finalRelayMutex,
+      });
+      if (relayed) {
+        return;
+      }
+    }
+  }).pipe(Effect.forkScoped, Effect.asVoid);
 }
 
 function toLifecycleCheckpoint(
@@ -743,6 +857,8 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
     const runRegistry = yield* ExecutionBridgeRunRegistry;
     const assistantResponseCache = new Map<string, AssistantResponseCacheEntry[]>();
     const firstAssistantMessageTurnKeys = new Map<string, FirstAssistantRelayEntry>();
+    const finalAssistantMessageTurnKeys = new Map<string, FinalAssistantRelayEntry>();
+    const finalAssistantMessageRelayMutex = yield* Semaphore.make(1);
 
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
@@ -775,6 +891,23 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
                 type: "started",
                 eventId: `${String(event.eventId)}:assistant-turn-observed`,
                 turnId: event.payload.turnId,
+              });
+            }
+            if (
+              trackedRun.kind === "task" &&
+              trackedRun.completedEventId !== null &&
+              event.payload.role === "assistant" &&
+              event.payload.turnId !== null
+            ) {
+              yield* postResolvedFinalTaskRuntimeAssistantMessage({
+                cache: assistantResponseCache,
+                trackedRun,
+                eventId: `${String(event.eventId)}:assistant-final`,
+                occurredAt: event.occurredAt,
+                turnId: event.payload.turnId,
+                firstRelays: firstAssistantMessageTurnKeys,
+                finalRelays: finalAssistantMessageTurnKeys,
+                finalRelayMutex: finalAssistantMessageRelayMutex,
               });
             }
           });
@@ -893,42 +1026,48 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
                 ? (lifecycle.turnId ?? trackedRun.lastTurnId ?? undefined)
                 : undefined;
 
-            const assistantResponseEntry =
-              lifecycle.type === "completed"
+            const immediateFinalResponseEntry =
+              lifecycle.type === "completed" && completedTurnId !== undefined
                 ? yield* resolveAssistantResponseEntry({
                     cache: assistantResponseCache,
                     threadId: event.payload.threadId,
-                    ...(completedTurnId !== undefined ? { turnId: completedTurnId } : {}),
+                    turnId: completedTurnId,
                   })
                 : undefined;
-            const firstRelay =
-              completedTurnId !== undefined
-                ? firstAssistantMessageTurnKeys.get(
-                    firstAssistantMessageTurnKey({
-                      threadId: event.payload.threadId,
-                      turnId: completedTurnId,
-                    }),
-                  )
-                : undefined;
-            const shouldRelayFinal =
-              lifecycle.type === "completed"
-                ? shouldRelayFinalAssistantResponse({
-                    ...(firstRelay !== undefined ? { firstRelay } : {}),
-                    ...(assistantResponseEntry !== undefined
-                      ? { finalResponse: assistantResponseEntry }
-                      : {}),
+            const immediateFinalRelayed =
+              lifecycle.type === "completed" && completedTurnId !== undefined
+                ? yield* postResolvedFinalTaskRuntimeAssistantMessage({
+                    cache: assistantResponseCache,
+                    trackedRun,
+                    eventId: `${String(event.eventId)}:assistant-final`,
+                    occurredAt: event.occurredAt,
+                    turnId: completedTurnId,
+                    firstRelays: firstAssistantMessageTurnKeys,
+                    finalRelays: finalAssistantMessageTurnKeys,
+                    finalRelayMutex: finalAssistantMessageRelayMutex,
                   })
                 : false;
-            if (lifecycle.type === "completed" && shouldRelayFinal) {
-              yield* postFinalTaskRuntimeAssistantMessage({
-                eventId: `${String(event.eventId)}:assistant-final`,
+            if (
+              lifecycle.type === "completed" &&
+              completedTurnId !== undefined &&
+              !immediateFinalRelayed
+            ) {
+              yield* scheduleFinalTaskRuntimeAssistantMessageRetries({
+                cache: assistantResponseCache,
+                getTrackedRun: runRegistry.getTrackedRun,
+                threadId: event.payload.threadId,
+                turnId: completedTurnId,
+                completionEventId: String(event.eventId),
                 occurredAt: event.occurredAt,
-                trackedRun,
-                ...(completedTurnId !== undefined ? { turnId: completedTurnId } : {}),
-                assistantMessageId: assistantResponseEntry!.messageId,
-                assistantResponse: assistantResponseEntry!.text,
+                firstRelays: firstAssistantMessageTurnKeys,
+                finalRelays: finalAssistantMessageTurnKeys,
+                finalRelayMutex: finalAssistantMessageRelayMutex,
               });
             }
+            const finalResponseForLifecycle =
+              immediateFinalRelayed && immediateFinalResponseEntry !== undefined
+                ? immediateFinalResponseEntry.text
+                : undefined;
             const payload = buildTaskRuntimeLifecycleEvent({
               trackedRun,
               type: lifecycle.type,
@@ -938,8 +1077,8 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
               ...(lifecycle.failureSummary !== undefined
                 ? { failureSummary: lifecycle.failureSummary }
                 : {}),
-              ...(shouldRelayFinal && assistantResponseEntry !== undefined
-                ? { assistantResponse: assistantResponseEntry.text }
+              ...(finalResponseForLifecycle !== undefined
+                ? { assistantResponse: finalResponseForLifecycle }
                 : {}),
             });
             yield* postTaskRuntimeLifecycleEvent(payload);

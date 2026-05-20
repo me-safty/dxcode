@@ -213,4 +213,40 @@ describe("execution bridge task runtime assistant relay boundaries", () => {
       }),
     ).toBe(true);
   });
+
+  it("relays a final response when the same message id has new final text", () => {
+    expect(
+      shouldRelayFinalAssistantResponse({
+        firstRelay: {
+          messageId: "assistant-message-1",
+          text: "Starting.",
+        },
+        finalResponse: {
+          messageId: "assistant-message-1",
+          turnId: "turn-1",
+          text: "Done.",
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not relay a final response twice for the same turn", () => {
+    expect(
+      shouldRelayFinalAssistantResponse({
+        firstRelay: {
+          messageId: "assistant-message-1",
+          text: "Starting.",
+        },
+        finalRelay: {
+          messageId: "assistant-message-2",
+          text: "Done.",
+        },
+        finalResponse: {
+          messageId: "assistant-message-2",
+          turnId: "turn-1",
+          text: "Done.",
+        },
+      }),
+    ).toBe(false);
+  });
 });
