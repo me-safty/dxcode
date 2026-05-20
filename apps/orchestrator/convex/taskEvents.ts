@@ -32,10 +32,11 @@ export function taskLifecycleReplyEventKey(input: {
 
 export function taskAssistantMessageReplyEventKey(input: {
   readonly workSessionId: string;
+  readonly sourceEventId: string;
   readonly t3MessageId: string;
   readonly linkId: string;
 }) {
-  return `task-assistant-message-reply:${input.workSessionId}:${input.t3MessageId}:${input.linkId}`;
+  return `task-assistant-message-reply:${input.workSessionId}:${input.sourceEventId}:${input.t3MessageId}:${input.linkId}`;
 }
 
 export function taskUserInputRequestEventKey(input: {
@@ -172,7 +173,7 @@ export function buildTaskLifecycleReplyBody(input: TaskLifecycleReplyInput) {
   ].join("\n");
 }
 
-function hasDeliveredAssistantMessageReply(input: {
+function hasDeliveredFinalAssistantMessageReply(input: {
   readonly taskEvents: Array<{
     readonly kind: string;
     readonly payloadJson?: string;
@@ -189,10 +190,13 @@ function hasDeliveredAssistantMessageReply(input: {
       const payload = JSON.parse(event.payloadJson) as {
         readonly workSessionId?: unknown;
         readonly linkId?: unknown;
+        readonly sourceEventId?: unknown;
       };
       return (
         String(payload.workSessionId) === input.workSessionId &&
-        String(payload.linkId) === input.linkId
+        String(payload.linkId) === input.linkId &&
+        typeof payload.sourceEventId === "string" &&
+        payload.sourceEventId.endsWith(":assistant-final")
       );
     } catch {
       return false;
@@ -409,7 +413,7 @@ export const claimTaskLifecycleReplies = internalMutation({
         link.kind === "linear_issue" ? "linear_issue" : "slack_thread";
       if (
         args.status === "completed" &&
-        hasDeliveredAssistantMessageReply({
+        hasDeliveredFinalAssistantMessageReply({
           taskEvents,
           workSessionId: String(args.workSessionId),
           linkId: String(link._id),
@@ -772,6 +776,7 @@ export const claimTaskAssistantMessageReplies = internalMutation({
 
       const claimEventKey = taskAssistantMessageReplyEventKey({
         workSessionId: String(args.workSessionId),
+        sourceEventId: args.eventId,
         t3MessageId: args.t3MessageId,
         linkId: String(link._id),
       });
@@ -796,6 +801,7 @@ export const claimTaskAssistantMessageReplies = internalMutation({
           kind: linkKind,
           externalId: link.externalId,
           occurredAt: args.occurredAt,
+          sourceEventId: args.eventId,
           t3ThreadId: args.t3ThreadId,
           t3MessageId: args.t3MessageId,
           ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
@@ -1447,6 +1453,9 @@ export const recordTaskAssistantMessageReplyDelivered = internalMutation({
     workSessionId: v.id("workSessions"),
     claimEventKey: v.string(),
     linkId: v.id("taskExternalLinks"),
+    sourceEventId: v.string(),
+    t3MessageId: v.string(),
+    t3TurnId: v.optional(v.string()),
     externalMessageId: v.optional(v.string()),
   },
   returns: v.null(),
@@ -1469,6 +1478,9 @@ export const recordTaskAssistantMessageReplyDelivered = internalMutation({
         claimEventKey: args.claimEventKey,
         workSessionId: args.workSessionId,
         linkId: args.linkId,
+        sourceEventId: args.sourceEventId,
+        t3MessageId: args.t3MessageId,
+        ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
         ...(args.externalMessageId !== undefined
           ? { externalMessageId: args.externalMessageId }
           : {}),

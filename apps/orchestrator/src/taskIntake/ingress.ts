@@ -40,6 +40,7 @@ export interface TaskIntakeIngressDependencies {
 
 export interface TaskIntakeIngressOptions {
   readonly initialPromptContext?: string;
+  readonly initialTriagePrompt?: string;
 }
 
 const CODEX_ROUTING_MARKER = /\[codex\]/i;
@@ -210,10 +211,14 @@ export async function handleTaskIntakeMessage(
 
   try {
     await acknowledgeAcceptedBestEffort(dependencies, message);
-    const initialPrompt =
-      options.initialPromptContext === undefined
-        ? buildTaskIntakeInitialPrompt(storageMessage)
-        : buildTaskIntakeInitialPrompt(storageMessage, { context: options.initialPromptContext });
+    const initialPrompt = buildTaskIntakeInitialPrompt(storageMessage, {
+      ...(options.initialPromptContext !== undefined
+        ? { agentPrompt: options.initialPromptContext }
+        : {}),
+      ...(options.initialTriagePrompt !== undefined
+        ? { triagePrompt: options.initialTriagePrompt }
+        : {}),
+    });
     const materialized = await dependencies.runtime.materializeTaskRuntime({
       taskId: stored.taskId,
       initialPrompt,

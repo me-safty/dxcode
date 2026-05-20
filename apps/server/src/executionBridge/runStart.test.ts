@@ -18,133 +18,12 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScriptRunner.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import {
-  buildTaskRuntimeInitialPrompt,
-  collectTaskPullRequestPreviewLinks,
   ExecutionBridgeRunRegistryLive,
   materializeTaskRuntime,
-  sortTaskPullRequestPreviewLinks,
   taskRuntimeWorktreeCreateInput,
-  toVercelBranchPreviewUrl,
 } from "./runStart.ts";
 
-describe("task pull request preview links", () => {
-  it("uses public GitHub deployment status URLs and filters Vercel dashboard URLs", () => {
-    const previews = collectTaskPullRequestPreviewLinks({
-      deployments: [
-        {
-          id: 1,
-          environment: "Preview - nextcard-web",
-          creator: { login: "vercel[bot]" },
-        },
-        {
-          id: 2,
-          environment: "Preview - nextcard-mcp",
-          creator: { login: "vercel[bot]" },
-        },
-      ],
-      statusesByDeploymentId: new Map([
-        [
-          "1",
-          [
-            {
-              state: "success",
-              environment_url: "https://nextcard-abc123.nextcard.com",
-              target_url: "https://vercel.com/affil/nextcard-web/build",
-            },
-          ],
-        ],
-        [
-          "2",
-          [
-            {
-              state: "success",
-              environment_url: "https://vercel.com/affil/nextcard-mcp/build",
-              target_url: "https://nextcard-mcp-abc123.nextcard.com",
-            },
-          ],
-        ],
-      ]),
-    });
-
-    expect(previews).toEqual([
-      {
-        provider: "vercel",
-        environment: "Preview - nextcard-web",
-        url: "https://nextcard-abc123.nextcard.com",
-      },
-      {
-        provider: "vercel",
-        environment: "Preview - nextcard-mcp",
-        url: "https://nextcard-mcp-abc123.nextcard.com",
-      },
-    ]);
-  });
-
-  it("rewrites nextcard Vercel commit URLs to branch preview aliases", () => {
-    expect(
-      toVercelBranchPreviewUrl({
-        url: "https://nextcard-c2pkvyk7n.nextcard.com",
-        environment: "Preview – nextcard-web",
-        branch: "t3code/pr-card-smoke",
-      }),
-    ).toBe("https://nextcard-web-git-t3code-pr-card-smoke.nextcard.com");
-  });
-
-  it("collects branch preview aliases for nextcard deployments", () => {
-    const previews = collectTaskPullRequestPreviewLinks({
-      headBranch: "t3code/pr-card-smoke",
-      deployments: [
-        {
-          id: 1,
-          environment: "Preview – nextcard-web",
-          creator: { login: "vercel[bot]" },
-        },
-      ],
-      statusesByDeploymentId: new Map([
-        [
-          "1",
-          [
-            {
-              state: "success",
-              environment_url: "https://nextcard-c2pkvyk7n.nextcard.com",
-            },
-          ],
-        ],
-      ]),
-    });
-
-    expect(previews[0]?.url).toBe("https://nextcard-web-git-t3code-pr-card-smoke.nextcard.com");
-  });
-
-  it("prefers the nextcard web preview when multiple deployments are available", () => {
-    expect(
-      sortTaskPullRequestPreviewLinks([
-        {
-          provider: "vercel",
-          environment: "Preview - nextcard-pdp",
-          url: "https://nextcard-pdp.example.com",
-        },
-        {
-          provider: "vercel",
-          environment: "Preview - nextcard-web",
-          url: "https://nextcard-web.example.com",
-        },
-      ])[0]?.url,
-    ).toBe("https://nextcard-web.example.com");
-  });
-});
-
 describe("task runtime worktree creation", () => {
-  it("prepends the internal Slack agent operating instructions to the first task prompt", () => {
-    const prompt = buildTaskRuntimeInitialPrompt("make the pricing page clearer");
-
-    expect(prompt).toContain("internal Slack agent");
-    expect(prompt).toContain("commit them and push the branch");
-    expect(prompt).toContain("pull request targeting `dev`");
-    expect(prompt).toContain("relevant Vercel preview deployment URL");
-    expect(prompt).toContain("User request:\nmake the pricing page clearer");
-  });
-
   it("requests an origin base refresh before materializing task worktrees", () => {
     expect(
       taskRuntimeWorktreeCreateInput(
@@ -189,7 +68,7 @@ describe("task runtime worktree creation", () => {
       title: "Fix it",
       runtimeMode: "full-access",
       interactionMode: "default",
-      startCodingAgent: false,
+      startCodingAgent: true,
     } satisfies TaskRuntimeMaterializeRequest;
 
     const layer = Layer.mergeAll(
@@ -241,7 +120,11 @@ describe("task runtime worktree creation", () => {
     expect(dispatchedCommands.map((command) => command.type)).toEqual([
       "project.create",
       "thread.create",
+      "thread.turn.start",
     ]);
+    expect(
+      dispatchedCommands.find((command) => command.type === "thread.turn.start")?.message.text,
+    ).toBe("fix it");
     expect(runForThread).toHaveBeenCalledWith({
       threadId: response.t3ThreadId,
       projectId: response.t3ProjectId,

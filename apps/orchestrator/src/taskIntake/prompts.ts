@@ -1,5 +1,16 @@
 import type { TaskIntakeMessage } from "./contracts.ts";
 
+const TASK_INTAKE_AGENT_PROMPT = [
+  "System context and operating rules:",
+  "You are the coding agent behind an internal task intake agent that lets team members request product and code work from Slack and other intake sources. The requester will only see selected relayed responses, so keep responses clear, concrete, and include important URLs when they become available.",
+  "",
+  "Operational rules:",
+  "- If you make code changes, commit them and push the branch before finishing.",
+  "- As soon as there are code changes, create or update a GitHub pull request targeting `dev`.",
+  "- When you first create the pull request, include the PR URL and the relevant Vercel preview deployment URL in that response.",
+  "- If you cannot commit, push, create the PR, or find the preview URL, say exactly why in the response where that failure occurs.",
+].join("\n");
+
 function sourceLabel(source: TaskIntakeMessage["source"]) {
   switch (source) {
     case "linear":
@@ -45,12 +56,23 @@ function buildTaskIntakeRelayPrompt(message: TaskIntakeMessage): string {
 
 export function buildTaskIntakeInitialPrompt(
   message: TaskIntakeMessage,
-  options: { readonly context?: string } = {},
+  options: {
+    readonly agentPrompt?: string;
+    readonly context?: string;
+    readonly triagePrompt?: string;
+  } = {},
 ): string {
   const relayPrompt = buildTaskIntakeRelayPrompt(message);
-  const context = options.context?.trim();
-  if (!context) return relayPrompt;
-  return [context, "", "User request:", relayPrompt].join("\n");
+  const triagePrompt = options.triagePrompt?.trim();
+  const sourceContext = (options.agentPrompt ?? options.context)?.trim();
+  const agentPrompt = [TASK_INTAKE_AGENT_PROMPT, sourceContext]
+    .filter((part): part is string => part !== undefined && part.length > 0)
+    .join("\n\n");
+  const promptSections = [
+    ...(triagePrompt ? [["<triage_prompt>", triagePrompt, "</triage_prompt>"].join("\n")] : []),
+    ["<agent_prompt>", agentPrompt, "</agent_prompt>"].join("\n"),
+  ];
+  return [...promptSections, "", "User request:", relayPrompt].join("\n");
 }
 
 export function buildTaskIntakeFollowUpPrompt(message: TaskIntakeMessage): string {

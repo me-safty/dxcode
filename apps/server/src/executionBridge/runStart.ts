@@ -38,19 +38,6 @@ import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 
 export type ExecutionLifecycleCheckpoint = "started" | "completed" | "failed" | "interrupted";
 
-const TASK_RUNTIME_INITIAL_PROMPT_PREFIX = `System context for this internal Slack agent:
-You are the coding agent behind an internal Slack agent that lets non-technical team members request product and code changes. The Slack user will only see selected relayed responses, so keep responses clear, concrete, and include important URLs when they become available.
-
-Operational rules:
-- If you make code changes, commit them and push the branch before finishing.
-- As soon as there are code changes, create or update a GitHub pull request targeting \`dev\`.
-- When you first create the pull request, include the PR URL and the relevant Vercel preview deployment URL in that response.
-- If you cannot commit, push, create the PR, or find the preview URL, say exactly why in the response where that failure occurs.`;
-
-export function buildTaskRuntimeInitialPrompt(userPrompt: string) {
-  return `${TASK_RUNTIME_INITIAL_PROMPT_PREFIX}\n\nUser request:\n${userPrompt}`;
-}
-
 export interface TrackedExecutionRun {
   readonly kind: "execution" | "task";
   readonly controlThreadId: string;
@@ -288,10 +275,6 @@ export const startExecutionRun = (request: ExecutionRunCreateRequest) =>
       attachments: request.attachments ?? [],
     });
     const title = deriveThreadTitle(request);
-    const initialPrompt =
-      request.taskRuntime === true
-        ? buildTaskRuntimeInitialPrompt(request.initialPrompt)
-        : request.initialPrompt;
     yield* orchestrationEngine.dispatch({
       type: "thread.create",
       commandId: CommandId.make(`execution-bridge:thread:create:${request.executionRunId}`),
@@ -327,7 +310,7 @@ export const startExecutionRun = (request: ExecutionRunCreateRequest) =>
       message: {
         messageId: MessageId.make(`execution-run:${request.executionRunId}`),
         role: "user",
-        text: initialPrompt,
+        text: request.initialPrompt,
         attachments,
       },
       modelSelection,
@@ -524,7 +507,7 @@ export const materializeTaskRuntime = (request: TaskRuntimeMaterializeRequest) =
           message: {
             messageId: MessageId.make(`task-runtime:${request.workSessionId}`),
             role: "user",
-            text: buildTaskRuntimeInitialPrompt(request.initialPrompt),
+            text: request.initialPrompt,
             attachments,
           },
           modelSelection: request.modelSelection,
@@ -618,7 +601,7 @@ export const materializeTaskRuntime = (request: TaskRuntimeMaterializeRequest) =
         message: {
           messageId: MessageId.make(`task-runtime:${request.workSessionId}`),
           role: "user",
-          text: buildTaskRuntimeInitialPrompt(request.initialPrompt),
+          text: request.initialPrompt,
           attachments,
         },
         modelSelection,
@@ -655,160 +638,6 @@ export const materializeTaskRuntime = (request: TaskRuntimeMaterializeRequest) =
         }),
     ),
   );
-
-interface GitHubDeploymentRow {
-  readonly id?: unknown;
-  readonly environment?: unknown;
-  readonly creator?: { readonly login?: unknown } | null | undefined;
-  readonly statuses_url?: unknown;
-}
-
-interface GitHubDeploymentStatusRow {
-  readonly state?: unknown;
-  readonly environment_url?: unknown;
-  readonly target_url?: unknown;
-}
-
-const GitHubDeploymentRow = Schema.Struct({
-  id: Schema.optional(Schema.Unknown),
-  environment: Schema.optional(Schema.Unknown),
-  creator: Schema.optional(
-    Schema.NullOr(
-      Schema.Struct({
-        login: Schema.optional(Schema.Unknown),
-      }),
-    ),
-  ),
-  statuses_url: Schema.optional(Schema.Unknown),
-});
-
-const GitHubDeploymentStatusRow = Schema.Struct({
-  state: Schema.optional(Schema.Unknown),
-  environment_url: Schema.optional(Schema.Unknown),
-  target_url: Schema.optional(Schema.Unknown),
-});
-
-export interface TaskPullRequestPreviewLink {
-  readonly provider: "vercel";
-  readonly environment?: string;
-  readonly url: string;
-}
-
-function vercelBranchSlug(branch: string) {
-  return branch
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function vercelProjectSlugFromEnvironment(environment: string | undefined) {
-  return environment
-    ?.trim()
-    .replace(/^Preview\s*(?:[-:]|\u2013|\u2014)\s*/i, "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-export function toVercelBranchPreviewUrl(input: {
-  readonly url: string;
-  readonly environment?: string;
-  readonly branch?: string;
-}) {
-  if (input.branch === undefined) return input.url;
-  const projectSlug = vercelProjectSlugFromEnvironment(input.environment);
-  const branchSlug = vercelBranchSlug(input.branch);
-  if (!projectSlug || !branchSlug) return input.url;
-
-  try {
-    const url = new URL(input.url);
-    const hostname = url.hostname.toLowerCase();
-    const suffix = hostname.includes(".") ? hostname.slice(hostname.indexOf(".") + 1) : "";
-    if (!suffix || !hostname.endsWith(".nextcard.com")) return input.url;
-    return `https://${projectSlug}-git-${branchSlug}.${suffix}`;
-  } catch {
-    return input.url;
-  }
-}
-
-function isPublicDeploymentPreviewUrl(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:") return false;
-    return url.hostname.toLowerCase() !== "vercel.com" && !url.hostname.endsWith(".vercel.com");
-  } catch {
-    return false;
-  }
-}
-
-function deploymentEnvironmentRank(environment: string | undefined) {
-  const normalized = environment?.toLowerCase() ?? "";
-  if (normalized.includes("preview") && normalized.includes("nextcard-web")) return 0;
-  if (normalized.includes("nextcard-web")) return 1;
-  if (normalized.includes("preview")) return 2;
-  return 3;
-}
-
-export function sortTaskPullRequestPreviewLinks(previews: readonly TaskPullRequestPreviewLink[]) {
-  return previews.toSorted((left, right) => {
-    const rankDelta =
-      deploymentEnvironmentRank(left.environment) - deploymentEnvironmentRank(right.environment);
-    if (rankDelta !== 0) return rankDelta;
-    return (left.environment ?? left.url).localeCompare(right.environment ?? right.url);
-  });
-}
-
-export function collectTaskPullRequestPreviewLinks(input: {
-  readonly deployments: readonly GitHubDeploymentRow[];
-  readonly statusesByDeploymentId: ReadonlyMap<string, readonly GitHubDeploymentStatusRow[]>;
-  readonly headBranch?: string;
-}) {
-  const previews: TaskPullRequestPreviewLink[] = [];
-  const seen = new Set<string>();
-
-  for (const deployment of input.deployments) {
-    const id = String(deployment.id ?? "").trim();
-    if (!id) continue;
-
-    const environment =
-      typeof deployment.environment === "string" ? deployment.environment.trim() : "";
-    const creatorLogin =
-      typeof deployment.creator?.login === "string" ? deployment.creator.login : "";
-    const isVercelDeployment =
-      creatorLogin.toLowerCase() === "vercel[bot]" ||
-      environment.toLowerCase().includes("vercel") ||
-      environment.toLowerCase().includes("nextcard");
-    if (!isVercelDeployment) continue;
-
-    const statuses = input.statusesByDeploymentId.get(id) ?? [];
-    for (const status of statuses) {
-      if (status.state !== "success") continue;
-      const url = isPublicDeploymentPreviewUrl(status.environment_url)
-        ? status.environment_url
-        : isPublicDeploymentPreviewUrl(status.target_url)
-          ? status.target_url
-          : null;
-      if (url === null || seen.has(url)) continue;
-      const previewUrl = toVercelBranchPreviewUrl({
-        url,
-        ...(environment ? { environment } : {}),
-        ...(input.headBranch !== undefined ? { branch: input.headBranch } : {}),
-      });
-      if (seen.has(previewUrl)) continue;
-      seen.add(previewUrl);
-      previews.push({
-        provider: "vercel",
-        ...(environment ? { environment } : {}),
-        url: previewUrl,
-      });
-    }
-  }
-
-  return sortTaskPullRequestPreviewLinks(previews);
-}
 
 export function buildLifecycleEvent(input: {
   readonly trackedRun: TrackedExecutionRun;

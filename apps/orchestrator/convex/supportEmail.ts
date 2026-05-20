@@ -22,6 +22,10 @@ const RESEND_API_BASE_URL = "https://api.resend.com";
 const SUPPORT_EMAIL_TRIAGE_PROMPT = [
   "You are triaging a support email for nextcard. Treat the issue as related to the nextcard repo unless the evidence clearly says otherwise.",
   "",
+  "Before doing any triage, decide whether the top-level email is actually from a user reporting an active issue. The email may be a follow-up from staff, such as someone at nextcard.com or affil.ai, with quoted user context below it. If staff is saying the issue was fixed, asking the user for more information, asking the user to retry something, or otherwise handling the thread without a new user-reported problem, do not investigate the quoted issue. Respond briefly that no triage is needed and explain why.",
+  "",
+  "Only do the triage work below when the current top-level message is clearly from a user with an active issue, or when staff is explicitly forwarding a user-reported issue for investigation.",
+  "",
   "First classify the request: product bug, account/data issue, billing/subscription issue, user confusion, feature request, or spam/no-action. Not every email needs a code change.",
   "",
   "Identify the affected user or account from the email. Use Convex production data to find the related nextcard user document. Report the Convex prod user document id, the `https://nextcard.com/admin/users/[id]` admin URL where `[id]` is that Convex user document id, and the Clerk id when present. Do not report Convex external ids.",
@@ -31,6 +35,12 @@ const SUPPORT_EMAIL_TRIAGE_PROMPT = [
   "Inspect the nextcard repo when code behavior is relevant, but do not make code changes and do not open a PR. If a code change appears necessary, describe the recommended change at a high level with the likely files or systems to inspect.",
   "",
   "End with a concise triage summary: classification, user/account links, observed evidence, recommended next steps, and any missing information needed.",
+].join("\n");
+
+const SUPPORT_EMAIL_AGENT_PROMPT = [
+  "- This task was started from a support email intake.",
+  "- The user request below contains the received email content, including headers, body, and attachment links.",
+  "- Use the received email content as the source message for this task.",
 ].join("\n");
 
 interface HeaderArg {
@@ -141,11 +151,35 @@ function slackTeamId() {
   return envValue("SLACK_TEAM_ID");
 }
 
+async function resolveSlackTeamId() {
+  const configuredTeamId = slackTeamId();
+  if (configuredTeamId !== undefined) return configuredTeamId;
+
+  const response = await fetch("https://slack.com/api/auth.test", {
+    headers: {
+      authorization: `Bearer ${requiredEnv("SLACK_BOT_TOKEN")}`,
+    },
+  });
+  const parsed = (await response.json()) as {
+    readonly ok?: boolean;
+    readonly team_id?: string;
+    readonly error?: string;
+  };
+  if (!response.ok || parsed.ok !== true) {
+    throw new Error(`Slack auth.test failed: ${parsed.error ?? response.statusText}`);
+  }
+  if (parsed.team_id === undefined || parsed.team_id.trim().length === 0) {
+    throw new Error("Slack auth.test did not return team_id");
+  }
+  return parsed.team_id;
+}
+
 function supportEmailSlackExternalId(input: {
   readonly channelId: string;
   readonly threadTs: string;
+  readonly teamId?: string;
 }) {
-  const teamId = slackTeamId();
+  const teamId = input.teamId ?? slackTeamId();
   return teamId === undefined
     ? `${input.channelId}:${input.threadTs}`
     : `${teamId}:${input.channelId}:${input.threadTs}`;
@@ -564,17 +598,6 @@ function supportEmailSlackBlocks(input: {
   ];
 }
 
-function t3Prompt(email: ResendReceivedEmail, attachments: readonly ProcessedEmailAttachment[]) {
-  return [
-    SUPPORT_EMAIL_TRIAGE_PROMPT,
-    "",
-    "Support email:",
-    "```",
-    formattedEmail(email, attachments),
-    "```",
-  ].join("\n");
-}
-
 async function retrieveReceivedEmail(emailId: string) {
   const response = await fetch(
     `${RESEND_API_BASE_URL}/emails/receiving/${encodeURIComponent(emailId)}`,
@@ -811,6 +834,7 @@ function buildIntakeMessage(input: {
   readonly attachments: readonly ProcessedEmailAttachment[];
   readonly channelId: string;
   readonly threadTs: string;
+  readonly teamId?: string;
 }): TaskIntakeMessage {
   const externalId = supportEmailSlackExternalId(input);
   const receivedAt = input.email.created_at ?? new Date().toISOString();
@@ -836,10 +860,10 @@ function buildIntakeMessage(input: {
       externalLinkKind: "slack_thread",
       externalId,
       channelId: input.channelId,
-      ...(slackTeamId() !== undefined ? { teamId: slackTeamId() } : {}),
+      ...(input.teamId !== undefined ? { teamId: input.teamId } : {}),
     },
     messageId: input.threadTs,
-    text: t3Prompt(input.email, input.attachments),
+    text: formattedEmail(input.email, input.attachments),
     ...(nativeImageAttachments.length > 0 ? { attachments: nativeImageAttachments } : {}),
     receivedAt,
     actor: {
@@ -874,6 +898,7 @@ async function processReceivedEmail(ctx: any, email: ResendReceivedEmail) {
 
   const attachments = await processEmailAttachments(ctx, email);
   const channelId = debuggingChannelId();
+  const teamId = await resolveSlackTeamId();
   const parent = await postSlackMessage({
     channelId,
     text: initialSlackMessageText(email, attachments),
@@ -889,122 +914,134 @@ async function processReceivedEmail(ctx: any, email: ResendReceivedEmail) {
     attachments,
     channelId: parent.channelId,
     threadTs,
+    teamId,
   });
-  const result = await handleTaskIntakeMessage(intakeMessage, {
-    store: {
-      async resolveMessage(input) {
-        return await ctx.runMutation(internal.tasks.resolveTaskIntakeMessage, {
-          eventId: input.message.eventId,
-          source: input.message.source,
-          externalLinkKind: input.externalLink.kind,
-          externalId: input.externalLink.externalId,
-          title: supportEmailTitle(email),
-          text: input.message.text,
-          messageId: input.message.messageId,
-          receivedAt: input.message.receivedAt,
-          ...(input.message.conversation.teamId !== undefined
-            ? { teamId: input.message.conversation.teamId }
-            : {}),
-          ...(input.message.conversation.channelId !== undefined
-            ? { channelId: input.message.conversation.channelId }
-            : {}),
-          ...(input.message.actor?.displayName !== undefined
-            ? { actorDisplayName: input.message.actor.displayName }
-            : {}),
-        });
+  const result = await handleTaskIntakeMessage(
+    intakeMessage,
+    {
+      store: {
+        async resolveMessage(input) {
+          return await ctx.runMutation(internal.tasks.resolveTaskIntakeMessage, {
+            eventId: input.message.eventId,
+            source: input.message.source,
+            externalLinkKind: input.externalLink.kind,
+            externalId: input.externalLink.externalId,
+            title: supportEmailTitle(email),
+            text: input.message.text,
+            messageId: input.message.messageId,
+            receivedAt: input.message.receivedAt,
+            ...(input.message.conversation.teamId !== undefined
+              ? { teamId: input.message.conversation.teamId }
+              : {}),
+            ...(input.message.conversation.channelId !== undefined
+              ? { channelId: input.message.conversation.channelId }
+              : {}),
+            ...(input.message.actor?.displayName !== undefined
+              ? { actorDisplayName: input.message.actor.displayName }
+              : {}),
+          });
+        },
+        async recordStartFailed(input) {
+          await ctx.runMutation(internal.tasks.markTaskIntakeStartFailed, {
+            eventId: input.message.eventId,
+            taskId: input.taskId as Id<"tasks">,
+            source: input.message.source,
+            summary: input.summary,
+          });
+        },
       },
-      async recordStartFailed(input) {
-        await ctx.runMutation(internal.tasks.markTaskIntakeStartFailed, {
-          eventId: input.message.eventId,
-          taskId: input.taskId as Id<"tasks">,
-          source: input.message.source,
-          summary: input.summary,
-        });
+      runtime: {
+        async materializeTaskRuntime(input) {
+          const modelSelection = toConvexModelSelection(input.modelSelection);
+          return await ctx.runAction(api.t3Runtime.materializeTaskRuntime, {
+            taskId: input.taskId as Id<"tasks">,
+            initialPrompt: input.initialPrompt,
+            ...(input.attachments !== undefined ? { attachments: [...input.attachments] } : {}),
+            startCodingAgent: input.startCodingAgent,
+            ...(modelSelection !== undefined ? { modelSelection } : {}),
+          });
+        },
+        async continueTaskRuntime(input) {
+          return await ctx.runAction(api.t3Runtime.continueTaskRuntime, {
+            eventId: input.eventId,
+            taskId: input.taskId as Id<"tasks">,
+            workSessionId: input.workSessionId as Id<"workSessions">,
+            t3ThreadId: input.t3ThreadId,
+            prompt: input.prompt,
+            ...(input.attachments !== undefined ? { attachments: [...input.attachments] } : {}),
+          });
+        },
+      },
+      replies: {
+        async acknowledgeAccepted() {
+          return { status: "skipped", reason: "email bootstrap already posted to Slack" };
+        },
+        async postTaskStartedCard({ taskId, materialization }) {
+          const t3ThreadUrl = buildT3ThreadUrl({
+            baseUrl: t3WebAppBaseUrl(),
+            environmentId: materialization.environmentId,
+            t3ThreadId: materialization.t3ThreadId,
+          });
+          const text = truncate(
+            [
+              supportEmailSlackTitle(email),
+              "",
+              "```",
+              formattedEmail(email, attachments),
+              "```",
+              ...(t3ThreadUrl === undefined ? [] : ["", `Open T3: ${t3ThreadUrl}`]),
+            ].join("\n"),
+            38000,
+          );
+          await updateSlackMessage({
+            channelId: parent.channelId,
+            ts: threadTs,
+            text,
+            blocks: supportEmailSlackBlocks({ email, attachments, t3ThreadUrl }),
+          });
+          await ctx.runMutation(api.taskExternalLinks.upsertTaskExternalLink, {
+            taskId: taskId as Id<"tasks">,
+            kind: "slack_thread",
+            externalId: supportEmailSlackExternalId({
+              channelId: parent.channelId,
+              threadTs,
+              teamId,
+            }),
+            muted: false,
+            ...(supportLinkUrl({ channelId: parent.channelId, threadTs }) !== undefined
+              ? { url: supportLinkUrl({ channelId: parent.channelId, threadTs }) }
+              : {}),
+          });
+          await upsertSupportEmailThreadLinks(ctx, {
+            taskId: taskId as Id<"tasks">,
+            email,
+            ...(supportLinkUrl({ channelId: parent.channelId, threadTs }) !== undefined
+              ? { url: supportLinkUrl({ channelId: parent.channelId, threadTs }) }
+              : {}),
+          });
+          return { status: "posted", externalMessageId: threadTs };
+        },
+        async postReply(reply) {
+          const posted = await postSlackMessage({
+            channelId: parent.channelId,
+            threadTs,
+            text: reply.body,
+          });
+          return { status: "posted", externalMessageId: posted.ts };
+        },
       },
     },
-    runtime: {
-      async materializeTaskRuntime(input) {
-        const modelSelection = toConvexModelSelection(input.modelSelection);
-        return await ctx.runAction(api.t3Runtime.materializeTaskRuntime, {
-          taskId: input.taskId as Id<"tasks">,
-          initialPrompt: input.initialPrompt,
-          ...(input.attachments !== undefined ? { attachments: [...input.attachments] } : {}),
-          startCodingAgent: input.startCodingAgent,
-          ...(modelSelection !== undefined ? { modelSelection } : {}),
-        });
-      },
-      async continueTaskRuntime(input) {
-        return await ctx.runAction(api.t3Runtime.continueTaskRuntime, {
-          eventId: input.eventId,
-          taskId: input.taskId as Id<"tasks">,
-          workSessionId: input.workSessionId as Id<"workSessions">,
-          t3ThreadId: input.t3ThreadId,
-          prompt: input.prompt,
-          ...(input.attachments !== undefined ? { attachments: [...input.attachments] } : {}),
-        });
-      },
+    {
+      initialTriagePrompt: SUPPORT_EMAIL_TRIAGE_PROMPT,
+      initialPromptContext: SUPPORT_EMAIL_AGENT_PROMPT,
     },
-    replies: {
-      async acknowledgeAccepted() {
-        return { status: "skipped", reason: "email bootstrap already posted to Slack" };
-      },
-      async postTaskStartedCard({ taskId, materialization }) {
-        const t3ThreadUrl = buildT3ThreadUrl({
-          baseUrl: t3WebAppBaseUrl(),
-          environmentId: materialization.environmentId,
-          t3ThreadId: materialization.t3ThreadId,
-        });
-        const text = truncate(
-          [
-            supportEmailSlackTitle(email),
-            "",
-            "```",
-            formattedEmail(email, attachments),
-            "```",
-            ...(t3ThreadUrl === undefined ? [] : ["", `Open T3: ${t3ThreadUrl}`]),
-          ].join("\n"),
-          38000,
-        );
-        await updateSlackMessage({
-          channelId: parent.channelId,
-          ts: threadTs,
-          text,
-          blocks: supportEmailSlackBlocks({ email, attachments, t3ThreadUrl }),
-        });
-        await ctx.runMutation(api.taskExternalLinks.upsertTaskExternalLink, {
-          taskId: taskId as Id<"tasks">,
-          kind: "slack_thread",
-          externalId: supportEmailSlackExternalId({ channelId: parent.channelId, threadTs }),
-          muted: false,
-          ...(supportLinkUrl({ channelId: parent.channelId, threadTs }) !== undefined
-            ? { url: supportLinkUrl({ channelId: parent.channelId, threadTs }) }
-            : {}),
-        });
-        await upsertSupportEmailThreadLinks(ctx, {
-          taskId: taskId as Id<"tasks">,
-          email,
-          ...(supportLinkUrl({ channelId: parent.channelId, threadTs }) !== undefined
-            ? { url: supportLinkUrl({ channelId: parent.channelId, threadTs }) }
-            : {}),
-        });
-        return { status: "posted", externalMessageId: threadTs };
-      },
-      async postReply(reply) {
-        const posted = await postSlackMessage({
-          channelId: parent.channelId,
-          threadTs,
-          text: reply.body,
-        });
-        return { status: "posted", externalMessageId: posted.ts };
-      },
-    },
-  });
+  );
 
   if (result.taskId !== undefined) {
     await ctx.runMutation(api.taskExternalLinks.upsertTaskExternalLink, {
       taskId: result.taskId as Id<"tasks">,
       kind: "slack_thread",
-      externalId: supportEmailSlackExternalId({ channelId: parent.channelId, threadTs }),
+      externalId: supportEmailSlackExternalId({ channelId: parent.channelId, threadTs, teamId }),
       muted: false,
       ...(supportLinkUrl({ channelId: parent.channelId, threadTs }) !== undefined
         ? { url: supportLinkUrl({ channelId: parent.channelId, threadTs }) }

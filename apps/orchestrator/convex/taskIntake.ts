@@ -204,6 +204,7 @@ function chatSdkState(ctx: any) {
 async function shouldHandleSlackIntakeMessage(
   ctx: any,
   intakeMessage: TaskIntakeMessage,
+  existingLink: any,
   rawText?: string,
 ) {
   if (intakeMessage.source !== "slack") {
@@ -211,10 +212,6 @@ async function shouldHandleSlackIntakeMessage(
   }
 
   const externalId = intakeMessage.conversation.externalId;
-  const existingLink = await ctx.runQuery(api.taskExternalLinks.findTaskExternalLink, {
-    kind: "slack_thread",
-    externalId,
-  });
   const mentionsBot = mentionsTeamAppUser({
     body: intakeMessage.text,
     botUserId: process.env.SLACK_BOT_USER_ID,
@@ -354,6 +351,52 @@ async function shouldHandleSlackIntakeMessage(
   return { handle: true as const };
 }
 
+function channelScopedSlackExternalId(externalId: string) {
+  const parts = externalId.split(":");
+  if (parts.length !== 3) return undefined;
+  const [, channelId, threadTs] = parts;
+  if (!channelId || !threadTs) return undefined;
+  return `${channelId}:${threadTs}`;
+}
+
+async function resolveSlackThreadRouting(ctx: any, intakeMessage: TaskIntakeMessage) {
+  if (intakeMessage.source !== "slack") {
+    return { intakeMessage, existingLink: null };
+  }
+
+  const exactLink = await ctx.runQuery(api.taskExternalLinks.findTaskExternalLink, {
+    kind: "slack_thread",
+    externalId: intakeMessage.conversation.externalId,
+  });
+  if (exactLink !== null) {
+    return { intakeMessage, existingLink: exactLink };
+  }
+
+  const fallbackExternalId = channelScopedSlackExternalId(intakeMessage.conversation.externalId);
+  if (fallbackExternalId === undefined) {
+    return { intakeMessage, existingLink: null };
+  }
+
+  const fallbackLink = await ctx.runQuery(api.taskExternalLinks.findTaskExternalLink, {
+    kind: "slack_thread",
+    externalId: fallbackExternalId,
+  });
+  if (fallbackLink === null) {
+    return { intakeMessage, existingLink: null };
+  }
+
+  return {
+    intakeMessage: {
+      ...intakeMessage,
+      conversation: {
+        ...intakeMessage.conversation,
+        externalId: fallbackExternalId,
+      },
+    },
+    existingLink: fallbackLink,
+  };
+}
+
 export const handleChatSdkWebhook = internalAction({
   args: {
     source: v.literal("slack"),
@@ -441,9 +484,12 @@ export const handleChatSdkWebhook = internalAction({
             readonly thread_ts?: string;
             readonly ts?: string;
           };
+          const slackRouting = await resolveSlackThreadRouting(ctx, intakeMessage);
+          const routedIntakeMessage = slackRouting.intakeMessage;
           const slackDecision = await shouldHandleSlackIntakeMessage(
             ctx,
-            intakeMessage,
+            routedIntakeMessage,
+            slackRouting.existingLink,
             rawSlackMessage.text,
           );
           if (!slackDecision.handle) {
@@ -476,7 +522,7 @@ export const handleChatSdkWebhook = internalAction({
             internal.taskEvents.findOpenTaskUserInputForExternalLink,
             {
               kind: "slack_thread",
-              externalId: intakeMessage.conversation.externalId,
+              externalId: routedIntakeMessage.conversation.externalId,
             },
           );
           if (pendingUserInput !== null) {
@@ -511,7 +557,7 @@ export const handleChatSdkWebhook = internalAction({
               eventKey: `${intakeMessage.eventId}:user-input-answer-claimed`,
               taskId: pendingUserInput.taskId,
               workSessionId: pendingUserInput.workSessionId,
-              externalId: intakeMessage.conversation.externalId,
+              externalId: routedIntakeMessage.conversation.externalId,
               payload: {
                 requestId: pendingUserInput.requestId,
                 answerPreview: answerText.slice(0, 120),
@@ -540,7 +586,7 @@ export const handleChatSdkWebhook = internalAction({
                 eventKey: `${intakeMessage.eventId}:user-input-answer-accepted`,
                 taskId: pendingUserInput.taskId,
                 workSessionId: pendingUserInput.workSessionId,
-                externalId: intakeMessage.conversation.externalId,
+                externalId: routedIntakeMessage.conversation.externalId,
                 payload: {
                   requestId: response.requestId,
                   t3ThreadId: response.t3ThreadId,
@@ -563,7 +609,7 @@ export const handleChatSdkWebhook = internalAction({
                 eventKey: `${intakeMessage.eventId}:user-input-answer-failed`,
                 taskId: pendingUserInput.taskId,
                 workSessionId: pendingUserInput.workSessionId,
-                externalId: intakeMessage.conversation.externalId,
+                externalId: routedIntakeMessage.conversation.externalId,
                 payload: {
                   requestId: pendingUserInput.requestId,
                   error: errorSummary(error),
@@ -573,10 +619,7 @@ export const handleChatSdkWebhook = internalAction({
             return;
           }
 
-          const existingSlackLink = await ctx.runQuery(api.taskExternalLinks.findTaskExternalLink, {
-            kind: "slack_thread",
-            externalId: intakeMessage.conversation.externalId,
-          });
+          const existingSlackLink = slackRouting.existingLink;
           const isSlackThreadReply =
             rawSlackMessage.thread_ts !== undefined &&
             rawSlackMessage.thread_ts !== rawSlackMessage.ts;
@@ -590,7 +633,7 @@ export const handleChatSdkWebhook = internalAction({
               : buildInitialPromptContext({ slackThreadContext: collectedSlackThreadContext });
 
           await handleTaskIntakeMessage(
-            intakeMessage,
+            routedIntakeMessage,
             {
               store: {
                 async resolveMessage(input) {
@@ -1389,6 +1432,9 @@ export const postTaskRuntimeAssistantMessage = internalAction({
           workSessionId: claim.workSessionId,
           claimEventKey: claim.claimEventKey,
           linkId: claim.linkId,
+          sourceEventId: args.eventId,
+          t3MessageId: args.t3MessageId,
+          ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
           externalMessageId: posted.id,
         });
         await logOrchestratorEvent(ctx, {

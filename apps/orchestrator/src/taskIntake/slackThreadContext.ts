@@ -73,5 +73,12 @@ export async function collectSlackThreadContext(
 export function buildInitialPromptContext(input: { readonly slackThreadContext?: string }) {
   const context = input.slackThreadContext?.trim();
   if (!context) return undefined;
-  return ["Slack thread context before Vevin was invoked:", "", context].join("\n");
+  return [
+    "- This task was started from a Slack thread where Vevin was invoked.",
+    "- Use the prior Slack thread context below to interpret the user request.",
+    "",
+    "Prior Slack thread context:",
+    "",
+    context,
+  ].join("\n");
 }

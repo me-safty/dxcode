@@ -28,15 +28,42 @@ const message: TaskIntakeMessage = {
 };
 
 describe("Task Intake prompts", () => {
-  it("relays the source message body and attachment links without source metadata", () => {
-    expect(buildTaskIntakeInitialPrompt(message)).toBe(
-      [
-        "<@BOT> fix checkout",
-        "",
-        "error-log.txt: https://files.slack.com/files-pri/T1-F1/error-log.txt",
-        "Attachment 2: https://files.slack.com/files-pri/T1-F2/screenshot.png",
-      ].join("\n"),
+  it("wraps the shared operating rules before the source message body", () => {
+    const prompt = buildTaskIntakeInitialPrompt(message);
+
+    expect(prompt).toContain("<agent_prompt>");
+    expect(prompt).toContain("System context and operating rules:");
+    expect(prompt).toContain("commit them and push the branch");
+    expect(prompt).toContain("pull request targeting `dev`");
+    expect(prompt).toContain("</agent_prompt>\n\nUser request:\n<@BOT> fix checkout");
+    expect(prompt).toContain(
+      "error-log.txt: https://files.slack.com/files-pri/T1-F1/error-log.txt",
     );
+    expect(prompt).toContain(
+      "Attachment 2: https://files.slack.com/files-pri/T1-F2/screenshot.png",
+    );
+  });
+
+  it("wraps normal prepended context as the agent prompt before the user request", () => {
+    const prompt = buildTaskIntakeInitialPrompt(message, { agentPrompt: "thread context" });
+
+    expect(prompt).toContain("<agent_prompt>");
+    expect(prompt).toContain("System context and operating rules:");
+    expect(prompt).toContain("thread context");
+    expect(prompt).toContain("</agent_prompt>\n\nUser request:\n<@BOT> fix checkout");
+  });
+
+  it("wraps support triage context separately from normal agent context", () => {
+    const prompt = buildTaskIntakeInitialPrompt(message, {
+      triagePrompt: "support triage rules",
+      agentPrompt: "thread context",
+    });
+
+    expect(prompt).toContain("<triage_prompt>\nsupport triage rules\n</triage_prompt>");
+    expect(prompt).toContain("<agent_prompt>");
+    expect(prompt).toContain("System context and operating rules:");
+    expect(prompt).toContain("thread context");
+    expect(prompt).toContain("</agent_prompt>\n\nUser request:\n<@BOT> fix checkout");
   });
 
   it("uses the same plain relay format for follow-ups", () => {

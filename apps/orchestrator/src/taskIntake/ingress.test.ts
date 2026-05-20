@@ -212,7 +212,10 @@ describe("handleTaskIntakeMessage", () => {
     expect(result.resolution.type).toBe("create_task");
     expect(storedTitle).toBe("@Vevin please inspect the dashboard dependencies");
     expect(storedText).toBe("@Vevin please inspect the dashboard dependencies");
-    expect(materialized?.initialPrompt).toBe("@Vevin please inspect the dashboard dependencies");
+    expect(materialized?.initialPrompt).toContain(
+      "User request:\n@Vevin please inspect the dashboard dependencies",
+    );
+    expect(materialized?.initialPrompt).toContain("commit them and push the branch");
     expect(materialized?.modelSelection).toEqual({
       instanceId: "codex",
       model: "gpt-5.5",
@@ -494,7 +497,8 @@ describe("handleTaskIntakeMessage", () => {
     );
 
     expect(result.resolution.type).toBe("create_task");
-    expect(materializedPrompt).toBe("@Engineering hello?");
+    expect(materializedPrompt).toContain("User request:\n@Engineering hello?");
+    expect(materializedPrompt).toContain("commit them and push the branch");
     expect(postedReplies).toHaveLength(0);
     expect(acknowledgements).toHaveLength(1);
   });
