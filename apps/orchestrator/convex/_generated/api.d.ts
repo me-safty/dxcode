@@ -15,6 +15,7 @@ import type * as http from "../http.js";
 import type * as observability from "../observability.js";
 import type * as ops from "../ops.js";
 import type * as projects from "../projects.js";
+import type * as supportEmail from "../supportEmail.js";
 import type * as t3Runtime from "../t3Runtime.js";
 import type * as taskEvents from "../taskEvents.js";
 import type * as taskExternalLinks from "../taskExternalLinks.js";
@@ -23,11 +24,7 @@ import type * as taskThreads from "../taskThreads.js";
 import type * as tasks from "../tasks.js";
 import type * as workSessions from "../workSessions.js";
 
-import type {
-  ApiFromModules,
-  FilterApi,
-  FunctionReference,
-} from "convex/server";
+import type { ApiFromModules, FilterApi, FunctionReference } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
   chatSdkState: typeof chatSdkState;
@@ -37,6 +34,7 @@ declare const fullApi: ApiFromModules<{
   observability: typeof observability;
   ops: typeof ops;
   projects: typeof projects;
+  supportEmail: typeof supportEmail;
   t3Runtime: typeof t3Runtime;
   taskEvents: typeof taskEvents;
   taskExternalLinks: typeof taskExternalLinks;
@@ -54,10 +52,7 @@ declare const fullApi: ApiFromModules<{
  * const myFunctionReference = api.myModule.myFunction;
  * ```
  */
-export declare const api: FilterApi<
-  typeof fullApi,
-  FunctionReference<any, "public">
->;
+export declare const api: FilterApi<typeof fullApi, FunctionReference<any, "public">>;
 
 /**
  * A utility for referencing Convex functions in your app's internal API.
@@ -67,10 +62,7 @@ export declare const api: FilterApi<
  * const myFunctionReference = internal.myModule.myFunction;
  * ```
  */
-export declare const internal: FilterApi<
-  typeof fullApi,
-  FunctionReference<any, "internal">
->;
+export declare const internal: FilterApi<typeof fullApi, FunctionReference<any, "internal">>;
 
 export declare const components: {
   agent: import("@convex-dev/agent/_generated/component.js").ComponentApi<"agent">;

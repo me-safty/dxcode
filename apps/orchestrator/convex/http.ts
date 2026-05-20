@@ -259,6 +259,47 @@ http.route({
 });
 
 http.route({
+  path: "/support-email/resend",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const body = await request.text();
+    await logHttpEvent(ctx, {
+      kind: "http.support-email.resend-received",
+      source: "support_email",
+      summary: "Received Resend support email webhook.",
+      payload: {
+        contentLength: request.headers.get("content-length"),
+        svixId: request.headers.get("svix-id"),
+      },
+    });
+    try {
+      const result = await ctx.runAction(internal.supportEmail.handleResendWebhook, {
+        headers: Array.from(request.headers.entries()).map(([name, value]) => ({ name, value })),
+        body,
+      });
+      await logHttpEvent(ctx, {
+        kind: "http.support-email.resend-handled",
+        source: "support_email",
+        summary: "Handled Resend support email webhook.",
+        payload: result,
+      });
+      return Response.json(result);
+    } catch (error) {
+      await logHttpEvent(ctx, {
+        kind: "http.support-email.resend-failed",
+        source: "support_email",
+        severity: "error",
+        summary: "Failed to handle Resend support email webhook.",
+        payload: {
+          error: errorSummary(error),
+        },
+      });
+      return Response.json({ error: errorSummary(error) }, { status: 400 });
+    }
+  }),
+});
+
+http.route({
   path: "/ops/health-alert",
   method: "POST",
   handler: httpAction(async (ctx, request) => {
