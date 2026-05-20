@@ -100,6 +100,12 @@ const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const MAINTAIN_SCROLL_AT_END_ANIMATED = { animated: true } as const;
+
+/** Tracks which work entries have already been displayed, so the fade-in-down
+ *  animation only plays the first time an entry appears — not on virtualization
+ *  re-mounts when the user scrolls back through history. */
+const seenWorkEntryIds = new Set<string>();
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -326,7 +332,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             renderItem={renderItem}
             estimatedItemSize={90}
             initialScrollAtEnd
-            maintainScrollAtEnd
+            maintainScrollAtEnd={MAINTAIN_SCROLL_AT_END_ANIMATED}
             maintainScrollAtEndThreshold={0.1}
             maintainVisibleContentPosition={{ data: false, size: true }}
             onScroll={handleScroll}
@@ -1173,9 +1179,14 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
+  const [isNewEntry] = useState(() => {
+    if (seenWorkEntryIds.has(workEntry.id)) return false;
+    seenWorkEntryIds.add(workEntry.id);
+    return true;
+  });
 
   return (
-    <div className="rounded-lg px-1 py-1">
+    <div className={cn("rounded-lg px-1 py-1", isNewEntry && "motion-safe:animate-fade-in-down")}>
       <div className="flex items-center gap-2 transition-[opacity,translate] duration-200">
         <span
           className={cn("flex size-5 shrink-0 items-center justify-center", iconConfig.className)}

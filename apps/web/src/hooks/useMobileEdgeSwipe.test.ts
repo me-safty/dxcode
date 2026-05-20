@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { isMobileEdgeSwipeStart, resolveMobileEdgeSwipeDecision } from "./useMobileEdgeSwipe";
+import {
+  hasActiveTextSelection,
+  isMobileEdgeSwipeStart,
+  MOBILE_EDGE_SWIPE_OPEN_INTENT_TIMEOUT_MS,
+  resolveMobileEdgeSwipeDecision,
+} from "./useMobileEdgeSwipe";
 
 describe("resolveMobileEdgeSwipeDecision", () => {
   it("opens the left panel after a horizontal rightward edge swipe", () => {
@@ -37,6 +42,40 @@ describe("resolveMobileEdgeSwipeDecision", () => {
     expect(resolveMobileEdgeSwipeDecision({ deltaX: 32, deltaY: 4, side: "left" })).toBe("pending");
   });
 
+  it("opens from a quick screen-wide swipe", () => {
+    expect(
+      resolveMobileEdgeSwipeDecision({
+        deltaX: 64,
+        deltaY: 12,
+        elapsedMs: MOBILE_EDGE_SWIPE_OPEN_INTENT_TIMEOUT_MS,
+        side: "left",
+      }),
+    ).toBe("open");
+  });
+
+  it("cancels slow open gestures that look like text selection drags", () => {
+    expect(
+      resolveMobileEdgeSwipeDecision({
+        deltaX: 64,
+        deltaY: 12,
+        elapsedMs: MOBILE_EDGE_SWIPE_OPEN_INTENT_TIMEOUT_MS + 1,
+        side: "left",
+      }),
+    ).toBe("cancel");
+  });
+
+  it("does not apply the open-intent timeout to close gestures", () => {
+    expect(
+      resolveMobileEdgeSwipeDecision({
+        action: "close",
+        deltaX: -64,
+        deltaY: 12,
+        elapsedMs: MOBILE_EDGE_SWIPE_OPEN_INTENT_TIMEOUT_MS + 1,
+        side: "left",
+      }),
+    ).toBe("close");
+  });
+
   it("cancels vertical scrolling gestures", () => {
     expect(resolveMobileEdgeSwipeDecision({ deltaX: 18, deltaY: 40, side: "left" })).toBe("cancel");
   });
@@ -71,5 +110,17 @@ describe("resolveMobileEdgeSwipeDecision", () => {
         x: 195,
       }),
     ).toBe(true);
+  });
+});
+
+describe("hasActiveTextSelection", () => {
+  it("detects non-collapsed text selections", () => {
+    expect(hasActiveTextSelection({ isCollapsed: false, rangeCount: 1 })).toBe(true);
+  });
+
+  it("ignores collapsed and empty selections", () => {
+    expect(hasActiveTextSelection({ isCollapsed: true, rangeCount: 1 })).toBe(false);
+    expect(hasActiveTextSelection({ isCollapsed: false, rangeCount: 0 })).toBe(false);
+    expect(hasActiveTextSelection(null)).toBe(false);
   });
 });

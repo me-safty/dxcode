@@ -1564,6 +1564,18 @@ async function openCommandPaletteFromTrigger(): Promise<void> {
   );
 }
 
+async function openMobileSidebarFromTrigger(): Promise<void> {
+  const trigger = await waitForElement(
+    () => document.querySelector<HTMLButtonElement>('[data-slot="sidebar-trigger"]'),
+    "Mobile sidebar trigger did not render.",
+  );
+  trigger.click();
+  await waitForElement(
+    () => document.querySelector('[data-mobile="true"][data-sidebar="sidebar"]'),
+    "Mobile sidebar should have opened.",
+  );
+}
+
 async function waitForNewThreadShortcutLabel(): Promise<void> {
   const newThreadButton = page.getByTestId("new-thread-button");
   await expect.element(newThreadButton).toBeInTheDocument();
@@ -4537,6 +4549,31 @@ describe("ChatView timeline estimator parity (full app)", () => {
         (path) => UUID_ROUTE_RE.test(path),
         "Route should have changed to a new draft thread UUID from the command palette.",
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens command palette from the mobile sidebar search button", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mobile-command-palette-trigger" as MessageId,
+        targetText: "mobile command palette trigger",
+      }),
+    });
+
+    try {
+      await openMobileSidebarFromTrigger();
+      const trigger = page.getByTestId("command-palette-trigger");
+      await expect.element(trigger).toBeInTheDocument();
+      await trigger.click();
+
+      const palette = page.getByTestId("command-palette");
+      await expect.element(palette).toBeInTheDocument();
+      await expect
+        .element(page.getByPlaceholder("Search commands, projects, and threads..."))
+        .toBeInTheDocument();
     } finally {
       await mounted.cleanup();
     }

@@ -19,9 +19,40 @@ type TouchStartInput = {
   readonly clientX: number | null;
   readonly defaultPrevented: boolean;
   readonly edgeWidth?: number;
+  readonly targetIsInteractive?: boolean;
   readonly touchCount: number;
   readonly viewportWidth: number;
 };
+
+const INTERACTIVE_TARGET_SELECTOR = [
+  "button",
+  "a[href]",
+  "input",
+  "textarea",
+  "select",
+  "label",
+  "summary",
+  '[role="button"]',
+  '[role="link"]',
+  '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
+  '[role="option"]',
+  '[role="tab"]',
+  '[role="switch"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[role="slider"]',
+  '[tabindex]:not([tabindex="-1"])',
+  "[data-ios-back-swipe-guard-allow='true']",
+].join(",");
+
+export function isInteractiveTouchTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  return target.closest(INTERACTIVE_TARGET_SELECTOR) !== null;
+}
 
 export function isIosTouchDevice(
   input: Pick<IosStandaloneBackSwipeGuardEnvironment, "maxTouchPoints" | "platform" | "userAgent">,
@@ -65,7 +96,8 @@ export function shouldPreventIosHistorySwipeTouchStart(input: TouchStartInput): 
     !input.cancelable ||
     input.defaultPrevented ||
     input.touchCount !== 1 ||
-    input.clientX === null
+    input.clientX === null ||
+    input.targetIsInteractive === true
   ) {
     return false;
   }
@@ -102,6 +134,7 @@ export function installIosStandaloneBackSwipeGuard(
         cancelable: event.cancelable,
         clientX: getFirstTouchClientX(event.touches),
         defaultPrevented: event.defaultPrevented,
+        targetIsInteractive: isInteractiveTouchTarget(event.target),
         touchCount: event.touches.length,
         viewportWidth: getViewportWidth(targetWindow),
       })

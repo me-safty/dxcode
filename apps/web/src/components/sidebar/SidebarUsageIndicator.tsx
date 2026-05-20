@@ -209,9 +209,6 @@ function SidebarUsageProviderRowView({ row }: { row: SidebarUsageProviderRow }) 
           iconClassName="size-3.5"
         />
         <span className="min-w-0 flex-1 truncate text-xs text-foreground/85">{row.label}</span>
-        <span className="shrink-0 text-[11px] font-medium tabular-nums text-foreground">
-          {formatUsagePrimary(primaryWindow)}
-        </span>
       </div>
       <SidebarUsageDetailsGrid row={row} />
     </div>

@@ -9,6 +9,7 @@ export const MOBILE_EDGE_SWIPE_EDGE_WIDTH_PX = 64;
 export const MOBILE_EDGE_SWIPE_TRIGGER_DISTANCE_PX = 56;
 export const MOBILE_EDGE_SWIPE_VERTICAL_CANCEL_DISTANCE_PX = 18;
 export const MOBILE_EDGE_SWIPE_HORIZONTAL_DOMINANCE_RATIO = 1.25;
+export const MOBILE_EDGE_SWIPE_OPEN_INTENT_TIMEOUT_MS = 350;
 export const MOBILE_EDGE_SWIPE_PANEL_ATTRIBUTE = "data-mobile-edge-swipe-panel";
 
 export type MobileEdgeSwipeDecision = "cancel" | MobileEdgeSwipeAction | "pending";
@@ -17,6 +18,7 @@ export interface MobileEdgeSwipeDelta {
   readonly action?: MobileEdgeSwipeAction;
   readonly deltaX: number;
   readonly deltaY: number;
+  readonly elapsedMs?: number;
   readonly side: MobileEdgeSwipeSide;
 }
 
@@ -44,6 +46,7 @@ export function resolveMobileEdgeSwipeDecision({
   action = "open",
   deltaX,
   deltaY,
+  elapsedMs,
   side,
 }: MobileEdgeSwipeDelta): MobileEdgeSwipeDecision {
   const horizontalDistance = Math.abs(deltaX);
@@ -62,6 +65,14 @@ export function resolveMobileEdgeSwipeDecision({
     actionDistance >= MOBILE_EDGE_SWIPE_TRIGGER_DISTANCE_PX &&
     horizontalDistance >= verticalDistance * MOBILE_EDGE_SWIPE_HORIZONTAL_DOMINANCE_RATIO
   ) {
+    if (
+      action === "open" &&
+      elapsedMs != null &&
+      elapsedMs > MOBILE_EDGE_SWIPE_OPEN_INTENT_TIMEOUT_MS
+    ) {
+      return "cancel";
+    }
+
     return action;
   }
 
@@ -70,6 +81,12 @@ export function resolveMobileEdgeSwipeDecision({
   }
 
   return "pending";
+}
+
+export function hasActiveTextSelection(
+  selection: Pick<Selection, "isCollapsed" | "rangeCount"> | null | undefined,
+): boolean {
+  return Boolean(selection && selection.rangeCount > 0 && !selection.isCollapsed);
 }
 
 function isBlockedTarget(target: EventTarget | null): boolean {
@@ -145,11 +162,13 @@ export function useMobileEdgeSwipe({
       | {
           pointerId: number;
           source: "pointer";
+          startTime: number;
           startX: number;
           startY: number;
         }
       | {
           source: "touch";
+          startTime: number;
           startX: number;
           startY: number;
           touchId: number;
@@ -171,6 +190,7 @@ export function useMobileEdgeSwipe({
       readonly target: EventTarget | null;
     }) => {
       if (
+        hasActiveTextSelection(window.getSelection()) ||
         !isAcceptedStartSurface({ side, startSurface, target }) ||
         !isMobileEdgeSwipeStart({
           edgeWidth,
@@ -185,8 +205,8 @@ export function useMobileEdgeSwipe({
 
       activeSwipe =
         source === "pointer"
-          ? { pointerId: id, source, startX, startY }
-          : { source, startX, startY, touchId: id };
+          ? { pointerId: id, source, startTime: performance.now(), startX, startY }
+          : { source, startTime: performance.now(), startX, startY, touchId: id };
     };
 
     const updateSwipe = ({
@@ -202,9 +222,15 @@ export function useMobileEdgeSwipe({
         return;
       }
 
+      if (hasActiveTextSelection(window.getSelection())) {
+        activeSwipe = null;
+        return;
+      }
+
       const decision = resolveMobileEdgeSwipeDecision({
         deltaX: clientX - activeSwipe.startX,
         deltaY: clientY - activeSwipe.startY,
+        elapsedMs: performance.now() - activeSwipe.startTime,
         action,
         side,
       });
