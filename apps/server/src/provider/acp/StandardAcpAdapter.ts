@@ -114,7 +114,6 @@ interface StandardAcpSessionContext {
   activePrompt:
     | {
         readonly turnId: TurnId;
-        readonly cancel: Deferred.Deferred<EffectAcpSchema.PromptResponse>;
       }
     | undefined;
   stopped: boolean;
@@ -826,8 +825,7 @@ export function makeStandardAcpAdapter(
           });
         }
 
-        const activePromptCancel = yield* Deferred.make<EffectAcpSchema.PromptResponse>();
-        ctx.activePrompt = { turnId, cancel: activePromptCancel };
+        ctx.activePrompt = { turnId };
         ctx.activeTurnId = turnId;
         ctx.lastPlanFingerprint = undefined;
         ctx.session = {
@@ -850,7 +848,6 @@ export function makeStandardAcpAdapter(
             prompt: promptParts,
           })
           .pipe(
-            Effect.raceFirst(Deferred.await(activePromptCancel)),
             Effect.mapError((error) =>
               mapAcpToAdapterError(provider, input.threadId, "session/prompt", error),
             ),
@@ -895,11 +892,9 @@ export function makeStandardAcpAdapter(
         const ctx = yield* requireSession(threadId);
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
         yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
-        if (ctx.activePrompt) {
-          yield* Deferred.succeed(ctx.activePrompt.cancel, {
-            stopReason: "cancelled",
-          });
-        }
+        if (!ctx.activePrompt) return;
+        // ACP owns prompt termination. Keep the turn active until the prompt
+        // call returns so late deltas cannot arrive after a local completion.
         yield* Effect.ignore(
           ctx.acp.cancel.pipe(
             Effect.mapError((error) =>

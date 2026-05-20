@@ -19,10 +19,22 @@ No open blocking findings remain.
 - F-003: The mobile collapsed composer send button lost the environment-unavailable disable guard while enabling running follow-ups.
   - Fixed by restoring `environmentUnavailable !== null` to the collapsed send-button disabled state.
 
+- F-004: ACP interrupt completion was locally raced against `session/prompt`, so an interrupted turn could be marked cancelled before the provider acknowledged prompt termination.
+  - Fixed by keeping `ctx.activePrompt` registered until `session/prompt` itself returns after `session/cancel`, with a controlled-runtime regression test that holds the provider prompt open after cancel.
+
+## External Finding Triage
+
+| Source          | Finding                                                                    | Current status | Bug class                   | Missed invariant/variant                                                                 | Action |
+| --------------- | -------------------------------------------------------------------------- | -------------- | --------------------------- | ---------------------------------------------------------------------------------------- | ------ |
+| Codex PR review | Interrupted ACP turns completed locally before provider prompt termination | fixed          | Lifecycle / async ownership | ACP owns prompt completion; cancel request must not synthesize `session/prompt` response | F-004  |
+
+Sibling sweep: `ctx.activePrompt` is owned only by `StandardAcpAdapter`; `rg` found no remaining local `Deferred` race or `ctx.activePrompt.cancel` completion path.
+
 ## Architecture Notes
 
 - Kiro-specific behavior remains isolated in `apps/server/src/provider/Layers/KiroAdapter.ts`.
 - The shared ACP layer only knows about an optional provider-supplied active-prompt hook and a provider-supplied method name.
+- ACP prompt lifecycle ownership stays in `apps/server/src/provider/acp/StandardAcpAdapter.ts`; provider adapters can request cancel, but they do not synthesize prompt completion.
 - Provider settings continue to use the existing schema annotation and instance-registry architecture rather than adding page-local provider form logic.
 - Appearance settings are client settings in `packages/contracts`; runtime application stays in the web app bootstrap and CSS variables.
 
@@ -31,6 +43,7 @@ No open blocking findings remain.
 - `bun fmt`
 - `bun lint` (passes with 9 existing warnings)
 - `bun run typecheck`
+- `bun run test src/provider/acp/StandardAcpAdapter.test.ts`
 - `bun run test src/provider/acp/AcpAdapterSupport.test.ts`
 - `bun run test src/provider/acp/KiroAcpSupport.test.ts src/provider/Layers/KiroProvider.test.ts src/provider/Drivers/KiroHome.test.ts src/provider/Layers/ProviderInstanceRegistryLive.test.ts`
 - `bun run test src/components/ChatView.logic.test.ts`
