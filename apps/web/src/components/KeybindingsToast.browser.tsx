@@ -123,6 +123,13 @@ function createBaseServerConfig(): ServerConfig {
           launchArgs: "",
         },
         cursor: { enabled: true, binaryPath: "", apiEndpoint: "", customModels: [] },
+        kiro: {
+          enabled: false,
+          binaryPath: "kiro-cli",
+          homePath: "",
+          agentName: "",
+          customModels: [],
+        },
         opencode: {
           enabled: true,
           binaryPath: "",

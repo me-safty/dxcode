@@ -21,6 +21,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import { ServerConfig } from "../../config.ts";
+import { resolveLocalUserHome } from "../../localUserEnvironment.ts";
 import {
   increment,
   terminalRestartsTotal,
@@ -704,6 +705,10 @@ function createTerminalSpawnEnv(
     if (value === undefined) continue;
     if (shouldExcludeTerminalEnvKey(key)) continue;
     spawnEnv[key] = value;
+  }
+  const localHome = resolveLocalUserHome(baseEnv);
+  if (localHome) {
+    spawnEnv.HOME = localHome;
   }
   if (runtimeEnv) {
     for (const [key, value] of Object.entries(runtimeEnv)) {

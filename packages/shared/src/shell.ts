@@ -135,7 +135,7 @@ function buildEnvironmentCaptureCommand(names: ReadonlyArray<string>): string {
 
       return [
         `printf '%s\\n' '${envCaptureStart(name)}'`,
-        `printenv ${name} || true`,
+        `printenv ${name}`,
         `printf '%s\\n' '${envCaptureEnd(name)}'`,
       ].join("; ");
     })

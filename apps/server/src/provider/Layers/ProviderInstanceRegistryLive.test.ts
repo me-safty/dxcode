@@ -10,7 +10,7 @@
  *
  *  2. **Many drivers, one registry** — the "all drivers slice" describe
  *     block below configures one instance of every shipped driver
- *     (`codex`, `claudeAgent`, `cursor`, `opencode`) in a single
+ *     (`codex`, `claudeAgent`, `cursor`, `kiro`, `opencode`) in a single
  *     `ProviderInstanceConfigMap` and asserts the registry boots them all
  *     without cross-contamination. This proves the driver SPI is uniform
  *     across every provider — any driver plugs into the registry through
@@ -18,9 +18,9 @@
  *
  * Every instance in these tests is configured with `enabled: false` so the
  * provider-status checks short-circuit to pending/disabled snapshots
- * without trying to spawn real `codex` / `claude` / `agent` / `opencode`
- * binaries. That keeps the assertions focused on registry routing
- * behaviour rather than the runtime details of each provider.
+ * without trying to spawn real provider binaries. That keeps the assertions
+ * focused on registry routing behaviour rather than the runtime details of
+ * each provider.
  */
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -28,6 +28,7 @@ import {
   type ClaudeSettings,
   type CodexSettings,
   type CursorSettings,
+  type KiroSettings,
   type OpenCodeSettings,
   ProviderDriverKind,
   type ProviderInstanceConfigMap,
@@ -41,6 +42,7 @@ import { ServerConfig } from "../../config.ts";
 import { ClaudeDriver } from "../Drivers/ClaudeDriver.ts";
 import { CodexDriver } from "../Drivers/CodexDriver.ts";
 import { CursorDriver } from "../Drivers/CursorDriver.ts";
+import { KiroDriver } from "../Drivers/KiroDriver.ts";
 import { OpenCodeDriver } from "../Drivers/OpenCodeDriver.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
@@ -75,6 +77,15 @@ const makeCursorConfig = (overrides: Partial<CursorSettings>): CursorSettings =>
   enabled: false,
   binaryPath: "agent",
   apiEndpoint: "",
+  customModels: [],
+  ...overrides,
+});
+
+const makeKiroConfig = (overrides: Partial<KiroSettings>): KiroSettings => ({
+  enabled: false,
+  binaryPath: "kiro-cli",
+  homePath: "",
+  agentName: "",
   customModels: [],
   ...overrides,
 });
@@ -218,7 +229,7 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
 });
 
 describe("ProviderInstanceRegistryLive — all drivers slice", () => {
-  // All four drivers need `NodeServices` (ChildProcessSpawner + FileSystem +
+  // All built-in drivers need `NodeServices` (ChildProcessSpawner + FileSystem +
   // Path). `OpenCodeDriver.create` additionally yields `OpenCodeRuntime`
   // at construction time, so we wire `OpenCodeRuntimeLive` into the stack.
   // `OpenCodeRuntimeLive` bundles its own `NetService.layer` via
@@ -244,11 +255,13 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       const codexId = ProviderInstanceId.make("codex_default");
       const claudeId = ProviderInstanceId.make("claude_default");
       const cursorId = ProviderInstanceId.make("cursor_default");
+      const kiroId = ProviderInstanceId.make("kiro_default");
       const openCodeId = ProviderInstanceId.make("opencode_default");
 
       const codexDriverKind = ProviderDriverKind.make("codex");
       const claudeDriverKind = ProviderDriverKind.make("claudeAgent");
       const cursorDriverKind = ProviderDriverKind.make("cursor");
+      const kiroDriverKind = ProviderDriverKind.make("kiro");
       const openCodeDriverKind = ProviderDriverKind.make("opencode");
 
       const configMap: ProviderInstanceConfigMap = {
@@ -273,6 +286,12 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
           enabled: false,
           config: makeCursorConfig({}),
         },
+        [kiroId]: {
+          driver: kiroDriverKind,
+          displayName: "Kiro",
+          enabled: false,
+          config: makeKiroConfig({ homePath: "/home/julius/.kiro-work" }),
+        },
         [openCodeId]: {
           driver: openCodeDriverKind,
           displayName: "OpenCode",
@@ -282,7 +301,7 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       };
 
       const { registry } = yield* makeProviderInstanceRegistry({
-        drivers: [CodexDriver, ClaudeDriver, CursorDriver, OpenCodeDriver],
+        drivers: [CodexDriver, ClaudeDriver, CursorDriver, KiroDriver, OpenCodeDriver],
         configMap,
       });
 
@@ -292,9 +311,9 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       expect(unavailable).toEqual([]);
 
       const instances = yield* registry.listInstances;
-      expect(instances).toHaveLength(4);
+      expect(instances).toHaveLength(5);
       expect(instances.map((instance) => instance.instanceId).toSorted()).toEqual(
-        [codexId, claudeId, cursorId, openCodeId].toSorted(),
+        [codexId, claudeId, cursorId, kiroId, openCodeId].toSorted(),
       );
 
       // Instance lookup by id resolves each instance to its own bundle —
@@ -303,14 +322,17 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       const codex = yield* registry.getInstance(codexId);
       const claude = yield* registry.getInstance(claudeId);
       const cursor = yield* registry.getInstance(cursorId);
+      const kiro = yield* registry.getInstance(kiroId);
       const openCode = yield* registry.getInstance(openCodeId);
       expect(codex?.driverKind).toBe(codexDriverKind);
       expect(claude?.driverKind).toBe(claudeDriverKind);
       expect(cursor?.driverKind).toBe(cursorDriverKind);
+      expect(kiro?.driverKind).toBe(kiroDriverKind);
       expect(openCode?.driverKind).toBe(openCodeDriverKind);
       expect(codex?.displayName).toBe("Codex");
       expect(claude?.displayName).toBe("Claude");
       expect(cursor?.displayName).toBe("Cursor");
+      expect(kiro?.displayName).toBe("Kiro");
       expect(openCode?.displayName).toBe("OpenCode");
 
       // Every instance owns its own set of closures — no sharing across
@@ -318,16 +340,29 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       // distinct references even when two instances happen to share a
       // trait (e.g. Cursor + others all use a stub-or-real
       // `textGeneration`; they must still be different object values).
-      const adapters = [codex!.adapter, claude!.adapter, cursor!.adapter, openCode!.adapter];
+      const adapters = [
+        codex!.adapter,
+        claude!.adapter,
+        cursor!.adapter,
+        kiro!.adapter,
+        openCode!.adapter,
+      ];
       expect(new Set(adapters).size).toBe(adapters.length);
       const textGenerations = [
         codex!.textGeneration,
         claude!.textGeneration,
         cursor!.textGeneration,
+        kiro!.textGeneration,
         openCode!.textGeneration,
       ];
       expect(new Set(textGenerations).size).toBe(textGenerations.length);
-      const snapshots = [codex!.snapshot, claude!.snapshot, cursor!.snapshot, openCode!.snapshot];
+      const snapshots = [
+        codex!.snapshot,
+        claude!.snapshot,
+        cursor!.snapshot,
+        kiro!.snapshot,
+        openCode!.snapshot,
+      ];
       expect(new Set(snapshots).size).toBe(snapshots.length);
 
       // Snapshots identify themselves by `instanceId` + `driver` so
@@ -355,6 +390,12 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       expect(cursorSnapshot.continuation?.groupKey).toBe(
         `${cursorDriverKind}:instance:${cursorId}`,
       );
+
+      const kiroSnapshot = yield* kiro!.snapshot.getSnapshot;
+      expect(kiroSnapshot.instanceId).toBe(kiroId);
+      expect(kiroSnapshot.driver).toBe(kiroDriverKind);
+      expect(kiroSnapshot.enabled).toBe(false);
+      expect(kiroSnapshot.continuation?.groupKey).toBe("kiro:home:/home/julius/.kiro-work");
 
       const openCodeSnapshot = yield* openCode!.snapshot.getSnapshot;
       expect(openCodeSnapshot.instanceId).toBe(openCodeId);

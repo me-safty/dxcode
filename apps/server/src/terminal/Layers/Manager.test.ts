@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeOS from "node:os";
 import { assert, it } from "@effect/vitest";
 import {
   DEFAULT_TERMINAL_ID,
@@ -1025,6 +1026,7 @@ it.layer(
       setEnv("PORT", "5173");
       setEnv("T3CODE_PORT", "3773");
       setEnv("VITE_DEV_SERVER_URL", "http://localhost:5173");
+      setEnv("HOME", "/private/tmp/t3code-home");
       setEnv("TEST_TERMINAL_KEEP", "keep-me");
 
       try {
@@ -1037,6 +1039,7 @@ it.layer(
         expect(spawnInput.env.PORT).toBeUndefined();
         expect(spawnInput.env.T3CODE_PORT).toBeUndefined();
         expect(spawnInput.env.VITE_DEV_SERVER_URL).toBeUndefined();
+        expect(spawnInput.env.HOME).toBe(NodeOS.userInfo().homedir);
         expect(spawnInput.env.TEST_TERMINAL_KEEP).toBe("keep-me");
       } finally {
         restoreEnv();

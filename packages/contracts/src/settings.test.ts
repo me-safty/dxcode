@@ -19,6 +19,13 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
     // Legacy `providers` struct is still hydrated with its per-driver defaults
     // so existing call sites keep working through the migration.
     expect(decoded.providers.codex.enabled).toBe(true);
+    expect(decoded.providers.kiro).toMatchObject({
+      enabled: false,
+      binaryPath: "kiro-cli",
+      homePath: "",
+      agentName: "",
+      customModels: [],
+    });
   });
 
   it("decodes a multi-instance map mixing first-party and fork drivers", () => {
@@ -107,6 +114,11 @@ describe("ServerSettingsPatch string normalization", () => {
           binaryPath: "  /opt/homebrew/bin/codex  ",
           homePath: "  ~/.codex  ",
         },
+        kiro: {
+          binaryPath: "  /opt/homebrew/bin/kiro-cli  ",
+          homePath: "  ~/.kiro-work  ",
+          agentName: "  builder  ",
+        },
       },
       providerInstances: {
         codex_personal: {
@@ -122,6 +134,9 @@ describe("ServerSettingsPatch string normalization", () => {
     expect(patch.observability?.otlpTracesUrl).toBe("http://localhost:4318/v1/traces");
     expect(patch.providers?.codex?.binaryPath).toBe("/opt/homebrew/bin/codex");
     expect(patch.providers?.codex?.homePath).toBe("~/.codex");
+    expect(patch.providers?.kiro?.binaryPath).toBe("/opt/homebrew/bin/kiro-cli");
+    expect(patch.providers?.kiro?.homePath).toBe("~/.kiro-work");
+    expect(patch.providers?.kiro?.agentName).toBe("builder");
     expect(patch.providerInstances?.[ProviderInstanceId.make("codex_personal")]?.driver).toBe(
       "codex",
     );
@@ -144,10 +159,19 @@ describe("ServerSettingsPatch string normalization", () => {
           ...defaultSettings.providers.codex,
           binaryPath: "  /opt/homebrew/bin/codex  ",
         },
+        kiro: {
+          ...defaultSettings.providers.kiro,
+          binaryPath: "  /opt/homebrew/bin/kiro-cli  ",
+          homePath: "  ~/.kiro-work  ",
+          agentName: "  builder  ",
+        },
       },
     });
 
     expect(encoded.addProjectBaseDirectory).toBe("~/Development");
     expect(encoded.providers?.codex?.binaryPath).toBe("/opt/homebrew/bin/codex");
+    expect(encoded.providers?.kiro?.binaryPath).toBe("/opt/homebrew/bin/kiro-cli");
+    expect(encoded.providers?.kiro?.homePath).toBe("~/.kiro-work");
+    expect(encoded.providers?.kiro?.agentName).toBe("builder");
   });
 });
