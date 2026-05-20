@@ -42,42 +42,6 @@ describe("createT3ExecutionBridgeClient", () => {
     );
   });
 
-  it("uses an override bridge base URL for routed runtime calls", async () => {
-    vi.stubEnv("T3_EXECUTION_BRIDGE_BASE_URL", "https://control.example.com");
-    vi.stubEnv("T3_EXECUTION_BRIDGE_SHARED_SECRET", "shared-secret");
-    const fetchMock = vi.fn(async () =>
-      Response.json({
-        taskId: "task-1",
-        workSessionId: "work-session-1",
-        status: "waiting_for_changes",
-        checkedAt: "2026-05-03T12:00:00.000Z",
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = createT3ExecutionBridgeClient({
-      baseUrl: "https://runtime.example.com/",
-    });
-    await client.ensureTaskPullRequest({
-      taskId: "task-1",
-      workSessionId: "work-session-1",
-      branch: "task/example",
-      worktreePath: "/workspace",
-      title: "Example",
-      idempotencyKey: "task-pr:task-1:work-session-1",
-      project: {
-        githubOwner: "acme",
-        githubRepo: "app",
-        defaultBranch: "main",
-      },
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://runtime.example.com/api/tasks/pull-request/ensure",
-      expect.any(Object),
-    );
-  });
-
   it("summarizes HTML bridge failures without including the response body", async () => {
     vi.stubEnv("T3_EXECUTION_BRIDGE_BASE_URL", "https://t3.example.com");
     vi.stubEnv("T3_EXECUTION_BRIDGE_SHARED_SECRET", "shared-secret");

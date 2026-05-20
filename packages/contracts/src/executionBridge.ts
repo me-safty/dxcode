@@ -236,7 +236,6 @@ export type TaskRuntimeUserInputRespondResponse = typeof TaskRuntimeUserInputRes
 export const TaskRuntimeCommitPushRequest = Schema.Struct({
   taskId: TrimmedNonEmptyString,
   workSessionId: TaskRuntimeMaterializationId,
-  t3ThreadId: Schema.optional(ThreadId),
   environmentId: Schema.optional(TrimmedNonEmptyString),
   branch: TrimmedNonEmptyString,
   worktreePath: TrimmedNonEmptyString,
@@ -260,7 +259,6 @@ export type TaskRuntimeCommitPushResponse = typeof TaskRuntimeCommitPushResponse
 export const TaskPullRequestEnsureRequest = Schema.Struct({
   taskId: TrimmedNonEmptyString,
   workSessionId: TaskRuntimeMaterializationId,
-  t3ThreadId: Schema.optional(ThreadId),
   environmentId: Schema.optional(TrimmedNonEmptyString),
   branch: TrimmedNonEmptyString,
   worktreePath: TrimmedNonEmptyString,

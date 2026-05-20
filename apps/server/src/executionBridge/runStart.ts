@@ -10,11 +10,7 @@ import {
   type ExecutionRunLifecycleEvent,
   MessageId,
   ProjectId,
-  type TaskPullRequestEnsureRequest,
-  type TaskPullRequestEnsureResponse,
   type TaskRuntimeLifecycleEvent,
-  type TaskRuntimeCommitPushRequest,
-  type TaskRuntimeCommitPushResponse,
   type TaskRuntimeMaterializeRequest,
   type TaskRuntimeMaterializeResponse,
   type TaskRuntimeUserInputRespondRequest,
@@ -24,27 +20,36 @@ import {
   TurnId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
-import { GitManager } from "../git/GitManager.ts";
-import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { normalizeUploadChatAttachments } from "../orchestration/Normalizer.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScriptRunner.ts";
-import { GitVcsDriver, type GitVcsDriverShape } from "../vcs/GitVcsDriver.ts";
+import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import { resolveExecutionBridgeModelSelection } from "./requestDefaults.ts";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 
 export type ExecutionLifecycleCheckpoint = "started" | "completed" | "failed" | "interrupted";
+
+const TASK_RUNTIME_INITIAL_PROMPT_PREFIX = `System context for this internal Slack agent:
+You are the coding agent behind an internal Slack agent that lets non-technical team members request product and code changes. The Slack user will only see selected relayed responses, so keep responses clear, concrete, and include important URLs when they become available.
+
+Operational rules:
+- If you make code changes, commit them and push the branch before finishing.
+- As soon as there are code changes, create or update a GitHub pull request targeting \`dev\`.
+- When you first create the pull request, include the PR URL and the relevant Vercel preview deployment URL in that response.
+- If you cannot commit, push, create the PR, or find the preview URL, say exactly why in the response where that failure occurs.`;
+
+export function buildTaskRuntimeInitialPrompt(userPrompt: string) {
+  return `${TASK_RUNTIME_INITIAL_PROMPT_PREFIX}\n\nUser request:\n${userPrompt}`;
+}
 
 export interface TrackedExecutionRun {
   readonly kind: "execution" | "task";
@@ -241,10 +246,6 @@ export class ExecutionBridgeRunStartError extends Schema.TaggedErrorClass<Execut
   },
 ) {}
 
-class GhCliError extends Data.TaggedError("GhCliError")<{
-  readonly cause: unknown;
-}> {}
-
 const currentIsoTimestamp = Effect.map(DateTime.now, (now) =>
   DateTime.formatIso(DateTime.toUtc(now)),
 );
@@ -287,6 +288,10 @@ export const startExecutionRun = (request: ExecutionRunCreateRequest) =>
       attachments: request.attachments ?? [],
     });
     const title = deriveThreadTitle(request);
+    const initialPrompt =
+      request.taskRuntime === true
+        ? buildTaskRuntimeInitialPrompt(request.initialPrompt)
+        : request.initialPrompt;
     yield* orchestrationEngine.dispatch({
       type: "thread.create",
       commandId: CommandId.make(`execution-bridge:thread:create:${request.executionRunId}`),
@@ -322,7 +327,7 @@ export const startExecutionRun = (request: ExecutionRunCreateRequest) =>
       message: {
         messageId: MessageId.make(`execution-run:${request.executionRunId}`),
         role: "user",
-        text: request.initialPrompt,
+        text: initialPrompt,
         attachments,
       },
       modelSelection,
@@ -519,7 +524,7 @@ export const materializeTaskRuntime = (request: TaskRuntimeMaterializeRequest) =
           message: {
             messageId: MessageId.make(`task-runtime:${request.workSessionId}`),
             role: "user",
-            text: request.initialPrompt,
+            text: buildTaskRuntimeInitialPrompt(request.initialPrompt),
             attachments,
           },
           modelSelection: request.modelSelection,
@@ -613,7 +618,7 @@ export const materializeTaskRuntime = (request: TaskRuntimeMaterializeRequest) =
         message: {
           messageId: MessageId.make(`task-runtime:${request.workSessionId}`),
           role: "user",
-          text: request.initialPrompt,
+          text: buildTaskRuntimeInitialPrompt(request.initialPrompt),
           attachments,
         },
         modelSelection,
@@ -651,19 +656,6 @@ export const materializeTaskRuntime = (request: TaskRuntimeMaterializeRequest) =
     ),
   );
 
-function parseGitHubPullRequestUrl(
-  url: string | undefined,
-): { owner: string; repo: string; number: number; url: string } | null {
-  const match = /https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)(?:\/[^\s]*)?/i.exec(
-    url ?? "",
-  );
-  if (!match) return null;
-  const [matchedUrl, owner, repo, numberText] = match;
-  const number = Number(numberText);
-  if (!owner || !repo || !Number.isSafeInteger(number) || number <= 0) return null;
-  return { owner, repo, number, url: matchedUrl };
-}
-
 interface GitHubDeploymentRow {
   readonly id?: unknown;
   readonly environment?: unknown;
@@ -695,15 +687,6 @@ const GitHubDeploymentStatusRow = Schema.Struct({
   environment_url: Schema.optional(Schema.Unknown),
   target_url: Schema.optional(Schema.Unknown),
 });
-
-const GitHubDeploymentRowsFromJson = Schema.fromJsonString(Schema.Array(GitHubDeploymentRow));
-const GitHubDeploymentStatusRowsFromJson = Schema.fromJsonString(
-  Schema.Array(GitHubDeploymentStatusRow),
-);
-const decodeGitHubDeploymentRows = Schema.decodeUnknownSync(GitHubDeploymentRowsFromJson);
-const decodeGitHubDeploymentStatusRows = Schema.decodeUnknownSync(
-  GitHubDeploymentStatusRowsFromJson,
-);
 
 export interface TaskPullRequestPreviewLink {
   readonly provider: "vercel";
@@ -826,401 +809,6 @@ export function collectTaskPullRequestPreviewLinks(input: {
 
   return sortTaskPullRequestPreviewLinks(previews);
 }
-
-const runGhJson = Effect.fn("executionBridge.runGhJson")(function* (
-  cwd: string,
-  args: readonly string[],
-) {
-  const result = yield* Effect.tryPromise({
-    try: async () => {
-      const { execFile } = await import("node:child_process");
-      return new Promise<{ stdout: string }>((resolve, reject) => {
-        execFile(
-          "gh",
-          [...args],
-          {
-            cwd,
-            timeout: 20_000,
-            maxBuffer: 4 * 1024 * 1024,
-          },
-          (error, stdout) => {
-            if (error) {
-              reject(error);
-              return;
-            }
-            resolve({ stdout });
-          },
-        );
-      });
-    },
-    catch: (cause) => new GhCliError({ cause }),
-  });
-  return result.stdout;
-});
-
-const readCurrentHeadSha = Effect.fn("executionBridge.readCurrentHeadSha")(function* (
-  git: GitVcsDriverShape,
-  cwd: string,
-) {
-  const result = yield* git.execute({
-    operation: "ExecutionBridge.ensureTaskPullRequest.readHeadSha",
-    cwd,
-    args: ["rev-parse", "HEAD"],
-  });
-  const sha = result.stdout.trim();
-  return sha.length > 0 ? sha : null;
-});
-
-const resolveTaskPullRequestPreviewLinks = Effect.fn(
-  "executionBridge.resolveTaskPullRequestPreviewLinks",
-)(function* (input: {
-  readonly cwd: string;
-  readonly owner: string;
-  readonly repo: string;
-  readonly headSha: string;
-  readonly headBranch?: string;
-}) {
-  let bestPreviews: readonly TaskPullRequestPreviewLink[] = [];
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const deployments = yield* runGhJson(input.cwd, [
-      "api",
-      `repos/${input.owner}/${input.repo}/deployments?sha=${input.headSha}`,
-    ]).pipe(
-      Effect.map((stdout) => decodeGitHubDeploymentRows(stdout)),
-      Effect.catch(() => Effect.succeed([])),
-    );
-
-    const statusesByDeploymentId = new Map<string, readonly GitHubDeploymentStatusRow[]>();
-    for (const deployment of deployments) {
-      const id = String(deployment.id ?? "").trim();
-      if (!id) continue;
-      const statusesUrl =
-        typeof deployment.statuses_url === "string"
-          ? deployment.statuses_url
-          : `repos/${input.owner}/${input.repo}/deployments/${id}/statuses`;
-      const statuses = yield* runGhJson(input.cwd, ["api", statusesUrl]).pipe(
-        Effect.map((stdout) => decodeGitHubDeploymentStatusRows(stdout)),
-        Effect.catch(() => Effect.succeed([])),
-      );
-      statusesByDeploymentId.set(id, statuses);
-    }
-
-    const previews = collectTaskPullRequestPreviewLinks({
-      deployments,
-      statusesByDeploymentId,
-      ...(input.headBranch !== undefined ? { headBranch: input.headBranch } : {}),
-    });
-    if (previews.length > bestPreviews.length) {
-      bestPreviews = previews;
-    }
-    const hasWebPreview = previews.some((preview) =>
-      preview.environment?.toLowerCase().includes("nextcard-web"),
-    );
-    const successfulDeploymentCount = deployments.filter((deployment) => {
-      const id = String(deployment.id ?? "").trim();
-      if (!id) return false;
-      return (statusesByDeploymentId.get(id) ?? []).some((status) => status.state === "success");
-    }).length;
-    if (
-      (previews.length > 0 && hasWebPreview) ||
-      (previews.length > 0 && successfulDeploymentCount >= 2) ||
-      attempt === 11
-    ) {
-      return previews.length > 0 ? previews : bestPreviews;
-    }
-    yield* Effect.sleep(Duration.seconds(5));
-  }
-
-  return bestPreviews;
-});
-
-const readAheadCount = Effect.fn("executionBridge.readAheadCount")(function* (
-  git: GitVcsDriverShape,
-  cwd: string,
-  baseRef: string,
-) {
-  const result = yield* git.execute({
-    operation: "ExecutionBridge.ensureTaskPullRequest.readAheadCount",
-    cwd,
-    args: ["rev-list", "--count", `${baseRef}..HEAD`],
-  });
-  const count = Number(result.stdout.trim());
-  return Number.isFinite(count) && count > 0 ? count : 0;
-});
-
-const hasCommittedChangesAgainstBase = Effect.fn("executionBridge.hasCommittedChangesAgainstBase")(
-  function* (git: GitVcsDriverShape, cwd: string, baseBranch: string) {
-    const localCount = yield* readAheadCount(git, cwd, baseBranch).pipe(
-      Effect.catch(() => Effect.succeed(null)),
-    );
-    if (localCount !== null) return localCount > 0;
-
-    const remoteCount = yield* readAheadCount(git, cwd, `origin/${baseBranch}`).pipe(
-      Effect.catch(() => Effect.succeed(null)),
-    );
-    return remoteCount !== null && remoteCount > 0;
-  },
-);
-
-const configureTaskPullRequestBaseBranch = Effect.fn(
-  "executionBridge.configureTaskPullRequestBaseBranch",
-)(function* (git: GitVcsDriverShape, cwd: string, branch: string, baseBranch: string) {
-  yield* git
-    .execute({
-      operation: "ExecutionBridge.ensureTaskPullRequest.configureBaseBranch",
-      cwd,
-      args: ["config", `branch.${branch}.gh-merge-base`, baseBranch],
-    })
-    .pipe(Effect.catch(() => Effect.void));
-});
-
-const detachTaskPullRequestBaseUpstream = Effect.fn(
-  "executionBridge.detachTaskPullRequestBaseUpstream",
-)(function* (git: GitVcsDriverShape, cwd: string, branch: string, baseBranch: string) {
-  const mergeRef = yield* git
-    .execute({
-      operation: "ExecutionBridge.ensureTaskPullRequest.readBranchMerge",
-      cwd,
-      args: ["config", "--get", `branch.${branch}.merge`],
-    })
-    .pipe(
-      Effect.map((result) => result.stdout.trim()),
-      Effect.catch(() => Effect.succeed("")),
-    );
-
-  if (branch === baseBranch || mergeRef !== `refs/heads/${baseBranch}`) {
-    return;
-  }
-
-  yield* Effect.logInfo(
-    "execution bridge detaching task branch from base upstream before PR ensure",
-    {
-      branch,
-      baseBranch,
-      worktreePath: cwd,
-    },
-  );
-  yield* git
-    .execute({
-      operation: "ExecutionBridge.ensureTaskPullRequest.unsetUpstream",
-      cwd,
-      args: ["branch", "--unset-upstream", branch],
-    })
-    .pipe(Effect.catch(() => Effect.void));
-});
-
-const syncTaskRuntimeThreadBranch = Effect.fn("executionBridge.syncTaskRuntimeThreadBranch")(
-  function* (input: {
-    readonly t3ThreadId?: ThreadId;
-    readonly worktreePath: string;
-    readonly requestedBranch: string;
-    readonly observedBranch: string;
-    readonly commandIdSuffix: string;
-  }) {
-    if (input.t3ThreadId === undefined || input.observedBranch === input.requestedBranch) {
-      return;
-    }
-
-    const orchestrationEngine = yield* OrchestrationEngineService;
-    yield* orchestrationEngine.dispatch({
-      type: "thread.meta.update",
-      commandId: CommandId.make(`execution-bridge:task:branch-sync:${input.commandIdSuffix}`),
-      threadId: input.t3ThreadId,
-      branch: input.observedBranch,
-      worktreePath: input.worktreePath,
-    });
-  },
-);
-
-export const ensureTaskPullRequest = (request: TaskPullRequestEnsureRequest) =>
-  Effect.gen(function* () {
-    const git = yield* GitVcsDriver;
-    const gitManager = yield* GitManager;
-    const checkedAt = yield* currentIsoTimestamp;
-    const details = yield* git.statusDetails(request.worktreePath);
-    let branch = details.branch ?? request.branch;
-    if (branch !== request.branch) {
-      yield* Effect.logInfo("execution bridge using current worktree branch for PR ensure", {
-        requestedBranch: request.branch,
-        currentBranch: branch,
-        worktreePath: request.worktreePath,
-      });
-      yield* syncTaskRuntimeThreadBranch({
-        ...(request.t3ThreadId !== undefined ? { t3ThreadId: request.t3ThreadId } : {}),
-        worktreePath: request.worktreePath,
-        requestedBranch: request.branch,
-        observedBranch: branch,
-        commandIdSuffix: `pr:${request.workSessionId}`,
-      });
-    }
-
-    const baseBranch = request.project.defaultBranch;
-    yield* detachTaskPullRequestBaseUpstream(git, request.worktreePath, branch, baseBranch);
-    yield* configureTaskPullRequestBaseBranch(git, request.worktreePath, branch, baseBranch);
-
-    if (!details.hasWorkingTreeChanges) {
-      const hasCommittedChanges = yield* hasCommittedChangesAgainstBase(
-        git,
-        request.worktreePath,
-        baseBranch,
-      );
-      if (!hasCommittedChanges) {
-        return {
-          taskId: request.taskId,
-          workSessionId: request.workSessionId,
-          status: "waiting_for_changes",
-          checkedAt,
-          summary: "No task changes have been committed or staged yet.",
-        } satisfies TaskPullRequestEnsureResponse;
-      }
-    }
-
-    const action = details.hasWorkingTreeChanges ? "commit_push_pr" : "create_pr";
-    const result = yield* gitManager.runStackedAction(
-      {
-        actionId: request.idempotencyKey,
-        cwd: request.worktreePath,
-        action,
-        sourceControlRepository: `${request.project.githubOwner}/${request.project.githubRepo}`,
-      },
-      { draftPullRequest: true },
-    );
-
-    if (result.pr.status !== "created" && result.pr.status !== "opened_existing") {
-      return {
-        taskId: request.taskId,
-        workSessionId: request.workSessionId,
-        status: "waiting_for_changes",
-        checkedAt,
-        summary: "No pull request was created because there are no publishable changes yet.",
-      } satisfies TaskPullRequestEnsureResponse;
-    }
-
-    const parsed = parseGitHubPullRequestUrl(result.pr.url);
-    const pullRequestNumber = result.pr.number ?? parsed?.number;
-    if (!parsed || pullRequestNumber === undefined) {
-      return {
-        taskId: request.taskId,
-        workSessionId: request.workSessionId,
-        status: "failed",
-        checkedAt,
-        summary: "GitHub pull request was created, but T3 could not parse its URL.",
-      } satisfies TaskPullRequestEnsureResponse;
-    }
-    const headSha = yield* readCurrentHeadSha(git, request.worktreePath).pipe(
-      Effect.catch(() => Effect.succeed(null)),
-    );
-    const deploymentPreviews =
-      headSha !== null
-        ? yield* resolveTaskPullRequestPreviewLinks({
-            cwd: request.worktreePath,
-            owner: parsed.owner,
-            repo: parsed.repo,
-            headSha,
-            headBranch: result.pr.headBranch ?? branch,
-          })
-        : [];
-    const previewUrl = deploymentPreviews[0]?.url;
-
-    return {
-      taskId: request.taskId,
-      workSessionId: request.workSessionId,
-      status: result.pr.status === "opened_existing" ? "existing" : "created",
-      checkedAt,
-      pullRequest: {
-        owner: parsed.owner,
-        repo: parsed.repo,
-        number: pullRequestNumber,
-        url: parsed.url,
-        headBranch: result.pr.headBranch ?? branch,
-        baseBranch: result.pr.baseBranch ?? request.project.defaultBranch,
-        title: result.pr.title ?? request.title,
-        draft: result.pr.status === "created",
-        ...(headSha !== null ? { headSha } : {}),
-        ...(previewUrl !== undefined ? { previewUrl } : {}),
-        ...(deploymentPreviews.length > 0 ? { deploymentPreviews } : {}),
-      },
-    } satisfies TaskPullRequestEnsureResponse;
-  }).pipe(
-    Effect.catch((cause) =>
-      Effect.gen(function* () {
-        const checkedAt = yield* currentIsoTimestamp;
-        return {
-          taskId: request.taskId,
-          workSessionId: request.workSessionId,
-          status: "failed",
-          checkedAt,
-          summary:
-            cause instanceof Error ? cause.message : "Failed to ensure a GitHub pull request.",
-        } satisfies TaskPullRequestEnsureResponse;
-      }),
-    ),
-  );
-
-export const commitPushTaskRuntime = (request: TaskRuntimeCommitPushRequest) =>
-  Effect.gen(function* () {
-    const git = yield* GitVcsDriver;
-    const gitWorkflow = yield* GitWorkflowService;
-    const checkedAt = yield* currentIsoTimestamp;
-    const details = yield* git.statusDetails(request.worktreePath);
-    const branch = details.branch ?? request.branch;
-    if (branch !== request.branch) {
-      yield* Effect.logInfo("execution bridge using current worktree branch for commit/push", {
-        requestedBranch: request.branch,
-        currentBranch: branch,
-        worktreePath: request.worktreePath,
-      });
-      yield* syncTaskRuntimeThreadBranch({
-        ...(request.t3ThreadId !== undefined ? { t3ThreadId: request.t3ThreadId } : {}),
-        worktreePath: request.worktreePath,
-        requestedBranch: request.branch,
-        observedBranch: branch,
-        commandIdSuffix: `commit:${request.workSessionId}`,
-      });
-    }
-
-    const result = yield* gitWorkflow.runStackedAction({
-      actionId: request.idempotencyKey,
-      cwd: request.worktreePath,
-      action: "commit_push",
-    });
-
-    if (result.push.status === "pushed") {
-      return {
-        taskId: request.taskId,
-        workSessionId: request.workSessionId,
-        status: "pushed",
-        checkedAt,
-        ...(result.commit.commitSha !== undefined ? { commitSha: result.commit.commitSha } : {}),
-        ...(result.commit.subject !== undefined ? { commitSubject: result.commit.subject } : {}),
-        branch: result.push.branch ?? branch,
-        ...(result.push.upstreamBranch !== undefined
-          ? { upstreamBranch: result.push.upstreamBranch }
-          : {}),
-      } satisfies TaskRuntimeCommitPushResponse;
-    }
-
-    return {
-      taskId: request.taskId,
-      workSessionId: request.workSessionId,
-      status: "waiting_for_changes",
-      checkedAt,
-      summary: "No task changes were committed or pushed.",
-    } satisfies TaskRuntimeCommitPushResponse;
-  }).pipe(
-    Effect.catch((cause) =>
-      Effect.gen(function* () {
-        const checkedAt = yield* currentIsoTimestamp;
-        return {
-          taskId: request.taskId,
-          workSessionId: request.workSessionId,
-          status: "failed",
-          checkedAt,
-          summary: cause instanceof Error ? cause.message : "Failed to commit and push task work.",
-        } satisfies TaskRuntimeCommitPushResponse;
-      }),
-    ),
-  );
 
 export function buildLifecycleEvent(input: {
   readonly trackedRun: TrackedExecutionRun;

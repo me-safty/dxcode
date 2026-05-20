@@ -6,7 +6,7 @@ import {
   TaskRuntimeUserInputRequestEvent,
 } from "@t3tools/contracts";
 
-import { api, internal } from "./_generated/api.js";
+import { internal } from "./_generated/api.js";
 import type { Id } from "./_generated/dataModel.js";
 import { httpAction } from "./_generated/server.js";
 
@@ -548,55 +548,7 @@ http.route({
           readonly externalMessageId?: string;
         }
       | undefined;
-    let pullRequest:
-      | {
-          readonly status: "waiting_for_changes" | "created" | "existing" | "failed" | "skipped";
-          readonly url?: string;
-          readonly title?: string;
-          readonly repo?: string;
-          readonly headBranch?: string;
-          readonly previewUrl?: string;
-          readonly deploymentPreviewsJson?: string;
-          readonly summary?: string;
-        }
-      | undefined;
-    let commitPush:
-      | {
-          readonly status: "waiting_for_changes" | "pushed" | "failed" | "skipped";
-          readonly commitSha?: string;
-          readonly commitSubject?: string;
-          readonly branch?: string;
-          readonly upstreamBranch?: string;
-          readonly summary?: string;
-        }
-      | undefined;
     if (payload.type === "completed" || payload.type === "failed") {
-      try {
-        commitPush = await ctx.runAction(api.t3Runtime.commitPushTaskRuntime, {
-          taskId: payload.taskId as Id<"tasks">,
-          workSessionId: payload.workSessionId as Id<"workSessions">,
-          reason: `runtime-${payload.type}`,
-        });
-      } catch (error) {
-        commitPush = {
-          status: "failed",
-          summary: error instanceof Error ? error.message : String(error),
-        };
-      }
-
-      try {
-        pullRequest = await ctx.runAction(api.t3Runtime.ensureTaskPullRequest, {
-          taskId: payload.taskId as Id<"tasks">,
-          workSessionId: payload.workSessionId as Id<"workSessions">,
-          reason: `runtime-${payload.type}`,
-        });
-      } catch (error) {
-        pullRequest = {
-          status: "failed",
-          summary: error instanceof Error ? error.message : String(error),
-        };
-      }
-
       try {
         if (payload.type === "completed" && payload.assistantResponse !== undefined) {
           try {
@@ -619,38 +571,7 @@ http.route({
           }
         }
 
-        if (
-          payload.type === "completed" &&
-          pullRequest?.status !== "failed" &&
-          pullRequest?.status !== "waiting_for_changes" &&
-          pullRequest?.status !== "skipped" &&
-          pullRequest.url !== undefined
-        ) {
-          const parsedPullRequest = /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/i.exec(
-            pullRequest.url,
-          );
-          intakeReply =
-            parsedPullRequest !== null
-              ? await ctx.runAction(internal.taskIntake.postTaskPullRequestStatusReply, {
-                  taskId: payload.taskId as Id<"tasks">,
-                  workSessionId: payload.workSessionId as Id<"workSessions">,
-                  pullRequestExternalId: `${parsedPullRequest[1]}/${parsedPullRequest[2]}#${parsedPullRequest[3]}`,
-                  pullRequestUrl: pullRequest.url,
-                  pullRequestStatus: pullRequest.status,
-                  ...(pullRequest.title !== undefined ? { title: pullRequest.title } : {}),
-                  ...(pullRequest.repo !== undefined ? { repo: pullRequest.repo } : {}),
-                  ...(pullRequest.headBranch !== undefined
-                    ? { headBranch: pullRequest.headBranch }
-                    : {}),
-                  ...(pullRequest.previewUrl !== undefined
-                    ? { previewUrl: pullRequest.previewUrl }
-                    : {}),
-                  ...(pullRequest.deploymentPreviewsJson !== undefined
-                    ? { deploymentPreviewsJson: pullRequest.deploymentPreviewsJson }
-                    : {}),
-                })
-              : { posted: false, reason: "unparseable_pull_request_url" };
-        } else if (payload.type === "failed") {
+        if (payload.type === "failed") {
           intakeReply = await ctx.runAction(internal.taskIntake.postTaskRuntimeLifecycleReply, {
             taskId: payload.taskId as Id<"tasks">,
             workSessionId: payload.workSessionId as Id<"workSessions">,
@@ -677,8 +598,6 @@ http.route({
     return Response.json({
       accepted: true,
       ...result,
-      ...(commitPush !== undefined ? { commitPush } : {}),
-      ...(pullRequest !== undefined ? { pullRequest } : {}),
       ...(intakeReply !== undefined ? { intakeReply } : {}),
     });
   }),

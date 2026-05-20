@@ -8,8 +8,6 @@ import {
   ExecutionRunCreateRequest,
   ExecutionRunInterruptRequest,
   ExecutionRunStatusQuery,
-  TaskPullRequestEnsureRequest,
-  TaskRuntimeCommitPushRequest,
   TaskRuntimeMaterializeRequest,
   TaskRuntimeUserInputRespondRequest,
   type OrchestrationEvent,
@@ -29,9 +27,7 @@ import { authenticateExecutionBridgeRequest, ExecutionBridgeAuthError } from "./
 import {
   buildLifecycleEvent,
   buildTaskRuntimeLifecycleEvent,
-  commitPushTaskRuntime,
   continueExecutionRun,
-  ensureTaskPullRequest,
   ExecutionBridgeRunRegistry,
   ExecutionBridgeRunStartError,
   interruptExecutionRun,
@@ -435,36 +431,6 @@ export const taskRuntimeMaterializeRouteLayer = HttpRouter.add(
       Effect.succeed(respondToExecutionBridgeError(error)),
     ),
     Effect.catchTag("ExecutionBridgeRunStartError", (error) =>
-      Effect.succeed(respondToExecutionBridgeError(error)),
-    ),
-  ),
-);
-
-export const taskRuntimeCommitPushRouteLayer = HttpRouter.add(
-  "POST",
-  "/api/tasks/commit-push",
-  Effect.gen(function* () {
-    yield* authenticateExecutionBridgeRequest;
-    const request = yield* HttpServerRequest.schemaBodyJson(TaskRuntimeCommitPushRequest);
-    const result = yield* commitPushTaskRuntime(request);
-    return HttpServerResponse.jsonUnsafe(result, { status: 202 });
-  }).pipe(
-    Effect.catchTag("ExecutionBridgeAuthError", (error) =>
-      Effect.succeed(respondToExecutionBridgeError(error)),
-    ),
-  ),
-);
-
-export const taskPullRequestEnsureRouteLayer = HttpRouter.add(
-  "POST",
-  "/api/tasks/pull-request/ensure",
-  Effect.gen(function* () {
-    yield* authenticateExecutionBridgeRequest;
-    const request = yield* HttpServerRequest.schemaBodyJson(TaskPullRequestEnsureRequest);
-    const result = yield* ensureTaskPullRequest(request);
-    return HttpServerResponse.jsonUnsafe(result, { status: 202 });
-  }).pipe(
-    Effect.catchTag("ExecutionBridgeAuthError", (error) =>
       Effect.succeed(respondToExecutionBridgeError(error)),
     ),
   ),
