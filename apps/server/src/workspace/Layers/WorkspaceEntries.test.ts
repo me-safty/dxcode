@@ -149,6 +149,47 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
       }),
     );
 
+    it.effect("matches representative file tagging queries in the current project", () =>
+      Effect.gen(function* () {
+        const cwd = yield* git(process.cwd(), ["rev-parse", "--show-toplevel"]);
+        const cases = [
+          {
+            query: "COMP",
+            expectedPaths: [
+              "apps/web/src/components",
+              "apps/web/src/components/chat/ChatComposer.tsx",
+            ],
+          },
+          {
+            query: "WorkspaceEntries",
+            expectedPaths: [
+              "apps/server/src/workspace/Layers/WorkspaceEntries.ts",
+              "apps/server/src/workspace/Layers/WorkspaceEntries.test.ts",
+            ],
+          },
+          {
+            query: "projectReactQuery",
+            expectedPaths: ["apps/web/src/lib/projectReactQuery.ts"],
+          },
+          {
+            query: "codex-app-server",
+            expectedPaths: ["packages/effect-codex-app-server/src/protocol.ts"],
+          },
+        ];
+
+        for (const { query, expectedPaths } of cases) {
+          const result = yield* searchWorkspaceEntries({ cwd, query, limit: 200 });
+          const paths = result.entries.map((entry) => entry.path);
+
+          for (const expectedPath of expectedPaths) {
+            expect(paths, `query '${query}' should include '${expectedPath}'`).toContain(
+              expectedPath,
+            );
+          }
+        }
+      }),
+    );
+
     it.effect("matches basename tokens so extensions and dotted names are searchable", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTempDir({ prefix: "t3code-workspace-token-query-" });
