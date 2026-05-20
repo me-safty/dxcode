@@ -924,9 +924,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   }
 
   return (
-    <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
-      <SkillInlineText text={props.text} skills={props.skills} />
-    </div>
+    <ChatMarkdown text={props.text} cwd={undefined} skills={props.skills} />
   );
 });
 
