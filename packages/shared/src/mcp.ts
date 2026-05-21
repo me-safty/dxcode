@@ -1,5 +1,7 @@
+export { MIN_MCP_TOOL_TIMEOUT_SEC } from "@t3tools/contracts";
+import { MIN_MCP_TOOL_TIMEOUT_SEC } from "@t3tools/contracts";
+
 export const DEFAULT_MCP_TOOL_TIMEOUT_SEC = 120;
-export const MIN_MCP_TOOL_TIMEOUT_SEC = 5;
 export const MAX_MCP_TOOL_TIMEOUT_MS = 2_147_483_647;
 
 export function normalizeMcpToolTimeoutSec(

@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 
 import { PortSchema, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
-const MIN_MCP_TOOL_TIMEOUT_SEC = 5;
+export const MIN_MCP_TOOL_TIMEOUT_SEC = 5;
 
 export const DesktopBootstrapWorkspaceFolder = Schema.Struct({
   key: TrimmedNonEmptyString,
