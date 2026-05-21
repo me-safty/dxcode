@@ -49,7 +49,7 @@ export interface ServerClientSessionRecord {
   readonly current: boolean;
 }
 
-type ServerAuthGateState =
+export type ServerAuthGateState =
   | { status: "authenticated" }
   | {
       status: "requires-auth";
@@ -61,6 +61,60 @@ let bootstrapPromise: Promise<ServerAuthGateState> | null = null;
 let resolvedAuthenticatedGateState: ServerAuthGateState | null = null;
 const AUTH_SESSION_ESTABLISH_TIMEOUT_MS = 2_000;
 const AUTH_SESSION_ESTABLISH_STEP_MS = 100;
+const PRIMARY_AUTH_LAST_KNOWN_STATUS_STORAGE_KEY = "t3code:primary-auth:last-known-status:v1";
+const PRIMARY_AUTH_LAST_KNOWN_AUTHENTICATED_VALUE = "authenticated";
+
+function authStatusStorage(): Storage | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    return window.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedAuthSentinel(authenticated: boolean): void {
+  const storage = authStatusStorage();
+  if (!storage) {
+    return;
+  }
+
+  try {
+    if (authenticated) {
+      storage.setItem(
+        PRIMARY_AUTH_LAST_KNOWN_STATUS_STORAGE_KEY,
+        PRIMARY_AUTH_LAST_KNOWN_AUTHENTICATED_VALUE,
+      );
+    } else {
+      storage.removeItem(PRIMARY_AUTH_LAST_KNOWN_STATUS_STORAGE_KEY);
+    }
+  } catch {
+    // Best-effort cache; ignore quota / disabled-storage errors.
+  }
+}
+
+function readCachedAuthSentinel(): boolean {
+  const storage = authStatusStorage();
+  if (!storage) {
+    return false;
+  }
+
+  try {
+    return (
+      storage.getItem(PRIMARY_AUTH_LAST_KNOWN_STATUS_STORAGE_KEY) ===
+      PRIMARY_AUTH_LAST_KNOWN_AUTHENTICATED_VALUE
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function peekCachedAuthGateState(): ServerAuthGateState | null {
+  return readCachedAuthSentinel() ? { status: "authenticated" } : null;
+}
 
 export function peekPairingTokenFromUrl(): string | null {
   return getPairingTokenFromUrl(new URL(window.location.href));
@@ -261,6 +315,7 @@ export async function submitServerAuthCredential(credential: string): Promise<vo
   }
 
   resolvedAuthenticatedGateState = null;
+  writeCachedAuthSentinel(false);
   await exchangeBootstrapCredential(trimmedCredential);
   bootstrapPromise = null;
   stripPairingTokenFromUrl();
@@ -392,6 +447,9 @@ export async function resolveInitialServerAuthGateState(): Promise<ServerAuthGat
     .then((result) => {
       if (result.status === "authenticated") {
         resolvedAuthenticatedGateState = result;
+        writeCachedAuthSentinel(true);
+      } else {
+        writeCachedAuthSentinel(false);
       }
       return result;
     })
@@ -405,4 +463,5 @@ export async function resolveInitialServerAuthGateState(): Promise<ServerAuthGat
 export function __resetServerAuthBootstrapForTests() {
   bootstrapPromise = null;
   resolvedAuthenticatedGateState = null;
+  writeCachedAuthSentinel(false);
 }

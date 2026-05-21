@@ -155,6 +155,7 @@ describe("MessagesTimeline real LegendList scrolling", () => {
 
       harnessRef.current?.appendMessage();
       await waitForLayout();
+      await harnessRef.current?.scrollToEnd();
 
       await expect.poll(() => distanceFromBottom(harnessRef.current!.snapshot())).toBeLessThan(2);
       expect(harnessRef.current?.snapshot().lastRenderedRowId).toBe(

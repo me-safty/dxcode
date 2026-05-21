@@ -6,6 +6,7 @@ import {
   type ErrorComponentProps,
   useLocation,
   useNavigate,
+  useRouter,
 } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
@@ -60,6 +61,8 @@ import { configureClientTracing } from "../observability/clientTracing";
 import {
   ensurePrimaryEnvironmentReady,
   getPrimaryKnownEnvironment,
+  peekCachedAuthGateState,
+  readPrimaryEnvironmentDescriptor,
   resolveInitialServerAuthGateState,
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
@@ -75,6 +78,7 @@ export const Route = createRootRouteWithContext<{
         authGateState: {
           status: "hosted-pairing",
         } as const,
+        authGateRevalidationRequired: false,
       };
     }
 
@@ -84,6 +88,16 @@ export const Route = createRootRouteWithContext<{
         authGateState: {
           status: "hosted-static",
         } as const,
+        authGateRevalidationRequired: false,
+      };
+    }
+
+    const cachedDescriptor = readPrimaryEnvironmentDescriptor();
+    const cachedAuthGate = peekCachedAuthGateState();
+    if (cachedDescriptor && cachedAuthGate) {
+      return {
+        authGateState: cachedAuthGate,
+        authGateRevalidationRequired: true,
       };
     }
 
@@ -93,6 +107,7 @@ export const Route = createRootRouteWithContext<{
     ]);
     return {
       authGateState,
+      authGateRevalidationRequired: false,
     };
   },
   component: RootRouteView,
@@ -104,7 +119,7 @@ export const Route = createRootRouteWithContext<{
 
 function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
-  const { authGateState } = Route.useRouteContext();
+  const { authGateState, authGateRevalidationRequired } = Route.useRouteContext();
   const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
 
   useEffect(() => {
@@ -136,6 +151,7 @@ function RootRouteView() {
     <ToastProvider>
       <AnchoredToastProvider>
         <BackNavigationBlocker />
+        {authGateRevalidationRequired ? <BackgroundAuthRevalidator /> : null}
         {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />
@@ -153,6 +169,34 @@ function RootRouteView() {
       </AnchoredToastProvider>
     </ToastProvider>
   );
+}
+
+function BackgroundAuthRevalidator() {
+  const router = useRouter();
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      ensurePrimaryEnvironmentReady().catch(() => null),
+      resolveInitialServerAuthGateState().catch(() => null),
+    ]).then(([, freshAuth]) => {
+      if (cancelled) {
+        return;
+      }
+      if (!freshAuth) {
+        return;
+      }
+      if (freshAuth.status !== "authenticated") {
+        void router.invalidate();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  return null;
 }
 
 function HostedStaticEnvironmentBootstrap() {

@@ -1563,12 +1563,21 @@ function ComposerPromptEditorInner({
     const previousSnapshot = snapshotRef.current;
     const contextsChanged = terminalContextsSignatureRef.current !== terminalContextsSignature;
     const skillsChanged = skillsSignatureRef.current !== skillsSignature;
+    const isCursorOnlyUpdate =
+      previousSnapshot.value === value && !contextsChanged && !skillsChanged;
     if (
-      previousSnapshot.value === value &&
+      isCursorOnlyUpdate &&
       previousSnapshot.cursor === normalizedCursor &&
-      !contextsChanged &&
-      !skillsChanged
+      previousSnapshot.expandedCursor === expandCollapsedComposerCursor(value, normalizedCursor)
     ) {
+      return;
+    }
+
+    const rootElement = editor.getRootElement();
+    const isFocused = Boolean(rootElement && document.activeElement === rootElement);
+    if (isCursorOnlyUpdate && isFocused) {
+      // Preserve the browser-owned live selection while typing; replaying it can
+      // reset native keyboard word context on iOS contentEditable.
       return;
     }
 
@@ -1581,9 +1590,7 @@ function ComposerPromptEditorInner({
     terminalContextsSignatureRef.current = terminalContextsSignature;
     skillsSignatureRef.current = skillsSignature;
 
-    const rootElement = editor.getRootElement();
-    const isFocused = Boolean(rootElement && document.activeElement === rootElement);
-    if (previousSnapshot.value === value && !contextsChanged && !skillsChanged && !isFocused) {
+    if (isCursorOnlyUpdate && !isFocused) {
       return;
     }
 
