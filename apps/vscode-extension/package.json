@@ -100,8 +100,8 @@
         "t3code.mcp.toolTimeoutSec": {
           "type": "number",
           "default": 120,
-          "minimum": 1,
-          "description": "Maximum time, in seconds, that Codex should wait for a VS Code MCP tool call before timing out."
+          "minimum": 5,
+          "description": "Maximum time, in seconds, that provider sessions should wait for a VS Code MCP tool call before timing out. Applied where the provider supports equivalent timeout configuration."
         },
         "t3code.ui.showOpenInPicker": {
           "type": "boolean",

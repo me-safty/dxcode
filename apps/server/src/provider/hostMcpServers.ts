@@ -1,5 +1,7 @@
 import type { DesktopBootstrapMcpServer } from "@t3tools/contracts";
 
+const MAX_MCP_TOOL_TIMEOUT_MS = 2_147_483_647;
+
 export interface HostMcpStdioServer {
   readonly name: string;
   readonly command: string;
@@ -39,6 +41,13 @@ export function hostMcpServersToStdioServers(
   });
 }
 
+function toolTimeoutMsFromSeconds(toolTimeoutSec: number | undefined): number | undefined {
+  if (toolTimeoutSec === undefined || !Number.isFinite(toolTimeoutSec)) {
+    return undefined;
+  }
+  return Math.max(1, Math.min(MAX_MCP_TOOL_TIMEOUT_MS, Math.trunc(toolTimeoutSec * 1000)));
+}
+
 export function hostMcpServersToOpenCodeConfigContent(
   hostMcpServers: ReadonlyArray<DesktopBootstrapMcpServer>,
 ): string {
@@ -48,18 +57,19 @@ export function hostMcpServersToOpenCodeConfigContent(
 
   return JSON.stringify({
     mcp: Object.fromEntries(
-      hostMcpServersToStdioServers(hostMcpServers).map((server) => [
-        server.name,
-        {
-          type: "local",
-          command: [server.command, ...server.args],
-          ...(Object.keys(server.env).length > 0 ? { environment: server.env } : {}),
-          enabled: true,
-          ...(server.toolTimeoutSec !== undefined
-            ? { timeout: Math.max(1, Math.trunc(server.toolTimeoutSec * 1000)) }
-            : {}),
-        },
-      ]),
+      hostMcpServersToStdioServers(hostMcpServers).map((server) => {
+        const timeout = toolTimeoutMsFromSeconds(server.toolTimeoutSec);
+        return [
+          server.name,
+          {
+            type: "local",
+            command: [server.command, ...server.args],
+            ...(Object.keys(server.env).length > 0 ? { environment: server.env } : {}),
+            enabled: true,
+            ...(timeout !== undefined ? { timeout } : {}),
+          },
+        ];
+      }),
     ),
   });
 }

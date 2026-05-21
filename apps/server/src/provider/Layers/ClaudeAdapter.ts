@@ -98,6 +98,7 @@ type ClaudeToolResultStreamKind = Extract<
   "command_output" | "file_change_output"
 >;
 type ClaudeSdkEffort = NonNullable<ClaudeQueryOptions["effort"]>;
+type ClaudeMcpServers = Record<string, McpServerConfig>;
 
 function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
   const result = encodeUnknownJsonStringExit(input);
@@ -635,7 +636,7 @@ function buildUserMessage(input: {
 
 function buildClaudeMcpServers(
   hostMcpServers: ReadonlyArray<DesktopBootstrapMcpServer>,
-): Record<string, McpServerConfig> | undefined {
+): ClaudeMcpServers | undefined {
   const servers = hostMcpServersToStdioServers(hostMcpServers);
   if (servers.length === 0) {
     return undefined;
@@ -650,6 +651,35 @@ function buildClaudeMcpServers(
         ...(Object.keys(server.env).length > 0 ? { env: { ...server.env } } : {}),
       } satisfies McpServerConfig,
     ]),
+  );
+}
+
+function buildClaudeMcpServersDiagnostics(mcpServers: ClaudeMcpServers | undefined): unknown {
+  if (!mcpServers) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(mcpServers).map(([name, server]) => {
+      const stdioServer = server as {
+        readonly type?: unknown;
+        readonly command?: unknown;
+        readonly args?: unknown;
+        readonly env?: unknown;
+      };
+      const envKeys =
+        stdioServer.env && typeof stdioServer.env === "object"
+          ? Object.keys(stdioServer.env).toSorted()
+          : [];
+      return [
+        name,
+        {
+          type: stdioServer.type,
+          command: stdioServer.command,
+          args: Array.isArray(stdioServer.args) ? stdioServer.args : [],
+          ...(envKeys.length > 0 ? { envKeys } : {}),
+        },
+      ];
+    }),
   );
 }
 
@@ -2952,6 +2982,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(ultracode ? { ultracode: true } : {}),
       };
       const mcpServers = buildClaudeMcpServers(serverConfig.hostMcpServers);
+      const mcpServersDiagnostics = buildClaudeMcpServersDiagnostics(mcpServers);
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -3001,7 +3032,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.query.additional_directories": input.cwd ? [input.cwd] : [],
         "claude.query.setting_sources": [...CLAUDE_SETTING_SOURCES],
         "claude.query.settings_json": encodeJsonStringForDiagnostics(settings) ?? "",
-        "claude.query.mcp_servers_json": encodeJsonStringForDiagnostics(mcpServers ?? {}) ?? "",
+        "claude.query.mcp_servers_json":
+          encodeJsonStringForDiagnostics(mcpServersDiagnostics) ?? "",
         "claude.query.extra_args_json": encodeJsonStringForDiagnostics(extraArgs) ?? "",
         "claude.query.path_to_executable": claudeBinaryPath,
       });
