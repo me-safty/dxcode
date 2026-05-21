@@ -1,0 +1,121 @@
+{
+  "task_id": "neuropharm-automatic-diagrams-graph-performance-tracker",
+  "mode": "rpg",
+  "rpg_used": true,
+  "localization": {
+    "nodes": [
+      "artifacts.neuropharm.xlsx_tracker",
+      "prompt.neuropharm.automatic_artifacts",
+      "web.neuropharm.automatic_prompt_surface",
+      "web.neuropharm.diagram_hardening",
+      "web.neuropharm.graph_render_performance"
+    ],
+    "files": [
+      "apps/web/src/components/chat/ChatComposer.tsx",
+      "apps/web/src/components/ChatMarkdown.tsx",
+      "apps/web/src/components/ChatMarkdown.browser.tsx",
+      "apps/web/src/components/neuropharm/ScientificGraphRenderer.tsx",
+      "apps/web/src/components/neuropharm/DomainPromptPicker.tsx",
+      "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+      "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+      "output/neuropharm-tracker/neuropharm_research_tracker.xlsx",
+      "repo_plan/rpg.json",
+      "repo_plan/file_index.json"
+    ],
+    "evidence": [
+      "Composer had a visible DomainPromptPicker menu wired into ChatComposer; removed it so neuropharm behavior is automatic.",
+      "ChatMarkdown only parsed explicitly labelled neuropharm-graph fences and limited Mermaid edge forms; extended both and covered with browser tests.",
+      "ScientificGraphRenderer recomputed grouped chart data on every render; memoized and bounded large graph inputs.",
+      "Spreadsheets plugin artifact-tool package was unavailable in this workspace, so a valid local XLSX package was generated and XML-verified as a fallback artifact."
+    ]
+  },
+  "tests": [
+    {
+      "cmd": "python3 scripts/tools/rpg_builder.py --write --rpg-mode minimal --dep-depth 1 --include-tests",
+      "ok": false,
+      "note": "Required helper is absent: scripts/tools/rpg_builder.py."
+    },
+    {
+      "cmd": "python3 scripts/validate_rpg.py",
+      "ok": false,
+      "note": "Required validator is absent: scripts/validate_rpg.py."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun fmt",
+      "ok": true
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter t3 test src/neuropharm/NeuropharmPromptPolicy.test.ts",
+      "ok": true
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/contracts test src/neuropharm.test.ts",
+      "ok": true
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/web test:browser src/components/ChatMarkdown.browser.tsx",
+      "ok": true,
+      "note": "Verified Mermaid variants, target_network, radar, heatmap, timeline, and plain-json graph auto-render."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/web typecheck",
+      "ok": true
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun lint",
+      "ok": true,
+      "note": "Passed with existing unrelated warnings only."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun typecheck",
+      "ok": true
+    },
+    {
+      "cmd": "python3 OOXML package verification for output/neuropharm-tracker/neuropharm_research_tracker.xlsx",
+      "ok": true,
+      "note": "Verified workbook package members and parsed workbook/sheet XML."
+    }
+  ],
+  "implemented_interfaces": [
+    "artifacts.neuropharm.xlsx_tracker",
+    "prompt.neuropharm.automatic_artifacts",
+    "web.neuropharm.automatic_prompt_surface",
+    "web.neuropharm.diagram_hardening",
+    "web.neuropharm.graph_render_performance"
+  ],
+  "tested_interfaces": [
+    "artifacts.neuropharm.xlsx_tracker",
+    "prompt.neuropharm.automatic_artifacts",
+    "web.neuropharm.automatic_prompt_surface",
+    "web.neuropharm.diagram_hardening",
+    "web.neuropharm.graph_render_performance"
+  ],
+  "files_changed": [
+    "apps/web/src/components/chat/ChatComposer.tsx",
+    "apps/web/src/components/ChatMarkdown.tsx",
+    "apps/web/src/components/ChatMarkdown.browser.tsx",
+    "apps/web/src/components/neuropharm/ScientificGraphRenderer.tsx",
+    "apps/web/src/components/neuropharm/DomainPromptPicker.tsx",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+    "output/neuropharm-tracker/neuropharm_research_tracker.xlsx",
+    "repo_plan/rpg.json",
+    "repo_plan/file_index.json"
+  ],
+  "artifact_outputs": {
+    "tracker_xlsx": "/Users/main/Desktop/t3neuropharmacology/output/neuropharm-tracker/neuropharm_research_tracker.xlsx",
+    "tracker_sheets": [
+      "Dashboard",
+      "Compounds",
+      "Targets",
+      "Interactions",
+      "Evidence_Claims",
+      "Graph_Specs",
+      "Risk_Flags",
+      "Tasks",
+      "Sources"
+    ]
+  },
+  "elapsed_s": null,
+  "tool_calls_count": null
+}

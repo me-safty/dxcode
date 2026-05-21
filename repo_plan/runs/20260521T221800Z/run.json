@@ -1,0 +1,189 @@
+{
+  "task_id": "neuropharm-graph-autoverify-and-local-db-1_5gb-fill",
+  "mode": "rpg",
+  "rpg_used": true,
+  "localization": {
+    "nodes": [
+      "contracts.neuropharm.local_database_1_5gb",
+      "prompt.neuropharm.local_database_1_5gb_contract",
+      "server.neuropharm.local_database_streaming_1_5gb",
+      "web.neuropharm.database_source_controls_1_5gb",
+      "web.neuropharm.standard_graph_autorender"
+    ],
+    "files": [
+      "packages/contracts/src/neuropharm.ts",
+      "packages/contracts/src/neuropharm.test.ts",
+      "apps/server/src/neuropharm/NeuropharmLocalDatabases.ts",
+      "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+      "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+      "apps/server/src/neuropharm/NeuropharmService.test.ts",
+      "apps/web/src/components/neuropharm/DatabaseConsole.tsx",
+      "apps/web/src/components/neuropharm/ScientificGraphRenderer.tsx",
+      "apps/web/src/components/ChatMarkdown.browser.tsx",
+      "repo_plan/rpg.json",
+      "repo_plan/file_index.json"
+    ],
+    "evidence": [
+      "Found local database manifest hardcoded to IUPHAR + BindingDB only and archive downloads buffering response.arrayBuffer() before writing.",
+      "Found ChatMarkdown already routes neuropharm-graph fences to ScientificGraphRenderer; extended renderer coverage and browser tests.",
+      "Verified BindingDB May 2026 archive sizes from official download endpoints before selecting under-1.5GB default set."
+    ]
+  },
+  "tests": [
+    {
+      "cmd": "python3 scripts/tools/rpg_builder.py --write --rpg-mode minimal --dep-depth 1 --include-tests",
+      "ok": false,
+      "note": "Required helper is absent: scripts/tools/rpg_builder.py."
+    },
+    {
+      "cmd": "python3 scripts/validate_rpg.py",
+      "ok": false,
+      "note": "Required validator is absent: scripts/validate_rpg.py."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun fmt apps/server/src/neuropharm/NeuropharmLocalDatabases.ts apps/server/src/neuropharm/NeuropharmPromptPolicy.ts apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts apps/server/src/neuropharm/NeuropharmService.test.ts apps/web/src/components/neuropharm/DatabaseConsole.tsx apps/web/src/components/neuropharm/ScientificGraphRenderer.tsx apps/web/src/components/ChatMarkdown.browser.tsx packages/contracts/src/neuropharm.ts packages/contracts/src/neuropharm.test.ts",
+      "ok": true
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter t3 test src/neuropharm/NeuropharmPromptPolicy.test.ts src/neuropharm/NeuropharmService.test.ts",
+      "ok": true
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/contracts test src/neuropharm.test.ts",
+      "ok": true
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/web test:browser src/components/ChatMarkdown.browser.tsx",
+      "ok": true,
+      "note": "Verified Mermaid, target_network, radar, heatmap, and pk_timeline auto-render instead of raw code blocks."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun lint",
+      "ok": true,
+      "note": "Passed with existing unrelated warnings only."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun typecheck",
+      "ok": true
+    },
+    {
+      "cmd": "Effect service downloadDatabases({ forceRefresh: false, importAfterDownload: true }) against /Users/main/.t3/dev/state.sqlite",
+      "ok": true,
+      "note": "Downloaded 12 local sources totaling 1,168,352,855 bytes; imported 23,742 IUPHAR interaction rows."
+    },
+    {
+      "cmd": "sqlite3 /Users/main/.t3/dev/state.sqlite local snapshot and AF710B/M1 search verification",
+      "ok": true,
+      "note": "Confirmed all local snapshots downloaded/imported and AF710B M1/SIGMAR1 rows searchable."
+    }
+  ],
+  "implemented_interfaces": [
+    "contracts.neuropharm.local_database_1_5gb",
+    "prompt.neuropharm.local_database_1_5gb_contract",
+    "server.neuropharm.local_database_streaming_1_5gb",
+    "web.neuropharm.database_source_controls_1_5gb",
+    "web.neuropharm.standard_graph_autorender"
+  ],
+  "tested_interfaces": [
+    "contracts.neuropharm.local_database_1_5gb",
+    "prompt.neuropharm.local_database_1_5gb_contract",
+    "server.neuropharm.local_database_streaming_1_5gb",
+    "web.neuropharm.database_source_controls_1_5gb",
+    "web.neuropharm.standard_graph_autorender"
+  ],
+  "files_changed": [
+    "packages/contracts/src/neuropharm.ts",
+    "packages/contracts/src/neuropharm.test.ts",
+    "apps/server/src/neuropharm/NeuropharmLocalDatabases.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+    "apps/server/src/neuropharm/NeuropharmService.test.ts",
+    "apps/web/src/components/neuropharm/DatabaseConsole.tsx",
+    "apps/web/src/components/neuropharm/ScientificGraphRenderer.tsx",
+    "apps/web/src/components/ChatMarkdown.browser.tsx",
+    "repo_plan/rpg.json",
+    "repo_plan/file_index.json"
+  ],
+  "download_evidence": {
+    "base_directory": "/Users/main/.t3/dev/neuropharm/databases",
+    "total_bytes": 1168352855,
+    "iuphar_imported_rows": 23742,
+    "sqlite_interactions_count_after": 23753,
+    "snapshots": [
+      {
+        "source": "iuphar",
+        "status": "imported",
+        "bytes": 7390193,
+        "rowCount": 23742
+      },
+      {
+        "source": "iuphar_ligands",
+        "status": "downloaded",
+        "bytes": 6720849,
+        "rowCount": 0
+      },
+      {
+        "source": "iuphar_targets",
+        "status": "downloaded",
+        "bytes": 1888799,
+        "rowCount": 0
+      },
+      {
+        "source": "iuphar_physchem",
+        "status": "downloaded",
+        "bytes": 823431,
+        "rowCount": 0
+      },
+      {
+        "source": "bindingdb",
+        "status": "downloaded",
+        "bytes": 581014061,
+        "rowCount": 0
+      },
+      {
+        "source": "bindingdb_chembl",
+        "status": "downloaded",
+        "bytes": 341430307,
+        "rowCount": 0
+      },
+      {
+        "source": "bindingdb_patents",
+        "status": "downloaded",
+        "bytes": 164742545,
+        "rowCount": 0
+      },
+      {
+        "source": "bindingdb_pubchem",
+        "status": "downloaded",
+        "bytes": 23467373,
+        "rowCount": 0
+      },
+      {
+        "source": "bindingdb_articles",
+        "status": "downloaded",
+        "bytes": 18053530,
+        "rowCount": 0
+      },
+      {
+        "source": "bindingdb_assays",
+        "status": "downloaded",
+        "bytes": 9844453,
+        "rowCount": 0
+      },
+      {
+        "source": "bindingdb_pdsp",
+        "status": "downloaded",
+        "bytes": 5577416,
+        "rowCount": 0
+      },
+      {
+        "source": "bindingdb_rsid",
+        "status": "downloaded",
+        "bytes": 7399898,
+        "rowCount": 0
+      }
+    ]
+  },
+  "elapsed_s": null,
+  "tool_calls_count": null
+}

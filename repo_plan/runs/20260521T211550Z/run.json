@@ -1,0 +1,104 @@
+{
+  "task_id": "neuropharm-analysis-db-backed-graphs",
+  "mode": "rpg",
+  "rpg_used": true,
+  "localization": {
+    "nodes": [
+      "server.neuropharm.analysis_local_db_grounding",
+      "server.neuropharm.db_backed_graph_specs",
+      "prompt.neuropharm.db_graph_contract",
+      "tests.neuropharm.db_graph_grounding"
+    ],
+    "files": [
+      "apps/server/src/neuropharm/NeuropharmService.ts",
+      "apps/server/src/neuropharm/NeuropharmService.test.ts",
+      "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+      "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+      "repo_plan/rpg.json",
+      "repo_plan/file_index.json"
+    ],
+    "evidence": [
+      "NeuropharmService.analyze previously searched only local evidence notes and emitted mode templates; it now installs basics, searches local DB rows, syncs named compounds, and builds graph specs from interactions.",
+      "compareCompounds previously used one static interaction_risk_heatmap; it now shares the database-backed interaction graph synthesizer.",
+      "Prompt policy now explicitly requires local receptor/database rows before template graph values."
+    ]
+  },
+  "tests": [
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter t3 test src/neuropharm/NeuropharmService.test.ts src/neuropharm/NeuropharmPromptPolicy.test.ts",
+      "ok": true,
+      "interfaces": [
+        "server.neuropharm.analysis_local_db_grounding",
+        "server.neuropharm.db_backed_graph_specs",
+        "prompt.neuropharm.db_graph_contract",
+        "tests.neuropharm.db_graph_grounding"
+      ]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/web test:browser src/components/ChatMarkdown.browser.tsx",
+      "ok": true,
+      "interfaces": ["web.neuropharm.standard_graph_autorender", "web.neuropharm.diagram_hardening"]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun fmt",
+      "ok": true,
+      "interfaces": [
+        "server.neuropharm.analysis_local_db_grounding",
+        "server.neuropharm.db_backed_graph_specs"
+      ]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun lint",
+      "ok": true,
+      "interfaces": [
+        "server.neuropharm.analysis_local_db_grounding",
+        "server.neuropharm.db_backed_graph_specs"
+      ],
+      "note": "Exited 0 with 9 unrelated existing warnings in apps/web/src/ChatView.tsx, clientPersistenceStorage.ts, and environments/runtime/catalog.test.ts."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun typecheck",
+      "ok": true,
+      "interfaces": [
+        "server.neuropharm.analysis_local_db_grounding",
+        "server.neuropharm.db_backed_graph_specs",
+        "prompt.neuropharm.db_graph_contract"
+      ]
+    },
+    {
+      "cmd": "python3 scripts/tools/rpg_builder.py --write --rpg-mode minimal --dep-depth 1 --include-tests",
+      "ok": false,
+      "interfaces": [],
+      "note": "Required AGENTS helper is absent in this checkout: scripts/tools/rpg_builder.py. RPG was updated manually."
+    },
+    {
+      "cmd": "python3 scripts/validate_rpg.py",
+      "ok": false,
+      "interfaces": [],
+      "note": "Required AGENTS validator is absent in this checkout: scripts/validate_rpg.py."
+    }
+  ],
+  "implemented_interfaces": [
+    "server.neuropharm.analysis_local_db_grounding",
+    "server.neuropharm.db_backed_graph_specs",
+    "prompt.neuropharm.db_graph_contract",
+    "tests.neuropharm.db_graph_grounding"
+  ],
+  "tested_interfaces": [
+    "server.neuropharm.analysis_local_db_grounding",
+    "server.neuropharm.db_backed_graph_specs",
+    "prompt.neuropharm.db_graph_contract",
+    "tests.neuropharm.db_graph_grounding"
+  ],
+  "files_changed": [
+    "apps/server/src/neuropharm/NeuropharmService.ts",
+    "apps/server/src/neuropharm/NeuropharmService.test.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+    "repo_plan/rpg.json",
+    "repo_plan/file_index.json",
+    "repo_plan/runs/20260521T211550Z/run.json"
+  ],
+  "elapsed_s": null,
+  "tool_calls_count": null
+}
