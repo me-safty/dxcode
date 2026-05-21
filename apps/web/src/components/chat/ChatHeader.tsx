@@ -6,15 +6,18 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { BeakerIcon } from "lucide-react";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
+import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, {
   type NewProjectScriptInput,
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
 import { OpenInPicker } from "./OpenInPicker";
+import { SidebarTrigger } from "../ui/sidebar";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { cn } from "~/lib/utils";
 
@@ -79,12 +82,13 @@ export const ChatHeader = memo(function ChatHeader({
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
+        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
         <Tooltip>
           <TooltipTrigger
             render={
               <h2
                 aria-label={activeThreadTitle}
-                className="min-w-0 flex-1 truncate text-sm font-medium text-foreground"
+                className="min-w-0 shrink truncate text-sm font-medium text-foreground"
               >
                 {activeThreadTitle}
               </h2>
@@ -92,6 +96,15 @@ export const ChatHeader = memo(function ChatHeader({
           />
           <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
         </Tooltip>
+        {activeProjectName ? (
+          <Badge variant="outline" className="min-w-0 shrink overflow-hidden">
+            <span className="min-w-0 truncate">{activeProjectName}</span>
+          </Badge>
+        ) : null}
+        <Badge variant="outline" className="shrink-0 gap-1 text-[10px] text-emerald-700">
+          <BeakerIcon className="size-3" />
+          Research
+        </Badge>
       </div>
       <div
         data-chat-header-actions
