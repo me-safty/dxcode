@@ -1,0 +1,140 @@
+{
+  "task_id": "neuropharm-local-basics-and-stuck-working-fix",
+  "mode": "rpg",
+  "rpg_used": true,
+  "timestamp": "2026-05-21T19:01:50Z",
+  "localization": {
+    "nodes": [
+      "server.neuropharm.basics_pack",
+      "persistence.neuropharm.local_snapshots",
+      "server.neuropharm.local_status_resilience",
+      "prompt.neuropharm.policy",
+      "web.session.phase_recovery",
+      "web.neuropharm.database"
+    ],
+    "files": [
+      "apps/server/src/neuropharm/NeuropharmBasicsPack.ts",
+      "apps/server/src/neuropharm/NeuropharmService.ts",
+      "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+      "apps/server/src/neuropharm/NeuropharmService.test.ts",
+      "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+      "apps/server/src/persistence/Migrations.ts",
+      "apps/server/src/persistence/Migrations/034_NeuropharmLocalDatabaseSnapshotsRepair.ts",
+      "apps/web/src/session-logic.ts",
+      "apps/web/src/session-logic.test.ts",
+      "apps/web/src/components/neuropharm/DomainPromptPicker.tsx"
+    ]
+  },
+  "tests": [
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun fmt",
+      "ok": true,
+      "interfaces": [
+        "server.neuropharm.basics_pack",
+        "web.neuropharm.database",
+        "web.session.phase_recovery"
+      ]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter t3 test src/neuropharm/NeuropharmService.test.ts src/neuropharm/NeuropharmPromptPolicy.test.ts",
+      "ok": true,
+      "interfaces": [
+        "server.neuropharm.basics_pack",
+        "server.neuropharm.local_status_resilience",
+        "prompt.neuropharm.policy"
+      ]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/web test src/session-logic.test.ts",
+      "ok": true,
+      "interfaces": ["web.session.phase_recovery", "web.neuropharm.database"]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/contracts test src/neuropharm.test.ts",
+      "ok": true,
+      "interfaces": ["contracts.neuropharm.basics_pack", "contracts.neuropharm.local_database"]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun lint",
+      "ok": true,
+      "interfaces": [
+        "server.neuropharm.basics_pack",
+        "web.neuropharm.database",
+        "web.session.phase_recovery"
+      ],
+      "note": "Passed with existing unrelated warnings in ChatView, clientPersistenceStorage, and catalog.test."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun typecheck",
+      "ok": true,
+      "interfaces": [
+        "server.neuropharm.basics_pack",
+        "persistence.neuropharm.local_snapshots",
+        "server.neuropharm.local_status_resilience",
+        "web.neuropharm.database",
+        "web.session.phase_recovery"
+      ]
+    },
+    {
+      "cmd": "sqlite3 /Users/main/.t3/dev/state.sqlite local neuropharm verification",
+      "ok": true,
+      "interfaces": ["persistence.neuropharm.local_snapshots", "server.neuropharm.basics_pack"],
+      "note": "Confirmed migration 34 recorded, snapshot table exists, and 8 basics-pack notes are installed."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bunx playwright screenshot --viewport-size=1440,1200 --wait-for-timeout=6000 http://localhost:5733/pair?... output/playwright/neuropharm-workspace.png",
+      "ok": true,
+      "interfaces": ["web.neuropharm.database", "web.session.phase_recovery"],
+      "note": "Browser reached workspace; composer ready with domain chips visible. Pairing screenshot with stale tokens failed first, then verified via fresh token."
+    },
+    {
+      "cmd": "python3 -m json.tool repo_plan/rpg.json && python3 -m json.tool repo_plan/file_index.json",
+      "ok": true,
+      "interfaces": ["repo_plan.rpg"]
+    },
+    {
+      "cmd": "python3 scripts/tools/rpg_builder.py --write --rpg-mode minimal --dep-depth 1 --include-tests",
+      "ok": false,
+      "interfaces": [],
+      "note": "Required helper absent in this checkout."
+    },
+    {
+      "cmd": "python3 scripts/validate_rpg.py",
+      "ok": false,
+      "interfaces": [],
+      "note": "Required validator absent in this checkout."
+    }
+  ],
+  "implemented_interfaces": [
+    "server.neuropharm.basics_pack",
+    "persistence.neuropharm.local_snapshots",
+    "server.neuropharm.local_status_resilience",
+    "prompt.neuropharm.policy",
+    "web.session.phase_recovery",
+    "web.neuropharm.database"
+  ],
+  "tested_interfaces": [
+    "server.neuropharm.basics_pack",
+    "persistence.neuropharm.local_snapshots",
+    "server.neuropharm.local_status_resilience",
+    "prompt.neuropharm.policy",
+    "web.session.phase_recovery",
+    "web.neuropharm.database"
+  ],
+  "files_changed": [
+    "apps/server/src/neuropharm/NeuropharmBasicsPack.ts",
+    "apps/server/src/neuropharm/NeuropharmService.ts",
+    "apps/server/src/neuropharm/NeuropharmService.test.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+    "apps/server/src/persistence/Migrations.ts",
+    "apps/server/src/persistence/Migrations/034_NeuropharmLocalDatabaseSnapshotsRepair.ts",
+    "apps/web/src/components/neuropharm/DomainPromptPicker.tsx",
+    "apps/web/src/session-logic.ts",
+    "apps/web/src/session-logic.test.ts",
+    "repo_plan/file_index.json",
+    "repo_plan/rpg.json"
+  ],
+  "elapsed_s": null,
+  "tool_calls_count": null
+}

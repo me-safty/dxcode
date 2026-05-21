@@ -1,0 +1,103 @@
+{
+  "task_id": "neuropharm-graph-rendering-and-local-evidence-prompt-fix",
+  "mode": "rpg",
+  "rpg_used": true,
+  "timestamp": "2026-05-21T19:22:00Z",
+  "localization": {
+    "nodes": [
+      "prompt.neuropharm.local_evidence_contract",
+      "web.neuropharm.graph_renderer_network",
+      "web.neuropharm.mermaid_renderer"
+    ],
+    "files": [
+      "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+      "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+      "apps/web/src/components/ChatMarkdown.tsx",
+      "apps/web/src/components/ChatMarkdown.browser.tsx",
+      "apps/web/src/components/neuropharm/ScientificGraphRenderer.tsx"
+    ]
+  },
+  "tests": [
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun fmt apps/server/src/neuropharm/NeuropharmPromptPolicy.ts apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts apps/web/src/components/neuropharm/ScientificGraphRenderer.tsx apps/web/src/components/ChatMarkdown.tsx apps/web/src/components/ChatMarkdown.browser.tsx",
+      "ok": true,
+      "interfaces": [
+        "prompt.neuropharm.local_evidence_contract",
+        "web.neuropharm.graph_renderer_network",
+        "web.neuropharm.mermaid_renderer"
+      ]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter t3 test src/neuropharm/NeuropharmPromptPolicy.test.ts",
+      "ok": true,
+      "interfaces": ["prompt.neuropharm.local_evidence_contract"]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/web test src/session-logic.test.ts",
+      "ok": true,
+      "interfaces": ["web.neuropharm.graph_renderer_network", "web.neuropharm.mermaid_renderer"]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/web test:browser:install",
+      "ok": true,
+      "interfaces": ["web.neuropharm.graph_renderer_network", "web.neuropharm.mermaid_renderer"]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/web test:browser src/components/ChatMarkdown.browser.tsx",
+      "ok": true,
+      "interfaces": ["web.neuropharm.graph_renderer_network", "web.neuropharm.mermaid_renderer"]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun lint",
+      "ok": true,
+      "interfaces": [
+        "prompt.neuropharm.local_evidence_contract",
+        "web.neuropharm.graph_renderer_network",
+        "web.neuropharm.mermaid_renderer"
+      ],
+      "note": "Passed with existing unrelated warnings."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun typecheck",
+      "ok": true,
+      "interfaces": [
+        "prompt.neuropharm.local_evidence_contract",
+        "web.neuropharm.graph_renderer_network",
+        "web.neuropharm.mermaid_renderer"
+      ]
+    },
+    {
+      "cmd": "python3 scripts/tools/rpg_builder.py --write --rpg-mode minimal --dep-depth 1 --include-tests",
+      "ok": false,
+      "interfaces": [],
+      "note": "Required helper absent in this checkout."
+    },
+    {
+      "cmd": "python3 scripts/validate_rpg.py",
+      "ok": false,
+      "interfaces": [],
+      "note": "Required validator absent in this checkout."
+    }
+  ],
+  "implemented_interfaces": [
+    "prompt.neuropharm.local_evidence_contract",
+    "web.neuropharm.graph_renderer_network",
+    "web.neuropharm.mermaid_renderer"
+  ],
+  "tested_interfaces": [
+    "prompt.neuropharm.local_evidence_contract",
+    "web.neuropharm.graph_renderer_network",
+    "web.neuropharm.mermaid_renderer"
+  ],
+  "files_changed": [
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+    "apps/web/src/components/ChatMarkdown.tsx",
+    "apps/web/src/components/ChatMarkdown.browser.tsx",
+    "apps/web/src/components/neuropharm/ScientificGraphRenderer.tsx",
+    "repo_plan/rpg.json",
+    "repo_plan/file_index.json"
+  ],
+  "elapsed_s": null,
+  "tool_calls_count": null
+}

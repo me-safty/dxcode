@@ -1,0 +1,105 @@
+{
+  "task_id": "neuropharm-local-basics-and-stuck-working-fix",
+  "mode": "rpg",
+  "rpg_used": true,
+  "timestamp": "2026-05-21T18:34:01Z",
+  "localization": {
+    "nodes": [
+      "server.neuropharm.basics_pack",
+      "server.neuropharm.local_status_resilience",
+      "prompt.neuropharm.policy",
+      "web.session.phase_recovery",
+      "web.neuropharm.database"
+    ],
+    "files": [
+      "apps/server/src/neuropharm/NeuropharmBasicsPack.ts",
+      "apps/server/src/neuropharm/NeuropharmService.ts",
+      "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+      "apps/server/src/neuropharm/NeuropharmService.test.ts",
+      "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+      "apps/web/src/session-logic.ts",
+      "apps/web/src/session-logic.test.ts"
+    ]
+  },
+  "tests": [
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter t3 test src/neuropharm/NeuropharmService.test.ts src/neuropharm/NeuropharmPromptPolicy.test.ts",
+      "ok": true,
+      "interfaces": [
+        "server.neuropharm.basics_pack",
+        "server.neuropharm.local_status_resilience",
+        "prompt.neuropharm.policy"
+      ]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/web test src/session-logic.test.ts",
+      "ok": true,
+      "interfaces": ["web.session.phase_recovery"]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/contracts test src/neuropharm.test.ts",
+      "ok": true,
+      "interfaces": ["contracts.neuropharm.basics_pack"]
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun lint",
+      "ok": true,
+      "interfaces": ["web.session.phase_recovery", "server.neuropharm.basics_pack"],
+      "note": "Passed with existing unrelated warnings."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun typecheck",
+      "ok": true,
+      "interfaces": [
+        "web.session.phase_recovery",
+        "server.neuropharm.basics_pack",
+        "server.neuropharm.local_status_resilience"
+      ]
+    },
+    {
+      "cmd": "sqlite3 /Users/main/.t3/dev/state.sqlite CREATE TABLE IF NOT EXISTS neuropharm_local_database_snapshots ...",
+      "ok": true,
+      "interfaces": ["server.neuropharm.local_status_resilience"],
+      "note": "Repaired current dev SQLite schema where migration 33 was marked run but the snapshot table was absent."
+    },
+    {
+      "cmd": "python3 scripts/tools/rpg_builder.py --write --rpg-mode minimal --dep-depth 1 --include-tests",
+      "ok": false,
+      "interfaces": [],
+      "note": "Required helper absent in this checkout."
+    },
+    {
+      "cmd": "python3 scripts/validate_rpg.py",
+      "ok": false,
+      "interfaces": [],
+      "note": "Required validator absent in this checkout."
+    }
+  ],
+  "implemented_interfaces": [
+    "server.neuropharm.basics_pack",
+    "server.neuropharm.local_status_resilience",
+    "prompt.neuropharm.policy",
+    "web.session.phase_recovery",
+    "web.neuropharm.database"
+  ],
+  "tested_interfaces": [
+    "server.neuropharm.basics_pack",
+    "server.neuropharm.local_status_resilience",
+    "prompt.neuropharm.policy",
+    "web.session.phase_recovery",
+    "web.neuropharm.database"
+  ],
+  "files_changed": [
+    "apps/server/src/neuropharm/NeuropharmBasicsPack.ts",
+    "apps/server/src/neuropharm/NeuropharmService.ts",
+    "apps/server/src/neuropharm/NeuropharmService.test.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+    "apps/web/src/session-logic.ts",
+    "apps/web/src/session-logic.test.ts",
+    "repo_plan/file_index.json",
+    "repo_plan/rpg.json"
+  ],
+  "elapsed_s": null,
+  "tool_calls_count": null
+}
