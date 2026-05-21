@@ -46,6 +46,34 @@ import {
 } from "./review.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
+  NeuropharmError,
+  NeuropharmAnalysisInput,
+  NeuropharmAnalysisResult,
+  NeuropharmCompoundComparisonInput,
+  NeuropharmCompoundComparisonResult,
+  NeuropharmCompoundLookupInput,
+  NeuropharmCompoundLookupResult,
+  NeuropharmDatabaseSyncInput,
+  NeuropharmDatabaseSyncResult,
+  NeuropharmLocalDatabaseDownloadInput,
+  NeuropharmLocalDatabaseDownloadResult,
+  NeuropharmLocalDatabaseStatusInput,
+  NeuropharmLocalDatabaseStatusResult,
+  NeuropharmLocalSearchInput,
+  NeuropharmLocalSearchResult,
+  NeuropharmBasicsPackInput,
+  NeuropharmBasicsPackResult,
+  NeuropharmEvidencePackInput,
+  NeuropharmEvidencePackResult,
+  NeuropharmGenerateGraphSpecInput,
+  NeuropharmGraphSpec,
+  NeuropharmImportDocumentInput,
+  NeuropharmEvidenceRecord,
+  NeuropharmSearchLibraryInput,
+  NeuropharmSearchSourcesInput,
+  NeuropharmSearchSourcesResult,
+} from "./neuropharm.ts";
+import {
   ClientOrchestrationCommand,
   ORCHESTRATION_WS_METHODS,
   OrchestrationDispatchCommandError,
@@ -223,6 +251,22 @@ export const WS_METHODS = {
   sourceControlCloneRepository: "sourceControl.cloneRepository",
   sourceControlPublishRepository: "sourceControl.publishRepository",
 
+  // Neuropharmacology methods
+  neuropharmSearchSources: "neuropharm.searchSources",
+  neuropharmImportDocument: "neuropharm.importDocument",
+  neuropharmInstallBasicsPack: "neuropharm.installBasicsPack",
+  neuropharmSearchLibrary: "neuropharm.searchLibrary",
+  neuropharmBuildEvidencePack: "neuropharm.buildEvidencePack",
+  neuropharmGenerateGraphSpec: "neuropharm.generateGraphSpec",
+  neuropharmAnalyze: "neuropharm.analyze",
+  neuropharmSyncDatabases: "neuropharm.syncDatabases",
+  neuropharmLookupCompound: "neuropharm.lookupCompound",
+  neuropharmCompareCompounds: "neuropharm.compareCompounds",
+  neuropharmDownloadDatabases: "neuropharm.downloadDatabases",
+  neuropharmDatabaseStatus: "neuropharm.databaseStatus",
+  neuropharmSearchLocalReceptors: "neuropharm.searchLocalReceptors",
+  neuropharmSearchLocalInteractions: "neuropharm.searchLocalInteractions",
+
   // Streaming subscriptions
   subscribeVcsStatus: "subscribeVcsStatus",
   subscribeTerminalEvents: "subscribeTerminalEvents",
@@ -394,6 +438,96 @@ export const WsAssetsCreateUrlRpc = Rpc.make(WS_METHODS.assetsCreateUrl, {
   success: AssetCreateUrlResult,
   error: Schema.Union([AssetAccessError, EnvironmentAuthorizationError]),
 });
+
+export const WsNeuropharmSearchSourcesRpc = Rpc.make(WS_METHODS.neuropharmSearchSources, {
+  payload: NeuropharmSearchSourcesInput,
+  success: NeuropharmSearchSourcesResult,
+  error: NeuropharmError,
+});
+
+export const WsNeuropharmImportDocumentRpc = Rpc.make(WS_METHODS.neuropharmImportDocument, {
+  payload: NeuropharmImportDocumentInput,
+  success: NeuropharmEvidenceRecord,
+  error: NeuropharmError,
+});
+
+export const WsNeuropharmInstallBasicsPackRpc = Rpc.make(WS_METHODS.neuropharmInstallBasicsPack, {
+  payload: NeuropharmBasicsPackInput,
+  success: NeuropharmBasicsPackResult,
+  error: NeuropharmError,
+});
+
+export const WsNeuropharmSearchLibraryRpc = Rpc.make(WS_METHODS.neuropharmSearchLibrary, {
+  payload: NeuropharmSearchLibraryInput,
+  success: Schema.Array(NeuropharmEvidenceRecord),
+  error: NeuropharmError,
+});
+
+export const WsNeuropharmBuildEvidencePackRpc = Rpc.make(WS_METHODS.neuropharmBuildEvidencePack, {
+  payload: NeuropharmEvidencePackInput,
+  success: NeuropharmEvidencePackResult,
+  error: NeuropharmError,
+});
+
+export const WsNeuropharmGenerateGraphSpecRpc = Rpc.make(WS_METHODS.neuropharmGenerateGraphSpec, {
+  payload: NeuropharmGenerateGraphSpecInput,
+  success: NeuropharmGraphSpec,
+  error: NeuropharmError,
+});
+
+export const WsNeuropharmAnalyzeRpc = Rpc.make(WS_METHODS.neuropharmAnalyze, {
+  payload: NeuropharmAnalysisInput,
+  success: NeuropharmAnalysisResult,
+  error: NeuropharmError,
+});
+
+export const WsNeuropharmSyncDatabasesRpc = Rpc.make(WS_METHODS.neuropharmSyncDatabases, {
+  payload: NeuropharmDatabaseSyncInput,
+  success: NeuropharmDatabaseSyncResult,
+  error: NeuropharmError,
+});
+
+export const WsNeuropharmLookupCompoundRpc = Rpc.make(WS_METHODS.neuropharmLookupCompound, {
+  payload: NeuropharmCompoundLookupInput,
+  success: NeuropharmCompoundLookupResult,
+  error: NeuropharmError,
+});
+
+export const WsNeuropharmCompareCompoundsRpc = Rpc.make(WS_METHODS.neuropharmCompareCompounds, {
+  payload: NeuropharmCompoundComparisonInput,
+  success: NeuropharmCompoundComparisonResult,
+  error: NeuropharmError,
+});
+
+export const WsNeuropharmDownloadDatabasesRpc = Rpc.make(WS_METHODS.neuropharmDownloadDatabases, {
+  payload: NeuropharmLocalDatabaseDownloadInput,
+  success: NeuropharmLocalDatabaseDownloadResult,
+  error: NeuropharmError,
+});
+
+export const WsNeuropharmDatabaseStatusRpc = Rpc.make(WS_METHODS.neuropharmDatabaseStatus, {
+  payload: NeuropharmLocalDatabaseStatusInput,
+  success: NeuropharmLocalDatabaseStatusResult,
+  error: NeuropharmError,
+});
+
+export const WsNeuropharmSearchLocalReceptorsRpc = Rpc.make(
+  WS_METHODS.neuropharmSearchLocalReceptors,
+  {
+    payload: NeuropharmLocalSearchInput,
+    success: NeuropharmLocalSearchResult,
+    error: NeuropharmError,
+  },
+);
+
+export const WsNeuropharmSearchLocalInteractionsRpc = Rpc.make(
+  WS_METHODS.neuropharmSearchLocalInteractions,
+  {
+    payload: NeuropharmLocalSearchInput,
+    success: NeuropharmLocalSearchResult,
+    error: NeuropharmError,
+  },
+);
 
 export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
   payload: VcsStatusInput,
@@ -706,6 +840,20 @@ export const WsRpcGroup = RpcGroup.make(
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsAssetsCreateUrlRpc,
+  WsNeuropharmSearchSourcesRpc,
+  WsNeuropharmImportDocumentRpc,
+  WsNeuropharmInstallBasicsPackRpc,
+  WsNeuropharmSearchLibraryRpc,
+  WsNeuropharmBuildEvidencePackRpc,
+  WsNeuropharmGenerateGraphSpecRpc,
+  WsNeuropharmAnalyzeRpc,
+  WsNeuropharmSyncDatabasesRpc,
+  WsNeuropharmLookupCompoundRpc,
+  WsNeuropharmCompareCompoundsRpc,
+  WsNeuropharmDownloadDatabasesRpc,
+  WsNeuropharmDatabaseStatusRpc,
+  WsNeuropharmSearchLocalReceptorsRpc,
+  WsNeuropharmSearchLocalInteractionsRpc,
   WsSubscribeVcsStatusRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
