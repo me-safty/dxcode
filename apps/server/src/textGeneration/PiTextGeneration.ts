@@ -78,7 +78,7 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
         {
           env: piEnvironment,
           cwd,
-          shell: process.platform === "win32",
+          shell: true,
           stdin: {
             stream: Stream.encodeText(
               // @effect-diagnostics-next-line preferSchemaOverJson:off
