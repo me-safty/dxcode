@@ -9,8 +9,10 @@ export function runMcpStdioToUds(socketPath: string): Promise<void> {
       socket.off("connect", onConnect);
       socket.off("error", onSocketError);
       socket.off("close", onSocketClose);
+      socket.off("end", onSocketEnd);
       process.stdin.off("error", onStdinError);
       process.stdin.off("end", onStdinEnd);
+      process.stdin.off("close", onStdinClose);
       process.stdout.off("error", onStdoutError);
       process.stdin.unpipe(socket);
       socket.unpipe(process.stdout);
@@ -33,20 +35,12 @@ export function runMcpStdioToUds(socketPath: string): Promise<void> {
       resolve();
     };
 
-    const fail = (error: Error) => {
-      if (settled) return;
-      if (!socket.destroyed) {
-        socket.destroy();
-      }
-      finish(error);
-    };
-
     const onConnect = () => {
       process.stdin.pipe(socket);
       socket.pipe(process.stdout);
     };
     const onSocketError = (error: Error) => {
-      fail(error);
+      finish(error);
     };
     const onSocketClose = (hadError: boolean) => {
       if (hadError) {
@@ -55,13 +49,21 @@ export function runMcpStdioToUds(socketPath: string): Promise<void> {
       }
       finish();
     };
+    const onSocketEnd = () => {
+      finish();
+    };
     const onStdinError = (error: Error) => {
-      fail(error);
+      finish(error);
     };
     const onStdoutError = (error: Error) => {
-      fail(error);
+      finish(error);
     };
     const onStdinEnd = () => {
+      if (!socket.destroyed) {
+        socket.end();
+      }
+    };
+    const onStdinClose = () => {
       if (!socket.destroyed) {
         socket.end();
       }
@@ -70,8 +72,10 @@ export function runMcpStdioToUds(socketPath: string): Promise<void> {
     socket.once("connect", onConnect);
     socket.once("error", onSocketError);
     socket.once("close", onSocketClose);
+    socket.once("end", onSocketEnd);
     process.stdin.once("error", onStdinError);
     process.stdin.once("end", onStdinEnd);
+    process.stdin.once("close", onStdinClose);
     process.stdout.once("error", onStdoutError);
   });
 }

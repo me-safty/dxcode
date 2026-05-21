@@ -133,6 +133,20 @@ describe("executeVsCodeRunCommand", () => {
     expect(getCommands).not.toHaveBeenCalled();
     expect(executeCommand).not.toHaveBeenCalled();
   });
+
+  it("rejects registered commands outside the MCP command allowlist", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+
+    await expect(
+      executeVsCodeRunCommand({
+        command: "workbench.action.openSettingsJson",
+      }),
+    ).rejects.toThrow(
+      "VS Code command is not allowed through MCP: workbench.action.openSettingsJson",
+    );
+    expect(getCommands).not.toHaveBeenCalled();
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
 });
 
 describe("VS Code language-service MCP tools", () => {
@@ -257,6 +271,19 @@ describe("VS Code language-service MCP tools", () => {
     });
   });
 
+  it("treats Windows absolute file paths as files instead of URI schemes", async () => {
+    const { executeVsCodeReferences } = await import("./mcpBridge.ts");
+    executeCommand.mockResolvedValue([]);
+
+    await executeVsCodeReferences({
+      file: "C:\\Users\\Luis\\project\\src\\app.ts",
+      position: { line: 0, character: 0 },
+    });
+
+    expect(uriFile).toHaveBeenCalledWith("C:\\Users\\Luis\\project\\src\\app.ts");
+    expect(uriParse).not.toHaveBeenCalledWith("C:\\Users\\Luis\\project\\src\\app.ts");
+  });
+
   it("searches workspace symbols through VS Code", async () => {
     const { executeVsCodeWorkspaceSymbols } = await import("./mcpBridge.ts");
     const symbolUri = {
@@ -294,6 +321,24 @@ describe("VS Code language-service MCP tools", () => {
           containerName: "src",
         },
       ],
+    });
+  });
+
+  it("does not serialize plain records with a scheme key as VS Code URIs", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+    getCommands.mockResolvedValue(["t3code.example.echo"]);
+    executeCommand.mockResolvedValue({
+      scheme: "not-a-uri",
+      value: "kept",
+    });
+
+    const result = await executeVsCodeRunCommand({
+      command: "t3code.example.echo",
+    });
+
+    expect(result.structuredContent.result).toEqual({
+      scheme: "not-a-uri",
+      value: "kept",
     });
   });
 });

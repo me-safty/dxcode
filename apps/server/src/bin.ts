@@ -26,10 +26,13 @@ if (import.meta.main && process.argv[2] === "stdio-to-uds") {
     process.stderr.write("Usage: t3 stdio-to-uds <socket-path>\n");
     process.exit(2);
   }
-  runMcpStdioToUds(socketPath).catch((error: unknown) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exit(1);
-  });
+  runMcpStdioToUds(socketPath).then(
+    () => process.exit(0),
+    (error: unknown) => {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      process.exit(1);
+    },
+  );
 } else if (import.meta.main) {
   Command.run(cli, { version: packageJson.version }).pipe(
     Effect.scoped,

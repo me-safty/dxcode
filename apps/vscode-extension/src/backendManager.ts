@@ -8,6 +8,7 @@ import {
   spawn as spawnChildProcess,
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
+import { DEFAULT_MCP_TOOL_TIMEOUT_SEC, normalizeMcpToolTimeoutSec } from "@t3tools/shared/mcp";
 import * as vscode from "vscode";
 
 import {
@@ -421,11 +422,8 @@ export function resolveT3Home(): string {
 export function resolveMcpToolTimeoutSec(): number {
   const configured = vscode.workspace
     .getConfiguration("t3code")
-    .get<number>("mcp.toolTimeoutSec", 120);
-  if (typeof configured !== "number" || !Number.isFinite(configured) || configured < 1) {
-    return 120;
-  }
-  return Math.trunc(configured);
+    .get<number>("mcp.toolTimeoutSec", DEFAULT_MCP_TOOL_TIMEOUT_SEC);
+  return normalizeMcpToolTimeoutSec(configured);
 }
 
 function resolveServerCommand(

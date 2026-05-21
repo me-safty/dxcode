@@ -52,7 +52,7 @@ The current supported MCP tools are:
 - `vscodeDiagnostics`: returns diagnostics currently known to VS Code, including language-server and extension diagnostics.
 - `vscodeReferences`: finds references for a file position through VS Code language providers.
 - `vscodeWorkspaceSymbols`: searches workspace symbols through VS Code language providers.
-- `vscodeRunCommand`: executes a registered non-internal VS Code command through `vscode.commands.executeCommand(...)` and returns a JSON-safe result.
+- `vscodeRunCommand`: executes an allowed registered VS Code command through `vscode.commands.executeCommand(...)` and returns a JSON-safe result.
 
 `vscodeRunCommand` accepts:
 
@@ -63,7 +63,7 @@ The current supported MCP tools are:
 }
 ```
 
-`vscodeRunCommand` rejects command ids prefixed with `_`, verifies registration with `vscode.commands.getCommands(true)`, hydrates supported JSON encodings for VS Code `Uri`, `Position`, and `Range` arguments, and serializes command return values into bounded JSON-safe values. The language-service tools return bounded JSON-safe result sets with truncation metadata.
+`vscodeRunCommand` rejects command ids outside the MCP command policy, verifies registration with `vscode.commands.getCommands(true)`, hydrates supported JSON encodings for VS Code `Uri`, `Position`, and `Range` arguments, and serializes command return values into bounded JSON-safe values. The current policy allows `t3code.*`, `vscode.open`, `vscode.diff`, and `revealLine`. The language-service tools return bounded JSON-safe result sets with truncation metadata.
 
 ## VS Code Webview UI Defaults
 
@@ -309,15 +309,15 @@ Implemented:
 - The OpenCode adapter injects local server `mcp` config through `OPENCODE_CONFIG_CONTENT` for backend-owned OpenCode servers.
 - The Cursor adapter passes host MCP metadata through ACP `mcpServers`.
 - `vscodeDiagnostics`, `vscodeReferences`, and `vscodeWorkspaceSymbols` expose VS Code language-service data through MCP.
-- `vscodeRunCommand` executes registered non-internal VS Code commands and returns JSON-safe MCP content.
+- `vscodeRunCommand` executes allowed registered VS Code commands and returns JSON-safe MCP content.
 
 Boundaries:
 
-- Internal VS Code commands prefixed with `_` are rejected for now.
-- The command list is queried with `vscode.commands.getCommands(true)`, so internal commands are filtered out.
-- `vscodeRunCommand` is intentionally broad. Future hardening can add allowlists, command profiles, and approval policies around the MCP tool.
+- Internal VS Code commands prefixed with `_` and commands outside the explicit MCP allowlist are rejected.
+- The command list is queried with `vscode.commands.getCommands(true)`, so stale or unregistered allowed commands are still rejected.
+- `vscodeRunCommand` is intentionally narrow by default. Future expansion should add commands to the allowlist only when their side effects and argument shapes are understood.
 - MCP bridge startup is gated by one setting, `t3code.mcp.enabled`, which defaults to `true`.
-- Codex MCP tool calls use `t3code.mcp.toolTimeoutSec`, which defaults to `120` seconds and is passed as `tool_timeout_sec`.
+- Codex MCP tool calls use `t3code.mcp.toolTimeoutSec`, which defaults to `120` seconds, rejects values below `5` seconds, and is passed as `tool_timeout_sec`.
 - OpenCode receives the same setting as its MCP `timeout` in milliseconds, but OpenCode documents that field as the timeout for fetching MCP tools.
 - Claude Code and Cursor do not currently receive a provider-specific timeout because the configuration surfaces used here do not expose a matching field.
 

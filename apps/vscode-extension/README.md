@@ -30,9 +30,9 @@ When enabled, the extension starts a local VS Code MCP bridge for agent sessions
 - `vscodeDiagnostics`: reads diagnostics currently known to VS Code.
 - `vscodeReferences`: finds symbol references at a file position.
 - `vscodeWorkspaceSymbols`: searches workspace symbols.
-- `vscodeRunCommand`: runs a registered non-internal VS Code command and returns its result.
+- `vscodeRunCommand`: runs an allowed registered VS Code command and returns its result. Allowed commands are currently `t3code.*`, `vscode.open`, `vscode.diff`, and `revealLine`.
 
-The MCP bridge is enabled by default and can be disabled with `t3code.mcp.enabled`. MCP tool calls default to a 120-second timeout, configurable with `t3code.mcp.toolTimeoutSec`. This timeout is passed through where the provider supports an equivalent setting. Each VS Code window gets its own MCP server identity and local socket, so tools are routed back to the window that launched the agent session. Browser and desktop app sessions are not affected by this setting.
+The MCP bridge is enabled by default and can be disabled with `t3code.mcp.enabled`. MCP tool calls default to a 120-second timeout, configurable with `t3code.mcp.toolTimeoutSec` with a minimum of 5 seconds. This timeout is passed through where the provider supports an equivalent setting. Each VS Code window gets its own MCP server identity and local socket, so tools are routed back to the window that launched the agent session. Browser and desktop app sessions are not affected by this setting.
 
 ## Commands
 
@@ -48,7 +48,7 @@ The MCP bridge is enabled by default and can be disabled with `t3code.mcp.enable
 - `t3code.server.args`: additional arguments for `t3code.server.command`.
 - `t3code.server.cwd`: optional working directory for `t3code.server.command`.
 - `t3code.mcp.enabled`: enable the VS Code MCP bridge for extension-launched agent sessions. Defaults to `true`.
-- `t3code.mcp.toolTimeoutSec`: maximum time, in seconds, provider sessions should wait for a VS Code MCP tool call. Defaults to `120`.
+- `t3code.mcp.toolTimeoutSec`: maximum time, in seconds, provider sessions should wait for a VS Code MCP tool call. Defaults to `120`; values below `5` fall back to the default.
 - `t3code.ui.showOpenInPicker`: show the T3 Code open/reveal picker inside VS Code webviews. Defaults to `false`.
 - `t3code.ui.showCheckoutModeIndicator`: show the T3 Code checkout mode indicator inside VS Code webviews. Defaults to `false`.
 - `t3code.ui.showBranchSelector`: show the T3 Code branch/ref selector inside VS Code webviews. Defaults to `false`.

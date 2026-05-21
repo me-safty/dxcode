@@ -10,6 +10,7 @@ import {
   BackendManager,
   type BackendManagerDependencies,
   type BackendSpawn,
+  resolveMcpToolTimeoutSec,
 } from "./backendManager.ts";
 
 const vscodeState = vi.hoisted(() => ({
@@ -321,6 +322,19 @@ describe("BackendManager", () => {
         },
       ],
     });
+  });
+
+  it.each([
+    ["below minimum", 4],
+    ["zero", 0],
+    ["negative", -1],
+    ["NaN", Number.NaN],
+    ["fractional", 30.5],
+    ["infinite", Number.POSITIVE_INFINITY],
+  ])("falls back to the default MCP tool timeout for %s values", (_name, value) => {
+    vscodeState.settings["mcp.toolTimeoutSec"] = value;
+
+    expect(resolveMcpToolTimeoutSec()).toBe(120);
   });
 
   it("uses an explicitly configured server command without leaking inherited backend env", async () => {

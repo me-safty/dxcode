@@ -7,7 +7,7 @@ import {
 
 const relayCommandForCurrentProcess = (socketPath: string) => {
   const entrypoint = process.argv[1];
-  if (!entrypoint) {
+  if (!entrypoint || !/(?:^|[/\\])(?:bin|cli)\.(?:[cm]?js|ts)$/u.test(entrypoint)) {
     return { command: "t3", args: ["stdio-to-uds", socketPath], env: {} };
   }
   return {
@@ -68,6 +68,16 @@ describe("host MCP server adapters", () => {
         toolTimeoutSec: Number.NaN,
       },
       {
+        name: "too-small-timeout",
+        socketPath: "/tmp/t3code-vscode-test/too-small.sock",
+        toolTimeoutSec: 0,
+      },
+      {
+        name: "fractional-timeout",
+        socketPath: "/tmp/t3code-vscode-test/fractional.sock",
+        toolTimeoutSec: 10.5,
+      },
+      {
         name: "large-timeout",
         socketPath: "/tmp/t3code-vscode-test/large.sock",
         toolTimeoutSec: Number.POSITIVE_INFINITY,
@@ -81,6 +91,8 @@ describe("host MCP server adapters", () => {
 
     const parsed = JSON.parse(raw);
     expect(parsed.mcp["invalid-timeout"].timeout).toBeUndefined();
+    expect(parsed.mcp["too-small-timeout"].timeout).toBeUndefined();
+    expect(parsed.mcp["fractional-timeout"].timeout).toBeUndefined();
     expect(parsed.mcp["large-timeout"].timeout).toBeUndefined();
     expect(parsed.mcp["capped-timeout"].timeout).toBe(2_147_483_647);
   });

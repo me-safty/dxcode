@@ -18,6 +18,9 @@ const DEFAULT_REFERENCES_LIMIT = 100;
 const MAX_REFERENCES_LIMIT = 1_000;
 const DEFAULT_WORKSPACE_SYMBOLS_LIMIT = 100;
 const MAX_WORKSPACE_SYMBOLS_LIMIT = 500;
+const MAX_MCP_RECEIVE_BUFFER_BYTES = 10 * 1024 * 1024;
+const ALLOWED_RUN_COMMAND_PREFIXES = ["t3code."] as const;
+const ALLOWED_RUN_COMMANDS = new Set(["vscode.open", "vscode.diff", "revealLine"]);
 
 export interface VscodeMcpServerBootstrap {
   readonly name: string;
@@ -96,7 +99,18 @@ export class VsCodeMcpBridge implements vscode.Disposable {
     const socketDir = this.#socketDir;
     this.#socketDir = null;
     if (socketDir) {
-      void fs.rm(socketDir, { recursive: true, force: true });
+      // VS Code disposables are synchronous; the endpoint path is unique per bridge, so cleanup can complete asynchronously.
+      void this.#removeSocketDir(socketDir);
+    }
+  }
+
+  async #removeSocketDir(socketDir: string): Promise<void> {
+    try {
+      await fs.rm(socketDir, { recursive: true, force: true });
+    } catch (error) {
+      this.#outputChannel.appendLine(
+        `[mcp] Failed to remove MCP socket directory ${socketDir}: ${errorMessage(error)}`,
+      );
     }
   }
 
@@ -136,9 +150,26 @@ export class VsCodeMcpBridge implements vscode.Disposable {
 
     let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
     let framing: TransportFraming | null = null;
+    let writeChain: Promise<void> = Promise.resolve();
+    const enqueueResponse = (response: JsonRpcResponse, responseFraming: TransportFraming) => {
+      writeChain = writeChain
+        .catch(() => undefined)
+        .then(() => writeSocketMessage(socket, encodeMessage(response, responseFraming)));
+      void writeChain.catch((error: unknown) => {
+        this.#outputChannel.appendLine(
+          `[mcp] Failed to write MCP response: ${errorMessage(error)}`,
+        );
+        socket.destroy();
+      });
+    };
     socket.on("data", (chunk) => {
       try {
         buffer = Buffer.concat([buffer, chunk]);
+        if (buffer.length > MAX_MCP_RECEIVE_BUFFER_BYTES) {
+          throw new Error(
+            `MCP receive buffer exceeded ${MAX_MCP_RECEIVE_BUFFER_BYTES} bytes without a complete message.`,
+          );
+        }
         while (true) {
           const parsed = readNextMessage(buffer, framing);
           if (!parsed) {
@@ -146,7 +177,7 @@ export class VsCodeMcpBridge implements vscode.Disposable {
           }
           buffer = parsed.remaining;
           framing = parsed.framing;
-          void this.#handleMessage(socket, parsed.framing, parsed.message);
+          void this.#handleMessage(parsed.framing, parsed.message, enqueueResponse);
         }
       } catch (error) {
         this.#outputChannel.appendLine(`[mcp] Failed to parse MCP message: ${errorMessage(error)}`);
@@ -156,9 +187,9 @@ export class VsCodeMcpBridge implements vscode.Disposable {
   }
 
   async #handleMessage(
-    socket: net.Socket,
     framing: TransportFraming,
     request: JsonRpcRequest,
+    enqueueResponse: (response: JsonRpcResponse, responseFraming: TransportFraming) => void,
   ): Promise<void> {
     const response = await handleMcpRequest(request, this.#outputChannel, {
       serverName: this.#serverName,
@@ -166,7 +197,7 @@ export class VsCodeMcpBridge implements vscode.Disposable {
     if (!response) {
       return;
     }
-    socket.write(encodeMessage(response, framing));
+    enqueueResponse(response, framing);
   }
 }
 
@@ -325,7 +356,7 @@ const MCP_TOOLS = [
   {
     name: "vscodeRunCommand",
     title: "VS Code Run Command",
-    description: "Execute a registered non-internal VS Code command and return its result.",
+    description: "Execute an allowed registered VS Code command and return its result.",
     inputSchema: {
       type: "object",
       properties: {
@@ -375,6 +406,9 @@ export async function executeVsCodeRunCommand(
   const args = parseRunCommandInput(input);
   if (args.command.startsWith("_")) {
     throw new Error("Internal VS Code commands are not supported by this tool.");
+  }
+  if (!isAllowedRunCommand(args.command)) {
+    throw new Error(`VS Code command is not allowed through MCP: ${args.command}`);
   }
 
   const registeredCommands = await vscode.commands.getCommands(true);
@@ -847,11 +881,11 @@ function serializeForJson(value: unknown, depth = 0, seen = new WeakSet<object>(
 
 function resolveVsCodeUri(input: string): vscode.Uri {
   const trimmed = input.trim();
+  if (path.win32.isAbsolute(trimmed) || path.isAbsolute(trimmed)) {
+    return vscode.Uri.file(trimmed);
+  }
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/u.test(trimmed)) {
     return vscode.Uri.parse(trimmed);
-  }
-  if (path.isAbsolute(trimmed)) {
-    return vscode.Uri.file(trimmed);
   }
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
@@ -973,6 +1007,9 @@ function readNextMessage(
       throw new Error("MCP message is missing Content-Length.");
     }
     const contentLength = Number(contentLengthMatch[1]);
+    if (contentLength > MAX_MCP_RECEIVE_BUFFER_BYTES) {
+      throw new Error(`MCP Content-Length exceeds ${MAX_MCP_RECEIVE_BUFFER_BYTES} bytes.`);
+    }
     const bodyStart = headerEnd + 4;
     const bodyEnd = bodyStart + contentLength;
     if (buffer.length < bodyEnd) {
@@ -1023,6 +1060,44 @@ function encodeMessage(message: JsonRpcResponse, framing: TransportFraming): Buf
   return `${json}\n`;
 }
 
+function writeSocketMessage(socket: net.Socket, message: Buffer | string): Promise<void> {
+  if (socket.destroyed) {
+    return Promise.resolve();
+  }
+  if (socket.write(message)) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      socket.off("drain", onDrain);
+      socket.off("error", onError);
+      socket.off("close", onClose);
+    };
+    const onDrain = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onClose = () => {
+      cleanup();
+      resolve();
+    };
+    socket.once("drain", onDrain);
+    socket.once("error", onError);
+    socket.once("close", onClose);
+  });
+}
+
+function isAllowedRunCommand(command: string): boolean {
+  return (
+    ALLOWED_RUN_COMMANDS.has(command) ||
+    ALLOWED_RUN_COMMAND_PREFIXES.some((prefix) => command.startsWith(prefix))
+  );
+}
+
 function jsonRpcResult(id: JsonRpcId, result: unknown): JsonRpcResponse {
   return {
     jsonrpc: "2.0",
@@ -1064,7 +1139,12 @@ function errorMessage(error: unknown): string {
 }
 
 function isUriLike(value: object): value is { readonly fsPath?: string; toString: () => string } {
-  return "scheme" in value && "toString" in value;
+  return (
+    "scheme" in value &&
+    typeof (value as { readonly scheme?: unknown }).scheme === "string" &&
+    "fsPath" in value &&
+    typeof (value as { readonly toString?: unknown }).toString === "function"
+  );
 }
 
 function isPositionLike(

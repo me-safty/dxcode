@@ -1,6 +1,5 @@
 import type { DesktopBootstrapMcpServer } from "@t3tools/contracts";
-
-const MAX_MCP_TOOL_TIMEOUT_MS = 2_147_483_647;
+import { mcpToolTimeoutMsFromSeconds } from "@t3tools/shared/mcp";
 
 export interface HostMcpStdioServer {
   readonly name: string;
@@ -16,7 +15,7 @@ export function makeT3McpRelayCommand(socketPath: string): {
   readonly env: Readonly<Record<string, string>>;
 } {
   const entrypoint = process.argv[1];
-  if (!entrypoint) {
+  if (!entrypoint || !isT3ServerEntrypoint(entrypoint)) {
     return { command: "t3", args: ["stdio-to-uds", socketPath], env: {} };
   }
   return {
@@ -24,6 +23,10 @@ export function makeT3McpRelayCommand(socketPath: string): {
     args: [entrypoint, "stdio-to-uds", socketPath],
     env: { ELECTRON_RUN_AS_NODE: "1" },
   };
+}
+
+function isT3ServerEntrypoint(entrypoint: string): boolean {
+  return /(?:^|[/\\])(?:bin|cli)\.(?:[cm]?js|ts)$/u.test(entrypoint);
 }
 
 export function hostMcpServersToStdioServers(
@@ -41,13 +44,6 @@ export function hostMcpServersToStdioServers(
   });
 }
 
-function toolTimeoutMsFromSeconds(toolTimeoutSec: number | undefined): number | undefined {
-  if (toolTimeoutSec === undefined || !Number.isFinite(toolTimeoutSec)) {
-    return undefined;
-  }
-  return Math.max(1, Math.min(MAX_MCP_TOOL_TIMEOUT_MS, Math.trunc(toolTimeoutSec * 1000)));
-}
-
 export function hostMcpServersToOpenCodeConfigContent(
   hostMcpServers: ReadonlyArray<DesktopBootstrapMcpServer>,
 ): string {
@@ -58,7 +54,7 @@ export function hostMcpServersToOpenCodeConfigContent(
   return JSON.stringify({
     mcp: Object.fromEntries(
       hostMcpServersToStdioServers(hostMcpServers).map((server) => {
-        const timeout = toolTimeoutMsFromSeconds(server.toolTimeoutSec);
+        const timeout = mcpToolTimeoutMsFromSeconds(server.toolTimeoutSec);
         return [
           server.name,
           {
