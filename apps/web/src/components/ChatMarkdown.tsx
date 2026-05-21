@@ -4,12 +4,13 @@ import {
   CheckIcon,
   ChevronRightIcon,
   CopyIcon,
+  GitBranchIcon,
   GlobeIcon,
   Maximize2Icon,
   Minimize2Icon,
   WrapTextIcon,
 } from "lucide-react";
-import type { ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
+import type { NeuropharmGraphSpec, ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -43,6 +44,7 @@ import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { hasSpecificPierreIconForFileName, syntheticFileNameForLanguageId } from "../pierre-icons";
+import { Badge } from "./ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { Button } from "./ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
@@ -82,6 +84,7 @@ import {
   openUrlInPreview,
   BrowserPreviewUnavailableError,
 } from "../browser/openFileInPreview";
+import { ScientificGraphRenderer } from "./neuropharm/ScientificGraphRenderer";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -227,6 +230,223 @@ function remarkPreserveCodeMeta() {
 
     visit(tree);
   };
+}
+
+function isNeuropharmGraphSpec(value: unknown): value is NeuropharmGraphSpec {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.kind === "string" &&
+    typeof candidate.title === "string" &&
+    Array.isArray(candidate.data) &&
+    Array.isArray(candidate.notes)
+  );
+}
+
+function parseNeuropharmGraphSpec(
+  className: string | undefined,
+  code: string,
+): NeuropharmGraphSpec | null {
+  const language = extractFenceLanguage(className);
+  const trimmedCode = code.trim();
+  if (
+    language !== "neuropharm-graph" &&
+    !(
+      (language === "json" || language === "text") &&
+      trimmedCode.startsWith("{") &&
+      trimmedCode.includes('"kind"') &&
+      trimmedCode.includes('"data"')
+    )
+  ) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmedCode) as unknown;
+    return isNeuropharmGraphSpec(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+interface MermaidNode {
+  readonly id: string;
+  readonly label: string;
+}
+
+interface MermaidEdge {
+  readonly from: string;
+  readonly to: string;
+  readonly label?: string;
+}
+
+interface MermaidFlowchart {
+  readonly direction: "LR" | "TD";
+  readonly nodes: ReadonlyArray<MermaidNode>;
+  readonly edges: ReadonlyArray<MermaidEdge>;
+}
+
+const MERMAID_NODE_DECLARATION =
+  /^\s*([A-Za-z][\w-]*)\s*(?:\[\s*"([^"]+)"\s*\]|\[\s*([^\]]+)\s*\])?\s*$/;
+const MERMAID_EDGE =
+  /^\s*([A-Za-z][\w-]*)\s*(?:\[\s*"([^"]+)"\s*\]|\[\s*([^\]]+)\s*\])?\s*(?:--\s*"([^"]+)"\s*-->|--\s*(.*?)\s*-->|-\.\s*"([^"]+)"\s*\.->|-\.\s*(.*?)\s*\.->|-->|---|-\.->)\s*([A-Za-z][\w-]*)\s*(?:\[\s*"([^"]+)"\s*\]|\[\s*([^\]]+)\s*\])?\s*$/;
+
+function cleanMermaidLabel(value: string | undefined, fallback: string): string {
+  const normalized = (value ?? fallback).replace(/\s+/g, " ").trim();
+  return normalized.length > 0 ? normalized.slice(0, 120) : fallback;
+}
+
+function parseMermaidFlowchart(
+  className: string | undefined,
+  code: string,
+): MermaidFlowchart | null {
+  const language = extractFenceLanguage(className);
+  if (language !== "mermaid" && language !== "mmd") return null;
+
+  const nodes = new Map<string, MermaidNode>();
+  const edges: MermaidEdge[] = [];
+  let direction: MermaidFlowchart["direction"] = "LR";
+  let sawFlowchart = false;
+
+  const upsertNode = (id: string, label?: string) => {
+    const existing = nodes.get(id);
+    nodes.set(id, {
+      id,
+      label: cleanMermaidLabel(label, existing?.label ?? id),
+    });
+  };
+
+  for (const rawLine of code.split(/\r?\n/)) {
+    const line = rawLine.trim().replace(/;$/, "");
+    if (!line || line.startsWith("%%")) continue;
+    const flowchart = /^graph\s+(LR|TD|TB)|^flowchart\s+(LR|TD|TB)/i.exec(line);
+    if (flowchart) {
+      const resolved = (flowchart[1] ?? flowchart[2] ?? "LR").toUpperCase();
+      direction = resolved === "TD" || resolved === "TB" ? "TD" : "LR";
+      sawFlowchart = true;
+      continue;
+    }
+
+    const edge = MERMAID_EDGE.exec(line);
+    if (edge) {
+      const from = edge[1] ?? "";
+      const to = edge[8] ?? "";
+      upsertNode(from, edge[2] ?? edge[3]);
+      upsertNode(to, edge[9] ?? edge[10]);
+      const rawEdgeLabel = edge[4] ?? edge[5] ?? edge[6] ?? edge[7];
+      edges.push({
+        from,
+        to,
+        ...(rawEdgeLabel ? { label: cleanMermaidLabel(rawEdgeLabel, "") } : {}),
+      });
+      continue;
+    }
+
+    const node = MERMAID_NODE_DECLARATION.exec(line);
+    if (node) {
+      upsertNode(node[1] ?? "", node[2] ?? node[3]);
+    }
+  }
+
+  if (!sawFlowchart || nodes.size === 0) return null;
+  return { direction, nodes: [...nodes.values()], edges };
+}
+
+function MermaidFlowchartRenderer({ flowchart }: { flowchart: MermaidFlowchart }) {
+  const incomingByNode = new Map<string, number>();
+  for (const edge of flowchart.edges) {
+    incomingByNode.set(edge.to, (incomingByNode.get(edge.to) ?? 0) + 1);
+  }
+  const sourceIds = new Set(
+    flowchart.nodes
+      .filter((node) => (incomingByNode.get(node.id) ?? 0) === 0)
+      .map((node) => node.id),
+  );
+  const columnCount = flowchart.direction === "LR" ? Math.min(5, flowchart.nodes.length) : 1;
+  const placedNodes = flowchart.nodes.map((node, index) => ({
+    ...node,
+    column: flowchart.direction === "LR" ? index % columnCount : 0,
+    row: flowchart.direction === "LR" ? Math.floor(index / columnCount) : index,
+  }));
+  const edgeCountByNode = new Map<string, number>();
+  for (const edge of flowchart.edges) {
+    edgeCountByNode.set(edge.from, (edgeCountByNode.get(edge.from) ?? 0) + 1);
+    edgeCountByNode.set(edge.to, (edgeCountByNode.get(edge.to) ?? 0) + 1);
+  }
+
+  return (
+    <div className="my-3 rounded-md border border-border bg-card/70 p-3 text-card-foreground">
+      <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <GitBranchIcon className="size-4 shrink-0 text-emerald-600" />
+          <span>Flow chart</span>
+        </div>
+        <Badge variant="outline">
+          {flowchart.nodes.length} nodes · {flowchart.edges.length} links
+        </Badge>
+      </div>
+      <div className="overflow-x-auto pb-1">
+        <div
+          className="grid min-w-[44rem] gap-x-4 gap-y-5"
+          style={{
+            gridTemplateColumns:
+              flowchart.direction === "LR"
+                ? `repeat(${columnCount}, minmax(8rem, 1fr))`
+                : "minmax(0, 1fr)",
+          }}
+        >
+          {placedNodes.map((node) => (
+            <div
+              key={node.id}
+              className="relative min-w-0 rounded-md border border-border/70 bg-background px-3 py-2 text-xs shadow-sm"
+              style={{ gridColumn: node.column + 1, gridRow: node.row + 1 }}
+            >
+              {!sourceIds.has(node.id) ? (
+                <div
+                  aria-hidden="true"
+                  className="absolute -left-4 top-1/2 hidden h-px w-4 bg-border sm:block"
+                />
+              ) : null}
+              {(edgeCountByNode.get(node.id) ?? 0) > 0 ? (
+                <div
+                  aria-hidden="true"
+                  className="absolute -right-4 top-1/2 hidden h-px w-4 bg-border sm:block"
+                />
+              ) : null}
+              <div className="truncate font-medium" title={node.label}>
+                {node.label}
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-2">
+                <span className="text-[10px] uppercase text-muted-foreground">{node.id}</span>
+                <Badge
+                  variant={sourceIds.has(node.id) ? "success" : "outline"}
+                  className="h-5 px-1.5 text-[10px]"
+                >
+                  {sourceIds.has(node.id) ? "source" : `${edgeCountByNode.get(node.id) ?? 0} link`}
+                </Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {flowchart.edges.some((edge) => edge.label) ? (
+        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-border/70 pt-2">
+          {flowchart.edges
+            .filter((edge) => edge.label)
+            .slice(0, 12)
+            .map((edge) => (
+              <Badge
+                key={`${edge.from}:${edge.label ?? ""}:${edge.to}`}
+                variant="outline"
+                className="max-w-full truncate"
+                title={edge.label}
+              >
+                {edge.label}
+              </Badge>
+            ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function nodeToPlainText(node: ReactNode): string {
@@ -1494,6 +1714,14 @@ function ChatMarkdown({
         const codeBlock = extractCodeBlock(children);
         if (!codeBlock) {
           return <pre {...props}>{children}</pre>;
+        }
+        const graphSpec = parseNeuropharmGraphSpec(codeBlock.className, codeBlock.code);
+        if (graphSpec) {
+          return <ScientificGraphRenderer spec={graphSpec} />;
+        }
+        const flowchart = parseMermaidFlowchart(codeBlock.className, codeBlock.code);
+        if (flowchart) {
+          return <MermaidFlowchartRenderer flowchart={flowchart} />;
         }
 
         const language = extractFenceLanguage(codeBlock.className);
