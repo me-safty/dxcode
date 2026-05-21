@@ -49,6 +49,7 @@ import type { ProviderInstance } from "../ProviderDriver.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
+import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 const decodeServerSettings = Schema.decodeSync(ServerSettings);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const encodedDefaultServerSettings = encodeServerSettings(DEFAULT_SERVER_SETTINGS);
@@ -845,6 +846,108 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
         }),
       );
 
+      it.effect("is the single startup refresh owner for managed provider instances", () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const codexDriver = ProviderDriverKind.make("codex");
+            const codexInstanceId = ProviderInstanceId.make("codex");
+            const initialProvider = {
+              instanceId: codexInstanceId,
+              driver: codexDriver,
+              status: "warning",
+              enabled: true,
+              installed: false,
+              auth: { status: "unknown" },
+              checkedAt: "2026-04-29T10:00:00.000Z",
+              version: null,
+              message: "Checking provider availability...",
+              models: [],
+              slashCommands: [],
+              skills: [],
+            } as const satisfies ServerProvider;
+            const { message: _message, ...initialProviderWithoutMessage } = initialProvider;
+            const refreshedProvider = {
+              ...initialProviderWithoutMessage,
+              status: "ready",
+              installed: true,
+              checkedAt: "2026-04-29T10:00:01.000Z",
+            } as const satisfies ServerProvider;
+            const checkCalls = yield* Ref.make(0);
+            const managedProvider = yield* makeManagedServerProvider<{ readonly enabled: boolean }>(
+              {
+                maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
+                  provider: codexDriver,
+                  packageName: null,
+                }),
+                getSettings: Effect.succeed({ enabled: true }),
+                streamSettings: Stream.empty,
+                haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+                initialSnapshot: () => Effect.succeed(initialProvider),
+                checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
+                  Effect.as(refreshedProvider),
+                ),
+                refreshInterval: "1 hour",
+              },
+            );
+
+            yield* Effect.yieldNow;
+            assert.strictEqual(
+              yield* Ref.get(checkCalls),
+              0,
+              "managed providers must not self-start their own boot probe",
+            );
+
+            const instance = {
+              instanceId: codexInstanceId,
+              driverKind: codexDriver,
+              continuationIdentity: {
+                driverKind: codexDriver,
+                continuationKey: "codex:instance:codex",
+              },
+              displayName: undefined,
+              enabled: true,
+              snapshot: managedProvider,
+              adapter: {} as ProviderInstance["adapter"],
+              textGeneration: {} as ProviderInstance["textGeneration"],
+            } satisfies ProviderInstance;
+            const instanceRegistryLayer = Layer.succeed(ProviderInstanceRegistry, {
+              getInstance: (instanceId) =>
+                Effect.succeed(instanceId === codexInstanceId ? instance : undefined),
+              listInstances: Effect.succeed([instance]),
+              listUnavailable: Effect.succeed([]),
+              streamChanges: Stream.empty,
+              subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), (pubsub) =>
+                PubSub.subscribe(pubsub),
+              ),
+            });
+            const scope = yield* Scope.make();
+            yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+            const runtimeServices = yield* Layer.build(
+              ProviderRegistryLive.pipe(
+                Layer.provideMerge(instanceRegistryLayer),
+                Layer.provideMerge(
+                  ServerConfig.layerTest(process.cwd(), {
+                    prefix: "t3-provider-registry-single-startup-refresh-",
+                  }),
+                ),
+                Layer.provideMerge(NodeServices.layer),
+              ),
+            ).pipe(Scope.provide(scope));
+
+            yield* Effect.gen(function* () {
+              const registry = yield* ProviderRegistry;
+
+              assert.deepStrictEqual(yield* registry.getProviders, [refreshedProvider]);
+              assert.strictEqual(
+                yield* Ref.get(checkCalls),
+                1,
+                "ProviderRegistryLive should perform exactly one startup refresh",
+              );
+            }).pipe(Effect.provide(runtimeServices));
+          }),
+        ),
+      );
+
       it.effect("keeps consuming registry changes after one sync fails", () =>
         Effect.gen(function* () {
           const codexDriver = ProviderDriverKind.make("codex");
@@ -1130,6 +1233,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             assert.strictEqual(initialCodex?.installed, false);
             const initialCheckedAt = initialCodex?.checkedAt;
             assert.notStrictEqual(initialCheckedAt, undefined);
+
+            // Advance the virtual clock before driving the settings change so
+            // the fresh probe's `checkedAt` can distinguish it from the
+            // boot-time probe.
+            yield* TestClock.adjust("50 millis");
 
             // Drive a settings change. The Hydration layer's
             // `SettingsWatcherLive` consumes this via `streamChanges`,
