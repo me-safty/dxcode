@@ -1,90 +1,133 @@
-# T3 Code
+# Neuropharm Research
 
-T3 Code is a minimal web GUI for coding agents (currently Codex, Claude, Cursor, and OpenCode, more coming soon).
+Neuropharm Research is a local-first neuropharmacology workspace for analyzing pharmacological compounds, receptor interactions, and cognitive effects using curated databases from PubChem, ChEMBL, IUPHAR, and PubMed.
 
-## Installation
+The interface provides research-focused tools for compound profiling, interaction checking, evidence grading, pharmacokinetic analysis, and generating publication-ready reports with confidence ratings.
 
-> [!WARNING]
-> T3 Code currently supports Codex, Claude, Cursor, and OpenCode.
-> Install and authenticate at least one provider before use:
->
-> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
-> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `cursor-agent login`
-> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
+## Features
 
-### Run without installing
+- **Compound Analysis**: Analyze receptor binding, pharmacokinetics, drug interactions, and mechanism of action with confidence-rated summaries
+- **Receptor Atlas**: Explore neurotransmitter receptors, transporters, and signaling pathways with cognitive function mapping
+- **Interaction Checker**: Identify drug-drug interactions, metabolic conflicts, and safety concerns when combining compounds
+- **Cognitive Effects**: Evaluate impact on attention, memory, and executive function with dose-response curves and tolerance patterns
+- **Pharmacokinetics**: Estimate onset time, peak concentration, half-life, and active metabolites based on published data
+- **Evidence Database**: Integrates data from PubMed, PubChem, ChEMBL, and IUPHAR with source tracking and confidence grading
+- **Visualizations**: Generate receptor selectivity radars, dose-response curves, interaction heatmaps, and pharmacokinetic timelines
+- **Export Reports**: Create formatted research documents with citations, figures, and confidence ratings in LaTeX format
 
-```bash
-npx t3@latest
+## Pharmacology Database
+
+The app supports a local receptor database under the default 1.5 GB cap. The
+manifest is intentionally focused on pharmacology rows that can be searched and
+used for graph grounding:
+
+- IUPHAR/BPS Guide to Pharmacology interactions TSV.
+- IUPHAR ligand, target/family, and physicochemical TSV references.
+- BindingDB all-measurements TSV archive.
+- BindingDB ChEMBL, PubChem, patent, article, assay, PDSP Ki, and identifier
+  mapping TSV archives.
+
+Large multi-GB archives such as ChEMBL SQLite and BindingDB all-2D/all-3D SDF
+files are not part of the default local download set.
+
+Downloaded local database files live outside the repo under:
+
+```text
+~/.t3/dev/neuropharm/databases
 ```
 
-Tip: Use `npx t3@latest --help` for the full CLI reference.
+SQLite app state lives under the configured T3 state directory. The repository
+stores source code, migrations, contracts, tests, prompt policy, and the tracker
+template/artifact, not the downloaded public database archives.
 
-### Desktop app
+## Scientific Graphs and Visualizations
 
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
+The application renders structured neuropharmacology graphs with evidence grading:
 
-#### Windows (`winget`)
-
-```bash
-winget install T3Tools.T3Code
+```neuropharm-graph
+{"kind":"target_network","title":"AF710B local target map","data":[{"label":"M1 muscarinic acetylcholine receptor","value":62,"group":"AF710B","unit":"inferred"}],"notes":["Values are evidence-weighted graph scores, not clinical effect sizes."]}
 ```
 
-#### macOS (Homebrew)
+Supported visualization types include:
+
+- `target_network` - Receptor binding strengths by evidence grade
+- `receptor_selectivity_radar` - Normalized selectivity profile
+- `interaction_risk_heatmap` - Risk matrix for drug combinations
+- `task_domain_matrix` - Cognitive domain effects
+- `pk_timeline` - Pharmacokinetic profile
+- `dose_response` - Dose-response curves
+- `effect_size_forest` - Effect size comparisons
+- `inverted_u_curve` - Inverted-U response patterns
+- `molecule_property_card` - Molecular properties
+- `similarity_map` - Compound similarity mapping
+- `admet_radar` - ADMET profile visualization
+
+Mermaid diagrams should use simple `flowchart LR` or `flowchart TD` syntax so
+they render reliably in chat.
+
+## Research posture
+
+This is a research and analysis tool. It can discuss evidence, uncertainty,
+mechanistic extrapolation, literature ranges, protocol context, receptor
+pharmacology, and risk flags. It must not present personalized diagnosis,
+treatment, prescribing, emergency guidance, or individualized medical
+instructions.
+
+Claims should be separated by evidence class:
+
+- Human
+- Animal
+- In-vitro
+- In-silico
+- Anecdotal
+- Low-confidence extrapolation
+
+Unsupported claims should be labeled as assumptions or unknowns. Exact receptor
+affinities, PK values, contraindications, or study outcomes should not be
+invented when the local database or cited literature does not contain them.
+
+## Repository layout
+
+- `apps/server`: Node/Effect backend, WebSocket RPC, SQLite persistence,
+  neuropharm services, database connectors, local database downloader/importer,
+  and prompt policy.
+- `apps/web`: React/Vite UI, chat rendering, database console, research console,
+  graph renderer, and neuropharm workspace panels.
+- `apps/desktop`: Desktop shell around the web/server runtime.
+- `packages/contracts`: Shared schemas for RPC, IPC, neuropharm records,
+  graph specs, local database status, and analysis results.
+- `output/neuropharm-tracker`: Local XLSX research tracker artifact.
+- `repo_plan`: Repository Planning Graph run artifacts for this conversion.
+
+## Development
+
+Install dependencies:
 
 ```bash
-brew install --cask t3-code
+bun install .
 ```
 
-#### Arch Linux (AUR)
+Run local development:
 
 ```bash
-yay -S t3code-bin
+bun run dev
 ```
 
-## Some notes
-
-We are very very early in this project. Expect bugs.
-
-We are not accepting contributions yet.
-
-There's no public docs site yet, checkout the miscellaneous markdown files in [docs](./docs).
-
-## Documentation
-
-- [Getting started](./docs/getting-started/quick-start.md)
-- [Architecture overview](./docs/architecture/overview.md)
-- [Provider guides](./docs/providers/codex.md)
-- [Operations](./docs/operations/ci.md)
-- [Reference](./docs/reference/encyclopedia.md)
-
-## If you REALLY want to contribute still.... read this first
-
-### Install `vp`
-
-T3 Code uses Vite+ so you'll need to install the global `vp` command-line tool.
-
-#### macOS / Linux
+Run the core verification gates:
 
 ```bash
-curl -fsSL https://vite.plus | bash
+bun fmt
+bun lint
+bun typecheck
+bun run test
 ```
 
-#### Windows
+Targeted neuropharm checks:
 
 ```bash
-irm https://vite.plus/ps1 | iex
+bun run --filter t3 test src/neuropharm/NeuropharmService.test.ts src/neuropharm/NeuropharmPromptPolicy.test.ts
+bun run --filter @t3tools/contracts test src/neuropharm.test.ts
+bun run --filter @t3tools/web test:browser src/components/ChatMarkdown.browser.tsx
 ```
 
-Checkout their getting started guide for more information: https://viteplus.dev/guide/
-
-### Install dependencies
-
-```bash
-vp i
-```
-
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
-
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+Do not use `bun test`; use `bun run test`.
