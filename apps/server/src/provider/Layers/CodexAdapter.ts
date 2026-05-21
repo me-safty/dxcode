@@ -80,12 +80,21 @@ function codexMcpServersFromHostConfig(input: {
   }>;
   readonly codexBinaryPath: string;
 }): ReadonlyArray<CodexMcpServerConfig> {
-  return input.hostMcpServers.map((server) => ({
-    name: server.name,
-    command: input.codexBinaryPath,
-    args: ["stdio-to-uds", server.socketPath],
-    ...(server.toolTimeoutSec !== undefined ? { toolTimeoutSec: server.toolTimeoutSec } : {}),
-  }));
+  return input.hostMcpServers.map((server) => {
+    if (server.toolTimeoutSec !== undefined) {
+      return {
+        name: server.name,
+        command: input.codexBinaryPath,
+        args: ["stdio-to-uds", server.socketPath],
+        toolTimeoutSec: server.toolTimeoutSec,
+      };
+    }
+    return {
+      name: server.name,
+      command: input.codexBinaryPath,
+      args: ["stdio-to-uds", server.socketPath],
+    };
+  });
 }
 
 export interface CodexAdapterLiveOptions {

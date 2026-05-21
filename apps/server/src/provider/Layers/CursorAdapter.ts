@@ -42,6 +42,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { hostMcpServersToStdioServers } from "../hostMcpServers.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -289,6 +290,17 @@ function applyRequestedSessionConfiguration<E>(input: {
   });
 }
 
+function buildCursorAcpMcpServers(
+  hostMcpServers: ReadonlyArray<import("@t3tools/contracts").DesktopBootstrapMcpServer>,
+): ReadonlyArray<EffectAcpSchema.McpServer> {
+  return hostMcpServersToStdioServers(hostMcpServers).map((server) => ({
+    name: server.name,
+    command: server.command,
+    args: [...server.args],
+    env: Object.entries(server.env).map(([name, value]) => ({ name, value })),
+  }));
+}
+
 function selectAutoApprovedPermissionOption(
   request: EffectAcpSchema.RequestPermissionRequest,
 ): string | undefined {
@@ -531,6 +543,7 @@ export function makeCursorAdapter(
             ...(options?.environment ? { environment: options.environment } : {}),
             childProcessSpawner,
             cwd,
+            mcpServers: buildCursorAcpMcpServers(serverConfig.hostMcpServers),
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "t3-code", version: "0.0.0" },
             ...acpNativeLoggers,

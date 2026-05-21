@@ -18,6 +18,7 @@ import {
   type SettingSource,
   type SDKUserMessage,
   type ModelUsage,
+  type McpServerConfig,
 } from "@anthropic-ai/claude-agent-sdk";
 import { parseCliArgs } from "@t3tools/shared/cliArgs";
 import {
@@ -25,6 +26,7 @@ import {
   type CanonicalItemType,
   type CanonicalRequestType,
   type ClaudeSettings,
+  type DesktopBootstrapMcpServer,
   EventId,
   type ProviderApprovalDecision,
   ProviderDriverKind,
@@ -67,6 +69,7 @@ import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { hostMcpServersToStdioServers } from "../hostMcpServers.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
   getClaudeModelCapabilities,
@@ -628,6 +631,26 @@ function buildUserMessage(input: {
       content: input.sdkContent as unknown as SDKUserMessage["message"]["content"],
     },
   } as SDKUserMessage;
+}
+
+function buildClaudeMcpServers(
+  hostMcpServers: ReadonlyArray<DesktopBootstrapMcpServer>,
+): Record<string, McpServerConfig> | undefined {
+  const servers = hostMcpServersToStdioServers(hostMcpServers);
+  if (servers.length === 0) {
+    return undefined;
+  }
+  return Object.fromEntries(
+    servers.map((server) => [
+      server.name,
+      {
+        type: "stdio",
+        command: server.command,
+        args: [...server.args],
+        ...(Object.keys(server.env).length > 0 ? { env: { ...server.env } } : {}),
+      } satisfies McpServerConfig,
+    ]),
+  );
 }
 
 function buildClaudeImageContentBlock(input: {
@@ -2928,6 +2951,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(fastMode ? { fastMode: true } : {}),
         ...(ultracode ? { ultracode: true } : {}),
       };
+      const mcpServers = buildClaudeMcpServers(serverConfig.hostMcpServers);
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -2946,6 +2970,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ? { allowDangerouslySkipPermissions: true }
           : {}),
         ...(Object.keys(settings).length > 0 ? { settings } : {}),
+        ...(mcpServers ? { mcpServers } : {}),
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
@@ -2976,6 +3001,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.query.additional_directories": input.cwd ? [input.cwd] : [],
         "claude.query.setting_sources": [...CLAUDE_SETTING_SOURCES],
         "claude.query.settings_json": encodeJsonStringForDiagnostics(settings) ?? "",
+        "claude.query.mcp_servers_json": encodeJsonStringForDiagnostics(mcpServers ?? {}) ?? "",
         "claude.query.extra_args_json": encodeJsonStringForDiagnostics(extraArgs) ?? "",
         "claude.query.path_to_executable": claudeBinaryPath,
       });

@@ -35,9 +35,17 @@ The VS Code extension exposes VS Code-backed tools through a local MCP server ow
 - `t3code.mcp.enabled`
 - `t3code.mcp.toolTimeoutSec`
 
-The bridge setting defaults to `true`, and the tool timeout setting defaults to `120` seconds. When enabled, each VS Code window starts a temporary local socket server with a unique `t3code-vscode-*` name, includes `{ name, socketPath, toolTimeoutSec }` in the desktop bootstrap envelope, and the backend converts that into Codex `mcp_servers` config by launching the configured Codex binary with `stdio-to-uds <socketPath>` and setting `tool_timeout_sec`. The per-window name avoids same-named MCP server collisions when multiple VS Code windows are running agents at the same time.
+The bridge setting defaults to `true`, and the tool timeout setting defaults to `120` seconds. When enabled, each VS Code window starts a temporary local socket server with a unique `t3code-vscode-*` name and includes `{ name, socketPath, toolTimeoutSec }` in the desktop bootstrap envelope. The backend converts that metadata into each provider's MCP configuration shape. The per-window name avoids same-named MCP server collisions when multiple VS Code windows are running agents at the same time.
 
-The extension MCP server is generic and not tied to Codex concepts. Codex is currently the only provider wired to consume it, because Codex already supports MCP configuration through app-server thread startup. Future provider integrations should translate the same bootstrap MCP server list into their provider-native MCP/tool configuration.
+The extension MCP server is generic, so that provider integrations translate the same bootstrap MCP server list into their provider-native MCP/tool configuration.
+
+Provider mappings:
+
+- Codex receives `mcp_servers` thread config. `t3code.mcp.toolTimeoutSec` is passed as Codex `tool_timeout_sec`.
+- Claude Code receives SDK `mcpServers` entries. The current SDK shape supports stdio MCP server config but does not expose an equivalent per-tool-call timeout field.
+- OpenCode local sessions receive `OPENCODE_CONFIG_CONTENT` with `mcp.<name>` local server entries. `t3code.mcp.toolTimeoutSec` maps to OpenCode's `timeout` field in milliseconds, which controls MCP tool discovery/fetch timeout rather than Codex-style tool-call timeout. Externally managed OpenCode servers cannot be injected by this backend because they are already running outside the session bootstrap.
+- Cursor receives ACP `mcpServers` on session create/load. ACP's stdio MCP server schema does not expose an equivalent per-tool-call timeout field.
+- Claude Code, OpenCode, and Cursor mappings use the T3 server's `stdio-to-uds` relay command to connect provider-managed stdio MCP clients back to the VS Code extension-owned socket. The relay config includes `ELECTRON_RUN_AS_NODE=1` so packaged VS Code/Electron extension launches execute the backend entrypoint as Node. Codex keeps using the Codex CLI `stdio-to-uds` relay because that path is known to work with Codex app-server MCP startup.
 
 The current supported MCP tools are:
 
@@ -153,7 +161,7 @@ Implemented so far:
   - extension-owned temporary socket MCP server
   - unique MCP server identity per VS Code window
   - desktop bootstrap `mcpServers` metadata
-  - Codex `mcp_servers` config injection via `codex stdio-to-uds <socketPath>`
+  - provider MCP config injection through provider-appropriate `stdio-to-uds <socketPath>` relays
   - configurable Codex `tool_timeout_sec` propagation from `t3code.mcp.toolTimeoutSec`
   - VS Code diagnostics, references, and workspace-symbol tools backed by VS Code language APIs
   - generic `vscodeRunCommand` tool execution through `vscode.commands.executeCommand(...)`
@@ -208,7 +216,7 @@ Implemented so far:
 - Added VS Code-only MCP orchestration that:
   - starts the extension MCP bridge only from VS Code extension usage
   - passes bridge metadata through the desktop bootstrap envelope
-  - injects Codex MCP config only for Codex sessions launched by the VS Code-backed backend
+  - injects provider-native MCP config for sessions launched by the VS Code-backed backend
   - leaves browser and desktop app prompt text, services, and runtime waiting paths untouched
 - Added extension settings for restoring VS Code-hidden T3 Code controls:
   - `t3code.ui.showOpenInPicker`
@@ -256,7 +264,7 @@ Deferred until there is a concrete UX need:
 
 - Chat Sessions integration, including the proposed `chatSessionsProvider`, `chatSessions/newSession` menu contribution, and listing recent T3 threads as VS Code chat session items.
 - Webview-to-extension host actions beyond client settings persistence and host appearance propagation, including adding the current file/selection to T3 Code and reveal/open file host actions.
-- Cross-provider MCP wiring beyond Codex. The extension-side MCP server is provider-neutral, but this branch only injects it into Codex sessions.
+- External OpenCode server MCP injection. Backend-owned OpenCode servers receive the VS Code MCP config through `OPENCODE_CONFIG_CONTENT`; externally managed OpenCode servers are already running and cannot be reconfigured by this backend session bootstrap.
 
 Not implemented yet:
 
@@ -279,11 +287,11 @@ Known packaging notes:
 
 ### 2026-05-20: Add VS Code MCP Bridge
 
-Decision: expose VS Code-backed tools through an extension-owned MCP server. Keep the MCP server generic and provider-neutral, but wire only Codex in this branch.
+Decision: expose VS Code-backed tools through an extension-owned MCP server. Keep the MCP server generic and provider-neutral, and translate it into each provider's native MCP config where the provider exposes one.
 
 Reasoning:
 
-- MCP is the provider-native shape for tool discovery, invocation, and result routing in Codex.
+- MCP is the provider-native shape for tool discovery, invocation, and result routing in the current Codex, Claude Code, OpenCode, and Cursor integrations.
 - The VS Code extension host is still the correct place to execute VS Code commands because it has access to the public `vscode.commands.executeCommand(...)` API.
 - The backend only needs generic MCP server bootstrap metadata. That keeps the extension bridge usable by future providers that can consume MCP without baking Codex semantics into the bridge itself.
 - Browser and desktop app usage should not receive VS Code MCP configuration or extension-host services. MCP startup and integration remain scoped to the VS Code extension bootstrap.
@@ -295,7 +303,11 @@ Implemented:
 - Each bridge instance uses a unique MCP server name so multiple VS Code windows do not advertise the same server key.
 - `BackendManager` includes enabled MCP server metadata in the desktop bootstrap envelope.
 - The server stores bootstrap MCP metadata in `ServerConfig.hostMcpServers`.
-- The Codex adapter converts host MCP metadata into Codex `mcp_servers` config using `codex stdio-to-uds`.
+- The backend exposes a generic `stdio-to-uds` relay so provider MCP clients can reach the VS Code extension-owned socket without depending on the Codex binary.
+- The Codex adapter converts host MCP metadata into Codex `mcp_servers` config using the Codex CLI relay.
+- The Claude adapter converts host MCP metadata into SDK `mcpServers` config.
+- The OpenCode adapter injects local server `mcp` config through `OPENCODE_CONFIG_CONTENT` for backend-owned OpenCode servers.
+- The Cursor adapter passes host MCP metadata through ACP `mcpServers`.
 - `vscodeDiagnostics`, `vscodeReferences`, and `vscodeWorkspaceSymbols` expose VS Code language-service data through MCP.
 - `vscodeRunCommand` executes registered non-internal VS Code commands and returns JSON-safe MCP content.
 
@@ -306,12 +318,12 @@ Boundaries:
 - `vscodeRunCommand` is intentionally broad. Future hardening can add allowlists, command profiles, and approval policies around the MCP tool.
 - MCP bridge startup is gated by one setting, `t3code.mcp.enabled`, which defaults to `true`.
 - Codex MCP tool calls use `t3code.mcp.toolTimeoutSec`, which defaults to `120` seconds and is passed as `tool_timeout_sec`.
-- Cross-provider MCP integration is deferred. The bridge shape supports it, but only Codex receives MCP config today.
+- OpenCode receives the same setting as its MCP `timeout` in milliseconds, but OpenCode documents that field as the timeout for fetching MCP tools.
+- Claude Code and Cursor do not currently receive a provider-specific timeout because the configuration surfaces used here do not expose a matching field.
 
 Deferred work:
 
-- Validate Codex subagent MCP inheritance and add targeted fixes only if the harness requires explicit subagent MCP propagation.
-- Add MCP integration for Claude Code, OpenCode, or other providers through their native configuration surfaces.
+- Validate provider-specific subagent MCP inheritance and add targeted fixes only if a harness requires explicit subagent MCP propagation.
 - Consider expanding the VS Code MCP tool catalog further after the initial command and language-service tools have enough real usage.
 
 ### 2026-05-15: Default VS Code View Into Secondary Side Bar

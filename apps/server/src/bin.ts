@@ -10,6 +10,7 @@ import { authCommand } from "./cli/auth.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
+import { runMcpStdioToUds } from "./mcpStdioToUds.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
@@ -19,7 +20,17 @@ export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
   Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),
 );
 
-if (import.meta.main) {
+if (import.meta.main && process.argv[2] === "stdio-to-uds") {
+  const socketPath = process.argv[3];
+  if (!socketPath) {
+    process.stderr.write("Usage: t3 stdio-to-uds <socket-path>\n");
+    process.exit(2);
+  }
+  runMcpStdioToUds(socketPath).catch((error: unknown) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  });
+} else if (import.meta.main) {
   Command.run(cli, { version: packageJson.version }).pipe(
     Effect.scoped,
     Effect.provide(CliRuntimeLayer),
