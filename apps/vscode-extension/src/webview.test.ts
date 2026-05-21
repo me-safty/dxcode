@@ -188,3 +188,18 @@ describe("VS Code display preference settings", () => {
     expect("t3code.ui.showTerminalToggle" in properties).toBe(false);
   });
 });
+
+describe("VS Code MCP settings", () => {
+  it("contributes a customizable vscodeRunCommand allowlist", () => {
+    const properties = packageJson.contributes.configuration.properties;
+
+    expect(properties["t3code.mcp.allowedRunCommands"]?.type).toBe("array");
+    expect(properties["t3code.mcp.allowedRunCommands"]?.default).toEqual([
+      "t3code.*",
+      "vscode.open",
+      "vscode.diff",
+      "revealLine",
+    ]);
+    expect(properties["t3code.mcp.allowedRunCommands"]?.items).toEqual({ type: "string" });
+  });
+});

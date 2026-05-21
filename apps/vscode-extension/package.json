@@ -104,6 +104,19 @@
           "minimum": 5,
           "description": "Maximum time, in seconds, that provider sessions should wait for a VS Code MCP tool call before timing out. Applied where the provider supports equivalent timeout configuration."
         },
+        "t3code.mcp.allowedRunCommands": {
+          "type": "array",
+          "default": [
+            "t3code.*",
+            "vscode.open",
+            "vscode.diff",
+            "revealLine"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "VS Code command ids that the vscodeRunCommand MCP tool may execute. Entries ending in * are treated as non-empty command-prefix rules."
+        },
         "t3code.ui.showOpenInPicker": {
           "type": "boolean",
           "default": false,

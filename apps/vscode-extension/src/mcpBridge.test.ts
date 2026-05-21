@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const vscodeState = vi.hoisted(() => ({
+  settings: {} as Record<string, unknown>,
+}));
+
 const executeCommand = vi.fn();
 const getCommands = vi.fn();
 const getDiagnostics = vi.fn();
@@ -46,7 +50,8 @@ vi.mock("vscode", () => ({
   },
   workspace: {
     getConfiguration: () => ({
-      get: (_key: string, defaultValue: unknown) => defaultValue,
+      get: (key: string, defaultValue: unknown) =>
+        key in vscodeState.settings ? vscodeState.settings[key] : defaultValue,
     }),
     workspaceFolders: [
       {
@@ -84,6 +89,7 @@ describe("executeVsCodeRunCommand", () => {
     getDiagnostics.mockReset();
     uriFile.mockClear();
     uriParse.mockClear();
+    vscodeState.settings = {};
   });
 
   it("runs a registered VS Code command and returns structured MCP content", async () => {
@@ -147,6 +153,62 @@ describe("executeVsCodeRunCommand", () => {
     expect(getCommands).not.toHaveBeenCalled();
     expect(executeCommand).not.toHaveBeenCalled();
   });
+
+  it("allows custom command ids from the VS Code setting", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+    vscodeState.settings["mcp.allowedRunCommands"] = ["workbench.action.files.save"];
+    getCommands.mockResolvedValue(["workbench.action.files.save"]);
+    executeCommand.mockResolvedValue(undefined);
+
+    const result = await executeVsCodeRunCommand({
+      command: "workbench.action.files.save",
+    });
+
+    expect(executeCommand).toHaveBeenCalledWith("workbench.action.files.save");
+    expect(result.structuredContent).toEqual({
+      command: "workbench.action.files.save",
+      result: null,
+    });
+  });
+
+  it("allows custom command prefixes from the VS Code setting", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+    vscodeState.settings["mcp.allowedRunCommands"] = ["workbench.action.quickOpen*"];
+    getCommands.mockResolvedValue(["workbench.action.quickOpenNavigateNext"]);
+    executeCommand.mockResolvedValue(undefined);
+
+    await executeVsCodeRunCommand({
+      command: "workbench.action.quickOpenNavigateNext",
+    });
+
+    expect(executeCommand).toHaveBeenCalledWith("workbench.action.quickOpenNavigateNext");
+  });
+
+  it("uses the custom command setting instead of adding it to the defaults", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+    vscodeState.settings["mcp.allowedRunCommands"] = ["workbench.action.files.save"];
+
+    await expect(
+      executeVsCodeRunCommand({
+        command: "vscode.open",
+      }),
+    ).rejects.toThrow("VS Code command is not allowed through MCP: vscode.open");
+    expect(getCommands).not.toHaveBeenCalled();
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a wildcard-only setting entry as allow all", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+    vscodeState.settings["mcp.allowedRunCommands"] = ["*"];
+
+    await expect(
+      executeVsCodeRunCommand({
+        command: "workbench.action.files.save",
+      }),
+    ).rejects.toThrow("VS Code command is not allowed through MCP: workbench.action.files.save");
+    expect(getCommands).not.toHaveBeenCalled();
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
 });
 
 describe("VS Code language-service MCP tools", () => {
@@ -156,6 +218,7 @@ describe("VS Code language-service MCP tools", () => {
     getDiagnostics.mockReset();
     uriFile.mockClear();
     uriParse.mockClear();
+    vscodeState.settings = {};
   });
 
   it("returns filtered diagnostics from VS Code", async () => {

@@ -6,6 +6,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 const MCP_SETTING = "mcp.enabled";
+const MCP_RUN_COMMAND_ALLOWLIST_SETTING = "mcp.allowedRunCommands";
 const MCP_SERVER_NAME_PREFIX = "t3code-vscode";
 const DEFAULT_MCP_SERVER_NAME = MCP_SERVER_NAME_PREFIX;
 const MCP_PROTOCOL_VERSION = "2024-11-05";
@@ -19,8 +20,12 @@ const MAX_REFERENCES_LIMIT = 1_000;
 const DEFAULT_WORKSPACE_SYMBOLS_LIMIT = 100;
 const MAX_WORKSPACE_SYMBOLS_LIMIT = 500;
 const MAX_MCP_RECEIVE_BUFFER_BYTES = 10 * 1024 * 1024;
-const ALLOWED_RUN_COMMAND_PREFIXES = ["t3code."] as const;
-const ALLOWED_RUN_COMMANDS = new Set(["vscode.open", "vscode.diff", "revealLine"]);
+const DEFAULT_ALLOWED_RUN_COMMAND_PATTERNS = [
+  "t3code.*",
+  "vscode.open",
+  "vscode.diff",
+  "revealLine",
+] as const;
 
 export interface VscodeMcpServerBootstrap {
   readonly name: string;
@@ -1092,10 +1097,35 @@ function writeSocketMessage(socket: net.Socket, message: Buffer | string): Promi
 }
 
 function isAllowedRunCommand(command: string): boolean {
-  return (
-    ALLOWED_RUN_COMMANDS.has(command) ||
-    ALLOWED_RUN_COMMAND_PREFIXES.some((prefix) => command.startsWith(prefix))
+  return getAllowedRunCommandPatterns().some((pattern) =>
+    matchesAllowedRunCommandPattern(command, pattern),
   );
+}
+
+function getAllowedRunCommandPatterns(): readonly string[] {
+  const configured = vscode.workspace
+    .getConfiguration("t3code")
+    .get<readonly unknown[]>(
+      MCP_RUN_COMMAND_ALLOWLIST_SETTING,
+      DEFAULT_ALLOWED_RUN_COMMAND_PATTERNS,
+    );
+  if (!Array.isArray(configured)) {
+    return DEFAULT_ALLOWED_RUN_COMMAND_PATTERNS;
+  }
+  return configured
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim());
+}
+
+function matchesAllowedRunCommandPattern(command: string, pattern: string): boolean {
+  if (!pattern) {
+    return false;
+  }
+  if (pattern.endsWith("*")) {
+    const prefix = pattern.slice(0, -1);
+    return prefix.length > 0 && command.startsWith(prefix);
+  }
+  return command === pattern;
 }
 
 function jsonRpcResult(id: JsonRpcId, result: unknown): JsonRpcResponse {

@@ -34,8 +34,9 @@ The VS Code extension exposes VS Code-backed tools through a local MCP server ow
 
 - `t3code.mcp.enabled`
 - `t3code.mcp.toolTimeoutSec`
+- `t3code.mcp.allowedRunCommands`
 
-The bridge setting defaults to `true`, and the tool timeout setting defaults to `120` seconds. When enabled, each VS Code window starts a temporary local socket server with a unique `t3code-vscode-*` name and includes `{ name, socketPath, toolTimeoutSec }` in the desktop bootstrap envelope. The backend converts that metadata into each provider's MCP configuration shape. The per-window name avoids same-named MCP server collisions when multiple VS Code windows are running agents at the same time.
+The bridge setting defaults to `true`, the tool timeout setting defaults to `120` seconds, and the `vscodeRunCommand` allowlist defaults to `t3code.*`, `vscode.open`, `vscode.diff`, and `revealLine`. When enabled, each VS Code window starts a temporary local socket server with a unique `t3code-vscode-*` name and includes `{ name, socketPath, toolTimeoutSec }` in the desktop bootstrap envelope. The backend converts that metadata into each provider's MCP configuration shape. The per-window name avoids same-named MCP server collisions when multiple VS Code windows are running agents at the same time.
 
 The extension MCP server is generic, so that provider integrations translate the same bootstrap MCP server list into their provider-native MCP/tool configuration.
 
@@ -63,7 +64,7 @@ The current supported MCP tools are:
 }
 ```
 
-`vscodeRunCommand` rejects command ids outside the MCP command policy, verifies registration with `vscode.commands.getCommands(true)`, hydrates supported JSON encodings for VS Code `Uri`, `Position`, and `Range` arguments, and serializes command return values into bounded JSON-safe values. The current policy allows `t3code.*`, `vscode.open`, `vscode.diff`, and `revealLine`. The language-service tools return bounded JSON-safe result sets with truncation metadata.
+`vscodeRunCommand` rejects command ids outside the MCP command policy, verifies registration with `vscode.commands.getCommands(true)`, hydrates supported JSON encodings for VS Code `Uri`, `Position`, and `Range` arguments, and serializes command return values into bounded JSON-safe values. The policy is configured by `t3code.mcp.allowedRunCommands`; entries ending in `*` are treated as non-empty command-prefix rules, and the default list is `t3code.*`, `vscode.open`, `vscode.diff`, and `revealLine`. The language-service tools return bounded JSON-safe result sets with truncation metadata.
 
 ## VS Code Webview UI Defaults
 
@@ -166,6 +167,7 @@ Implemented so far:
   - VS Code diagnostics, references, and workspace-symbol tools backed by VS Code language APIs
   - generic `vscodeRunCommand` tool execution through `vscode.commands.executeCommand(...)`
   - registered-command validation and internal-command rejection
+  - configurable command allowlist for `vscodeRunCommand` through `t3code.mcp.allowedRunCommands`
   - JSON-safe command argument/result handling, including supported `Uri`, `Position`, and `Range` arguments
   - `t3code.mcp.enabled` setting for enabling or disabling the whole bridge
 - Added a neutral host bridge contract:
@@ -230,6 +232,7 @@ Implemented so far:
 - Added extension setting for the VS Code MCP bridge:
   - `t3code.mcp.enabled`
   - `t3code.mcp.toolTimeoutSec`
+  - `t3code.mcp.allowedRunCommands`
 - Added shared T3 Code app `ClientSettings` persistence for VS Code:
   - persists to `<T3 home>/userdata/client-settings.json`
   - uses the same raw client-settings file format as desktop
@@ -315,7 +318,7 @@ Boundaries:
 
 - Internal VS Code commands prefixed with `_` and commands outside the explicit MCP allowlist are rejected.
 - The command list is queried with `vscode.commands.getCommands(true)`, so stale or unregistered allowed commands are still rejected.
-- `vscodeRunCommand` is intentionally narrow by default. Future expansion should add commands to the allowlist only when their side effects and argument shapes are understood.
+- `vscodeRunCommand` is intentionally narrow by default. Users can expand `t3code.mcp.allowedRunCommands` only when the command side effects and argument shapes are understood.
 - MCP bridge startup is gated by one setting, `t3code.mcp.enabled`, which defaults to `true`.
 - Codex MCP tool calls use `t3code.mcp.toolTimeoutSec`, which defaults to `120` seconds, rejects values below `5` seconds, and is passed as `tool_timeout_sec`.
 - OpenCode receives the same setting as its MCP `timeout` in milliseconds, but OpenCode documents that field as the timeout for fetching MCP tools.
