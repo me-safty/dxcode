@@ -26,6 +26,8 @@ import {
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
   type VcsStatusResult,
+  type VcsWorkingTreeDiffInput,
+  type VcsWorkingTreeDiffResult,
 } from "@t3tools/contracts";
 
 import { GitManager, type GitRunStackedActionOptions } from "./GitManager.ts";
@@ -46,6 +48,9 @@ export interface GitWorkflowServiceShape {
   readonly invalidateRemoteStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly invalidateStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
+  readonly readWorkingTreeDiff: (
+    input: VcsWorkingTreeDiffInput,
+  ) => Effect.Effect<VcsWorkingTreeDiffResult, GitCommandError>;
   readonly runStackedAction: (
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
@@ -271,6 +276,10 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
     pullCurrentBranch: (cwd) =>
       ensureGitCommand("GitWorkflowService.pullCurrentBranch", cwd).pipe(
         Effect.andThen(git.pullCurrentBranch(cwd)),
+      ),
+    readWorkingTreeDiff: (input) =>
+      ensureGitCommand("GitWorkflowService.readWorkingTreeDiff", input.cwd).pipe(
+        Effect.andThen(git.readWorkingTreeDiff(input)),
       ),
     runStackedAction: (input, options) =>
       ensureGit("GitWorkflowService.runStackedAction", input.cwd).pipe(

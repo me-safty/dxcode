@@ -25,6 +25,8 @@ import {
   type VcsRemoveWorktreeInput,
   type VcsStatusInput,
   type VcsStatusResult,
+  type VcsWorkingTreeDiffInput,
+  type VcsWorkingTreeDiffResult,
 } from "@t3tools/contracts";
 import * as GitVcsDriverCore from "./GitVcsDriverCore.ts";
 import * as VcsDriver from "./VcsDriver.ts";
@@ -160,6 +162,9 @@ export interface GitVcsDriverShape {
   readonly status: (input: VcsStatusInput) => Effect.Effect<VcsStatusResult, GitCommandError>;
   readonly statusDetails: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
   readonly statusDetailsLocal: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
+  readonly readWorkingTreeDiff: (
+    input: VcsWorkingTreeDiffInput,
+  ) => Effect.Effect<VcsWorkingTreeDiffResult, GitCommandError>;
   readonly prepareCommitContext: (
     cwd: string,
     filePaths?: readonly string[],

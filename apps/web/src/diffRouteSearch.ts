@@ -1,7 +1,10 @@
 import { TurnId } from "@t3tools/contracts";
 
+export type DiffRouteSource = "unstaged" | "staged";
+
 export interface DiffRouteSearch {
   diff?: "1" | undefined;
+  diffSource?: DiffRouteSource | undefined;
   diffTurnId?: TurnId | undefined;
   diffFilePath?: string | undefined;
 }
@@ -18,21 +21,35 @@ function normalizeSearchString(value: unknown): string | undefined {
   return normalized.length > 0 ? normalized : undefined;
 }
 
+function normalizeDiffSource(value: unknown): DiffRouteSource | undefined {
+  const normalized = normalizeSearchString(value);
+  return normalized === "unstaged" || normalized === "staged" ? normalized : undefined;
+}
+
 export function stripDiffSearchParams<T extends Record<string, unknown>>(
   params: T,
-): Omit<T, "diff" | "diffTurnId" | "diffFilePath"> {
-  const { diff: _diff, diffTurnId: _diffTurnId, diffFilePath: _diffFilePath, ...rest } = params;
-  return rest as Omit<T, "diff" | "diffTurnId" | "diffFilePath">;
+): Omit<T, "diff" | "diffSource" | "diffTurnId" | "diffFilePath"> {
+  const {
+    diff: _diff,
+    diffSource: _diffSource,
+    diffTurnId: _diffTurnId,
+    diffFilePath: _diffFilePath,
+    ...rest
+  } = params;
+  return rest as Omit<T, "diff" | "diffSource" | "diffTurnId" | "diffFilePath">;
 }
 
 export function parseDiffRouteSearch(search: Record<string, unknown>): DiffRouteSearch {
   const diff = isDiffOpenValue(search.diff) ? "1" : undefined;
-  const diffTurnIdRaw = diff ? normalizeSearchString(search.diffTurnId) : undefined;
+  const diffSource = diff ? normalizeDiffSource(search.diffSource) : undefined;
+  const diffTurnIdRaw = diff && !diffSource ? normalizeSearchString(search.diffTurnId) : undefined;
   const diffTurnId = diffTurnIdRaw ? TurnId.make(diffTurnIdRaw) : undefined;
-  const diffFilePath = diff && diffTurnId ? normalizeSearchString(search.diffFilePath) : undefined;
+  const diffFilePath =
+    diff && (diffSource || diffTurnId) ? normalizeSearchString(search.diffFilePath) : undefined;
 
   return {
     ...(diff ? { diff } : {}),
+    ...(diffSource ? { diffSource } : {}),
     ...(diffTurnId ? { diffTurnId } : {}),
     ...(diffFilePath ? { diffFilePath } : {}),
   };

@@ -94,9 +94,10 @@ type ThreadDetailSubscriptionEntry = {
   unsubscribe: () => void;
   unsubscribeConnectionListener: (() => void) | null;
   refCount: number;
+  activeRefCount: number;
   latestDetailSequence: number | null;
   resetDetailSequenceOnNextSnapshot: boolean;
-  refreshOnNextRetain: boolean;
+  refreshOnNextActiveRetain: boolean;
   refreshTargetSequence: number | null;
   refreshTimeoutId: ReturnType<typeof setTimeout> | null;
   activeReconcileIntervalId: ReturnType<typeof setInterval> | null;
@@ -733,7 +734,7 @@ function refreshThreadDetailSubscriptionsStuckOnCompletedRunningTurn(
     if (!isThreadDetailSubscriptionStuckOnCompletedRunningTurn(entry)) {
       continue;
     }
-    scheduleThreadDetailGapRefresh(entry);
+    requestThreadDetailForcedSnapshot(entry.environmentId, entry.threadId);
   }
 }
 
@@ -769,8 +770,8 @@ function requestThreadDetailForcedSnapshot(environmentId: EnvironmentId, threadI
   if (!entry) {
     return;
   }
-  if (entry.refCount <= 0) {
-    entry.refreshOnNextRetain = true;
+  if (entry.activeRefCount <= 0) {
+    entry.refreshOnNextActiveRetain = true;
     return;
   }
   scheduleThreadDetailGapRefresh(entry);
@@ -810,7 +811,7 @@ function shouldRefreshRetainedThreadDetailSubscription(entry: ThreadDetailSubscr
 function shouldActivelyReconcileThreadDetailSubscription(
   entry: ThreadDetailSubscriptionEntry,
 ): boolean {
-  return entry.refCount > 0 && isNonIdleThreadDetailSubscription(entry);
+  return entry.activeRefCount > 0 && isNonIdleThreadDetailSubscription(entry);
 }
 
 function hasRetainedThreadDetailSubscription(): boolean {
@@ -1125,22 +1126,30 @@ function reconcileThreadDetailSubscriptionEvictionForEnvironment(
   evictIdleThreadDetailSubscriptionsToCapacity();
 }
 
-export function retainThreadDetailSubscription(
+function retainThreadDetailSubscriptionInternal(
   environmentId: EnvironmentId,
   threadId: ThreadId,
+  options: { readonly active: boolean },
 ): () => void {
   const key = getThreadDetailSubscriptionKey(environmentId, threadId);
   const existing = threadDetailSubscriptions.get(key);
   if (existing) {
-    const wasReleased = existing.refCount === 0;
+    const wasActive = existing.activeRefCount > 0;
     clearThreadDetailSubscriptionEviction(existing);
     existing.refCount += 1;
+    if (options.active) {
+      existing.activeRefCount += 1;
+    }
     existing.lastAccessedAt = Date.now();
     if (!attachThreadDetailSubscription(existing)) {
       watchThreadDetailSubscriptionConnection(existing);
     }
-    if (wasReleased && existing.refreshOnNextRetain) {
-      existing.refreshOnNextRetain = false;
+    if (
+      options.active &&
+      !wasActive &&
+      (existing.latestDetailSequence !== null || existing.refreshOnNextActiveRetain)
+    ) {
+      existing.refreshOnNextActiveRetain = false;
       scheduleThreadDetailGapRefresh(existing);
     } else {
       scheduleThreadDetailRefreshToCurrentProjectionIfBehind(existing);
@@ -1153,6 +1162,9 @@ export function retainThreadDetailSubscription(
       }
       released = true;
       existing.refCount = Math.max(0, existing.refCount - 1);
+      if (options.active) {
+        existing.activeRefCount = Math.max(0, existing.activeRefCount - 1);
+      }
       existing.lastAccessedAt = Date.now();
       reconcileThreadDetailSubscriptionEvictionState(existing);
       evictIdleThreadDetailSubscriptionsToCapacity();
@@ -1165,9 +1177,10 @@ export function retainThreadDetailSubscription(
     unsubscribe: NOOP,
     unsubscribeConnectionListener: null,
     refCount: 1,
+    activeRefCount: options.active ? 1 : 0,
     latestDetailSequence: null,
     resetDetailSequenceOnNextSnapshot: false,
-    refreshOnNextRetain: false,
+    refreshOnNextActiveRetain: false,
     refreshTargetSequence: null,
     refreshTimeoutId: null,
     activeReconcileIntervalId: null,
@@ -1188,10 +1201,27 @@ export function retainThreadDetailSubscription(
     }
     released = true;
     entry.refCount = Math.max(0, entry.refCount - 1);
+    if (options.active) {
+      entry.activeRefCount = Math.max(0, entry.activeRefCount - 1);
+    }
     entry.lastAccessedAt = Date.now();
     reconcileThreadDetailSubscriptionEvictionState(entry);
     evictIdleThreadDetailSubscriptionsToCapacity();
   };
+}
+
+export function retainThreadDetailSubscription(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+): () => void {
+  return retainThreadDetailSubscriptionInternal(environmentId, threadId, { active: false });
+}
+
+export function retainActiveThreadDetailSubscription(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+): () => void {
+  return retainThreadDetailSubscriptionInternal(environmentId, threadId, { active: true });
 }
 
 function emitEnvironmentConnectionRegistryChange() {

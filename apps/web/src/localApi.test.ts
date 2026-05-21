@@ -68,6 +68,7 @@ const rpcClientMock = {
   vcs: {
     pull: vi.fn(),
     refreshStatus: vi.fn(),
+    getWorkingTreeDiff: vi.fn(),
     onStatus: vi.fn((input: { cwd: string }, listener: (event: VcsStatusResult) => void) =>
       registerListener(gitStatusListeners, listener),
     ),
@@ -410,6 +411,25 @@ describe("wsApi", () => {
     await api.vcs.refreshStatus({ cwd: "/repo" });
 
     expect(rpcClientMock.vcs.refreshStatus).toHaveBeenCalledWith({ cwd: "/repo" });
+  });
+
+  it("forwards working tree diff requests directly to the RPC client", async () => {
+    rpcClientMock.vcs.getWorkingTreeDiff.mockResolvedValue({ diff: "patch" });
+    const { createEnvironmentApi } = await import("./environmentApi");
+
+    const api = createEnvironmentApi(rpcClientMock as never);
+
+    await api.vcs.getWorkingTreeDiff({
+      cwd: "/repo",
+      target: "unstaged",
+      ignoreWhitespace: true,
+    });
+
+    expect(rpcClientMock.vcs.getWorkingTreeDiff).toHaveBeenCalledWith({
+      cwd: "/repo",
+      target: "unstaged",
+      ignoreWhitespace: true,
+    });
   });
 
   it("forwards shell stream subscription options to the RPC client", async () => {

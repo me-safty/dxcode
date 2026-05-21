@@ -60,6 +60,68 @@ describe("parseDiffRouteSearch", () => {
     });
   });
 
+  it("parses working tree diff sources", () => {
+    expect(
+      parseDiffRouteSearch({
+        diff: "1",
+        diffSource: "unstaged",
+      }),
+    ).toEqual({
+      diff: "1",
+      diffSource: "unstaged",
+    });
+
+    expect(
+      parseDiffRouteSearch({
+        diff: "1",
+        diffSource: "staged",
+      }),
+    ).toEqual({
+      diff: "1",
+      diffSource: "staged",
+    });
+  });
+
+  it("drops invalid working tree diff sources", () => {
+    const parsed = parseDiffRouteSearch({
+      diff: "1",
+      diffSource: "working-tree",
+    });
+
+    expect(parsed).toEqual({
+      diff: "1",
+    });
+  });
+
+  it("lets working tree diff source override stale turn values", () => {
+    const parsed = parseDiffRouteSearch({
+      diff: "1",
+      diffSource: "staged",
+      diffTurnId: "turn-1",
+      diffFilePath: "src/app.ts",
+    });
+
+    expect(parsed).toEqual({
+      diff: "1",
+      diffSource: "staged",
+      diffFilePath: "src/app.ts",
+    });
+  });
+
+  it("keeps file value when working tree diff source is selected", () => {
+    const parsed = parseDiffRouteSearch({
+      diff: "1",
+      diffSource: "unstaged",
+      diffFilePath: "src/app.ts",
+    });
+
+    expect(parsed).toEqual({
+      diff: "1",
+      diffSource: "unstaged",
+      diffFilePath: "src/app.ts",
+    });
+  });
+
   it("normalizes whitespace-only values", () => {
     const parsed = parseDiffRouteSearch({
       diff: "1",

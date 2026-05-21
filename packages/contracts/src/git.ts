@@ -16,6 +16,8 @@ export const GitStackedAction = Schema.Literals([
   "commit_push_pr",
 ]);
 export type GitStackedAction = typeof GitStackedAction.Type;
+export const VcsWorkingTreeDiffTarget = Schema.Literals(["unstaged", "staged"]);
+export type VcsWorkingTreeDiffTarget = typeof VcsWorkingTreeDiffTarget.Type;
 export const GitActionProgressPhase = Schema.Literals(["branch", "commit", "push", "pr"]);
 export type GitActionProgressPhase = typeof GitActionProgressPhase.Type;
 export const GitActionProgressKind = Schema.Literals([
@@ -108,6 +110,13 @@ export const VcsPullInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
 });
 export type VcsPullInput = typeof VcsPullInput.Type;
+
+export const VcsWorkingTreeDiffInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  target: VcsWorkingTreeDiffTarget,
+  ignoreWhitespace: Schema.optional(Schema.Boolean),
+});
+export type VcsWorkingTreeDiffInput = typeof VcsWorkingTreeDiffInput.Type;
 
 export const GitRunStackedActionInput = Schema.Struct({
   actionId: TrimmedNonEmptyStringSchema,
@@ -234,6 +243,11 @@ export const VcsStatusResult = Schema.Struct({
   ...VcsStatusRemoteShape,
 });
 export type VcsStatusResult = typeof VcsStatusResult.Type;
+
+export const VcsWorkingTreeDiffResult = Schema.Struct({
+  diff: Schema.String,
+});
+export type VcsWorkingTreeDiffResult = typeof VcsWorkingTreeDiffResult.Type;
 
 export const VcsStatusStreamEvent = Schema.Union([
   Schema.TaggedStruct("snapshot", {

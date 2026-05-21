@@ -212,6 +212,125 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
     );
   });
 
+  describe("working tree diffs", () => {
+    it.effect("returns only staged changes for staged diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "staged.txt", "base\n");
+        yield* writeTextFile(cwd, "unstaged.txt", "base\n");
+        yield* git(cwd, ["add", "staged.txt", "unstaged.txt"]);
+        yield* git(cwd, ["commit", "-m", "add fixture files"]);
+        yield* writeTextFile(cwd, "staged.txt", "base\nstaged change\n");
+        yield* writeTextFile(cwd, "unstaged.txt", "base\nunstaged change\n");
+        yield* git(cwd, ["add", "staged.txt"]);
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "staged",
+          ignoreWhitespace: false,
+        });
+
+        assert.include(result.diff, "+staged change");
+        assert.notInclude(result.diff, "+unstaged change");
+      }),
+    );
+
+    it.effect("returns tracked unstaged changes for unstaged diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "staged.txt", "base\n");
+        yield* writeTextFile(cwd, "unstaged.txt", "base\n");
+        yield* git(cwd, ["add", "staged.txt", "unstaged.txt"]);
+        yield* git(cwd, ["commit", "-m", "add fixture files"]);
+        yield* writeTextFile(cwd, "staged.txt", "base\nstaged change\n");
+        yield* writeTextFile(cwd, "unstaged.txt", "base\nunstaged change\n");
+        yield* git(cwd, ["add", "staged.txt"]);
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "unstaged",
+          ignoreWhitespace: false,
+        });
+
+        assert.include(result.diff, "+unstaged change");
+        assert.notInclude(result.diff, "+staged change");
+      }),
+    );
+
+    it.effect("includes untracked files in unstaged diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "untracked.txt", "untracked change\n");
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "unstaged",
+          ignoreWhitespace: false,
+        });
+
+        assert.include(result.diff, "diff --git a/untracked.txt b/untracked.txt");
+        assert.include(result.diff, "+untracked change");
+      }),
+    );
+
+    it.effect("does not mutate the real git index when including untracked files", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "untracked.txt", "untracked change\n");
+        const beforeStatus = yield* git(cwd, ["status", "--porcelain"]);
+
+        yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "unstaged",
+          ignoreWhitespace: false,
+        });
+
+        const afterStatus = yield* git(cwd, ["status", "--porcelain"]);
+        assert.equal(afterStatus, beforeStatus);
+        assert.include(afterStatus, "?? untracked.txt");
+      }),
+    );
+
+    it.effect("honors ignoreWhitespace for working tree diffs", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "spacing.txt", "value\n");
+        yield* git(cwd, ["add", "spacing.txt"]);
+        yield* git(cwd, ["commit", "-m", "add spacing fixture"]);
+        yield* writeTextFile(cwd, "spacing.txt", "value   \n");
+
+        const withWhitespace = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "unstaged",
+          ignoreWhitespace: false,
+        });
+        const withoutWhitespace = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "unstaged",
+          ignoreWhitespace: true,
+        });
+
+        assert.include(withWhitespace.diff, "+value");
+        assert.equal(withoutWhitespace.diff.trim(), "");
+      }),
+    );
+  });
+
   describe("refName operations", () => {
     it.effect("creates, checks out, renames, and lists refs", () =>
       Effect.gen(function* () {

@@ -29,7 +29,6 @@ import {
   $getRoot,
   HISTORY_MERGE_TAG,
   DecoratorNode,
-  type LexicalEditor,
   type ElementNode,
   type LexicalNode,
   type SerializedLexicalNode,
@@ -47,16 +46,8 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
 } from "react";
 
-import {
-  appendComposerDebugEvent,
-  clearComposerDebugEntries,
-  formatComposerDebugPayload,
-  isComposerDebugEnabled,
-  readComposerDebugEntries,
-} from "~/composerDebugLog";
 import {
   clampCollapsedComposerCursor,
   collapseExpandedComposerCursor,
@@ -531,72 +522,6 @@ function readComposerNativeInputChangeMetadata(
     isComposing: tracker.isComposing,
     inputType: tracker.lastInputType,
   };
-}
-
-function composerDebugTextTail(value: string): string {
-  return value.slice(-80);
-}
-
-function composerDebugInputData(data: string | null): { length: number; tail: string } | null {
-  return data === null
-    ? null
-    : {
-        length: data.length,
-        tail: composerDebugTextTail(data),
-      };
-}
-
-type ComposerDebugEditorSnapshot = {
-  valueLength: number;
-  valueTail: string;
-  cursor: number;
-  expandedCursor: number;
-  selectionKind: "range" | "other" | "none";
-  selectionCollapsed: boolean | null;
-};
-
-function readComposerDebugEditorSnapshot(
-  editor: LexicalEditor,
-  fallbackCursor: number,
-): ComposerDebugEditorSnapshot | null {
-  if (!isComposerDebugEnabled()) {
-    return null;
-  }
-  try {
-    let snapshot: ComposerDebugEditorSnapshot | null = null;
-    editor.getEditorState().read(() => {
-      const value = $getRoot().getTextContent();
-      const boundedFallback = clampCollapsedComposerCursor(value, fallbackCursor);
-      const selection = $getSelection();
-      const isRange = $isRangeSelection(selection);
-      snapshot = {
-        valueLength: value.length,
-        valueTail: composerDebugTextTail(value),
-        cursor: clampCollapsedComposerCursor(
-          value,
-          $readSelectionOffsetFromEditorState(boundedFallback),
-        ),
-        expandedCursor: clampExpandedCursor(
-          value,
-          $readExpandedSelectionOffsetFromEditorState(
-            expandCollapsedComposerCursor(value, boundedFallback),
-          ),
-        ),
-        selectionKind: isRange ? "range" : selection ? "other" : "none",
-        selectionCollapsed: isRange ? selection.isCollapsed() : null,
-      };
-    });
-    return snapshot;
-  } catch (error) {
-    return {
-      valueLength: -1,
-      valueTail: error instanceof Error ? error.message : "Unable to read editor snapshot",
-      cursor: -1,
-      expandedCursor: -1,
-      selectionKind: "none",
-      selectionCollapsed: null,
-    };
-  }
 }
 
 function getComposerInlineTokenTextLength(_node: ComposerInlineTokenNode): 1 {
@@ -1255,15 +1180,7 @@ function ComposerNativeInputPlugin(props: {
 
     const onBeforeInput = (event: InputEvent) => {
       markInputType(event.inputType);
-      const browserHandled = shouldLetBrowserHandleComposerBeforeInput(event.inputType);
-      appendComposerDebugEvent("native.beforeinput", {
-        inputType: event.inputType,
-        data: composerDebugInputData(event.data),
-        isComposing: event.isComposing,
-        browserHandled,
-        snapshot: readComposerDebugEditorSnapshot(editor, 0),
-      });
-      if (!browserHandled) {
+      if (!shouldLetBrowserHandleComposerBeforeInput(event.inputType)) {
         return;
       }
       event.stopPropagation();
@@ -1273,12 +1190,6 @@ function ComposerNativeInputPlugin(props: {
     const onInput = (event: Event) => {
       const inputEvent = event as InputEvent;
       markInputType(inputEvent.inputType ?? null);
-      appendComposerDebugEvent("native.input", {
-        inputType: inputEvent.inputType ?? null,
-        data: composerDebugInputData(inputEvent.data ?? null),
-        isComposing: inputEvent.isComposing,
-        snapshot: readComposerDebugEditorSnapshot(editor, 0),
-      });
     };
 
     const onCompositionStart = () => {
@@ -1286,10 +1197,6 @@ function ComposerNativeInputPlugin(props: {
       if (!tracker) return;
       tracker.isComposing = true;
       markComposerNativeInputSuppression(tracker, tracker.lastInputType);
-      appendComposerDebugEvent("native.compositionstart", {
-        inputType: tracker.lastInputType,
-        snapshot: readComposerDebugEditorSnapshot(editor, 0),
-      });
     };
 
     const onCompositionEnd = () => {
@@ -1297,32 +1204,10 @@ function ComposerNativeInputPlugin(props: {
       if (!tracker) return;
       tracker.isComposing = false;
       markComposerNativeInputSuppression(tracker, tracker.lastInputType);
-      appendComposerDebugEvent("native.compositionend", {
-        inputType: tracker.lastInputType,
-        snapshot: readComposerDebugEditorSnapshot(editor, 0),
-      });
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      const composingKey = isComposerNativeComposingKeyEvent(event);
-      if (
-        composingKey ||
-        event.key === " " ||
-        event.code === "Space" ||
-        event.key === "Backspace" ||
-        event.key === "Enter"
-      ) {
-        appendComposerDebugEvent("native.keydown", {
-          key: event.key,
-          code: event.code,
-          keyCode: event.keyCode,
-          which: event.which,
-          isComposing: event.isComposing,
-          composingKey,
-          snapshot: readComposerDebugEditorSnapshot(editor, 0),
-        });
-      }
-      if (!composingKey) {
+      if (!isComposerNativeComposingKeyEvent(event)) {
         return;
       }
       const tracker = props.nativeInputTrackerRef.current;
@@ -1331,23 +1216,6 @@ function ComposerNativeInputPlugin(props: {
     };
 
     let activeRootElement: HTMLElement | null = null;
-    let lastSelectionLogAt = 0;
-    const onSelectionChange = () => {
-      if (!isComposerDebugEnabled()) {
-        return;
-      }
-      if (!activeRootElement || document.activeElement !== activeRootElement) {
-        return;
-      }
-      const timestamp = nowMs();
-      if (timestamp - lastSelectionLogAt < 40) {
-        return;
-      }
-      lastSelectionLogAt = timestamp;
-      appendComposerDebugEvent("dom.selectionchange", {
-        snapshot: readComposerDebugEditorSnapshot(editor, 0),
-      });
-    };
     const unregisterRootListener = editor.registerRootListener((rootElement, prevRootElement) => {
       prevRootElement?.removeEventListener("beforeinput", onBeforeInput, true);
       prevRootElement?.removeEventListener("input", onInput);
@@ -1361,7 +1229,6 @@ function ComposerNativeInputPlugin(props: {
       rootElement?.addEventListener("keydown", onKeyDown, true);
       activeRootElement = rootElement;
     });
-    document.addEventListener("selectionchange", onSelectionChange);
 
     return () => {
       if (activeRootElement) {
@@ -1371,7 +1238,6 @@ function ComposerNativeInputPlugin(props: {
         activeRootElement.removeEventListener("compositionend", onCompositionEnd);
         activeRootElement.removeEventListener("keydown", onKeyDown, true);
       }
-      document.removeEventListener("selectionchange", onSelectionChange);
       unregisterRootListener();
     };
   }, [editor, props.nativeInputTrackerRef]);
@@ -1645,93 +1511,6 @@ function ComposerSurroundSelectionPlugin(props: {
   return null;
 }
 
-async function copyComposerDebugText(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch {
-      // Fall through to the textarea copy path for browsers with stricter clipboard rules.
-    }
-  }
-  const textArea = document.createElement("textarea");
-  textArea.value = text;
-  textArea.setAttribute("readonly", "true");
-  textArea.style.position = "fixed";
-  textArea.style.left = "-9999px";
-  textArea.style.top = "0";
-  document.body.append(textArea);
-  textArea.select();
-  document.execCommand("copy");
-  textArea.remove();
-}
-
-function ComposerDebugPanel() {
-  const [enabled, setEnabled] = useState(() => isComposerDebugEnabled());
-  const [entryCount, setEntryCount] = useState(() => readComposerDebugEntries().length);
-  const [status, setStatus] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!enabled) return;
-    const interval = window.setInterval(() => {
-      setEntryCount(readComposerDebugEntries().length);
-    }, 1_000);
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [enabled]);
-
-  useEffect(() => {
-    setEnabled(isComposerDebugEnabled());
-  }, []);
-
-  if (!enabled) {
-    return null;
-  }
-
-  const copyLog = () => {
-    void copyComposerDebugText(formatComposerDebugPayload()).then(
-      () => {
-        setEntryCount(readComposerDebugEntries().length);
-        setStatus("Copied");
-      },
-      () => setStatus("Copy failed"),
-    );
-  };
-  const clearLog = () => {
-    clearComposerDebugEntries();
-    setEntryCount(0);
-    setStatus("Cleared");
-  };
-
-  return (
-    <div
-      className="fixed bottom-3 right-3 z-100 flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-md border border-border bg-popover px-2 py-1.5 text-xs text-popover-foreground shadow-lg"
-      data-composer-debug-panel="true"
-    >
-      <span className="whitespace-nowrap font-medium">Composer debug</span>
-      <span className="whitespace-nowrap text-muted-foreground">{entryCount} events</span>
-      <button
-        className="rounded border border-input px-2 py-1 text-xs hover:bg-accent"
-        onClick={copyLog}
-        onMouseDown={(event) => event.preventDefault()}
-        type="button"
-      >
-        Copy
-      </button>
-      <button
-        className="rounded border border-input px-2 py-1 text-xs hover:bg-accent"
-        onClick={clearLog}
-        onMouseDown={(event) => event.preventDefault()}
-        type="button"
-      >
-        Clear
-      </button>
-      {status ? <span className="whitespace-nowrap text-muted-foreground">{status}</span> : null}
-    </div>
-  );
-}
-
 function ComposerPromptEditorInner({
   value,
   cursor,
@@ -1790,11 +1569,6 @@ function ComposerPromptEditorInner({
       !contextsChanged &&
       !skillsChanged
     ) {
-      appendComposerDebugEvent("controlledSync.skip.sameSnapshot", {
-        cursor: normalizedCursor,
-        valueLength: value.length,
-        valueTail: composerDebugTextTail(value),
-      });
       return;
     }
 
@@ -1810,36 +1584,10 @@ function ComposerPromptEditorInner({
     const rootElement = editor.getRootElement();
     const isFocused = Boolean(rootElement && document.activeElement === rootElement);
     if (previousSnapshot.value === value && !contextsChanged && !skillsChanged && !isFocused) {
-      appendComposerDebugEvent("controlledSync.skip.unfocusedCursorOnly", {
-        previousCursor: previousSnapshot.cursor,
-        nextCursor: normalizedCursor,
-        valueLength: value.length,
-        valueTail: composerDebugTextTail(value),
-      });
       return;
     }
 
     isApplyingControlledUpdateRef.current = true;
-    appendComposerDebugEvent("controlledSync.apply", {
-      focused: isFocused,
-      shouldRewriteEditorState:
-        previousSnapshot.value !== value || contextsChanged || skillsChanged,
-      previous: {
-        valueLength: previousSnapshot.value.length,
-        valueTail: composerDebugTextTail(previousSnapshot.value),
-        cursor: previousSnapshot.cursor,
-        expandedCursor: previousSnapshot.expandedCursor,
-      },
-      next: {
-        valueLength: value.length,
-        valueTail: composerDebugTextTail(value),
-        cursor: normalizedCursor,
-        expandedCursor: expandCollapsedComposerCursor(value, normalizedCursor),
-      },
-      contextsChanged,
-      skillsChanged,
-      editorSnapshot: readComposerDebugEditorSnapshot(editor, previousSnapshot.cursor),
-    });
     editor.update(() => {
       const shouldRewriteEditorState =
         previousSnapshot.value !== value || contextsChanged || skillsChanged;
@@ -1860,17 +1608,6 @@ function ComposerPromptEditorInner({
       const rootElement = editor.getRootElement();
       if (!rootElement) return;
       const boundedCursor = clampCollapsedComposerCursor(snapshotRef.current.value, nextCursor);
-      appendComposerDebugEvent("imperative.focusAt", {
-        requestedCursor: nextCursor,
-        boundedCursor,
-        before: {
-          valueLength: snapshotRef.current.value.length,
-          valueTail: composerDebugTextTail(snapshotRef.current.value),
-          cursor: snapshotRef.current.cursor,
-          expandedCursor: snapshotRef.current.expandedCursor,
-        },
-        editorSnapshot: readComposerDebugEditorSnapshot(editor, snapshotRef.current.cursor),
-      });
       rootElement.focus({ preventScroll: true });
       editor.update(() => {
         $setSelectionAtComposerOffset(boundedCursor);
@@ -1972,21 +1709,9 @@ function ComposerPromptEditorInner({
         previousSnapshot.terminalContextIds.length === terminalContextIds.length &&
         previousSnapshot.terminalContextIds.every((id, index) => id === terminalContextIds[index])
       ) {
-        appendComposerDebugEvent("lexicalChange.skip.sameSnapshot", {
-          cursor: nextCursor,
-          expandedCursor: nextExpandedCursor,
-          valueLength: nextValue.length,
-          valueTail: composerDebugTextTail(nextValue),
-        });
         return;
       }
       if (isApplyingControlledUpdateRef.current) {
-        appendComposerDebugEvent("lexicalChange.skip.controlledUpdate", {
-          cursor: nextCursor,
-          expandedCursor: nextExpandedCursor,
-          valueLength: nextValue.length,
-          valueTail: composerDebugTextTail(nextValue),
-        });
         return;
       }
       snapshotRef.current = {
@@ -1998,23 +1723,6 @@ function ComposerPromptEditorInner({
       const cursorAdjacentToMention =
         isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, "left") ||
         isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, "right");
-      appendComposerDebugEvent("lexicalChange.emit", {
-        previous: {
-          valueLength: previousSnapshot.value.length,
-          valueTail: composerDebugTextTail(previousSnapshot.value),
-          cursor: previousSnapshot.cursor,
-          expandedCursor: previousSnapshot.expandedCursor,
-        },
-        next: {
-          valueLength: nextValue.length,
-          valueTail: composerDebugTextTail(nextValue),
-          cursor: nextCursor,
-          expandedCursor: nextExpandedCursor,
-        },
-        cursorAdjacentToMention,
-        terminalContextIds,
-        metadata: readComposerNativeInputChangeMetadata(nativeInputTrackerRef.current),
-      });
       onChangeRef.current(
         nextValue,
         nextCursor,
@@ -2064,7 +1772,6 @@ function ComposerPromptEditorInner({
         <ComposerInlineTokenSelectionNormalizePlugin />
         <ComposerInlineTokenBackspacePlugin />
         <HistoryPlugin />
-        <ComposerDebugPanel />
       </div>
     </ComposerTerminalContextActionsContext>
   );

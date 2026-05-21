@@ -345,7 +345,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             initialScrollAtEnd
             maintainScrollAtEnd={MAINTAIN_SCROLL_AT_END_ANIMATED}
             maintainScrollAtEndThreshold={0.1}
-            maintainVisibleContentPosition={{ data: true, size: false }}
+            maintainVisibleContentPosition={{ data: false, size: true }}
             onScroll={handleScroll}
             className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
             ListHeaderComponent={listHeader}

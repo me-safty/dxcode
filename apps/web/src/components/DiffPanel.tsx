@@ -3,12 +3,13 @@ import { FileDiff, type FileDiffMetadata, Virtualizer } from "@pierre/diffs/reac
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import type { TurnId } from "@t3tools/contracts";
+import type { TurnId, VcsWorkingTreeDiffTarget } from "@t3tools/contracts";
 import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   Columns2Icon,
+  PanelRightCloseIcon,
   PilcrowIcon,
   Rows3Icon,
   TextWrapIcon,
@@ -22,6 +23,7 @@ import {
   useState,
 } from "react";
 import { useGitStatus } from "~/lib/gitStatusState";
+import { gitWorkingTreeDiffQueryOptions } from "~/lib/gitReactQuery";
 import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
 import { cn } from "~/lib/utils";
 import { resolvePathLinkTarget } from "../terminal-links";
@@ -36,6 +38,8 @@ import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { useSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
+import { Button } from "./ui/button";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { openPathInPreferredEditorOrFilePreview } from "../workspaceFilePreview";
 import {
@@ -280,6 +284,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     environmentId: activeThread?.environmentId ?? null,
     cwd: activeCwd ?? null,
   });
+  const previousGitStatusDataRef = useRef(gitStatusQuery.data);
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
@@ -298,8 +303,13 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     [inferredCheckpointTurnCountByTurnId, turnDiffSummaries],
   );
 
-  const selectedTurnId = diffSearch.diffTurnId ?? null;
-  const selectedFilePath = selectedTurnId !== null ? (diffSearch.diffFilePath ?? null) : null;
+  const selectedDiffSource = diffSearch.diffSource ?? null;
+  const isWorkingTreeSelection = selectedDiffSource !== null;
+  const selectedTurnId = isWorkingTreeSelection ? null : (diffSearch.diffTurnId ?? null);
+  const selectedFilePath =
+    selectedTurnId !== null || selectedDiffSource !== null
+      ? (diffSearch.diffFilePath ?? null)
+      : null;
   const selectedTurn =
     selectedTurnId === null
       ? undefined
@@ -333,23 +343,27 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   }, [inferredCheckpointTurnCountByTurnId, orderedTurnDiffSummaries]);
   const conversationCheckpointRange = useMemo(
     () =>
-      !selectedTurn && typeof conversationCheckpointTurnCount === "number"
+      !isWorkingTreeSelection &&
+      !selectedTurn &&
+      typeof conversationCheckpointTurnCount === "number"
         ? {
             fromTurnCount: 0,
             toTurnCount: conversationCheckpointTurnCount,
           }
         : null,
-    [conversationCheckpointTurnCount, selectedTurn],
+    [conversationCheckpointTurnCount, isWorkingTreeSelection, selectedTurn],
   );
-  const activeCheckpointRange = selectedTurn
-    ? selectedCheckpointRange
-    : conversationCheckpointRange;
+  const activeCheckpointRange = isWorkingTreeSelection
+    ? null
+    : selectedTurn
+      ? selectedCheckpointRange
+      : conversationCheckpointRange;
   const conversationCacheScope = useMemo(() => {
-    if (selectedTurn || orderedTurnDiffSummaries.length === 0) {
+    if (isWorkingTreeSelection || selectedTurn || orderedTurnDiffSummaries.length === 0) {
       return null;
     }
     return `conversation:${orderedTurnDiffSummaries.map((summary) => summary.turnId).join(",")}`;
-  }, [orderedTurnDiffSummaries, selectedTurn]);
+  }, [isWorkingTreeSelection, orderedTurnDiffSummaries, selectedTurn]);
   const activeCheckpointDiffQuery = useQuery(
     checkpointDiffQueryOptions({
       environmentId: activeThread?.environmentId ?? null,
@@ -358,24 +372,48 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       toTurnCount: activeCheckpointRange?.toTurnCount ?? null,
       ignoreWhitespace: diffIgnoreWhitespace,
       cacheScope: selectedTurn ? `turn:${selectedTurn.turnId}` : conversationCacheScope,
+      enabled: isGitRepo && !isWorkingTreeSelection,
+    }),
+  );
+  const workingTreeDiffQuery = useQuery(
+    gitWorkingTreeDiffQueryOptions({
+      environmentId: activeThread?.environmentId ?? null,
+      cwd: activeCwd ?? null,
+      target: selectedDiffSource,
+      ignoreWhitespace: diffIgnoreWhitespace,
       enabled: isGitRepo,
     }),
   );
+  const refetchWorkingTreeDiff = workingTreeDiffQuery.refetch;
+  const workingTreeDiffFetched = workingTreeDiffQuery.isFetched;
   const selectedTurnCheckpointDiff = selectedTurn
     ? activeCheckpointDiffQuery.data?.diff
     : undefined;
-  const conversationCheckpointDiff = selectedTurn
-    ? undefined
-    : activeCheckpointDiffQuery.data?.diff;
-  const isLoadingCheckpointDiff = activeCheckpointDiffQuery.isLoading;
+  const conversationCheckpointDiff =
+    selectedTurn || isWorkingTreeSelection ? undefined : activeCheckpointDiffQuery.data?.diff;
+  const workingTreeDiff = isWorkingTreeSelection ? workingTreeDiffQuery.data?.diff : undefined;
+  const isLoadingSelectedDiff = isWorkingTreeSelection
+    ? workingTreeDiffQuery.isLoading
+    : activeCheckpointDiffQuery.isLoading;
   const checkpointDiffError =
     activeCheckpointDiffQuery.error instanceof Error
       ? activeCheckpointDiffQuery.error.message
       : activeCheckpointDiffQuery.error
         ? "Failed to load checkpoint diff."
         : null;
+  const workingTreeDiffError =
+    workingTreeDiffQuery.error instanceof Error
+      ? workingTreeDiffQuery.error.message
+      : workingTreeDiffQuery.error
+        ? "Failed to load working tree diff."
+        : null;
+  const selectedDiffError = isWorkingTreeSelection ? workingTreeDiffError : checkpointDiffError;
 
-  const selectedPatch = selectedTurn ? selectedTurnCheckpointDiff : conversationCheckpointDiff;
+  const selectedPatch = isWorkingTreeSelection
+    ? workingTreeDiff
+    : selectedTurn
+      ? selectedTurnCheckpointDiff
+      : conversationCheckpointDiff;
   const hasResolvedPatch = typeof selectedPatch === "string";
   const hasNoNetChanges = hasResolvedPatch && selectedPatch.trim().length === 0;
   const renderablePatch = useMemo(
@@ -416,6 +454,19 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   }, [diffOpen, settings.diffIgnoreWhitespace, settings.diffWordWrap]);
 
   useEffect(() => {
+    const previousGitStatusData = previousGitStatusDataRef.current;
+    previousGitStatusDataRef.current = gitStatusQuery.data;
+    if (
+      previousGitStatusData === gitStatusQuery.data ||
+      !selectedDiffSource ||
+      !workingTreeDiffFetched
+    ) {
+      return;
+    }
+    void refetchWorkingTreeDiff();
+  }, [gitStatusQuery.data, refetchWorkingTreeDiff, selectedDiffSource, workingTreeDiffFetched]);
+
+  useEffect(() => {
     if (!selectedFilePath || !patchViewportRef.current) {
       return;
     }
@@ -434,6 +485,8 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         ...(activeCwd ? { cwd: activeCwd, displayPath: filePath } : {}),
         returnTarget: {
           kind: "diff",
+          ...(selectedDiffSource ? { diffSource: selectedDiffSource } : {}),
+          ...(selectedDiffSource ? { diffFilePath: filePath } : {}),
           ...(selectedTurn?.turnId ? { diffTurnId: selectedTurn.turnId } : {}),
           ...(selectedTurn?.turnId ? { diffFilePath: filePath } : {}),
         },
@@ -441,7 +494,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         console.warn("Failed to open diff file in editor.", error);
       });
     },
-    [activeCwd, activeThread?.environmentId, selectedTurn?.turnId],
+    [activeCwd, activeThread?.environmentId, selectedDiffSource, selectedTurn?.turnId],
   );
   const toggleDiffFileCollapsed = useCallback((fileKey: string) => {
     setCollapsedDiffFileKeys((current) => {
@@ -475,6 +528,25 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         const rest = stripDiffSearchParams(previous);
         return { ...rest, diff: "1" };
       },
+    });
+  };
+  const selectWorkingTreeDiff = (target: VcsWorkingTreeDiffTarget) => {
+    if (!activeThread) return;
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, activeThread.id)),
+      search: (previous) => {
+        const rest = stripDiffSearchParams(previous);
+        return { ...rest, diff: "1", diffSource: target };
+      },
+    });
+  };
+  const closeDiffPanel = () => {
+    if (!activeThread) return;
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, activeThread.id)),
+      search: { diff: undefined },
     });
   };
   const updateTurnStripScrollState = useCallback(() => {
@@ -528,7 +600,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [orderedTurnDiffSummaries, selectedTurnId, updateTurnStripScrollState]);
+  }, [orderedTurnDiffSummaries, selectedDiffSource, selectedTurnId, updateTurnStripScrollState]);
 
   useEffect(() => {
     const element = turnStripRef.current;
@@ -536,11 +608,71 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
 
     const selectedChip = element.querySelector<HTMLElement>("[data-turn-chip-selected='true']");
     selectedChip?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
-  }, [selectedTurn?.turnId, selectedTurnId]);
+  }, [selectedDiffSource, selectedTurn?.turnId, selectedTurnId]);
 
+  const diffSelectionValue = selectedDiffSource ?? selectedTurn?.turnId ?? "all";
+  const selectedDiffDropdownLabel = (() => {
+    if (selectedDiffSource === "unstaged") {
+      return "Unstaged";
+    }
+    if (selectedDiffSource === "staged") {
+      return "Staged";
+    }
+    if (!selectedTurn) {
+      return "All turns";
+    }
+    const count =
+      selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId];
+    return `Turn ${count ?? "?"}`;
+  })();
   const headerRow = (
     <>
-      <div className="relative min-w-0 flex-1 [-webkit-app-region:no-drag]">
+      <div className="hidden min-w-0 flex-1 [-webkit-app-region:no-drag] max-[760px]:block">
+        <Select
+          value={diffSelectionValue}
+          onValueChange={(value) => {
+            if (value === "unstaged" || value === "staged") {
+              selectWorkingTreeDiff(value);
+              return;
+            }
+            if (value === "all") {
+              selectWholeConversation();
+              return;
+            }
+            selectTurn(value as TurnId);
+          }}
+        >
+          <SelectTrigger className="w-full" aria-label="Diff selection">
+            <SelectValue>{selectedDiffDropdownLabel}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            <SelectItem hideIndicator value="unstaged">
+              Unstaged
+            </SelectItem>
+            <SelectItem hideIndicator value="staged">
+              Staged
+            </SelectItem>
+            <SelectItem hideIndicator value="all">
+              All turns
+            </SelectItem>
+            {orderedTurnDiffSummaries.map((summary) => {
+              const turnCount =
+                summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId];
+              return (
+                <SelectItem hideIndicator key={summary.turnId} value={summary.turnId}>
+                  <span className="flex items-center gap-2">
+                    <span>Turn {turnCount ?? "?"}</span>
+                    <span className="text-[10px] text-muted-foreground/70">
+                      {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
+                    </span>
+                  </span>
+                </SelectItem>
+              );
+            })}
+          </SelectPopup>
+        </Select>
+      </div>
+      <div className="relative min-w-0 flex-1 [-webkit-app-region:no-drag] max-[760px]:hidden">
         <button
           type="button"
           className={cn(
@@ -584,13 +716,47 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           <button
             type="button"
             className="shrink-0 rounded-md"
-            onClick={selectWholeConversation}
-            data-turn-chip-selected={selectedTurnId === null}
+            onClick={() => selectWorkingTreeDiff("unstaged")}
+            data-turn-chip-selected={selectedDiffSource === "unstaged"}
           >
             <div
               className={cn(
                 "rounded-md border px-2 py-1 text-left transition-colors",
-                selectedTurnId === null
+                selectedDiffSource === "unstaged"
+                  ? "border-border bg-accent text-accent-foreground"
+                  : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
+              )}
+            >
+              <div className="text-[10px] leading-tight font-medium">Unstaged</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            className="shrink-0 rounded-md"
+            onClick={() => selectWorkingTreeDiff("staged")}
+            data-turn-chip-selected={selectedDiffSource === "staged"}
+          >
+            <div
+              className={cn(
+                "rounded-md border px-2 py-1 text-left transition-colors",
+                selectedDiffSource === "staged"
+                  ? "border-border bg-accent text-accent-foreground"
+                  : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
+              )}
+            >
+              <div className="text-[10px] leading-tight font-medium">Staged</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            className="shrink-0 rounded-md"
+            onClick={selectWholeConversation}
+            data-turn-chip-selected={selectedDiffSource === null && selectedTurnId === null}
+          >
+            <div
+              className={cn(
+                "rounded-md border px-2 py-1 text-left transition-colors",
+                selectedDiffSource === null && selectedTurnId === null
                   ? "border-border bg-accent text-accent-foreground"
                   : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
               )}
@@ -675,6 +841,17 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         >
           <PilcrowIcon className="size-3" />
         </Toggle>
+        {mode === "sheet" ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Close diff"
+            title="Close diff"
+            onClick={closeDiffPanel}
+          >
+            <PanelRightCloseIcon className="size-3.5" />
+          </Button>
+        ) : null}
       </div>
     </>
   );
@@ -689,7 +866,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Turn diffs are unavailable because this project is not a git repository.
         </div>
-      ) : orderedTurnDiffSummaries.length === 0 ? (
+      ) : orderedTurnDiffSummaries.length === 0 && !isWorkingTreeSelection ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           No completed turns yet.
         </div>
@@ -699,14 +876,20 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
             ref={patchViewportRef}
             className="diff-panel-viewport min-h-0 min-w-0 flex-1 overflow-hidden"
           >
-            {checkpointDiffError && !renderablePatch && (
+            {selectedDiffError && !renderablePatch && (
               <div className="px-3">
-                <p className="mb-2 text-[11px] text-red-500/80">{checkpointDiffError}</p>
+                <p className="mb-2 text-[11px] text-red-500/80">{selectedDiffError}</p>
               </div>
             )}
             {!renderablePatch ? (
-              isLoadingCheckpointDiff ? (
-                <DiffPanelLoadingState label="Loading checkpoint diff..." />
+              isLoadingSelectedDiff ? (
+                <DiffPanelLoadingState
+                  label={
+                    isWorkingTreeSelection
+                      ? "Loading working tree diff..."
+                      : "Loading checkpoint diff..."
+                  }
+                />
               ) : (
                 <div className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
                   <p>

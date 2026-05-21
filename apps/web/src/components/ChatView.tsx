@@ -202,7 +202,7 @@ import {
   useServerKeybindings,
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
-import { retainThreadDetailSubscription } from "../environments/runtime/service";
+import { retainActiveThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
 import {
@@ -912,7 +912,7 @@ export default function ChatView(props: ChatViewProps) {
     if (routeKind !== "server") {
       return;
     }
-    return retainThreadDetailSubscription(environmentId, threadId);
+    return retainActiveThreadDetailSubscription(environmentId, threadId);
   }, [environmentId, routeKind, threadId]);
 
   // Compute the list of environments this logical project spans, used to

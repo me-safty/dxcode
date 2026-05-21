@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import * as Cache from "effect/Cache";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -37,6 +39,8 @@ const PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES = 49_000;
 const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
+const WORKING_TREE_DIFF_MAX_OUTPUT_BYTES = 10_000_000;
+const WORKING_TREE_DIFF_GIT_ADD_MAX_ARG_BYTES = 64 * 1024;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
@@ -115,6 +119,44 @@ function parseNumstatEntries(
     });
   }
   return entries;
+}
+
+function splitNullSeparatedPaths(input: string, truncated: boolean): string[] {
+  const parts = input.split("\0");
+  if (parts.length === 0) return [];
+
+  if (truncated && parts[parts.length - 1]?.length) {
+    parts.pop();
+  }
+
+  return parts.filter((value) => value.length > 0);
+}
+
+function chunkPathsForGitArgs(relativePaths: ReadonlyArray<string>): string[][] {
+  const chunks: string[][] = [];
+  let chunk: string[] = [];
+  let chunkBytes = 0;
+
+  for (const relativePath of relativePaths) {
+    const relativePathBytes = Buffer.byteLength(relativePath) + 1;
+    if (
+      chunk.length > 0 &&
+      chunkBytes + relativePathBytes > WORKING_TREE_DIFF_GIT_ADD_MAX_ARG_BYTES
+    ) {
+      chunks.push(chunk);
+      chunk = [];
+      chunkBytes = 0;
+    }
+
+    chunk.push(relativePath);
+    chunkBytes += relativePathBytes;
+  }
+
+  if (chunk.length > 0) {
+    chunks.push(chunk);
+  }
+
+  return chunks;
 }
 
 function parsePorcelainPath(line: string): string | null {
@@ -1350,6 +1392,123 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       })),
     );
 
+  const readWorkingTreeDiff: GitVcsDriver.GitVcsDriverShape["readWorkingTreeDiff"] = Effect.fn(
+    "readWorkingTreeDiff",
+  )(function* (input) {
+    const diffArgs = [
+      "diff",
+      ...(input.target === "staged" ? ["--cached"] : []),
+      "--patch",
+      "--minimal",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+    ];
+    const diffOptions = {
+      maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
+      appendTruncationMarker: true,
+    } satisfies ExecuteGitOptions;
+
+    if (input.target === "staged") {
+      const diff = yield* runGitStdoutWithOptions(
+        "GitVcsDriver.readWorkingTreeDiff.staged",
+        input.cwd,
+        diffArgs,
+        diffOptions,
+      );
+      return { diff };
+    }
+
+    const realIndexPathRaw = yield* runGitStdout(
+      "GitVcsDriver.readWorkingTreeDiff.resolveIndex",
+      input.cwd,
+      ["rev-parse", "--git-path", "index"],
+    ).pipe(Effect.map((stdout) => stdout.trim()));
+    const realIndexPath = path.isAbsolute(realIndexPathRaw)
+      ? realIndexPathRaw
+      : path.resolve(input.cwd, realIndexPathRaw);
+    const tempIndexPath = path.join(
+      path.dirname(realIndexPath),
+      `t3-working-tree-diff-index-${randomUUID()}`,
+    );
+    const tempIndexEnv: NodeJS.ProcessEnv = {
+      GIT_INDEX_FILE: tempIndexPath,
+    };
+    const cleanupTempIndex = Effect.all(
+      [
+        fileSystem.remove(tempIndexPath, { force: true }),
+        fileSystem.remove(`${tempIndexPath}.lock`, { force: true }),
+      ],
+      { discard: true },
+    ).pipe(Effect.ignore);
+
+    const copyCurrentIndex = Effect.gen(function* () {
+      const indexExists = yield* fileSystem
+        .exists(realIndexPath)
+        .pipe(Effect.orElseSucceed(() => false));
+      if (!indexExists) {
+        return;
+      }
+      yield* fileSystem
+        .copyFile(realIndexPath, tempIndexPath)
+        .pipe(
+          Effect.mapError((cause) =>
+            createGitCommandError(
+              "GitVcsDriver.readWorkingTreeDiff.copyIndex",
+              input.cwd,
+              ["rev-parse", "--git-path", "index"],
+              "Failed to copy git index for working tree diff.",
+              cause,
+            ),
+          ),
+        );
+    });
+
+    const readUntrackedPaths = executeGit(
+      "GitVcsDriver.readWorkingTreeDiff.untracked",
+      input.cwd,
+      ["ls-files", "--others", "--exclude-standard", "-z"],
+      {
+        allowNonZeroExit: false,
+        maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
+      },
+    ).pipe(Effect.map((result) => splitNullSeparatedPaths(result.stdout, result.stdoutTruncated)));
+
+    const addUntrackedIntentToAdd = (untrackedPaths: ReadonlyArray<string>) =>
+      Effect.forEach(
+        chunkPathsForGitArgs(untrackedPaths),
+        (chunk) =>
+          executeGit(
+            "GitVcsDriver.readWorkingTreeDiff.intentToAdd",
+            input.cwd,
+            ["add", "--intent-to-add", "--", ...chunk],
+            { env: tempIndexEnv },
+          ).pipe(Effect.asVoid),
+        { discard: true },
+      );
+
+    const program = Effect.gen(function* () {
+      yield* copyCurrentIndex;
+      const untrackedPaths = yield* readUntrackedPaths;
+      if (untrackedPaths.length > 0) {
+        yield* addUntrackedIntentToAdd(untrackedPaths);
+      }
+      const diff = yield* runGitStdoutWithOptions(
+        "GitVcsDriver.readWorkingTreeDiff.unstaged",
+        input.cwd,
+        diffArgs,
+        {
+          ...diffOptions,
+          env: tempIndexEnv,
+        },
+      );
+      return { diff };
+    });
+
+    return yield* program.pipe(Effect.ensuring(cleanupTempIndex));
+  });
+
   const prepareCommitContext: GitVcsDriver.GitVcsDriverShape["prepareCommitContext"] = Effect.fn(
     "prepareCommitContext",
   )(function* (cwd, filePaths) {
@@ -2128,6 +2287,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     status,
     statusDetails,
     statusDetailsLocal,
+    readWorkingTreeDiff,
     prepareCommitContext,
     commit,
     pushCurrentBranch,

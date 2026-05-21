@@ -297,14 +297,21 @@ function ChatThreadRouteView() {
         params: buildThreadRouteParams(threadRef),
         search: (previous) => {
           const rest = stripDiffSearchParams(previous);
-          return returnTarget.diffTurnId
+          return returnTarget.diffSource
             ? {
                 ...rest,
                 diff: "1",
-                diffTurnId: returnTarget.diffTurnId,
+                diffSource: returnTarget.diffSource,
                 ...(returnTarget.diffFilePath ? { diffFilePath: returnTarget.diffFilePath } : {}),
               }
-            : { ...rest, diff: "1" };
+            : returnTarget.diffTurnId
+              ? {
+                  ...rest,
+                  diff: "1",
+                  diffTurnId: returnTarget.diffTurnId,
+                  ...(returnTarget.diffFilePath ? { diffFilePath: returnTarget.diffFilePath } : {}),
+                }
+              : { ...rest, diff: "1" };
         },
       });
     },

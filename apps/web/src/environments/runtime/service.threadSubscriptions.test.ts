@@ -1078,6 +1078,7 @@ describe("retainThreadDetailSubscription", () => {
 
   it("refreshes a warm idle detail subscription when active re-entry finds it behind shell", async () => {
     const {
+      retainActiveThreadDetailSubscription,
       retainThreadDetailSubscription,
       startEnvironmentConnectionService,
       resetEnvironmentServiceForTests,
@@ -1134,7 +1135,7 @@ describe("retainThreadDetailSubscription", () => {
     expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
-    const releaseActive = retainThreadDetailSubscription(environmentId, threadId);
+    const releaseActive = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(300);
@@ -1148,7 +1149,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("keeps a warm detail subscription attached on active re-entry when it is caught up", async () => {
+  it("keeps a warm detail subscription attached on warm re-entry when it is caught up", async () => {
     const {
       retainThreadDetailSubscription,
       startEnvironmentConnectionService,
@@ -1196,6 +1197,297 @@ describe("retainThreadDetailSubscription", () => {
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     releaseActive();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("force-refreshes prewarmed detail when notification navigation opens it as active", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectThreadByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-prewarm-active-open");
+    const messageId = MessageId.make("assistant-notification-open-final");
+    const turnId = TurnId.make("turn-1");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      {
+        ...makeThreadShellSnapshot({
+          threadId,
+          sessionStatus: "running",
+        }),
+        snapshotSequence: 5,
+      },
+      environmentId,
+    );
+
+    const releaseWarm = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    const warmDetailListener = mockSubscribeThread.mock.calls[0]?.[1] as
+      | ((item: {
+          readonly kind: "snapshot";
+          readonly snapshot: ReturnType<typeof makeThreadDetailSnapshot>;
+        }) => void)
+      | undefined;
+    expect(warmDetailListener).toBeDefined();
+    warmDetailListener?.({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 6,
+        threadId,
+        sessionStatus: "running",
+        messages: [
+          {
+            id: messageId,
+            role: "assistant",
+            text: "Still working",
+            turnId,
+            streaming: true,
+            createdAt: "2026-04-13T00:00:05.000Z",
+            updatedAt: "2026-04-13T00:00:06.000Z",
+          },
+        ],
+      }),
+    });
+
+    const releaseActive = retainActiveThreadDetailSubscription(environmentId, threadId);
+    await vi.advanceTimersByTimeAsync(300);
+    await vi.waitFor(() => {
+      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
+      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
+    });
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    const refreshedDetailListener = mockSubscribeThread.mock.calls[1]?.[1] as
+      | ((item: {
+          readonly kind: "snapshot";
+          readonly snapshot: ReturnType<typeof makeThreadDetailSnapshot>;
+        }) => void)
+      | undefined;
+    expect(refreshedDetailListener).toBeDefined();
+    refreshedDetailListener?.({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 5,
+        threadId,
+        sessionStatus: "ready",
+        messages: [
+          {
+            id: messageId,
+            role: "assistant",
+            text: "Final response",
+            turnId,
+            streaming: false,
+            createdAt: "2026-04-13T00:00:05.000Z",
+            updatedAt: "2026-04-13T00:00:07.000Z",
+          },
+        ],
+      }),
+    });
+
+    const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
+    expect(thread?.messages.map((message) => message.text)).toEqual(["Final response"]);
+    expect(thread?.messages[0]?.streaming).toBe(false);
+    expect(thread?.session?.status).toBe("ready");
+
+    releaseActive();
+    releaseWarm();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not immediately force-refresh prewarmed detail on browser resume", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const documentTarget = new EventTarget();
+    const windowTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+    });
+    mockProbeSync.mockResolvedValueOnce({
+      clientSequence: 2,
+      serverSequence: 2,
+      behind: false,
+    });
+
+    const {
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-prewarm-resume-no-immediate-refresh");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      {
+        ...makeThreadShellSnapshot({
+          threadId,
+          sessionStatus: "running",
+        }),
+        snapshotSequence: 2,
+      },
+      environmentId,
+    );
+
+    const releaseWarm = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    const detailListener = mockSubscribeThread.mock.calls[0]?.[1] as
+      | ((item: {
+          readonly kind: "snapshot";
+          readonly snapshot: ReturnType<typeof makeThreadDetailSnapshot>;
+        }) => void)
+      | undefined;
+    expect(detailListener).toBeDefined();
+    detailListener?.({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 2,
+        threadId,
+        sessionStatus: "running",
+      }),
+    });
+
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    visibilityState = "visible";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 2 });
+    });
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    releaseWarm();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("defers prewarmed completion refresh until the thread becomes active", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-prewarm-completion-active-later");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      {
+        ...makeThreadShellSnapshot({
+          threadId,
+          sessionStatus: "running",
+        }),
+        snapshotSequence: 2,
+      },
+      environmentId,
+    );
+
+    const releaseWarm = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    const detailListener = mockSubscribeThread.mock.calls[0]?.[1] as
+      | ((item: {
+          readonly kind: "snapshot";
+          readonly snapshot: ReturnType<typeof makeThreadDetailSnapshot>;
+        }) => void)
+      | undefined;
+    expect(detailListener).toBeDefined();
+    detailListener?.({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 3,
+        threadId,
+        sessionStatus: "running",
+      }),
+    });
+
+    connectionInput.applyShellEvent(
+      {
+        kind: "thread-upserted",
+        sequence: 3,
+        thread: makeCompletedThreadShellSnapshot({
+          snapshotSequence: 3,
+          threadId,
+          sessionStatus: "ready",
+        }).threads[0]!,
+      },
+      environmentId,
+    );
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    const releaseActive = retainActiveThreadDetailSubscription(environmentId, threadId);
+    await vi.advanceTimersByTimeAsync(300);
+    await vi.waitFor(() => {
+      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
+      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
+    });
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    releaseActive();
+    releaseWarm();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not double-refresh a brand-new active thread detail subscription", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-new-active-no-double-refresh");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "ready",
+      }),
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    release();
     stop();
     await resetEnvironmentServiceForTests();
   });
@@ -1268,7 +1560,7 @@ describe("retainThreadDetailSubscription", () => {
 
   it("periodically reconciles a retained active thread that missed completion events", async () => {
     const {
-      retainThreadDetailSubscription,
+      retainActiveThreadDetailSubscription,
       resetEnvironmentServiceForTests,
       startEnvironmentConnectionService,
     } = await import("./service");
@@ -1290,7 +1582,7 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
     );
 
-    const release = retainThreadDetailSubscription(environmentId, threadId);
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     mockProbeSync.mockResolvedValueOnce({
@@ -1324,7 +1616,7 @@ describe("retainThreadDetailSubscription", () => {
 
   it("refreshes a retained active thread detail subscription when the initial snapshot stalls", async () => {
     const {
-      retainThreadDetailSubscription,
+      retainActiveThreadDetailSubscription,
       resetEnvironmentServiceForTests,
       startEnvironmentConnectionService,
     } = await import("./service");
@@ -1344,7 +1636,7 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
     );
 
-    const release = retainThreadDetailSubscription(environmentId, threadId);
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(5_000);
@@ -1535,7 +1827,7 @@ describe("retainThreadDetailSubscription", () => {
     });
 
     const {
-      retainThreadDetailSubscription,
+      retainActiveThreadDetailSubscription,
       resetEnvironmentServiceForTests,
       startEnvironmentConnectionService,
     } = await import("./service");
@@ -1556,7 +1848,7 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
     );
 
-    const release = retainThreadDetailSubscription(environmentId, threadId);
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     const detailListener = mockSubscribeThread.mock.calls[0]?.[1] as
@@ -1617,7 +1909,7 @@ describe("retainThreadDetailSubscription", () => {
     });
 
     const {
-      retainThreadDetailSubscription,
+      retainActiveThreadDetailSubscription,
       resetEnvironmentServiceForTests,
       startEnvironmentConnectionService,
     } = await import("./service");
@@ -1638,7 +1930,7 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
     );
 
-    const release = retainThreadDetailSubscription(environmentId, threadId);
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     const detailListener = mockSubscribeThread.mock.calls[0]?.[1] as
@@ -1710,7 +2002,7 @@ describe("retainThreadDetailSubscription", () => {
     });
 
     const {
-      retainThreadDetailSubscription,
+      retainActiveThreadDetailSubscription,
       resetEnvironmentServiceForTests,
       startEnvironmentConnectionService,
     } = await import("./service");
@@ -1735,7 +2027,7 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
     );
 
-    const release = retainThreadDetailSubscription(environmentId, threadId);
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     const initialDetailListener = mockSubscribeThread.mock.calls[0]?.[1] as
@@ -1818,7 +2110,7 @@ describe("retainThreadDetailSubscription", () => {
 
   it("force-refreshes active detail when a detail completion event settles running work", async () => {
     const {
-      retainThreadDetailSubscription,
+      retainActiveThreadDetailSubscription,
       resetEnvironmentServiceForTests,
       startEnvironmentConnectionService,
     } = await import("./service");
@@ -1838,7 +2130,7 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
     );
 
-    const release = retainThreadDetailSubscription(environmentId, threadId);
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     const detailListener = mockSubscribeThread.mock.calls[0]?.[1] as
@@ -1918,7 +2210,7 @@ describe("retainThreadDetailSubscription", () => {
 
   it("applies missing final message events after a completion-triggered forced snapshot reset", async () => {
     const {
-      retainThreadDetailSubscription,
+      retainActiveThreadDetailSubscription,
       resetEnvironmentServiceForTests,
       startEnvironmentConnectionService,
     } = await import("./service");
@@ -1940,7 +2232,7 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
     );
 
-    const release = retainThreadDetailSubscription(environmentId, threadId);
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     const initialDetailListener = mockSubscribeThread.mock.calls[0]?.[1] as
@@ -2050,7 +2342,7 @@ describe("retainThreadDetailSubscription", () => {
 
   it("force-refreshes active detail when shell completion arrives at the current detail sequence", async () => {
     const {
-      retainThreadDetailSubscription,
+      retainActiveThreadDetailSubscription,
       resetEnvironmentServiceForTests,
       startEnvironmentConnectionService,
     } = await import("./service");
@@ -2071,7 +2363,7 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
     );
 
-    const release = retainThreadDetailSubscription(environmentId, threadId);
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     const detailListener = mockSubscribeThread.mock.calls[0]?.[1] as
@@ -2117,6 +2409,7 @@ describe("retainThreadDetailSubscription", () => {
 
   it("defers shell-completion refresh for a released warm detail subscription until active re-entry", async () => {
     const {
+      retainActiveThreadDetailSubscription,
       retainThreadDetailSubscription,
       resetEnvironmentServiceForTests,
       startEnvironmentConnectionService,
@@ -2178,7 +2471,7 @@ describe("retainThreadDetailSubscription", () => {
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
-    const releaseActive = retainThreadDetailSubscription(environmentId, threadId);
+    const releaseActive = retainActiveThreadDetailSubscription(environmentId, threadId);
     await vi.advanceTimersByTimeAsync(300);
     await vi.waitFor(() => {
       expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
@@ -2244,7 +2537,7 @@ describe("retainThreadDetailSubscription", () => {
     });
 
     const {
-      retainThreadDetailSubscription,
+      retainActiveThreadDetailSubscription,
       resetEnvironmentServiceForTests,
       startEnvironmentConnectionService,
     } = await import("./service");
@@ -2275,7 +2568,7 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
     );
 
-    const release = retainThreadDetailSubscription(environmentId, threadId);
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     const detailListener = mockSubscribeThread.mock.calls[0]?.[1] as
@@ -2337,6 +2630,7 @@ describe("retainThreadDetailSubscription", () => {
     });
 
     const {
+      retainActiveThreadDetailSubscription,
       retainThreadDetailSubscription,
       resetEnvironmentServiceForTests,
       startEnvironmentConnectionService,
@@ -2393,7 +2687,7 @@ describe("retainThreadDetailSubscription", () => {
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
-    const releaseActive = retainThreadDetailSubscription(environmentId, threadId);
+    const releaseActive = retainActiveThreadDetailSubscription(environmentId, threadId);
     await vi.advanceTimersByTimeAsync(300);
     await vi.waitFor(() => {
       expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
@@ -2431,7 +2725,7 @@ describe("retainThreadDetailSubscription", () => {
     });
 
     const {
-      retainThreadDetailSubscription,
+      retainActiveThreadDetailSubscription,
       resetEnvironmentServiceForTests,
       startEnvironmentConnectionService,
     } = await import("./service");
@@ -2454,7 +2748,7 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
     );
 
-    const release = retainThreadDetailSubscription(environmentId, threadId);
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     visibilityState = "hidden";

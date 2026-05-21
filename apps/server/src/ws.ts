@@ -1241,6 +1241,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               "rpc.aggregate": "vcs",
             },
           ),
+        [WS_METHODS.vcsGetWorkingTreeDiff]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsGetWorkingTreeDiff,
+            gitWorkflow.readWorkingTreeDiff(input),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
         [WS_METHODS.vcsPull]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsPull,

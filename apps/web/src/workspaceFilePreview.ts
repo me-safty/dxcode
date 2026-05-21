@@ -2,6 +2,7 @@ import type { EnvironmentId, TurnId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 
+import type { DiffRouteSource } from "./diffRouteSearch";
 import { openInPreferredEditor } from "./editorPreferences";
 import { readLocalApi } from "./localApi";
 import { openRightPanel } from "./rightPanelGesture";
@@ -9,6 +10,7 @@ import { splitPathAndPosition } from "./terminal-links";
 
 export interface WorkspaceFilePreviewReturnTarget {
   kind: "diff";
+  diffSource?: DiffRouteSource;
   diffTurnId?: TurnId;
   diffFilePath?: string;
 }

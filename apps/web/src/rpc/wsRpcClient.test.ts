@@ -4,6 +4,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  WS_METHODS,
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
   type VcsStatusStreamEvent,
@@ -215,5 +216,41 @@ describe("wsRpcClient", () => {
         },
       ],
     ]);
+  });
+
+  it("forwards working tree diff requests through the websocket transport", async () => {
+    const result = { diff: "patch" };
+    const protocolGetWorkingTreeDiff = vi.fn(() => Effect.succeed(result));
+    const protocolClient = {
+      [WS_METHODS.vcsGetWorkingTreeDiff]: protocolGetWorkingTreeDiff,
+    } as unknown as WsRpcProtocolClient;
+    const request = vi.fn(
+      async <TSuccess>(
+        execute: (client: WsRpcProtocolClient) => Effect.Effect<TSuccess, Error, never>,
+      ) => Effect.runPromise(execute(protocolClient)),
+    );
+    const transport = {
+      dispose: vi.fn(async () => undefined),
+      reconnect: vi.fn(async () => undefined),
+      isHeartbeatFresh: vi.fn(() => true),
+      request: request as WsTransport["request"],
+      requestStream: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
+    } satisfies Pick<
+      WsTransport,
+      "dispose" | "reconnect" | "isHeartbeatFresh" | "request" | "requestStream" | "subscribe"
+    >;
+
+    const client = createWsRpcClient(transport as unknown as WsTransport);
+    const input = {
+      cwd: "/repo",
+      target: "staged" as const,
+      ignoreWhitespace: true,
+    };
+
+    await expect(client.vcs.getWorkingTreeDiff(input)).resolves.toEqual(result);
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(protocolGetWorkingTreeDiff).toHaveBeenCalledWith(input);
   });
 });

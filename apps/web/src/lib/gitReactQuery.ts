@@ -4,6 +4,7 @@ import {
   type GitStackedAction,
   type SourceControlPublishRepositoryInput,
   type ThreadId,
+  type VcsWorkingTreeDiffTarget,
 } from "@t3tools/contracts";
 import {
   infiniteQueryOptions,
@@ -24,6 +25,12 @@ export const gitQueryKeys = {
     ["git", "refs", environmentId ?? null, cwd] as const,
   branchSearch: (environmentId: EnvironmentId | null, cwd: string | null, query: string) =>
     ["git", "refs", environmentId ?? null, cwd, "search", query] as const,
+  workingTreeDiff: (
+    environmentId: EnvironmentId | null,
+    cwd: string | null,
+    target: VcsWorkingTreeDiffTarget | null,
+    ignoreWhitespace: boolean,
+  ) => ["git", "workingTreeDiff", environmentId ?? null, cwd, target, ignoreWhitespace] as const,
 };
 
 export const gitMutationKeys = {
@@ -124,6 +131,42 @@ export function gitResolvePullRequestQueryOptions(input: {
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+  });
+}
+
+export function gitWorkingTreeDiffQueryOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  target: VcsWorkingTreeDiffTarget | null;
+  ignoreWhitespace: boolean;
+  enabled?: boolean;
+}) {
+  return queryOptions({
+    queryKey: gitQueryKeys.workingTreeDiff(
+      input.environmentId,
+      input.cwd,
+      input.target,
+      input.ignoreWhitespace,
+    ),
+    queryFn: async () => {
+      if (!input.cwd || !input.environmentId || !input.target) {
+        throw new Error("Working tree diff is unavailable.");
+      }
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.vcs.getWorkingTreeDiff({
+        cwd: input.cwd,
+        target: input.target,
+        ignoreWhitespace: input.ignoreWhitespace,
+      });
+    },
+    enabled:
+      (input.enabled ?? true) &&
+      input.environmentId !== null &&
+      input.cwd !== null &&
+      input.target !== null,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 }
 

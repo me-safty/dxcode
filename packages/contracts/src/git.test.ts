@@ -7,6 +7,7 @@ import {
   GitRunStackedActionResult,
   GitRunStackedActionInput,
   GitResolvePullRequestResult,
+  VcsWorkingTreeDiffInput,
 } from "./git.ts";
 
 const decodeCreateWorktreeInput = Schema.decodeUnknownSync(VcsCreateWorktreeInput);
@@ -16,6 +17,7 @@ const decodePreparePullRequestThreadInput = Schema.decodeUnknownSync(
 const decodeRunStackedActionInput = Schema.decodeUnknownSync(GitRunStackedActionInput);
 const decodeRunStackedActionResult = Schema.decodeUnknownSync(GitRunStackedActionResult);
 const decodeResolvePullRequestResult = Schema.decodeUnknownSync(GitResolvePullRequestResult);
+const decodeWorkingTreeDiffInput = Schema.decodeUnknownSync(VcsWorkingTreeDiffInput);
 
 describe("VcsCreateWorktreeInput", () => {
   it("accepts omitted newRefName for existing-refName worktrees", () => {
@@ -40,6 +42,41 @@ describe("GitPreparePullRequestThreadInput", () => {
 
     expect(parsed.reference).toBe("#42");
     expect(parsed.mode).toBe("worktree");
+  });
+});
+
+describe("VcsWorkingTreeDiffInput", () => {
+  it("accepts staged and unstaged working tree diff targets", () => {
+    expect(
+      decodeWorkingTreeDiffInput({
+        cwd: "/repo",
+        target: "unstaged",
+        ignoreWhitespace: true,
+      }),
+    ).toEqual({
+      cwd: "/repo",
+      target: "unstaged",
+      ignoreWhitespace: true,
+    });
+
+    expect(
+      decodeWorkingTreeDiffInput({
+        cwd: "/repo",
+        target: "staged",
+      }),
+    ).toEqual({
+      cwd: "/repo",
+      target: "staged",
+    });
+  });
+
+  it("rejects invalid working tree diff targets", () => {
+    expect(() =>
+      decodeWorkingTreeDiffInput({
+        cwd: "/repo",
+        target: "all",
+      }),
+    ).toThrow();
   });
 });
 

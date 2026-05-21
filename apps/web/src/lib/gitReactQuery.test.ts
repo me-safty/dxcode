@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../environmentApi", () => ({
   ensureEnvironmentApi: vi.fn(),
@@ -11,14 +11,17 @@ vi.mock("../wsRpcClient", () => ({
 }));
 
 import type { InfiniteData } from "@tanstack/react-query";
-import { EnvironmentId, type VcsListRefsResult } from "@t3tools/contracts";
+import { EnvironmentId, type EnvironmentApi, type VcsListRefsResult } from "@t3tools/contracts";
+import * as environmentApi from "../environmentApi";
 
 import {
   gitBranchSearchInfiniteQueryOptions,
   gitMutationKeys,
   gitPreparePullRequestThreadMutationOptions,
   gitPullMutationOptions,
+  gitQueryKeys,
   gitRunStackedActionMutationOptions,
+  gitWorkingTreeDiffQueryOptions,
   invalidateGitQueries,
 } from "./gitReactQuery";
 
@@ -37,6 +40,10 @@ const BRANCH_SEARCH_RESULT: InfiniteData<VcsListRefsResult, number> = {
 const ENVIRONMENT_A = EnvironmentId.make("environment-a");
 const ENVIRONMENT_B = EnvironmentId.make("environment-b");
 
+afterEach(() => {
+  vi.clearAllMocks();
+});
+
 describe("gitMutationKeys", () => {
   it("scopes stacked action keys by cwd", () => {
     expect(gitMutationKeys.runStackedAction(ENVIRONMENT_A, "/repo/a")).not.toEqual(
@@ -54,6 +61,42 @@ describe("gitMutationKeys", () => {
     expect(gitMutationKeys.preparePullRequestThread(ENVIRONMENT_A, "/repo/a")).not.toEqual(
       gitMutationKeys.preparePullRequestThread(ENVIRONMENT_A, "/repo/b"),
     );
+  });
+});
+
+describe("git working tree diff query options", () => {
+  it("includes target and ignoreWhitespace in the query key", () => {
+    expect(gitQueryKeys.workingTreeDiff(ENVIRONMENT_A, "/repo", "unstaged", false)).not.toEqual(
+      gitQueryKeys.workingTreeDiff(ENVIRONMENT_A, "/repo", "staged", false),
+    );
+    expect(gitQueryKeys.workingTreeDiff(ENVIRONMENT_A, "/repo", "unstaged", false)).not.toEqual(
+      gitQueryKeys.workingTreeDiff(ENVIRONMENT_A, "/repo", "unstaged", true),
+    );
+  });
+
+  it("forwards working tree diff requests to the environment API", async () => {
+    const getWorkingTreeDiff = vi.fn().mockResolvedValue({ diff: "patch" });
+    vi.mocked(environmentApi.ensureEnvironmentApi).mockReturnValue({
+      vcs: {
+        getWorkingTreeDiff,
+      },
+    } as unknown as EnvironmentApi);
+
+    const queryClient = new QueryClient();
+    await queryClient.fetchQuery(
+      gitWorkingTreeDiffQueryOptions({
+        environmentId: ENVIRONMENT_A,
+        cwd: "/repo",
+        target: "unstaged",
+        ignoreWhitespace: true,
+      }),
+    );
+
+    expect(getWorkingTreeDiff).toHaveBeenCalledWith({
+      cwd: "/repo",
+      target: "unstaged",
+      ignoreWhitespace: true,
+    });
   });
 });
 
