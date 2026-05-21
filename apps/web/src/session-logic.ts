@@ -1388,6 +1388,9 @@ export function derivePhase(session: ThreadSession | null): SessionPhase {
     return "disconnected";
   }
   if (session.status === "starting") return "connecting";
+  if (session.orchestrationStatus === "interrupted" || session.orchestrationStatus === "error") {
+    return "ready";
+  }
   if (session.status === "running") return "running";
   return "ready";
 }
