@@ -22,6 +22,33 @@ import type { ReviewDiffPreviewInput, ReviewDiffPreviewResult } from "./review.t
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type { AssetCreateUrlInput, AssetCreateUrlResult } from "./assets.ts";
 import type {
+  NeuropharmEvidencePackInput,
+  NeuropharmEvidencePackResult,
+  NeuropharmEvidenceRecord,
+  NeuropharmCompoundComparisonInput,
+  NeuropharmCompoundComparisonResult,
+  NeuropharmCompoundLookupInput,
+  NeuropharmCompoundLookupResult,
+  NeuropharmDatabaseSyncInput,
+  NeuropharmDatabaseSyncResult,
+  NeuropharmLocalDatabaseDownloadInput,
+  NeuropharmLocalDatabaseDownloadResult,
+  NeuropharmLocalDatabaseStatusInput,
+  NeuropharmLocalDatabaseStatusResult,
+  NeuropharmLocalSearchInput,
+  NeuropharmLocalSearchResult,
+  NeuropharmBasicsPackInput,
+  NeuropharmBasicsPackResult,
+  NeuropharmGenerateGraphSpecInput,
+  NeuropharmGraphSpec,
+  NeuropharmImportDocumentInput,
+  NeuropharmAnalysisInput,
+  NeuropharmAnalysisResult,
+  NeuropharmSearchLibraryInput,
+  NeuropharmSearchSourcesInput,
+  NeuropharmSearchSourcesResult,
+} from "./neuropharm.ts";
+import type {
   ProjectListEntriesInput,
   ProjectListEntriesResult,
   ProjectReadFileInput,
@@ -1165,6 +1192,38 @@ export interface EnvironmentApi {
   };
   assets: {
     createUrl: (input: AssetCreateUrlInput) => Promise<AssetCreateUrlResult>;
+  };
+  neuropharm: {
+    searchSources: (input: NeuropharmSearchSourcesInput) => Promise<NeuropharmSearchSourcesResult>;
+    importDocument: (input: NeuropharmImportDocumentInput) => Promise<NeuropharmEvidenceRecord>;
+    installBasicsPack: (input: NeuropharmBasicsPackInput) => Promise<NeuropharmBasicsPackResult>;
+    searchLibrary: (
+      input: NeuropharmSearchLibraryInput,
+    ) => Promise<ReadonlyArray<NeuropharmEvidenceRecord>>;
+    buildEvidencePack: (
+      input: NeuropharmEvidencePackInput,
+    ) => Promise<NeuropharmEvidencePackResult>;
+    generateGraphSpec: (input: NeuropharmGenerateGraphSpecInput) => Promise<NeuropharmGraphSpec>;
+    analyze: (input: NeuropharmAnalysisInput) => Promise<NeuropharmAnalysisResult>;
+    syncDatabases: (input: NeuropharmDatabaseSyncInput) => Promise<NeuropharmDatabaseSyncResult>;
+    lookupCompound: (
+      input: NeuropharmCompoundLookupInput,
+    ) => Promise<NeuropharmCompoundLookupResult>;
+    compareCompounds: (
+      input: NeuropharmCompoundComparisonInput,
+    ) => Promise<NeuropharmCompoundComparisonResult>;
+    downloadDatabases: (
+      input: NeuropharmLocalDatabaseDownloadInput,
+    ) => Promise<NeuropharmLocalDatabaseDownloadResult>;
+    databaseStatus: (
+      input: NeuropharmLocalDatabaseStatusInput,
+    ) => Promise<NeuropharmLocalDatabaseStatusResult>;
+    searchLocalReceptors: (
+      input: NeuropharmLocalSearchInput,
+    ) => Promise<NeuropharmLocalSearchResult>;
+    searchLocalInteractions: (
+      input: NeuropharmLocalSearchInput,
+    ) => Promise<NeuropharmLocalSearchResult>;
   };
   sourceControl: {
     lookupRepository: (
