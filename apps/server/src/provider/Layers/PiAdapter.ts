@@ -206,29 +206,25 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       case "message_update": {
         if (!context.turnState) return;
         const assistantEvent = event.assistantMessageEvent;
-        if (assistantEvent && "text" in assistantEvent && typeof assistantEvent.text === "string") {
+        if (!assistantEvent) return;
+        if (assistantEvent.type === "text_delta") {
           yield* offerRuntimeEvent({
             ...base,
             turnId: context.turnState.turnId,
             type: "content.delta",
             payload: {
               streamKind: "assistant_text",
-              delta: assistantEvent.text,
+              delta: assistantEvent.delta,
             },
           });
-        }
-        if (
-          assistantEvent &&
-          "thinking" in assistantEvent &&
-          typeof assistantEvent.thinking === "string"
-        ) {
+        } else if (assistantEvent.type === "thinking_delta") {
           yield* offerRuntimeEvent({
             ...base,
             turnId: context.turnState.turnId,
             type: "content.delta",
             payload: {
               streamKind: "reasoning_text",
-              delta: assistantEvent.thinking,
+              delta: assistantEvent.delta,
             },
           });
         }
@@ -444,7 +440,6 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
 
     const sessionOptions: CreateAgentSessionOptions = {
       cwd: input.cwd ?? serverConfig.cwd,
-      ...(modelSelection?.model ? {} : {}),
     };
 
     const piSession = yield* Effect.tryPromise({
@@ -563,15 +558,19 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
 
     const promptText = typeof input.input === "string" ? input.input : "";
 
-    yield* Effect.tryPromise({
-      try: () => context.piSession.prompt(promptText),
-      catch: (cause) =>
-        new ProviderAdapterRequestError({
-          provider: PROVIDER,
-          method: "turn/prompt",
-          detail: toMessage(cause, "Failed to send prompt to Pi Agent."),
-        }),
-    });
+    const runtimeContext = yield* Effect.context<never>();
+    const runFork = Effect.runForkWith(runtimeContext);
+    runFork(
+      Effect.tryPromise({
+        try: () => context.piSession.prompt(promptText),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "turn/prompt",
+            detail: toMessage(cause, "Failed to send prompt to Pi Agent."),
+          }),
+      }).pipe(Effect.catch(() => completeTurn(context, "failed", "Prompt failed."))),
+    );
 
     return {
       threadId: context.session.threadId,
