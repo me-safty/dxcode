@@ -94,6 +94,8 @@ which tools it may call, and which shell-provided component modules it expects.
 Known placements:
 
 - `dashboard`: persistent project or home page location.
+- `project.navView`: full project view reachable from project navigation.
+- `global.navView`: full user/global view reachable from global navigation.
 - `conversation.inlineCard`: compact renderer inside an agent conversation.
 - `conversation.sidecar`: interactive side panel beside a conversation.
 - `artifact.detail`: custom artifact detail renderer.
@@ -111,6 +113,8 @@ Example host context:
 type MiniappHostContext = {
   placement:
     | "dashboard"
+    | "project.navView"
+    | "global.navView"
     | "conversation.inlineCard"
     | "conversation.sidecar"
     | "artifact.detail"
@@ -126,6 +130,43 @@ type MiniappHostContext = {
   resourceRef?: ResourceRef;
 };
 ```
+
+## Custom Views
+
+Current first-party surfaces such as Backlog and My Work are effectively hardcoded
+project dashboards. They prove the interaction model, but they should not remain the
+only way to add dense project views.
+
+The miniapp model should allow custom views to register into navigation:
+
+- project nav: views scoped to one project workspace.
+- global nav: views from the home workspace or enabled global miniapps.
+- optional resource nav: views attached to one work item, repository, account, or other resource.
+
+Example:
+
+```json
+{
+  "id": "planning-board",
+  "name": "Planning Board",
+  "scope": "project",
+  "entry": "./App.tsx",
+  "placements": [
+    {
+      "type": "project.navView",
+      "label": "Planning",
+      "icon": "layout-dashboard",
+      "order": 40
+    }
+  ],
+  "tools": ["artifact.list", "integration.search", "recipe.run"],
+  "components": ["Button", "Table", "KanbanBoard", "Timeline"]
+}
+```
+
+Navigation registration should be declarative. The shell owns ordering, collision
+handling, disabled states, and permission prompts. A broken custom view should fail as
+one nav item, not break the project shell.
 
 Miniapps should adapt density by placement.
 
