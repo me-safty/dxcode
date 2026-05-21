@@ -1,16 +1,14 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
-import { EllipsisIcon, ListTodoIcon } from "lucide-react";
+import { BotIcon, ListTodoIcon, LockIcon, LockOpenIcon, PenLineIcon } from "lucide-react";
 import { Button } from "../ui/button";
-import {
-  Menu,
-  MenuItem,
-  MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuSeparator as MenuDivider,
-  MenuTrigger,
-} from "../ui/menu";
+import { cn } from "~/lib/utils";
+
+const runtimeModeIcon = {
+  "approval-required": LockIcon,
+  "auto-accept-edits": PenLineIcon,
+  "full-access": LockOpenIcon,
+} satisfies Record<RuntimeMode, typeof LockIcon>;
 
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   activePlan: boolean;
@@ -25,66 +23,59 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
   return (
-    <Menu>
-      <MenuTrigger
-        render={
+    <div className="flex shrink-0 items-center gap-1">
+      {props.traitsMenuContent}
+      {props.showInteractionModeToggle ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80"
+          type="button"
+          onClick={props.onToggleInteractionMode}
+          title={props.interactionMode === "plan" ? "Plan mode" : "Research mode"}
+        >
+          <BotIcon className="size-4" />
+          <span className="sr-only">{props.interactionMode === "plan" ? "Plan" : "Research"}</span>
+        </Button>
+      ) : null}
+      {(["approval-required", "auto-accept-edits", "full-access"] as const).map((mode) => {
+        const ModeIcon = runtimeModeIcon[mode];
+        return (
           <Button
+            key={mode}
             size="sm"
             variant="ghost"
-            className="shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80"
-            aria-label="More composer controls"
-          />
-        }
-      >
-        <EllipsisIcon aria-hidden="true" className="size-4" />
-      </MenuTrigger>
-      <MenuPopup align="start">
-        {props.traitsMenuContent ? (
-          <>
-            {props.traitsMenuContent}
-            <MenuDivider />
-          </>
-        ) : null}
-        {props.showInteractionModeToggle ? (
-          <>
-            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
-            <MenuRadioGroup
-              value={props.interactionMode}
-              onValueChange={(value) => {
-                if (!value || value === props.interactionMode) return;
-                props.onToggleInteractionMode();
-              }}
-            >
-              <MenuRadioItem value="default">Chat</MenuRadioItem>
-              <MenuRadioItem value="plan">Plan</MenuRadioItem>
-            </MenuRadioGroup>
-            <MenuDivider />
-          </>
-        ) : null}
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
-        <MenuRadioGroup
-          value={props.runtimeMode}
-          onValueChange={(value) => {
-            if (!value || value === props.runtimeMode) return;
-            props.onRuntimeModeChange(value as RuntimeMode);
-          }}
+            className={cn(
+              "shrink-0 px-2",
+              props.runtimeMode === mode
+                ? "text-foreground"
+                : "text-muted-foreground/60 hover:text-foreground/80",
+            )}
+            type="button"
+            onClick={() => props.onRuntimeModeChange(mode)}
+            aria-label={`Set access mode to ${mode}`}
+          >
+            <ModeIcon className="size-4" />
+          </Button>
+        );
+      })}
+      {props.activePlan ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className={cn(
+            "shrink-0 px-2",
+            props.planSidebarOpen
+              ? "text-blue-400 hover:text-blue-300"
+              : "text-muted-foreground/70 hover:text-foreground/80",
+          )}
+          type="button"
+          onClick={props.onTogglePlanSidebar}
+          aria-label={`${props.planSidebarOpen ? "Hide" : "Show"} ${props.planSidebarLabel}`}
         >
-          <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
-          <MenuRadioItem value="auto-accept-edits">Auto-accept edits</MenuRadioItem>
-          <MenuRadioItem value="full-access">Full access</MenuRadioItem>
-        </MenuRadioGroup>
-        {props.activePlan ? (
-          <>
-            <MenuDivider />
-            <MenuItem onClick={props.onTogglePlanSidebar}>
-              <ListTodoIcon className="size-4 shrink-0" />
-              {props.planSidebarOpen
-                ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
-                : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`}
-            </MenuItem>
-          </>
-        ) : null}
-      </MenuPopup>
-    </Menu>
+          <ListTodoIcon className="size-4" />
+        </Button>
+      ) : null}
+    </div>
   );
 });
