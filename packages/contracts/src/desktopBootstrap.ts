@@ -12,8 +12,16 @@ export const DesktopBootstrapWorkspaceFolder = Schema.Struct({
 });
 export type DesktopBootstrapWorkspaceFolder = typeof DesktopBootstrapWorkspaceFolder.Type;
 
+export const DesktopBootstrapMcpServer = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  socketPath: TrimmedNonEmptyString,
+  toolTimeoutSec: Schema.optional(Schema.Number),
+});
+export type DesktopBootstrapMcpServer = typeof DesktopBootstrapMcpServer.Type;
+
 export const DesktopBackendBootstrap = Schema.Struct({
   mode: Schema.Literal("desktop"),
+  hostIntegration: Schema.optional(Schema.Literal("vscode")),
   noBrowser: Schema.Boolean,
   port: PortSchema,
   t3Home: Schema.String,
@@ -26,6 +34,7 @@ export const DesktopBackendBootstrap = Schema.Struct({
   workspaceFolders: Schema.optional(Schema.Array(DesktopBootstrapWorkspaceFolder)),
   // Consuming code must ignore this when it does not match a workspace folder key.
   activeWorkspaceFolderKey: Schema.optional(TrimmedNonEmptyString),
+  mcpServers: Schema.optional(Schema.Array(DesktopBootstrapMcpServer)),
 });
 
 export type DesktopBackendBootstrap = typeof DesktopBackendBootstrap.Type;

@@ -13,12 +13,17 @@ import * as LogLevel from "effect/LogLevel";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
-import type { DesktopBootstrapWorkspaceFolder } from "@t3tools/contracts";
+import type {
+  DesktopBootstrapMcpServer,
+  DesktopBootstrapWorkspaceFolder,
+} from "@t3tools/contracts";
 
 export const DEFAULT_PORT = 3773;
 
 export const RuntimeMode = Schema.Literals(["web", "desktop"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
+export const HostIntegration = Schema.Literals(["vscode"]);
+export type HostIntegration = typeof HostIntegration.Type;
 
 export const StartupPresentation = Schema.Literals(["browser", "headless"]);
 export type StartupPresentation = typeof StartupPresentation.Type;
@@ -70,9 +75,11 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly noBrowser: boolean;
   readonly startupPresentation: StartupPresentation;
   readonly desktopBootstrapToken: string | undefined;
+  readonly hostIntegration?: HostIntegration | undefined;
   readonly autoBootstrapProjectFromCwd: boolean;
   readonly autoBootstrapWorkspaceFolders: ReadonlyArray<DesktopBootstrapWorkspaceFolder>;
   readonly activeBootstrapWorkspaceFolderKey: string | undefined;
+  readonly hostMcpServers: ReadonlyArray<DesktopBootstrapMcpServer>;
   readonly logWebSocketEvents: boolean;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
@@ -170,12 +177,14 @@ export class ServerConfig extends Context.Service<ServerConfig, ServerConfigShap
           autoBootstrapProjectFromCwd: false,
           autoBootstrapWorkspaceFolders: [],
           activeBootstrapWorkspaceFolderKey: undefined,
+          hostMcpServers: [],
           logWebSocketEvents: false,
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
           port: 0,
           host: undefined,
           desktopBootstrapToken: undefined,
+          hostIntegration: undefined,
           staticDir: undefined,
           devUrl,
           noBrowser: false,

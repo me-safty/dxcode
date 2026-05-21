@@ -1,0 +1,378 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const executeCommand = vi.fn();
+const getCommands = vi.fn();
+const getDiagnostics = vi.fn();
+const uriFile = vi.fn((value: string) => ({
+  scheme: "file",
+  fsPath: value,
+  authority: "",
+  toString: () => `file://${value}`,
+}));
+const uriParse = vi.fn((value: string) => ({
+  scheme: "file",
+  fsPath: value.startsWith("file://") ? value.slice("file://".length) : "/tmp/parsed",
+  authority: "",
+  toString: () => value,
+}));
+
+class MockPosition {
+  line: number;
+  character: number;
+
+  constructor(line: number, character: number) {
+    this.line = line;
+    this.character = character;
+  }
+}
+
+class MockRange {
+  start: MockPosition;
+  end: MockPosition;
+
+  constructor(startLine: number, startCharacter: number, endLine: number, endCharacter: number) {
+    this.start = new MockPosition(startLine, startCharacter);
+    this.end = new MockPosition(endLine, endCharacter);
+  }
+}
+
+vi.mock("vscode", () => ({
+  commands: {
+    executeCommand,
+    getCommands,
+  },
+  languages: {
+    getDiagnostics,
+  },
+  workspace: {
+    getConfiguration: () => ({
+      get: (_key: string, defaultValue: unknown) => defaultValue,
+    }),
+    workspaceFolders: [
+      {
+        uri: {
+          scheme: "file",
+          authority: "",
+          fsPath: "/workspace",
+          toString: () => "file:///workspace",
+        },
+      },
+    ],
+  },
+  DiagnosticSeverity: {
+    Error: 0,
+    Warning: 1,
+    Information: 2,
+    Hint: 3,
+  },
+  Uri: {
+    file: uriFile,
+    parse: uriParse,
+  },
+  Position: MockPosition,
+  Range: MockRange,
+  SymbolKind: {
+    5: "Class",
+    Class: 5,
+  },
+}));
+
+describe("executeVsCodeRunCommand", () => {
+  beforeEach(() => {
+    executeCommand.mockReset();
+    getCommands.mockReset();
+    getDiagnostics.mockReset();
+    uriFile.mockClear();
+    uriParse.mockClear();
+  });
+
+  it("runs a registered VS Code command and returns structured MCP content", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+    getCommands.mockResolvedValue(["t3code.example.echo"]);
+    executeCommand.mockResolvedValue({ value: "echo:hello" });
+
+    const result = await executeVsCodeRunCommand({
+      command: "t3code.example.echo",
+      args: ["hello"],
+    });
+
+    expect(executeCommand).toHaveBeenCalledWith("t3code.example.echo", "hello");
+    expect(result.structuredContent).toEqual({
+      command: "t3code.example.echo",
+      result: { value: "echo:hello" },
+    });
+    expect(result.content[0]?.text).toContain("echo:hello");
+  });
+
+  it("hydrates VS Code Uri arguments before executing the command", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+    getCommands.mockResolvedValue(["vscode.open"]);
+    executeCommand.mockResolvedValue(undefined);
+
+    await executeVsCodeRunCommand({
+      command: "vscode.open",
+      args: [{ $vscode: "Uri", path: "/tmp/example.txt" }],
+    });
+
+    expect(uriFile).toHaveBeenCalledWith("/tmp/example.txt");
+    expect(executeCommand).toHaveBeenCalledWith(
+      "vscode.open",
+      expect.objectContaining({ fsPath: "/tmp/example.txt" }),
+    );
+  });
+
+  it("rejects internal VS Code commands", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+
+    await expect(
+      executeVsCodeRunCommand({
+        command: "_workbench.internal.example",
+        args: ["value"],
+      }),
+    ).rejects.toThrow("Internal VS Code commands are not supported by this tool.");
+    expect(getCommands).not.toHaveBeenCalled();
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+});
+
+describe("VS Code language-service MCP tools", () => {
+  beforeEach(() => {
+    executeCommand.mockReset();
+    getCommands.mockReset();
+    getDiagnostics.mockReset();
+    uriFile.mockClear();
+    uriParse.mockClear();
+  });
+
+  it("returns filtered diagnostics from VS Code", async () => {
+    const { executeVsCodeDiagnostics } = await import("./mcpBridge.ts");
+    const workspaceUri = {
+      scheme: "file",
+      authority: "",
+      fsPath: "/workspace/src/app.ts",
+      toString: () => "file:///workspace/src/app.ts",
+    };
+    const externalUri = {
+      scheme: "file",
+      authority: "",
+      fsPath: "/tmp/outside.ts",
+      toString: () => "file:///tmp/outside.ts",
+    };
+    getDiagnostics.mockReturnValue([
+      [
+        workspaceUri,
+        [
+          {
+            range: new MockRange(1, 2, 1, 5),
+            severity: 0,
+            message: "Unexpected token",
+            source: "ts",
+            code: 1005,
+          },
+          {
+            range: new MockRange(2, 0, 2, 4),
+            severity: 3,
+            message: "Style hint",
+            source: "ts",
+          },
+        ],
+      ],
+      [
+        externalUri,
+        [
+          {
+            range: new MockRange(1, 0, 1, 1),
+            severity: 0,
+            message: "Outside workspace",
+            source: "ts",
+          },
+        ],
+      ],
+    ]);
+
+    const result = await executeVsCodeDiagnostics({
+      minSeverity: "information",
+      source: "ts",
+      maxDiagnostics: 10,
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      returnedDiagnostics: 1,
+      totalDiagnosticsAfterFiltering: 1,
+      truncated: false,
+      diagnostics: [
+        {
+          file: {
+            path: "/workspace/src/app.ts",
+          },
+          severity: "error",
+          message: "Unexpected token",
+          source: "ts",
+          code: 1005,
+        },
+      ],
+    });
+  });
+
+  it("finds references through the VS Code reference provider", async () => {
+    const { executeVsCodeReferences } = await import("./mcpBridge.ts");
+    const referenceUri = {
+      scheme: "file",
+      authority: "",
+      fsPath: "/workspace/src/usage.ts",
+      toString: () => "file:///workspace/src/usage.ts",
+    };
+    executeCommand.mockResolvedValue([
+      {
+        uri: referenceUri,
+        range: new MockRange(3, 4, 3, 10),
+      },
+    ]);
+
+    const result = await executeVsCodeReferences({
+      file: "src/app.ts",
+      position: { line: 7, character: 12 },
+      includeDeclaration: false,
+    });
+
+    expect(uriFile).toHaveBeenCalledWith("/workspace/src/app.ts");
+    expect(executeCommand).toHaveBeenCalledWith(
+      "vscode.executeReferenceProvider",
+      expect.objectContaining({ fsPath: "/workspace/src/app.ts" }),
+      expect.objectContaining({ line: 7, character: 12 }),
+      { includeDeclaration: false },
+    );
+    expect(result.structuredContent).toMatchObject({
+      returnedReferences: 1,
+      totalReferences: 1,
+      references: [
+        {
+          uri: { path: "/workspace/src/usage.ts" },
+          range: {
+            start: { line: 3, character: 4 },
+            end: { line: 3, character: 10 },
+          },
+        },
+      ],
+    });
+  });
+
+  it("searches workspace symbols through VS Code", async () => {
+    const { executeVsCodeWorkspaceSymbols } = await import("./mcpBridge.ts");
+    const symbolUri = {
+      scheme: "file",
+      authority: "",
+      fsPath: "/workspace/src/Foo.ts",
+      toString: () => "file:///workspace/src/Foo.ts",
+    };
+    executeCommand.mockResolvedValue([
+      {
+        name: "Foo",
+        kind: 5,
+        containerName: "src",
+        location: {
+          uri: symbolUri,
+          range: new MockRange(0, 13, 0, 16),
+        },
+      },
+    ]);
+
+    const result = await executeVsCodeWorkspaceSymbols({
+      query: "Foo",
+      maxSymbols: 5,
+    });
+
+    expect(executeCommand).toHaveBeenCalledWith("vscode.executeWorkspaceSymbolProvider", "Foo");
+    expect(result.structuredContent).toMatchObject({
+      returnedSymbols: 1,
+      totalSymbols: 1,
+      symbols: [
+        {
+          name: "Foo",
+          kind: 5,
+          kindName: "Class",
+          containerName: "src",
+        },
+      ],
+    });
+  });
+});
+
+describe("VsCodeMcpBridge", () => {
+  it("uses a unique MCP server name per bridge instance", async () => {
+    const { VsCodeMcpBridge } = await import("./mcpBridge.ts");
+    const bridgeA = new VsCodeMcpBridge({ appendLine: vi.fn() } as never);
+    const bridgeB = new VsCodeMcpBridge({ appendLine: vi.fn() } as never);
+    try {
+      const [serverA, serverB] = await Promise.all([
+        bridgeA.ensureStarted(),
+        bridgeB.ensureStarted(),
+      ]);
+
+      expect(serverA?.name).toMatch(/^t3code-vscode-\d+-[0-9a-f]+$/u);
+      expect(serverB?.name).toMatch(/^t3code-vscode-\d+-[0-9a-f]+$/u);
+      expect(serverA?.name).not.toBe(serverB?.name);
+      expect(serverA?.socketPath).not.toBe(serverB?.socketPath);
+    } finally {
+      bridgeA.dispose();
+      bridgeB.dispose();
+    }
+  });
+});
+
+describe("handleMcpRequest", () => {
+  it("reports the MCP server name from the bridge context", async () => {
+    const { handleMcpRequest } = await import("./mcpBridge.ts");
+
+    await expect(
+      handleMcpRequest(
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+        },
+        undefined,
+        { serverName: "t3code-vscode-window-a" },
+      ),
+    ).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        serverInfo: {
+          name: "t3code-vscode-window-a",
+        },
+      },
+    });
+  });
+
+  it("lists the VS Code MCP tools", async () => {
+    const { handleMcpRequest } = await import("./mcpBridge.ts");
+
+    await expect(
+      handleMcpRequest({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+      }),
+    ).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        tools: [
+          {
+            name: "vscodeDiagnostics",
+          },
+          {
+            name: "vscodeReferences",
+          },
+          {
+            name: "vscodeWorkspaceSymbols",
+          },
+          {
+            name: "vscodeRunCommand",
+          },
+        ],
+      },
+    });
+  });
+});

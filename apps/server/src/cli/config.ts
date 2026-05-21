@@ -302,7 +302,9 @@ export const resolveServerConfig = (
       () => mode === "desktop",
     );
     const desktopBootstrapToken = bootstrap?.desktopBootstrapToken;
+    const hostIntegration = bootstrap?.hostIntegration;
     const autoBootstrapWorkspaceFolders = bootstrap?.workspaceFolders ?? [];
+    const hostMcpServers = bootstrap?.mcpServers ?? [];
     const activeBootstrapWorkspaceFolderKey = resolveActiveBootstrapWorkspaceFolderKey(
       autoBootstrapWorkspaceFolders,
       bootstrap?.activeWorkspaceFolderKey,
@@ -379,9 +381,11 @@ export const resolveServerConfig = (
       noBrowser,
       startupPresentation,
       desktopBootstrapToken,
+      hostIntegration,
       autoBootstrapProjectFromCwd,
       autoBootstrapWorkspaceFolders,
       activeBootstrapWorkspaceFolderKey,
+      hostMcpServers,
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,

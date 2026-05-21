@@ -197,6 +197,61 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
+  it("passes MCP server config to thread/start", async () => {
+    const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
+    const started = makeThreadOpenResponse("fresh-thread");
+    const client = {
+      request: <M extends "thread/start" | "thread/resume">(
+        method: M,
+        payload: CodexRpc.ClientRequestParamsByMethod[M],
+      ) => {
+        calls.push({ method, payload });
+        return Effect.succeed(started as CodexRpc.ClientRequestResponsesByMethod[M]);
+      },
+    };
+
+    await Effect.runPromise(
+      openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: undefined,
+        mcpServers: [
+          {
+            name: "t3code-vscode",
+            command: "codex",
+            args: ["stdio-to-uds", "/tmp/t3code-vscode-mcp/mcp.sock"],
+            toolTimeoutSec: 120,
+          },
+        ],
+      }),
+    );
+
+    assert.deepStrictEqual(calls, [
+      {
+        method: "thread/start",
+        payload: {
+          cwd: "/tmp/project",
+          model: "gpt-5.3-codex",
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          config: {
+            mcp_servers: {
+              "t3code-vscode": {
+                command: "codex",
+                args: ["stdio-to-uds", "/tmp/t3code-vscode-mcp/mcp.sock"],
+                tool_timeout_sec: 120,
+              },
+            },
+          },
+        },
+      },
+    ]);
+  });
+
   it("falls back to thread/start when resume fails recoverably", async () => {
     const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
     const started = makeThreadOpenResponse("fresh-thread");

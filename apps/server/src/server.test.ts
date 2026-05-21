@@ -373,6 +373,7 @@ const buildAppUnderTest = (options?: {
       autoBootstrapProjectFromCwd: false,
       autoBootstrapWorkspaceFolders: [],
       activeBootstrapWorkspaceFolderKey: undefined,
+      hostMcpServers: [],
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,

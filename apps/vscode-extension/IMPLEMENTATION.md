@@ -28,6 +28,35 @@ VS Code webviews use bearer auth for the extension-owned local backend, not brow
 
 The web app then sends authenticated HTTP requests with an `Authorization: Bearer ...` header and requests short-lived WebSocket tokens before opening `/ws`. This avoids relying on cross-origin cookie behavior between the VS Code webview origin and the loopback backend.
 
+## VS Code MCP Bridge
+
+The VS Code extension exposes VS Code-backed tools through a local MCP server owned by the extension host. The bridge is enabled by the extension setting:
+
+- `t3code.mcp.enabled`
+- `t3code.mcp.toolTimeoutSec`
+
+The bridge setting defaults to `true`, and the tool timeout setting defaults to `120` seconds. When enabled, each VS Code window starts a temporary local socket server with a unique `t3code-vscode-*` name, includes `{ name, socketPath, toolTimeoutSec }` in the desktop bootstrap envelope, and the backend converts that into Codex `mcp_servers` config by launching the configured Codex binary with `stdio-to-uds <socketPath>` and setting `tool_timeout_sec`. The per-window name avoids same-named MCP server collisions when multiple VS Code windows are running agents at the same time.
+
+The extension MCP server is generic and not tied to Codex concepts. Codex is currently the only provider wired to consume it, because Codex already supports MCP configuration through app-server thread startup. Future provider integrations should translate the same bootstrap MCP server list into their provider-native MCP/tool configuration.
+
+The current supported MCP tools are:
+
+- `vscodeDiagnostics`: returns diagnostics currently known to VS Code, including language-server and extension diagnostics.
+- `vscodeReferences`: finds references for a file position through VS Code language providers.
+- `vscodeWorkspaceSymbols`: searches workspace symbols through VS Code language providers.
+- `vscodeRunCommand`: executes a registered non-internal VS Code command through `vscode.commands.executeCommand(...)` and returns a JSON-safe result.
+
+`vscodeRunCommand` accepts:
+
+```json
+{
+  "command": "vscode.open",
+  "args": [{ "$vscode": "Uri", "path": "/absolute/path/to/file.ts" }]
+}
+```
+
+`vscodeRunCommand` rejects command ids prefixed with `_`, verifies registration with `vscode.commands.getCommands(true)`, hydrates supported JSON encodings for VS Code `Uri`, `Position`, and `Range` arguments, and serializes command return values into bounded JSON-safe values. The language-service tools return bounded JSON-safe result sets with truncation metadata.
+
 ## VS Code Webview UI Defaults
 
 The VS Code webview hides T3 Code controls that duplicate VS Code-native surfaces:
@@ -114,10 +143,23 @@ Implemented so far:
   - starts the bundled `dist/server/bin.mjs` with `ELECTRON_RUN_AS_NODE=1`
   - falls back to a development checkout command when no bundled server exists
   - supports user-configurable server command, args, cwd, and T3 home
+  - includes enabled VS Code MCP bridge servers in the desktop bootstrap envelope
   - records T3-owned virtual workspace clone metadata
   - prunes inactive virtual workspace clones not used for 15 days after successful backend startup
   - polls `/.well-known/t3/environment` with a per-request timeout
+  - marks the backend bootstrap with `hostIntegration: "vscode"` so VS Code-only behavior can remain scoped server-side
   - terminates the backend on extension disposal
+- Added VS Code MCP support:
+  - extension-owned temporary socket MCP server
+  - unique MCP server identity per VS Code window
+  - desktop bootstrap `mcpServers` metadata
+  - Codex `mcp_servers` config injection via `codex stdio-to-uds <socketPath>`
+  - configurable Codex `tool_timeout_sec` propagation from `t3code.mcp.toolTimeoutSec`
+  - VS Code diagnostics, references, and workspace-symbol tools backed by VS Code language APIs
+  - generic `vscodeRunCommand` tool execution through `vscode.commands.executeCommand(...)`
+  - registered-command validation and internal-command rejection
+  - JSON-safe command argument/result handling, including supported `Uri`, `Position`, and `Range` arguments
+  - `t3code.mcp.enabled` setting for enabling or disabling the whole bridge
 - Added a neutral host bridge contract:
   - `T3HostBridge`
   - `window.t3HostBridge`
@@ -163,6 +205,11 @@ Implemented so far:
   - initializes the hash route
   - overwrites stale retained hash routes with the requested initial route
   - applies a restrictive CSP with local backend HTTP and WebSocket connect sources
+- Added VS Code-only MCP orchestration that:
+  - starts the extension MCP bridge only from VS Code extension usage
+  - passes bridge metadata through the desktop bootstrap envelope
+  - injects Codex MCP config only for Codex sessions launched by the VS Code-backed backend
+  - leaves browser and desktop app prompt text, services, and runtime waiting paths untouched
 - Added extension settings for restoring VS Code-hidden T3 Code controls:
   - `t3code.ui.showOpenInPicker`
   - `t3code.ui.showCheckoutModeIndicator`
@@ -172,6 +219,9 @@ Implemented so far:
   - `t3code.ui.threadConversationMaxWidth`
 - Added extension setting for restoring the default T3 Code theme instead of matching VS Code:
   - `t3code.ui.restoreDefaultTheme`
+- Added extension setting for the VS Code MCP bridge:
+  - `t3code.mcp.enabled`
+  - `t3code.mcp.toolTimeoutSec`
 - Added shared T3 Code app `ClientSettings` persistence for VS Code:
   - persists to `<T3 home>/userdata/client-settings.json`
   - uses the same raw client-settings file format as desktop
@@ -206,6 +256,7 @@ Deferred until there is a concrete UX need:
 
 - Chat Sessions integration, including the proposed `chatSessionsProvider`, `chatSessions/newSession` menu contribution, and listing recent T3 threads as VS Code chat session items.
 - Webview-to-extension host actions beyond client settings persistence and host appearance propagation, including adding the current file/selection to T3 Code and reveal/open file host actions.
+- Cross-provider MCP wiring beyond Codex. The extension-side MCP server is provider-neutral, but this branch only injects it into Codex sessions.
 
 Not implemented yet:
 
@@ -225,6 +276,43 @@ Known packaging notes:
 - Marketplace publishing uses the `VSCE_PUBLISHER` GitHub repository variable and `VSCE_PAT` GitHub secret. Per the VS Code publishing docs, `vsce` publishes with a Visual Studio Marketplace Personal Access Token; the token should be scoped so it can publish for the configured publisher.
 
 ## Decision Log
+
+### 2026-05-20: Add VS Code MCP Bridge
+
+Decision: expose VS Code-backed tools through an extension-owned MCP server. Keep the MCP server generic and provider-neutral, but wire only Codex in this branch.
+
+Reasoning:
+
+- MCP is the provider-native shape for tool discovery, invocation, and result routing in Codex.
+- The VS Code extension host is still the correct place to execute VS Code commands because it has access to the public `vscode.commands.executeCommand(...)` API.
+- The backend only needs generic MCP server bootstrap metadata. That keeps the extension bridge usable by future providers that can consume MCP without baking Codex semantics into the bridge itself.
+- Browser and desktop app usage should not receive VS Code MCP configuration or extension-host services. MCP startup and integration remain scoped to the VS Code extension bootstrap.
+- Subagents can use the MCP tools if the underlying harness inherits MCP configuration and permits MCP tools for child agents. Provider-specific subagent behavior should be validated and enhanced in a separate branch, because this branch is focused on the VS Code extension bridge and Codex integration.
+
+Implemented:
+
+- `VsCodeMcpBridge` starts a local socket MCP server from the VS Code extension host.
+- Each bridge instance uses a unique MCP server name so multiple VS Code windows do not advertise the same server key.
+- `BackendManager` includes enabled MCP server metadata in the desktop bootstrap envelope.
+- The server stores bootstrap MCP metadata in `ServerConfig.hostMcpServers`.
+- The Codex adapter converts host MCP metadata into Codex `mcp_servers` config using `codex stdio-to-uds`.
+- `vscodeDiagnostics`, `vscodeReferences`, and `vscodeWorkspaceSymbols` expose VS Code language-service data through MCP.
+- `vscodeRunCommand` executes registered non-internal VS Code commands and returns JSON-safe MCP content.
+
+Boundaries:
+
+- Internal VS Code commands prefixed with `_` are rejected for now.
+- The command list is queried with `vscode.commands.getCommands(true)`, so internal commands are filtered out.
+- `vscodeRunCommand` is intentionally broad. Future hardening can add allowlists, command profiles, and approval policies around the MCP tool.
+- MCP bridge startup is gated by one setting, `t3code.mcp.enabled`, which defaults to `true`.
+- Codex MCP tool calls use `t3code.mcp.toolTimeoutSec`, which defaults to `120` seconds and is passed as `tool_timeout_sec`.
+- Cross-provider MCP integration is deferred. The bridge shape supports it, but only Codex receives MCP config today.
+
+Deferred work:
+
+- Validate Codex subagent MCP inheritance and add targeted fixes only if the harness requires explicit subagent MCP propagation.
+- Add MCP integration for Claude Code, OpenCode, or other providers through their native configuration surfaces.
+- Consider expanding the VS Code MCP tool catalog further after the initial command and language-service tools have enough real usage.
 
 ### 2026-05-15: Default VS Code View Into Secondary Side Bar
 

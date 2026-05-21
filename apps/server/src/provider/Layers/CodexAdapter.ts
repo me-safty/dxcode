@@ -54,6 +54,7 @@ import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import {
+  type CodexMcpServerConfig,
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
   makeCodexSessionRuntime,
@@ -70,6 +71,22 @@ const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
 const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
 
 const PROVIDER = ProviderDriverKind.make("codex");
+
+function codexMcpServersFromHostConfig(input: {
+  readonly hostMcpServers: ReadonlyArray<{
+    readonly name: string;
+    readonly socketPath: string;
+    readonly toolTimeoutSec?: number | undefined;
+  }>;
+  readonly codexBinaryPath: string;
+}): ReadonlyArray<CodexMcpServerConfig> {
+  return input.hostMcpServers.map((server) => ({
+    name: server.name,
+    command: input.codexBinaryPath,
+    args: ["stdio-to-uds", server.socketPath],
+    ...(server.toolTimeoutSec !== undefined ? { toolTimeoutSec: server.toolTimeoutSec } : {}),
+  }));
+}
 
 export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
@@ -1385,6 +1402,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           providerInstanceId: boundInstanceId,
           cwd: input.cwd ?? process.cwd(),
           binaryPath: codexConfig.binaryPath,
+          mcpServers: codexMcpServersFromHostConfig({
+            hostMcpServers: serverConfig.hostMcpServers,
+            codexBinaryPath: codexConfig.binaryPath,
+          }),
           ...(options?.environment ? { environment: options.environment } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
           ...(isCodexResumeCursorSchema(input.resumeCursor)

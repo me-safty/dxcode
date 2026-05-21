@@ -219,6 +219,7 @@ describe("BackendManager", () => {
     });
     expect(JSON.parse(bootstrapJson)).toEqual({
       mode: "desktop",
+      hostIntegration: "vscode",
       noBrowser: true,
       port: 49111,
       t3Home: path.join(os.homedir(), ".t3"),
@@ -255,6 +256,71 @@ describe("BackendManager", () => {
         method: "POST",
       },
     );
+  });
+
+  it("includes VS Code MCP server bootstrap data when the bridge is enabled", async () => {
+    let bootstrapJson = "";
+    const spawnMock = vi.fn<BackendSpawn>(() =>
+      makeChildProcess((value) => {
+        bootstrapJson = value;
+      }),
+    );
+    const manager = new BackendManager(
+      { extensionPath: extensionRoot } as never,
+      makeOutputChannel() as never,
+      makeDependencies({ spawn: spawnMock }),
+      {
+        ensureStarted: async () => ({
+          name: "t3code-vscode",
+          socketPath: "/tmp/t3code-vscode-mcp/mcp.sock",
+        }),
+      },
+    );
+
+    await manager.ensureStarted();
+
+    expect(JSON.parse(bootstrapJson)).toMatchObject({
+      mcpServers: [
+        {
+          name: "t3code-vscode",
+          socketPath: "/tmp/t3code-vscode-mcp/mcp.sock",
+          toolTimeoutSec: 120,
+        },
+      ],
+    });
+  });
+
+  it("includes the configured MCP tool timeout in bootstrap data", async () => {
+    vscodeState.settings["mcp.toolTimeoutSec"] = 900;
+    let bootstrapJson = "";
+    const spawnMock = vi.fn<BackendSpawn>(() =>
+      makeChildProcess((value) => {
+        bootstrapJson = value;
+      }),
+    );
+    const manager = new BackendManager(
+      { extensionPath: extensionRoot } as never,
+      makeOutputChannel() as never,
+      makeDependencies({ spawn: spawnMock }),
+      {
+        ensureStarted: async () => ({
+          name: "t3code-vscode",
+          socketPath: "/tmp/t3code-vscode-mcp/mcp.sock",
+        }),
+      },
+    );
+
+    await manager.ensureStarted();
+
+    expect(JSON.parse(bootstrapJson)).toMatchObject({
+      mcpServers: [
+        {
+          name: "t3code-vscode",
+          socketPath: "/tmp/t3code-vscode-mcp/mcp.sock",
+          toolTimeoutSec: 900,
+        },
+      ],
+    });
   });
 
   it("uses an explicitly configured server command without leaking inherited backend env", async () => {

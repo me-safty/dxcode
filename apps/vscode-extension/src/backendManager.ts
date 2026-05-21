@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   spawn as spawnChildProcess,
   type ChildProcessWithoutNullStreams,
@@ -43,6 +44,7 @@ const INHERITED_ENV_ALLOWLIST = [
 
 interface BackendBootstrap {
   readonly mode: "desktop";
+  readonly hostIntegration: "vscode";
   readonly noBrowser: boolean;
   readonly port: number;
   readonly t3Home: string;
@@ -52,6 +54,7 @@ interface BackendBootstrap {
   readonly tailscaleServePort: number;
   readonly workspaceFolders?: readonly BootstrapWorkspaceFolder[];
   readonly activeWorkspaceFolderKey?: string;
+  readonly mcpServers?: readonly BackendMcpServerBootstrap[];
 }
 
 interface BootstrapWorkspaceFolder {
@@ -69,6 +72,16 @@ export interface BackendConnection {
   readonly bearerToken: string;
   readonly cwd: string;
   readonly t3Home: string;
+}
+
+export interface BackendMcpServerBootstrap {
+  readonly name: string;
+  readonly socketPath: string;
+  readonly toolTimeoutSec?: number;
+}
+
+export interface BackendMcpBridge {
+  ensureStarted(): Promise<BackendMcpServerBootstrap | null>;
 }
 
 interface ResolvedServerCommand {
@@ -131,15 +144,18 @@ export class BackendManager {
   #outputChannel: vscode.OutputChannel;
   readonly #context: vscode.ExtensionContext;
   readonly #dependencies: BackendManagerDependencies;
+  readonly #mcpBridge: BackendMcpBridge | null;
 
   constructor(
     context: vscode.ExtensionContext,
     outputChannel: vscode.OutputChannel,
     dependencies: BackendManagerDependencies = defaultBackendManagerDependencies,
+    mcpBridge: BackendMcpBridge | null = null,
   ) {
     this.#context = context;
     this.#outputChannel = outputChannel;
     this.#dependencies = dependencies;
+    this.#mcpBridge = mcpBridge;
   }
 
   async ensureStarted(): Promise<BackendConnection> {
@@ -179,15 +195,19 @@ export class BackendManager {
     }
 
     await new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        child.kill("SIGKILL");
+      let resolved = false;
+      const finish = () => {
+        if (resolved) return;
+        resolved = true;
         resolve();
-      }, 2_000);
+      };
 
-      child.once("exit", () => {
-        clearTimeout(timeout);
-        resolve();
+      void sleep(2_000).then(() => {
+        if (resolved) return;
+        child.kill("SIGKILL");
+        finish();
       });
+      child.once("exit", finish);
       child.kill("SIGTERM");
     });
   }
@@ -206,8 +226,11 @@ export class BackendManager {
     const host = "127.0.0.1";
     const bootstrapToken = this.#dependencies.randomBytes(24).toString("hex");
     const command = resolveServerCommand(this.#context, cwd);
+    const mcpServer = await this.#mcpBridge?.ensureStarted();
+    const mcpToolTimeoutSec = resolveMcpToolTimeoutSec();
     const bootstrap: BackendBootstrap = {
       mode: "desktop",
+      hostIntegration: "vscode",
       noBrowser: true,
       port,
       t3Home,
@@ -217,6 +240,7 @@ export class BackendManager {
       tailscaleServePort: 443,
       ...(workspaceFolders.length > 0 ? { workspaceFolders } : {}),
       ...(activeWorkspaceFolder ? { activeWorkspaceFolderKey: activeWorkspaceFolder.key } : {}),
+      ...(mcpServer ? { mcpServers: [{ ...mcpServer, toolTimeoutSec: mcpToolTimeoutSec }] } : {}),
     };
     const args = [
       ...command.args,
@@ -394,6 +418,16 @@ export function resolveT3Home(): string {
   return path.join(os.homedir(), ".t3");
 }
 
+export function resolveMcpToolTimeoutSec(): number {
+  const configured = vscode.workspace
+    .getConfiguration("t3code")
+    .get<number>("mcp.toolTimeoutSec", 120);
+  if (typeof configured !== "number" || !Number.isFinite(configured) || configured < 1) {
+    return 120;
+  }
+  return Math.trunc(configured);
+}
+
 function resolveServerCommand(
   context: vscode.ExtensionContext,
   workspaceCwd: string,
@@ -517,19 +551,15 @@ async function waitForBackendReady(
   const readinessUrl = new URL(READINESS_PATH, httpBaseUrl);
 
   while (Date.now() < deadline) {
-    const controller = new AbortController();
-    const requestTimeout = setTimeout(() => controller.abort(), 1_000);
     try {
-      const response = await fetchFn(readinessUrl, { signal: controller.signal });
+      const response = await fetchFn(readinessUrl, { signal: AbortSignal.timeout(1_000) });
       if (response.ok) {
         return;
       }
     } catch {
       // Retry until the backend binds the port.
-    } finally {
-      clearTimeout(requestTimeout);
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await sleep(100);
   }
 
   throw new Error(`Timed out waiting for T3 backend readiness at ${readinessUrl.toString()}.`);

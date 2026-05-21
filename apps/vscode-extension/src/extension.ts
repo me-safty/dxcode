@@ -14,15 +14,18 @@ import {
   type WebviewDisplayPreferences,
   type WebviewHostAppearance,
 } from "./webview.ts";
+import { VsCodeMcpBridge } from "./mcpBridge.ts";
 
 export function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel("T3 Code");
-  const backendManager = new BackendManager(context, outputChannel);
+  const mcpBridge = new VsCodeMcpBridge(outputChannel);
+  const backendManager = new BackendManager(context, outputChannel, undefined, mcpBridge);
   const displayPreferences = new WebviewDisplayPreferenceBroadcaster(context);
   const hostAppearance = new WebviewHostAppearanceBroadcaster(context);
   const backendConnections = new WebviewBackendConnectionBroadcaster();
 
   context.subscriptions.push(outputChannel);
+  context.subscriptions.push(mcpBridge);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       "t3code.sidebarView",

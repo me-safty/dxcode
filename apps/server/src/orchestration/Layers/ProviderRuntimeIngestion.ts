@@ -1534,6 +1534,8 @@ const make = Effect.gen(function* () {
             turnId,
             updatedAt: now,
           });
+
+          loadedThreadDetail = undefined;
         }
       }
 

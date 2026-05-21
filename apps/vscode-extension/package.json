@@ -12,6 +12,7 @@
     "url": "https://github.com/t3tools/t3code.git",
     "directory": "apps/vscode-extension"
   },
+  "publisher": "t3tools",
   "files": [
     "dist",
     "resources",
@@ -90,6 +91,17 @@
           "type": "string",
           "default": "",
           "description": "Optional T3 home directory. Defaults to ~/.t3 to match the desktop app."
+        },
+        "t3code.mcp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the VS Code MCP bridge so agent sessions launched by T3 Code can use VS Code-backed tools."
+        },
+        "t3code.mcp.toolTimeoutSec": {
+          "type": "number",
+          "default": 120,
+          "minimum": 1,
+          "description": "Maximum time, in seconds, that Codex should wait for a VS Code MCP tool call before timing out."
         },
         "t3code.ui.showOpenInPicker": {
           "type": "boolean",
@@ -186,6 +198,5 @@
   "icon": "resources/icon.png",
   "engines": {
     "vscode": "^1.106.0"
-  },
-  "publisher": "t3tools"
+  }
 }

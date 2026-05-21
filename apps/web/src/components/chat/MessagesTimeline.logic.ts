@@ -162,37 +162,34 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    const message = timelineEntry.message;
+
     const assistantTurnStillInProgress =
-      timelineEntry.message.role === "assistant" &&
+      message.role === "assistant" &&
       input.activeTurnInProgress === true &&
       input.activeTurnId != null &&
-      timelineEntry.message.turnId === input.activeTurnId;
+      message.turnId === input.activeTurnId;
 
     const showCompletionDivider =
-      timelineEntry.message.role === "assistant" &&
-      input.completionDividerBeforeEntryId === timelineEntry.id;
+      message.role === "assistant" && input.completionDividerBeforeEntryId === timelineEntry.id;
 
     nextRows.push({
       kind: "message",
       id: timelineEntry.id,
       createdAt: timelineEntry.createdAt,
-      message: timelineEntry.message,
-      durationStart:
-        durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt,
+      message,
+      durationStart: durationStartByMessageId.get(message.id) ?? message.createdAt,
       showCompletionDivider,
       completionSummary: showCompletionDivider ? (input.completionSummary ?? null) : null,
       showAssistantCopyButton:
-        timelineEntry.message.role === "assistant" &&
-        terminalAssistantMessageIds.has(timelineEntry.message.id),
-      assistantCopyStreaming: timelineEntry.message.streaming || assistantTurnStillInProgress,
+        message.role === "assistant" && terminalAssistantMessageIds.has(message.id),
+      assistantCopyStreaming: message.streaming || assistantTurnStillInProgress,
       assistantTurnDiffSummary:
-        timelineEntry.message.role === "assistant"
-          ? input.turnDiffSummaryByAssistantMessageId.get(timelineEntry.message.id)
+        message.role === "assistant"
+          ? input.turnDiffSummaryByAssistantMessageId.get(message.id)
           : undefined,
       revertTurnCount:
-        timelineEntry.message.role === "user"
-          ? input.revertTurnCountByUserMessageId.get(timelineEntry.message.id)
-          : undefined,
+        message.role === "user" ? input.revertTurnCountByUserMessageId.get(message.id) : undefined,
     });
   }
 
