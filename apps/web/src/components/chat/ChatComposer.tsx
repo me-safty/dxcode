@@ -360,7 +360,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         />
       ) : null}
       {props.isPreparingWorktree ? (
-        <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
+        <span className="text-muted-foreground/70 text-xs">Preparing research workspace...</span>
       ) : null}
       <ComposerPrimaryActions
         compact={props.compact}
@@ -2415,7 +2415,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             )}`
                           : phase === "disconnected"
                             ? "Ask for follow-up changes or attach images"
-                            : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                            : "Ask for a compound profile, receptor explorer, stack checker, evidence graph, LaTeX report, diagram, or estimate"
                 }
                 disabled={
                   isConnecting ||
