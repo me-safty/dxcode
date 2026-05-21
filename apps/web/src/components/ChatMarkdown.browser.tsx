@@ -25,6 +25,15 @@ vi.mock("../localApi", () => ({
 
 import ChatMarkdown from "./ChatMarkdown";
 
+function resolveCssColor(color: string): string {
+  const probe = document.createElement("span");
+  probe.style.color = color;
+  document.body.append(probe);
+  const resolvedColor = getComputedStyle(probe).color;
+  probe.remove();
+  return resolvedColor;
+}
+
 describe("ChatMarkdown", () => {
   afterEach(() => {
     openInPreferredEditorMock.mockClear();
@@ -124,16 +133,36 @@ describe("ChatMarkdown", () => {
     }
   });
 
-  it("keeps normal web links unchanged", async () => {
+  it("keeps normal web links unchanged and styled with the app accent", async () => {
     const screen = await render(
-      <ChatMarkdown text="[OpenAI](https://openai.com/docs)" cwd="/repo/project" />,
+      <ChatMarkdown
+        text={[
+          "- [OpenAI](https://openai.com/docs)",
+          "- [Electron](https://www.electronjs.org/docs/latest/tutorial/security)",
+          "- [Next.js](https://nextjs.org/docs)",
+        ].join("\n")}
+        cwd="/repo/project"
+      />,
     );
 
     try {
-      const link = page.getByRole("link", { name: "OpenAI" });
-      await expect.element(link).toBeInTheDocument();
-      await expect.element(link).toHaveAttribute("href", "https://openai.com/docs");
-      await expect.element(link).toHaveAttribute("target", "_blank");
+      const expectedLinks = [
+        ["OpenAI", "https://openai.com/docs"],
+        ["Electron", "https://www.electronjs.org/docs/latest/tutorial/security"],
+        ["Next.js", "https://nextjs.org/docs"],
+      ] as const;
+      const primaryColor = resolveCssColor("var(--primary)");
+
+      for (const [name, href] of expectedLinks) {
+        const link = page.getByRole("link", { name });
+        await expect.element(link).toBeInTheDocument();
+        await expect.element(link).toHaveAttribute("href", href);
+        await expect.element(link).toHaveAttribute("target", "_blank");
+
+        const linkElement = document.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
+        expect(linkElement).not.toBeNull();
+        expect(getComputedStyle(linkElement!).color).toBe(primaryColor);
+      }
     } finally {
       await screen.unmount();
     }
