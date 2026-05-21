@@ -1,0 +1,68 @@
+{
+  "task_id": "neuropharm-analysis-db-backed-graphs",
+  "updated_at": "2026-05-21T21:15:50Z",
+  "entrypoints": [
+    "apps/server/src/neuropharm/NeuropharmService.ts",
+    "apps/server/src/neuropharm/NeuropharmService.test.ts",
+    "apps/web/src/components/chat/ChatComposer.tsx",
+    "apps/web/src/components/ChatMarkdown.tsx",
+    "apps/web/src/components/neuropharm/ScientificGraphRenderer.tsx",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+    "output/neuropharm-tracker/neuropharm_research_tracker.xlsx"
+  ],
+  "touched_files": [
+    "apps/web/src/components/chat/ChatComposer.tsx",
+    "apps/web/src/components/ChatMarkdown.tsx",
+    "apps/web/src/components/ChatMarkdown.browser.tsx",
+    "apps/web/src/components/neuropharm/ScientificGraphRenderer.tsx",
+    "apps/web/src/components/neuropharm/DomainPromptPicker.tsx",
+    "apps/server/src/neuropharm/NeuropharmService.ts",
+    "apps/server/src/neuropharm/NeuropharmService.test.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.test.ts",
+    "output/neuropharm-tracker/neuropharm_research_tracker.xlsx",
+    "repo_plan/rpg.json",
+    "repo_plan/file_index.json"
+  ],
+  "dependency_roots": [
+    "apps/web/src/components/chat/ChatComposer.tsx",
+    "apps/web/src/components/ChatMarkdown.tsx",
+    "apps/web/src/components/neuropharm/ScientificGraphRenderer.tsx",
+    "apps/server/src/neuropharm/NeuropharmService.ts",
+    "apps/server/src/neuropharm/NeuropharmDatabaseConnectors.ts",
+    "apps/server/src/neuropharm/NeuropharmPromptPolicy.ts"
+  ],
+  "full_inventory_note": "Full repository inventory helper remains unavailable because scripts/tools/rpg_builder.py is absent. This index captures entrypoints, touched files, dependency roots, and artifact outputs for the current run.",
+  "local_database_artifacts": {
+    "base_directory": "/Users/main/.t3/dev/neuropharm/databases",
+    "total_bytes": 1168352855,
+    "sources": [
+      "iuphar",
+      "iuphar_ligands",
+      "iuphar_targets",
+      "iuphar_physchem",
+      "bindingdb",
+      "bindingdb_chembl",
+      "bindingdb_patents",
+      "bindingdb_pubchem",
+      "bindingdb_articles",
+      "bindingdb_assays",
+      "bindingdb_pdsp",
+      "bindingdb_rsid"
+    ]
+  },
+  "artifact_outputs": {
+    "tracker_xlsx": "/Users/main/Desktop/t3neuropharmacology/output/neuropharm-tracker/neuropharm_research_tracker.xlsx",
+    "tracker_sheets": [
+      "Dashboard",
+      "Compounds",
+      "Targets",
+      "Interactions",
+      "Evidence_Claims",
+      "Graph_Specs",
+      "Risk_Flags",
+      "Tasks",
+      "Sources"
+    ]
+  }
+}

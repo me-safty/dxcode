@@ -1,0 +1,545 @@
+{
+  "task_id": "neuropharm-analysis-db-backed-graphs",
+  "mode": "rpg",
+  "updated_at": "2026-05-21T21:15:50Z",
+  "summary": "Make neuropharm analyses automatically use local database/basics evidence and synthesize stronger graph specs from local receptor and comparison records.",
+  "rpg_tooling": {
+    "builder_available": false,
+    "validator_available": false,
+    "note": "scripts/tools/rpg_builder.py and scripts/validate_rpg.py are absent in this checkout, so this graph was updated manually in the required interface-first shape."
+  },
+  "nodes": [
+    {
+      "id": "contracts.neuropharm.analysis",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Shared schemas for analysis modes, graph nodes/edges, diagrams, LaTeX artifacts, and structured analysis results."
+    },
+    {
+      "id": "contracts.neuropharm.database",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Shared schemas for compound lookup, database sync, source status, interaction provenance, and compound comparison outputs."
+    },
+    {
+      "id": "contracts.neuropharm.local_database",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Shared schemas for IUPHAR and BindingDB local database manifests, snapshots, downloads, and local search results under the default 1 GB cap."
+    },
+    {
+      "id": "rpc.neuropharm.analysis",
+      "kind": "interface",
+      "status": "tested",
+      "description": "WebSocket and environment API methods for neuropharm.analyze and evidence import/search flows."
+    },
+    {
+      "id": "rpc.neuropharm.database",
+      "kind": "interface",
+      "status": "tested",
+      "description": "WebSocket and environment API methods for neuropharm.syncDatabases, neuropharm.lookupCompound, and neuropharm.compareCompounds."
+    },
+    {
+      "id": "rpc.neuropharm.local_database",
+      "kind": "interface",
+      "status": "tested",
+      "description": "WebSocket and environment API methods for neuropharm.downloadDatabases, neuropharm.databaseStatus, neuropharm.searchLocalReceptors, and neuropharm.searchLocalInteractions."
+    },
+    {
+      "id": "persistence.neuropharm.library",
+      "kind": "module",
+      "status": "tested",
+      "description": "SQLite migrations for neuropharm evidence records and analysis-run persistence."
+    },
+    {
+      "id": "persistence.neuropharm.database",
+      "kind": "module",
+      "status": "tested",
+      "description": "SQLite receptor/compound database tables for cached source records, compounds, targets, interactions, publications, and sync jobs."
+    },
+    {
+      "id": "persistence.neuropharm.local_snapshots",
+      "kind": "module",
+      "status": "tested",
+      "description": "SQLite migrations and repository paths for local database snapshot state, including downloaded/imported/failed status and a repair migration for stale databases that already recorded migration 33."
+    },
+    {
+      "id": "server.neuropharm.connectors",
+      "kind": "module",
+      "status": "tested",
+      "description": "Online connectors for PubChem, ChEMBL, IUPHAR/GtoPdb, and PubMed with local caching and AF710B plus methylphenidate seed workflow."
+    },
+    {
+      "id": "server.neuropharm.local_databases",
+      "kind": "module",
+      "status": "tested",
+      "description": "Local downloader/importer for public IUPHAR/GtoPdb interaction TSV and BindingDB TSV archive manifests; ChEMBL remains online-only by default because its SQLite archive is multi-GB."
+    },
+    {
+      "id": "server.neuropharm.service",
+      "kind": "module",
+      "status": "tested",
+      "description": "Service that imports/searches evidence, installs the basics pack, builds evidence packs, generates graph specs, persists analysis runs, and serves local database operations."
+    },
+    {
+      "id": "prompt.neuropharm.policy",
+      "kind": "interface",
+      "status": "tested",
+      "description": "System prompt policy for local-database-first neuropharmacology, built-in basics-pack memory, sub-1GB local DB defaults, power-user extrapolation labels, research protocol ranges, and renderable Mermaid flowchart syntax."
+    },
+    {
+      "id": "web.neuropharm.workspace",
+      "kind": "module",
+      "status": "tested",
+      "description": "Research workspace cards, live analysis console, domain prompt presets for M1/AF710B/niche targets, standardized graph rendering, and Mermaid flowchart rendering."
+    },
+    {
+      "id": "web.neuropharm.database",
+      "kind": "module",
+      "status": "tested",
+      "description": "Database status, expanded basics-pack install, local download/search controls, live sync, and AF710B plus methylphenidate comparison UI."
+    },
+    {
+      "id": "web.neuropharm.product_cleanup",
+      "kind": "module",
+      "status": "tested",
+      "description": "Reduced visible coding-agent chrome by removing the compact composer overflow menu and updating remaining T3 Code labels."
+    },
+    {
+      "id": "docs.neuropharm.readme",
+      "kind": "module",
+      "status": "tested",
+      "description": "Top-level README describes the neuropharmacology research product instead of the old coding-agent shell."
+    },
+    {
+      "id": "contracts.neuropharm.basics_pack",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Shared schemas for installing the local basics pack and returning imported evidence records plus topic metadata."
+    },
+    {
+      "id": "rpc.neuropharm.basics_pack",
+      "kind": "interface",
+      "status": "tested",
+      "description": "WebSocket, environment API, and web RPC method for neuropharm.installBasicsPack."
+    },
+    {
+      "id": "server.neuropharm.basics_pack",
+      "kind": "module",
+      "status": "tested",
+      "description": "Expanded built-in local primer and cheat-sheet documents for M1/CHRM1, AF710B aliases, cognitive task-domain scoring, and diagram syntax."
+    },
+    {
+      "id": "web.session.phase_recovery",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Client session phase derivation treats interrupted/error orchestration states as ready so the composer does not stay stuck working."
+    },
+    {
+      "id": "server.neuropharm.local_status_resilience",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Local database status degrades to not_downloaded snapshots when an older SQLite file is missing local snapshot tables; migration 34 repairs stale databases on startup."
+    },
+    {
+      "id": "prompt.neuropharm.local_evidence_contract",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Prompt contract forbids shell/file-search discovery for neuropharm local evidence and requires app local APIs/basics-pack/receptor DB surfaces before live literature."
+    },
+    {
+      "id": "web.neuropharm.graph_renderer_network",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Structured renderer for target_network neuropharm-graph artifacts with compounds, targets, groups, confidence/evidence labels, and notes."
+    },
+    {
+      "id": "web.neuropharm.mermaid_renderer",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Renderer for Mermaid flowcharts that displays connected lanes/nodes without dumping raw edge text."
+    },
+    {
+      "id": "contracts.neuropharm.local_database_1_5gb",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Shared schemas accept the expanded under-1.5GB local source set: IUPHAR reference TSVs plus BindingDB all-measurements, ChEMBL subset, PDSP Ki, and assay archive snapshots."
+    },
+    {
+      "id": "server.neuropharm.local_database_streaming_1_5gb",
+      "kind": "module",
+      "status": "tested",
+      "description": "Local database manifest, status, and downloader support the expanded source set and stream large archives to disk with checksum tracking instead of buffering archives in memory."
+    },
+    {
+      "id": "prompt.neuropharm.local_database_1_5gb_contract",
+      "kind": "interface",
+      "status": "tested",
+      "description": "System prompt tells the model to use the expanded under-1.5GB local source set and the built-in auto-render graph formats without shell/file-search work logs."
+    },
+    {
+      "id": "web.neuropharm.database_source_controls_1_5gb",
+      "kind": "module",
+      "status": "tested",
+      "description": "Database console downloads and searches the full local manifest dynamically and presents archive/reference sources without hardcoded two-source assumptions."
+    },
+    {
+      "id": "web.neuropharm.standard_graph_autorender",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Chat markdown auto-renders neuropharm-graph JSON as standardized target-network, radar, heatmap, timeline, and bar panels; browser tests verify rendered output rather than raw code blocks."
+    },
+    {
+      "id": "web.neuropharm.automatic_prompt_surface",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Neuropharm prompt support is built into composer behavior without a visible Domains strip or manual domain menu."
+    },
+    {
+      "id": "web.neuropharm.graph_render_performance",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Scientific graph renderers memoize derived series, bound rendered shapes, and keep heavy chart layouts stable for long model outputs."
+    },
+    {
+      "id": "web.neuropharm.diagram_hardening",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Chat markdown handles supported Mermaid flowchart variants, invalid graph JSON fallback, and standardized diagram output without raw edge dumps."
+    },
+    {
+      "id": "artifacts.neuropharm.xlsx_tracker",
+      "kind": "module",
+      "status": "tested",
+      "description": "Local XLSX research tracker for compounds, receptor interactions, evidence claims, graph specs, risks, and follow-up tasks."
+    },
+    {
+      "id": "prompt.neuropharm.automatic_artifacts",
+      "kind": "interface",
+      "status": "tested",
+      "description": "System prompt tells the model to auto-use local databases, graph JSON, Mermaid diagrams, and the tracker schema without requiring the user to choose domains."
+    },
+    {
+      "id": "server.neuropharm.analysis_local_db_grounding",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Analysis automatically installs/searches basics pack, consults local receptor interactions, and includes local database status evidence in estimates."
+    },
+    {
+      "id": "server.neuropharm.db_backed_graph_specs",
+      "kind": "interface",
+      "status": "tested",
+      "description": "Analysis and comparison graph specs include target-network, receptor radar, risk heatmap, task matrix, and timeline outputs derived from local/cached interaction records where available."
+    },
+    {
+      "id": "prompt.neuropharm.db_graph_contract",
+      "kind": "interface",
+      "status": "tested",
+      "description": "System prompt explicitly requires database-backed graph artifacts and local-row evidence before mechanism diagrams."
+    },
+    {
+      "id": "tests.neuropharm.db_graph_grounding",
+      "kind": "module",
+      "status": "tested",
+      "description": "Regression tests verify local evidence is used in analysis outputs and graph specs are present/renderable."
+    }
+  ],
+  "edges": [
+    {
+      "from": "contracts.neuropharm.analysis",
+      "to": "rpc.neuropharm.analysis",
+      "type": "dependency"
+    },
+    {
+      "from": "contracts.neuropharm.database",
+      "to": "rpc.neuropharm.database",
+      "type": "dependency"
+    },
+    {
+      "from": "contracts.neuropharm.local_database",
+      "to": "rpc.neuropharm.local_database",
+      "type": "dependency"
+    },
+    {
+      "from": "rpc.neuropharm.analysis",
+      "to": "server.neuropharm.service",
+      "type": "data_flow"
+    },
+    {
+      "from": "rpc.neuropharm.database",
+      "to": "server.neuropharm.connectors",
+      "type": "data_flow"
+    },
+    {
+      "from": "rpc.neuropharm.local_database",
+      "to": "server.neuropharm.local_databases",
+      "type": "data_flow"
+    },
+    {
+      "from": "server.neuropharm.service",
+      "to": "persistence.neuropharm.library",
+      "type": "dependency"
+    },
+    {
+      "from": "server.neuropharm.connectors",
+      "to": "persistence.neuropharm.database",
+      "type": "dependency"
+    },
+    {
+      "from": "server.neuropharm.local_databases",
+      "to": "persistence.neuropharm.local_snapshots",
+      "type": "dependency"
+    },
+    {
+      "from": "server.neuropharm.local_databases",
+      "to": "server.neuropharm.service",
+      "type": "dependency"
+    },
+    {
+      "from": "prompt.neuropharm.policy",
+      "to": "server.neuropharm.service",
+      "type": "dependency"
+    },
+    {
+      "from": "rpc.neuropharm.analysis",
+      "to": "web.neuropharm.workspace",
+      "type": "data_flow"
+    },
+    {
+      "from": "rpc.neuropharm.database",
+      "to": "web.neuropharm.database",
+      "type": "data_flow"
+    },
+    {
+      "from": "rpc.neuropharm.local_database",
+      "to": "web.neuropharm.database",
+      "type": "data_flow"
+    },
+    {
+      "from": "web.neuropharm.product_cleanup",
+      "to": "web.neuropharm.workspace",
+      "type": "dependency"
+    },
+    {
+      "from": "contracts.neuropharm.basics_pack",
+      "to": "rpc.neuropharm.basics_pack",
+      "type": "dependency"
+    },
+    {
+      "from": "rpc.neuropharm.basics_pack",
+      "to": "server.neuropharm.service",
+      "type": "data_flow"
+    },
+    {
+      "from": "server.neuropharm.basics_pack",
+      "to": "server.neuropharm.service",
+      "type": "dependency"
+    },
+    {
+      "from": "server.neuropharm.basics_pack",
+      "to": "persistence.neuropharm.library",
+      "type": "data_flow"
+    },
+    {
+      "from": "rpc.neuropharm.basics_pack",
+      "to": "web.neuropharm.database",
+      "type": "data_flow"
+    },
+    {
+      "from": "server.neuropharm.basics_pack",
+      "to": "prompt.neuropharm.policy",
+      "type": "dependency"
+    },
+    {
+      "from": "server.neuropharm.local_status_resilience",
+      "to": "web.neuropharm.database",
+      "type": "data_flow"
+    },
+    {
+      "from": "web.session.phase_recovery",
+      "to": "web.neuropharm.workspace",
+      "type": "dependency"
+    },
+    {
+      "from": "persistence.neuropharm.local_snapshots",
+      "to": "server.neuropharm.local_status_resilience",
+      "type": "dependency"
+    },
+    {
+      "from": "prompt.neuropharm.local_evidence_contract",
+      "to": "server.neuropharm.service",
+      "type": "dependency"
+    },
+    {
+      "from": "prompt.neuropharm.local_evidence_contract",
+      "to": "web.neuropharm.workspace",
+      "type": "data_flow"
+    },
+    {
+      "from": "web.neuropharm.graph_renderer_network",
+      "to": "web.neuropharm.workspace",
+      "type": "dependency"
+    },
+    {
+      "from": "web.neuropharm.mermaid_renderer",
+      "to": "web.neuropharm.workspace",
+      "type": "dependency"
+    },
+    {
+      "from": "contracts.neuropharm.local_database_1_5gb",
+      "to": "rpc.neuropharm.local_database",
+      "type": "dependency"
+    },
+    {
+      "from": "contracts.neuropharm.local_database_1_5gb",
+      "to": "server.neuropharm.local_database_streaming_1_5gb",
+      "type": "dependency"
+    },
+    {
+      "from": "server.neuropharm.local_database_streaming_1_5gb",
+      "to": "persistence.neuropharm.local_snapshots",
+      "type": "dependency"
+    },
+    {
+      "from": "server.neuropharm.local_database_streaming_1_5gb",
+      "to": "web.neuropharm.database_source_controls_1_5gb",
+      "type": "data_flow"
+    },
+    {
+      "from": "prompt.neuropharm.local_database_1_5gb_contract",
+      "to": "server.neuropharm.service",
+      "type": "dependency"
+    },
+    {
+      "from": "prompt.neuropharm.local_database_1_5gb_contract",
+      "to": "web.neuropharm.standard_graph_autorender",
+      "type": "data_flow"
+    },
+    {
+      "from": "web.neuropharm.standard_graph_autorender",
+      "to": "web.neuropharm.workspace",
+      "type": "dependency"
+    },
+    {
+      "from": "web.neuropharm.database_source_controls_1_5gb",
+      "to": "web.neuropharm.database",
+      "type": "dependency"
+    },
+    {
+      "from": "web.neuropharm.automatic_prompt_surface",
+      "to": "web.neuropharm.workspace",
+      "type": "dependency"
+    },
+    {
+      "from": "prompt.neuropharm.automatic_artifacts",
+      "to": "web.neuropharm.automatic_prompt_surface",
+      "type": "data_flow"
+    },
+    {
+      "from": "prompt.neuropharm.automatic_artifacts",
+      "to": "web.neuropharm.diagram_hardening",
+      "type": "data_flow"
+    },
+    {
+      "from": "web.neuropharm.graph_render_performance",
+      "to": "web.neuropharm.workspace",
+      "type": "dependency"
+    },
+    {
+      "from": "web.neuropharm.diagram_hardening",
+      "to": "web.neuropharm.workspace",
+      "type": "dependency"
+    },
+    {
+      "from": "artifacts.neuropharm.xlsx_tracker",
+      "to": "prompt.neuropharm.automatic_artifacts",
+      "type": "dependency"
+    },
+    {
+      "from": "server.neuropharm.analysis_local_db_grounding",
+      "to": "server.neuropharm.service",
+      "type": "dependency"
+    },
+    {
+      "from": "server.neuropharm.db_backed_graph_specs",
+      "to": "server.neuropharm.service",
+      "type": "dependency"
+    },
+    {
+      "from": "server.neuropharm.analysis_local_db_grounding",
+      "to": "server.neuropharm.db_backed_graph_specs",
+      "type": "data_flow"
+    },
+    {
+      "from": "prompt.neuropharm.db_graph_contract",
+      "to": "server.neuropharm.service",
+      "type": "dependency"
+    },
+    {
+      "from": "tests.neuropharm.db_graph_grounding",
+      "to": "server.neuropharm.analysis_local_db_grounding",
+      "type": "dependency"
+    },
+    {
+      "from": "tests.neuropharm.db_graph_grounding",
+      "to": "server.neuropharm.db_backed_graph_specs",
+      "type": "dependency"
+    }
+  ],
+  "work_plan": [
+    {
+      "node_id": "server.neuropharm.analysis_local_db_grounding",
+      "status": "tested"
+    },
+    {
+      "node_id": "server.neuropharm.db_backed_graph_specs",
+      "status": "tested"
+    },
+    {
+      "node_id": "prompt.neuropharm.db_graph_contract",
+      "status": "tested"
+    },
+    {
+      "node_id": "tests.neuropharm.db_graph_grounding",
+      "status": "tested"
+    }
+  ],
+  "test_status": "tested",
+  "verification": [
+    {
+      "cmd": "python3 scripts/tools/rpg_builder.py --write --rpg-mode minimal --dep-depth 1 --include-tests",
+      "ok": false,
+      "note": "Required helper is absent: scripts/tools/rpg_builder.py."
+    },
+    {
+      "cmd": "python3 scripts/validate_rpg.py",
+      "ok": false,
+      "note": "Required validator is absent: scripts/validate_rpg.py."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter t3 test src/neuropharm/NeuropharmService.test.ts src/neuropharm/NeuropharmPromptPolicy.test.ts",
+      "ok": true,
+      "note": "2 files and 11 neuropharm service/prompt tests passed."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun run --filter @t3tools/web test:browser src/components/ChatMarkdown.browser.tsx",
+      "ok": true,
+      "note": "Browser graph/markdown rendering tests passed."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun fmt",
+      "ok": true,
+      "note": "oxfmt completed."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun lint",
+      "ok": true,
+      "note": "Exited 0 with 9 unrelated existing warnings in ChatView/clientPersistenceStorage/catalog.test."
+    },
+    {
+      "cmd": "PATH=\"$HOME/.bun/bin:$PATH\" bun typecheck",
+      "ok": true,
+      "note": "13/13 package typecheck tasks passed."
+    }
+  ]
+}
