@@ -39,6 +39,10 @@ import { sanitizeThreadErrorMessage } from "./rpc/transportError";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
 const isProviderDriverKindValue = Schema.is(ProviderDriverKind);
 
+function createRecord<Key extends PropertyKey, Value>(): Record<Key, Value> {
+  return Object.create(null) as Record<Key, Value>;
+}
+
 export interface EnvironmentState {
   projectIds: ProjectId[];
   projectById: Record<ProjectId, Project>;
@@ -1083,16 +1087,18 @@ function syncEnvironmentShellSnapshot(
   const nextProjects = snapshot.projects.map((project) => mapProject(project, environmentId));
   const nextThreadIds = new Set<ThreadId>();
   const threadIds: ThreadId[] = [];
-  const threadIdsByProjectId: Record<ProjectId, ThreadId[]> = {};
-  const threadShellById: Record<ThreadId, ThreadShell> = {};
-  const threadSessionById: Record<ThreadId, ThreadSession | null> = {};
-  const threadTurnStateById: Record<ThreadId, ThreadTurnState> = {};
-  const sidebarThreadSummaryById: Record<ThreadId, SidebarThreadSummary> = {};
+  const threadIdsByProjectId = createRecord<ProjectId, ThreadId[]>();
+  const threadShellById = createRecord<ThreadId, ThreadShell>();
+  const threadSessionById = createRecord<ThreadId, ThreadSession | null>();
+  const threadTurnStateById = createRecord<ThreadId, ThreadTurnState>();
+  const sidebarThreadSummaryById = createRecord<ThreadId, SidebarThreadSummary>();
 
   for (const thread of snapshot.threads) {
     if (nextThreadIds.has(thread.id)) {
       continue;
     }
+    // Malformed snapshots can repeat a thread id. Keep the first shell entry so
+    // all derived shell maps agree with the first index position.
     nextThreadIds.add(thread.id);
     threadIds.push(thread.id);
 

@@ -592,6 +592,44 @@ describe("shell snapshot sync", () => {
     expect(environmentState.threadIdsByProjectId[first.projectId]).toEqual([threadId]);
     expect(environmentState.threadShellById[threadId]?.title).toBe("First duplicate");
   });
+
+  it("stores server-provided ids as data keys during bulk shell sync", () => {
+    const threadId = ThreadId.make("__proto__");
+    const projectId = ProjectId.make("__proto__");
+    const thread = makeShellThread({
+      id: threadId,
+      projectId,
+      title: "Prototype-looking thread",
+    });
+
+    const next = syncServerShellSnapshot(
+      makeEmptyState(),
+      makeShellSnapshot(
+        [thread],
+        [
+          {
+            id: projectId,
+            title: "Prototype-looking project",
+            workspaceRoot: "/tmp/proto",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: "2026-02-27T00:00:00.000Z",
+            updatedAt: "2026-02-27T00:00:00.000Z",
+          },
+        ],
+      ),
+      localEnvironmentId,
+    );
+    const environmentState = localEnvironmentStateOf(next);
+
+    expect(Object.hasOwn(environmentState.threadIdsByProjectId, projectId)).toBe(true);
+    expect(Object.hasOwn(environmentState.threadShellById, threadId)).toBe(true);
+    expect(Object.hasOwn(environmentState.threadSessionById, threadId)).toBe(true);
+    expect(Object.hasOwn(environmentState.threadTurnStateById, threadId)).toBe(true);
+    expect(Object.hasOwn(environmentState.sidebarThreadSummaryById, threadId)).toBe(true);
+    expect(environmentState.threadIdsByProjectId[projectId]).toEqual([threadId]);
+    expect(environmentState.threadShellById[threadId]?.title).toBe("Prototype-looking thread");
+  });
 });
 
 describe("setThreadBranch", () => {
