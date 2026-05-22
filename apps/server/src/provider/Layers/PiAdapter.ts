@@ -1,5 +1,6 @@
 import {
   createAgentSession,
+  SessionManager,
   type AgentSession,
   type AgentSessionEvent,
   type CreateAgentSessionOptions,
@@ -63,6 +64,14 @@ function toMessage(cause: unknown, fallback: string): string {
     return cause.message;
   }
   return fallback;
+}
+
+function readPiResumeState(resumeCursor: unknown): { sessionFile: string } | undefined {
+  if (!resumeCursor || typeof resumeCursor !== "object") return undefined;
+  const cursor = resumeCursor as Record<string, unknown>;
+  return typeof cursor.sessionFile === "string" && cursor.sessionFile.trim().length > 0
+    ? { sessionFile: cursor.sessionFile }
+    : undefined;
 }
 
 function classifyToolItemType(toolName: string): CanonicalItemType {
@@ -439,13 +448,21 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
     const runtimeContext = yield* Effect.context<never>();
     const runFork = Effect.runForkWith(runtimeContext);
 
-    const sessionOptions: CreateAgentSessionOptions = {
-      cwd: input.cwd ?? serverConfig.cwd,
-    };
+    const piResumeState = readPiResumeState(input.resumeCursor);
+    const baseCwd = input.cwd ?? serverConfig.cwd;
 
     const piSession = yield* Effect.tryPromise({
       try: async () => {
-        const result = await createAgentSession(sessionOptions);
+        if (piResumeState) {
+          try {
+            const sessionManager = SessionManager.open(piResumeState.sessionFile);
+            const result = await createAgentSession({ cwd: baseCwd, sessionManager });
+            return result.session;
+          } catch {
+            // Session file inaccessible; fall through to a fresh session.
+          }
+        }
+        const result = await createAgentSession({ cwd: baseCwd });
         return result.session;
       },
       catch: (cause) =>
@@ -457,6 +474,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
         }),
     });
 
+    const piSessionFile = piSession.sessionFile;
+
     const session: ProviderSession = {
       threadId,
       provider: PROVIDER,
@@ -465,6 +484,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       runtimeMode: input.runtimeMode,
       ...(input.cwd ? { cwd: input.cwd } : {}),
       ...(modelSelection?.model ? { model: modelSelection.model } : {}),
+      ...(piSessionFile !== undefined ? { resumeCursor: { sessionFile: piSessionFile } } : {}),
       createdAt: startedAt,
       updatedAt: startedAt,
     };
