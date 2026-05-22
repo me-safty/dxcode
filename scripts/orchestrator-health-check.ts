@@ -81,9 +81,13 @@ export function loadLocalEnvFiles(env: NodeJS.ProcessEnv = process.env): void {
 export function defaultHealthCheckConfig(env: NodeJS.ProcessEnv = process.env): HealthCheckConfig {
   const convexSiteUrl =
     envValue(env, "T3CODE_HEALTH_CONVEX_SITE_URL") ?? envValue(env, "ORCHESTRATOR_BASE_URL");
+  const localBaseUrl = envValue(env, "T3CODE_HEALTH_LOCAL_BASE_URL") ?? "http://127.0.0.1:3773";
   return {
-    localBaseUrl: env.T3CODE_HEALTH_LOCAL_BASE_URL ?? "http://127.0.0.1:3773",
-    publicBaseUrl: env.T3CODE_HEALTH_PUBLIC_BASE_URL ?? "https://t3.olumbe.com",
+    localBaseUrl,
+    publicBaseUrl:
+      envValue(env, "T3CODE_HEALTH_PUBLIC_BASE_URL") ??
+      envValue(env, "T3CODE_PUBLIC_BASE_URL") ??
+      localBaseUrl,
     convexSiteUrl,
     alertEndpointUrl:
       envValue(env, "T3CODE_HEALTH_ALERT_URL") ??

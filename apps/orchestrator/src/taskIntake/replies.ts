@@ -28,6 +28,30 @@ export function buildTaskIntakeNeedsInputReply(input: {
   });
 }
 
+export function buildTaskIntakeNeedsProjectReply(input: {
+  readonly message: TaskIntakeMessage;
+  readonly projects: ReadonlyArray<{
+    readonly githubOwner: string;
+    readonly githubRepo: string;
+  }>;
+}): TaskIntakeReply {
+  const projectLines = input.projects.map(
+    (project) => `- \`${project.githubRepo}\` (${project.githubOwner}/${project.githubRepo})`,
+  );
+
+  return replyBase({
+    message: input.message,
+    suffix: "needs-project",
+    body: [
+      "I can help with this, but I need to know which project to use.",
+      "",
+      ...(projectLines.length > 0
+        ? ["Please reply with one of these repo names to continue:", ...projectLines]
+        : ["No projects are configured yet, so I cannot start this request."]),
+    ].join("\n"),
+  });
+}
+
 export function buildTaskIntakeAcceptedReply(input: {
   readonly message: TaskIntakeMessage;
   readonly taskId: string;

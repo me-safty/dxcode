@@ -132,13 +132,10 @@ describe("ssh tunnel scripts", () => {
 
   it("builds the remote t3 runner with a node script override", () => {
     const script = buildRemoteT3RunnerScript({
-      nodeScriptPath: "/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs",
+      nodeScriptPath: "<repo-root>/apps/server/dist/bin.mjs",
     });
 
-    assert.include(
-      script,
-      "T3_NODE_SCRIPT_PATH='/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs'",
-    );
+    assert.include(script, "T3_NODE_SCRIPT_PATH='<repo-root>/apps/server/dist/bin.mjs'");
     assert.include(script, 'exec node "$T3_NODE_SCRIPT_PATH" "$@"');
   });
 

@@ -74,8 +74,8 @@ function queuedMessage() {
     raw: {},
     author: {
       userId: "U1",
-      userName: "vivek",
-      fullName: "Vivek",
+      userName: "test-user",
+      fullName: "Test User",
       isBot: false,
       isMe: false,
     },

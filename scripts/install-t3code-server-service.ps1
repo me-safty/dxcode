@@ -1,7 +1,9 @@
 #Requires -RunAsAdministrator
 
 param(
-  [switch]$StopExistingPortOwner
+  [switch]$StopExistingPortOwner,
+  [string]$LocalUrl = $(if ($env:T3CODE_LOCAL_BASE_URL) { $env:T3CODE_LOCAL_BASE_URL.TrimEnd("/") + "/" } else { "http://127.0.0.1:3773/" }),
+  [string]$PublicUrl = $(if ($env:T3CODE_PUBLIC_BASE_URL) { $env:T3CODE_PUBLIC_BASE_URL.TrimEnd("/") + "/" } else { $LocalUrl })
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,9 +16,7 @@ $LogDir = Join-Path $RepoRoot "logs"
 $NssmCommand = Get-Command nssm.exe -ErrorAction SilentlyContinue
 $Nssm = if ($NssmCommand) { $NssmCommand.Source } else { $null }
 $OldScheduledTaskName = "t3code-server"
-$LocalUrl = "http://127.0.0.1:3773/"
-$PublicUrl = "https://t3.olumbe.com/"
-$BridgeStatusUrl = "https://t3.olumbe.com/api/execution/runs/status"
+$BridgeStatusUrl = $PublicUrl.TrimEnd("/") + "/api/execution/runs/status"
 
 function Write-Step {
   param([string]$Message)

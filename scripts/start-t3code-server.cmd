@@ -25,7 +25,7 @@ REM Windows services installed through NSSM currently run as LocalSystem. In tha
 REM context USERPROFILE points at systemprofile, so CLIs like codex/gh cannot see
 REM Vivek's installed binaries or auth files unless we hydrate the user profile
 REM explicitly. Default to the profile that owns this checkout:
-REM   C:\Users\Vivek\Affil\t3code -> C:\Users\Vivek
+REM   <repo-root> -> <windows-user-profile>
 if "%T3CODE_SERVICE_USERPROFILE%"=="" (
   for %%I in ("%REPO_ROOT%\..\..") do set "T3CODE_SERVICE_USERPROFILE=%%~fI"
 )

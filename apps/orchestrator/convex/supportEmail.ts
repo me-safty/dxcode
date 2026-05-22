@@ -19,24 +19,6 @@ import { internalAction } from "./_generated/server.js";
 
 const RESEND_API_BASE_URL = "https://api.resend.com";
 
-const SUPPORT_EMAIL_TRIAGE_PROMPT = [
-  "You are triaging a support email for nextcard. Treat the issue as related to the nextcard repo unless the evidence clearly says otherwise.",
-  "",
-  "Before doing any triage, decide whether the top-level email is actually from a user reporting an active issue. The email may be a follow-up from staff, such as someone at nextcard.com or affil.ai, with quoted user context below it. If staff is saying the issue was fixed, asking the user for more information, asking the user to retry something, or otherwise handling the thread without a new user-reported problem, do not investigate the quoted issue. Respond briefly that no triage is needed and explain why.",
-  "",
-  "Only do the triage work below when the current top-level message is clearly from a user with an active issue, or when staff is explicitly forwarding a user-reported issue for investigation.",
-  "",
-  "First classify the request: product bug, account/data issue, billing/subscription issue, user confusion, feature request, or spam/no-action. Not every email needs a code change.",
-  "",
-  "Identify the affected user or account from the email. Use Convex production data to find the related nextcard user document. Report the Convex prod user document id, the `https://nextcard.com/admin/users/[id]` admin URL where `[id]` is that Convex user document id, and the Clerk id when present. Do not report Convex external ids.",
-  "",
-  "Use PostHog CLI/MCP and the email details to find matching PostHog persons and activity around the likely time of the issue. Include full PostHog person URLs in the format `https://us.posthog.com/project/157083/person/<person_id>`. Do not use relative links. Summarize relevant recent events, sessions, errors, or absence of evidence.",
-  "",
-  "Inspect the nextcard repo when code behavior is relevant, but do not make code changes and do not open a PR. If a code change appears necessary, describe the recommended change at a high level with the likely files or systems to inspect.",
-  "",
-  "End with a concise triage summary: classification, user/account links, observed evidence, recommended next steps, and any missing information needed.",
-].join("\n");
-
 const SUPPORT_EMAIL_AGENT_PROMPT = [
   "- This task was started from a support email intake.",
   "- The user request below contains the received email content, including headers, body, and attachment links.",
@@ -133,14 +115,44 @@ function t3WebAppBaseUrl() {
 }
 
 function supportGroupAddress() {
-  return envValue("SUPPORT_EMAIL_GROUP_ADDRESS") ?? "help@nextcard.com";
+  return envValue("SUPPORT_EMAIL_GROUP_ADDRESS") ?? "support@example.com";
 }
 
 function internalEmailDomains() {
-  return (envValue("SUPPORT_EMAIL_INTERNAL_DOMAINS") ?? "nextcard.com")
+  return (envValue("SUPPORT_EMAIL_INTERNAL_DOMAINS") ?? "example.com")
     .split(",")
     .map((domain) => domain.trim().toLowerCase())
     .filter(Boolean);
+}
+
+function supportEmailTriagePrompt() {
+  const productName = envValue("SUPPORT_EMAIL_PRODUCT_NAME") ?? "the configured product";
+  const repoName = envValue("SUPPORT_EMAIL_REPO_NAME") ?? "the configured repo";
+  const adminUserUrlTemplate =
+    envValue("SUPPORT_EMAIL_ADMIN_USER_URL_TEMPLATE") ??
+    "the configured admin user URL for the affected account";
+  const postHogPersonUrlTemplate =
+    envValue("SUPPORT_EMAIL_POSTHOG_PERSON_URL_TEMPLATE") ??
+    "the configured PostHog person URL for the affected user";
+  const staffDomains = internalEmailDomains().join(", ") || "configured internal domains";
+
+  return [
+    `You are triaging a support email for ${productName}. Treat the issue as related to the ${repoName} repo unless the evidence clearly says otherwise.`,
+    "",
+    `Before doing any triage, decide whether the top-level email is actually from a user reporting an active issue. The email may be a follow-up from staff at ${staffDomains}, with quoted user context below it. If staff is saying the issue was fixed, asking the user for more information, asking the user to retry something, or otherwise handling the thread without a new user-reported problem, do not investigate the quoted issue. Respond briefly that no triage is needed and explain why.`,
+    "",
+    "Only do the triage work below when the current top-level message is clearly from a user with an active issue, or when staff is explicitly forwarding a user-reported issue for investigation.",
+    "",
+    "First classify the request: product bug, account/data issue, billing/subscription issue, user confusion, feature request, or spam/no-action. Not every email needs a code change.",
+    "",
+    `Identify the affected user or account from the email. Use Convex production data to find the related ${productName} user document. Report the Convex prod user document id, the admin URL using ${adminUserUrlTemplate}, and the Clerk id when present. Do not report Convex external ids.`,
+    "",
+    `Use PostHog CLI/MCP and the email details to find matching PostHog persons and activity around the likely time of the issue. Include full PostHog person URLs using ${postHogPersonUrlTemplate}. Do not use relative links. Summarize relevant recent events, sessions, errors, or absence of evidence.`,
+    "",
+    `Inspect the ${repoName} repo when code behavior is relevant, but do not make code changes and do not open a PR. If a code change appears necessary, describe the recommended change at a high level with the likely files or systems to inspect.`,
+    "",
+    "End with a concise triage summary: classification, user/account links, observed evidence, recommended next steps, and any missing information needed.",
+  ].join("\n");
 }
 
 function debuggingChannelId() {
@@ -1032,7 +1044,7 @@ async function processReceivedEmail(ctx: any, email: ResendReceivedEmail) {
       },
     },
     {
-      initialTriagePrompt: SUPPORT_EMAIL_TRIAGE_PROMPT,
+      initialTriagePrompt: supportEmailTriagePrompt(),
       initialPromptContext: SUPPORT_EMAIL_AGENT_PROMPT,
     },
   );

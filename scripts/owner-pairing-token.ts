@@ -51,10 +51,12 @@ export function resolveOwnerPairingDbPath(
 
 export function resolveOwnerPairingUrl(
   env: NodeJS.ProcessEnv = process.env,
-  baseUrl = "https://t3.olumbe.com",
+  baseUrl = env.T3CODE_OWNER_PAIRING_BASE_URL?.trim() ||
+    env.T3CODE_PUBLIC_BASE_URL?.trim() ||
+    env.T3CODE_LOCAL_BASE_URL?.trim(),
 ): string | null {
   const token = env[OWNER_PAIRING_TOKEN_ENV]?.trim();
-  if (!token) {
+  if (!token || !baseUrl) {
     return null;
   }
 

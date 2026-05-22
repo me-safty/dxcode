@@ -79,20 +79,20 @@ describe("chatSdkThreadIdForLifecycleReply", () => {
         pullRequestUrl: "https://github.com/acme/app/pull/42",
         deploymentPreviews: [
           {
-            environment: "Preview - nextcard-web",
-            url: "https://nextcard-web-abc123.nextcard.com",
+            environment: "Preview - example-web",
+            url: "https://example-web-abc123.example-app.com",
           },
           {
-            environment: "Preview - nextcard-mcp",
-            url: "https://nextcard-mcp-abc123.nextcard.com",
+            environment: "Preview - example-api",
+            url: "https://example-api-abc123.example-app.com",
           },
         ],
       }),
     ).toBe(
       [
         "Pull request: https://github.com/acme/app/pull/42",
-        "Preview (Preview - nextcard-web): https://nextcard-web-abc123.nextcard.com",
-        "Preview (Preview - nextcard-mcp): https://nextcard-mcp-abc123.nextcard.com",
+        "Preview (Preview - example-web): https://example-web-abc123.example-app.com",
+        "Preview (Preview - example-api): https://example-api-abc123.example-app.com",
       ].join("\n"),
     );
   });

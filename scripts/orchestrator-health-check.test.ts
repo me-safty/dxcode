@@ -45,13 +45,13 @@ describe("orchestrator-health-check", () => {
     expect(
       parseEnvFileContents(`
 # ignored
-ORCHESTRATOR_BASE_URL=https://scrupulous-fly-947.convex.site
-CONVEX_DEPLOYMENT=dev:scrupulous-fly-947 # team: affil, project: engineering
+ORCHESTRATOR_BASE_URL=https://<your-dev-convex-site>
+CONVEX_DEPLOYMENT=dev:example-dev-deployment # team: example, project: example-project
 bad-line
 `),
     ).toEqual([
-      ["ORCHESTRATOR_BASE_URL", "https://scrupulous-fly-947.convex.site"],
-      ["CONVEX_DEPLOYMENT", "dev:scrupulous-fly-947"],
+      ["ORCHESTRATOR_BASE_URL", "https://<your-dev-convex-site>"],
+      ["CONVEX_DEPLOYMENT", "dev:example-dev-deployment"],
     ]);
   });
 

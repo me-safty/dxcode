@@ -3,7 +3,10 @@ import * as DateTime from "effect/DateTime";
 
 import { isValidTaskStatusTransition } from "../src/domain/taskStatus.ts";
 import type { TaskStatus } from "../src/domain/taskStatus.ts";
-import { resolveMentionedProjectAlias } from "../src/taskIntake/projectRouting.ts";
+import {
+  resolveMentionedProject,
+  type IntakeProjectRouteCandidate,
+} from "../src/taskIntake/projectRouting.ts";
 import type { Id } from "./_generated/dataModel.js";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server.js";
 
@@ -42,6 +45,20 @@ const linkKind = v.union(
   v.literal("webhook_event"),
   v.literal("github_pr"),
 );
+
+const taskIntakeProjectOption = v.object({
+  projectId: v.id("projects"),
+  repoName: v.string(),
+  githubOwner: v.string(),
+  githubRepo: v.string(),
+});
+
+interface TaskIntakeProjectRow extends IntakeProjectRouteCandidate {
+  readonly _id: Id<"projects">;
+  readonly repoName: string;
+  readonly githubOwner: string;
+  readonly githubRepo: string;
+}
 
 function taskReturn() {
   return v.object({
@@ -223,6 +240,10 @@ export const resolveTaskIntakeMessage = internalMutation({
       taskId: v.optional(v.id("tasks")),
     }),
     v.object({
+      status: v.literal("needs_project"),
+      projects: v.array(taskIntakeProjectOption),
+    }),
+    v.object({
       status: v.literal("created"),
       taskId: v.id("tasks"),
       projectId: v.id("projects"),
@@ -322,22 +343,19 @@ export const resolveTaskIntakeMessage = internalMutation({
       return routedExistingTask(task._id);
     }
 
-    const project = await resolveProjectForTaskIntake(ctx, {
-      source: args.source,
-      teamId: args.teamId,
+    const projectResolution = await resolveProjectForTaskIntake(ctx, {
       text: args.text,
     });
-    if (project === null) {
-      throw new Error(
-        args.teamId
-          ? `No Project is configured for ${args.source} team ${args.teamId}`
-          : `No default Project is configured for ${args.source} ingress`,
-      );
+    if (projectResolution.project === null) {
+      return {
+        status: "needs_project" as const,
+        projects: projectResolution.projects.map(toTaskIntakeProjectOption),
+      };
     }
 
     const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const taskId = await ctx.db.insert("tasks", {
-      projectId: project._id,
+      projectId: projectResolution.project._id,
       title: args.title || `${args.source} task`,
       status: "ready",
       createdFrom: args.source,
@@ -367,7 +385,7 @@ export const resolveTaskIntakeMessage = internalMutation({
     return {
       status: "created" as const,
       taskId,
-      projectId: project._id,
+      projectId: projectResolution.project._id,
     };
   },
 });
@@ -406,23 +424,21 @@ export const ensureTaskFromLinearIngress = internalMutation({
       };
     }
 
-    const project = await resolveProjectForLinear(
-      ctx,
-      args.teamId,
-      `${args.title ?? ""}\n${args.body}`,
-    );
-    if (project === null) {
+    const projectResolution = await resolveProjectForTaskIntake(ctx, {
+      text: `${args.title ?? ""}\n${args.body}`,
+    });
+    if (projectResolution.project === null) {
       throw new Error(
-        args.teamId
-          ? `No Project is configured for Linear team ${args.teamId}`
-          : "No default Project is configured for Linear ingress",
+        `No Project mention found in Linear ingress. Available projects: ${
+          projectResolution.projects.map((project) => project.githubRepo).join(", ") || "none"
+        }`,
       );
     }
 
     const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const title = (args.title ?? args.issueIdentifier ?? args.body.slice(0, 80)) || "Linear Task";
     const taskId = await ctx.db.insert("tasks", {
-      projectId: project._id,
+      projectId: projectResolution.project._id,
       title,
       status: "ready",
       createdFrom: "linear",
@@ -455,7 +471,7 @@ export const ensureTaskFromLinearIngress = internalMutation({
 
     return {
       taskId,
-      projectId: project._id,
+      projectId: projectResolution.project._id,
       created: true,
     };
   },
@@ -624,54 +640,23 @@ export const recordTaskIntakeLifecycleReplyPosted = internalMutation({
   },
 });
 
-async function resolveProjectForLinear(ctx: any, teamId: string | undefined, text: string) {
-  return resolveProjectForTaskIntake(ctx, { source: "linear", teamId, text });
+async function resolveProjectForTaskIntake(ctx: any, input: { readonly text: string }) {
+  const projects = (await ctx.db
+    .query("projects")
+    .collect()) as ReadonlyArray<TaskIntakeProjectRow>;
+  return {
+    project: resolveMentionedProject(input.text, projects),
+    projects,
+  };
 }
 
-async function resolveProjectForTaskIntake(
-  ctx: any,
-  input: { readonly source: string; readonly teamId: string | undefined; readonly text: string },
-) {
-  const requestedRepo = resolveMentionedProjectAlias(input.text) ?? "nextcard";
-  const requestedProject = await findProjectByRepoName(ctx, requestedRepo);
-  if (requestedProject !== null) {
-    return requestedProject;
-  }
-
-  if (input.teamId !== undefined) {
-    const exactRows = await ctx.db
-      .query("projects")
-      .withIndex("by_linear_team_project", (q: any) =>
-        input.source === "linear"
-          ? q.eq("linearTeamId", input.teamId).eq("linearProjectId", undefined)
-          : q.eq("linearTeamId", undefined).eq("linearProjectId", undefined),
-      )
-      .take(2);
-    if (exactRows.length === 1) {
-      return exactRows[0];
-    }
-  }
-
-  const projects = await ctx.db.query("projects").take(2);
-  return projects.length === 1 ? projects[0] : null;
-}
-
-async function findProjectByRepoName(ctx: any, repoName: "nextcard" | "t3code") {
-  const row = await ctx.db
-    .query("projects")
-    .withIndex("by_repo", (q: any) => q.eq("githubOwner", "affil-ai").eq("githubRepo", repoName))
-    .unique();
-  if (row !== null) {
-    return row;
-  }
-
-  const rows = await ctx.db
-    .query("projects")
-    .withIndex("by_workspace_root", (q: any) =>
-      q.eq("workspaceRoot", `C:\\Users\\Vivek\\Affil\\${repoName}`),
-    )
-    .take(1);
-  return rows[0] ?? null;
+function toTaskIntakeProjectOption(project: TaskIntakeProjectRow) {
+  return {
+    projectId: project._id,
+    repoName: project.repoName,
+    githubOwner: project.githubOwner,
+    githubRepo: project.githubRepo,
+  };
 }
 
 function taskIntakeEventPayload(args: {

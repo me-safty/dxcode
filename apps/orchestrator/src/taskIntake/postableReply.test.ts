@@ -60,17 +60,17 @@ describe("postableReplyBody", () => {
   it("builds T3 thread URLs from the public app base URL and scoped thread ref", () => {
     expect(
       buildT3ThreadUrl({
-        baseUrl: "https://t3.olumbe.com/",
+        baseUrl: "https://t3.example.com/",
         environmentId: "environment-local",
         t3ThreadId: "thread-123",
       }),
-    ).toBe("https://t3.olumbe.com/environment-local/thread-123");
+    ).toBe("https://t3.example.com/environment-local/thread-123");
   });
 
   it("builds a Slack task started card with an Open T3 button", () => {
     const message = postableTaskStartedStatus({
       kind: "slack_thread",
-      t3ThreadUrl: "https://t3.olumbe.com/environment-local/thread-123",
+      t3ThreadUrl: "https://t3.example.com/environment-local/thread-123",
     });
 
     expect(message).toMatchObject({
@@ -79,7 +79,9 @@ describe("postableReplyBody", () => {
         title: "Talk to Vevin in this thread",
       },
     });
-    expect(JSON.stringify(message)).toContain("https://t3.olumbe.com/environment-local/thread-123");
+    expect(JSON.stringify(message)).toContain(
+      "https://t3.example.com/environment-local/thread-123",
+    );
   });
 
   it("builds a Slack PR status card with PR and preview buttons", () => {
@@ -91,15 +93,15 @@ describe("postableReplyBody", () => {
       title: "Add checkout filter",
       repo: "acme/app",
       branch: "task/add-checkout-filter",
-      t3ThreadUrl: "https://t3.olumbe.com/environment-local/thread-123",
+      t3ThreadUrl: "https://t3.example.com/environment-local/thread-123",
       deploymentPreviews: [
         {
-          environment: "Preview - nextcard-web",
-          url: "https://nextcard-web.example.com",
+          environment: "Preview - example-web",
+          url: "https://example-web.example.com",
         },
         {
-          environment: "Preview - nextcard-mcp",
-          url: "https://nextcard-mcp.example.com",
+          environment: "Preview - example-api",
+          url: "https://example-api.example.com",
         },
       ],
     });
@@ -112,15 +114,15 @@ describe("postableReplyBody", () => {
     });
     expect(JSON.stringify(message)).toContain("View PR");
     expect(JSON.stringify(message)).not.toContain("Open T3");
-    expect(JSON.stringify(message)).toContain("https://nextcard-web.example.com");
-    expect(JSON.stringify(message)).toContain("https://nextcard-mcp.example.com");
+    expect(JSON.stringify(message)).toContain("https://example-web.example.com");
+    expect(JSON.stringify(message)).toContain("https://example-api.example.com");
   });
 
   it("renders every deployment preview as a button", () => {
     const postable = postablePullRequestStatus({
       kind: "slack_thread",
-      body: "Pull request: https://github.com/affil-ai/nextcard/pull/123",
-      pullRequestUrl: "https://github.com/affil-ai/nextcard/pull/123",
+      body: "Pull request: https://github.com/example-org/example-app/pull/123",
+      pullRequestUrl: "https://github.com/example-org/example-app/pull/123",
       deploymentPreviews: Array.from({ length: 7 }, (_, index) => ({
         environment: `Preview - app-${index + 1}`,
         url: `https://preview-${index + 1}.example.com`,
@@ -134,35 +136,35 @@ describe("postableReplyBody", () => {
   it("keeps all Nextcard deployment preview buttons paired to their own URLs", () => {
     const message = postablePullRequestStatus({
       kind: "slack_thread",
-      body: "Pull request: https://github.com/affil-ai/nextcard/pull/1382",
-      pullRequestUrl: "https://github.com/affil-ai/nextcard/pull/1382",
+      body: "Pull request: https://github.com/example-org/example-app/pull/1382",
+      pullRequestUrl: "https://github.com/example-org/example-app/pull/1382",
       title: "Add Slack PR preview smoke file",
-      repo: "affil-ai/nextcard",
+      repo: "example-org/example-app",
       branch: "t3code/slack-preview-smoke-file",
       deploymentPreviews: [
         {
-          environment: "Preview – nextcard-web",
-          url: "https://nextcard-web-preview.nextcard.com",
+          environment: "Preview – example-web",
+          url: "https://example-web-preview.example-app.com",
         },
         {
-          environment: "Preview – nextcard-mcp",
-          url: "https://nextcard-mcp-preview.nextcard.com",
+          environment: "Preview – example-api",
+          url: "https://example-api-preview.example-app.com",
         },
         {
-          environment: "Preview – nextcard-pdp",
-          url: "https://nextcard-pdp-preview.nextcard.com",
+          environment: "Preview – example-pdp",
+          url: "https://example-pdp-preview.example-app.com",
         },
       ],
     });
 
     const json = JSON.stringify(message);
 
-    expect(json).toContain("nextcard-web");
-    expect(json).toContain("https://nextcard-web-preview.nextcard.com");
-    expect(json).toContain("nextcard-mcp");
-    expect(json).toContain("https://nextcard-mcp-preview.nextcard.com");
-    expect(json).toContain("nextcard-pdp");
-    expect(json).toContain("https://nextcard-pdp-preview.nextcard.com");
+    expect(json).toContain("example-web");
+    expect(json).toContain("https://example-web-preview.example-app.com");
+    expect(json).toContain("example-api");
+    expect(json).toContain("https://example-api-preview.example-app.com");
+    expect(json).toContain("example-pdp");
+    expect(json).toContain("https://example-pdp-preview.example-app.com");
   });
 
   it("keeps Linear PR status as raw text", () => {
@@ -195,29 +197,29 @@ describe("postableReplyBody", () => {
   it("builds a Slack deployment-ready card with a deployment button", () => {
     const message = postableDeploymentReady({
       kind: "slack_thread",
-      environment: "Preview - nextcard-web",
-      url: "https://nextcard-web-preview.nextcard.com",
+      environment: "Preview - example-web",
+      url: "https://example-web-preview.example-app.com",
     });
 
     expect(message).toMatchObject({
       fallbackText:
-        "Deployment ready (Preview - nextcard-web): https://nextcard-web-preview.nextcard.com",
+        "Deployment ready (Preview - example-web): https://example-web-preview.example-app.com",
       card: {
-        title: "Preview - nextcard-web is ready",
+        title: "Preview - example-web is ready",
       },
     });
     expect(JSON.stringify(message)).toContain("Open deployment");
-    expect(JSON.stringify(message)).toContain("https://nextcard-web-preview.nextcard.com");
+    expect(JSON.stringify(message)).toContain("https://example-web-preview.example-app.com");
   });
 
   it("keeps Linear deployment-ready replies as raw text", () => {
     expect(
       postableDeploymentReady({
         kind: "linear_issue",
-        environment: "Preview - nextcard-web",
-        url: "https://nextcard-web-preview.nextcard.com",
+        environment: "Preview - example-web",
+        url: "https://example-web-preview.example-app.com",
       }),
-    ).toBe("Deployment ready (Preview - nextcard-web): https://nextcard-web-preview.nextcard.com");
+    ).toBe("Deployment ready (Preview - example-web): https://example-web-preview.example-app.com");
   });
 
   it("builds a Slack ops health alert card", () => {
@@ -229,14 +231,14 @@ describe("postableReplyBody", () => {
       failingChecks: [
         {
           name: "public T3",
-          details: "https://t3.olumbe.com -> HTTP 530",
+          details: "https://t3.example.com -> HTTP 530",
         },
       ],
       allChecks: [
         {
           name: "public T3",
           ok: false,
-          details: "https://t3.olumbe.com -> HTTP 530",
+          details: "https://t3.example.com -> HTTP 530",
         },
       ],
     });

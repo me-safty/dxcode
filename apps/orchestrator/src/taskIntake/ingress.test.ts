@@ -468,6 +468,50 @@ describe("handleTaskIntakeMessage", () => {
     expect(postedReplies).toHaveLength(0);
   });
 
+  it("asks for a project when the store cannot resolve one", async () => {
+    const postedReplies: TaskIntakeReply[] = [];
+    let materializeCalls = 0;
+    const deps = dependencies({
+      replies: postedReplies,
+      store: {
+        async resolveMessage() {
+          return {
+            status: "needs_project",
+            projects: [
+              {
+                projectId: "project-example-app",
+                repoName: "example-app",
+                githubOwner: "example-org",
+                githubRepo: "example-app",
+              },
+              {
+                projectId: "project-t3code",
+                repoName: "t3code",
+                githubOwner: "example-org",
+                githubRepo: "t3code",
+              },
+            ],
+          };
+        },
+      },
+      runtime: {
+        async materializeTaskRuntime() {
+          materializeCalls += 1;
+          throw new Error("should not materialize");
+        },
+      },
+    });
+
+    const result = await handleTaskIntakeMessage(baseMessage(), deps);
+
+    expect(result.resolution.type).toBe("needs_input");
+    expect(materializeCalls).toBe(0);
+    expect(postedReplies).toHaveLength(1);
+    expect(postedReplies[0]?.idempotencyKey).toBe("linear:event-1:needs-project");
+    expect(postedReplies[0]?.body).toContain("`example-app`");
+    expect(postedReplies[0]?.body).toContain("`t3code`");
+  });
+
   it("trusts short messages and relays them into a T3 task", async () => {
     const postedReplies: TaskIntakeReply[] = [];
     const acknowledgements: TaskIntakeMessage[] = [];

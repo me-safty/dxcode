@@ -9,7 +9,9 @@ param(
   [switch]$SkipHealthCheck,
   [switch]$DetachedRestart,
   [int]$DetachedRestartDelaySeconds = 5,
-  [switch]$RestartOnly
+  [switch]$RestartOnly,
+  [string]$LocalUrl = $(if ($env:T3CODE_LOCAL_BASE_URL) { $env:T3CODE_LOCAL_BASE_URL.TrimEnd("/") + "/" } else { "http://127.0.0.1:3773/" }),
+  [string]$PublicUrl = $(if ($env:T3CODE_PUBLIC_BASE_URL) { $env:T3CODE_PUBLIC_BASE_URL.TrimEnd("/") + "/" } else { $LocalUrl })
 )
 
 $ErrorActionPreference = "Stop"
@@ -129,8 +131,8 @@ function Assert-HttpStatus {
 }
 
 function Assert-T3CodeReachable {
-  Assert-HttpStatus -Name "Local T3" -Url "http://127.0.0.1:3773/"
-  Assert-HttpStatus -Name "Cloudflare T3" -Url "https://t3.olumbe.com/"
+  Assert-HttpStatus -Name "Local T3" -Url $LocalUrl
+  Assert-HttpStatus -Name "Public T3" -Url $PublicUrl
 }
 
 function Restart-T3CodeServer {
@@ -260,6 +262,10 @@ if (-not $SkipRestart) {
       "-SkipGitUpdate",
       "-SkipInstall",
       "-SkipBuild",
+      "-LocalUrl",
+      $LocalUrl,
+      "-PublicUrl",
+      $PublicUrl,
       "-DetachedRestartDelaySeconds",
       $DetachedRestartDelaySeconds.ToString()
     )

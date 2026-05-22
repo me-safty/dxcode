@@ -3,7 +3,7 @@
 This runbook covers the local production topology:
 
 - the T3 server runs on this Windows PC at `127.0.0.1:3773`
-- Cloudflare Tunnel `t3code-local` exposes it publicly at `https://t3.olumbe.com`
+- Cloudflare Tunnel `t3code-local` exposes it publicly at `https://<your-public-t3-url>`
 - Convex calls the local server bridge through that public URL
 - Slack calls the Convex public HTTP endpoint
 
@@ -18,7 +18,7 @@ t3code-server
 
 cloudflared-t3code
   Windows service:
-  C:\Program Files (x86)\cloudflared\cloudflared.exe --config C:\Users\Vivek\.cloudflared\config.yml tunnel run t3code-local
+  C:\Program Files (x86)\cloudflared\cloudflared.exe --config <windows-user-profile>\.cloudflared\config.yml tunnel run t3code-local
 ```
 
 `t3code-server` should run as a Windows service via NSSM. Install or repair it
@@ -26,7 +26,7 @@ from an elevated PowerShell:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
-C:\Users\Vivek\Affil\t3code\scripts\install-t3code-server-service.ps1
+<repo-root>\scripts\install-t3code-server-service.ps1
 ```
 
 If another dev/server process already owns port `3773`, stop it first or rerun
@@ -34,16 +34,16 @@ with `-StopExistingPortOwner`.
 
 The service runs under `LocalSystem`, so `scripts\start-t3code-server.cmd`
 hydrates the interactive user profile before launching T3. By default it infers
-the profile from this checkout path (`C:\Users\Vivek\Affil\t3code` ->
-`C:\Users\Vivek`) and sets:
+the profile from this checkout path (`<repo-root>` ->
+`<windows-user-profile>`) and sets:
 
 ```text
-USERPROFILE=C:\Users\Vivek
-HOME=C:\Users\Vivek
-APPDATA=C:\Users\Vivek\AppData\Roaming
-LOCALAPPDATA=C:\Users\Vivek\AppData\Local
-CODEX_HOME=C:\Users\Vivek\.codex
-GH_CONFIG_DIR=C:\Users\Vivek\AppData\Roaming\GitHub CLI
+USERPROFILE=<windows-user-profile>
+HOME=<windows-user-profile>
+APPDATA=<windows-user-profile>\AppData\Roaming
+LOCALAPPDATA=<windows-user-profile>\AppData\Local
+CODEX_HOME=<windows-user-profile>\.codex
+GH_CONFIG_DIR=<windows-user-profile>\AppData\Roaming\GitHub CLI
 ```
 
 This is required so service-launched Codex/GitHub CLI processes can see the same
@@ -71,13 +71,13 @@ GIT_CONFIG_VALUE_0=*
 ```
 
 That lets service-launched T3 detect and checkpoint local target repos owned by
-the interactive user, such as `C:\Users\Vivek\Affil\nextcard`, instead of
+the interactive user, such as `<target-repo-root>`, instead of
 reporting unsupported VCS operations.
 
 The old `t3code-server` scheduled task should remain disabled after the service
 is healthy. On 2026-05-15 the old scheduled tunnel/server tasks were found with
 a 72-hour execution limit, which caused the Cloudflare tunnel to stop after
-three days and made `https://t3.olumbe.com` return Cloudflare `530`.
+three days and made `https://<your-public-t3-url>` return Cloudflare `530`.
 
 `cloudflared-t3code` replaced the old `t3code-tunnel` scheduled task. It is a
 Windows service configured for automatic startup and restart-on-failure. The old
@@ -90,7 +90,7 @@ IPv6:
 
 ```yaml
 ingress:
-  - hostname: t3.olumbe.com
+  - hostname: <your-public-t3-host>
     service: http://127.0.0.1:3773
   - service: http_status:404
 ```
@@ -99,7 +99,7 @@ Install or repair the Cloudflare service from an elevated PowerShell:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
-C:\Users\Vivek\Affil\t3code\scripts\install-cloudflared-t3code-service.ps1
+<repo-root>\scripts\install-cloudflared-t3code-service.ps1
 ```
 
 Use the operator command from the repo root to start the server, tunnel, and desktop app:
@@ -132,7 +132,7 @@ T3CODE_OWNER_PAIRING_TOKEN=<long random local-only token>
 Then use:
 
 ```text
-https://t3.olumbe.com/pair#token=<long random local-only token>
+https://<your-public-t3-url>/pair#token=<long random local-only token>
 ```
 
 `bun run dev:local-cloudflare` keeps the matching local auth row armed while it
@@ -155,9 +155,9 @@ bun run auth:seed-owner-pairing
 Run Convex commands from `apps/orchestrator` with the intended `CONVEX_DEPLOYMENT` selected.
 
 ```bash
-bunx convex env set --prod T3_EXECUTION_BRIDGE_BASE_URL 'https://t3.olumbe.com'
+bunx convex env set --prod T3_EXECUTION_BRIDGE_BASE_URL 'https://<your-public-t3-url>'
 bunx convex env set --prod T3_EXECUTION_BRIDGE_SHARED_SECRET '<same secret used by local T3 server>'
-bunx convex env set --prod LINEAR_DEFAULT_WORKSPACE_ROOT 'C:\Users\Vivek\Affil\t3code'
+bunx convex env set --prod LINEAR_DEFAULT_WORKSPACE_ROOT '<repo-root>'
 bunx convex env set --prod GITHUB_WEBHOOK_SECRET '<shared GitHub webhook secret>'
 ```
 
@@ -169,11 +169,11 @@ https://<your-convex-site>/github/webhook
 ```
 
 Configure the GitHub webhook on each coding target repository that Vevin creates
-PRs against. This is not necessarily this `t3code` repo. The current required
-target repo is:
+PRs against. This is not necessarily this `t3code` repo. For each target repo,
+open:
 
 ```text
-https://github.com/affil-ai/nextcard/settings/hooks
+https://github.com/<owner>/<repo>/settings/hooks
 ```
 
 That webhook should point at:
@@ -212,8 +212,8 @@ T3_DEFAULT_MODEL=gpt-5.5
 Run the combined local/Cloudflare/Convex check:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code
-$env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://basic-porcupine-321.convex.site"
+cd <repo-root>
+$env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://<your-convex-site>"
 bun run health:orchestrator
 ```
 
@@ -223,8 +223,8 @@ Manual checks:
 Get-Service t3code-server
 Get-Service cloudflared-t3code
 curl.exe -i http://127.0.0.1:3773/
-curl.exe -i https://t3.olumbe.com/
-curl.exe -i -X POST https://t3.olumbe.com/api/execution/runs/status
+curl.exe -i https://<your-public-t3-url>/
+curl.exe -i -X POST https://<your-public-t3-url>/api/execution/runs/status
 ```
 
 Expected bridge result without auth:
@@ -241,10 +241,10 @@ with:
 
 ```text
 T3_OPS_ALERT_SECRET=<shared local monitor to Convex secret>
-T3_OPS_SLACK_ALERT_CHANNEL_ID=slack:C08JGQQMJCQ
+T3_OPS_SLACK_ALERT_CHANNEL_ID=slack:<alert-channel-id>
 ```
 
-`C08JGQQMJCQ` is `#infrastructure`. The Convex endpoint is
+`<alert-channel-id>` is `#infrastructure`. The Convex endpoint is
 `POST /ops/health-alert`; it requires `Authorization: Bearer <T3_OPS_ALERT_SECRET>`
 and posts a Chat SDK card into the configured Slack channel.
 
@@ -257,7 +257,7 @@ scripts\run-orchestrator-health-monitor.cmd
 Install the recurring monitor from elevated PowerShell:
 
 ```powershell
-C:\Users\Vivek\Affil\t3code\scripts\install-orchestrator-health-monitor-task.ps1
+<repo-root>\scripts\install-orchestrator-health-monitor-task.ps1
 ```
 
 The monitor stores local alert state in
@@ -282,7 +282,7 @@ The Windows services run the files in this checkout. The scripted update path is
 the preferred runbook:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code
+cd <repo-root>
 Set-ExecutionPolicy -Scope Process Bypass -Force
 .\scripts\update-t3code-server.ps1
 ```
@@ -313,15 +313,15 @@ the final response.
 Equivalent manual flow:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code
+cd <repo-root>
 git fetch pingdotgg main
 git merge pingdotgg/main
 bun install
 bun run build
 Restart-Service t3code-server
 curl.exe -i http://127.0.0.1:3773/
-curl.exe -i https://t3.olumbe.com/
-curl.exe -i -X POST https://t3.olumbe.com/api/execution/runs/status
+curl.exe -i https://<your-public-t3-url>/
+curl.exe -i -X POST https://<your-public-t3-url>/api/execution/runs/status
 ```
 
 The Cloudflare service usually does not need a restart for upstream T3 changes;
@@ -344,7 +344,7 @@ server.
 2. Confirm the bridge returns `401`, not `404`:
 
    ```powershell
-   curl.exe -i -X POST https://t3.olumbe.com/api/execution/runs/status
+   curl.exe -i -X POST https://<your-public-t3-url>/api/execution/runs/status
    ```
 
 3. Post a tiny dated Slack smoke task in `#testing` that mentions `Vevin`.
@@ -363,7 +363,7 @@ bunx convex logs --prod
 Watch the local production T3 logs while testing:
 
 ```powershell
-Get-Content C:\Users\Vivek\Affil\t3code\logs\t3code-server.log -Wait
+Get-Content <repo-root>\logs\t3code-server.log -Wait
 ```
 
 Test these Slack behaviors in `#testing`:
@@ -398,8 +398,8 @@ Latest live run:
 - Slack thread: `C0AJ5HR70PR` / `1778700070.090889`
 - Task: `kn76eye74y6t36wczn835ysrs186mgma`
 - Work session: `ks7dfw28hb6wb479waxygcfr0x86nzsh`
-- PR: `https://github.com/affil-ai/nextcard/pull/1388`
-- Verified preview buttons: `nextcard-web`, `nextcard-mcp`, `nextcard-pdp`
+- PR: `https://github.com/<owner>/<repo>/pull/1388`
+- Verified preview buttons: `example-web`, `example-api`, `example-pdp`
 - Merge validation: PR #1388 was merged on 2026-05-13 at 13:03 PDT. Convex dev handled the GitHub `pull_request.closed` webhook, Slack parent message `1778700070.090889` received `white_check_mark`, and Vevin posted a merge PR card in the thread at `1778702583.999829`.
 
 PR merge validation steps:

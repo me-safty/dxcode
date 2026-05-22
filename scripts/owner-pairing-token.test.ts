@@ -32,8 +32,11 @@ describe("owner-pairing-token", () => {
 
   it("prints the stable Cloudflare pairing URL without putting the token in the query", () => {
     assert.equal(
-      resolveOwnerPairingUrl({ T3CODE_OWNER_PAIRING_TOKEN: "stable-token" }),
-      "https://t3.olumbe.com/pair#token=stable-token",
+      resolveOwnerPairingUrl({
+        T3CODE_OWNER_PAIRING_TOKEN: "stable-token",
+        T3CODE_PUBLIC_BASE_URL: "https://t3.example.com",
+      }),
+      "https://t3.example.com/pair#token=stable-token",
     );
   });
 

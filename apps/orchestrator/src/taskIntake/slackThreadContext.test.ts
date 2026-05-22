@@ -18,8 +18,8 @@ function message(input: {
     raw: {},
     author: {
       userId: input.author ?? "U1",
-      userName: input.author ?? "vivek",
-      fullName: input.author ?? "Vivek",
+      userName: input.author ?? "test-user",
+      fullName: input.author ?? "Test User",
       isBot: input.isBot ?? false,
       isMe: false,
     },

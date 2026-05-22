@@ -48,7 +48,7 @@ describe("Execution bridge contracts", () => {
         initialPrompt: "Inspect this screenshot",
         attachments: [attachment],
         project: {
-          repoName: "nextcard",
+          repoName: "example-app",
           workspaceRoot: "C:\\repo",
           defaultBranch: "dev",
         },

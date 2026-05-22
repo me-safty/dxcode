@@ -5,7 +5,7 @@ The active production-like setup runs T3 on this Windows PC and exposes it throu
 ## Topology
 
 ```text
-Convex -> https://t3.olumbe.com -> Cloudflare Tunnel t3code-local -> 127.0.0.1:3773
+Convex -> https://<your-public-t3-url> -> Cloudflare Tunnel t3code-local -> 127.0.0.1:3773
 ```
 
 Slack does not call the local T3 server directly. It calls Convex:
@@ -14,7 +14,7 @@ Slack does not call the local T3 server directly. It calls Convex:
 https://<your-convex-site>/slack/webhook
 ```
 
-Convex then calls the local T3 execution bridge at `https://t3.olumbe.com`.
+Convex then calls the local T3 execution bridge at `https://<your-public-t3-url>`.
 
 ## Windows Services
 
@@ -50,9 +50,9 @@ T3_DEFAULT_MODEL=gpt-5.5
 Convex:
 
 ```text
-T3_EXECUTION_BRIDGE_BASE_URL=https://t3.olumbe.com
+T3_EXECUTION_BRIDGE_BASE_URL=https://<your-public-t3-url>
 T3_EXECUTION_BRIDGE_SHARED_SECRET=<shared-secret>
-LINEAR_DEFAULT_WORKSPACE_ROOT=C:\Users\Vivek\Affil\t3code
+LINEAR_DEFAULT_WORKSPACE_ROOT=<repo-root>
 ```
 
 ## Checks
@@ -61,8 +61,8 @@ LINEAR_DEFAULT_WORKSPACE_ROOT=C:\Users\Vivek\Affil\t3code
 Get-Service t3code-server
 Get-Service cloudflared-t3code
 curl.exe -i http://127.0.0.1:3773/
-curl.exe -i https://t3.olumbe.com/
-curl.exe -i -X POST https://t3.olumbe.com/api/execution/runs/status
+curl.exe -i https://<your-public-t3-url>/
+curl.exe -i -X POST https://<your-public-t3-url>/api/execution/runs/status
 ```
 
 Expected unauthenticated bridge response:
@@ -78,7 +78,7 @@ Detailed update/restart runbook: [t3code-production-update.md](./t3code-producti
 Use the scripted update path from an elevated PowerShell:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code
+cd <repo-root>
 Set-ExecutionPolicy -Scope Process Bypass -Force
 .\scripts\update-t3code-server.ps1
 ```

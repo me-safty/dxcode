@@ -1,5 +1,9 @@
 #Requires -RunAsAdministrator
 
+param(
+  [string]$PublicUrl = $(if ($env:T3CODE_PUBLIC_BASE_URL) { $env:T3CODE_PUBLIC_BASE_URL.TrimEnd("/") + "/" } else { "http://127.0.0.1:3773/" })
+)
+
 $ErrorActionPreference = "Stop"
 
 $ServiceName = "cloudflared-t3code"
@@ -7,7 +11,6 @@ $DisplayName = "cloudflared t3code-local"
 $CloudflaredPath = "C:\Program Files (x86)\cloudflared\cloudflared.exe"
 $ConfigPath = "$env:USERPROFILE\.cloudflared\config.yml"
 $TunnelName = "t3code-local"
-$PublicUrl = "https://t3.olumbe.com/"
 $OldScheduledTaskName = "t3code-tunnel"
 
 function Write-Step {

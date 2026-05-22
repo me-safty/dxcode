@@ -14,10 +14,21 @@ export interface TaskIntakeExistingTask {
   readonly workSessionId?: string;
 }
 
+export interface TaskIntakeProjectOption {
+  readonly projectId: string;
+  readonly repoName: string;
+  readonly githubOwner: string;
+  readonly githubRepo: string;
+}
+
 export type TaskIntakeStoredEvent =
   | {
       readonly status: "duplicate";
       readonly taskId?: string;
+    }
+  | {
+      readonly status: "needs_project";
+      readonly projects: ReadonlyArray<TaskIntakeProjectOption>;
     }
   | {
       readonly status: "created";

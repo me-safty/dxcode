@@ -377,7 +377,7 @@ Tasks:
    canonical live deployment.
 2. Remove stale Linear chat documentation and any inactive Linear webhook config
    that could confuse operators.
-3. Archive old EC2/Caddy/systemd T3 hosting runbooks from active docs.
+3. Archive stale hosting runbooks from active docs.
 4. Document the production Slack/GitHub webhook URLs.
 5. Add periodic dependency/update checks for upstream `pingdotgg/t3code`.
 6. Decide whether to keep the local machine architecture long-term or migrate the
@@ -386,7 +386,7 @@ Tasks:
 Acceptance criteria:
 
 - New agents can determine the correct production deployment from docs alone.
-- There is no stale active-path doc pointing to an old Convex URL, EC2 host, or
+- There is no stale active-path doc pointing to an old Convex URL, host, or
   Linear chat flow.
 - The production E2E checklist has a date-stamped passing run.
 

@@ -3,10 +3,10 @@
 This machine runs the production-like T3 Code server from this checkout:
 
 ```text
-C:\Users\Vivek\Affil\t3code
+<repo-root>
 ```
 
-The server process runs `apps\server\dist\bin.mjs` on `127.0.0.1:3773`, and Cloudflare Tunnel forwards `https://t3.olumbe.com` to that local port.
+The server process runs `apps\server\dist\bin.mjs` on `127.0.0.1:3773`, and Cloudflare Tunnel forwards `https://<your-public-t3-url>` to that local port.
 
 ## Golden Rule
 
@@ -22,7 +22,7 @@ Preferred operators:
 Run PowerShell as Administrator:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code
+cd <repo-root>
 Set-ExecutionPolicy -Scope Process Bypass -Force
 .\scripts\update-t3code-server.ps1 -Remote origin -Branch main
 ```
@@ -40,7 +40,7 @@ The script:
 - runs `bun run build`
 - restarts the active `t3code-server` path
 - verifies local T3 at `http://127.0.0.1:3773/`
-- verifies Cloudflare T3 at `https://t3.olumbe.com/`
+- verifies Cloudflare T3 at `https://<your-public-t3-url>/`
 - runs `bun run health:orchestrator`
 
 ## Update From T3 Or Slack
@@ -48,7 +48,7 @@ The script:
 Use the safe wrapper. It queues the full rebuild in a detached PowerShell process and returns before the server restarts:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code
+cd <repo-root>
 .\scripts\rebuild-t3code-production-safe.ps1 -Remote origin -Branch main
 ```
 
@@ -96,8 +96,8 @@ After restart, the updater checks local and Cloudflare reachability automaticall
 ```powershell
 Get-NetTCPConnection -LocalPort 3773 -State Listen
 curl.exe -i http://127.0.0.1:3773/
-curl.exe -i https://t3.olumbe.com/
-curl.exe -i -X POST https://t3.olumbe.com/api/execution/runs/status
+curl.exe -i https://<your-public-t3-url>/
+curl.exe -i -X POST https://<your-public-t3-url>/api/execution/runs/status
 ```
 
 Expected bridge status response:

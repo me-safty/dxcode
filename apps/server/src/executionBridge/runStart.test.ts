@@ -29,15 +29,15 @@ describe("task runtime worktree creation", () => {
       taskRuntimeWorktreeCreateInput(
         {
           project: {
-            repoName: "nextcard",
-            workspaceRoot: "C:\\Users\\Vivek\\Affil\\nextcard",
+            repoName: "example-app",
+            workspaceRoot: "C:\\Users\\example\\dev\\example-app",
             defaultBranch: "dev",
           },
         },
         "t3code/fresh-base",
       ),
     ).toEqual({
-      cwd: "C:\\Users\\Vivek\\Affil\\nextcard",
+      cwd: "C:\\Users\\example\\dev\\example-app",
       refName: "dev",
       newRefName: "t3code/fresh-base",
       path: null,
@@ -51,7 +51,7 @@ describe("task runtime worktree creation", () => {
       Effect.succeed({
         worktree: {
           refName: "t3code/task-branch",
-          path: "C:\\Users\\Vivek\\Affil\\nextcard-t3-worktree",
+          path: "C:\\Users\\example\\dev\\example-app-t3-worktree",
         },
       }),
     );
@@ -61,8 +61,8 @@ describe("task runtime worktree creation", () => {
       workSessionId: "session-1",
       initialPrompt: "fix it",
       project: {
-        repoName: "nextcard",
-        workspaceRoot: "C:\\Users\\Vivek\\Affil\\nextcard",
+        repoName: "example-app",
+        workspaceRoot: "C:\\Users\\example\\dev\\example-app",
         defaultBranch: "dev",
       },
       title: "Fix it",
@@ -128,11 +128,11 @@ describe("task runtime worktree creation", () => {
     expect(runForThread).toHaveBeenCalledWith({
       threadId: response.t3ThreadId,
       projectId: response.t3ProjectId,
-      projectCwd: "C:\\Users\\Vivek\\Affil\\nextcard",
-      worktreePath: "C:\\Users\\Vivek\\Affil\\nextcard-t3-worktree",
+      projectCwd: "C:\\Users\\example\\dev\\example-app",
+      worktreePath: "C:\\Users\\example\\dev\\example-app-t3-worktree",
     });
     expect(createWorktree).toHaveBeenCalledWith({
-      cwd: "C:\\Users\\Vivek\\Affil\\nextcard",
+      cwd: "C:\\Users\\example\\dev\\example-app",
       refName: "dev",
       newRefName: expect.stringMatching(/^t3code\//),
       path: null,

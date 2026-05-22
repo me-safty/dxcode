@@ -4,7 +4,7 @@ This runbook is for the current Vevin production topology:
 
 - Convex production is the canonical live orchestrator deployment.
 - Slack and GitHub webhooks point at the active Convex site URL.
-- Local T3 runs on this Windows machine and is exposed through Cloudflare at `https://t3.olumbe.com`.
+- Local T3 runs on this Windows machine and is exposed through Cloudflare at `https://<your-public-t3-url>`.
 - `t3code-server` and `cloudflared-t3code` should both run as Windows services.
 
 Use this with `apps/orchestrator/AGENTS.md` and `docs/orchestrator-deployment.md`.
@@ -12,7 +12,7 @@ Use this with `apps/orchestrator/AGENTS.md` and `docs/orchestrator-deployment.md
 Current production Convex site:
 
 ```text
-https://basic-porcupine-321.convex.site
+https://<your-convex-site>
 ```
 
 ## Fast Triage
@@ -20,8 +20,8 @@ https://basic-porcupine-321.convex.site
 Run the local production health check first:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code
-$env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://basic-porcupine-321.convex.site"
+cd <repo-root>
+$env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://<your-convex-site>"
 bun run health:orchestrator
 ```
 
@@ -31,7 +31,7 @@ The command checks:
 - `t3code-server` Windows service
 - `cloudflared-t3code` Windows service
 - local T3 at `http://127.0.0.1:3773`
-- public T3/Cloudflare at `https://t3.olumbe.com`
+- public T3/Cloudflare at `https://<your-public-t3-url>`
 - unauthenticated bridge status at `/api/execution/runs/status`
 - Convex `/health`
 - recent `severity: "error"` orchestrator events
@@ -39,7 +39,7 @@ The command checks:
 Start with the durable Convex event log:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code\apps\orchestrator
+cd <repo-root>\apps\orchestrator
 bunx convex run observability:listRecent -- '{ "limit": 25 }'
 ```
 
@@ -97,7 +97,7 @@ bunx convex run taskEvents:listTaskEvents -- '{ "taskId": "<convex task id>", "l
 5. Check active Convex logs:
 
    ```powershell
-   cd C:\Users\Vivek\Affil\t3code\apps\orchestrator
+   cd <repo-root>\apps\orchestrator
    bunx convex logs
    ```
 
@@ -127,8 +127,8 @@ bunx convex run taskEvents:listTaskEvents -- '{ "taskId": "<convex task id>", "l
    Required:
 
    ```text
-   T3_WEB_APP_BASE_URL=https://t3.olumbe.com
-   T3_EXECUTION_BRIDGE_BASE_URL=https://t3.olumbe.com
+   T3_WEB_APP_BASE_URL=https://<your-public-t3-url>
+   T3_EXECUTION_BRIDGE_BASE_URL=https://<your-public-t3-url>
    ```
 
 ## Assistant Message Not Relayed
@@ -148,7 +148,7 @@ bunx convex run taskEvents:listTaskEvents -- '{ "taskId": "<convex task id>", "l
 3. If no HTTP event exists, inspect local T3 logs and bridge callback env:
 
    ```text
-   ORCHESTRATOR_BASE_URL=https://basic-porcupine-321.convex.site
+   ORCHESTRATOR_BASE_URL=https://<your-convex-site>
    T3_EXECUTION_BRIDGE_SHARED_SECRET=<same secret configured in Convex>
    ```
 
@@ -250,8 +250,8 @@ Check local and tunnel reachability:
 
 ```powershell
 curl.exe -i http://127.0.0.1:3773/
-curl.exe -i https://t3.olumbe.com/
-curl.exe -i -X POST https://t3.olumbe.com/api/execution/runs/status
+curl.exe -i https://<your-public-t3-url>/
+curl.exe -i -X POST https://<your-public-t3-url>/api/execution/runs/status
 ```
 
 Expected unauthenticated bridge result:
@@ -290,8 +290,8 @@ If either service needs to be installed or repaired, run an elevated PowerShell:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
-C:\Users\Vivek\Affil\t3code\scripts\install-t3code-server-service.ps1
-C:\Users\Vivek\Affil\t3code\scripts\install-cloudflared-t3code-service.ps1
+<repo-root>\scripts\install-t3code-server-service.ps1
+<repo-root>\scripts\install-cloudflared-t3code-service.ps1
 ```
 
 On 2026-05-15 the old scheduled tunnel task was found stopped because Task
@@ -317,7 +317,7 @@ The services run this local checkout. Use the scripted path from an elevated
 PowerShell:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code
+cd <repo-root>
 Set-ExecutionPolicy -Scope Process Bypass -Force
 .\scripts\update-t3code-server.ps1
 ```
@@ -329,15 +329,15 @@ restarts `t3code-server`, and runs `bun run health:orchestrator`.
 Manual equivalent:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code
+cd <repo-root>
 git fetch pingdotgg main
 git merge pingdotgg/main
 bun install
 bun run build
 Restart-Service t3code-server
 curl.exe -i http://127.0.0.1:3773/
-curl.exe -i https://t3.olumbe.com/
-curl.exe -i -X POST https://t3.olumbe.com/api/execution/runs/status
+curl.exe -i https://<your-public-t3-url>/
+curl.exe -i -X POST https://<your-public-t3-url>/api/execution/runs/status
 ```
 
 Expected bridge result is `401` without auth. If it returns `404`, the running
@@ -357,28 +357,28 @@ Current alert destination:
 
 ```text
 #infrastructure
-T3_OPS_SLACK_ALERT_CHANNEL_ID=slack:C08JGQQMJCQ
+T3_OPS_SLACK_ALERT_CHANNEL_ID=slack:<alert-channel-id>
 ```
 
 Required env:
 
 ```text
 T3_OPS_ALERT_SECRET=<shared local monitor to Convex secret>
-T3_OPS_SLACK_ALERT_CHANNEL_ID=slack:C08JGQQMJCQ
+T3_OPS_SLACK_ALERT_CHANNEL_ID=slack:<alert-channel-id>
 ```
 
 Convex dev must have the same values:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code\apps\orchestrator
+cd <repo-root>\apps\orchestrator
 bunx convex env set T3_OPS_ALERT_SECRET "<secret>"
-bunx convex env set T3_OPS_SLACK_ALERT_CHANNEL_ID "slack:C08JGQQMJCQ"
+bunx convex env set T3_OPS_SLACK_ALERT_CHANNEL_ID "slack:<alert-channel-id>"
 ```
 
 Run the notifying monitor once:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code
+cd <repo-root>
 .\scripts\run-orchestrator-health-monitor.cmd
 ```
 
@@ -386,7 +386,7 @@ Install the recurring Windows scheduled task from an elevated PowerShell:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
-C:\Users\Vivek\Affil\t3code\scripts\install-orchestrator-health-monitor-task.ps1
+<repo-root>\scripts\install-orchestrator-health-monitor-task.ps1
 ```
 
 The scheduled task runs every five minutes by default and posts only when a
@@ -425,15 +425,15 @@ the production Convex deployment.
 1. Confirm the production Convex deployment URL:
 
    ```text
-   Production: https://basic-porcupine-321.convex.site
+   Production: https://<your-convex-site>
    ```
 
 2. Set production Convex env vars:
 
    ```powershell
-   cd C:\Users\Vivek\Affil\t3code\apps\orchestrator
-   bunx convex env set --prod T3_EXECUTION_BRIDGE_BASE_URL "https://t3.olumbe.com"
-   bunx convex env set --prod T3_WEB_APP_BASE_URL "https://t3.olumbe.com"
+   cd <repo-root>\apps\orchestrator
+   bunx convex env set --prod T3_EXECUTION_BRIDGE_BASE_URL "https://<your-public-t3-url>"
+   bunx convex env set --prod T3_WEB_APP_BASE_URL "https://<your-public-t3-url>"
    bunx convex env set --prod T3_EXECUTION_BRIDGE_SHARED_SECRET "<rotated bridge secret>"
    bunx convex env set --prod GITHUB_WEBHOOK_SECRET "<rotated github webhook secret>"
    ```
@@ -445,39 +445,39 @@ the production Convex deployment.
 5. Configure local T3 to call the production Convex URL:
 
    ```text
-   ORCHESTRATOR_BASE_URL=https://basic-porcupine-321.convex.site
+   ORCHESTRATOR_BASE_URL=https://<your-convex-site>
    T3_EXECUTION_BRIDGE_SHARED_SECRET=<same rotated bridge secret>
    ```
 
 6. Run health checks against production:
 
    ```powershell
-   cd C:\Users\Vivek\Affil\t3code
-   $env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://basic-porcupine-321.convex.site"
+   cd <repo-root>
+   $env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://<your-convex-site>"
    bun run health:orchestrator
    ```
 
 7. Confirm Slack event/webhook URL:
 
    ```text
-   https://basic-porcupine-321.convex.site/slack/webhook
+   https://<your-convex-site>/slack/webhook
    ```
 
 8. Confirm the GitHub webhook URL on every coding target repo that Vevin creates
-   PRs against. The current required repo is:
+   PRs against:
 
    ```text
-   https://github.com/affil-ai/nextcard/settings/hooks
+   https://github.com/<owner>/<repo>/settings/hooks
    ```
 
    The webhook URL should be:
 
    ```text
-   https://basic-porcupine-321.convex.site/github/webhook
+   https://<your-convex-site>/github/webhook
    ```
 
-   Do not expect this webhook to exist on `affil-ai/t3code` unless Vevin is also
-   creating PRs against the orchestrator repo itself.
+   Do not expect this webhook to exist on the orchestrator repo unless Vevin is
+   also creating PRs against the orchestrator repo itself.
 
 9. Confirm each target-repo GitHub webhook uses content type `application/json`,
    uses the same secret as Convex `GITHUB_WEBHOOK_SECRET`, and includes:
@@ -505,7 +505,7 @@ the production Convex deployment.
 12. Inspect the trace:
 
 ```powershell
-cd C:\Users\Vivek\Affil\t3code\apps\orchestrator
+cd <repo-root>\apps\orchestrator
 bunx convex run observability:listRecent -- '{ "limit": 100 }'
 bunx convex run observability:listRecent -- '{ "severity": "error", "limit": 50 }'
 ```
@@ -518,26 +518,26 @@ deployment.
 1. Repoint Slack to:
 
    ```text
-   https://scrupulous-fly-947.convex.site/slack/webhook
+   https://<your-dev-convex-site>/slack/webhook
    ```
 
 2. Repoint GitHub to:
 
    ```text
-   https://scrupulous-fly-947.convex.site/github/webhook
+   https://<your-dev-convex-site>/github/webhook
    ```
 
 3. Restore local T3:
 
    ```text
-   ORCHESTRATOR_BASE_URL=https://scrupulous-fly-947.convex.site
+   ORCHESTRATOR_BASE_URL=https://<your-dev-convex-site>
    T3_EXECUTION_BRIDGE_SHARED_SECRET=<dev bridge secret>
    ```
 
 4. Restart local T3 and run:
 
    ```powershell
-   cd C:\Users\Vivek\Affil\t3code
-   $env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://scrupulous-fly-947.convex.site"
+   cd <repo-root>
+   $env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://<your-dev-convex-site>"
    bun run health:orchestrator
    ```

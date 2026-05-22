@@ -417,18 +417,15 @@ Run one final live test for Slack and one for Linear using the dev Convex deploy
 - First diagnostic Task: `kn70ebh0yq5s7387q1v25nf2md8610c1`, Work Session
   `ks72jtc9bhzgxggc8pd25gytrs861mkc`, T3 Thread
   `3fb553c3-d010-458e-a65d-c5e1bb4792d1`, branch
-  `task/u0b0t56ay7r-live-e2e-for-pr-orchestration-please-q1v25nf2md8610c1`, worktree
-  `/Users/vivek/.t3code-slack-e2e/worktrees/t3code/task-u0b0t56ay7r-live-e2e-for-pr-orchestration-please-q1v25nf2md8610c1`.
-  Manual repository-qualified retry produced draft PR `https://github.com/affil-ai/t3code/pull/1`
+  `task/u0b0t56ay7r-live-e2e-for-pr-orchestration-please-q1v25nf2md8610c1`.
+  Manual repository-qualified retry produced a draft PR
   and Convex recorded it as `github_pr`.
 - Clean patched Slack E2E Task: `kn7a95bnfv88aedr54a8924wcd860nan`, Work Session
   `ks78k5dpwaenwy763s5tkmbt3n8609bp`, T3 Thread
   `60fe4440-6ab2-48e0-a22c-7157e554f938`, branch
-  `task/u0b0t56ay7r-live-e2e-retry-for-patched-pr-orches-54a8924wcd860nan`, worktree
-  `/Users/vivek/.t3code-slack-e2e/worktrees/t3code/task-u0b0t56ay7r-live-e2e-retry-for-patched-pr-orches-54a8924wcd860nan`.
+  `task/u0b0t56ay7r-live-e2e-retry-for-patched-pr-orches-54a8924wcd860nan`.
   Slack thread `1777795467.003019` received the terminal completion reply with draft PR
-  `https://github.com/affil-ai/t3code/pull/2`, and Convex stores external link
-  `affil-ai/t3code#2`.
+  and Convex stored the external link.
 - Cleanup completed: removed dev Convex `T3_EXECUTION_BRIDGE_BASE_URL`, stopped the local
   T3 bridge on `127.0.0.1:4773`, stopped the ngrok tunnel, and stopped the Convex log tail
   started for this E2E run.

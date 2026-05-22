@@ -1,23 +1,31 @@
-const PROJECT_ALIASES = ["nextcard", "t3code"] as const;
+export interface IntakeProjectRouteCandidate {
+  readonly githubRepo: string;
+}
 
-export type IntakeProjectAlias = (typeof PROJECT_ALIASES)[number];
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-export function resolveMentionedProjectAlias(text: string): IntakeProjectAlias | null {
+export function resolveMentionedProject<TProject extends IntakeProjectRouteCandidate>(
+  text: string,
+  projects: ReadonlyArray<TProject>,
+): TProject | null {
   const normalized = text.toLowerCase();
-  let match: { readonly alias: IntakeProjectAlias; readonly index: number } | null = null;
 
-  for (const alias of PROJECT_ALIASES) {
-    const pattern = new RegExp(`(^|[^a-z0-9])${alias}([^a-z0-9]|$)`, "i");
+  for (const project of projects) {
+    const githubRepo = project.githubRepo.trim().toLowerCase();
+    if (githubRepo.length === 0) {
+      continue;
+    }
+
+    const pattern = new RegExp(`(^|[^a-z0-9])${escapeRegExp(githubRepo)}([^a-z0-9]|$)`, "i");
     const result = pattern.exec(normalized);
     if (result === null || result.index < 0) {
       continue;
     }
 
-    const index = result.index + result[1]!.length;
-    if (match === null || index < match.index) {
-      match = { alias, index };
-    }
+    return project;
   }
 
-  return match?.alias ?? null;
+  return null;
 }

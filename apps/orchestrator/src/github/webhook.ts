@@ -98,6 +98,13 @@ function vercelProjectSlugFromEnvironment(environment: string | undefined) {
     .replace(/^-+|-+$/g, "");
 }
 
+function configuredVercelBranchDeploymentSuffixes() {
+  return (process.env.VERCEL_BRANCH_DEPLOYMENT_DOMAIN_SUFFIXES ?? "")
+    .split(",")
+    .map((suffix) => suffix.trim().toLowerCase().replace(/^\./, ""))
+    .filter(Boolean);
+}
+
 export function toVercelBranchDeploymentUrl(input: {
   readonly url: string;
   readonly environment?: string | undefined;
@@ -112,7 +119,14 @@ export function toVercelBranchDeploymentUrl(input: {
     const url = new URL(input.url);
     const hostname = url.hostname.toLowerCase();
     const suffix = hostname.includes(".") ? hostname.slice(hostname.indexOf(".") + 1) : "";
-    if (!suffix || !hostname.endsWith(".nextcard.com")) return input.url;
+    if (
+      !suffix ||
+      !configuredVercelBranchDeploymentSuffixes().some(
+        (configuredSuffix) => suffix === configuredSuffix,
+      )
+    ) {
+      return input.url;
+    }
     return `https://${projectSlug}-git-${branchSlug}.${suffix}`;
   } catch {
     return input.url;

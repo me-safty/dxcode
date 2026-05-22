@@ -470,9 +470,9 @@ describe("groupSidebarThreadsByWorktree", () => {
 
   it("groups worktree threads by exact worktree path", () => {
     const groups = groupSidebarThreadsByWorktree([
-      thread("thread-a-1", "C:\\Users\\Vivek\\Affil\\nextcard\\.worktrees\\alpha", "alpha"),
-      thread("thread-b-1", "C:\\Users\\Vivek\\Affil\\nextcard\\.worktrees\\beta", "beta"),
-      thread("thread-a-2", "C:\\Users\\Vivek\\Affil\\nextcard\\.worktrees\\alpha", "alpha"),
+      thread("thread-a-1", "C:\\Users\\example\\dev\\example-app\\.worktrees\\alpha", "alpha"),
+      thread("thread-b-1", "C:\\Users\\example\\dev\\example-app\\.worktrees\\beta", "beta"),
+      thread("thread-a-2", "C:\\Users\\example\\dev\\example-app\\.worktrees\\alpha", "alpha"),
     ]);
 
     expect(groups.map((group) => group.label)).toEqual(["alpha", "beta"]);

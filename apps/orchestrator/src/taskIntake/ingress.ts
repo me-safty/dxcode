@@ -13,7 +13,11 @@ import {
   buildTaskIntakeInitialPrompt,
   buildTaskIntakeTitle,
 } from "./prompts.ts";
-import { buildTaskIntakeFollowUpFailedReply, buildTaskIntakeStartFailedReply } from "./replies.ts";
+import {
+  buildTaskIntakeFollowUpFailedReply,
+  buildTaskIntakeNeedsProjectReply,
+  buildTaskIntakeStartFailedReply,
+} from "./replies.ts";
 
 export type TaskIntakeIngressResult =
   | {
@@ -158,6 +162,23 @@ export async function handleTaskIntakeMessage(
       resolution: {
         type: "ignore",
         reason: "duplicate_event",
+      },
+    };
+  }
+
+  if (stored.status === "needs_project") {
+    const reply = buildTaskIntakeNeedsProjectReply({
+      message,
+      projects: stored.projects,
+    });
+    await postReplyBestEffort(dependencies, reply);
+    return {
+      accepted: true,
+      ignored: false,
+      resolution: {
+        type: "needs_input",
+        reason: "Project could not be resolved from the message.",
+        reply,
       },
     };
   }
