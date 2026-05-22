@@ -68,6 +68,8 @@ import type {
   OrchestrationGetThreadDetailPageInput,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationReconcileThreadDetailInput,
+  OrchestrationReconcileThreadDetailResult,
   OrchestrationThreadDetailSnapshot,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
@@ -581,6 +583,9 @@ export interface EnvironmentApi {
     getThreadDetailPage: (
       input: OrchestrationGetThreadDetailPageInput,
     ) => Promise<OrchestrationThreadDetailSnapshot>;
+    reconcileThreadDetail: (
+      input: OrchestrationReconcileThreadDetailInput,
+    ) => Promise<OrchestrationReconcileThreadDetailResult>;
     getArchivedShellSnapshot: () => Promise<OrchestrationShellSnapshot>;
     subscribeShell: (
       callback: (event: OrchestrationShellStreamItem) => void,

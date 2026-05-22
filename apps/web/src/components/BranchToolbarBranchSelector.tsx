@@ -1,7 +1,6 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronDownIcon } from "lucide-react";
 import {
   useCallback,
@@ -34,6 +33,7 @@ import {
   shouldIncludeBranchPickerItem,
 } from "./BranchToolbar.logic";
 import { Button } from "./ui/button";
+import { VirtualizedList, type VirtualizedListHandle } from "./virtualization/VirtualizedList";
 import {
   Combobox,
   ComboboxEmpty,
@@ -457,7 +457,7 @@ export function BranchToolbarBranchSelector({
 
     void fetchNextPage().catch(() => undefined);
   }, [fetchNextPage, hasNextPage, isBranchMenuOpen, isFetchingNextPage]);
-  const branchListRef = useRef<LegendListRef | null>(null);
+  const branchListRef = useRef<VirtualizedListHandle | null>(null);
   const setBranchListRef = useCallback((element: HTMLDivElement | null) => {
     branchListScrollElementRef.current = (element?.parentElement as HTMLDivElement | null) ?? null;
   }, []);
@@ -501,6 +501,7 @@ export function BranchToolbarBranchSelector({
     effectiveEnvMode,
     resolvedActiveBranch,
   });
+  const branchListHeightPx = Math.min(filteredBranchPickerItems.length * 28, 224);
 
   function renderPickerItem(itemValue: string, index: number) {
     if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
@@ -619,19 +620,19 @@ export function BranchToolbarBranchSelector({
 
         {shouldVirtualizeBranchList ? (
           <ComboboxListVirtualized>
-            <LegendList<string>
+            <VirtualizedList<string>
               ref={branchListRef}
               data={filteredBranchPickerItems}
               keyExtractor={(item) => item}
               renderItem={({ item, index }) => renderPickerItem(item, index)}
               estimatedItemSize={28}
-              drawDistance={336}
+              increaseViewportBy={336}
               onEndReached={() => {
                 if (hasNextPage && !isFetchingNextPage) {
                   void fetchNextPage().catch(() => undefined);
                 }
               }}
-              style={{ maxHeight: "14rem" }}
+              style={{ height: branchListHeightPx }}
             />
           </ComboboxListVirtualized>
         ) : (

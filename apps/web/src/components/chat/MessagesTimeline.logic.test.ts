@@ -381,6 +381,63 @@ describe("deriveMessagesTimelineRows", () => {
     expect(userRow?.revertTurnCount).toBe(1);
     expect(assistantRow?.assistantTurnDiffSummary).toBe(assistantTurnDiffSummary);
   });
+
+  it("keeps a work-group row id stable when older work entries prepend into the group", () => {
+    const recentWorkEntry = {
+      id: "work-recent",
+      createdAt: "2026-01-01T00:00:01Z",
+      label: "read",
+      detail: "Reading package.json",
+      tone: "tool" as const,
+    };
+    const olderWorkEntry = {
+      id: "work-older",
+      createdAt: "2026-01-01T00:00:00Z",
+      label: "thinking",
+      detail: "Inspecting repository state",
+      tone: "thinking" as const,
+    };
+
+    const recentRows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "entry-work-recent",
+          kind: "work",
+          createdAt: recentWorkEntry.createdAt,
+          entry: recentWorkEntry,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+    const prependedRows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "entry-work-older",
+          kind: "work",
+          createdAt: olderWorkEntry.createdAt,
+          entry: olderWorkEntry,
+        },
+        {
+          id: "entry-work-recent",
+          kind: "work",
+          createdAt: recentWorkEntry.createdAt,
+          entry: recentWorkEntry,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(recentRows[0]?.id).toBe("work-group:work-recent");
+    expect(prependedRows[0]?.id).toBe("work-group:work-recent");
+  });
 });
 
 describe("computeStableMessagesTimelineRows", () => {

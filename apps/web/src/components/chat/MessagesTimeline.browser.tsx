@@ -2,7 +2,7 @@ import "../../index.css";
 
 import { EnvironmentId } from "@t3tools/contracts";
 import { createRef } from "react";
-import type { LegendListRef } from "@legendapp/list/react";
+import type { VirtualizedListHandle } from "../virtualization/VirtualizedList";
 import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
@@ -10,38 +10,61 @@ import { render } from "vitest-browser-react";
 const scrollToEndSpy = vi.fn();
 const getStateSpy = vi.fn(() => ({ isAtEnd: true }));
 
-vi.mock("@legendapp/list/react", async () => {
+vi.mock("../virtualization/VirtualizedList", async () => {
   const React = await import("react");
 
-  function LegendList(props: {
+  function VirtualizedList(props: {
     data: Array<{ id: string }>;
     keyExtractor: (item: { id: string }) => string;
-    renderItem: (args: { item: { id: string } }) => React.ReactNode;
+    renderItem: (args: { item: { id: string }; index: number }) => React.ReactNode;
     ListHeaderComponent?: React.ReactNode;
     ListFooterComponent?: React.ReactNode;
-    ref?: React.Ref<LegendListRef>;
+    ref?: React.Ref<VirtualizedListHandle>;
+    className?: string;
+    style?: React.CSSProperties;
+    "data-testid"?: string;
   }) {
+    const rootRef = React.useRef<HTMLDivElement | null>(null);
     React.useImperativeHandle(
       props.ref,
       () =>
         ({
-          scrollToEnd: scrollToEndSpy,
+          scrollToEnd: (options?: { animated?: boolean }) => {
+            scrollToEndSpy(options);
+            const node = rootRef.current;
+            if (!node) return;
+            node.scrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
+          },
+          scrollToOffset: ({ offset }: { offset: number; animated?: boolean }) => {
+            const node = rootRef.current;
+            if (!node) return;
+            node.scrollTop = offset;
+          },
+          scrollIndexIntoView: ({ index }: { index: number; animated?: boolean }) => {
+            rootRef.current?.children.item(index)?.scrollIntoView({ block: "nearest" });
+          },
+          getScrollableNode: () => rootRef.current,
           getState: getStateSpy,
-        }) as unknown as LegendListRef,
+        }) as unknown as VirtualizedListHandle,
     );
 
     return (
-      <div data-testid="legend-list">
+      <div
+        className={props.className}
+        data-testid={props["data-testid"] ?? "virtualized-list"}
+        ref={rootRef}
+        style={{ ...props.style, minHeight: 720, overflowY: "auto" }}
+      >
         {props.ListHeaderComponent}
-        {props.data.map((item) => (
-          <div key={props.keyExtractor(item)}>{props.renderItem({ item })}</div>
+        {props.data.map((item, index) => (
+          <div key={props.keyExtractor(item)}>{props.renderItem({ item, index })}</div>
         ))}
         {props.ListFooterComponent}
       </div>
     );
   }
 
-  return { LegendList };
+  return { VirtualizedList };
 });
 
 import { MessagesTimeline } from "./MessagesTimeline";
@@ -54,7 +77,7 @@ function buildProps() {
     activeTurnInProgress: false,
     activeTurnId: null,
     activeTurnStartedAt: null,
-    listRef: createRef<LegendListRef | null>(),
+    listRef: createRef<VirtualizedListHandle | null>(),
     completionDividerBeforeEntryId: null,
     completionSummary: null,
     turnDiffSummaryByAssistantMessageId: new Map(),
@@ -255,14 +278,46 @@ describe("MessagesTimeline", () => {
     );
 
     try {
-      const list = document.querySelector("[data-testid='legend-list']");
+      const list = document.querySelector("[data-testid='messages-timeline-list']");
       expect(list).not.toBeNull();
 
-      list?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      list?.parentElement?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
       list?.dispatchEvent(new WheelEvent("wheel", { bubbles: true }));
       list?.dispatchEvent(new Event("touchmove", { bubbles: true }));
 
       expect(onUserScrollIntent).toHaveBeenCalledTimes(3);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("requests manual older history from the older button", async () => {
+    const onLoadOlderThreadDetail = vi.fn();
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        hasOlderThreadDetail
+        onLoadOlderThreadDetail={onLoadOlderThreadDetail}
+        timelineEntries={[
+          {
+            id: "work-1",
+            kind: "work",
+            createdAt: "2026-04-13T12:00:00.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-04-13T12:00:00.000Z",
+              label: "thinking",
+              detail: "Inspecting repository state",
+              tone: "thinking",
+            },
+          },
+        ]}
+      />,
+    );
+
+    try {
+      await page.getByRole("button", { name: "Older" }).click();
+      expect(onLoadOlderThreadDetail).toHaveBeenCalledWith();
     } finally {
       await screen.unmount();
     }

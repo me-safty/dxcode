@@ -94,6 +94,10 @@
     "./imageMime": {
       "types": "./src/imageMime.ts",
       "import": "./src/imageMime.ts"
+    },
+    "./orchestrationThreadDetailFingerprint": {
+      "types": "./src/orchestrationThreadDetailFingerprint.ts",
+      "import": "./src/orchestrationThreadDetailFingerprint.ts"
     }
   },
   "scripts": {

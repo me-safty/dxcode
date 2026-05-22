@@ -95,6 +95,12 @@ const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
     files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
   }),
 );
+type ProjectionThreadMessageDbRow = Schema.Schema.Type<typeof ProjectionThreadMessageDbRowSchema>;
+type ProjectionThreadProposedPlanDbRow = Schema.Schema.Type<
+  typeof ProjectionThreadProposedPlanDbRowSchema
+>;
+type ProjectionThreadActivityDbRow = Schema.Schema.Type<typeof ProjectionThreadActivityDbRowSchema>;
+type ProjectionCheckpointDbRow = Schema.Schema.Type<typeof ProjectionCheckpointDbRowSchema>;
 const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   threadId: ProjectionThread.fields.threadId,
   turnId: TurnId,
@@ -368,6 +374,17 @@ function resolveThreadDetailPageLimits(page: OrchestrationThreadDetailPageReques
       DEFAULT_THREAD_DETAIL_PAGE_LIMITS.checkpoints,
     ),
   };
+}
+
+function hasThreadDetailBeforeCursors(page: OrchestrationThreadDetailPageRequest | null): boolean {
+  const before = page?.before;
+  return (
+    before !== undefined &&
+    (before.messages !== undefined ||
+      before.proposedPlans !== undefined ||
+      before.activities !== undefined ||
+      before.checkpoints !== undefined)
+  );
 }
 
 function makeThreadDetailPageCursor(
@@ -2275,6 +2292,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         Effect.gen(function* () {
           const pageRequest = page ?? null;
           const pageLimits = pageRequest ? resolveThreadDetailPageLimits(pageRequest) : null;
+          const olderPageRequest = hasThreadDetailBeforeCursors(pageRequest);
 
           const messageRows = pageLimits
             ? yield* (
@@ -2285,10 +2303,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       beforeId: pageRequest.before.messages.id,
                       limit: toThreadDetailPageQueryLimit(pageLimits.messages),
                     })
-                  : listLatestThreadMessageRowsByThread({
-                      threadId,
-                      limit: toThreadDetailPageQueryLimit(pageLimits.messages),
-                    })
+                  : olderPageRequest
+                    ? Effect.succeed([] as ProjectionThreadMessageDbRow[])
+                    : listLatestThreadMessageRowsByThread({
+                        threadId,
+                        limit: toThreadDetailPageQueryLimit(pageLimits.messages),
+                      })
               ).pipe(
                 Effect.mapError(
                   toPersistenceSqlOrDecodeError(
@@ -2317,10 +2337,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       beforeId: pageRequest.before.proposedPlans.id,
                       limit: toThreadDetailPageQueryLimit(pageLimits.proposedPlans),
                     })
-                  : listLatestThreadProposedPlanRowsByThread({
-                      threadId,
-                      limit: toThreadDetailPageQueryLimit(pageLimits.proposedPlans),
-                    })
+                  : olderPageRequest
+                    ? Effect.succeed([] as ProjectionThreadProposedPlanDbRow[])
+                    : listLatestThreadProposedPlanRowsByThread({
+                        threadId,
+                        limit: toThreadDetailPageQueryLimit(pageLimits.proposedPlans),
+                      })
               ).pipe(
                 Effect.mapError(
                   toPersistenceSqlOrDecodeError(
@@ -2350,10 +2372,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       beforeSequence: pageRequest.before.activities.sequence ?? null,
                       limit: toThreadDetailPageQueryLimit(pageLimits.activities),
                     })
-                  : listLatestThreadActivityRowsByThread({
-                      threadId,
-                      limit: toThreadDetailPageQueryLimit(pageLimits.activities),
-                    })
+                  : olderPageRequest
+                    ? Effect.succeed([] as ProjectionThreadActivityDbRow[])
+                    : listLatestThreadActivityRowsByThread({
+                        threadId,
+                        limit: toThreadDetailPageQueryLimit(pageLimits.activities),
+                      })
               ).pipe(
                 Effect.mapError(
                   toPersistenceSqlOrDecodeError(
@@ -2381,10 +2405,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       beforeCheckpointTurnCount: pageRequest.before.checkpoints.checkpointTurnCount,
                       limit: toThreadDetailPageQueryLimit(pageLimits.checkpoints),
                     })
-                  : listLatestCheckpointRowsByThread({
-                      threadId,
-                      limit: toThreadDetailPageQueryLimit(pageLimits.checkpoints),
-                    })
+                  : olderPageRequest
+                    ? Effect.succeed([] as ProjectionCheckpointDbRow[])
+                    : listLatestCheckpointRowsByThread({
+                        threadId,
+                        limit: toThreadDetailPageQueryLimit(pageLimits.checkpoints),
+                      })
               ).pipe(
                 Effect.mapError(
                   toPersistenceSqlOrDecodeError(

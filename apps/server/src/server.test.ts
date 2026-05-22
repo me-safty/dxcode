@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
   DEFAULT_SERVER_SETTINGS,
+  EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
   EnvironmentId,
   EventId,
   GitCommandError,
@@ -25,6 +26,7 @@ import {
   WsRpcGroup,
   EditorId,
 } from "@t3tools/contracts";
+import { computeOrchestrationThreadDetailFingerprint } from "@t3tools/shared/orchestrationThreadDetailFingerprint";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
 import * as Clock from "effect/Clock";
@@ -3326,12 +3328,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           },
         ],
       };
+      const threadDetailSnapshot = {
+        snapshotSequence: 1,
+        thread: snapshot.threads[0]!,
+        pageInfo: EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+      };
 
       yield* buildAppUnderTest({
         layers: {
           projectionSnapshotQuery: {
             getSnapshot: () => Effect.succeed(snapshot),
             getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 9 }),
+            getThreadDetailSnapshotById: () => Effect.succeed(Option.some(threadDetailSnapshot)),
           },
           orchestrationEngine: {
             dispatch: () => Effect.succeed({ sequence: 7 }),
@@ -3410,6 +3418,23 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         clientSequence: 5,
         serverSequence: 9,
         behind: true,
+      });
+
+      const fingerprint = computeOrchestrationThreadDetailFingerprint(threadDetailSnapshot);
+      const reconcileResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.reconcileThreadDetail]({
+            threadId: ThreadId.make("thread-1"),
+            clientSequence: 1,
+            verifiedSequence: 1,
+            verifiedFingerprint: fingerprint,
+          }),
+        ),
+      );
+      assert.deepEqual(reconcileResult, {
+        kind: "current",
+        serverSequence: 1,
+        serverFingerprint: fingerprint,
       });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

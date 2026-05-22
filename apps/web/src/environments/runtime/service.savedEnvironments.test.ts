@@ -121,6 +121,7 @@ vi.mock("~/store", () => ({
     getState: () => ({
       syncServerShellSnapshot: vi.fn(),
       syncServerThreadDetail: vi.fn(),
+      mergeServerThreadDetailTailSnapshot: vi.fn(),
       removeServerThreadDetail: vi.fn(),
       applyServerShellEvent: vi.fn(),
     }),

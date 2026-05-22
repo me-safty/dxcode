@@ -1,8 +1,8 @@
 import type { RefObject } from "react";
-import type { LegendListRef } from "@legendapp/list/react";
+import type { VirtualizedListHandle } from "../virtualization/VirtualizedList";
 
 export interface TimelineScrollAnchor {
-  readonly rowId: string;
+  readonly anchorId: string;
   readonly offsetTop: number;
 }
 
@@ -10,7 +10,13 @@ export interface ScheduledTimelineScrollAnchorRestore {
   readonly cancel: () => void;
 }
 
-interface TimelineScrollAnchorScheduler {
+export interface TimelinePrependScrollSnapshot {
+  readonly scrollTop: number;
+  readonly scrollHeight: number;
+  readonly anchor: TimelineScrollAnchor | null;
+}
+
+export interface TimelineScrollAnchorScheduler {
   readonly requestAnimationFrame: (callback: FrameRequestCallback) => number;
   readonly cancelAnimationFrame: (handle: number) => void;
   readonly setTimeout: (callback: () => void, delay: number) => number;
@@ -18,7 +24,7 @@ interface TimelineScrollAnchorScheduler {
 }
 
 interface ScheduleTimelineScrollAnchorRestoreInput {
-  readonly listRef: RefObject<LegendListRef | null>;
+  readonly listRef: RefObject<VirtualizedListHandle | null>;
   readonly anchor: TimelineScrollAnchor;
   readonly shouldCancel?: () => boolean;
   readonly frameCount?: number;
@@ -26,7 +32,25 @@ interface ScheduleTimelineScrollAnchorRestoreInput {
   readonly scheduler?: TimelineScrollAnchorScheduler;
 }
 
-const TIMELINE_ROW_SELECTOR = "[data-timeline-row-id]";
+interface ScheduleTimelinePrependScrollSnapshotRestoreInput {
+  readonly listRef: RefObject<VirtualizedListHandle | null>;
+  readonly snapshot: TimelinePrependScrollSnapshot;
+  readonly shouldCancel?: () => boolean;
+  readonly frameCount?: number;
+  readonly settleDelaysMs?: readonly number[];
+  readonly scheduler?: TimelineScrollAnchorScheduler;
+}
+
+interface ScheduleTimelineRestoreInput {
+  readonly restore: () => void;
+  readonly shouldCancel: (() => boolean) | undefined;
+  readonly frameCount: number;
+  readonly settleDelaysMs: readonly number[];
+  readonly scheduler: TimelineScrollAnchorScheduler;
+}
+
+const TIMELINE_ANCHOR_SELECTOR = "[data-timeline-anchor-id]";
+const TIMELINE_ANCHOR_IGNORE_SELECTOR = "[data-scroll-anchor-ignore]";
 const TIMELINE_ANCHOR_RESTORE_FRAME_COUNT = 4;
 const TIMELINE_ANCHOR_RESTORE_SETTLE_DELAYS_MS = [80, 180] as const;
 
@@ -37,34 +61,36 @@ const defaultScheduler: TimelineScrollAnchorScheduler = {
   clearTimeout: (handle) => window.clearTimeout(handle),
 };
 
-function getScrollableNode(listRef: LegendListRef | null): HTMLElement | null {
+function getScrollableNode(listRef: VirtualizedListHandle | null): HTMLElement | null {
   return listRef?.getScrollableNode?.() ?? null;
 }
 
-function getTimelineRows(scrollableNode: HTMLElement): HTMLElement[] {
-  return Array.from(scrollableNode.querySelectorAll<HTMLElement>(TIMELINE_ROW_SELECTOR));
+function getTimelineAnchors(scrollableNode: HTMLElement): HTMLElement[] {
+  return Array.from(scrollableNode.querySelectorAll<HTMLElement>(TIMELINE_ANCHOR_SELECTOR)).filter(
+    (anchor) => anchor.closest(TIMELINE_ANCHOR_IGNORE_SELECTOR) === null,
+  );
 }
 
-function getRowId(row: HTMLElement): string | null {
-  const rowId = row.dataset.timelineRowId;
-  return rowId && rowId.length > 0 ? rowId : null;
+function getAnchorId(anchor: HTMLElement): string | null {
+  const anchorId = anchor.dataset.timelineAnchorId;
+  return anchorId && anchorId.length > 0 ? anchorId : null;
 }
 
-function getRelativeTop(row: HTMLElement, scrollableNode: HTMLElement): number {
-  return row.getBoundingClientRect().top - scrollableNode.getBoundingClientRect().top;
+function getRelativeTop(anchor: HTMLElement, scrollableNode: HTMLElement): number {
+  return anchor.getBoundingClientRect().top - scrollableNode.getBoundingClientRect().top;
 }
 
-function findTimelineRowById(scrollableNode: HTMLElement, rowId: string): HTMLElement | null {
-  for (const row of getTimelineRows(scrollableNode)) {
-    if (getRowId(row) === rowId) {
-      return row;
+function findTimelineAnchorById(scrollableNode: HTMLElement, anchorId: string): HTMLElement | null {
+  for (const anchor of getTimelineAnchors(scrollableNode)) {
+    if (getAnchorId(anchor) === anchorId) {
+      return anchor;
     }
   }
   return null;
 }
 
 export function captureTimelineScrollAnchor(
-  listRef: LegendListRef | null,
+  listRef: VirtualizedListHandle | null,
 ): TimelineScrollAnchor | null {
   const scrollableNode = getScrollableNode(listRef);
   if (!scrollableNode) {
@@ -72,45 +98,45 @@ export function captureTimelineScrollAnchor(
   }
 
   const scrollableRect = scrollableNode.getBoundingClientRect();
-  let anchorRow: HTMLElement | null = null;
+  let anchorElement: HTMLElement | null = null;
   let anchorTop = Number.POSITIVE_INFINITY;
 
-  for (const row of getTimelineRows(scrollableNode)) {
-    const rowId = getRowId(row);
-    if (!rowId) {
+  for (const anchor of getTimelineAnchors(scrollableNode)) {
+    const anchorId = getAnchorId(anchor);
+    if (!anchorId) {
       continue;
     }
 
-    const rowRect = row.getBoundingClientRect();
-    if (rowRect.height <= 0 || rowRect.bottom <= scrollableRect.top) {
+    const anchorRect = anchor.getBoundingClientRect();
+    if (anchorRect.height <= 0 || anchorRect.bottom <= scrollableRect.top) {
       continue;
     }
-    if (rowRect.top >= scrollableRect.bottom) {
+    if (anchorRect.top >= scrollableRect.bottom) {
       continue;
     }
-    if (rowRect.top < anchorTop) {
-      anchorTop = rowRect.top;
-      anchorRow = row;
+    if (anchorRect.top < anchorTop) {
+      anchorTop = anchorRect.top;
+      anchorElement = anchor;
     }
   }
 
-  if (!anchorRow) {
+  if (!anchorElement) {
     return null;
   }
 
-  const rowId = getRowId(anchorRow);
-  if (!rowId) {
+  const anchorId = getAnchorId(anchorElement);
+  if (!anchorId) {
     return null;
   }
 
   return {
-    rowId,
-    offsetTop: getRelativeTop(anchorRow, scrollableNode),
+    anchorId,
+    offsetTop: getRelativeTop(anchorElement, scrollableNode),
   };
 }
 
 export function restoreTimelineScrollAnchor(
-  listRef: LegendListRef | null,
+  listRef: VirtualizedListHandle | null,
   anchor: TimelineScrollAnchor,
 ): boolean {
   const scrollableNode = getScrollableNode(listRef);
@@ -118,17 +144,53 @@ export function restoreTimelineScrollAnchor(
     return false;
   }
 
-  const anchorRow = findTimelineRowById(scrollableNode, anchor.rowId);
-  if (!anchorRow) {
+  const anchorElement = findTimelineAnchorById(scrollableNode, anchor.anchorId);
+  if (!anchorElement) {
     return false;
   }
 
-  const delta = getRelativeTop(anchorRow, scrollableNode) - anchor.offsetTop;
+  const delta = getRelativeTop(anchorElement, scrollableNode) - anchor.offsetTop;
   if (!Number.isFinite(delta) || Math.abs(delta) < 0.5) {
     return true;
   }
 
   scrollableNode.scrollTop += delta;
+  return true;
+}
+
+export function captureTimelinePrependScrollSnapshot(
+  listRef: VirtualizedListHandle | null,
+): TimelinePrependScrollSnapshot | null {
+  const scrollableNode = getScrollableNode(listRef);
+  if (!scrollableNode) {
+    return null;
+  }
+
+  return {
+    scrollTop: scrollableNode.scrollTop,
+    scrollHeight: scrollableNode.scrollHeight,
+    anchor: captureTimelineScrollAnchor(listRef),
+  };
+}
+
+export function restoreTimelinePrependScrollSnapshot(
+  listRef: VirtualizedListHandle | null,
+  snapshot: TimelinePrependScrollSnapshot,
+): boolean {
+  const scrollableNode = getScrollableNode(listRef);
+  if (!scrollableNode) {
+    return false;
+  }
+
+  const heightDelta = scrollableNode.scrollHeight - snapshot.scrollHeight;
+  const nextScrollTop = snapshot.scrollTop + heightDelta;
+  if (Number.isFinite(nextScrollTop)) {
+    scrollableNode.scrollTop = Math.max(0, nextScrollTop);
+  }
+
+  if (snapshot.anchor) {
+    restoreTimelineScrollAnchor(listRef, snapshot.anchor);
+  }
   return true;
 }
 
@@ -140,6 +202,39 @@ export function scheduleTimelineScrollAnchorRestore({
   settleDelaysMs = TIMELINE_ANCHOR_RESTORE_SETTLE_DELAYS_MS,
   scheduler = defaultScheduler,
 }: ScheduleTimelineScrollAnchorRestoreInput): ScheduledTimelineScrollAnchorRestore {
+  return scheduleTimelineRestore({
+    restore: () => restoreTimelineScrollAnchor(listRef.current, anchor),
+    shouldCancel,
+    frameCount,
+    settleDelaysMs,
+    scheduler,
+  });
+}
+
+export function scheduleTimelinePrependScrollSnapshotRestore({
+  listRef,
+  snapshot,
+  shouldCancel,
+  frameCount = TIMELINE_ANCHOR_RESTORE_FRAME_COUNT,
+  settleDelaysMs = TIMELINE_ANCHOR_RESTORE_SETTLE_DELAYS_MS,
+  scheduler = defaultScheduler,
+}: ScheduleTimelinePrependScrollSnapshotRestoreInput): ScheduledTimelineScrollAnchorRestore {
+  return scheduleTimelineRestore({
+    restore: () => restoreTimelinePrependScrollSnapshot(listRef.current, snapshot),
+    shouldCancel,
+    frameCount,
+    settleDelaysMs,
+    scheduler,
+  });
+}
+
+function scheduleTimelineRestore({
+  restore,
+  shouldCancel,
+  frameCount,
+  settleDelaysMs,
+  scheduler,
+}: ScheduleTimelineRestoreInput): ScheduledTimelineScrollAnchorRestore {
   let cancelled = false;
   const frameHandles = new Set<number>();
   const timeoutHandles = new Set<number>();
@@ -175,7 +270,7 @@ export function scheduleTimelineScrollAnchorRestore({
         return;
       }
 
-      restoreTimelineScrollAnchor(listRef.current, anchor);
+      restore();
       scheduleFrameLoop(remainingFrames - 1);
     });
     frameHandles.add(frameHandle);

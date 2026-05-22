@@ -12,10 +12,12 @@ import type {
   OrchestrationSession,
   OrchestrationSessionStatus,
   OrchestrationThread,
+  OrchestrationThreadDetailPageCursors,
   OrchestrationThreadDetailPageInfo,
   OrchestrationThreadDetailSnapshot,
   OrchestrationThreadShell,
   OrchestrationThreadActivity,
+  ModelSelection,
   ProjectId,
   ScopedProjectRef,
   ScopedThreadRef,
@@ -31,6 +33,7 @@ import { resolveModelSlugForProvider } from "@t3tools/shared/model";
 import { create } from "zustand";
 import {
   type ChatMessage,
+  type ChatAttachment,
   type Project,
   type ProposedPlan,
   type SidebarThreadSummary,
@@ -38,11 +41,13 @@ import {
   type ThreadSession,
   type ThreadShell,
   type ThreadTurnState,
+  type TurnDiffFileChange,
   type TurnDiffSummary,
 } from "./types";
 import { resolveEnvironmentHttpUrl } from "./environments/runtime";
 import { sanitizeThreadErrorMessage } from "./rpc/transportError";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
+import { compareThreadActivitiesByOrder } from "./threadActivityOrdering";
 const isProviderDriverKindValue = Schema.is(ProviderDriverKind);
 
 export interface EnvironmentState {
@@ -71,9 +76,9 @@ export interface EnvironmentState {
   threadTurnStateById: Record<ThreadId, ThreadTurnState>;
 
   // ---------------------------------------------------------------------------
-  // Thread detail content — written ONLY by the detail stream
-  // (writeThreadState / syncServerThreadDetail).  The shell stream never
-  // touches these.
+  // Thread detail content — written ONLY by detail sources
+  // (subscription tail snapshots/events and explicit older-page merges).  The
+  // shell stream never touches these.
   // ---------------------------------------------------------------------------
   messageIdsByThreadId: Record<ThreadId, MessageId[]>;
   messageByThreadId: Record<ThreadId, Record<MessageId, ChatMessage>>;
@@ -134,6 +139,10 @@ interface ThreadDetailWriteOptions {
   readonly syncSidebarSummaries?: boolean;
 }
 
+interface ThreadDetailPageMergeOptions {
+  readonly requestedBefore?: OrchestrationThreadDetailPageCursors;
+}
+
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
 const MAX_THREAD_PROPOSED_PLANS = 200;
@@ -142,6 +151,11 @@ const EMPTY_THREAD_IDS: ThreadId[] = [];
 
 function arraysEqual<T>(left: readonly T[], right: readonly T[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function isPlainObject(value: object): value is Record<string, unknown> {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 // Accepts the open `instanceId` string carried on `ModelSelection`; malformed
@@ -402,6 +416,29 @@ function threadSessionsEqual(
   );
 }
 
+function providerOptionSelectionsEqual(
+  left: ModelSelection["options"] | undefined,
+  right: ModelSelection["options"] | undefined,
+): boolean {
+  const leftOptions = left ?? [];
+  const rightOptions = right ?? [];
+  return (
+    leftOptions.length === rightOptions.length &&
+    leftOptions.every((option, index) => {
+      const other = rightOptions[index];
+      return other !== undefined && option.id === other.id && option.value === other.value;
+    })
+  );
+}
+
+function modelSelectionsEqual(left: ModelSelection, right: ModelSelection): boolean {
+  return (
+    left.instanceId === right.instanceId &&
+    left.model === right.model &&
+    providerOptionSelectionsEqual(left.options, right.options)
+  );
+}
+
 function sidebarThreadSummariesEqual(
   left: SidebarThreadSummary | undefined,
   right: SidebarThreadSummary,
@@ -434,7 +471,7 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.codexThreadId === right.codexThreadId &&
     left.projectId === right.projectId &&
     left.title === right.title &&
-    left.modelSelection === right.modelSelection &&
+    modelSelectionsEqual(left.modelSelection, right.modelSelection) &&
     left.runtimeMode === right.runtimeMode &&
     left.interactionMode === right.interactionMode &&
     left.error === right.error &&
@@ -491,12 +528,364 @@ function threadDetailPageInfosEqual(
   );
 }
 
+function chatAttachmentsEqual(
+  left: readonly ChatAttachment[] | undefined,
+  right: readonly ChatAttachment[] | undefined,
+): boolean {
+  const leftAttachments = left ?? [];
+  const rightAttachments = right ?? [];
+  return (
+    leftAttachments.length === rightAttachments.length &&
+    leftAttachments.every((attachment, index) => {
+      const other = rightAttachments[index];
+      return (
+        other !== undefined &&
+        attachment.type === other.type &&
+        attachment.id === other.id &&
+        attachment.name === other.name &&
+        attachment.mimeType === other.mimeType &&
+        attachment.sizeBytes === other.sizeBytes &&
+        attachment.previewUrl === other.previewUrl
+      );
+    })
+  );
+}
+
+function chatMessagesEqual(left: ChatMessage, right: ChatMessage): boolean {
+  return (
+    left.id === right.id &&
+    left.role === right.role &&
+    left.text === right.text &&
+    left.turnId === right.turnId &&
+    left.createdAt === right.createdAt &&
+    left.completedAt === right.completedAt &&
+    left.streaming === right.streaming &&
+    chatAttachmentsEqual(left.attachments, right.attachments)
+  );
+}
+
+function proposedPlansEqual(left: ProposedPlan, right: ProposedPlan): boolean {
+  return (
+    left.id === right.id &&
+    left.turnId === right.turnId &&
+    left.planMarkdown === right.planMarkdown &&
+    left.implementedAt === right.implementedAt &&
+    left.implementationThreadId === right.implementationThreadId &&
+    left.createdAt === right.createdAt &&
+    left.updatedAt === right.updatedAt
+  );
+}
+
+function turnDiffFilesEqual(
+  left: readonly TurnDiffFileChange[],
+  right: readonly TurnDiffFileChange[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((file, index) => {
+      const other = right[index];
+      return (
+        other !== undefined &&
+        file.path === other.path &&
+        file.kind === other.kind &&
+        file.additions === other.additions &&
+        file.deletions === other.deletions
+      );
+    })
+  );
+}
+
+function turnDiffSummariesEqual(left: TurnDiffSummary, right: TurnDiffSummary): boolean {
+  return (
+    left.turnId === right.turnId &&
+    left.completedAt === right.completedAt &&
+    left.status === right.status &&
+    left.checkpointRef === right.checkpointRef &&
+    left.checkpointTurnCount === right.checkpointTurnCount &&
+    left.assistantMessageId === right.assistantMessageId &&
+    turnDiffFilesEqual(left.files, right.files)
+  );
+}
+
+function jsonLikeValuesEqual(
+  left: unknown,
+  right: unknown,
+  seen: WeakMap<object, WeakSet<object>> = new WeakMap(),
+): boolean {
+  if (Object.is(left, right)) {
+    return true;
+  }
+
+  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") {
+    return false;
+  }
+
+  const seenRights = seen.get(left);
+  if (seenRights?.has(right)) {
+    return true;
+  }
+  if (seenRights) {
+    seenRights.add(right);
+  } else {
+    seen.set(left, new WeakSet([right]));
+  }
+
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => jsonLikeValuesEqual(value, right[index], seen))
+    );
+  }
+
+  if (!isPlainObject(left) || !isPlainObject(right)) {
+    return false;
+  }
+
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every((key) =>
+      Object.prototype.hasOwnProperty.call(right, key)
+        ? jsonLikeValuesEqual(left[key], right[key], seen)
+        : false,
+    )
+  );
+}
+
+function threadActivitiesEqual(
+  left: OrchestrationThreadActivity,
+  right: OrchestrationThreadActivity,
+): boolean {
+  return (
+    left.id === right.id &&
+    left.tone === right.tone &&
+    left.kind === right.kind &&
+    left.summary === right.summary &&
+    left.turnId === right.turnId &&
+    left.sequence === right.sequence &&
+    left.createdAt === right.createdAt &&
+    jsonLikeValuesEqual(left.payload, right.payload)
+  );
+}
+
 function appendId<T extends string>(ids: readonly T[], id: T): T[] {
   return ids.includes(id) ? [...ids] : [...ids, id];
 }
 
 function removeId<T extends string>(ids: readonly T[], id: T): T[] {
   return ids.filter((value) => value !== id);
+}
+
+function reuseEqualOrderedItems<TItem, TId extends string>(
+  previousItems: TItem[],
+  nextItems: TItem[],
+  getId: (item: TItem) => TId,
+  itemsEqual: (left: TItem, right: TItem) => boolean,
+): TItem[] {
+  if (
+    previousItems.length === nextItems.length &&
+    previousItems.every((previousItem, index) => {
+      const nextItem = nextItems[index];
+      return (
+        nextItem !== undefined &&
+        getId(previousItem) === getId(nextItem) &&
+        itemsEqual(previousItem, nextItem)
+      );
+    })
+  ) {
+    return previousItems;
+  }
+
+  if (previousItems.length === 0 || nextItems.length === 0) {
+    return nextItems;
+  }
+
+  const previousById = new Map<TId, TItem>();
+  for (const item of previousItems) {
+    previousById.set(getId(item), item);
+  }
+
+  let reusedAnyItem = false;
+  const sharedItems = nextItems.map((nextItem) => {
+    const previousItem = previousById.get(getId(nextItem));
+    if (previousItem === undefined || !itemsEqual(previousItem, nextItem)) {
+      return nextItem;
+    }
+    if (previousItem !== nextItem) {
+      reusedAnyItem = true;
+    }
+    return previousItem;
+  });
+
+  return reusedAnyItem ? sharedItems : nextItems;
+}
+
+function shareThreadDetailCollections(previousThread: Thread, nextThread: Thread): Thread {
+  const messages = reuseEqualOrderedItems(
+    previousThread.messages,
+    nextThread.messages,
+    (message) => message.id,
+    chatMessagesEqual,
+  );
+  const activities = reuseEqualOrderedItems(
+    previousThread.activities,
+    nextThread.activities,
+    (activity) => activity.id,
+    threadActivitiesEqual,
+  );
+  const proposedPlans = reuseEqualOrderedItems(
+    previousThread.proposedPlans,
+    nextThread.proposedPlans,
+    (plan) => plan.id,
+    proposedPlansEqual,
+  );
+  const turnDiffSummaries = reuseEqualOrderedItems(
+    previousThread.turnDiffSummaries,
+    nextThread.turnDiffSummaries,
+    (summary) => summary.turnId,
+    turnDiffSummariesEqual,
+  );
+
+  if (
+    messages === nextThread.messages &&
+    activities === nextThread.activities &&
+    proposedPlans === nextThread.proposedPlans &&
+    turnDiffSummaries === nextThread.turnDiffSummaries
+  ) {
+    return nextThread;
+  }
+
+  return {
+    ...nextThread,
+    messages,
+    activities,
+    proposedPlans,
+    turnDiffSummaries,
+  };
+}
+
+function compareMessagesByOrder(left: ChatMessage, right: ChatMessage): number {
+  return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
+
+function compareProposedPlansByOrder(left: ProposedPlan, right: ProposedPlan): number {
+  return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
+
+function compareTurnDiffSummariesByOrder(left: TurnDiffSummary, right: TurnDiffSummary): number {
+  const leftCheckpointTurnCount = left.checkpointTurnCount;
+  const rightCheckpointTurnCount = right.checkpointTurnCount;
+  if (leftCheckpointTurnCount !== undefined && rightCheckpointTurnCount !== undefined) {
+    if (leftCheckpointTurnCount !== rightCheckpointTurnCount) {
+      return leftCheckpointTurnCount - rightCheckpointTurnCount;
+    }
+  } else if (leftCheckpointTurnCount !== undefined) {
+    return -1;
+  } else if (rightCheckpointTurnCount !== undefined) {
+    return 1;
+  }
+
+  return (
+    left.completedAt.localeCompare(right.completedAt) || left.turnId.localeCompare(right.turnId)
+  );
+}
+
+function mergeItemsWithIncomingPrecedence<TItem, TId extends string>(
+  currentItems: readonly TItem[],
+  incomingItems: readonly TItem[],
+  getId: (item: TItem) => TId,
+  compare: (left: TItem, right: TItem) => number,
+): TItem[] {
+  const byId = new Map<TId, TItem>();
+  for (const item of currentItems) {
+    byId.set(getId(item), item);
+  }
+  for (const item of incomingItems) {
+    byId.set(getId(item), item);
+  }
+  return [...byId.values()].toSorted(compare);
+}
+
+function mergeTailItems<TItem, TId extends string>(
+  currentItems: readonly TItem[],
+  incomingTailItems: readonly TItem[],
+  getId: (item: TItem) => TId,
+  compare: (left: TItem, right: TItem) => number,
+): TItem[] {
+  return mergeItemsWithIncomingPrecedence(currentItems, incomingTailItems, getId, compare);
+}
+
+function mergeOlderItems<TItem, TId extends string>(
+  olderItems: readonly TItem[],
+  currentItems: readonly TItem[],
+  getId: (item: TItem) => TId,
+  compare: (left: TItem, right: TItem) => number,
+): TItem[] {
+  return mergeItemsWithIncomingPrecedence(currentItems, olderItems, getId, compare);
+}
+
+function preserveTailCollectionPageInfo(
+  previousPageInfo: OrchestrationThreadDetailPageInfo["messages"],
+  incomingPageInfo: OrchestrationThreadDetailPageInfo["messages"],
+): OrchestrationThreadDetailPageInfo["messages"] {
+  return previousPageInfo.hasMoreBefore || previousPageInfo.startCursor !== null
+    ? previousPageInfo
+    : incomingPageInfo;
+}
+
+function resolveTailSnapshotPageInfo(
+  previousPageInfo: OrchestrationThreadDetailPageInfo | undefined,
+  incomingPageInfo: OrchestrationThreadDetailPageInfo,
+): OrchestrationThreadDetailPageInfo {
+  if (previousPageInfo === undefined) {
+    return incomingPageInfo;
+  }
+  return {
+    messages: preserveTailCollectionPageInfo(previousPageInfo.messages, incomingPageInfo.messages),
+    proposedPlans: preserveTailCollectionPageInfo(
+      previousPageInfo.proposedPlans,
+      incomingPageInfo.proposedPlans,
+    ),
+    activities: preserveTailCollectionPageInfo(
+      previousPageInfo.activities,
+      incomingPageInfo.activities,
+    ),
+    checkpoints: preserveTailCollectionPageInfo(
+      previousPageInfo.checkpoints,
+      incomingPageInfo.checkpoints,
+    ),
+  };
+}
+
+function resolveOlderPageInfo(
+  previousPageInfo: OrchestrationThreadDetailPageInfo | undefined,
+  incomingPageInfo: OrchestrationThreadDetailPageInfo,
+  requestedBefore: OrchestrationThreadDetailPageCursors | undefined,
+): OrchestrationThreadDetailPageInfo {
+  if (previousPageInfo === undefined || requestedBefore === undefined) {
+    return incomingPageInfo;
+  }
+  return {
+    messages:
+      requestedBefore.messages !== undefined
+        ? incomingPageInfo.messages
+        : previousPageInfo.messages,
+    proposedPlans:
+      requestedBefore.proposedPlans !== undefined
+        ? incomingPageInfo.proposedPlans
+        : previousPageInfo.proposedPlans,
+    activities:
+      requestedBefore.activities !== undefined
+        ? incomingPageInfo.activities
+        : previousPageInfo.activities,
+    checkpoints:
+      requestedBefore.checkpoints !== undefined
+        ? incomingPageInfo.checkpoints
+        : previousPageInfo.checkpoints,
+  };
 }
 
 function buildMessageSlice(thread: Thread): {
@@ -632,25 +1021,28 @@ function writeThreadState(
   previousThread?: Thread,
   options: ThreadDetailWriteOptions = {},
 ): EnvironmentState {
+  const sharedNextThread = previousThread
+    ? shareThreadDetailCollections(previousThread, nextThread)
+    : nextThread;
   // Detail packets may arrive after a newer shell projection; keep shell-owned
   // fields monotonic while still accepting detail-only content below.
   const shellSourceThread =
     options.preserveShellFields && previousThread
       ? previousThread
       : previousThread?.updatedAt !== undefined &&
-          nextThread.updatedAt !== undefined &&
-          nextThread.updatedAt < previousThread.updatedAt
+          sharedNextThread.updatedAt !== undefined &&
+          sharedNextThread.updatedAt < previousThread.updatedAt
         ? previousThread
-        : nextThread;
+        : sharedNextThread;
   const nextShell = toThreadShell(shellSourceThread);
   const nextTurnState = toThreadTurnState(shellSourceThread);
-  const previousShell = state.threadShellById[nextThread.id];
-  const previousTurnState = state.threadTurnStateById[nextThread.id];
+  const previousShell = state.threadShellById[sharedNextThread.id];
+  const previousTurnState = state.threadTurnStateById[sharedNextThread.id];
 
   let nextState = ensureThreadRegistered(
     state,
-    nextThread.id,
-    nextThread.projectId,
+    sharedNextThread.id,
+    sharedNextThread.projectId,
     previousThread?.projectId,
   );
 
@@ -659,7 +1051,7 @@ function writeThreadState(
       ...nextState,
       threadShellById: {
         ...nextState.threadShellById,
-        [nextThread.id]: nextShell,
+        [sharedNextThread.id]: nextShell,
       },
     };
   }
@@ -669,7 +1061,7 @@ function writeThreadState(
       ...nextState,
       threadSessionById: {
         ...nextState.threadSessionById,
-        [nextThread.id]: shellSourceThread.session,
+        [sharedNextThread.id]: shellSourceThread.session,
       },
     };
   }
@@ -679,81 +1071,86 @@ function writeThreadState(
       ...nextState,
       threadTurnStateById: {
         ...nextState.threadTurnStateById,
-        [nextThread.id]: nextTurnState,
+        [sharedNextThread.id]: nextTurnState,
       },
     };
   }
 
-  if (previousThread?.messages !== nextThread.messages) {
-    const nextMessageSlice = buildMessageSlice(nextThread);
+  if (previousThread?.messages !== sharedNextThread.messages) {
+    const nextMessageSlice = buildMessageSlice(sharedNextThread);
     nextState = {
       ...nextState,
       messageIdsByThreadId: {
         ...nextState.messageIdsByThreadId,
-        [nextThread.id]: nextMessageSlice.ids,
+        [sharedNextThread.id]: nextMessageSlice.ids,
       },
       messageByThreadId: {
         ...nextState.messageByThreadId,
-        [nextThread.id]: nextMessageSlice.byId,
+        [sharedNextThread.id]: nextMessageSlice.byId,
       },
     };
   }
 
-  if (previousThread?.activities !== nextThread.activities) {
-    const nextActivitySlice = buildActivitySlice(nextThread);
+  if (previousThread?.activities !== sharedNextThread.activities) {
+    const nextActivitySlice = buildActivitySlice(sharedNextThread);
     nextState = {
       ...nextState,
       activityIdsByThreadId: {
         ...nextState.activityIdsByThreadId,
-        [nextThread.id]: nextActivitySlice.ids,
+        [sharedNextThread.id]: nextActivitySlice.ids,
       },
       activityByThreadId: {
         ...nextState.activityByThreadId,
-        [nextThread.id]: nextActivitySlice.byId,
+        [sharedNextThread.id]: nextActivitySlice.byId,
       },
     };
   }
 
-  if (previousThread?.proposedPlans !== nextThread.proposedPlans) {
-    const nextProposedPlanSlice = buildProposedPlanSlice(nextThread);
+  if (previousThread?.proposedPlans !== sharedNextThread.proposedPlans) {
+    const nextProposedPlanSlice = buildProposedPlanSlice(sharedNextThread);
     nextState = {
       ...nextState,
       proposedPlanIdsByThreadId: {
         ...nextState.proposedPlanIdsByThreadId,
-        [nextThread.id]: nextProposedPlanSlice.ids,
+        [sharedNextThread.id]: nextProposedPlanSlice.ids,
       },
       proposedPlanByThreadId: {
         ...nextState.proposedPlanByThreadId,
-        [nextThread.id]: nextProposedPlanSlice.byId,
+        [sharedNextThread.id]: nextProposedPlanSlice.byId,
       },
     };
   }
 
-  if (previousThread?.turnDiffSummaries !== nextThread.turnDiffSummaries) {
-    const nextTurnDiffSlice = buildTurnDiffSlice(nextThread);
+  if (previousThread?.turnDiffSummaries !== sharedNextThread.turnDiffSummaries) {
+    const nextTurnDiffSlice = buildTurnDiffSlice(sharedNextThread);
     nextState = {
       ...nextState,
       turnDiffIdsByThreadId: {
         ...nextState.turnDiffIdsByThreadId,
-        [nextThread.id]: nextTurnDiffSlice.ids,
+        [sharedNextThread.id]: nextTurnDiffSlice.ids,
       },
       turnDiffSummaryByThreadId: {
         ...nextState.turnDiffSummaryByThreadId,
-        [nextThread.id]: nextTurnDiffSlice.byId,
+        [sharedNextThread.id]: nextTurnDiffSlice.byId,
       },
     };
   }
 
   const nextPageInfo =
-    options.pageInfo ?? nextThread.detailPageInfo ?? EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO;
+    options.pageInfo ??
+    sharedNextThread.detailPageInfo ??
+    EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO;
   if (
-    !threadDetailPageInfosEqual(state.threadDetailPageInfoByThreadId[nextThread.id], nextPageInfo)
+    !threadDetailPageInfosEqual(
+      state.threadDetailPageInfoByThreadId[sharedNextThread.id],
+      nextPageInfo,
+    )
   ) {
     nextState = {
       ...nextState,
       threadDetailPageInfoByThreadId: {
         ...nextState.threadDetailPageInfoByThreadId,
-        [nextThread.id]: nextPageInfo,
+        [sharedNextThread.id]: nextPageInfo,
       },
     };
   }
@@ -1330,54 +1727,102 @@ export function syncServerThreadDetail(
   );
 }
 
-function mergeOlderItems<TItem, TId extends string>(
-  olderItems: readonly TItem[],
-  currentItems: readonly TItem[],
-  getId: (item: TItem) => TId,
-): TItem[] {
-  const seen = new Set<TId>();
-  const merged: TItem[] = [];
-  for (const item of [...olderItems, ...currentItems]) {
-    const id = getId(item);
-    if (seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
-    merged.push(item);
-  }
-  return merged;
+export function mergeServerThreadDetailTailSnapshot(
+  state: AppState,
+  thread: OrchestrationThread,
+  environmentId: EnvironmentId,
+  options?: ThreadDetailWriteOptions,
+): AppState {
+  const environmentState = getStoredEnvironmentState(state, environmentId);
+  const previousThread = getThreadFromEnvironmentState(environmentState, thread.id);
+  const incomingPageInfo = options?.pageInfo ?? EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO;
+  const incomingThread = mapThread(thread, environmentId, incomingPageInfo);
+  const nextPageInfo = resolveTailSnapshotPageInfo(
+    environmentState.threadDetailPageInfoByThreadId[thread.id],
+    incomingPageInfo,
+  );
+  const nextThread: Thread = previousThread
+    ? {
+        ...incomingThread,
+        detailPageInfo: nextPageInfo,
+        messages: mergeTailItems(
+          previousThread.messages,
+          incomingThread.messages,
+          (message) => message.id,
+          compareMessagesByOrder,
+        ),
+        proposedPlans: mergeTailItems(
+          previousThread.proposedPlans,
+          incomingThread.proposedPlans,
+          (plan) => plan.id,
+          compareProposedPlansByOrder,
+        ),
+        activities: mergeTailItems(
+          previousThread.activities,
+          incomingThread.activities,
+          (activity) => activity.id,
+          compareThreadActivitiesByOrder,
+        ),
+        turnDiffSummaries: mergeTailItems(
+          previousThread.turnDiffSummaries,
+          incomingThread.turnDiffSummaries,
+          (summary) => summary.turnId,
+          compareTurnDiffSummariesByOrder,
+        ),
+      }
+    : incomingThread;
+
+  return commitEnvironmentState(
+    state,
+    environmentId,
+    writeThreadState(environmentState, nextThread, previousThread, {
+      ...options,
+      pageInfo: nextPageInfo,
+    }),
+  );
 }
 
 export function mergeServerThreadDetailPage(
   state: AppState,
   snapshot: OrchestrationThreadDetailSnapshot,
   environmentId: EnvironmentId,
+  options: ThreadDetailPageMergeOptions = {},
 ): AppState {
   const environmentState = getStoredEnvironmentState(state, environmentId);
   const previousThread = getThreadFromEnvironmentState(environmentState, snapshot.thread.id);
-  const pageThread = mapThread(snapshot.thread, environmentId, snapshot.pageInfo);
+  const nextPageInfo = resolveOlderPageInfo(
+    environmentState.threadDetailPageInfoByThreadId[snapshot.thread.id],
+    snapshot.pageInfo,
+    options.requestedBefore,
+  );
+  const pageThread = mapThread(snapshot.thread, environmentId, nextPageInfo);
   const nextThread: Thread = previousThread
     ? {
         ...pageThread,
+        detailPageInfo: nextPageInfo,
         messages: mergeOlderItems(
           pageThread.messages,
           previousThread.messages,
           (message) => message.id,
+          compareMessagesByOrder,
         ),
         proposedPlans: mergeOlderItems(
           pageThread.proposedPlans,
           previousThread.proposedPlans,
           (plan) => plan.id,
+          compareProposedPlansByOrder,
         ),
         activities: mergeOlderItems(
           pageThread.activities,
           previousThread.activities,
           (activity) => activity.id,
+          compareThreadActivitiesByOrder,
         ),
         turnDiffSummaries: mergeOlderItems(
           pageThread.turnDiffSummaries,
           previousThread.turnDiffSummaries,
           (summary) => summary.turnId,
+          compareTurnDiffSummariesByOrder,
         ),
       }
     : pageThread;
@@ -1385,7 +1830,7 @@ export function mergeServerThreadDetailPage(
   return commitEnvironmentState(
     state,
     environmentId,
-    writeThreadState(environmentState, nextThread, previousThread, { pageInfo: snapshot.pageInfo }),
+    writeThreadState(environmentState, nextThread, previousThread, { pageInfo: nextPageInfo }),
   );
 }
 
@@ -2302,9 +2747,15 @@ interface AppStore extends AppState {
     environmentId: EnvironmentId,
     options?: ThreadDetailWriteOptions,
   ) => void;
+  mergeServerThreadDetailTailSnapshot: (
+    thread: OrchestrationThread,
+    environmentId: EnvironmentId,
+    options?: ThreadDetailWriteOptions,
+  ) => void;
   mergeServerThreadDetailPage: (
     snapshot: OrchestrationThreadDetailSnapshot,
     environmentId: EnvironmentId,
+    options?: ThreadDetailPageMergeOptions,
   ) => void;
   applyOrchestrationEvent: (event: OrchestrationEvent, environmentId: EnvironmentId) => void;
   applyOrchestrationEvents: (
@@ -2333,8 +2784,10 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => syncServerShellSnapshot(state, snapshot, environmentId)),
   syncServerThreadDetail: (thread, environmentId, options) =>
     set((state) => syncServerThreadDetail(state, thread, environmentId, options)),
-  mergeServerThreadDetailPage: (snapshot, environmentId) =>
-    set((state) => mergeServerThreadDetailPage(state, snapshot, environmentId)),
+  mergeServerThreadDetailTailSnapshot: (thread, environmentId, options) =>
+    set((state) => mergeServerThreadDetailTailSnapshot(state, thread, environmentId, options)),
+  mergeServerThreadDetailPage: (snapshot, environmentId, options) =>
+    set((state) => mergeServerThreadDetailPage(state, snapshot, environmentId, options)),
   applyOrchestrationEvent: (event, environmentId) =>
     set((state) => applyOrchestrationEvent(state, event, environmentId)),
   applyOrchestrationEvents: (events, environmentId, options) =>

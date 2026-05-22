@@ -283,7 +283,7 @@ function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
 
 /**
  * A variant of `ComboboxList` without `ScrollArea`, for use when
- * an external virtualizer (e.g. LegendList) owns the scroll container.
+ * an external virtualizer (e.g. VirtualizedList) owns the scroll container.
  */
 function ComboboxListVirtualized({ className, ...props }: ComboboxPrimitive.List.Props) {
   return (

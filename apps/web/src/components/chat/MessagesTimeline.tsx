@@ -16,7 +16,6 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
@@ -71,10 +70,11 @@ import {
 } from "./userMessageTerminalContexts";
 import { SkillInlineText } from "./SkillInlineText";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
+import { VirtualizedList, type VirtualizedListHandle } from "../virtualization/VirtualizedList";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
-// Propagates through LegendList's memo boundaries for shared callbacks and
+// Propagates through VirtualizedList's memo boundaries for shared callbacks and
 // non-row-scoped state. `nowIso` is intentionally excluded — self-ticking
 // components (WorkingTimer, LiveElapsed) handle it.
 // ---------------------------------------------------------------------------
@@ -119,7 +119,7 @@ interface MessagesTimelineProps {
   activeTurnInProgress: boolean;
   activeTurnId?: TurnId | null;
   activeTurnStartedAt: string | null;
-  listRef: React.RefObject<LegendListRef | null>;
+  listRef: React.RefObject<VirtualizedListHandle | null>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
@@ -203,13 +203,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const rows = useStableRows(rawRows);
 
-  const handleScroll = useCallback(() => {
-    const state = listRef.current?.getState?.();
-    if (state) {
-      onIsAtEndChange(state.isAtEnd);
-    }
-  }, [listRef, onIsAtEndChange]);
-
   const handleUserScrollIntent = useCallback(() => {
     onUserScrollIntent?.();
   }, [onUserScrollIntent]);
@@ -221,9 +214,24 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     },
     [handleUserScrollIntent],
   );
+  const handleManualOlderThreadDetailLoad = useCallback(() => {
+    onLoadOlderThreadDetail?.();
+  }, [onLoadOlderThreadDetail]);
   const listHeader = useMemo(() => {
     if (!hasOlderThreadDetail) {
       return TIMELINE_LIST_HEADER;
+    }
+    if (isLoadingOlderThreadDetail) {
+      return (
+        <div
+          aria-live="polite"
+          className="flex h-12 items-center justify-center gap-1.5 text-muted-foreground text-xs"
+          role="status"
+        >
+          <LoaderCircleIcon className="size-3 animate-spin" />
+          Loading earlier messages...
+        </div>
+      );
     }
     return (
       <div className="flex h-12 items-center justify-center">
@@ -231,20 +239,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           type="button"
           size="xs"
           variant="ghost"
-          disabled={isLoadingOlderThreadDetail}
-          onClick={onLoadOlderThreadDetail}
+          onClick={handleManualOlderThreadDetailLoad}
           className="gap-1.5 text-muted-foreground"
         >
-          {isLoadingOlderThreadDetail ? (
-            <LoaderCircleIcon className="size-3 animate-spin" />
-          ) : (
-            <ChevronUpIcon className="size-3" />
-          )}
+          <ChevronUpIcon className="size-3" />
           Older
         </Button>
       </div>
     );
-  }, [hasOlderThreadDetail, isLoadingOlderThreadDetail, onLoadOlderThreadDetail]);
+  }, [handleManualOlderThreadDetailLoad, hasOlderThreadDetail, isLoadingOlderThreadDetail]);
 
   const previousRowCountRef = useRef(rows.length);
   useEffect(() => {
@@ -299,11 +302,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
-  // from TimelineRowCtx, which propagates through LegendList's memo.
+  // from TimelineRowCtx, which propagates through VirtualizedList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
-        <TimelineRowContent row={item} />
+      <div className="px-3 sm:px-5">
+        <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+          <TimelineRowContent row={item} />
+        </div>
       </div>
     ),
     [],
@@ -336,7 +341,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           onTouchMoveCapture={handleUserScrollIntent}
           onWheelCapture={handleUserScrollIntent}
         >
-          <LegendList<MessagesTimelineRow>
+          <VirtualizedList<MessagesTimelineRow>
             ref={listRef}
             data={rows}
             keyExtractor={keyExtractor}
@@ -344,10 +349,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             estimatedItemSize={90}
             initialScrollAtEnd
             maintainScrollAtEnd={MAINTAIN_SCROLL_AT_END_ANIMATED}
-            maintainScrollAtEndThreshold={0.1}
-            maintainVisibleContentPosition={{ data: false, size: true }}
-            onScroll={handleScroll}
-            className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+            maintainScrollAtEndThreshold={8}
+            onIsAtEndChange={onIsAtEndChange}
+            className="h-full overflow-x-hidden overscroll-y-contain"
+            style={{ height: "100%" }}
+            data-testid="messages-timeline-list"
             ListHeaderComponent={listHeader}
             ListFooterComponent={TIMELINE_LIST_FOOTER}
           />
@@ -359,6 +365,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
 function keyExtractor(item: MessagesTimelineRow) {
   return item.id;
+}
+
+function timelineRowAnchorId(row: MessagesTimelineRow): string | undefined {
+  if (row.kind === "message") {
+    return `message:${row.message.id}`;
+  }
+  if (row.kind === "proposed-plan") {
+    return `proposed-plan:${row.proposedPlan.id}`;
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +393,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       )}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}
+      data-timeline-anchor-id={timelineRowAnchorId(row)}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
@@ -981,7 +998,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
 
 // ---------------------------------------------------------------------------
 // Structural sharing — reuse old row references when data hasn't changed
-// so LegendList (and React) can skip re-rendering unchanged items.
+// so VirtualizedList (and React) can skip re-rendering unchanged items.
 // ---------------------------------------------------------------------------
 
 /** Returns a structurally-shared copy of `rows`: for each row whose content
@@ -1174,7 +1191,10 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   });
 
   return (
-    <div className={cn("rounded-lg px-1 py-1", isNewEntry && "motion-safe:animate-fade-in-down")}>
+    <div
+      className={cn("rounded-lg px-1 py-1", isNewEntry && "motion-safe:animate-fade-in-down")}
+      data-timeline-anchor-id={`work-entry:${workEntry.id}`}
+    >
       <div className="flex items-center gap-2 transition-[opacity,translate] duration-200">
         <span
           className={cn("flex size-5 shrink-0 items-center justify-center", iconConfig.className)}

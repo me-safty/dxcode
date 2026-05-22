@@ -65,7 +65,7 @@ import {
   isLatestTurnSettled,
   formatElapsed,
 } from "../session-logic";
-import { type LegendListRef } from "@legendapp/list/react";
+import { type VirtualizedListHandle } from "./virtualization/VirtualizedList";
 import {
   buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
@@ -157,11 +157,12 @@ import {
   type ScheduledStickToBottom,
 } from "./chat/stickToBottom";
 import {
-  captureTimelineScrollAnchor,
-  restoreTimelineScrollAnchor,
-  scheduleTimelineScrollAnchorRestore,
+  captureTimelinePrependScrollSnapshot,
+  restoreTimelinePrependScrollSnapshot,
+  scheduleTimelinePrependScrollSnapshotRestore,
   type ScheduledTimelineScrollAnchorRestore,
 } from "./chat/timelineScrollAnchor";
+import { deriveOlderThreadDetailPageIntegrity } from "./chat/olderThreadDetailPageIntegrity";
 import { ChatHeader } from "./chat/ChatHeader";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
@@ -758,23 +759,23 @@ export default function ChatView(props: ChatViewProps) {
     {},
     LastInvokedScriptByProjectSchema,
   );
-  const legendListRef = useRef<LegendListRef | null>(null);
+  const timelineListRef = useRef<VirtualizedListHandle | null>(null);
   const isAtEndRef = useRef(true);
   const scheduledStickToBottomRef = useRef<ScheduledStickToBottom | null>(null);
-  const scheduledOlderDetailAnchorRestoreRef = useRef<ScheduledTimelineScrollAnchorRestore | null>(
+  const scheduledOlderDetailPrependRestoreRef = useRef<ScheduledTimelineScrollAnchorRestore | null>(
     null,
   );
-  const olderDetailAnchorRestoreTokenRef = useRef(0);
+  const olderDetailPrependRestoreTokenRef = useRef(0);
   const stickToBottomLockUntilRef = useRef(0);
   const userScrollDetachUntilRef = useRef(0);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
-  const cancelScheduledOlderDetailAnchorRestore = useCallback(() => {
-    olderDetailAnchorRestoreTokenRef.current += 1;
-    scheduledOlderDetailAnchorRestoreRef.current?.cancel();
-    scheduledOlderDetailAnchorRestoreRef.current = null;
+  const cancelScheduledOlderDetailPrependRestore = useCallback(() => {
+    olderDetailPrependRestoreTokenRef.current += 1;
+    scheduledOlderDetailPrependRestoreRef.current?.cancel();
+    scheduledOlderDetailPrependRestoreRef.current = null;
   }, []);
 
   const terminalState = useTerminalStateStore((state) =>
@@ -1827,9 +1828,10 @@ export default function ChatView(props: ChatViewProps) {
     [draftId, routeThreadRef, serverThread, setStoreThreadError],
   );
   const [isLoadingOlderThreadDetail, setIsLoadingOlderThreadDetail] = useState(false);
+  const olderDetailLoadInFlightRef = useRef(false);
   const hasOlderThreadDetail = hasOlderThreadDetailPage(activeThread?.detailPageInfo);
   const loadOlderThreadDetail = useCallback(async () => {
-    if (!activeThread || isLoadingOlderThreadDetail) {
+    if (!activeThread || olderDetailLoadInFlightRef.current) {
       return;
     }
 
@@ -1848,27 +1850,39 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
 
+    olderDetailLoadInFlightRef.current = true;
     setIsLoadingOlderThreadDetail(true);
-    cancelScheduledOlderDetailAnchorRestore();
+    cancelScheduledOlderDetailPrependRestore();
     try {
       const snapshot = await api.orchestration.getThreadDetailPage({
         threadId: activeThread.id,
         page: { before },
       });
-      const anchor = captureTimelineScrollAnchor(legendListRef.current);
-      const anchorRestoreToken = olderDetailAnchorRestoreTokenRef.current + 1;
-      olderDetailAnchorRestoreTokenRef.current = anchorRestoreToken;
+      const pageIntegrity = deriveOlderThreadDetailPageIntegrity({
+        currentThread: activeThread,
+        snapshot,
+        requestedBefore: before,
+      });
+      if (pageIntegrity.isNoopPage) {
+        return;
+      }
+      const scrollSnapshot = captureTimelinePrependScrollSnapshot(timelineListRef.current);
+      const prependRestoreToken = olderDetailPrependRestoreTokenRef.current + 1;
+      olderDetailPrependRestoreTokenRef.current = prependRestoreToken;
 
       flushSync(() => {
-        useStore.getState().mergeServerThreadDetailPage(snapshot, activeThread.environmentId);
-      });
-      if (anchor) {
-        restoreTimelineScrollAnchor(legendListRef.current, anchor);
-        scheduledOlderDetailAnchorRestoreRef.current = scheduleTimelineScrollAnchorRestore({
-          listRef: legendListRef,
-          anchor,
-          shouldCancel: () => olderDetailAnchorRestoreTokenRef.current !== anchorRestoreToken,
+        useStore.getState().mergeServerThreadDetailPage(snapshot, activeThread.environmentId, {
+          requestedBefore: before,
         });
+      });
+      if (scrollSnapshot) {
+        restoreTimelinePrependScrollSnapshot(timelineListRef.current, scrollSnapshot);
+        scheduledOlderDetailPrependRestoreRef.current =
+          scheduleTimelinePrependScrollSnapshotRestore({
+            listRef: timelineListRef,
+            snapshot: scrollSnapshot,
+            shouldCancel: () => olderDetailPrependRestoreTokenRef.current !== prependRestoreToken,
+          });
       }
     } catch (error) {
       setThreadError(
@@ -1876,18 +1890,15 @@ export default function ChatView(props: ChatViewProps) {
         error instanceof Error ? error.message : "Failed to load older messages.",
       );
     } finally {
+      olderDetailLoadInFlightRef.current = false;
       setIsLoadingOlderThreadDetail(false);
     }
-  }, [
-    activeThread,
-    cancelScheduledOlderDetailAnchorRestore,
-    isLoadingOlderThreadDetail,
-    setThreadError,
-  ]);
+  }, [activeThread, cancelScheduledOlderDetailPrependRestore, setThreadError]);
   useEffect(() => {
-    cancelScheduledOlderDetailAnchorRestore();
+    cancelScheduledOlderDetailPrependRestore();
+    olderDetailLoadInFlightRef.current = false;
     setIsLoadingOlderThreadDetail(false);
-  }, [activeThreadKey, cancelScheduledOlderDetailAnchorRestore]);
+  }, [activeThreadKey, cancelScheduledOlderDetailPrependRestore]);
 
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
@@ -2349,7 +2360,7 @@ export default function ChatView(props: ChatViewProps) {
   }, []);
 
   // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
-  // thread switches.  LegendList fires scroll events with isAtEnd=false while
+  // thread switches. The timeline virtualizer can report isAtEnd=false while
   // initialScrollAtEnd is settling; hiding is always immediate.
   const showScrollDebouncer = useRef(
     new Debouncer(() => setScrollToBottomVisible(true), { wait: 150 }),
@@ -2376,22 +2387,22 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [cancelScheduledStickToBottom]);
 
-  // Scroll helpers — LegendList handles steady-state auto-scroll via
-  // maintainScrollAtEnd. Mobile Safari/PWA resume and keyboard collapse can
+  // Scroll helpers — the timeline virtualizer handles steady-state auto-scroll
+  // via maintainScrollAtEnd. Mobile Safari/PWA resume and keyboard collapse can
   // still resize the viewport after a send, so we settle the bottom position
   // across a few frames and short delayed windows.
   const scrollToEnd = useCallback(
     (animated = false) => {
       markTimelineAtEnd();
       cancelScheduledStickToBottom();
-      void legendListRef.current?.scrollToEnd?.({ animated });
+      void timelineListRef.current?.scrollToEnd?.({ animated });
       if (animated) {
         return;
       }
 
       scheduledStickToBottomRef.current = scheduleStickToBottom({
         scrollToEnd: () => {
-          void legendListRef.current?.scrollToEnd?.({ animated: false });
+          void timelineListRef.current?.scrollToEnd?.({ animated: false });
         },
       });
     },
@@ -2421,11 +2432,11 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   const onTimelineUserScrollIntent = useCallback(() => {
-    cancelScheduledOlderDetailAnchorRestore();
+    cancelScheduledOlderDetailPrependRestore();
     stickToBottomLockUntilRef.current = 0;
     userScrollDetachUntilRef.current = performance.now() + USER_SCROLL_DETACH_GRACE_MS;
     markTimelineAwayFromEnd();
-  }, [cancelScheduledOlderDetailAnchorRestore, markTimelineAwayFromEnd]);
+  }, [cancelScheduledOlderDetailPrependRestore, markTimelineAwayFromEnd]);
 
   useEffect(() => {
     if (!isAtEndRef.current) {
@@ -2436,8 +2447,8 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => cancelScheduledStickToBottom, [cancelScheduledStickToBottom]);
   useEffect(
-    () => cancelScheduledOlderDetailAnchorRestore,
-    [cancelScheduledOlderDetailAnchorRestore],
+    () => cancelScheduledOlderDetailPrependRestore,
+    [cancelScheduledOlderDetailPrependRestore],
   );
 
   useEffect(() => {
@@ -2455,7 +2466,7 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     const shouldRestoreBottom = () => {
-      const listState = legendListRef.current?.getState?.();
+      const listState = timelineListRef.current?.getState?.();
       return Boolean(listState?.isAtEnd || isAtEndRef.current || !showScrollToBottomRef.current);
     };
 
@@ -2998,10 +3009,10 @@ export default function ChatView(props: ChatViewProps) {
       previewUrl: image.previewUrl,
     }));
     // Scroll to the current end *before* adding the optimistic message.
-    // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
-    // automatically pins to the new item when the data changes.
+    // This marks the timeline as at-end so maintainScrollAtEnd automatically
+    // pins to the new item when the data changes.
     markTimelineAtEnd();
-    await legendListRef.current?.scrollToEnd?.({ animated: false });
+    await timelineListRef.current?.scrollToEnd?.({ animated: false });
 
     setOptimisticUserMessages((existing) => [
       ...existing,
@@ -3395,7 +3406,7 @@ export default function ChatView(props: ChatViewProps) {
 
       // Scroll to the current end *before* adding the optimistic message.
       markTimelineAtEnd();
-      await legendListRef.current?.scrollToEnd?.({ animated: false });
+      await timelineListRef.current?.scrollToEnd?.({ animated: false });
 
       setOptimisticUserMessages((existing) => [
         ...existing,
@@ -3810,7 +3821,7 @@ export default function ChatView(props: ChatViewProps) {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
           <div className="relative flex min-h-0 flex-1 flex-col">
-            {/* Messages — LegendList handles virtualization and scrolling internally */}
+            {/* Messages — VirtualizedList handles virtualization and scrolling internally */}
             <MessagesTimeline
               key={activeThread.id}
               isWorking={isWorking}
@@ -3818,7 +3829,7 @@ export default function ChatView(props: ChatViewProps) {
               activeTurnInProgress={isWorking || !latestTurnSettled}
               activeTurnId={activeLatestTurn?.turnId ?? null}
               activeTurnStartedAt={activeWorkStartedAt}
-              listRef={legendListRef}
+              listRef={timelineListRef}
               timelineEntries={timelineEntries}
               completionDividerBeforeEntryId={completionDividerBeforeEntryId}
               completionSummary={completionSummary}

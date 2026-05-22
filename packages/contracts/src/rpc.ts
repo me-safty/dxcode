@@ -492,6 +492,15 @@ export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.
   error: OrchestrationReplayEventsError,
 });
 
+export const WsOrchestrationReconcileThreadDetailRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.reconcileThreadDetail,
+  {
+    payload: OrchestrationRpcSchemas.reconcileThreadDetail.input,
+    success: OrchestrationRpcSchemas.reconcileThreadDetail.output,
+    error: OrchestrationGetSnapshotError,
+  },
+);
+
 export const WsOrchestrationProbeSyncRpc = Rpc.make(ORCHESTRATION_WS_METHODS.probeSync, {
   payload: OrchestrationRpcSchemas.probeSync.input,
   success: OrchestrationRpcSchemas.probeSync.output,
@@ -612,6 +621,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationProbeSyncRpc,
   WsOrchestrationReplayEventsRpc,
+  WsOrchestrationReconcileThreadDetailRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationGetThreadDetailPageRpc,
   WsOrchestrationSubscribeShellRpc,

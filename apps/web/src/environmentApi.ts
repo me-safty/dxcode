@@ -50,6 +50,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
       getThreadDetailPage: rpcClient.orchestration.getThreadDetailPage,
+      reconcileThreadDetail: rpcClient.orchestration.reconcileThreadDetail,
       getArchivedShellSnapshot: rpcClient.orchestration.getArchivedShellSnapshot,
       subscribeShell: (callback, options) =>
         rpcClient.orchestration.subscribeShell(callback, options),

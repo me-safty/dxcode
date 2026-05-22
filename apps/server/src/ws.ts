@@ -34,6 +34,10 @@ import {
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
+import {
+  computeOrchestrationThreadDetailFingerprint,
+  orchestrationThreadDetailFingerprintsEqual,
+} from "@t3tools/shared/orchestrationThreadDetailFingerprint";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -96,6 +100,7 @@ const isOrchestrationGetSnapshotError = Schema.is(OrchestrationGetSnapshotError)
 const isWorkspacePathOutsideRootError = Schema.is(WorkspacePathOutsideRootError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+const THREAD_DETAIL_RECONCILE_EVENT_LIMIT = 500;
 
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
@@ -853,6 +858,111 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   }),
               ),
             ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.reconcileThreadDetail]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.reconcileThreadDetail,
+            Effect.gen(function* () {
+              const snapshotOption = yield* projectionSnapshotQuery
+                .getThreadDetailSnapshotById(input.threadId, input.page ?? {})
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: `Failed to load thread ${input.threadId}`,
+                        cause,
+                      }),
+                  ),
+                );
+
+              if (Option.isNone(snapshotOption)) {
+                return yield* new OrchestrationGetSnapshotError({
+                  message: `Thread ${input.threadId} was not found`,
+                  cause: input.threadId,
+                });
+              }
+
+              const snapshot = snapshotOption.value;
+              const serverSequence = snapshot.snapshotSequence;
+              const serverFingerprint = computeOrchestrationThreadDetailFingerprint(snapshot);
+              const snapshotResult = (
+                reason:
+                  | "missing-client-verification"
+                  | "unverified-client-cursor"
+                  | "fingerprint-mismatch"
+                  | "too-many-events",
+              ) => ({
+                kind: "snapshot" as const,
+                reason,
+                serverSequence,
+                serverFingerprint,
+                snapshot,
+              });
+
+              if (input.clientSequence === null) {
+                return snapshotResult("missing-client-verification");
+              }
+
+              if (
+                input.verifiedSequence !== input.clientSequence ||
+                input.verifiedFingerprint === null
+              ) {
+                return snapshotResult("unverified-client-cursor");
+              }
+
+              if (input.clientSequence >= serverSequence) {
+                if (
+                  orchestrationThreadDetailFingerprintsEqual(
+                    input.verifiedFingerprint,
+                    serverFingerprint,
+                  )
+                ) {
+                  return {
+                    kind: "current" as const,
+                    serverSequence,
+                    serverFingerprint,
+                  };
+                }
+                return snapshotResult("fingerprint-mismatch");
+              }
+
+              const replayedEvents = yield* Stream.runCollect(
+                orchestrationEngine.readEvents(
+                  clamp(input.clientSequence, {
+                    maximum: Number.MAX_SAFE_INTEGER,
+                    minimum: 0,
+                  }),
+                ),
+              ).pipe(
+                Effect.map((events) => Array.from(events)),
+                Effect.flatMap(enrichOrchestrationEvents),
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: `Failed to reconcile thread ${input.threadId}`,
+                      cause,
+                    }),
+                ),
+              );
+              const threadDetailEvents = replayedEvents.filter(
+                (event) =>
+                  event.aggregateKind === "thread" &&
+                  event.aggregateId === input.threadId &&
+                  isThreadDetailEvent(event),
+              );
+
+              if (threadDetailEvents.length > THREAD_DETAIL_RECONCILE_EVENT_LIMIT) {
+                return snapshotResult("too-many-events");
+              }
+
+              return {
+                kind: "events" as const,
+                serverSequence,
+                serverFingerprint,
+                events: threadDetailEvents,
+              };
+            }),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.subscribeShell]: (_input) =>

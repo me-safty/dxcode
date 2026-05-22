@@ -1,5 +1,6 @@
 const DEFAULT_NOTIFICATION_TITLE = "T3 Code";
 const DEFAULT_NOTIFICATION_URL = "/";
+const NOTIFICATION_CLICK_MESSAGE_TYPE = "t3.notification-click";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
@@ -67,14 +68,22 @@ async function openNotificationUrl(url) {
   }
 
   if (targetClient.url === url && "focus" in targetClient) {
-    return targetClient.focus();
+    const focusedClient = await targetClient.focus();
+    postNotificationClickMessage(focusedClient || targetClient, url);
+    return focusedClient;
   }
 
   if ("navigate" in targetClient) {
     try {
       const navigatedClient = await targetClient.navigate(url);
       if (navigatedClient && "focus" in navigatedClient) {
-        return navigatedClient.focus();
+        const focusedClient = await navigatedClient.focus();
+        postNotificationClickMessage(focusedClient || navigatedClient, url);
+        return focusedClient;
+      }
+      if (navigatedClient) {
+        postNotificationClickMessage(navigatedClient, url);
+        return navigatedClient;
       }
     } catch {
       // Fall through to opening a fresh window for the target thread.
@@ -84,17 +93,41 @@ async function openNotificationUrl(url) {
   try {
     const openedClient = await self.clients.openWindow(url);
     if (openedClient && "focus" in openedClient) {
-      return openedClient.focus();
+      const focusedClient = await openedClient.focus();
+      postNotificationClickMessage(focusedClient || openedClient, url);
+      return focusedClient;
+    }
+    if (openedClient) {
+      postNotificationClickMessage(openedClient, url);
+      return openedClient;
     }
   } catch {
     // Use the already-open app window as a last resort.
   }
 
   if ("focus" in targetClient) {
-    return targetClient.focus();
+    const focusedClient = await targetClient.focus();
+    postNotificationClickMessage(focusedClient || targetClient, url);
+    return focusedClient;
   }
 
   return undefined;
+}
+
+function postNotificationClickMessage(client, url) {
+  if (!client || !("postMessage" in client)) {
+    return;
+  }
+
+  const message = {
+    type: NOTIFICATION_CLICK_MESSAGE_TYPE,
+    url,
+    openedAt: Date.now(),
+  };
+
+  // Client.postMessage from a service worker does not accept a target origin.
+  // oxlint-disable-next-line require-post-message-target-origin
+  client.postMessage(message);
 }
 
 function selectNotificationClient(clients, url) {

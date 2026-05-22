@@ -224,6 +224,9 @@ function createMockEnvironmentApi(input: {
       getThreadDetailPage: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getThreadDetailPage"],
+      reconcileThreadDetail: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["reconcileThreadDetail"],
       getArchivedShellSnapshot: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getArchivedShellSnapshot"],

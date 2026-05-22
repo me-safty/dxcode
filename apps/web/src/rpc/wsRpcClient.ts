@@ -163,6 +163,9 @@ export interface WsRpcClient {
     readonly getThreadDetailPage: RpcUnaryMethod<
       typeof ORCHESTRATION_WS_METHODS.getThreadDetailPage
     >;
+    readonly reconcileThreadDetail: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.reconcileThreadDetail
+    >;
     readonly probeSync: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.probeSync>;
     readonly replayEvents: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.replayEvents>;
     readonly getArchivedShellSnapshot: RpcUnaryNoArgMethod<
@@ -336,6 +339,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getFullThreadDiff](input)),
       getThreadDetailPage: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getThreadDetailPage](input)),
+      reconcileThreadDetail: (input) =>
+        transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.reconcileThreadDetail](input),
+        ),
       probeSync: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.probeSync](input)),
       replayEvents: (input) =>

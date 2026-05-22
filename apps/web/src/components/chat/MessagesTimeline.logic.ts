@@ -142,9 +142,10 @@ export function deriveMessagesTimelineRows(input: {
         groupedEntries.push(nextEntry.entry);
         cursor += 1;
       }
+      const anchorEntry = groupedEntries[groupedEntries.length - 1];
       nextRows.push({
         kind: "work",
-        id: timelineEntry.id,
+        id: `work-group:${anchorEntry?.id ?? timelineEntry.id}`,
         createdAt: timelineEntry.createdAt,
         groupedEntries,
       });

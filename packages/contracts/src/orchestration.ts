@@ -29,6 +29,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   probeSync: "orchestration.probeSync",
   replayEvents: "orchestration.replayEvents",
+  reconcileThreadDetail: "orchestration.reconcileThreadDetail",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   getThreadDetailPage: "orchestration.getThreadDetailPage",
   subscribeShell: "orchestration.subscribeShell",
@@ -525,6 +526,12 @@ export const OrchestrationThreadDetailSnapshot = Schema.Struct({
   ),
 });
 export type OrchestrationThreadDetailSnapshot = typeof OrchestrationThreadDetailSnapshot.Type;
+
+export const OrchestrationThreadDetailFingerprint = Schema.Struct({
+  version: Schema.Literal(1),
+  value: TrimmedNonEmptyString,
+});
+export type OrchestrationThreadDetailFingerprint = typeof OrchestrationThreadDetailFingerprint.Type;
 
 export const ProjectCreateCommand = Schema.Struct({
   type: Schema.Literal("project.create"),
@@ -1305,6 +1312,48 @@ export const OrchestrationProbeSyncResult = Schema.Struct({
 });
 export type OrchestrationProbeSyncResult = typeof OrchestrationProbeSyncResult.Type;
 
+export const OrchestrationReconcileThreadDetailInput = Schema.Struct({
+  threadId: ThreadId,
+  clientSequence: Schema.NullOr(NonNegativeInt),
+  verifiedSequence: Schema.NullOr(NonNegativeInt),
+  verifiedFingerprint: Schema.NullOr(OrchestrationThreadDetailFingerprint),
+  page: Schema.optional(OrchestrationThreadDetailPageRequest),
+});
+export type OrchestrationReconcileThreadDetailInput =
+  typeof OrchestrationReconcileThreadDetailInput.Type;
+
+export const OrchestrationReconcileThreadDetailSnapshotReason = Schema.Literals([
+  "missing-client-verification",
+  "unverified-client-cursor",
+  "fingerprint-mismatch",
+  "too-many-events",
+]);
+export type OrchestrationReconcileThreadDetailSnapshotReason =
+  typeof OrchestrationReconcileThreadDetailSnapshotReason.Type;
+
+export const OrchestrationReconcileThreadDetailResult = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("current"),
+    serverSequence: NonNegativeInt,
+    serverFingerprint: OrchestrationThreadDetailFingerprint,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("events"),
+    serverSequence: NonNegativeInt,
+    serverFingerprint: OrchestrationThreadDetailFingerprint,
+    events: Schema.Array(OrchestrationEvent),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    reason: OrchestrationReconcileThreadDetailSnapshotReason,
+    serverSequence: NonNegativeInt,
+    serverFingerprint: OrchestrationThreadDetailFingerprint,
+    snapshot: OrchestrationThreadDetailSnapshot,
+  }),
+]);
+export type OrchestrationReconcileThreadDetailResult =
+  typeof OrchestrationReconcileThreadDetailResult.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -1321,6 +1370,10 @@ export const OrchestrationRpcSchemas = {
   replayEvents: {
     input: OrchestrationReplayEventsInput,
     output: OrchestrationReplayEventsResult,
+  },
+  reconcileThreadDetail: {
+    input: OrchestrationReconcileThreadDetailInput,
+    output: OrchestrationReconcileThreadDetailResult,
   },
   probeSync: {
     input: OrchestrationProbeSyncInput,

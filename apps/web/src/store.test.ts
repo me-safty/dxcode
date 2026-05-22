@@ -10,6 +10,7 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationThread,
+  type OrchestrationThreadDetailPageCursors,
   type OrchestrationThreadDetailPageInfo,
   type OrchestrationThreadDetailSnapshot,
   type OrchestrationEvent,
@@ -25,6 +26,7 @@ import {
   selectThreadByRef,
   selectThreadExistsByRef,
   setThreadBranch,
+  mergeServerThreadDetailTailSnapshot,
   mergeServerThreadDetailPage,
   selectThreadsAcrossEnvironments,
   syncServerThreadDetail,
@@ -263,6 +265,23 @@ function makePageInfo(input: {
         checkpointTurnCount: input.startIndex,
       },
     },
+  };
+}
+
+function makeEmptyPageInfo(): OrchestrationThreadDetailPageInfo {
+  return {
+    messages: { hasMoreBefore: false, startCursor: null },
+    proposedPlans: { hasMoreBefore: false, startCursor: null },
+    activities: { hasMoreBefore: false, startCursor: null },
+    checkpoints: { hasMoreBefore: false, startCursor: null },
+  };
+}
+
+function makeActivityPageCursor(index: number): OrchestrationThreadDetailPageCursors["activities"] {
+  return {
+    id: `activity-${index}`,
+    createdAt: `2026-02-13T00:0${index}:30.000Z`,
+    sequence: index,
   };
 }
 
@@ -587,6 +606,275 @@ describe("thread selection memoization", () => {
   });
 });
 
+describe("thread detail structural sharing", () => {
+  it("treats identical thread detail snapshots as a store no-op", () => {
+    const threadId = ThreadId.make("thread-identical-detail");
+    const sourceThread = makeThread({
+      id: threadId,
+      messages: [makeMessage(1), makeMessage(2)],
+      activities: [makeActivity(1), makeActivity(2)],
+      proposedPlans: [makePlan(1), makePlan(2)],
+      turnDiffSummaries: [makeTurnDiffSummary(1), makeTurnDiffSummary(2)],
+    });
+    const first = syncServerThreadDetail(
+      makeEmptyState(),
+      makeOrchestrationThread(sourceThread),
+      localEnvironmentId,
+    );
+    const ref = scopeThreadRef(localEnvironmentId, threadId);
+    const firstThread = selectThreadByRef(first, ref);
+    expect(firstThread).toBeDefined();
+
+    const equivalentThread = makeThread({
+      id: threadId,
+      messages: [makeMessage(1), makeMessage(2)],
+      activities: [makeActivity(1), makeActivity(2)],
+      proposedPlans: [makePlan(1), makePlan(2)],
+      turnDiffSummaries: [makeTurnDiffSummary(1), makeTurnDiffSummary(2)],
+    });
+    const second = syncServerThreadDetail(
+      first,
+      makeOrchestrationThread(equivalentThread),
+      localEnvironmentId,
+    );
+    const secondThread = selectThreadByRef(second, ref);
+
+    expect(second).toBe(first);
+    expect(secondThread).toBe(firstThread);
+    expect(secondThread?.messages).toBe(firstThread?.messages);
+    expect(secondThread?.activities).toBe(firstThread?.activities);
+    expect(secondThread?.proposedPlans).toBe(firstThread?.proposedPlans);
+    expect(secondThread?.turnDiffSummaries).toBe(firstThread?.turnDiffSummaries);
+  });
+
+  it("does not replace the shell for identical normalized model selections", () => {
+    const threadId = ThreadId.make("thread-identical-model-selection");
+    const sourceThread = makeThread({
+      id: threadId,
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: DEFAULT_MODEL,
+        options: [{ id: "effort", value: "high" }],
+      },
+    });
+    const first = syncServerThreadDetail(
+      makeEmptyState(),
+      makeOrchestrationThread(sourceThread),
+      localEnvironmentId,
+    );
+    const firstShell = localEnvironmentStateOf(first).threadShellById[threadId];
+
+    const equivalentThread = makeThread({
+      id: threadId,
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: DEFAULT_MODEL,
+        options: [{ id: "effort", value: "high" }],
+      },
+    });
+    const second = syncServerThreadDetail(
+      first,
+      makeOrchestrationThread(equivalentThread),
+      localEnvironmentId,
+    );
+
+    expect(localEnvironmentStateOf(second).threadShellById[threadId]).toBe(firstShell);
+    expect(second).toBe(first);
+  });
+
+  it("updates longer streaming assistant text while reusing unchanged messages", () => {
+    const threadId = ThreadId.make("thread-streaming-update");
+    const userMessage = makeMessage(1);
+    const assistantMessageId = MessageId.make("assistant-streaming");
+    const turnId = TurnId.make("turn-streaming");
+    const initialThread = makeThread({
+      id: threadId,
+      messages: [
+        userMessage,
+        {
+          id: assistantMessageId,
+          role: "assistant",
+          text: "Still working",
+          turnId,
+          createdAt: "2026-02-13T00:02:00.000Z",
+          streaming: true,
+        },
+      ],
+    });
+    const first = syncServerThreadDetail(
+      makeEmptyState(),
+      makeOrchestrationThread(initialThread),
+      localEnvironmentId,
+    );
+    const ref = scopeThreadRef(localEnvironmentId, threadId);
+    const firstThread = selectThreadByRef(first, ref);
+
+    const updatedThread = makeThread({
+      id: threadId,
+      messages: [
+        makeMessage(1),
+        {
+          id: assistantMessageId,
+          role: "assistant",
+          text: "Still working with more text",
+          turnId,
+          createdAt: "2026-02-13T00:02:00.000Z",
+          streaming: true,
+        },
+      ],
+    });
+    const second = syncServerThreadDetail(
+      first,
+      makeOrchestrationThread(updatedThread),
+      localEnvironmentId,
+    );
+    const secondThread = selectThreadByRef(second, ref);
+
+    expect(second).not.toBe(first);
+    expect(secondThread?.messages).not.toBe(firstThread?.messages);
+    expect(secondThread?.messages[0]).toBe(firstThread?.messages[0]);
+    expect(secondThread?.messages[1]).not.toBe(firstThread?.messages[1]);
+    expect(secondThread?.messages[1]?.text).toBe("Still working with more text");
+    expect(secondThread?.messages[1]?.streaming).toBe(true);
+  });
+
+  it("updates a streaming assistant message when it completes", () => {
+    const threadId = ThreadId.make("thread-streaming-completed");
+    const messageId = MessageId.make("assistant-streaming-completed");
+    const turnId = TurnId.make("turn-streaming-completed");
+    const initialThread = makeThread({
+      id: threadId,
+      messages: [
+        {
+          id: messageId,
+          role: "assistant",
+          text: "Final response",
+          turnId,
+          createdAt: "2026-02-13T00:02:00.000Z",
+          streaming: true,
+        },
+      ],
+    });
+    const first = syncServerThreadDetail(
+      makeEmptyState(),
+      makeOrchestrationThread(initialThread),
+      localEnvironmentId,
+    );
+
+    const completedThread = makeThread({
+      id: threadId,
+      messages: [
+        {
+          id: messageId,
+          role: "assistant",
+          text: "Final response",
+          turnId,
+          createdAt: "2026-02-13T00:02:00.000Z",
+          completedAt: "2026-02-13T00:03:00.000Z",
+          streaming: false,
+        },
+      ],
+    });
+    const second = syncServerThreadDetail(
+      first,
+      makeOrchestrationThread(completedThread),
+      localEnvironmentId,
+    );
+    const thread = selectThreadByRef(second, scopeThreadRef(localEnvironmentId, threadId));
+
+    expect(second).not.toBe(first);
+    expect(thread?.messages[0]?.streaming).toBe(false);
+    expect(thread?.messages[0]?.completedAt).toBe("2026-02-13T00:03:00.000Z");
+  });
+
+  it("reuses unchanged activity payloads from fresh snapshot objects", () => {
+    const threadId = ThreadId.make("thread-activity-payload-same");
+    const initialThread = makeThread({
+      id: threadId,
+      activities: [
+        {
+          ...makeActivity(1),
+          payload: {
+            nested: { count: 1 },
+            items: ["alpha", true],
+          },
+        },
+      ],
+    });
+    const first = syncServerThreadDetail(
+      makeEmptyState(),
+      makeOrchestrationThread(initialThread),
+      localEnvironmentId,
+    );
+    const ref = scopeThreadRef(localEnvironmentId, threadId);
+    const firstThread = selectThreadByRef(first, ref);
+
+    const equivalentThread = makeThread({
+      id: threadId,
+      activities: [
+        {
+          ...makeActivity(1),
+          payload: {
+            nested: { count: 1 },
+            items: ["alpha", true],
+          },
+        },
+      ],
+    });
+    const second = syncServerThreadDetail(
+      first,
+      makeOrchestrationThread(equivalentThread),
+      localEnvironmentId,
+    );
+    const secondThread = selectThreadByRef(second, ref);
+
+    expect(second).toBe(first);
+    expect(secondThread?.activities).toBe(firstThread?.activities);
+    expect(secondThread?.activities[0]).toBe(firstThread?.activities[0]);
+  });
+
+  it("updates activities when a nested payload value changes", () => {
+    const threadId = ThreadId.make("thread-activity-payload-changed");
+    const initialThread = makeThread({
+      id: threadId,
+      activities: [
+        {
+          ...makeActivity(1),
+          payload: { nested: { count: 1 } },
+        },
+      ],
+    });
+    const first = syncServerThreadDetail(
+      makeEmptyState(),
+      makeOrchestrationThread(initialThread),
+      localEnvironmentId,
+    );
+    const ref = scopeThreadRef(localEnvironmentId, threadId);
+    const firstThread = selectThreadByRef(first, ref);
+
+    const updatedThread = makeThread({
+      id: threadId,
+      activities: [
+        {
+          ...makeActivity(1),
+          payload: { nested: { count: 2 } },
+        },
+      ],
+    });
+    const second = syncServerThreadDetail(
+      first,
+      makeOrchestrationThread(updatedThread),
+      localEnvironmentId,
+    );
+    const secondThread = selectThreadByRef(second, ref);
+
+    expect(second).not.toBe(first);
+    expect(secondThread?.activities).not.toBe(firstThread?.activities);
+    expect(secondThread?.activities[0]).not.toBe(firstThread?.activities[0]);
+    expect(secondThread?.activities[0]?.payload).toEqual({ nested: { count: 2 } });
+  });
+});
+
 describe("thread detail pagination", () => {
   it("maps persisted user image attachments to environment attachment preview URLs", () => {
     const originalWindow = globalThis.window;
@@ -659,6 +947,130 @@ describe("thread detail pagination", () => {
     }
   });
 
+  it("seeds thread detail from a tail subscription snapshot", () => {
+    const threadId = ThreadId.make("thread-tail-seed");
+    const pageInfo = makePageInfo({ hasMoreBefore: true, startIndex: 3 });
+    const next = mergeServerThreadDetailTailSnapshot(
+      makeEmptyState(),
+      makeOrchestrationThread(
+        makeThread({
+          id: threadId,
+          messages: [makeMessage(3), makeMessage(4)],
+          activities: [makeActivity(3)],
+        }),
+      ),
+      localEnvironmentId,
+      { pageInfo },
+    );
+    const thread = selectThreadByRef(next, scopeThreadRef(localEnvironmentId, threadId));
+
+    expect(thread?.messages.map((message) => message.id)).toEqual([
+      MessageId.make("message-3"),
+      MessageId.make("message-4"),
+    ]);
+    expect(thread?.activities.map((activity) => activity.id)).toEqual([EventId.make("activity-3")]);
+    expect(thread?.detailPageInfo).toEqual(pageInfo);
+  });
+
+  it("merges tail subscription snapshots without dropping loaded older rows", () => {
+    const threadId = ThreadId.make("thread-tail-preserve-older");
+    const pageInfo = makePageInfo({ hasMoreBefore: true, startIndex: 1 });
+    const initial = syncServerThreadDetail(
+      makeEmptyState(),
+      makeOrchestrationThread(
+        makeThread({
+          id: threadId,
+          messages: [makeMessage(1), makeMessage(2), makeMessage(3), makeMessage(4)],
+        }),
+      ),
+      localEnvironmentId,
+      { pageInfo },
+    );
+
+    const next = mergeServerThreadDetailTailSnapshot(
+      initial,
+      makeOrchestrationThread(
+        makeThread({
+          id: threadId,
+          messages: [
+            makeMessage(3),
+            { ...makeMessage(4), text: "repaired recent message" },
+            makeMessage(5),
+          ],
+        }),
+      ),
+      localEnvironmentId,
+      { pageInfo: makePageInfo({ hasMoreBefore: true, startIndex: 3 }) },
+    );
+    const thread = selectThreadByRef(next, scopeThreadRef(localEnvironmentId, threadId));
+
+    expect(thread?.messages.map((message) => message.id)).toEqual([
+      MessageId.make("message-1"),
+      MessageId.make("message-2"),
+      MessageId.make("message-3"),
+      MessageId.make("message-4"),
+      MessageId.make("message-5"),
+    ]);
+    expect(
+      thread?.messages.find((message) => message.id === MessageId.make("message-4"))?.text,
+    ).toBe("repaired recent message");
+    expect(thread?.detailPageInfo).toEqual(pageInfo);
+  });
+
+  it("updates older-page page info only for requested collections", () => {
+    const threadId = ThreadId.make("thread-pageinfo-requested-only");
+    const initialPageInfo = makePageInfo({ hasMoreBefore: true, startIndex: 3 });
+    const initial = syncServerThreadDetail(
+      makeEmptyState(),
+      makeOrchestrationThread(
+        makeThread({
+          id: threadId,
+          messages: [makeMessage(3), makeMessage(4)],
+          activities: [makeActivity(3), makeActivity(4)],
+        }),
+      ),
+      localEnvironmentId,
+      { pageInfo: initialPageInfo },
+    );
+    const incomingPageInfo = makeEmptyPageInfo();
+    const next = mergeServerThreadDetailPage(
+      initial,
+      {
+        snapshotSequence: 5,
+        thread: makeOrchestrationThread(
+          makeThread({
+            id: threadId,
+            activities: [makeActivity(1), makeActivity(2)],
+          }),
+        ),
+        pageInfo: incomingPageInfo,
+      },
+      localEnvironmentId,
+      {
+        requestedBefore: {
+          activities: makeActivityPageCursor(3),
+        },
+      },
+    );
+    const thread = selectThreadByRef(next, scopeThreadRef(localEnvironmentId, threadId));
+
+    expect(thread?.messages.map((message) => message.id)).toEqual([
+      MessageId.make("message-3"),
+      MessageId.make("message-4"),
+    ]);
+    expect(thread?.activities.map((activity) => activity.id)).toEqual([
+      EventId.make("activity-1"),
+      EventId.make("activity-2"),
+      EventId.make("activity-3"),
+      EventId.make("activity-4"),
+    ]);
+    expect(thread?.detailPageInfo?.messages).toEqual(initialPageInfo.messages);
+    expect(thread?.detailPageInfo?.activities).toEqual(incomingPageInfo.activities);
+    expect(
+      localEnvironmentStateOf(next).threadDetailPageInfoByThreadId[threadId]?.messages,
+    ).toEqual(initialPageInfo.messages);
+  });
+
   it("prepends older detail pages without replacing the visible recent page", () => {
     const threadId = ThreadId.make("thread-paged");
     const currentThread = makeThread({
@@ -722,6 +1134,30 @@ describe("thread detail pagination", () => {
     ]);
     expect(environmentState.threadDetailPageInfoByThreadId[threadId]).toEqual(pageInfo);
     expect(thread?.detailPageInfo).toEqual(pageInfo);
+
+    const repeated = mergeServerThreadDetailPage(next, snapshot, localEnvironmentId);
+    const repeatedThread = selectThreadByRef(
+      repeated,
+      scopeThreadRef(localEnvironmentId, threadId),
+    );
+    expect(repeated).toBe(next);
+    expect(repeatedThread).toBe(thread);
+    expect(repeatedThread?.messages).toBe(thread?.messages);
+    expect(repeatedThread?.activities).toBe(thread?.activities);
+    expect(repeatedThread?.proposedPlans).toBe(thread?.proposedPlans);
+    expect(repeatedThread?.turnDiffSummaries).toBe(thread?.turnDiffSummaries);
+    expect(repeatedThread?.messages.map((message) => message.id)).toEqual([
+      MessageId.make("message-1"),
+      MessageId.make("message-2"),
+      MessageId.make("message-3"),
+      MessageId.make("message-4"),
+    ]);
+    expect(repeatedThread?.activities.map((activity) => activity.id)).toEqual([
+      EventId.make("activity-1"),
+      EventId.make("activity-2"),
+      EventId.make("activity-3"),
+      EventId.make("activity-4"),
+    ]);
   });
 
   it("keeps a paged snapshot isolated to its environment", () => {

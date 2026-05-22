@@ -21,6 +21,7 @@ const mockSubscribeThread = vi.fn();
 const mockThreadUnsubscribe = vi.fn();
 const mockProbeSync = vi.fn();
 const mockReplayEvents = vi.fn();
+const mockReconcileThreadDetail = vi.fn();
 const mockCreateEnvironmentConnection = vi.fn();
 const mockCreateWsRpcClient = vi.fn();
 const mockWaitForSavedEnvironmentRegistryHydration = vi.fn();
@@ -293,6 +294,76 @@ function makeThreadDetailSnapshot(params: {
   };
 }
 
+type ThreadDetailSubscriptionTestItem =
+  | {
+      readonly kind: "snapshot";
+      readonly snapshot: OrchestrationThreadDetailSnapshot;
+    }
+  | {
+      readonly kind: "event";
+      readonly event: OrchestrationEvent;
+    };
+
+function readThreadDetailSubscriptionListener(
+  callIndex: number,
+): (item: ThreadDetailSubscriptionTestItem) => void {
+  const listener = mockSubscribeThread.mock.calls[callIndex]?.[1] as
+    | ((item: ThreadDetailSubscriptionTestItem) => void)
+    | undefined;
+  expect(listener).toBeDefined();
+  return listener!;
+}
+
+async function expectThreadDetailReconcileCallCount(count: number): Promise<void> {
+  await vi.waitFor(() => {
+    expect(mockReconcileThreadDetail).toHaveBeenCalledTimes(count);
+  });
+  expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+}
+
+function makeThreadDetailReconcileSnapshotResult(
+  snapshot: OrchestrationThreadDetailSnapshot,
+  reason:
+    | "missing-client-verification"
+    | "unverified-client-cursor"
+    | "fingerprint-mismatch"
+    | "too-many-events" = "fingerprint-mismatch",
+) {
+  return {
+    kind: "snapshot" as const,
+    reason,
+    serverSequence: snapshot.snapshotSequence,
+    serverFingerprint: { version: 1 as const, value: `fingerprint-${snapshot.snapshotSequence}` },
+    snapshot,
+  };
+}
+
+function stubServiceWorkerNotificationClickTarget(origin = "https://example.test") {
+  const serviceWorkerTarget = new EventTarget();
+  vi.stubGlobal("navigator", {
+    userAgent: "Vitest",
+    serviceWorker: {
+      addEventListener: serviceWorkerTarget.addEventListener.bind(serviceWorkerTarget),
+      removeEventListener: serviceWorkerTarget.removeEventListener.bind(serviceWorkerTarget),
+    },
+  });
+  vi.stubGlobal("window", {
+    location: { origin },
+  });
+
+  return {
+    notificationThreadUrl: (environmentId: EnvironmentId, threadId: ThreadId) =>
+      `${origin}/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`,
+    dispatchNotificationClickMessage: (data: unknown) => {
+      const event = new Event("message") as MessageEvent;
+      Object.defineProperty(event, "data", {
+        value: data,
+      });
+      serviceWorkerTarget.dispatchEvent(event);
+    },
+  };
+}
+
 function makeThreadSessionSetEvent(params: {
   readonly sequence: number;
   readonly threadId: ThreadId;
@@ -324,42 +395,6 @@ function makeThreadSessionSetEvent(params: {
         lastError: null,
         updatedAt: occurredAt,
       },
-    },
-  };
-}
-
-function makeThreadMessageSentEvent(params: {
-  readonly sequence: number;
-  readonly threadId: ThreadId;
-  readonly messageId: MessageId;
-  readonly role?: "user" | "assistant" | "system";
-  readonly text: string;
-  readonly turnId?: TurnId | null;
-  readonly streaming?: boolean;
-  readonly occurredAt?: string;
-}): Extract<OrchestrationEvent, { type: "thread.message-sent" }> {
-  const occurredAt = params.occurredAt ?? `2026-04-13T00:00:0${params.sequence}.000Z`;
-
-  return {
-    sequence: params.sequence,
-    eventId: EventId.make(`event-message-sent-${params.sequence}`),
-    aggregateKind: "thread",
-    aggregateId: params.threadId,
-    occurredAt,
-    commandId: CommandId.make(`command-message-sent-${params.sequence}`),
-    causationEventId: null,
-    correlationId: null,
-    metadata: {},
-    type: "thread.message-sent",
-    payload: {
-      threadId: params.threadId,
-      messageId: params.messageId,
-      role: params.role ?? "assistant",
-      text: params.text,
-      turnId: params.turnId ?? TurnId.make("turn-1"),
-      streaming: params.streaming ?? false,
-      createdAt: occurredAt,
-      updatedAt: occurredAt,
     },
   };
 }
@@ -459,6 +494,7 @@ describe("retainThreadDetailSubscription", () => {
     mockThreadUnsubscribe.mockReset();
     mockProbeSync.mockReset();
     mockReplayEvents.mockReset();
+    mockReconcileThreadDetail.mockReset();
     mockCreateEnvironmentConnection.mockReset();
     mockCreateWsRpcClient.mockReset();
     mockWaitForSavedEnvironmentRegistryHydration.mockReset();
@@ -481,6 +517,11 @@ describe("retainThreadDetailSubscription", () => {
 
     mockThreadUnsubscribe.mockImplementation(() => undefined);
     mockSubscribeThread.mockImplementation(() => mockThreadUnsubscribe);
+    mockReconcileThreadDetail.mockImplementation(async (input) => ({
+      kind: "current",
+      serverSequence: input.clientSequence ?? 0,
+      serverFingerprint: input.verifiedFingerprint ?? { version: 1, value: "test-fingerprint" },
+    }));
     mockCreateWsRpcClient.mockReturnValue({
       server: {
         getConfig: vi.fn(async () => ({
@@ -498,6 +539,7 @@ describe("retainThreadDetailSubscription", () => {
         subscribeThread: mockSubscribeThread,
         probeSync: mockProbeSync,
         replayEvents: mockReplayEvents,
+        reconcileThreadDetail: mockReconcileThreadDetail,
       },
     });
     mockCreateEnvironmentConnection.mockImplementation((input) => {
@@ -815,10 +857,9 @@ describe("retainThreadDetailSubscription", () => {
     );
 
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     release();
     stop();
@@ -1076,6 +1117,168 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("does not let subscription snapshots drop older rows loaded through page requests", async () => {
+    const {
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectThreadByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-tail-snapshot-preserves-older");
+    const recentPageInfo: OrchestrationThreadDetailPageInfo = {
+      ...EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+      messages: {
+        hasMoreBefore: true,
+        startCursor: {
+          id: "message-3",
+          createdAt: "2026-04-13T00:00:03.000Z",
+        },
+      },
+    };
+    const olderPageInfo: OrchestrationThreadDetailPageInfo = {
+      ...EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+      messages: {
+        hasMoreBefore: false,
+        startCursor: {
+          id: "message-1",
+          createdAt: "2026-04-13T00:00:01.000Z",
+        },
+      },
+    };
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "ready",
+      }),
+      environmentId,
+    );
+
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    const detailListener = readThreadDetailSubscriptionListener(0);
+    detailListener({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        pageInfo: recentPageInfo,
+        messages: [
+          {
+            id: MessageId.make("message-3"),
+            role: "user",
+            text: "recent three",
+            turnId: TurnId.make("turn-3"),
+            streaming: false,
+            createdAt: "2026-04-13T00:00:03.000Z",
+            updatedAt: "2026-04-13T00:00:03.000Z",
+          },
+          {
+            id: MessageId.make("message-4"),
+            role: "assistant",
+            text: "recent four",
+            turnId: TurnId.make("turn-4"),
+            streaming: false,
+            createdAt: "2026-04-13T00:00:04.000Z",
+            updatedAt: "2026-04-13T00:00:04.000Z",
+          },
+        ],
+      }),
+    });
+
+    useStore.getState().mergeServerThreadDetailPage(
+      makeThreadDetailSnapshot({
+        snapshotSequence: 2,
+        threadId,
+        pageInfo: olderPageInfo,
+        messages: [
+          {
+            id: MessageId.make("message-1"),
+            role: "user",
+            text: "older one",
+            turnId: TurnId.make("turn-1"),
+            streaming: false,
+            createdAt: "2026-04-13T00:00:01.000Z",
+            updatedAt: "2026-04-13T00:00:01.000Z",
+          },
+          {
+            id: MessageId.make("message-2"),
+            role: "assistant",
+            text: "older two",
+            turnId: TurnId.make("turn-2"),
+            streaming: false,
+            createdAt: "2026-04-13T00:00:02.000Z",
+            updatedAt: "2026-04-13T00:00:02.000Z",
+          },
+        ],
+      }),
+      environmentId,
+      { requestedBefore: { messages: recentPageInfo.messages.startCursor! } },
+    );
+
+    detailListener({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 3,
+        threadId,
+        pageInfo: {
+          ...EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+          messages: {
+            hasMoreBefore: true,
+            startCursor: {
+              id: "message-4",
+              createdAt: "2026-04-13T00:00:04.000Z",
+            },
+          },
+        },
+        messages: [
+          {
+            id: MessageId.make("message-4"),
+            role: "assistant",
+            text: "recent four repaired",
+            turnId: TurnId.make("turn-4"),
+            streaming: false,
+            createdAt: "2026-04-13T00:00:04.000Z",
+            updatedAt: "2026-04-13T00:00:05.000Z",
+          },
+          {
+            id: MessageId.make("message-5"),
+            role: "user",
+            text: "recent five",
+            turnId: TurnId.make("turn-5"),
+            streaming: false,
+            createdAt: "2026-04-13T00:00:05.000Z",
+            updatedAt: "2026-04-13T00:00:05.000Z",
+          },
+        ],
+      }),
+    });
+
+    const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
+
+    expect(thread?.messages.map((message) => message.id)).toEqual([
+      MessageId.make("message-1"),
+      MessageId.make("message-2"),
+      MessageId.make("message-3"),
+      MessageId.make("message-4"),
+      MessageId.make("message-5"),
+    ]);
+    expect(
+      thread?.messages.find((message) => message.id === MessageId.make("message-4"))?.text,
+    ).toBe("recent four repaired");
+    expect(thread?.detailPageInfo?.messages).toEqual(olderPageInfo.messages);
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
   it("refreshes a warm idle detail subscription when active re-entry finds it behind shell", async () => {
     const {
       retainActiveThreadDetailSubscription,
@@ -1139,10 +1342,8 @@ describe("retainThreadDetailSubscription", () => {
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     releaseActive();
     stop();
@@ -1260,40 +1461,31 @@ describe("retainThreadDetailSubscription", () => {
       }),
     });
 
+    const refreshedSnapshot = makeThreadDetailSnapshot({
+      snapshotSequence: 5,
+      threadId,
+      sessionStatus: "ready",
+      messages: [
+        {
+          id: messageId,
+          role: "assistant",
+          text: "Final response",
+          turnId,
+          streaming: false,
+          createdAt: "2026-04-13T00:00:05.000Z",
+          updatedAt: "2026-04-13T00:00:07.000Z",
+        },
+      ],
+    });
+    mockReconcileThreadDetail.mockResolvedValueOnce(
+      makeThreadDetailReconcileSnapshotResult(refreshedSnapshot),
+    );
+
     const releaseActive = retainActiveThreadDetailSubscription(environmentId, threadId);
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
-
-    const refreshedDetailListener = mockSubscribeThread.mock.calls[1]?.[1] as
-      | ((item: {
-          readonly kind: "snapshot";
-          readonly snapshot: ReturnType<typeof makeThreadDetailSnapshot>;
-        }) => void)
-      | undefined;
-    expect(refreshedDetailListener).toBeDefined();
-    refreshedDetailListener?.({
-      kind: "snapshot",
-      snapshot: makeThreadDetailSnapshot({
-        snapshotSequence: 5,
-        threadId,
-        sessionStatus: "ready",
-        messages: [
-          {
-            id: messageId,
-            role: "assistant",
-            text: "Final response",
-            turnId,
-            streaming: false,
-            createdAt: "2026-04-13T00:00:05.000Z",
-            updatedAt: "2026-04-13T00:00:07.000Z",
-          },
-        ],
-      }),
-    });
 
     const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
     expect(thread?.messages.map((message) => message.text)).toEqual(["Final response"]);
@@ -1303,6 +1495,545 @@ describe("retainThreadDetailSubscription", () => {
     releaseActive();
     releaseWarm();
     stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("force-refreshes active detail when a notification click message targets the open thread", async () => {
+    const notificationTarget = stubServiceWorkerNotificationClickTarget();
+    const {
+      retainActiveThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-click-active");
+    const messageId = MessageId.make("assistant-notification-click-active");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      {
+        ...makeThreadShellSnapshot({
+          threadId,
+          sessionStatus: "running",
+        }),
+        snapshotSequence: 5,
+      },
+      environmentId,
+    );
+    mockProbeSync.mockResolvedValue({
+      clientSequence: 5,
+      serverSequence: 5,
+      behind: false,
+    });
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 5,
+        threadId,
+        sessionStatus: "running",
+        messages: [
+          {
+            id: messageId,
+            role: "assistant",
+            text: "Still working",
+            turnId: TurnId.make("turn-1"),
+            streaming: true,
+            createdAt: "2026-04-13T00:00:05.000Z",
+            updatedAt: "2026-04-13T00:00:06.000Z",
+          },
+        ],
+      }),
+    });
+
+    notificationTarget.dispatchNotificationClickMessage({
+      type: "t3.notification-click",
+      url: notificationTarget.notificationThreadUrl(environmentId, threadId),
+      openedAt: Date.now(),
+    });
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 5 });
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not replace active thread state when a notification refresh returns identical detail", async () => {
+    const notificationTarget = stubServiceWorkerNotificationClickTarget();
+    const {
+      retainActiveThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectThreadByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-click-identical");
+    const messageId = MessageId.make("assistant-notification-click-identical");
+    const turnId = TurnId.make("turn-1");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      {
+        ...makeThreadShellSnapshot({
+          threadId,
+          sessionStatus: "running",
+        }),
+        snapshotSequence: 5,
+      },
+      environmentId,
+    );
+    mockProbeSync.mockResolvedValue({
+      clientSequence: 5,
+      serverSequence: 5,
+      behind: false,
+    });
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    const initialSnapshot = makeThreadDetailSnapshot({
+      snapshotSequence: 5,
+      threadId,
+      sessionStatus: "running",
+      messages: [
+        {
+          id: messageId,
+          role: "assistant",
+          text: "Still working",
+          turnId,
+          streaming: true,
+          createdAt: "2026-04-13T00:00:05.000Z",
+          updatedAt: "2026-04-13T00:00:06.000Z",
+        },
+      ],
+    });
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: initialSnapshot,
+    });
+    const threadRef = scopeThreadRef(environmentId, threadId);
+    const firstThread = selectThreadByRef(useStore.getState(), threadRef);
+    expect(firstThread).toBeDefined();
+
+    notificationTarget.dispatchNotificationClickMessage({
+      type: "t3.notification-click",
+      url: notificationTarget.notificationThreadUrl(environmentId, threadId),
+      openedAt: Date.now(),
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    const secondThread = selectThreadByRef(useStore.getState(), threadRef);
+
+    expect(secondThread).toBe(firstThread);
+    expect(secondThread?.messages).toBe(firstThread?.messages);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("repairs missing streaming text from a notification click while the turn is still running", async () => {
+    const notificationTarget = stubServiceWorkerNotificationClickTarget();
+    const {
+      retainActiveThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectThreadByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-click-streaming");
+    const messageId = MessageId.make("assistant-notification-click-streaming");
+    const turnId = TurnId.make("turn-1");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      {
+        ...makeThreadShellSnapshot({
+          threadId,
+          sessionStatus: "running",
+        }),
+        snapshotSequence: 7,
+      },
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 9,
+        threadId,
+        sessionStatus: "running",
+        messages: [
+          {
+            id: messageId,
+            role: "assistant",
+            text: "Still working",
+            turnId,
+            streaming: true,
+            createdAt: "2026-04-13T00:00:05.000Z",
+            updatedAt: "2026-04-13T00:00:06.000Z",
+          },
+        ],
+      }),
+    });
+    const firstThread = selectThreadByRef(
+      useStore.getState(),
+      scopeThreadRef(environmentId, threadId),
+    );
+    expect(firstThread).toBeDefined();
+
+    const refreshedSnapshot = makeThreadDetailSnapshot({
+      snapshotSequence: 8,
+      threadId,
+      sessionStatus: "running",
+      messages: [
+        {
+          id: messageId,
+          role: "assistant",
+          text: "Still working with new streamed content",
+          turnId,
+          streaming: true,
+          createdAt: "2026-04-13T00:00:05.000Z",
+          updatedAt: "2026-04-13T00:00:07.000Z",
+        },
+      ],
+    });
+    mockReconcileThreadDetail.mockResolvedValueOnce(
+      makeThreadDetailReconcileSnapshotResult(refreshedSnapshot),
+    );
+
+    notificationTarget.dispatchNotificationClickMessage({
+      type: "t3.notification-click",
+      url: notificationTarget.notificationThreadUrl(environmentId, threadId),
+      openedAt: Date.now(),
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
+    expect(thread).not.toBe(firstThread);
+    expect(thread?.messages.map((message) => message.text)).toEqual([
+      "Still working with new streamed content",
+    ]);
+    expect(thread?.messages[0]?.streaming).toBe(true);
+    expect(thread?.session?.status).toBe("running");
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("runs shell projection reconciliation after a notification click", async () => {
+    const notificationTarget = stubServiceWorkerNotificationClickTarget();
+    const {
+      retainActiveThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectSidebarThreadSummaryByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-click-shell");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+    mockProbeSync.mockResolvedValueOnce({
+      clientSequence: 1,
+      serverSequence: 2,
+      behind: true,
+    });
+    mockReplayEvents.mockResolvedValueOnce([
+      makeThreadSessionSetEvent({
+        sequence: 2,
+        threadId,
+        status: "ready",
+      }),
+    ]);
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "running",
+      }),
+    });
+
+    notificationTarget.dispatchNotificationClickMessage({
+      type: "t3.notification-click",
+      url: notificationTarget.notificationThreadUrl(environmentId, threadId),
+      openedAt: Date.now(),
+    });
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+      expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
+    });
+    const sidebarThread = selectSidebarThreadSummaryByRef(
+      useStore.getState(),
+      scopeThreadRef(environmentId, threadId),
+    );
+    expect(sidebarThread?.session?.orchestrationStatus).toBe("ready");
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("defers a warm notification click detail refresh until active open", async () => {
+    const notificationTarget = stubServiceWorkerNotificationClickTarget();
+    const {
+      retainActiveThreadDetailSubscription,
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-click-warm");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      {
+        ...makeThreadShellSnapshot({
+          threadId,
+          sessionStatus: "running",
+        }),
+        snapshotSequence: 5,
+      },
+      environmentId,
+    );
+    mockProbeSync.mockResolvedValue({
+      clientSequence: 5,
+      serverSequence: 5,
+      behind: false,
+    });
+
+    const releaseWarm = retainThreadDetailSubscription(environmentId, threadId);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 5,
+        threadId,
+        sessionStatus: "running",
+      }),
+    });
+
+    notificationTarget.dispatchNotificationClickMessage({
+      type: "t3.notification-click",
+      url: notificationTarget.notificationThreadUrl(environmentId, threadId),
+      openedAt: Date.now(),
+    });
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 5 });
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    const releaseActive = retainActiveThreadDetailSubscription(environmentId, threadId);
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    releaseActive();
+    releaseWarm();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("records a notification click before subscription exists without double-refreshing brand-new active load", async () => {
+    const notificationTarget = stubServiceWorkerNotificationClickTarget();
+    const {
+      retainActiveThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-click-before-subscribe");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      {
+        ...makeThreadShellSnapshot({
+          threadId,
+          sessionStatus: "running",
+        }),
+        snapshotSequence: 3,
+      },
+      environmentId,
+    );
+
+    notificationTarget.dispatchNotificationClickMessage({
+      type: "t3.notification-click",
+      url: notificationTarget.notificationThreadUrl(environmentId, threadId),
+      openedAt: Date.now(),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("expires pending notification click refreshes before inactive-to-active re-entry", async () => {
+    const notificationTarget = stubServiceWorkerNotificationClickTarget();
+    const {
+      retainActiveThreadDetailSubscription,
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-click-expired");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    notificationTarget.dispatchNotificationClickMessage({
+      type: "t3.notification-click",
+      url: notificationTarget.notificationThreadUrl(environmentId, threadId),
+      openedAt: Date.now(),
+    });
+    vi.setSystemTime(Date.now() + 61_000);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const releaseWarm = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    releaseWarm();
+
+    const releaseActive = retainActiveThreadDetailSubscription(environmentId, threadId);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    releaseActive();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("ignores invalid notification click service worker messages", async () => {
+    const notificationTarget = stubServiceWorkerNotificationClickTarget();
+    const {
+      retainActiveThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-click-invalid");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+
+    notificationTarget.dispatchNotificationClickMessage({
+      type: "other",
+      url: notificationTarget.notificationThreadUrl(environmentId, threadId),
+    });
+    notificationTarget.dispatchNotificationClickMessage({
+      type: "t3.notification-click",
+    });
+    notificationTarget.dispatchNotificationClickMessage({
+      type: "t3.notification-click",
+      url: "https://elsewhere.example/env-1/thread-1",
+    });
+    notificationTarget.dispatchNotificationClickMessage({
+      type: "t3.notification-click",
+      url: "https://example.test/settings",
+    });
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(mockProbeSync).not.toHaveBeenCalled();
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("removes the service worker notification click listener when the service stops", async () => {
+    const notificationTarget = stubServiceWorkerNotificationClickTarget();
+    const { startEnvironmentConnectionService, resetEnvironmentServiceForTests } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-click-after-stop");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    stop();
+    notificationTarget.dispatchNotificationClickMessage({
+      type: "t3.notification-click",
+      url: notificationTarget.notificationThreadUrl(environmentId, threadId),
+      openedAt: Date.now(),
+    });
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(mockProbeSync).not.toHaveBeenCalled();
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
     await resetEnvironmentServiceForTests();
   });
 
@@ -1449,10 +2180,8 @@ describe("retainThreadDetailSubscription", () => {
 
     const releaseActive = retainActiveThreadDetailSubscription(environmentId, threadId);
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     releaseActive();
@@ -1548,10 +2277,9 @@ describe("retainThreadDetailSubscription", () => {
     });
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     release();
     stop();
@@ -1565,7 +2293,8 @@ describe("retainThreadDetailSubscription", () => {
       startEnvironmentConnectionService,
     } = await import("./service");
     const { scopeThreadRef } = await import("@t3tools/client-runtime");
-    const { selectThreadByRef, useStore } = await import("~/store");
+    const { selectSidebarThreadSummaryByRef, selectThreadByRef, useStore } =
+      await import("~/store");
 
     const stop = startEnvironmentConnectionService(new QueryClient());
     const environmentId = EnvironmentId.make("env-1");
@@ -1608,6 +2337,12 @@ describe("retainThreadDetailSubscription", () => {
     const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
     expect(thread?.session?.status).toBe("ready");
     expect(thread?.session?.activeTurnId).toBeUndefined();
+    const sidebarThread = selectSidebarThreadSummaryByRef(
+      useStore.getState(),
+      scopeThreadRef(environmentId, threadId),
+    );
+    expect(sidebarThread?.session?.orchestrationStatus).toBe("ready");
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     release();
     stop();
@@ -1639,15 +2374,342 @@ describe("retainThreadDetailSubscription", () => {
     const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(300);
+
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("force-refreshes active detail after a wake-drift timer tick when the backend cursor is current", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectThreadByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-wake-drift-current");
+    const messageId = MessageId.make("assistant-wake-drift-current");
+    const turnId = TurnId.make("turn-1");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      {
+        ...makeThreadShellSnapshot({
+          threadId,
+          sessionStatus: "running",
+        }),
+        snapshotSequence: 5,
+      },
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 5,
+        threadId,
+        sessionStatus: "running",
+        messages: [
+          {
+            id: messageId,
+            role: "assistant",
+            text: "Still working",
+            turnId,
+            streaming: true,
+            createdAt: "2026-04-13T00:00:05.000Z",
+            updatedAt: "2026-04-13T00:00:06.000Z",
+          },
+        ],
+      }),
+    });
+    mockProbeSync.mockResolvedValue({
+      clientSequence: 5,
+      serverSequence: 5,
+      behind: false,
+    });
+    const threadRef = scopeThreadRef(environmentId, threadId);
+    const firstThread = selectThreadByRef(useStore.getState(), threadRef);
+    expect(firstThread).toBeDefined();
+
+    vi.setSystemTime(Date.now() + 60_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 5 });
+    });
+    await vi.advanceTimersByTimeAsync(300);
+
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    const secondThread = selectThreadByRef(useStore.getState(), threadRef);
+    expect(secondThread).toBe(firstThread);
+    expect(secondThread?.messages).toBe(firstThread?.messages);
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("repairs missing final assistant text after a wake-drift detail refresh", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectThreadByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-wake-drift-final-text");
+    const messageId = MessageId.make("assistant-wake-drift-final");
+    const turnId = TurnId.make("turn-1");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      {
+        ...makeThreadShellSnapshot({
+          threadId,
+          sessionStatus: "running",
+        }),
+        snapshotSequence: 7,
+      },
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 9,
+        threadId,
+        sessionStatus: "running",
+        messages: [
+          {
+            id: messageId,
+            role: "assistant",
+            text: "Still working",
+            turnId,
+            streaming: true,
+            createdAt: "2026-04-13T00:00:05.000Z",
+            updatedAt: "2026-04-13T00:00:06.000Z",
+          },
+        ],
+      }),
+    });
+
+    const refreshedSnapshot = makeThreadDetailSnapshot({
+      snapshotSequence: 8,
+      threadId,
+      sessionStatus: "ready",
+      messages: [
+        {
+          id: messageId,
+          role: "assistant",
+          text: "Final answer",
+          turnId,
+          streaming: false,
+          createdAt: "2026-04-13T00:00:05.000Z",
+          updatedAt: "2026-04-13T00:00:07.000Z",
+        },
+      ],
+    });
+    mockReconcileThreadDetail.mockResolvedValueOnce(
+      makeThreadDetailReconcileSnapshotResult(refreshedSnapshot),
+    );
+
+    vi.setSystemTime(Date.now() + 60_000);
     await vi.advanceTimersByTimeAsync(5_000);
     await vi.advanceTimersByTimeAsync(300);
 
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
+    expect(thread?.messages.map((message) => message.text)).toEqual(["Final answer"]);
+    expect(thread?.messages[0]?.streaming).toBe(false);
+    expect(thread?.session?.status).toBe("ready");
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not force-refresh active detail on a normal current timer tick", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-normal-tick-current");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "running",
+      }),
+    });
+    mockProbeSync.mockResolvedValue({
+      clientSequence: 1,
+      serverSequence: 1,
+      behind: false,
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+    });
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not wake-refresh warm prewarmed thread detail", async () => {
+    const {
+      retainThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-warm-wake-drift-no-refresh");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    const releaseWarm = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "running",
+      }),
+    });
+
+    vi.setSystemTime(Date.now() + 60_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    releaseWarm();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("limits wake-drift detail refreshes with a cooldown and stops after active release", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-wake-drift-cooldown");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "idle",
+      }),
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "idle",
+      }),
+    });
+
+    vi.setSystemTime(Date.now() + 60_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(Date.now() + 20_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledTimes(1);
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(Date.now() + 31_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(2);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    release();
+    vi.setSystemTime(Date.now() + 60_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledTimes(2);
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
     stop();
     await resetEnvironmentServiceForTests();
   });
@@ -1876,10 +2938,8 @@ describe("retainThreadDetailSubscription", () => {
       expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 2 });
     });
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     release();
@@ -1969,10 +3029,8 @@ describe("retainThreadDetailSubscription", () => {
       expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 2 });
     });
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     release();
@@ -2057,6 +3115,26 @@ describe("retainThreadDetailSubscription", () => {
       }),
     });
 
+    const refreshedSnapshot = makeThreadDetailSnapshot({
+      snapshotSequence: 2,
+      threadId,
+      sessionStatus: "running",
+      messages: [
+        {
+          id: messageId,
+          role: "assistant",
+          text: "Hello world",
+          turnId,
+          streaming: true,
+          createdAt: "2026-04-13T00:00:02.000Z",
+          updatedAt: "2026-04-13T00:00:03.000Z",
+        },
+      ],
+    });
+    mockReconcileThreadDetail.mockResolvedValueOnce(
+      makeThreadDetailReconcileSnapshotResult(refreshedSnapshot),
+    );
+
     visibilityState = "hidden";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
     visibilityState = "visible";
@@ -2066,36 +3144,8 @@ describe("retainThreadDetailSubscription", () => {
       expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 2 });
     });
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
-
-    const refreshedDetailListener = mockSubscribeThread.mock.calls[1]?.[1] as
-      | ((item: {
-          readonly kind: "snapshot";
-          readonly snapshot: ReturnType<typeof makeThreadDetailSnapshot>;
-        }) => void)
-      | undefined;
-    expect(refreshedDetailListener).toBeDefined();
-    refreshedDetailListener?.({
-      kind: "snapshot",
-      snapshot: makeThreadDetailSnapshot({
-        snapshotSequence: 2,
-        threadId,
-        sessionStatus: "running",
-        messages: [
-          {
-            id: messageId,
-            role: "assistant",
-            text: "Hello world",
-            turnId,
-            streaming: true,
-            createdAt: "2026-04-13T00:00:02.000Z",
-            updatedAt: "2026-04-13T00:00:03.000Z",
-          },
-        ],
-      }),
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
     expect(thread?.messages.map((message) => message.text)).toEqual(["Hello world"]);
@@ -2155,37 +3205,13 @@ describe("retainThreadDetailSubscription", () => {
         sessionStatus: "running",
       }),
     });
-    detailListener?.({
-      kind: "event",
-      event: makeThreadSessionSetEvent({
-        sequence: 2,
-        threadId,
-        status: "ready",
-      }),
-    });
-
-    await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
-    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
-
-    const refreshedDetailListener = mockSubscribeThread.mock.calls[1]?.[1] as
-      | ((item: {
-          readonly kind: "snapshot";
-          readonly snapshot: OrchestrationThreadDetailSnapshot;
-        }) => void)
-      | undefined;
     const completedThread = makeCompletedThreadShellSnapshot({
       snapshotSequence: 2,
       threadId,
     }).threads[0];
-    expect(refreshedDetailListener).toBeDefined();
     expect(completedThread).toBeDefined();
-    refreshedDetailListener?.({
-      kind: "snapshot",
-      snapshot: {
+    mockReconcileThreadDetail.mockResolvedValueOnce(
+      makeThreadDetailReconcileSnapshotResult({
         snapshotSequence: 2,
         thread: {
           ...completedThread!,
@@ -2196,8 +3222,21 @@ describe("retainThreadDetailSubscription", () => {
           checkpoints: [],
         },
         pageInfo: EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
-      },
+      }),
+    );
+    detailListener?.({
+      kind: "event",
+      event: makeThreadSessionSetEvent({
+        sequence: 2,
+        threadId,
+        status: "ready",
+      }),
     });
+
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
     expect(thread?.session?.status).toBe("ready");
@@ -2268,6 +3307,27 @@ describe("retainThreadDetailSubscription", () => {
         ],
       }),
     });
+    mockReconcileThreadDetail.mockResolvedValueOnce(
+      makeThreadDetailReconcileSnapshotResult(
+        makeThreadDetailSnapshot({
+          snapshotSequence: 12,
+          threadId,
+          sessionStatus: "ready",
+          messages: [
+            {
+              id: messageId,
+              role: "assistant",
+              text: "Hello world",
+              turnId,
+              streaming: false,
+              createdAt: "2026-04-13T00:00:10.000Z",
+              updatedAt: "2026-04-13T00:00:11.000Z",
+            },
+          ],
+        }),
+        "unverified-client-cursor",
+      ),
+    );
     initialDetailListener?.({
       kind: "event",
       event: makeThreadSessionSetEvent({
@@ -2279,55 +3339,8 @@ describe("retainThreadDetailSubscription", () => {
     });
 
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
-
-    const refreshedDetailListener = mockSubscribeThread.mock.calls[1]?.[1] as
-      | ((
-          item:
-            | {
-                readonly kind: "snapshot";
-                readonly snapshot: ReturnType<typeof makeThreadDetailSnapshot>;
-              }
-            | {
-                readonly kind: "event";
-                readonly event: Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
-              },
-        ) => void)
-      | undefined;
-    expect(refreshedDetailListener).toBeDefined();
-    refreshedDetailListener?.({
-      kind: "snapshot",
-      snapshot: makeThreadDetailSnapshot({
-        snapshotSequence: 10,
-        threadId,
-        sessionStatus: "ready",
-        messages: [
-          {
-            id: messageId,
-            role: "assistant",
-            text: "Hello",
-            turnId,
-            streaming: true,
-            createdAt: "2026-04-13T00:00:10.000Z",
-            updatedAt: "2026-04-13T00:00:10.000Z",
-          },
-        ],
-      }),
-    });
-    refreshedDetailListener?.({
-      kind: "event",
-      event: makeThreadMessageSentEvent({
-        sequence: 11,
-        threadId,
-        messageId,
-        text: "Hello world",
-        turnId,
-        streaming: false,
-        occurredAt: "2026-04-13T00:00:11.000Z",
-      }),
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
     expect(thread?.messages.map((message) => message.text)).toEqual(["Hello world"]);
@@ -2396,10 +3409,8 @@ describe("retainThreadDetailSubscription", () => {
     );
 
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     release();
@@ -2471,40 +3482,31 @@ describe("retainThreadDetailSubscription", () => {
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
+    const refreshedSnapshot = makeThreadDetailSnapshot({
+      snapshotSequence: 1,
+      threadId,
+      sessionStatus: "ready",
+      messages: [
+        {
+          id: messageId,
+          role: "assistant",
+          text: "Final response",
+          turnId,
+          streaming: false,
+          createdAt: "2026-04-13T00:00:02.000Z",
+          updatedAt: "2026-04-13T00:00:03.000Z",
+        },
+      ],
+    });
+    mockReconcileThreadDetail.mockResolvedValueOnce(
+      makeThreadDetailReconcileSnapshotResult(refreshedSnapshot),
+    );
+
     const releaseActive = retainActiveThreadDetailSubscription(environmentId, threadId);
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
-
-    const refreshedDetailListener = mockSubscribeThread.mock.calls[1]?.[1] as
-      | ((item: {
-          readonly kind: "snapshot";
-          readonly snapshot: ReturnType<typeof makeThreadDetailSnapshot>;
-        }) => void)
-      | undefined;
-    expect(refreshedDetailListener).toBeDefined();
-    refreshedDetailListener?.({
-      kind: "snapshot",
-      snapshot: makeThreadDetailSnapshot({
-        snapshotSequence: 1,
-        threadId,
-        sessionStatus: "ready",
-        messages: [
-          {
-            id: messageId,
-            role: "assistant",
-            text: "Final response",
-            turnId,
-            streaming: false,
-            createdAt: "2026-04-13T00:00:02.000Z",
-            updatedAt: "2026-04-13T00:00:03.000Z",
-          },
-        ],
-      }),
-    });
 
     const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
     expect(thread?.messages.map((message) => message.text)).toEqual(["Final response"]);
@@ -2597,10 +3599,8 @@ describe("retainThreadDetailSubscription", () => {
       expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 2 });
     });
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     release();
@@ -2689,10 +3689,8 @@ describe("retainThreadDetailSubscription", () => {
 
     const releaseActive = retainActiveThreadDetailSubscription(environmentId, threadId);
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     releaseActive();
@@ -2758,15 +3756,13 @@ describe("retainThreadDetailSubscription", () => {
 
     // Probe says we're caught up (the gap is invisible at the sequence
     // level). The runtime must still observe the stuck-running shape and
-    // force a re-subscription so the new snapshot can converge state.
+    // run a detail reconcile so the new snapshot can converge state.
     await vi.waitFor(() => {
       expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 2 });
     });
     await vi.advanceTimersByTimeAsync(300);
-    await vi.waitFor(() => {
-      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
-      expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
-    });
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     release();
@@ -3295,6 +4291,7 @@ describe("retainThreadDetailSubscription", () => {
         subscribeThread: mockSubscribeThread,
         probeSync: mockProbeSync,
         replayEvents: mockReplayEvents,
+        reconcileThreadDetail: mockReconcileThreadDetail,
       },
     });
     mockProbeSync.mockResolvedValueOnce({
@@ -3418,6 +4415,7 @@ describe("retainThreadDetailSubscription", () => {
         subscribeThread: mockSubscribeThread,
         probeSync: mockProbeSync,
         replayEvents: mockReplayEvents,
+        reconcileThreadDetail: mockReconcileThreadDetail,
       },
     });
 

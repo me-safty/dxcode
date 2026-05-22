@@ -21,6 +21,7 @@ import type {
   ThreadSession,
   TurnDiffSummary,
 } from "./types";
+import { compareThreadActivitiesByOrder } from "./threadActivityOrdering";
 
 export type ProviderPickerKind = ProviderDriverKind;
 
@@ -230,7 +231,7 @@ export function derivePendingApprovals(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): PendingApproval[] {
   const openByRequestId = new Map<ApprovalRequestId, PendingApproval>();
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = [...activities].toSorted(compareThreadActivitiesByOrder);
 
   for (const activity of ordered) {
     const payload =
@@ -336,7 +337,7 @@ export function derivePendingUserInputs(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): PendingUserInput[] {
   const openByRequestId = new Map<ApprovalRequestId, PendingUserInput>();
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = [...activities].toSorted(compareThreadActivitiesByOrder);
 
   for (const activity of ordered) {
     const payload =
@@ -385,7 +386,7 @@ export function deriveActivePlanState(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
 ): ActivePlanState | null {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = [...activities].toSorted(compareThreadActivitiesByOrder);
   const allPlanActivities = ordered.filter((activity) => activity.kind === "turn.plan.updated");
   // Prefer plan from the current turn; fall back to the most recent plan from any turn
   // so that TodoWrite tasks persist across follow-up messages.
@@ -505,7 +506,7 @@ export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
 ): WorkLogEntry[] {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = [...activities].toSorted(compareThreadActivitiesByOrder);
   const entries = ordered
     .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
     .filter((activity) => activity.kind !== "tool.started")
@@ -1127,47 +1128,6 @@ function extractChangedFiles(payload: Record<string, unknown> | null): string[] 
   const seen = new Set<string>();
   collectChangedFiles(asRecord(payload?.data), changedFiles, seen, 0);
   return changedFiles;
-}
-
-function compareActivitiesByOrder(
-  left: OrchestrationThreadActivity,
-  right: OrchestrationThreadActivity,
-): number {
-  if (left.sequence !== undefined && right.sequence !== undefined) {
-    if (left.sequence !== right.sequence) {
-      return left.sequence - right.sequence;
-    }
-  } else if (left.sequence !== undefined) {
-    return 1;
-  } else if (right.sequence !== undefined) {
-    return -1;
-  }
-
-  const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
-  if (createdAtComparison !== 0) {
-    return createdAtComparison;
-  }
-
-  const lifecycleRankComparison =
-    compareActivityLifecycleRank(left.kind) - compareActivityLifecycleRank(right.kind);
-  if (lifecycleRankComparison !== 0) {
-    return lifecycleRankComparison;
-  }
-
-  return left.id.localeCompare(right.id);
-}
-
-function compareActivityLifecycleRank(kind: string): number {
-  if (kind.endsWith(".started") || kind === "tool.started") {
-    return 0;
-  }
-  if (kind.endsWith(".progress") || kind.endsWith(".updated")) {
-    return 1;
-  }
-  if (kind.endsWith(".completed") || kind.endsWith(".resolved")) {
-    return 2;
-  }
-  return 1;
 }
 
 export function hasToolActivityForTurn(
