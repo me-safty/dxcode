@@ -29,7 +29,11 @@ function hasThemeStorage() {
 }
 
 function getSystemDark() {
-  return typeof window !== "undefined" && window.matchMedia(MEDIA_QUERY).matches;
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(MEDIA_QUERY).matches
+  );
 }
 
 function getStored(): Theme {
@@ -90,7 +94,7 @@ export function syncBrowserChromeTheme() {
 
 function applyTheme(theme: Theme, suppressTransitions = false) {
   if (typeof document === "undefined" || typeof window === "undefined") return;
-  const systemDark = getSystemDark();
+  const systemDark = theme === "system" ? getSystemDark() : false;
   if (lastAppliedTheme?.theme === theme && lastAppliedTheme.systemDark === systemDark) {
     syncDesktopTheme(theme);
     return;
@@ -156,12 +160,12 @@ function subscribe(listener: () => void): () => void {
   listeners.push(listener);
 
   // Listen for system preference changes
-  const mq = window.matchMedia(MEDIA_QUERY);
+  const mq = typeof window.matchMedia === "function" ? window.matchMedia(MEDIA_QUERY) : null;
   const handleChange = () => {
     if (getStored() === "system") applyTheme("system", true);
     emitChange();
   };
-  mq.addEventListener("change", handleChange);
+  mq?.addEventListener("change", handleChange);
 
   // Listen for storage changes from other tabs
   const handleStorage = (e: StorageEvent) => {
@@ -174,7 +178,7 @@ function subscribe(listener: () => void): () => void {
 
   return () => {
     listeners = listeners.filter((l) => l !== listener);
-    mq.removeEventListener("change", handleChange);
+    mq?.removeEventListener("change", handleChange);
     window.removeEventListener("storage", handleStorage);
   };
 }
