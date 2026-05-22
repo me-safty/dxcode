@@ -304,13 +304,20 @@ describe("executeVsCodeRunCommand", () => {
     expect(executeCommand).toHaveBeenCalledWith("workbench.action.files.saveAs");
   });
 
-  it("activates a requested extension before checking registered commands", async () => {
+  it("activates a requested extension that contributes the command before checking registered commands", async () => {
     const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
     const calls: string[] = [];
     const activate = vi.fn(async () => {
       calls.push("activate");
     });
-    getExtension.mockReturnValue({ activate });
+    getExtension.mockReturnValue({
+      activate,
+      packageJSON: {
+        contributes: {
+          commands: [{ command: "t3code.example.fromExtension" }],
+        },
+      },
+    });
     getCommands.mockImplementation(async () => {
       calls.push("getCommands");
       return ["t3code.example.fromExtension"];
@@ -326,6 +333,31 @@ describe("executeVsCodeRunCommand", () => {
     expect(activate).toHaveBeenCalledTimes(1);
     expect(calls).toEqual(["activate", "getCommands"]);
     expect(executeCommand).toHaveBeenCalledWith("t3code.example.fromExtension");
+  });
+
+  it("rejects requested extensions that do not contribute the command before activation", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+    const activate = vi.fn();
+    getExtension.mockReturnValue({
+      activate,
+      packageJSON: {
+        contributes: {
+          commands: [{ command: "t3code.example.otherCommand" }],
+        },
+      },
+    });
+
+    await expect(
+      executeVsCodeRunCommand({
+        command: "t3code.example.fromExtension",
+        activateExtension: "publisher.example-extension",
+      }),
+    ).rejects.toThrow(
+      "VS Code extension publisher.example-extension does not contribute command: t3code.example.fromExtension",
+    );
+    expect(activate).not.toHaveBeenCalled();
+    expect(getCommands).not.toHaveBeenCalled();
+    expect(executeCommand).not.toHaveBeenCalled();
   });
 
   it("rejects missing requested extensions before checking registered commands", async () => {

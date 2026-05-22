@@ -421,7 +421,7 @@ export async function executeVsCodeRunCommand(
   }
 
   if (args.activateExtension) {
-    await activateVsCodeExtension(args.activateExtension);
+    await activateVsCodeExtension(args.activateExtension, args.command);
   }
 
   const registeredCommands = await vscode.commands.getCommands(true);
@@ -613,12 +613,35 @@ function parseRunCommandInput(input: unknown): {
   };
 }
 
-async function activateVsCodeExtension(extensionId: string): Promise<void> {
+async function activateVsCodeExtension(extensionId: string, command: string): Promise<void> {
   const extension = vscode.extensions.getExtension(extensionId);
   if (!extension) {
     throw new Error(`VS Code extension is not installed: ${extensionId}`);
   }
+  if (!extensionContributesCommand(extension.packageJSON, command)) {
+    throw new Error(`VS Code extension ${extensionId} does not contribute command: ${command}`);
+  }
   await extension.activate();
+}
+
+function extensionContributesCommand(packageJson: unknown, command: string): boolean {
+  if (!isRecord(packageJson)) {
+    return false;
+  }
+  const contributes = packageJson.contributes;
+  if (!isRecord(contributes)) {
+    return false;
+  }
+  const commands = contributes.commands;
+  if (!Array.isArray(commands)) {
+    return false;
+  }
+  return commands.some((contribution) => {
+    if (typeof contribution === "string") {
+      return contribution === command;
+    }
+    return isRecord(contribution) && contribution.command === command;
+  });
 }
 
 function parseDiagnosticsInput(input: unknown): {
