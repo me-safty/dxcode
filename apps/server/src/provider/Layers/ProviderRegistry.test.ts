@@ -1045,9 +1045,30 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             yield* Effect.gen(function* () {
               const registry = yield* ProviderRegistry;
 
-              assert.deepStrictEqual(yield* registry.getProviders, [refreshedProvider]);
+              assert.deepStrictEqual(yield* registry.getProviders, [initialProvider]);
               assert.strictEqual(
                 yield* Ref.get(checkCalls),
+                0,
+                "ProviderRegistryLive should wait for the startup refresh lifecycle hook",
+              );
+
+              yield* registry.startBackgroundRefreshes;
+
+              let providers = yield* registry.getProviders;
+              let calls = yield* Ref.get(checkCalls);
+              for (
+                let attempt = 0;
+                attempt < 50 && (calls !== 1 || providers[0]?.status !== refreshedProvider.status);
+                attempt += 1
+              ) {
+                yield* Effect.yieldNow;
+                providers = yield* registry.getProviders;
+                calls = yield* Ref.get(checkCalls);
+              }
+
+              assert.deepStrictEqual(providers, [refreshedProvider]);
+              assert.strictEqual(
+                calls,
                 1,
                 "ProviderRegistryLive should perform exactly one startup refresh",
               );
