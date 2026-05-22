@@ -66,6 +66,22 @@ describe("deriveLooseWorkspaceProjects", () => {
     expect(looseWorkspaceProjects).toEqual([]);
   });
 
+  it("does not duplicate a live workspace when the saved project root has a trailing slash", () => {
+    const looseWorkspaceProjects = deriveLooseWorkspaceProjects(
+      [
+        makeStoredProject({
+          workspace: {
+            rootPath: "/workspace/saved/",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        }),
+      ],
+      [makeLiveProject({ cwd: "/workspace/saved" })],
+    );
+
+    expect(looseWorkspaceProjects).toEqual([]);
+  });
+
   it("does not duplicate a live workspace owned through a linked repository local path", () => {
     const looseWorkspaceProjects = deriveLooseWorkspaceProjects(
       [
@@ -79,6 +95,32 @@ describe("deriveLooseWorkspaceProjects", () => {
                   {
                     url: "https://github.com/acme/repo",
                     localPath: "/workspace/references/repo",
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      ],
+      [makeLiveProject({ cwd: "/workspace/references/repo" })],
+    );
+
+    expect(looseWorkspaceProjects).toEqual([]);
+  });
+
+  it("does not duplicate a live workspace when a linked repository path differs only by a trailing slash", () => {
+    const looseWorkspaceProjects = deriveLooseWorkspaceProjects(
+      [
+        makeStoredProject({
+          source: {
+            provider: "atlassian",
+            externalProjectId: "jira-123",
+            raw: {
+              agentReferences: {
+                linkedRepositories: [
+                  {
+                    url: "https://github.com/acme/repo",
+                    localPath: "/workspace/references/repo/",
                   },
                 ],
               },

@@ -3,6 +3,7 @@ import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3to
 import type { Project } from "~/types";
 import { MOCK_TICKETS } from "~/t3work/data/t3work-mockThreads";
 import type { ProjectThread } from "~/t3work/t3work-types";
+import { normalizeWorkspaceRootPath } from "./t3work-threadBridge";
 
 let projectIdCounter = 0;
 let threadIdCounter = 0;
@@ -72,8 +73,9 @@ function dedupeProjects(projects: ProjectShellProject[]): ProjectShellProject[] 
 function readOwnedWorkspaceRoots(project: ProjectShellProject): ReadonlyArray<string> {
   const ownedRoots = new Set<string>();
 
-  if (project.workspace?.rootPath) {
-    ownedRoots.add(project.workspace.rootPath);
+  const workspaceRoot = normalizeWorkspaceRootPath(project.workspace?.rootPath);
+  if (workspaceRoot) {
+    ownedRoots.add(workspaceRoot);
   }
 
   const raw = project.source.raw;
@@ -100,8 +102,9 @@ function readOwnedWorkspaceRoots(project: ProjectShellProject): ReadonlyArray<st
       continue;
     }
     const localPath = (entry as Record<string, unknown>).localPath;
-    if (typeof localPath === "string" && localPath.trim().length > 0) {
-      ownedRoots.add(localPath);
+    const normalizedLocalPath = normalizeWorkspaceRootPath(localPath as string | undefined);
+    if (normalizedLocalPath) {
+      ownedRoots.add(normalizedLocalPath);
     }
   }
 
@@ -138,7 +141,8 @@ export function deriveLooseWorkspaceProjects(
 ): ProjectShellProject[] {
   const workspaceRoots = new Set(storedProjects.flatMap(readOwnedWorkspaceRoots));
   return liveProjects.flatMap((project) => {
-    if (workspaceRoots.has(project.cwd)) {
+    const normalizedProjectCwd = normalizeWorkspaceRootPath(project.cwd);
+    if (normalizedProjectCwd && workspaceRoots.has(normalizedProjectCwd)) {
       return [];
     }
     return [synthesizeLooseWorkspaceProject(project)];
