@@ -373,6 +373,10 @@ const MCP_TOOLS = [
           type: "array",
           items: {},
         },
+        activateExtension: {
+          type: "string",
+          minLength: 1,
+        },
       },
       required: ["command"],
       additionalProperties: false,
@@ -414,6 +418,10 @@ export async function executeVsCodeRunCommand(
   }
   if (!isAllowedRunCommand(args.command)) {
     throw new Error(`VS Code command is not allowed through MCP: ${args.command}`);
+  }
+
+  if (args.activateExtension) {
+    await activateVsCodeExtension(args.activateExtension);
   }
 
   const registeredCommands = await vscode.commands.getCommands(true);
@@ -576,6 +584,7 @@ async function createMcpEndpoint(): Promise<{
 function parseRunCommandInput(input: unknown): {
   readonly command: string;
   readonly args: readonly unknown[];
+  readonly activateExtension?: string;
 } {
   if (!isRecord(input)) {
     throw new Error("vscodeRunCommand expects an object input.");
@@ -588,10 +597,28 @@ function parseRunCommandInput(input: unknown): {
   if (rawArgs !== undefined && !Array.isArray(rawArgs)) {
     throw new Error("vscodeRunCommand.args must be an array when provided.");
   }
+  const activateExtension = input.activateExtension;
+  if (
+    activateExtension !== undefined &&
+    (typeof activateExtension !== "string" || activateExtension.trim().length === 0)
+  ) {
+    throw new Error("vscodeRunCommand.activateExtension must be a non-empty string when provided.");
+  }
   return {
     command: command.trim(),
     args: rawArgs ?? [],
+    ...(typeof activateExtension === "string"
+      ? { activateExtension: activateExtension.trim() }
+      : {}),
   };
+}
+
+async function activateVsCodeExtension(extensionId: string): Promise<void> {
+  const extension = vscode.extensions.getExtension(extensionId);
+  if (!extension) {
+    throw new Error(`VS Code extension is not installed: ${extensionId}`);
+  }
+  await extension.activate();
 }
 
 function parseDiagnosticsInput(input: unknown): {

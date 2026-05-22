@@ -10,6 +10,7 @@ type ConfigurationChangeListener = (event: {
 
 const executeCommand = vi.fn();
 const getCommands = vi.fn();
+const getExtension = vi.fn();
 const getDiagnostics = vi.fn();
 const configurationChangeListeners = new Set<ConfigurationChangeListener>();
 const onDidChangeConfiguration = vi.fn((listener: ConfigurationChangeListener) => {
@@ -57,6 +58,9 @@ vi.mock("vscode", () => ({
   commands: {
     executeCommand,
     getCommands,
+  },
+  extensions: {
+    getExtension,
   },
   languages: {
     getDiagnostics,
@@ -116,6 +120,7 @@ describe("executeVsCodeRunCommand", () => {
   beforeEach(() => {
     executeCommand.mockReset();
     getCommands.mockReset();
+    getExtension.mockReset();
     getDiagnostics.mockReset();
     uriFile.mockClear();
     uriParse.mockClear();
@@ -298,12 +303,83 @@ describe("executeVsCodeRunCommand", () => {
     expect(executeCommand).toHaveBeenCalledWith("workbench.action.files.save");
     expect(executeCommand).toHaveBeenCalledWith("workbench.action.files.saveAs");
   });
+
+  it("activates a requested extension before checking registered commands", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+    const calls: string[] = [];
+    const activate = vi.fn(async () => {
+      calls.push("activate");
+    });
+    getExtension.mockReturnValue({ activate });
+    getCommands.mockImplementation(async () => {
+      calls.push("getCommands");
+      return ["t3code.example.fromExtension"];
+    });
+    executeCommand.mockResolvedValue("done");
+
+    await executeVsCodeRunCommand({
+      command: "t3code.example.fromExtension",
+      activateExtension: "publisher.example-extension",
+    });
+
+    expect(getExtension).toHaveBeenCalledWith("publisher.example-extension");
+    expect(activate).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(["activate", "getCommands"]);
+    expect(executeCommand).toHaveBeenCalledWith("t3code.example.fromExtension");
+  });
+
+  it("rejects missing requested extensions before checking registered commands", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+    getExtension.mockReturnValue(undefined);
+
+    await expect(
+      executeVsCodeRunCommand({
+        command: "t3code.example.fromExtension",
+        activateExtension: "publisher.missing-extension",
+      }),
+    ).rejects.toThrow("VS Code extension is not installed: publisher.missing-extension");
+    expect(getCommands).not.toHaveBeenCalled();
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("does not activate extensions for disallowed commands", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+
+    await expect(
+      executeVsCodeRunCommand({
+        command: "workbench.action.openSettingsJson",
+        activateExtension: "publisher.example-extension",
+      }),
+    ).rejects.toThrow(
+      "VS Code command is not allowed through MCP: workbench.action.openSettingsJson",
+    );
+    expect(getExtension).not.toHaveBeenCalled();
+    expect(getCommands).not.toHaveBeenCalled();
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed activateExtension values", async () => {
+    const { executeVsCodeRunCommand } = await import("./mcpBridge.ts");
+
+    await expect(
+      executeVsCodeRunCommand({
+        command: "t3code.example.echo",
+        activateExtension: " ",
+      }),
+    ).rejects.toThrow(
+      "vscodeRunCommand.activateExtension must be a non-empty string when provided.",
+    );
+    expect(getExtension).not.toHaveBeenCalled();
+    expect(getCommands).not.toHaveBeenCalled();
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
 });
 
 describe("VS Code language-service MCP tools", () => {
   beforeEach(() => {
     executeCommand.mockReset();
     getCommands.mockReset();
+    getExtension.mockReset();
     getDiagnostics.mockReset();
     uriFile.mockClear();
     uriParse.mockClear();

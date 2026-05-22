@@ -60,11 +60,12 @@ The current supported MCP tools are:
 ```json
 {
   "command": "vscode.open",
-  "args": [{ "$vscode": "Uri", "path": "/absolute/path/to/file.ts" }]
+  "args": [{ "$vscode": "Uri", "path": "/absolute/path/to/file.ts" }],
+  "activateExtension": "publisher.extension-id"
 }
 ```
 
-`vscodeRunCommand` rejects command ids outside the MCP command policy, verifies registration with `vscode.commands.getCommands(true)`, hydrates supported JSON encodings for VS Code `Uri`, `Position`, and `Range` arguments, and serializes command return values into bounded JSON-safe values. The policy is configured by `t3code.mcp.allowedRunCommands`; entries ending in `*` are treated as non-empty command-prefix rules, and the default list is `t3code.*`, `vscode.open`, `vscode.diff`, and `revealLine`. The language-service tools return bounded JSON-safe result sets with truncation metadata.
+`activateExtension` is optional. When provided, `vscodeRunCommand` calls `vscode.extensions.getExtension(...).activate()` after the command has passed the internal-command and MCP allowlist checks, then verifies registration with `vscode.commands.getCommands(true)`. This lets the tool run commands contributed by extensions whose activation events have not fired yet while still rejecting disallowed command ids before extension activation. `vscodeRunCommand` hydrates supported JSON encodings for VS Code `Uri`, `Position`, and `Range` arguments, and serializes command return values into bounded JSON-safe values. The policy is configured by `t3code.mcp.allowedRunCommands`; entries ending in `*` are treated as non-empty command-prefix rules, and the default list is `t3code.*`, `vscode.open`, `vscode.diff`, and `revealLine`. The language-service tools return bounded JSON-safe result sets with truncation metadata.
 
 ## VS Code Webview UI Defaults
 
@@ -317,7 +318,7 @@ Implemented:
 Boundaries:
 
 - Internal VS Code commands prefixed with `_` and commands outside the explicit MCP allowlist are rejected.
-- The command list is queried with `vscode.commands.getCommands(true)`, so stale or unregistered allowed commands are still rejected.
+- The command list is queried with `vscode.commands.getCommands(true)`, so stale or unregistered allowed commands are still rejected. Tool calls may provide `activateExtension` to activate an installed extension before this registration check.
 - `vscodeRunCommand` is intentionally narrow by default. Users can expand `t3code.mcp.allowedRunCommands` only when the command side effects and argument shapes are understood.
 - MCP bridge startup is gated by one setting, `t3code.mcp.enabled`, which defaults to `true`.
 - Codex MCP tool calls use `t3code.mcp.toolTimeoutSec`, which defaults to `120` seconds, rejects values below `5` seconds, and is passed as `tool_timeout_sec`.

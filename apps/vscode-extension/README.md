@@ -30,7 +30,7 @@ When enabled, the extension starts a local VS Code MCP bridge for agent sessions
 - `vscodeDiagnostics`: reads diagnostics currently known to VS Code.
 - `vscodeReferences`: finds symbol references at a file position.
 - `vscodeWorkspaceSymbols`: searches workspace symbols.
-- `vscodeRunCommand`: runs an allowed registered VS Code command and returns its result. Allowed commands default to `t3code.*`, `vscode.open`, `vscode.diff`, and `revealLine`, and can be customized with `t3code.mcp.allowedRunCommands`.
+- `vscodeRunCommand`: runs an allowed registered VS Code command and returns its result. Calls can include `activateExtension` to activate an installed extension before the command registration check. Allowed commands default to `t3code.*`, `vscode.open`, `vscode.diff`, and `revealLine`, and can be customized with `t3code.mcp.allowedRunCommands`.
 
 The MCP bridge is enabled by default and can be disabled with `t3code.mcp.enabled`. MCP tool calls default to a 120-second timeout, configurable with `t3code.mcp.toolTimeoutSec` with a minimum of 5 seconds. This timeout is passed through where the provider supports an equivalent setting. Each VS Code window gets its own MCP server identity and local socket, so tools are routed back to the window that launched the agent session. Browser and desktop app sessions are not affected by this setting.
 
