@@ -68,6 +68,7 @@ import { useTerminalStateStore } from "~/terminalStateStore";
 import { useUiStateStore } from "~/uiStateStore";
 import type { WsProtocolCloseContext } from "../../rpc/protocol";
 import { getServerConfig } from "../../rpc/serverState";
+import { isTransportConnectionErrorMessage } from "../../rpc/transportError";
 import { WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
 import { appendVersionMismatchHint, resolveServerConfigVersionMismatch } from "../../versionSkew";
@@ -137,6 +138,12 @@ interface ProjectionRecovery {
   promise: Promise<void>;
 }
 
+interface ConnectionHealthRecovery {
+  failureCount: number;
+  nextAllowedAt: number;
+  promise: Promise<void> | null;
+}
+
 interface RecoveredEventBatchOptions {
   readonly preserveShellFields?: boolean;
   readonly syncSidebarSummaries?: boolean;
@@ -164,6 +171,7 @@ const lastAppliedProjectionVersionByEnvironment = new Map<
   }
 >();
 const projectionRecoveryByEnvironment = new Map<EnvironmentId, ProjectionRecovery>();
+const connectionHealthRecoveryByEnvironment = new Map<EnvironmentId, ConnectionHealthRecovery>();
 
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
@@ -186,6 +194,10 @@ const THREAD_DETAIL_ACTIVE_WAKE_REFRESH_COOLDOWN_MS = 30_000;
 const THREAD_DETAIL_ACTIVE_RECONCILE_FIRST_PING_MS = 10_000;
 const THREAD_DETAIL_ACTIVE_RECONCILE_COOLDOWN_MS = 30_000;
 const NOTIFICATION_OPEN_PENDING_REFRESH_TTL_MS = 60_000;
+const CONNECTION_HEALTH_RECOVERY_COOLDOWN_MS = 30_000;
+const CONNECTION_HEALTH_RECOVERY_BACKOFF_BASE_MS = 30_000;
+const CONNECTION_HEALTH_RECOVERY_BACKOFF_MAX_MS = 2 * 60_000;
+const CONNECTION_HEALTH_RECOVERY_RECONNECT_TIMEOUT_MS = 15_000;
 const BROWSER_RESUME_RECONCILE_COOLDOWN_MS = 2_000;
 const BROWSER_RESUME_RECONCILE_TIMEOUT_MS = 1_500;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
@@ -564,6 +576,98 @@ function queueProjectionRecovery(environmentId: EnvironmentId, observedSequence:
       }
     });
 }
+
+function getConnectionHealthRecoveryBackoffMs(failureCount: number): number {
+  return Math.min(
+    CONNECTION_HEALTH_RECOVERY_BACKOFF_BASE_MS * 2 ** Math.max(0, failureCount - 1),
+    CONNECTION_HEALTH_RECOVERY_BACKOFF_MAX_MS,
+  );
+}
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function isActiveThreadProjectionReason(reason: string): boolean {
+  return reason === "active-thread-detail" || reason.startsWith("active-thread-detail:");
+}
+
+function shouldRecoverConnectionFromActiveProjectionError(error: unknown): boolean {
+  return isTransportConnectionErrorMessage(formatUnknownError(error));
+}
+
+function queueEnvironmentConnectionHealthRecovery(
+  connection: EnvironmentConnection,
+  reason: string,
+  cause?: unknown,
+): void {
+  const environmentId = connection.environmentId;
+  const now = Date.now();
+  const existing = connectionHealthRecoveryByEnvironment.get(environmentId);
+  if (existing?.promise) {
+    return;
+  }
+  if (existing && now < existing.nextAllowedAt) {
+    return;
+  }
+
+  const recovery: ConnectionHealthRecovery = existing ?? {
+    failureCount: 0,
+    nextAllowedAt: 0,
+    promise: null,
+  };
+  connectionHealthRecoveryByEnvironment.set(environmentId, recovery);
+  recovery.promise = (async () => {
+    console.warn("Environment connection health recovery reconnecting", {
+      environmentId,
+      reason,
+      ...(cause !== undefined ? { cause: formatUnknownError(cause) } : {}),
+    });
+    try {
+      await withTimeout(
+        connection.reconnect(),
+        CONNECTION_HEALTH_RECOVERY_RECONNECT_TIMEOUT_MS,
+        () => new Error("Environment connection health recovery timed out."),
+      );
+      if (readEnvironmentConnection(environmentId) !== connection) {
+        return;
+      }
+      recovery.failureCount = 0;
+      recovery.nextAllowedAt = Date.now() + CONNECTION_HEALTH_RECOVERY_COOLDOWN_MS;
+    } catch (error) {
+      if (readEnvironmentConnection(environmentId) !== connection) {
+        return;
+      }
+      recovery.failureCount += 1;
+      recovery.nextAllowedAt =
+        Date.now() + getConnectionHealthRecoveryBackoffMs(recovery.failureCount);
+      console.warn("Environment connection health recovery failed", {
+        environmentId,
+        reason,
+        error: formatUnknownError(error),
+      });
+    } finally {
+      if (connectionHealthRecoveryByEnvironment.get(environmentId) === recovery) {
+        recovery.promise = null;
+      }
+    }
+  })();
+}
+
+function queueEnvironmentConnectionHealthRecoveryIfIdle(
+  connection: EnvironmentConnection,
+  reason: string,
+  cause?: unknown,
+): void {
+  if (browserResumeReconciliationByEnvironment.has(connection.environmentId)) {
+    return;
+  }
+  queueEnvironmentConnectionHealthRecovery(connection, reason, cause);
+}
+
 function getThreadDetailSubscriptionKey(environmentId: EnvironmentId, threadId: ThreadId): string {
   return scopedThreadKey(scopeThreadRef(environmentId, threadId));
 }
@@ -973,6 +1077,10 @@ async function runThreadDetailReconcile(
   if (!connection) {
     return;
   }
+  if (!connection.client.isHeartbeatFresh()) {
+    queueEnvironmentConnectionHealthRecoveryIfIdle(connection, `thread-detail-reconcile:${reason}`);
+    return;
+  }
 
   entry.reconcileInFlight = true;
   try {
@@ -1090,7 +1198,14 @@ function scheduleThreadDetailReconcileToCurrentProjectionIfBehind(
 function reconcileActiveThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): void {
   const connection = readEnvironmentConnection(entry.environmentId);
   if (connection) {
-    queueEnvironmentBrowserResumeReconciliation(connection, "active-thread-detail");
+    if (connection.client.isHeartbeatFresh()) {
+      queueEnvironmentBrowserResumeReconciliation(connection, "active-thread-detail");
+    } else {
+      queueEnvironmentConnectionHealthRecoveryIfIdle(
+        connection,
+        "active-thread-detail-stale-heartbeat",
+      );
+    }
   }
   scheduleThreadDetailReconcileToCurrentProjectionIfBehind(entry);
 }
@@ -2192,6 +2307,7 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
 
   lastAppliedProjectionVersionByEnvironment.delete(environmentId);
   projectionRecoveryByEnvironment.delete(environmentId);
+  connectionHealthRecoveryByEnvironment.delete(environmentId);
   environmentConnections.delete(environmentId);
   emitEnvironmentConnectionRegistryChange();
   detachThreadDetailSubscriptionsForEnvironment(environmentId);
@@ -2421,13 +2537,22 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
   reason: string,
 ): Promise<void> {
   const environmentId = connection.environmentId;
+  const isActiveThreadProjection = isActiveThreadProjectionReason(reason);
+  const allowReconnect = !isActiveThreadProjection;
 
   // Fast path: if the heartbeat pong is stale, the underlying socket is
   // almost certainly dead (common on iOS PWA after backgrounding, where
   // the JS `WebSocket` may still report OPEN even though TCP is gone).
-  // Skip the probe round-trip and reconnect immediately so thread detail
-  // subscriptions re-attach on the new session.
+  // Browser lifecycle paths skip the probe round-trip and reconnect
+  // immediately so thread detail subscriptions re-attach on the new session.
+  // The active-thread timer is only a convergence check; it must not put the
+  // whole environment into reconnect/retry UI state on every 5s tick. It goes
+  // through the connection health recovery queue instead.
   if (!connection.client.isHeartbeatFresh()) {
+    if (!allowReconnect) {
+      queueEnvironmentConnectionHealthRecovery(connection, `${reason}:stale-heartbeat`);
+      return;
+    }
     console.warn("Environment heartbeat stale on browser resume; reconnecting", {
       environmentId,
       reason,
@@ -2499,10 +2624,23 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
       return;
     }
 
+    if (!allowReconnect) {
+      if (shouldRecoverConnectionFromActiveProjectionError(error)) {
+        queueEnvironmentConnectionHealthRecovery(connection, `${reason}:probe-failed`, error);
+        return;
+      }
+      console.warn("Active thread projection reconciliation failed without reconnecting", {
+        environmentId,
+        reason,
+        error: formatUnknownError(error),
+      });
+      return;
+    }
+
     console.warn("Environment reconciliation after browser resume failed; reconnecting", {
       environmentId,
       reason,
-      error: error instanceof Error ? error.message : String(error),
+      error: formatUnknownError(error),
     });
     await connection.reconnect();
   }
@@ -2972,6 +3110,7 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   browserResumeReconciliationByEnvironment.clear();
   lastAppliedProjectionVersionByEnvironment.clear();
   projectionRecoveryByEnvironment.clear();
+  connectionHealthRecoveryByEnvironment.clear();
   pendingSavedEnvironmentConnections.clear();
   pendingNotificationOpenThreadDetailReconcileByKey.clear();
   for (const key of Array.from(threadDetailSubscriptions.keys())) {

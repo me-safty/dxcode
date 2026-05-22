@@ -491,6 +491,26 @@ label:has(> select#reasoning-effort) select {
   padding-right: calc(0.9rem + var(--chat-markdown-codeblock-copy-button-space));
 }
 
+.chat-markdown .chat-markdown-shiki {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.chat-markdown .chat-markdown-shiki .shiki {
+  max-width: 100%;
+  overflow-x: auto;
+  background: color-mix(in srgb, var(--muted) 78%, var(--background)) !important;
+}
+
+.chat-markdown .chat-markdown-shiki .shiki code {
+  display: block;
+  min-width: max-content;
+}
+
+.chat-markdown .chat-markdown-shiki .line {
+  min-height: 1lh;
+}
+
 .chat-markdown .chat-markdown-copy-button {
   position: absolute;
   top: 0.5rem;
@@ -523,10 +543,6 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown .chat-markdown-copy-button:hover {
   color: var(--foreground);
   border-color: color-mix(in srgb, var(--border) 70%, var(--foreground));
-}
-
-.chat-markdown .chat-markdown-shiki .shiki {
-  background: color-mix(in srgb, var(--muted) 78%, var(--background)) !important;
 }
 
 .chat-markdown table {

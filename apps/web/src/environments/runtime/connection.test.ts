@@ -244,6 +244,49 @@ describe("createEnvironmentConnection", () => {
     await connection.dispose();
   });
 
+  it("keeps pending reconnect waiters across repeated bootstrap resets", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, emitShellSnapshot } = createTestClient();
+    const syncShellSnapshot = vi.fn();
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot,
+      applyTerminalEvent: vi.fn(),
+    });
+
+    await connection.ensureBootstrapped();
+
+    const firstReconnect = connection.reconnect();
+    const secondReconnect = connection.reconnect();
+    await Promise.resolve();
+    expect(syncShellSnapshot).toHaveBeenCalledTimes(1);
+
+    emitShellSnapshot(2);
+    await Promise.all([firstReconnect, secondReconnect]);
+
+    expect(client.reconnect).toHaveBeenCalledTimes(2);
+    expect(syncShellSnapshot).toHaveBeenCalledTimes(2);
+    expect(syncShellSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({ snapshotSequence: 2 }),
+      environmentId,
+    );
+
+    await connection.dispose();
+  });
+
   it("skips primary lifecycle/config subscriptions when no handlers are registered", async () => {
     const environmentId = EnvironmentId.make("env-1");
     const { client } = createTestClient();

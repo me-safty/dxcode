@@ -163,6 +163,40 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
   );
 }
 
+export function splitCodeBlockLinesForStableFallback(code: string): readonly string[] {
+  return code.split("\n");
+}
+
+export function StableCodeBlockFallback({
+  code,
+  themeName,
+}: {
+  readonly code: string;
+  readonly themeName: DiffThemeName;
+}) {
+  const lines = splitCodeBlockLinesForStableFallback(code);
+  let nextLineStartOffset = 0;
+
+  return (
+    <div className="chat-markdown-shiki chat-markdown-shiki-fallback">
+      <pre className={`shiki ${themeName}`} tabIndex={0} data-code-highlight-state="fallback">
+        <code>
+          {lines.map((line, index) => {
+            const lineStartOffset = nextLineStartOffset;
+            nextLineStartOffset += line.length + 1;
+            return (
+              <React.Fragment key={`${lineStartOffset}:${line}`}>
+                <span className="line">{line}</span>
+                {index < lines.length - 1 ? "\n" : null}
+              </React.Fragment>
+            );
+          })}
+        </code>
+      </pre>
+    </div>
+  );
+}
+
 interface SuspenseShikiCodeBlockProps {
   className: string | undefined;
   code: string;
@@ -184,6 +218,7 @@ function SuspenseShikiCodeBlock({
     return (
       <div
         className="chat-markdown-shiki"
+        data-code-highlight-state="highlighted"
         dangerouslySetInnerHTML={{ __html: cachedHighlightedHtml }}
       />
     );
@@ -227,7 +262,11 @@ function UncachedShikiCodeBlock({
   }, [cacheKey, code, highlightedHtml, isStreaming]);
 
   return (
-    <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+    <div
+      className="chat-markdown-shiki"
+      data-code-highlight-state="highlighted"
+      dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+    />
   );
 }
 
@@ -652,10 +691,14 @@ function ChatMarkdown({
           return <pre {...props}>{children}</pre>;
         }
 
+        const stableFallback = (
+          <StableCodeBlockFallback code={codeBlock.code} themeName={diffThemeName} />
+        );
+
         return (
           <MarkdownCodeBlock code={codeBlock.code}>
-            <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
-              <Suspense fallback={<pre {...props}>{children}</pre>}>
+            <CodeHighlightErrorBoundary fallback={stableFallback}>
+              <Suspense fallback={stableFallback}>
                 <SuspenseShikiCodeBlock
                   className={codeBlock.className}
                   code={codeBlock.code}

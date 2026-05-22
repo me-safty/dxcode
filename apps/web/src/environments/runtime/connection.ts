@@ -42,30 +42,39 @@ interface EnvironmentConnectionInput extends OrchestrationHandlers {
 }
 
 function createBootstrapGate() {
-  let resolve: (() => void) | null = null;
-  let reject: ((error: unknown) => void) | null = null;
-  let promise = new Promise<void>((nextResolve, nextReject) => {
-    resolve = nextResolve;
-    reject = nextReject;
-  });
+  let isOpen = false;
+  const waiters = new Set<{
+    readonly resolve: () => void;
+    readonly reject: (error: unknown) => void;
+  }>();
 
   return {
-    wait: () => promise,
+    wait: () => {
+      if (isOpen) {
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve, reject) => {
+        waiters.add({ resolve, reject });
+      });
+    },
     resolve: () => {
-      resolve?.();
-      resolve = null;
-      reject = null;
+      isOpen = true;
+      const currentWaiters = [...waiters];
+      waiters.clear();
+      for (const waiter of currentWaiters) {
+        waiter.resolve();
+      }
     },
     reject: (error: unknown) => {
-      reject?.(error);
-      resolve = null;
-      reject = null;
+      isOpen = false;
+      const currentWaiters = [...waiters];
+      waiters.clear();
+      for (const waiter of currentWaiters) {
+        waiter.reject(error);
+      }
     },
     reset: () => {
-      promise = new Promise<void>((nextResolve, nextReject) => {
-        resolve = nextResolve;
-        reject = nextReject;
-      });
+      isOpen = false;
     },
   };
 }

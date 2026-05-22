@@ -2286,7 +2286,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("periodically reconciles a retained active thread that missed completion events", async () => {
+  it("periodically reconciles sidebar projection for an active thread without reconnecting", async () => {
     const {
       retainActiveThreadDetailSubscription,
       resetEnvironmentServiceForTests,
@@ -2313,7 +2313,6 @@ describe("retainThreadDetailSubscription", () => {
 
     const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
-
     mockProbeSync.mockResolvedValueOnce({
       clientSequence: 1,
       serverSequence: 2,
@@ -2342,6 +2341,7 @@ describe("retainThreadDetailSubscription", () => {
       scopeThreadRef(environmentId, threadId),
     );
     expect(sidebarThread?.session?.orchestrationStatus).toBe("ready");
+    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     release();
@@ -2434,23 +2434,15 @@ describe("retainThreadDetailSubscription", () => {
         ],
       }),
     });
-    mockProbeSync.mockResolvedValue({
-      clientSequence: 5,
-      serverSequence: 5,
-      behind: false,
-    });
     const threadRef = scopeThreadRef(environmentId, threadId);
     const firstThread = selectThreadByRef(useStore.getState(), threadRef);
     expect(firstThread).toBeDefined();
 
     vi.setSystemTime(Date.now() + 60_000);
     await vi.advanceTimersByTimeAsync(5_000);
-
-    await vi.waitFor(() => {
-      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 5 });
-    });
     await vi.advanceTimersByTimeAsync(300);
 
+    expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 5 });
     await expectThreadDetailReconcileCallCount(1);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
@@ -2583,22 +2575,346 @@ describe("retainThreadDetailSubscription", () => {
         sessionStatus: "running",
       }),
     });
-    mockProbeSync.mockResolvedValue({
-      clientSequence: 1,
-      serverSequence: 1,
-      behind: false,
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+    await expectThreadDetailReconcileCallCount(0);
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("rate-limits connection health recovery from the active timer when the heartbeat is stale", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const client = mockCreateWsRpcClient.mock.results[0]?.value as
+      | { readonly isHeartbeatFresh: ReturnType<typeof vi.fn> }
+      | undefined;
+    expect(client).toBeDefined();
+    client?.isHeartbeatFresh.mockReturnValue(false);
+
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-stale-heartbeat-health-recovery");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "running",
+      }),
     });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(mockProbeSync).not.toHaveBeenCalled();
+    await expectThreadDetailReconcileCallCount(0);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(300);
+
+    await expectThreadDetailReconcileCallCount(0);
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(2);
+    });
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not enqueue active stale-heartbeat health recovery during full browser resume", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const documentTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const client = mockCreateWsRpcClient.mock.results[0]?.value as
+      | { readonly isHeartbeatFresh: ReturnType<typeof vi.fn> }
+      | undefined;
+    expect(client).toBeDefined();
+    client?.isHeartbeatFresh.mockReturnValue(false);
+    mockConnectionReconnects[0]?.mockImplementation(() => new Promise(() => undefined));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-stale-heartbeat-during-browser-resume");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "running",
+      }),
+    });
+
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    visibilityState = "visible";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+
+    warnSpy.mockRestore();
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("clears timed-out connection health recovery and allows a later retry", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const client = mockCreateWsRpcClient.mock.results[0]?.value as
+      | { readonly isHeartbeatFresh: ReturnType<typeof vi.fn> }
+      | undefined;
+    expect(client).toBeDefined();
+    client?.isHeartbeatFresh.mockReturnValue(false);
+    mockConnectionReconnects[0]?.mockImplementation(() => new Promise(() => undefined));
+
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-health-recovery-timeout");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "running",
+      }),
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(25_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(2);
+    });
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not recover the connection when active projection probing fails generically", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-probe-failure-health-recovery");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+    mockProbeSync.mockRejectedValue(new Error("probe failed"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(5_000);
 
     await vi.waitFor(() => {
       expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
     });
-    await vi.advanceTimersByTimeAsync(300);
-
-    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
-    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Active thread projection reconciliation failed without reconnecting",
+      expect.objectContaining({
+        environmentId,
+        reason: "active-thread-detail",
+        error: "probe failed",
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not recover the connection when active projection probing times out", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-probe-timeout-no-health-recovery");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+    mockProbeSync.mockImplementation(() => new Promise(() => undefined));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await vi.waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Active thread projection reconciliation failed without reconnecting",
+        expect.objectContaining({
+          environmentId,
+          reason: "active-thread-detail",
+          error: "Browser resume reconciliation timed out.",
+        }),
+      );
+    });
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("queues controlled connection health recovery when active projection probing fails from transport", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-transport-probe-health-recovery");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+    mockProbeSync.mockRejectedValue(new Error("SocketCloseError: 1006"));
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
 
     release();
     stop();

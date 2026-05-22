@@ -604,6 +604,30 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     orchestrationStatus: "idle" as const,
   };
 
+  const makeLocalDispatch = () =>
+    createLocalDispatchSnapshot({
+      id: ThreadId.make("thread-1"),
+      environmentId: localEnvironmentId,
+      codexThreadId: null,
+      projectId,
+      title: "Thread",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      session: previousSession,
+      messages: [],
+      proposedPlans: [],
+      error: null,
+      createdAt: "2026-03-29T00:00:00.000Z",
+      archivedAt: null,
+      updatedAt: "2026-03-29T00:00:10.000Z",
+      latestTurn: previousLatestTurn,
+      branch: null,
+      worktreePath: null,
+      turnDiffSummaries: [],
+      activities: [],
+    });
+
   it("does not clear local dispatch before server state changes", () => {
     const localDispatch = createLocalDispatchSnapshot({
       id: ThreadId.make("thread-1"),
@@ -641,7 +665,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     ).toBe(false);
   });
 
-  it("clears local dispatch when the server has persisted the submitted user message", () => {
+  it("keeps local dispatch active when only the submitted user message is persisted", () => {
     const localDispatch = createLocalDispatchSnapshot({
       id: ThreadId.make("thread-1"),
       environmentId: localEnvironmentId,
@@ -668,15 +692,14 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
-        phase: "running",
+        phase: "ready",
         latestTurn: previousLatestTurn,
         session: previousSession,
-        messageCount: 1,
         hasPendingApproval: false,
         hasPendingUserInput: false,
         threadError: null,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("clears local dispatch when a new turn is already settled", () => {
@@ -861,7 +884,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     ).toBe(true);
   });
 
-  it("clears local dispatch when the session changes without an observed running phase", () => {
+  it("keeps local dispatch active when the session changes without an observed running phase", () => {
     const localDispatch = createLocalDispatchSnapshot({
       id: ThreadId.make("thread-1"),
       environmentId: localEnvironmentId,
@@ -897,6 +920,63 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
         hasPendingApproval: false,
         hasPendingUserInput: false,
         threadError: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("clears local dispatch when the server reports a terminal non-running session status", () => {
+    const terminalSessions = [
+      { orchestrationStatus: "error" as const, status: "error" as const },
+      { orchestrationStatus: "stopped" as const, status: "closed" as const },
+      { orchestrationStatus: "interrupted" as const, status: "ready" as const },
+    ];
+
+    for (const terminalSession of terminalSessions) {
+      expect(
+        hasServerAcknowledgedLocalDispatch({
+          localDispatch: makeLocalDispatch(),
+          phase: "ready",
+          latestTurn: previousLatestTurn,
+          session: {
+            ...previousSession,
+            ...terminalSession,
+            updatedAt: "2026-03-29T00:00:11.000Z",
+          },
+          hasPendingApproval: false,
+          hasPendingUserInput: false,
+          threadError: null,
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("clears local dispatch for pending user action or thread error", () => {
+    const baseInput = {
+      localDispatch: makeLocalDispatch(),
+      phase: "ready" as const,
+      latestTurn: previousLatestTurn,
+      session: previousSession,
+      hasPendingApproval: false,
+      hasPendingUserInput: false,
+      threadError: null,
+    };
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...baseInput,
+        hasPendingApproval: true,
+      }),
+    ).toBe(true);
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...baseInput,
+        hasPendingUserInput: true,
+      }),
+    ).toBe(true);
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...baseInput,
+        threadError: "Provider failed",
       }),
     ).toBe(true);
   });
