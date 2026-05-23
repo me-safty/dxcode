@@ -2921,6 +2921,167 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("does not let an active projection probe block foreground resume recovery", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const documentTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mockProbeSync
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockResolvedValueOnce({
+        clientSequence: 1,
+        serverSequence: 2,
+        behind: true,
+      });
+    mockReplayEvents.mockResolvedValueOnce([
+      makeThreadSessionSetEvent({
+        sequence: 2,
+        threadId: ThreadId.make("thread-active-projection-foreground"),
+        status: "ready",
+      }),
+    ]);
+
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-projection-foreground");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "running",
+      }),
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledTimes(1);
+    });
+
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    visibilityState = "visible";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledTimes(2);
+      expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
+    });
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("keeps active projection timeout low priority before foreground resume reconnects", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const documentTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    mockProbeSync
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockRejectedValueOnce(new Error("stale socket"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-active-timeout-before-foreground");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "running",
+      }),
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(1_500);
+    await vi.waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Active thread projection reconciliation failed without reconnecting",
+        expect.objectContaining({
+          environmentId,
+          reason: "active-thread-detail",
+          error: "Browser resume reconciliation timed out.",
+        }),
+      );
+    });
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    visibilityState = "visible";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledTimes(2);
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+
+    warnSpy.mockRestore();
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
   it("does not wake-refresh warm prewarmed thread detail", async () => {
     const {
       retainThreadDetailSubscription,
@@ -3183,7 +3344,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("refreshes stale retained thread detail on browser resume when backend cursor is current", async () => {
+  it("keeps foreground resume projection-only when backend cursor is current", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -3254,7 +3415,8 @@ describe("retainThreadDetailSubscription", () => {
       expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 2 });
     });
     await vi.advanceTimersByTimeAsync(300);
-    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+    await expectThreadDetailReconcileCallCount(0);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
@@ -3263,7 +3425,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("force-refreshes active running thread detail on browser resume even when the detail sequence is current", async () => {
+  it("does not force-refresh active running thread detail on current foreground resume", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -3345,7 +3507,8 @@ describe("retainThreadDetailSubscription", () => {
       expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 2 });
     });
     await vi.advanceTimersByTimeAsync(300);
-    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+    await expectThreadDetailReconcileCallCount(0);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
@@ -3354,7 +3517,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("updates streaming assistant text from the forced active detail snapshot after browser resume", async () => {
+  it("does not update streaming assistant text from detail on current foreground resume", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -3431,26 +3594,6 @@ describe("retainThreadDetailSubscription", () => {
       }),
     });
 
-    const refreshedSnapshot = makeThreadDetailSnapshot({
-      snapshotSequence: 2,
-      threadId,
-      sessionStatus: "running",
-      messages: [
-        {
-          id: messageId,
-          role: "assistant",
-          text: "Hello world",
-          turnId,
-          streaming: true,
-          createdAt: "2026-04-13T00:00:02.000Z",
-          updatedAt: "2026-04-13T00:00:03.000Z",
-        },
-      ],
-    });
-    mockReconcileThreadDetail.mockResolvedValueOnce(
-      makeThreadDetailReconcileSnapshotResult(refreshedSnapshot),
-    );
-
     visibilityState = "hidden";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
     visibilityState = "visible";
@@ -3460,11 +3603,12 @@ describe("retainThreadDetailSubscription", () => {
       expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 2 });
     });
     await vi.advanceTimersByTimeAsync(300);
-    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+    await expectThreadDetailReconcileCallCount(0);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
-    expect(thread?.messages.map((message) => message.text)).toEqual(["Hello world"]);
+    expect(thread?.messages.map((message) => message.text)).toEqual(["Hello"]);
     expect(thread?.messages[0]?.streaming).toBe(true);
     expect(thread?.latestTurn?.state).toBe("running");
     expect(thread?.session?.status).toBe("running");
@@ -3833,7 +3977,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("force-refreshes active empty thread detail on browser resume when shell knows conversation content", async () => {
+  it("does not force-refresh active empty thread detail on current foreground resume", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -3915,7 +4059,8 @@ describe("retainThreadDetailSubscription", () => {
       expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 2 });
     });
     await vi.advanceTimersByTimeAsync(300);
-    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+    await expectThreadDetailReconcileCallCount(0);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
@@ -4014,15 +4159,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("force-refreshes a retained thread detail when browser resume finds it stuck in a completed-but-running turn", async () => {
-    // Regression guard for the iOS PWA "Working for …" indicator that
-    // refused to clear after foregrounding. Backgrounding silently drops
-    // the `thread.session-set` event that closes a turn while still
-    // delivering `thread.turn-diff-completed`, leaving the projection
-    // with activeTurnId pointing at the same turnId latestTurn already
-    // marks completedAt for. Even when the post-resume probe says "not
-    // behind", the runtime must re-fetch the thread detail so the stuck
-    // session reconciles to the server's real state.
+  it("keeps completed-but-running foreground resume projection-only when backend cursor is current", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -4070,14 +4207,12 @@ describe("retainThreadDetailSubscription", () => {
     visibilityState = "visible";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
 
-    // Probe says we're caught up (the gap is invisible at the sequence
-    // level). The runtime must still observe the stuck-running shape and
-    // run a detail reconcile so the new snapshot can converge state.
     await vi.waitFor(() => {
       expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 2 });
     });
     await vi.advanceTimersByTimeAsync(300);
-    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+    await expectThreadDetailReconcileCallCount(0);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 

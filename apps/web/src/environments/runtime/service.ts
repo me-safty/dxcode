@@ -163,6 +163,7 @@ const environmentConnectionListeners = new Set<() => void>();
 const threadDetailSubscriptions = new Map<string, ThreadDetailSubscriptionEntry>();
 const pendingNotificationOpenThreadDetailReconcileByKey = new Map<string, number>();
 const browserResumeReconciliationByEnvironment = new Map<EnvironmentId, Promise<void>>();
+const activeThreadProjectionReconciliationByEnvironment = new Map<EnvironmentId, Promise<void>>();
 const lastAppliedProjectionVersionByEnvironment = new Map<
   EnvironmentId,
   {
@@ -591,10 +592,6 @@ function formatUnknownError(error: unknown): string {
   return String(error);
 }
 
-function isActiveThreadProjectionReason(reason: string): boolean {
-  return reason === "active-thread-detail" || reason.startsWith("active-thread-detail:");
-}
-
 function shouldRecoverConnectionFromActiveProjectionError(error: unknown): boolean {
   return isTransportConnectionErrorMessage(formatUnknownError(error));
 }
@@ -830,76 +827,6 @@ function shouldEvictThreadDetailSubscription(entry: ThreadDetailSubscriptionEntr
   return entry.refCount === 0 && !isNonIdleThreadDetailSubscription(entry);
 }
 
-// Detects the iOS PWA "stuck running" gap: the session still claims the
-// active turn id while the same latestTurn already reports a completedAt.
-// In normal operation this state is transient (the closing
-// `thread.session-set` event arrives moments after `thread.turn-diff-completed`),
-// but iOS Safari can drop the closing event when the tab is backgrounded.
-// The active session remains authoritative in live UI because a completed
-// assistant message can arrive before the provider turn is done. This refresh
-// path exists specifically for resume reconciliation, where the browser may
-// have missed the closing `thread.session-set` event.
-function isThreadDetailSubscriptionStuckOnCompletedRunningTurn(
-  entry: ThreadDetailSubscriptionEntry,
-): boolean {
-  const thread = selectThreadByRef(
-    useStore.getState(),
-    scopeThreadRef(entry.environmentId, entry.threadId),
-  );
-  const session = thread?.session;
-  const latestTurn = thread?.latestTurn;
-  if (!session || !latestTurn) {
-    return false;
-  }
-  return (
-    session.orchestrationStatus === "running" &&
-    session.activeTurnId !== undefined &&
-    session.activeTurnId !== null &&
-    latestTurn.turnId === session.activeTurnId &&
-    latestTurn.completedAt !== undefined &&
-    latestTurn.completedAt !== null
-  );
-}
-
-function refreshThreadDetailSubscriptionsStuckOnCompletedRunningTurn(
-  environmentId: EnvironmentId,
-): void {
-  for (const entry of threadDetailSubscriptions.values()) {
-    if (entry.environmentId !== environmentId) {
-      continue;
-    }
-    if (!isThreadDetailSubscriptionStuckOnCompletedRunningTurn(entry)) {
-      continue;
-    }
-    requestThreadDetailReconcile(entry.environmentId, entry.threadId, "completed-running-turn");
-  }
-}
-
-function refreshRetainedThreadDetailSubscriptionsToCurrentProjection(
-  environmentId: EnvironmentId,
-): void {
-  for (const entry of threadDetailSubscriptions.values()) {
-    if (entry.environmentId !== environmentId) {
-      continue;
-    }
-    if (!shouldRefreshRetainedThreadDetailSubscription(entry)) {
-      continue;
-    }
-    scheduleThreadDetailReconcileToCurrentProjectionIfBehind(entry);
-  }
-}
-
-function forceRefreshActiveThreadDetailSubscriptionsAfterBrowserResume(
-  environmentId: EnvironmentId,
-): void {
-  for (const entry of threadDetailSubscriptions.values()) {
-    if (entry.environmentId !== environmentId) {
-      continue;
-    }
-    requestThreadDetailReconcile(entry.environmentId, entry.threadId, "browser-resume");
-  }
-}
-
 function requestThreadDetailReconcile(
   environmentId: EnvironmentId,
   threadId: ThreadId,
@@ -930,25 +857,6 @@ function requestThreadDetailReconcileAfterNotificationOpen(
   }
 
   requestThreadDetailReconcile(environmentId, threadId, "notification-click");
-}
-
-function reconcileThreadDetailSubscriptionsAfterBrowserResume(environmentId: EnvironmentId): void {
-  refreshRetainedThreadDetailSubscriptionsToCurrentProjection(environmentId);
-  forceRefreshActiveThreadDetailSubscriptionsAfterBrowserResume(environmentId);
-  refreshThreadDetailSubscriptionsStuckOnCompletedRunningTurn(environmentId);
-}
-
-function reconcileThreadDetailSubscriptionsAfterActiveProjectionReconcile(
-  environmentId: EnvironmentId,
-): void {
-  refreshRetainedThreadDetailSubscriptionsToCurrentProjection(environmentId);
-  refreshThreadDetailSubscriptionsStuckOnCompletedRunningTurn(environmentId);
-}
-
-function reconcileThreadDetailSubscriptionsAfterNotificationProjectionReconcile(
-  environmentId: EnvironmentId,
-): void {
-  refreshThreadDetailSubscriptionsStuckOnCompletedRunningTurn(environmentId);
 }
 
 function shouldRefreshRetainedThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry) {
@@ -1199,7 +1107,7 @@ function reconcileActiveThreadDetailSubscription(entry: ThreadDetailSubscription
   const connection = readEnvironmentConnection(entry.environmentId);
   if (connection) {
     if (connection.client.isHeartbeatFresh()) {
-      queueEnvironmentBrowserResumeReconciliation(connection, "active-thread-detail");
+      queueEnvironmentActiveThreadProjectionReconciliation(connection);
     } else {
       queueEnvironmentConnectionHealthRecoveryIfIdle(
         connection,
@@ -2537,22 +2445,13 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
   reason: string,
 ): Promise<void> {
   const environmentId = connection.environmentId;
-  const isActiveThreadProjection = isActiveThreadProjectionReason(reason);
-  const allowReconnect = !isActiveThreadProjection;
 
   // Fast path: if the heartbeat pong is stale, the underlying socket is
   // almost certainly dead (common on iOS PWA after backgrounding, where
   // the JS `WebSocket` may still report OPEN even though TCP is gone).
-  // Browser lifecycle paths skip the probe round-trip and reconnect
-  // immediately so thread detail subscriptions re-attach on the new session.
-  // The active-thread timer is only a convergence check; it must not put the
-  // whole environment into reconnect/retry UI state on every 5s tick. It goes
-  // through the connection health recovery queue instead.
+  // Skip the probe round-trip and reconnect immediately so thread detail
+  // subscriptions re-attach on the new session.
   if (!connection.client.isHeartbeatFresh()) {
-    if (!allowReconnect) {
-      queueEnvironmentConnectionHealthRecovery(connection, `${reason}:stale-heartbeat`);
-      return;
-    }
     console.warn("Environment heartbeat stale on browser resume; reconnecting", {
       environmentId,
       reason,
@@ -2565,12 +2464,6 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
   if (currentSequence === undefined) {
     return;
   }
-  const reconcileThreadDetailsAfterProjection =
-    reason === "notification-click"
-      ? reconcileThreadDetailSubscriptionsAfterNotificationProjectionReconcile
-      : reason === "active-thread-detail"
-        ? reconcileThreadDetailSubscriptionsAfterActiveProjectionReconcile
-        : reconcileThreadDetailSubscriptionsAfterBrowserResume;
 
   try {
     const syncProbe = await withTimeout(
@@ -2586,10 +2479,6 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
     const latestSequenceAfterProbe =
       readLastAppliedProjectionVersion(environmentId)?.sequence ?? currentSequence;
     if (!syncProbe.behind || syncProbe.serverSequence <= latestSequenceAfterProbe) {
-      // Browser resume/focus refreshes active detail even when the shell
-      // cursor is current. Periodic active-thread checks use the projection
-      // only path so normal timer ticks do not resubscribe detail.
-      reconcileThreadDetailsAfterProjection(environmentId);
       return;
     }
 
@@ -2618,22 +2507,8 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
     if (highestReplayedSequence > recoveredSequence) {
       queueProjectionRecovery(environmentId, highestReplayedSequence);
     }
-    reconcileThreadDetailsAfterProjection(environmentId);
   } catch (error) {
     if (readEnvironmentConnection(environmentId) !== connection) {
-      return;
-    }
-
-    if (!allowReconnect) {
-      if (shouldRecoverConnectionFromActiveProjectionError(error)) {
-        queueEnvironmentConnectionHealthRecovery(connection, `${reason}:probe-failed`, error);
-        return;
-      }
-      console.warn("Active thread projection reconciliation failed without reconnecting", {
-        environmentId,
-        reason,
-        error: formatUnknownError(error),
-      });
       return;
     }
 
@@ -2644,6 +2519,129 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
     });
     await connection.reconnect();
   }
+}
+
+async function reconcileEnvironmentConnectionForActiveThreadProjection(
+  connection: EnvironmentConnection,
+): Promise<void> {
+  const environmentId = connection.environmentId;
+  if (browserResumeReconciliationByEnvironment.has(environmentId)) {
+    return;
+  }
+
+  if (!connection.client.isHeartbeatFresh()) {
+    queueEnvironmentConnectionHealthRecoveryIfIdle(
+      connection,
+      "active-thread-detail-stale-heartbeat",
+    );
+    return;
+  }
+
+  const currentSequence = readLastAppliedProjectionVersion(environmentId)?.sequence;
+  if (currentSequence === undefined) {
+    return;
+  }
+
+  try {
+    const syncProbe = await withTimeout(
+      connection.client.orchestration.probeSync({
+        clientSequence: currentSequence,
+      }),
+      BROWSER_RESUME_RECONCILE_TIMEOUT_MS,
+      () => new Error("Browser resume reconciliation timed out."),
+    );
+    if (
+      readEnvironmentConnection(environmentId) !== connection ||
+      browserResumeReconciliationByEnvironment.has(environmentId)
+    ) {
+      return;
+    }
+
+    const latestSequenceAfterProbe =
+      readLastAppliedProjectionVersion(environmentId)?.sequence ?? currentSequence;
+    if (!syncProbe.behind || syncProbe.serverSequence <= latestSequenceAfterProbe) {
+      return;
+    }
+
+    const replayedEvents = await withTimeout(
+      connection.client.orchestration.replayEvents({
+        fromSequenceExclusive: latestSequenceAfterProbe,
+      }),
+      BROWSER_RESUME_RECONCILE_TIMEOUT_MS,
+      () => new Error("Browser resume replay timed out."),
+    );
+    if (
+      readEnvironmentConnection(environmentId) !== connection ||
+      browserResumeReconciliationByEnvironment.has(environmentId)
+    ) {
+      return;
+    }
+
+    const latestSequence =
+      readLastAppliedProjectionVersion(environmentId)?.sequence ?? latestSequenceAfterProbe;
+    const contiguousEvents = selectContiguousReplayEvents(replayedEvents, latestSequence);
+    applyRecoveredProjectionEventBatch(contiguousEvents, environmentId);
+
+    const recoveredSequence =
+      readLastAppliedProjectionVersion(environmentId)?.sequence ?? latestSequence;
+    const highestReplayedSequence = replayedEvents.reduce(
+      (highest, event) => Math.max(highest, event.sequence),
+      syncProbe.serverSequence,
+    );
+    if (highestReplayedSequence > recoveredSequence) {
+      queueProjectionRecovery(environmentId, highestReplayedSequence);
+    }
+  } catch (error) {
+    if (
+      readEnvironmentConnection(environmentId) !== connection ||
+      browserResumeReconciliationByEnvironment.has(environmentId)
+    ) {
+      return;
+    }
+
+    if (shouldRecoverConnectionFromActiveProjectionError(error)) {
+      queueEnvironmentConnectionHealthRecoveryIfIdle(
+        connection,
+        "active-thread-detail:probe-failed",
+        error,
+      );
+      return;
+    }
+
+    console.warn("Active thread projection reconciliation failed without reconnecting", {
+      environmentId,
+      reason: "active-thread-detail",
+      error: formatUnknownError(error),
+    });
+  }
+}
+
+function queueEnvironmentActiveThreadProjectionReconciliation(
+  connection: EnvironmentConnection,
+): void {
+  const environmentId = connection.environmentId;
+  if (
+    browserResumeReconciliationByEnvironment.has(environmentId) ||
+    activeThreadProjectionReconciliationByEnvironment.has(environmentId)
+  ) {
+    return;
+  }
+
+  const promise = reconcileEnvironmentConnectionForActiveThreadProjection(connection).catch(
+    (error) => {
+      console.warn("Active thread projection reconciliation failed", {
+        environmentId,
+        error: formatUnknownError(error),
+      });
+    },
+  );
+
+  activeThreadProjectionReconciliationByEnvironment.set(environmentId, promise);
+  void promise.finally(() => {
+    if (activeThreadProjectionReconciliationByEnvironment.get(environmentId) === promise) {
+      activeThreadProjectionReconciliationByEnvironment.delete(environmentId);
+    }
+  });
 }
 
 function queueEnvironmentBrowserResumeReconciliation(
@@ -3108,6 +3106,7 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   lastBrowserHiddenAt = null;
   lastBrowserResumeReconcileAt = Number.NEGATIVE_INFINITY;
   browserResumeReconciliationByEnvironment.clear();
+  activeThreadProjectionReconciliationByEnvironment.clear();
   lastAppliedProjectionVersionByEnvironment.clear();
   projectionRecoveryByEnvironment.clear();
   connectionHealthRecoveryByEnvironment.clear();
