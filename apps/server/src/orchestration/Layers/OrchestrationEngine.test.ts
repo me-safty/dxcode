@@ -68,6 +68,14 @@ async function createOrchestrationSystem() {
   return {
     engine,
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
+    readThreadDetail: (threadId: ThreadId) =>
+      runtime.runPromise(snapshotQuery.getThreadDetailSnapshotById(threadId)),
+    readEvents: (fromSequenceExclusive = 0) =>
+      runtime.runPromise(
+        Stream.runCollect(engine.readEvents(fromSequenceExclusive)).pipe(
+          Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
+        ),
+      ),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
   };
@@ -148,6 +156,7 @@ describe("OrchestrationEngine", () => {
           archivedAt: null,
           deletedAt: null,
           messages: [],
+          queuedTurns: [],
           proposedPlans: [],
           activities: [],
           checkpoints: [],
@@ -289,6 +298,142 @@ describe("OrchestrationEngine", () => {
     const readModelA = await system.readModel();
     const readModelB = await system.readModel();
     expect(readModelB).toEqual(readModelA);
+    await system.dispose();
+  });
+
+  it("projects queued turns separately from messages through cancel and dispatch", async () => {
+    const createdAt = now();
+    const threadId = ThreadId.make("thread-queue");
+    const projectId = asProjectId("project-queue");
+    const system = await createOrchestrationSystem();
+    const { engine } = system;
+
+    await system.run(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-project-queue-create"),
+        projectId,
+        title: "Project Queue",
+        workspaceRoot: "/tmp/project-queue",
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-thread-queue-create"),
+        threadId,
+        projectId,
+        title: "Queued thread",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+
+    await system.run(
+      engine.dispatch({
+        type: "thread.turn.queue",
+        commandId: CommandId.make("cmd-turn-queue-cancel"),
+        threadId,
+        message: {
+          messageId: asMessageId("msg-queued-cancel"),
+          role: "user",
+          text: "cancel me",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+
+    const queuedReadModel = await system.readModel();
+    const queuedThread = queuedReadModel.threads.find((thread) => thread.id === threadId);
+    expect(queuedThread?.messages).toEqual([]);
+    expect(queuedThread?.queuedTurns.map((queuedTurn) => queuedTurn.text)).toEqual(["cancel me"]);
+
+    const queuedDetail = await system.readThreadDetail(threadId);
+    expect(Option.isSome(queuedDetail)).toBe(true);
+    if (Option.isSome(queuedDetail)) {
+      expect(queuedDetail.value.thread.messages).toEqual([]);
+      expect(queuedDetail.value.thread.queuedTurns.map((queuedTurn) => queuedTurn.text)).toEqual([
+        "cancel me",
+      ]);
+    }
+
+    await system.run(
+      engine.dispatch({
+        type: "thread.queued-turn.cancel",
+        commandId: CommandId.make("cmd-turn-queue-cancel-cancel"),
+        threadId,
+        messageId: asMessageId("msg-queued-cancel"),
+        createdAt: "2026-01-01T00:00:02.000Z",
+      }),
+    );
+
+    const cancelledReadModel = await system.readModel();
+    const cancelledThread = cancelledReadModel.threads.find((thread) => thread.id === threadId);
+    expect(cancelledThread?.queuedTurns).toEqual([]);
+    expect((await system.readEvents()).map((event) => event.type)).not.toContain(
+      "thread.turn-start-requested",
+    );
+
+    await system.run(
+      engine.dispatch({
+        type: "thread.turn.queue",
+        commandId: CommandId.make("cmd-turn-queue-dispatch"),
+        threadId,
+        message: {
+          messageId: asMessageId("msg-queued-dispatch"),
+          role: "user",
+          text: "dispatch me",
+          attachments: [],
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:03.000Z",
+      }),
+    );
+
+    await system.run(
+      engine.dispatch({
+        type: "thread.queued-turn.dispatch",
+        commandId: CommandId.make("cmd-turn-queue-dispatch-dispatch"),
+        threadId,
+        messageId: asMessageId("msg-queued-dispatch"),
+        createdAt: "2026-01-01T00:00:04.000Z",
+      }),
+    );
+
+    const dispatchedReadModel = await system.readModel();
+    const dispatchedThread = dispatchedReadModel.threads.find((thread) => thread.id === threadId);
+    expect(dispatchedThread?.queuedTurns).toEqual([]);
+    expect(dispatchedThread?.messages.map((message) => message.text)).toEqual(["dispatch me"]);
+
+    const dispatchEvents = (await system.readEvents()).filter(
+      (event) => event.commandId === CommandId.make("cmd-turn-queue-dispatch-dispatch"),
+    );
+    expect(dispatchEvents.map((event) => event.type)).toEqual([
+      "thread.queued-turn-dispatched",
+      "thread.message-sent",
+      "thread.turn-start-requested",
+    ]);
+
     await system.dispose();
   });
 

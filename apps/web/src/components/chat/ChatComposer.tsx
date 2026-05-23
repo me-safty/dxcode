@@ -10,6 +10,7 @@ import type {
   RuntimeMode,
   ScopedThreadRef,
   ServerProvider,
+  MessageId,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -84,6 +85,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import { ComposerQueuedTurnsPanel } from "./ComposerQueuedTurnsPanel";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
@@ -111,7 +113,7 @@ import {
 } from "../../providerInstances";
 import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelSelection";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
-import type { SessionPhase, Thread } from "../../types";
+import type { QueuedTurn, SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
@@ -419,6 +421,9 @@ export interface ChatComposerProps {
     readonly label: string;
     readonly connectionState: "connecting" | "disconnected" | "error";
   } | null;
+  queuedTurns: readonly QueuedTurn[];
+  cancelingQueuedMessageIds: ReadonlySet<MessageId>;
+  onCancelQueuedTurn: (messageId: QueuedTurn["messageId"]) => void;
 
   // Pending approvals / inputs
   activePendingApproval: PendingApproval | null;
@@ -527,6 +532,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isSendBusy,
     isPreparingWorktree,
     environmentUnavailable,
+    queuedTurns,
+    cancelingQueuedMessageIds,
+    onCancelQueuedTurn,
     activePendingApproval,
     pendingApprovals,
     pendingUserInputs,
@@ -1027,6 +1035,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const isComposerApprovalState = activePendingApproval !== null;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const hasComposerHeader =
+    queuedTurns.length > 0 ||
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
     (showPlanFollowUpPrompt && activeProposedPlan !== null);
@@ -2125,6 +2134,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             scheduleComposerCollapseCheck();
           }}
         >
+          {!isComposerCollapsedMobile && queuedTurns.length > 0 ? (
+            <ComposerQueuedTurnsPanel
+              queuedTurns={queuedTurns}
+              cancelingQueuedMessageIds={cancelingQueuedMessageIds}
+              onCancelQueuedTurn={onCancelQueuedTurn}
+            />
+          ) : null}
+
           {!isComposerCollapsedMobile &&
             (activePendingApproval ? (
               <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">

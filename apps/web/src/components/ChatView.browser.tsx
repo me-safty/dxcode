@@ -50,6 +50,7 @@ import {
 } from "../lib/terminalContext";
 import { isMacPlatform } from "../lib/utils";
 import { __resetLocalApiForTests } from "../localApi";
+import { installServiceWorkerNotificationNavigation } from "../push/notificationNavigation";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { getServerConfig } from "../rpc/serverState";
 import { getRouter } from "../router";
@@ -380,6 +381,7 @@ function createSnapshotForTargetUser(options: {
         archivedAt: null,
         deletedAt: null,
         messages,
+        queuedTurns: [],
         activities: [],
         proposedPlans: [],
         checkpoints: [],
@@ -445,6 +447,7 @@ function addThreadToSnapshot(
         archivedAt: null,
         deletedAt: null,
         messages: [],
+        queuedTurns: [],
         activities: [],
         proposedPlans: [],
         checkpoints: [],
@@ -827,6 +830,7 @@ function createSnapshotWithSecondaryProject(options?: {
           updatedAt: isoAt(31),
           deletedAt: null,
           messages: [],
+          queuedTurns: [],
           activities: [],
           proposedPlans: [],
           checkpoints: [],
@@ -859,6 +863,7 @@ function createSnapshotWithSecondaryProject(options?: {
           updatedAt: isoAt(25),
           deletedAt: null,
           messages: [],
+          queuedTurns: [],
           activities: [],
           proposedPlans: [],
           checkpoints: [],
@@ -3969,10 +3974,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
-          const turnStartRequest = wsRequests.find(
+          const queuedTurnRequest = wsRequests.find(
             (request) =>
               request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
-              request.type === "thread.turn.start",
+              request.type === "thread.turn.queue",
           ) as
             | {
                 message?: {
@@ -3980,7 +3985,29 @@ describe("ChatView timeline estimator parity (full app)", () => {
                 };
               }
             | undefined;
-          expect(turnStartRequest?.message?.text).toBe("Run this after the current turn");
+          expect(queuedTurnRequest?.message?.text).toBe("Run this after the current turn");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await expect.element(page.getByText("1 Queued")).toBeInTheDocument();
+      await expect.element(page.getByText("Run this after the current turn")).toBeInTheDocument();
+
+      const cancelButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label="Cancel queued message"]'),
+        "Unable to find queued message cancel button.",
+      );
+      await cancelButton.click();
+
+      await vi.waitFor(
+        () => {
+          const cancelRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.queued-turn.cancel",
+          );
+          expect(cancelRequest).toBeTruthy();
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -4169,6 +4196,47 @@ describe("ChatView timeline estimator parity (full app)", () => {
       // whether the promoted thread is still running.
       await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
     } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("navigates service worker notification clicks through the app router", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-notification-navigation-test" as MessageId,
+        targetText: "notification navigation test",
+      }),
+      initialPath: "/",
+    });
+    const cleanupNotificationNavigation = installServiceWorkerNotificationNavigation(
+      mounted.router,
+    );
+
+    try {
+      wsRequests.length = 0;
+      navigator.serviceWorker.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            type: "t3.notification-click",
+            url: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`,
+            openedAt: Date.now(),
+          },
+        }),
+      );
+
+      await waitForURL(
+        mounted.router,
+        (path) => path === serverThreadPath(THREAD_ID),
+        "Notification clicks should navigate the existing app shell to the target thread.",
+      );
+      expect(
+        wsRequests.some(
+          (request) => request._tag === ORCHESTRATION_WS_METHODS.reconcileThreadDetail,
+        ),
+      ).toBe(false);
+    } finally {
+      cleanupNotificationNavigation();
       await mounted.cleanup();
     }
   });

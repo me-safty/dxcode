@@ -93,6 +93,7 @@ import {
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
   type ChatMessage,
+  type QueuedTurn,
   type SessionPhase,
   type Thread,
   type TurnDiffSummary,
@@ -718,6 +719,10 @@ export default function ChatView(props: ChatViewProps) {
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
+  const [optimisticQueuedTurns, setOptimisticQueuedTurns] = useState<QueuedTurn[]>([]);
+  const optimisticQueuedTurnsRef = useRef(optimisticQueuedTurns);
+  optimisticQueuedTurnsRef.current = optimisticQueuedTurns;
+  const [cancelingQueuedMessageIds, setCancelingQueuedMessageIds] = useState<MessageId[]>([]);
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
     Record<string, string | null>
   >({});
@@ -1449,6 +1454,11 @@ export default function ChatView(props: ChatViewProps) {
       for (const message of optimisticUserMessagesRef.current) {
         revokeUserMessagePreviewUrls(message);
       }
+      for (const queuedTurn of optimisticQueuedTurnsRef.current) {
+        for (const attachment of queuedTurn.attachments) {
+          revokeBlobPreviewUrl(attachment.previewUrl);
+        }
+      }
     };
   }, [clearAttachmentPreviewHandoffs]);
   const handoffAttachmentPreviews = useCallback((messageId: MessageId, previewUrls: string[]) => {
@@ -1608,6 +1618,31 @@ export default function ChatView(props: ChatViewProps) {
     () =>
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
     [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+  );
+  const queuedTurnsForComposer = useMemo(() => {
+    const serverQueuedTurns = activeThread?.queuedTurns ?? [];
+    if (optimisticQueuedTurns.length === 0) {
+      return serverQueuedTurns;
+    }
+    const serverQueuedTurnIds = new Set(
+      serverQueuedTurns.map((queuedTurn) => queuedTurn.messageId),
+    );
+    const pendingOptimisticQueuedTurns = optimisticQueuedTurns.filter(
+      (queuedTurn) =>
+        queuedTurn.threadId === activeThread?.id && !serverQueuedTurnIds.has(queuedTurn.messageId),
+    );
+    if (pendingOptimisticQueuedTurns.length === 0) {
+      return serverQueuedTurns;
+    }
+    return [...serverQueuedTurns, ...pendingOptimisticQueuedTurns].toSorted(
+      (left, right) =>
+        left.createdAt.localeCompare(right.createdAt) ||
+        left.messageId.localeCompare(right.messageId),
+    );
+  }, [activeThread?.id, activeThread?.queuedTurns, optimisticQueuedTurns]);
+  const cancelingQueuedMessageIdSet = useMemo(
+    () => new Set(cancelingQueuedMessageIds),
+    [cancelingQueuedMessageIds],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
@@ -2568,12 +2603,47 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThread?.id, activeThread?.messages, handoffAttachmentPreviews, optimisticUserMessages]);
 
   useEffect(() => {
+    if (!activeThread?.id || activeThread.queuedTurns.length === 0) {
+      return;
+    }
+    const serverIds = new Set(activeThread.queuedTurns.map((queuedTurn) => queuedTurn.messageId));
+    const removedQueuedTurns = optimisticQueuedTurns.filter((queuedTurn) =>
+      serverIds.has(queuedTurn.messageId),
+    );
+    if (removedQueuedTurns.length === 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setOptimisticQueuedTurns((existing) =>
+        existing.filter((queuedTurn) => !serverIds.has(queuedTurn.messageId)),
+      );
+    }, 0);
+    for (const queuedTurn of removedQueuedTurns) {
+      for (const attachment of queuedTurn.attachments) {
+        revokeBlobPreviewUrl(attachment.previewUrl);
+      }
+    }
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [activeThread?.id, activeThread?.queuedTurns, optimisticQueuedTurns]);
+
+  useEffect(() => {
     setOptimisticUserMessages((existing) => {
       for (const message of existing) {
         revokeUserMessagePreviewUrls(message);
       }
       return [];
     });
+    setOptimisticQueuedTurns((existing) => {
+      for (const queuedTurn of existing) {
+        for (const attachment of queuedTurn.attachments) {
+          revokeBlobPreviewUrl(attachment.previewUrl);
+        }
+      }
+      return [];
+    });
+    setCancelingQueuedMessageIds([]);
     resetLocalDispatch();
     setExpandedImage(null);
   }, [activeThreadKey, resetLocalDispatch]);
@@ -2972,8 +3042,6 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     sendInFlightRef.current = true;
-    beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
-
     const composerImagesSnapshot = [...composerImages];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const messageTextForSend = appendTerminalContextsToPrompt(
@@ -3006,6 +3074,129 @@ export default function ChatView(props: ChatViewProps) {
       sizeBytes: image.sizeBytes,
       previewUrl: image.previewUrl,
     }));
+    let firstComposerImageName: string | null = null;
+    if (composerImagesSnapshot.length > 0) {
+      const firstComposerImage = composerImagesSnapshot[0];
+      if (firstComposerImage) {
+        firstComposerImageName = firstComposerImage.name;
+      }
+    }
+    let titleSeed = trimmed;
+    if (!titleSeed) {
+      if (firstComposerImageName) {
+        titleSeed = `Image: ${firstComposerImageName}`;
+      } else if (composerTerminalContextsSnapshot.length > 0) {
+        titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
+      } else {
+        titleSeed = "New thread";
+      }
+    }
+    const title = truncate(titleSeed);
+    const threadCreateModelSelection = createModelSelection(
+      ctxSelectedModelSelection.instanceId,
+      ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
+      ctxSelectedModelSelection.options,
+    );
+    const shouldQueueTurn = isServerThread && phase === "running";
+
+    if (shouldQueueTurn) {
+      const optimisticQueuedTurn: QueuedTurn = {
+        threadId: threadIdForSend,
+        messageId: messageIdForSend,
+        role: "user",
+        text: outgoingMessageText,
+        attachments: optimisticAttachments,
+        modelSelection: ctxSelectedModelSelection,
+        titleSeed: title,
+        runtimeMode,
+        interactionMode,
+        createdAt: messageCreatedAt,
+        updatedAt: messageCreatedAt,
+      };
+
+      setThreadError(threadIdForSend, null);
+      if (expiredTerminalContextCount > 0) {
+        const toastCopy = buildExpiredTerminalContextToastCopy(
+          expiredTerminalContextCount,
+          "omitted",
+        );
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: toastCopy.title,
+            description: toastCopy.description,
+          }),
+        );
+      }
+      setOptimisticQueuedTurns((existing) => [...existing, optimisticQueuedTurn]);
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+
+      let queuedTurnSucceeded = false;
+      try {
+        const turnAttachments = await turnAttachmentsPromise;
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.queue",
+          commandId: newCommandId(),
+          threadId: threadIdForSend,
+          message: {
+            messageId: messageIdForSend,
+            role: "user",
+            text: outgoingMessageText,
+            attachments: turnAttachments,
+          },
+          modelSelection: ctxSelectedModelSelection,
+          titleSeed: title,
+          runtimeMode,
+          interactionMode,
+          createdAt: messageCreatedAt,
+        });
+        queuedTurnSucceeded = true;
+      } catch (err) {
+        if (
+          !queuedTurnSucceeded &&
+          promptRef.current.length === 0 &&
+          composerImagesRef.current.length === 0 &&
+          composerTerminalContextsRef.current.length === 0
+        ) {
+          setOptimisticQueuedTurns((existing) => {
+            const removed = existing.filter(
+              (queuedTurn) => queuedTurn.messageId === messageIdForSend,
+            );
+            for (const queuedTurn of removed) {
+              for (const attachment of queuedTurn.attachments) {
+                revokeBlobPreviewUrl(attachment.previewUrl);
+              }
+            }
+            const next = existing.filter((queuedTurn) => queuedTurn.messageId !== messageIdForSend);
+            return next.length === existing.length ? existing : next;
+          });
+          promptRef.current = promptForSend;
+          const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry);
+          composerImagesRef.current = retryComposerImages;
+          composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
+          setComposerDraftPrompt(composerDraftTarget, promptForSend);
+          addComposerDraftImages(composerDraftTarget, retryComposerImages);
+          setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
+          composerRef.current?.resetCursorState({
+            cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),
+            prompt: promptForSend,
+            detectTrigger: true,
+          });
+        }
+        setThreadError(
+          threadIdForSend,
+          err instanceof Error ? err.message : "Failed to queue message.",
+        );
+      } finally {
+        sendInFlightRef.current = false;
+      }
+      return;
+    }
+
+    beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
+
     // Scroll to the current end *before* adding the optimistic message.
     // This marks the timeline as at-end so maintainScrollAtEnd automatically
     // pins to the new item when the data changes.
@@ -3045,30 +3236,6 @@ export default function ChatView(props: ChatViewProps) {
 
     let turnStartSucceeded = false;
     await (async () => {
-      let firstComposerImageName: string | null = null;
-      if (composerImagesSnapshot.length > 0) {
-        const firstComposerImage = composerImagesSnapshot[0];
-        if (firstComposerImage) {
-          firstComposerImageName = firstComposerImage.name;
-        }
-      }
-      let titleSeed = trimmed;
-      if (!titleSeed) {
-        if (firstComposerImageName) {
-          titleSeed = `Image: ${firstComposerImageName}`;
-        } else if (composerTerminalContextsSnapshot.length > 0) {
-          titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
-        } else {
-          titleSeed = "New thread";
-        }
-      }
-      const title = truncate(titleSeed);
-      const threadCreateModelSelection = createModelSelection(
-        ctxSelectedModelSelection.instanceId,
-        ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
-        ctxSelectedModelSelection.options,
-      );
-
       // Auto-title from first message
       if (isFirstMessage && isServerThread) {
         await api.orchestration.dispatchCommand({
@@ -3176,6 +3343,44 @@ export default function ChatView(props: ChatViewProps) {
       resetLocalDispatch();
     }
   };
+
+  const onCancelQueuedTurn = useCallback(
+    async (messageId: MessageId) => {
+      const api = readEnvironmentApi(environmentId);
+      if (!api || !activeThread) return;
+
+      setCancelingQueuedMessageIds((existing) =>
+        existing.includes(messageId) ? existing : [...existing, messageId],
+      );
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.queued-turn.cancel",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          messageId,
+          createdAt: new Date().toISOString(),
+        });
+        setOptimisticQueuedTurns((existing) => {
+          const removed = existing.filter((queuedTurn) => queuedTurn.messageId === messageId);
+          for (const queuedTurn of removed) {
+            for (const attachment of queuedTurn.attachments) {
+              revokeBlobPreviewUrl(attachment.previewUrl);
+            }
+          }
+          const next = existing.filter((queuedTurn) => queuedTurn.messageId !== messageId);
+          return next.length === existing.length ? existing : next;
+        });
+      } catch (err) {
+        setThreadError(
+          activeThread.id,
+          err instanceof Error ? err.message : "Failed to cancel queued message.",
+        );
+      } finally {
+        setCancelingQueuedMessageIds((existing) => existing.filter((id) => id !== messageId));
+      }
+    },
+    [activeThread, environmentId, setThreadError],
+  );
 
   const onInterrupt = async () => {
     const api = readEnvironmentApi(environmentId);
@@ -3895,6 +4100,9 @@ export default function ChatView(props: ChatViewProps) {
                   isSendBusy={isSendBusy}
                   isPreparingWorktree={isPreparingWorktree}
                   environmentUnavailable={activeEnvironmentUnavailableState}
+                  queuedTurns={queuedTurnsForComposer}
+                  cancelingQueuedMessageIds={cancelingQueuedMessageIdSet}
+                  onCancelQueuedTurn={onCancelQueuedTurn}
                   activePendingApproval={activePendingApproval}
                   pendingApprovals={pendingApprovals}
                   pendingUserInputs={pendingUserInputs}

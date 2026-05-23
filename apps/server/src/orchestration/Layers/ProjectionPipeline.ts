@@ -27,6 +27,10 @@ import {
   type ProjectionThreadProposedPlan,
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
+import {
+  type ProjectionThreadQueuedTurn,
+  ProjectionThreadQueuedTurnRepository,
+} from "../../persistence/Services/ProjectionThreadQueuedTurns.ts";
 import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import {
   type ProjectionTurn,
@@ -39,6 +43,7 @@ import { ProjectionStateRepositoryLive } from "../../persistence/Layers/Projecti
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
 import { ProjectionThreadMessageRepositoryLive } from "../../persistence/Layers/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlanRepositoryLive } from "../../persistence/Layers/ProjectionThreadProposedPlans.ts";
+import { ProjectionThreadQueuedTurnRepositoryLive } from "../../persistence/Layers/ProjectionThreadQueuedTurns.ts";
 import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/ProjectionThreadSessions.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
@@ -59,6 +64,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
   threadProposedPlans: "projection.thread-proposed-plans",
+  threadQueuedTurns: "projection.thread-queued-turns",
   threadActivities: "projection.thread-activities",
   threadSessions: "projection.thread-sessions",
   threadTurns: "projection.thread-turns",
@@ -315,15 +321,17 @@ function retainProjectionProposedPlansAfterRevert(
 
 function collectThreadAttachmentRelativePaths(
   threadId: string,
-  messages: ReadonlyArray<ProjectionThreadMessage>,
+  attachmentOwners: ReadonlyArray<{
+    readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  }>,
 ): Set<string> {
   const threadSegment = toSafeThreadAttachmentSegment(threadId);
   if (!threadSegment) {
     return new Set();
   }
   const relativePaths = new Set<string>();
-  for (const message of messages) {
-    for (const attachment of message.attachments ?? []) {
+  for (const owner of attachmentOwners) {
+    for (const attachment of owner.attachments ?? []) {
       if (attachment.type !== "image") {
         continue;
       }
@@ -464,6 +472,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadRepository = yield* ProjectionThreadRepository;
     const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
     const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
+    const projectionThreadQueuedTurnRepository = yield* ProjectionThreadQueuedTurnRepository;
     const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
@@ -542,17 +551,22 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         return;
       }
 
-      const [messages, proposedPlans, activities, pendingApprovals] = yield* Effect.all([
-        projectionThreadMessageRepository.listByThreadId({ threadId }),
-        projectionThreadProposedPlanRepository.listByThreadId({ threadId }),
-        projectionThreadActivityRepository.listByThreadId({ threadId }),
-        projectionPendingApprovalRepository.listByThreadId({ threadId }),
-      ]);
+      const [messages, queuedTurns, proposedPlans, activities, pendingApprovals] =
+        yield* Effect.all([
+          projectionThreadMessageRepository.listByThreadId({ threadId }),
+          projectionThreadQueuedTurnRepository.listByThreadId({ threadId }),
+          projectionThreadProposedPlanRepository.listByThreadId({ threadId }),
+          projectionThreadActivityRepository.listByThreadId({ threadId }),
+          projectionPendingApprovalRepository.listByThreadId({ threadId }),
+        ]);
 
       const latestUserMessageAt =
-        messages
-          .filter((message) => message.role === "user")
-          .map((message) => message.createdAt)
+        [
+          ...messages
+            .filter((message) => message.role === "user")
+            .map((message) => message.createdAt),
+          ...queuedTurns.map((queuedTurn) => queuedTurn.createdAt),
+        ]
           .toSorted()
           .at(-1) ?? null;
 
@@ -699,6 +713,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
 
         case "thread.message-sent":
+        case "thread.turn-queued":
+        case "thread.queued-turn-cancelled":
+        case "thread.queued-turn-dispatched":
         case "thread.proposed-plan-upserted":
         case "thread.activity-appended":
         case "thread.approval-response-requested":
@@ -786,6 +803,95 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* refreshThreadShellSummary(event.payload.threadId);
           return;
         }
+
+        default:
+          return;
+      }
+    });
+
+    const collectRemainingQueuedTurnAttachmentOwners = Effect.fn(
+      "collectRemainingQueuedTurnAttachmentOwners",
+    )(function* (threadId: ThreadId) {
+      const [messages, queuedTurns] = yield* Effect.all([
+        projectionThreadMessageRepository.listByThreadId({ threadId }),
+        projectionThreadQueuedTurnRepository.listByThreadId({ threadId }),
+      ]);
+      return [...messages, ...queuedTurns] satisfies Array<
+        ProjectionThreadMessage | ProjectionThreadQueuedTurn
+      >;
+    });
+
+    const applyThreadQueuedTurnsProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyThreadQueuedTurnsProjection",
+    )(function* (event, attachmentSideEffects) {
+      switch (event.type) {
+        case "thread.turn-queued": {
+          yield* projectionThreadQueuedTurnRepository.upsert({
+            threadId: event.payload.threadId,
+            messageId: event.payload.messageId,
+            role: event.payload.role,
+            text: event.payload.text,
+            attachments: yield* materializeAttachmentsForProjection({
+              attachments: event.payload.attachments,
+            }),
+            ...(event.payload.modelSelection !== undefined
+              ? { modelSelection: event.payload.modelSelection }
+              : {}),
+            ...(event.payload.titleSeed !== undefined
+              ? { titleSeed: event.payload.titleSeed }
+              : {}),
+            runtimeMode: event.payload.runtimeMode,
+            interactionMode: event.payload.interactionMode,
+            ...(event.payload.sourceProposedPlan !== undefined
+              ? { sourceProposedPlan: event.payload.sourceProposedPlan }
+              : {}),
+            createdAt: event.payload.createdAt,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.queued-turn-cancelled": {
+          yield* projectionThreadQueuedTurnRepository.deleteByMessageId({
+            messageId: event.payload.messageId,
+          });
+          const remainingAttachmentOwners = yield* collectRemainingQueuedTurnAttachmentOwners(
+            event.payload.threadId,
+          );
+          attachmentSideEffects.prunedThreadRelativePaths.set(
+            event.payload.threadId,
+            collectThreadAttachmentRelativePaths(event.payload.threadId, remainingAttachmentOwners),
+          );
+          return;
+        }
+
+        case "thread.queued-turn-dispatched":
+          yield* projectionThreadQueuedTurnRepository.deleteByMessageId({
+            messageId: event.payload.messageId,
+          });
+          return;
+
+        case "thread.archived": {
+          yield* projectionThreadQueuedTurnRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          const remainingAttachmentOwners = yield* projectionThreadMessageRepository.listByThreadId(
+            {
+              threadId: event.payload.threadId,
+            },
+          );
+          attachmentSideEffects.prunedThreadRelativePaths.set(
+            event.payload.threadId,
+            collectThreadAttachmentRelativePaths(event.payload.threadId, remainingAttachmentOwners),
+          );
+          return;
+        }
+
+        case "thread.deleted":
+          yield* projectionThreadQueuedTurnRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          return;
 
         default:
           return;
@@ -1388,6 +1494,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyThreadMessagesProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.threadQueuedTurns,
+        apply: applyThreadQueuedTurnsProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
         apply: applyThreadProposedPlansProjection,
       },
@@ -1512,6 +1622,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionProjectRepositoryLive),
   Layer.provideMerge(ProjectionThreadRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
+  Layer.provideMerge(ProjectionThreadQueuedTurnRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),

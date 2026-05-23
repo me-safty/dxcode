@@ -20,9 +20,12 @@ const TestLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-normalizer-attachments-",
 }).pipe(Layer.provideMerge(WorkspacePathsLive), Layer.provideMerge(NodeServices.layer));
 
-function imageUploadCommand(dataUrl: string): ClientOrchestrationCommand {
+function imageUploadCommand(
+  dataUrl: string,
+  type: "thread.turn.start" | "thread.turn.queue" = "thread.turn.start",
+): ClientOrchestrationCommand {
   return {
-    type: "thread.turn.start",
+    type,
     commandId: CommandId.make(`cmd-${crypto.randomUUID()}`),
     threadId: ThreadId.make("thread-normalizer"),
     message: {
@@ -65,6 +68,32 @@ it.layer(TestLayer)("normalizeDispatchCommand image attachments", (it) => {
         mimeType: "image/png",
         sizeBytes: 4,
       });
+      assert.notProperty(attachment, "dataUrl");
+
+      const attachmentPath = resolveAttachmentPath({
+        attachmentsDir: serverConfig.attachmentsDir,
+        attachment: attachment!,
+      });
+      assert.isString(attachmentPath);
+      const fileInfo = yield* fileSystem.stat(attachmentPath!);
+      assert.equal(fileInfo.type, "File");
+      assert.equal(Number(fileInfo.size), 4);
+    }),
+  );
+
+  it.effect("persists uploaded image data URLs for queued turns", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const serverConfig = yield* ServerConfig;
+      const normalized = yield* normalizeDispatchCommand(
+        imageUploadCommand("data:image/png;base64,iVBORw==", "thread.turn.queue"),
+      );
+
+      assert.equal(normalized.type, "thread.turn.queue");
+      if (normalized.type !== "thread.turn.queue") {
+        return;
+      }
+      const attachment = normalized.message.attachments[0];
       assert.notProperty(attachment, "dataUrl");
 
       const attachmentPath = resolveAttachmentPath({

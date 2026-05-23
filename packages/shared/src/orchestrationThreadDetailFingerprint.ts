@@ -80,6 +80,30 @@ function appendThreadParts(parts: string[], thread: OrchestrationThread): void {
     }
   }
 
+  for (const queuedTurn of thread.queuedTurns) {
+    parts.push(
+      "queuedTurn",
+      queuedTurn.messageId,
+      queuedTurn.role,
+      queuedTurn.runtimeMode,
+      queuedTurn.interactionMode,
+      queuedTurn.createdAt,
+      queuedTurn.updatedAt,
+      String(queuedTurn.text.length),
+      hashString(queuedTurn.text),
+    );
+    for (const attachment of queuedTurn.attachments) {
+      parts.push(
+        "queued-attachment",
+        attachment.type,
+        attachment.id,
+        attachment.name,
+        attachment.mimeType,
+        String(attachment.sizeBytes),
+      );
+    }
+  }
+
   for (const activity of tail(
     thread.activities,
     THREAD_DETAIL_FINGERPRINT_TAIL_LIMITS.activities,

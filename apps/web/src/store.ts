@@ -6,6 +6,7 @@ import type {
   OrchestrationLatestTurn,
   OrchestrationMessage,
   OrchestrationProposedPlan,
+  OrchestrationQueuedTurn,
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationShellStreamEvent,
@@ -36,6 +37,7 @@ import {
   type ChatAttachment,
   type Project,
   type ProposedPlan,
+  type QueuedTurn,
   type SidebarThreadSummary,
   type Thread,
   type ThreadSession,
@@ -82,6 +84,8 @@ export interface EnvironmentState {
   // ---------------------------------------------------------------------------
   messageIdsByThreadId: Record<ThreadId, MessageId[]>;
   messageByThreadId: Record<ThreadId, Record<MessageId, ChatMessage>>;
+  queuedTurnIdsByThreadId: Record<ThreadId, MessageId[]>;
+  queuedTurnByThreadId: Record<ThreadId, Record<MessageId, QueuedTurn>>;
   activityIdsByThreadId: Record<ThreadId, string[]>;
   activityByThreadId: Record<ThreadId, Record<string, OrchestrationThreadActivity>>;
   proposedPlanIdsByThreadId: Record<ThreadId, string[]>;
@@ -117,6 +121,8 @@ const initialEnvironmentState: EnvironmentState = {
   threadTurnStateById: {},
   messageIdsByThreadId: {},
   messageByThreadId: {},
+  queuedTurnIdsByThreadId: {},
+  queuedTurnByThreadId: {},
   activityIdsByThreadId: {},
   activityByThreadId: {},
   proposedPlanIdsByThreadId: {},
@@ -188,8 +194,11 @@ function mapSession(session: OrchestrationSession): ThreadSession {
   };
 }
 
-function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage): ChatMessage {
-  const attachments = message.attachments?.map((attachment) => ({
+function mapChatAttachment(
+  environmentId: EnvironmentId,
+  attachment: NonNullable<OrchestrationMessage["attachments"]>[number],
+): ChatAttachment {
+  return {
     type: "image" as const,
     id: attachment.id,
     name: attachment.name,
@@ -199,7 +208,13 @@ function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage)
       environmentId,
       pathname: attachmentPreviewRoutePath(attachment.id),
     }),
-  }));
+  };
+}
+
+function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage): ChatMessage {
+  const attachments = message.attachments?.map((attachment) =>
+    mapChatAttachment(environmentId, attachment),
+  );
 
   return {
     id: message.id,
@@ -210,6 +225,32 @@ function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage)
     streaming: message.streaming,
     ...(message.streaming ? {} : { completedAt: message.updatedAt }),
     ...(attachments && attachments.length > 0 ? { attachments } : {}),
+  };
+}
+
+function mapQueuedTurn(
+  environmentId: EnvironmentId,
+  queuedTurn: OrchestrationQueuedTurn,
+): QueuedTurn {
+  return {
+    threadId: queuedTurn.threadId,
+    messageId: queuedTurn.messageId,
+    role: queuedTurn.role,
+    text: queuedTurn.text,
+    attachments: queuedTurn.attachments.map((attachment) =>
+      mapChatAttachment(environmentId, attachment),
+    ),
+    ...(queuedTurn.modelSelection !== undefined
+      ? { modelSelection: normalizeModelSelection(queuedTurn.modelSelection) }
+      : {}),
+    ...(queuedTurn.titleSeed !== undefined ? { titleSeed: queuedTurn.titleSeed } : {}),
+    runtimeMode: queuedTurn.runtimeMode,
+    interactionMode: queuedTurn.interactionMode,
+    ...(queuedTurn.sourceProposedPlan !== undefined
+      ? { sourceProposedPlan: queuedTurn.sourceProposedPlan }
+      : {}),
+    createdAt: queuedTurn.createdAt,
+    updatedAt: queuedTurn.updatedAt,
   };
 }
 
@@ -274,6 +315,7 @@ function mapThread(
     interactionMode: thread.interactionMode,
     session: thread.session ? mapSession(thread.session) : null,
     messages: thread.messages.map((message) => mapMessage(environmentId, message)),
+    queuedTurns: thread.queuedTurns.map((queuedTurn) => mapQueuedTurn(environmentId, queuedTurn)),
     proposedPlans: thread.proposedPlans.map(mapProposedPlan),
     error: sanitizeThreadErrorMessage(thread.session?.lastError),
     createdAt: thread.createdAt,
@@ -564,6 +606,26 @@ function chatMessagesEqual(left: ChatMessage, right: ChatMessage): boolean {
   );
 }
 
+function queuedTurnsEqual(left: QueuedTurn, right: QueuedTurn): boolean {
+  return (
+    left.threadId === right.threadId &&
+    left.messageId === right.messageId &&
+    left.role === right.role &&
+    left.text === right.text &&
+    left.titleSeed === right.titleSeed &&
+    left.runtimeMode === right.runtimeMode &&
+    left.interactionMode === right.interactionMode &&
+    left.createdAt === right.createdAt &&
+    left.updatedAt === right.updatedAt &&
+    chatAttachmentsEqual(left.attachments, right.attachments) &&
+    ((left.modelSelection === undefined && right.modelSelection === undefined) ||
+      (left.modelSelection !== undefined &&
+        right.modelSelection !== undefined &&
+        modelSelectionsEqual(left.modelSelection, right.modelSelection))) &&
+    sourceProposedPlansEqual(left.sourceProposedPlan, right.sourceProposedPlan)
+  );
+}
+
 function proposedPlansEqual(left: ProposedPlan, right: ProposedPlan): boolean {
   return (
     left.id === right.id &&
@@ -730,6 +792,12 @@ function shareThreadDetailCollections(previousThread: Thread, nextThread: Thread
     (message) => message.id,
     chatMessagesEqual,
   );
+  const queuedTurns = reuseEqualOrderedItems(
+    previousThread.queuedTurns,
+    nextThread.queuedTurns,
+    (queuedTurn) => queuedTurn.messageId,
+    queuedTurnsEqual,
+  );
   const activities = reuseEqualOrderedItems(
     previousThread.activities,
     nextThread.activities,
@@ -751,6 +819,7 @@ function shareThreadDetailCollections(previousThread: Thread, nextThread: Thread
 
   if (
     messages === nextThread.messages &&
+    queuedTurns === nextThread.queuedTurns &&
     activities === nextThread.activities &&
     proposedPlans === nextThread.proposedPlans &&
     turnDiffSummaries === nextThread.turnDiffSummaries
@@ -761,6 +830,7 @@ function shareThreadDetailCollections(previousThread: Thread, nextThread: Thread
   return {
     ...nextThread,
     messages,
+    queuedTurns,
     activities,
     proposedPlans,
     turnDiffSummaries,
@@ -769,6 +839,12 @@ function shareThreadDetailCollections(previousThread: Thread, nextThread: Thread
 
 function compareMessagesByOrder(left: ChatMessage, right: ChatMessage): number {
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
+
+function compareQueuedTurnsByOrder(left: QueuedTurn, right: QueuedTurn): number {
+  return (
+    left.createdAt.localeCompare(right.createdAt) || left.messageId.localeCompare(right.messageId)
+  );
 }
 
 function compareProposedPlansByOrder(left: ProposedPlan, right: ProposedPlan): number {
@@ -897,6 +973,18 @@ function buildMessageSlice(thread: Thread): {
     byId: Object.fromEntries(
       thread.messages.map((message) => [message.id, message] as const),
     ) as Record<MessageId, ChatMessage>,
+  };
+}
+
+function buildQueuedTurnSlice(thread: Thread): {
+  ids: MessageId[];
+  byId: Record<MessageId, QueuedTurn>;
+} {
+  return {
+    ids: thread.queuedTurns.map((queuedTurn) => queuedTurn.messageId),
+    byId: Object.fromEntries(
+      thread.queuedTurns.map((queuedTurn) => [queuedTurn.messageId, queuedTurn] as const),
+    ) as Record<MessageId, QueuedTurn>,
   };
 }
 
@@ -1091,6 +1179,21 @@ function writeThreadState(
     };
   }
 
+  if (previousThread?.queuedTurns !== sharedNextThread.queuedTurns) {
+    const nextQueuedTurnSlice = buildQueuedTurnSlice(sharedNextThread);
+    nextState = {
+      ...nextState,
+      queuedTurnIdsByThreadId: {
+        ...nextState.queuedTurnIdsByThreadId,
+        [sharedNextThread.id]: nextQueuedTurnSlice.ids,
+      },
+      queuedTurnByThreadId: {
+        ...nextState.queuedTurnByThreadId,
+        [sharedNextThread.id]: nextQueuedTurnSlice.byId,
+      },
+    };
+  }
+
   if (previousThread?.activities !== sharedNextThread.activities) {
     const nextActivitySlice = buildActivitySlice(sharedNextThread);
     nextState = {
@@ -1246,15 +1349,27 @@ function deriveLatestUserMessageAtForSidebarSummary(
 ): string | null {
   const messageIds = state.messageIdsByThreadId[threadId] ?? [];
   const messages = state.messageByThreadId[threadId] ?? {};
+  const queuedTurnIds = state.queuedTurnIdsByThreadId[threadId] ?? [];
+  const queuedTurns = state.queuedTurnByThreadId[threadId] ?? {};
+
+  const latestQueuedTurn = queuedTurnIds
+    .flatMap((queuedTurnId) => {
+      const queuedTurn = queuedTurns[queuedTurnId];
+      return queuedTurn ? [queuedTurn.createdAt] : [];
+    })
+    .toSorted()
+    .at(-1);
 
   for (let index = messageIds.length - 1; index >= 0; index -= 1) {
     const message = messages[messageIds[index]!];
     if (message?.role === "user") {
-      return message.createdAt;
+      return latestQueuedTurn && latestQueuedTurn > message.createdAt
+        ? latestQueuedTurn
+        : message.createdAt;
     }
   }
 
-  return existingSummary?.latestUserMessageAt ?? null;
+  return latestQueuedTurn ?? existingSummary?.latestUserMessageAt ?? null;
 }
 
 function syncSidebarThreadSummaryFromThreadState(
@@ -1365,6 +1480,9 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
   const { [threadId]: _removedTurnState, ...threadTurnStateById } = state.threadTurnStateById;
   const { [threadId]: _removedMessageIds, ...messageIdsByThreadId } = state.messageIdsByThreadId;
   const { [threadId]: _removedMessages, ...messageByThreadId } = state.messageByThreadId;
+  const { [threadId]: _removedQueuedTurnIds, ...queuedTurnIdsByThreadId } =
+    state.queuedTurnIdsByThreadId;
+  const { [threadId]: _removedQueuedTurns, ...queuedTurnByThreadId } = state.queuedTurnByThreadId;
   const { [threadId]: _removedActivityIds, ...activityIdsByThreadId } = state.activityIdsByThreadId;
   const { [threadId]: _removedActivities, ...activityByThreadId } = state.activityByThreadId;
   const { [threadId]: _removedPlanIds, ...proposedPlanIdsByThreadId } =
@@ -1387,6 +1505,8 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
     threadTurnStateById,
     messageIdsByThreadId,
     messageByThreadId,
+    queuedTurnIdsByThreadId,
+    queuedTurnByThreadId,
     activityIdsByThreadId,
     activityByThreadId,
     proposedPlanIdsByThreadId,
@@ -1665,6 +1785,8 @@ function syncEnvironmentShellSnapshot(
     sidebarThreadSummaryById: {},
     messageIdsByThreadId: retainThreadScopedRecord(state.messageIdsByThreadId, nextThreadIds),
     messageByThreadId: retainThreadScopedRecord(state.messageByThreadId, nextThreadIds),
+    queuedTurnIdsByThreadId: retainThreadScopedRecord(state.queuedTurnIdsByThreadId, nextThreadIds),
+    queuedTurnByThreadId: retainThreadScopedRecord(state.queuedTurnByThreadId, nextThreadIds),
     activityIdsByThreadId: retainThreadScopedRecord(state.activityIdsByThreadId, nextThreadIds),
     activityByThreadId: retainThreadScopedRecord(state.activityByThreadId, nextThreadIds),
     proposedPlanIdsByThreadId: retainThreadScopedRecord(
@@ -1955,6 +2077,7 @@ function applyEnvironmentOrchestrationEvent(
           archivedAt: null,
           deletedAt: null,
           messages: [],
+          queuedTurns: [],
           proposedPlans: [],
           activities: [],
           checkpoints: [],
@@ -2171,6 +2294,46 @@ function applyEnvironmentOrchestrationEvent(
             messages: cappedMessages,
             turnDiffSummaries,
             latestTurn,
+            updatedAt: event.occurredAt,
+          };
+        },
+        options,
+      );
+
+    case "thread.turn-queued":
+      return updateThreadState(
+        state,
+        event.payload.threadId,
+        (thread) => {
+          const queuedTurn = mapQueuedTurn(thread.environmentId, event.payload);
+          const queuedTurns = [
+            ...thread.queuedTurns.filter((entry) => entry.messageId !== queuedTurn.messageId),
+            queuedTurn,
+          ].toSorted(compareQueuedTurnsByOrder);
+          return {
+            ...thread,
+            queuedTurns,
+            updatedAt: event.occurredAt,
+          };
+        },
+        options,
+      );
+
+    case "thread.queued-turn-cancelled":
+    case "thread.queued-turn-dispatched":
+      return updateThreadState(
+        state,
+        event.payload.threadId,
+        (thread) => {
+          const queuedTurns = thread.queuedTurns.filter(
+            (entry) => entry.messageId !== event.payload.messageId,
+          );
+          if (queuedTurns.length === thread.queuedTurns.length) {
+            return thread;
+          }
+          return {
+            ...thread,
+            queuedTurns,
             updatedAt: event.occurredAt,
           };
         },
@@ -2704,6 +2867,8 @@ export function hydrateCachedEnvironmentState(
 
   return commitEnvironmentState(state, environmentId, {
     ...cachedState,
+    queuedTurnIdsByThreadId: cachedState.queuedTurnIdsByThreadId ?? {},
+    queuedTurnByThreadId: cachedState.queuedTurnByThreadId ?? {},
     bootstrapComplete: false,
   });
 }

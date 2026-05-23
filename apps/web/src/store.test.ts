@@ -85,6 +85,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     interactionMode: DEFAULT_INTERACTION_MODE,
     session: null,
     messages: [],
+    queuedTurns: [],
     turnDiffSummaries: [],
     activities: [],
     proposedPlans: [],
@@ -110,6 +111,25 @@ function makeMessage(index: number): Thread["messages"][number] {
     createdAt,
     completedAt: createdAt,
     streaming: false,
+  };
+}
+
+function makeQueuedTurn(index: number): Thread["queuedTurns"][number] {
+  const createdAt = `2026-02-13T00:0${index}:00.000Z`;
+  return {
+    threadId: ThreadId.make("thread-1"),
+    messageId: MessageId.make(`queued-message-${index}`),
+    role: "user",
+    text: `queued message ${index}`,
+    attachments: [],
+    modelSelection: {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5-codex",
+    },
+    runtimeMode: DEFAULT_RUNTIME_MODE,
+    interactionMode: DEFAULT_INTERACTION_MODE,
+    createdAt,
+    updatedAt: createdAt,
   };
 }
 
@@ -188,6 +208,30 @@ function makeOrchestrationThread(
       streaming: message.streaming,
       createdAt: message.createdAt,
       updatedAt: message.completedAt ?? message.createdAt,
+    })),
+    queuedTurns: thread.queuedTurns.map((queuedTurn) => ({
+      threadId: queuedTurn.threadId,
+      messageId: queuedTurn.messageId,
+      role: queuedTurn.role,
+      text: queuedTurn.text,
+      attachments: queuedTurn.attachments.map((attachment) => ({
+        type: attachment.type,
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+      })),
+      ...(queuedTurn.modelSelection !== undefined
+        ? { modelSelection: queuedTurn.modelSelection }
+        : {}),
+      ...(queuedTurn.titleSeed !== undefined ? { titleSeed: queuedTurn.titleSeed } : {}),
+      runtimeMode: queuedTurn.runtimeMode,
+      interactionMode: queuedTurn.interactionMode,
+      ...(queuedTurn.sourceProposedPlan !== undefined
+        ? { sourceProposedPlan: queuedTurn.sourceProposedPlan }
+        : {}),
+      createdAt: queuedTurn.createdAt,
+      updatedAt: queuedTurn.updatedAt,
     })),
     proposedPlans: thread.proposedPlans.map((plan) => ({ ...plan })),
     activities: thread.activities.map((activity) => ({ ...activity })),
@@ -347,6 +391,14 @@ function makeState(thread: Thread): AppState {
         thread.messages.map((message) => [message.id, message] as const),
       ) as EnvironmentState["messageByThreadId"][ThreadId],
     },
+    queuedTurnIdsByThreadId: {
+      [thread.id]: thread.queuedTurns.map((queuedTurn) => queuedTurn.messageId),
+    },
+    queuedTurnByThreadId: {
+      [thread.id]: Object.fromEntries(
+        thread.queuedTurns.map((queuedTurn) => [queuedTurn.messageId, queuedTurn] as const),
+      ) as EnvironmentState["queuedTurnByThreadId"][ThreadId],
+    },
     activityIdsByThreadId: {
       [thread.id]: thread.activities.map((activity) => activity.id),
     },
@@ -391,6 +443,8 @@ function makeEmptyState(overrides: Partial<AppState & EnvironmentState> = {}): A
     threadTurnStateById: {},
     messageIdsByThreadId: {},
     messageByThreadId: {},
+    queuedTurnIdsByThreadId: {},
+    queuedTurnByThreadId: {},
     activityIdsByThreadId: {},
     activityByThreadId: {},
     proposedPlanIdsByThreadId: {},
@@ -1539,6 +1593,68 @@ describe("incremental orchestration updates", () => {
     expect(nextEnvironmentState?.messageByThreadId[thread2.id]).toBe(
       previousEnvironmentState?.messageByThreadId[thread2.id],
     );
+  });
+
+  it("applies queued turn lifecycle events outside the timeline", () => {
+    const thread = makeThread();
+    const state = makeState(thread);
+    const queuedTurn = makeQueuedTurn(1);
+
+    const queued = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.turn-queued", queuedTurn),
+      localEnvironmentId,
+    );
+    expect(threadsOf(queued)[0]?.queuedTurns.map((turn) => turn.text)).toEqual([
+      "queued message 1",
+    ]);
+    expect(threadsOf(queued)[0]?.messages).toEqual([]);
+
+    const cancelled = applyOrchestrationEvent(
+      queued,
+      makeEvent("thread.queued-turn-cancelled", {
+        threadId: thread.id,
+        messageId: queuedTurn.messageId,
+        cancelledAt: "2026-02-13T00:02:00.000Z",
+      }),
+      localEnvironmentId,
+    );
+    expect(threadsOf(cancelled)[0]?.queuedTurns).toEqual([]);
+
+    const queuedAgain = applyOrchestrationEvent(
+      cancelled,
+      makeEvent("thread.turn-queued", queuedTurn),
+      localEnvironmentId,
+    );
+    const dispatched = applyOrchestrationEvent(
+      queuedAgain,
+      makeEvent("thread.queued-turn-dispatched", {
+        threadId: thread.id,
+        messageId: queuedTurn.messageId,
+        dispatchedAt: "2026-02-13T00:03:00.000Z",
+      }),
+      localEnvironmentId,
+    );
+    expect(threadsOf(dispatched)[0]?.queuedTurns).toEqual([]);
+
+    const sent = applyOrchestrationEvent(
+      dispatched,
+      makeEvent("thread.message-sent", {
+        threadId: thread.id,
+        messageId: queuedTurn.messageId,
+        role: "user",
+        text: queuedTurn.text,
+        attachments: [],
+        turnId: null,
+        streaming: false,
+        createdAt: "2026-02-13T00:03:00.000Z",
+        updatedAt: "2026-02-13T00:03:00.000Z",
+      }),
+      localEnvironmentId,
+    );
+    expect(threadsOf(sent)[0]?.messages.map((message) => message.text)).toEqual([
+      "queued message 1",
+    ]);
   });
 
   it("applies replay batches in sequence and updates session state", () => {

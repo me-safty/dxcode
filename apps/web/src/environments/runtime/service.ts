@@ -149,19 +149,12 @@ interface RecoveredEventBatchOptions {
   readonly syncSidebarSummaries?: boolean;
 }
 
-interface NotificationClickClientMessage {
-  readonly type: "t3.notification-click";
-  readonly url: string;
-  readonly openedAt?: number;
-}
-
 const pendingSavedEnvironmentConnections = new Map<
   EnvironmentId,
   PendingSavedEnvironmentConnection
 >();
 const environmentConnectionListeners = new Set<() => void>();
 const threadDetailSubscriptions = new Map<string, ThreadDetailSubscriptionEntry>();
-const pendingNotificationOpenThreadDetailReconcileByKey = new Map<string, number>();
 const browserResumeReconciliationByEnvironment = new Map<EnvironmentId, Promise<void>>();
 const activeThreadProjectionReconciliationByEnvironment = new Map<EnvironmentId, Promise<void>>();
 const lastAppliedProjectionVersionByEnvironment = new Map<
@@ -194,7 +187,6 @@ const THREAD_DETAIL_ACTIVE_RECONCILE_WAKE_DRIFT_MS = 15_000;
 const THREAD_DETAIL_ACTIVE_WAKE_REFRESH_COOLDOWN_MS = 30_000;
 const THREAD_DETAIL_ACTIVE_RECONCILE_FIRST_PING_MS = 10_000;
 const THREAD_DETAIL_ACTIVE_RECONCILE_COOLDOWN_MS = 30_000;
-const NOTIFICATION_OPEN_PENDING_REFRESH_TTL_MS = 60_000;
 const CONNECTION_HEALTH_RECOVERY_COOLDOWN_MS = 30_000;
 const CONNECTION_HEALTH_RECOVERY_BACKOFF_BASE_MS = 30_000;
 const CONNECTION_HEALTH_RECOVERY_BACKOFF_MAX_MS = 2 * 60_000;
@@ -670,20 +662,6 @@ function getThreadDetailSubscriptionKey(environmentId: EnvironmentId, threadId: 
   return scopedThreadKey(scopeThreadRef(environmentId, threadId));
 }
 
-function consumePendingNotificationOpenThreadDetailRefresh(
-  environmentId: EnvironmentId,
-  threadId: ThreadId,
-): boolean {
-  const key = getThreadDetailSubscriptionKey(environmentId, threadId);
-  const requestedAt = pendingNotificationOpenThreadDetailReconcileByKey.get(key);
-  if (requestedAt === undefined) {
-    return false;
-  }
-
-  pendingNotificationOpenThreadDetailReconcileByKey.delete(key);
-  return Date.now() - requestedAt <= NOTIFICATION_OPEN_PENDING_REFRESH_TTL_MS;
-}
-
 function clearThreadDetailSubscriptionEviction(
   entry: ThreadDetailSubscriptionEntry,
 ): ThreadDetailSubscriptionEntry {
@@ -855,24 +833,6 @@ function refreshActiveThreadDetailsForEnvironment(
     if (entry.activeRefCount === 0) continue;
     requestThreadDetailReconcile(entry.environmentId, entry.threadId, reason);
   }
-}
-
-function requestThreadDetailReconcileAfterNotificationOpen(
-  environmentId: EnvironmentId,
-  threadId: ThreadId,
-): void {
-  const connection = readEnvironmentConnection(environmentId);
-  if (connection) {
-    queueEnvironmentBrowserResumeReconciliation(connection, "notification-click");
-  }
-
-  const key = getThreadDetailSubscriptionKey(environmentId, threadId);
-  if (!threadDetailSubscriptions.has(key)) {
-    pendingNotificationOpenThreadDetailReconcileByKey.set(key, Date.now());
-    return;
-  }
-
-  requestThreadDetailReconcile(environmentId, threadId, "notification-click");
 }
 
 function shouldRefreshRetainedThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry) {
@@ -1372,10 +1332,6 @@ function retainThreadDetailSubscriptionInternal(
   const existing = threadDetailSubscriptions.get(key);
   if (existing) {
     const wasActive = existing.activeRefCount > 0;
-    const hasPendingNotificationOpenRefresh =
-      options.active &&
-      !wasActive &&
-      consumePendingNotificationOpenThreadDetailRefresh(environmentId, threadId);
     clearThreadDetailSubscriptionEviction(existing);
     existing.refCount += 1;
     if (options.active) {
@@ -1388,9 +1344,7 @@ function retainThreadDetailSubscriptionInternal(
     if (
       options.active &&
       !wasActive &&
-      (existing.latestDetailSequence !== null ||
-        existing.reconcileOnNextActiveRetain ||
-        hasPendingNotificationOpenRefresh)
+      (existing.latestDetailSequence !== null || existing.reconcileOnNextActiveRetain)
     ) {
       existing.reconcileOnNextActiveRetain = false;
       scheduleThreadDetailReconcile(existing, "active-retain");
@@ -1414,10 +1368,6 @@ function retainThreadDetailSubscriptionInternal(
     };
   }
 
-  const hasPendingNotificationOpenRefresh = consumePendingNotificationOpenThreadDetailRefresh(
-    environmentId,
-    threadId,
-  );
   const entry: ThreadDetailSubscriptionEntry = {
     environmentId,
     threadId,
@@ -1429,7 +1379,7 @@ function retainThreadDetailSubscriptionInternal(
     verifiedDetailSequence: null,
     verifiedDetailFingerprint: null,
     resetDetailSequenceOnNextSnapshot: false,
-    reconcileOnNextActiveRetain: !options.active && hasPendingNotificationOpenRefresh,
+    reconcileOnNextActiveRetain: false,
     reconcileTimeoutId: null,
     reconcileInFlight: false,
     reconcileRequestedWhileInFlight: false,
@@ -2715,79 +2665,6 @@ function reconcileEnvironmentConnectionsAfterBrowserResume(reason: string): void
   }
 }
 
-function isNotificationClickClientMessage(data: unknown): data is NotificationClickClientMessage {
-  return (
-    typeof data === "object" &&
-    data !== null &&
-    "type" in data &&
-    data.type === "t3.notification-click" &&
-    "url" in data &&
-    typeof data.url === "string"
-  );
-}
-
-function parseNotificationThreadUrl(
-  rawUrl: string,
-): { environmentId: EnvironmentId; threadId: ThreadId } | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    const url = new URL(rawUrl, window.location.origin);
-    if (url.origin !== window.location.origin) {
-      return null;
-    }
-
-    const segments = url.pathname.split("/").filter(Boolean);
-    if (segments.length < 2) {
-      return null;
-    }
-    if (segments[0] === "settings" || segments[0] === "pair" || segments[0] === "draft") {
-      return null;
-    }
-
-    const environmentId = decodeURIComponent(segments[0] ?? "");
-    const threadId = decodeURIComponent(segments[1] ?? "");
-    if (environmentId.length === 0 || threadId.length === 0) {
-      return null;
-    }
-
-    return {
-      environmentId: environmentId as EnvironmentId,
-      threadId: threadId as ThreadId,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function subscribeServiceWorkerNotificationClicks(): () => void {
-  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
-    return NOOP;
-  }
-
-  const serviceWorker = navigator.serviceWorker;
-  const handleMessage = (event: MessageEvent<unknown>) => {
-    const data = event.data;
-    if (!isNotificationClickClientMessage(data)) {
-      return;
-    }
-
-    const target = parseNotificationThreadUrl(data.url);
-    if (target === null) {
-      return;
-    }
-
-    requestThreadDetailReconcileAfterNotificationOpen(target.environmentId, target.threadId);
-  };
-
-  serviceWorker.addEventListener("message", handleMessage);
-  return () => {
-    serviceWorker.removeEventListener("message", handleMessage);
-  };
-}
-
 function subscribeBrowserResumeReconnects(): () => void {
   if (typeof document === "undefined" || typeof window === "undefined") {
     return NOOP;
@@ -3122,7 +2999,6 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
     .catch(() => undefined);
 
   const unsubscribeBrowserResumeReconnects = subscribeBrowserResumeReconnects();
-  const unsubscribeServiceWorkerNotificationClicks = subscribeServiceWorkerNotificationClicks();
 
   activeService = {
     queryClient,
@@ -3131,7 +3007,6 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
     stop: () => {
       unsubscribeSavedEnvironments();
       unsubscribeBrowserResumeReconnects();
-      unsubscribeServiceWorkerNotificationClicks();
       queryInvalidationThrottler.cancel();
     },
   };
@@ -3157,7 +3032,6 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   projectionRecoveryByEnvironment.clear();
   connectionHealthRecoveryByEnvironment.clear();
   pendingSavedEnvironmentConnections.clear();
-  pendingNotificationOpenThreadDetailReconcileByKey.clear();
   for (const key of Array.from(threadDetailSubscriptions.keys())) {
     disposeThreadDetailSubscriptionByKey(key);
   }

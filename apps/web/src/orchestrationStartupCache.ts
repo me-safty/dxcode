@@ -68,6 +68,8 @@ function isEnvironmentStateLike(value: unknown): value is EnvironmentState {
     isRecord(value.threadTurnStateById) &&
     isRecord(value.messageIdsByThreadId) &&
     isRecord(value.messageByThreadId) &&
+    (value.queuedTurnIdsByThreadId === undefined || isRecord(value.queuedTurnIdsByThreadId)) &&
+    (value.queuedTurnByThreadId === undefined || isRecord(value.queuedTurnByThreadId)) &&
     isRecord(value.activityIdsByThreadId) &&
     isRecord(value.activityByThreadId) &&
     isRecord(value.proposedPlanIdsByThreadId) &&
@@ -390,6 +392,12 @@ function createCachedEnvironmentState(
     detailThreadIds,
     MAX_CACHED_THREAD_MESSAGES,
   );
+  const queuedTurnState = retainThreadItemRecord(
+    state.queuedTurnIdsByThreadId,
+    state.queuedTurnByThreadId,
+    detailThreadIds,
+    MAX_CACHED_THREAD_MESSAGES,
+  );
   const activityState = retainThreadItemRecord(
     state.activityIdsByThreadId,
     state.activityByThreadId,
@@ -413,6 +421,9 @@ function createCachedEnvironmentState(
     threadTurnStateById: pickThreadRecord(state.threadTurnStateById, retainedThreadIdSet),
     messageIdsByThreadId: messageState.idsByThreadId as EnvironmentState["messageIdsByThreadId"],
     messageByThreadId: messageState.byThreadId as EnvironmentState["messageByThreadId"],
+    queuedTurnIdsByThreadId:
+      queuedTurnState.idsByThreadId as EnvironmentState["queuedTurnIdsByThreadId"],
+    queuedTurnByThreadId: queuedTurnState.byThreadId as EnvironmentState["queuedTurnByThreadId"],
     activityIdsByThreadId: activityState.idsByThreadId as EnvironmentState["activityIdsByThreadId"],
     activityByThreadId: activityState.byThreadId as EnvironmentState["activityByThreadId"],
     proposedPlanIdsByThreadId:
@@ -444,6 +455,8 @@ export function readCachedEnvironmentState(environmentId: EnvironmentId): Enviro
   return cached
     ? {
         ...cached.state,
+        queuedTurnIdsByThreadId: cached.state.queuedTurnIdsByThreadId ?? {},
+        queuedTurnByThreadId: cached.state.queuedTurnByThreadId ?? {},
         bootstrapComplete: false,
       }
     : null;

@@ -2,6 +2,7 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
+  type MessageId,
   type ModelSelection,
   type OrchestrationEvent,
   ProviderDriverKind,
@@ -15,6 +16,7 @@ import {
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -30,6 +32,8 @@ import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { ProjectionThreadQueuedTurnRepositoryLive } from "../../persistence/Layers/ProjectionThreadQueuedTurns.ts";
+import { ProjectionThreadQueuedTurnRepository } from "../../persistence/Services/ProjectionThreadQueuedTurns.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -47,6 +51,7 @@ type ProviderIntentEvent = Extract<
   {
     type:
       | "thread.runtime-mode-set"
+      | "thread.turn-queued"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
@@ -94,6 +99,7 @@ const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const DEFAULT_THREAD_TITLE = "New thread";
+const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
 export function providerErrorLabel(value: string | undefined): string {
   const normalized = value?.trim();
@@ -186,6 +192,7 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const projectionThreadQueuedTurnRepository = yield* ProjectionThreadQueuedTurnRepository;
   const providerService = yield* ProviderService;
   const gitWorkflow = yield* GitWorkflowService;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
@@ -211,6 +218,7 @@ const make = Effect.gen(function* () {
   >();
   const activeTurnStartThreadIds = new Set<string>();
   const observedRunningTurnThreadIds = new Set<string>();
+  const queuedTurnPromotionMessageIdByThreadId = new Map<string, MessageId>();
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -324,12 +332,62 @@ const make = Effect.gen(function* () {
   };
 
   const isThreadTurnBusy = Effect.fnUntraced(function* (threadId: ThreadId) {
-    if (activeTurnStartThreadIds.has(String(threadId))) {
+    const threadKey = String(threadId);
+    if (
+      activeTurnStartThreadIds.has(threadKey) ||
+      queuedTurnPromotionMessageIdByThreadId.has(threadKey)
+    ) {
       return true;
     }
     const thread = yield* resolveThread(threadId);
     const sessionStatus = thread?.session?.status;
     return sessionStatus === "starting" || sessionStatus === "running";
+  });
+
+  const dispatchQueuedTurnForThread = Effect.fn("dispatchQueuedTurnForThread")(function* (
+    threadId: ThreadId,
+  ) {
+    if (yield* isThreadTurnBusy(threadId)) {
+      return false;
+    }
+
+    const threadKey = String(threadId);
+    const queuedTurn = yield* projectionThreadQueuedTurnRepository.getOldestByThreadId({
+      threadId,
+    });
+    if (Option.isNone(queuedTurn)) {
+      return false;
+    }
+
+    queuedTurnPromotionMessageIdByThreadId.set(threadKey, queuedTurn.value.messageId);
+    const createdAt = yield* nowIso;
+    const dispatched = yield* orchestrationEngine
+      .dispatch({
+        type: "thread.queued-turn.dispatch",
+        commandId: serverCommandId("queued-turn-dispatch"),
+        threadId,
+        messageId: queuedTurn.value.messageId,
+        createdAt,
+      })
+      .pipe(
+        Effect.as(true),
+        Effect.catchCause((cause) =>
+          Effect.sync(() => {
+            queuedTurnPromotionMessageIdByThreadId.delete(threadKey);
+          }).pipe(
+            Effect.andThen(
+              Effect.logWarning("provider command reactor failed to dispatch queued turn", {
+                threadId,
+                messageId: queuedTurn.value.messageId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+            Effect.as(false),
+          ),
+        ),
+      );
+
+    return dispatched;
   });
 
   const ensureSessionForThread = Effect.fn("ensureSessionForThread")(function* (
@@ -846,12 +904,26 @@ const make = Effect.gen(function* () {
     yield* startTurnFromEvent(next);
   });
 
+  const startNextAvailableTurnForThread = Effect.fn("startNextAvailableTurnForThread")(function* (
+    threadId: ThreadId,
+  ) {
+    const dispatchedQueuedTurn = yield* dispatchQueuedTurnForThread(threadId);
+    if (dispatchedQueuedTurn) {
+      return;
+    }
+    yield* startNextQueuedTurnForThread(threadId);
+  });
+
   const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
   ) {
     const key = turnStartKeyForEvent(event);
     if (yield* hasHandledTurnStartRecently(key)) {
       return;
+    }
+    const threadKey = String(event.payload.threadId);
+    if (queuedTurnPromotionMessageIdByThreadId.get(threadKey) === event.payload.messageId) {
+      queuedTurnPromotionMessageIdByThreadId.delete(threadKey);
     }
     if (yield* isThreadTurnBusy(event.payload.threadId)) {
       queueTurnStart(event);
@@ -881,7 +953,7 @@ const make = Effect.gen(function* () {
     ) {
       activeTurnStartThreadIds.delete(threadKey);
       observedRunningTurnThreadIds.delete(threadKey);
-      yield* startNextQueuedTurnForThread(event.payload.threadId);
+      yield* startNextAvailableTurnForThread(event.payload.threadId);
     }
   });
 
@@ -893,7 +965,13 @@ const make = Effect.gen(function* () {
     }
     activeTurnStartThreadIds.delete(String(event.payload.threadId));
     observedRunningTurnThreadIds.delete(String(event.payload.threadId));
-    yield* startNextQueuedTurnForThread(event.payload.threadId);
+    yield* startNextAvailableTurnForThread(event.payload.threadId);
+  });
+
+  const processTurnQueued = Effect.fn("processTurnQueued")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.turn-queued" }>,
+  ) {
+    yield* startNextAvailableTurnForThread(event.payload.threadId);
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
@@ -1063,6 +1141,9 @@ const make = Effect.gen(function* () {
         );
         return;
       }
+      case "thread.turn-queued":
+        yield* processTurnQueued(event);
+        return;
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
         return;
@@ -1106,6 +1187,7 @@ const make = Effect.gen(function* () {
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
       if (
         event.type === "thread.runtime-mode-set" ||
+        event.type === "thread.turn-queued" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.activity-appended" ||
         event.type === "thread.session-set" ||
@@ -1121,6 +1203,23 @@ const make = Effect.gen(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent),
     );
+
+    yield* Effect.gen(function* () {
+      const queuedThreadIds =
+        yield* projectionThreadQueuedTurnRepository.listThreadIdsWithQueuedTurns();
+      yield* Effect.forEach(queuedThreadIds, startNextAvailableTurnForThread, {
+        concurrency: 1,
+      });
+    }).pipe(
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.interrupt;
+        }
+        return Effect.logWarning("provider command reactor failed to scan queued turns", {
+          cause: Cause.pretty(cause),
+        });
+      }),
+    );
   });
 
   return {
@@ -1129,4 +1228,6 @@ const make = Effect.gen(function* () {
   } satisfies ProviderCommandReactorShape;
 });
 
-export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make);
+export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make).pipe(
+  Layer.provideMerge(ProjectionThreadQueuedTurnRepositoryLive),
+);

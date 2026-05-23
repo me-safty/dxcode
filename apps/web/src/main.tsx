@@ -11,11 +11,13 @@ import { installIosStandaloneBackSwipeGuard } from "./iosStandaloneBackSwipeGuar
 import { getRouter } from "./router";
 import { APP_DISPLAY_NAME } from "./branding";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
+import { installServiceWorkerNotificationNavigation } from "./push/notificationNavigation";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();
 
 const router = getRouter(history);
+installServiceWorkerNotificationNavigation(router);
 
 if (isElectron) {
   syncDocumentWindowControlsOverlayClass();

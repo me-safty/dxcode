@@ -67,50 +67,13 @@ async function openNotificationUrl(url) {
     return self.clients.openWindow(url);
   }
 
-  if (targetClient.url === url && "focus" in targetClient) {
-    const focusedClient = await targetClient.focus();
-    postNotificationClickMessage(focusedClient || targetClient, url);
-    return focusedClient;
-  }
-
-  if ("navigate" in targetClient) {
-    try {
-      const navigatedClient = await targetClient.navigate(url);
-      if (navigatedClient && "focus" in navigatedClient) {
-        const focusedClient = await navigatedClient.focus();
-        postNotificationClickMessage(focusedClient || navigatedClient, url);
-        return focusedClient;
-      }
-      if (navigatedClient) {
-        postNotificationClickMessage(navigatedClient, url);
-        return navigatedClient;
-      }
-    } catch {
-      // Fall through to opening a fresh window for the target thread.
-    }
-  }
-
-  try {
-    const openedClient = await self.clients.openWindow(url);
-    if (openedClient && "focus" in openedClient) {
-      const focusedClient = await openedClient.focus();
-      postNotificationClickMessage(focusedClient || openedClient, url);
-      return focusedClient;
-    }
-    if (openedClient) {
-      postNotificationClickMessage(openedClient, url);
-      return openedClient;
-    }
-  } catch {
-    // Use the already-open app window as a last resort.
-  }
-
   if ("focus" in targetClient) {
     const focusedClient = await targetClient.focus();
     postNotificationClickMessage(focusedClient || targetClient, url);
     return focusedClient;
   }
 
+  postNotificationClickMessage(targetClient, url);
   return undefined;
 }
 

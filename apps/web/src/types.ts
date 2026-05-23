@@ -2,6 +2,7 @@ import type {
   EnvironmentId,
   ModelSelection,
   OrchestrationLatestTurn,
+  OrchestrationQueuedTurn,
   OrchestrationThreadDetailPageInfo,
   OrchestrationProposedPlanId,
   RepositoryIdentity,
@@ -55,6 +56,10 @@ export interface ChatMessage {
   streaming: boolean;
 }
 
+export type QueuedTurn = Omit<OrchestrationQueuedTurn, "attachments"> & {
+  attachments: ChatAttachment[];
+};
+
 export interface ProposedPlan {
   id: OrchestrationProposedPlanId;
   turnId: TurnId | null;
@@ -105,6 +110,7 @@ export interface Thread {
   interactionMode: ProviderInteractionMode;
   session: ThreadSession | null;
   messages: ChatMessage[];
+  queuedTurns: QueuedTurn[];
   proposedPlans: ProposedPlan[];
   error: string | null;
   createdAt: string;

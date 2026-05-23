@@ -89,6 +89,7 @@ function makeSnapshot(text: string): OrchestrationThreadDetailSnapshot {
           updatedAt: now,
         },
       ],
+      queuedTurns: [],
       proposedPlans: [],
       activities: [],
       checkpoints: [],
