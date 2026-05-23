@@ -201,6 +201,7 @@ const CONNECTION_HEALTH_RECOVERY_BACKOFF_MAX_MS = 2 * 60_000;
 const CONNECTION_HEALTH_RECOVERY_RECONNECT_TIMEOUT_MS = 15_000;
 const BROWSER_RESUME_RECONCILE_COOLDOWN_MS = 2_000;
 const BROWSER_RESUME_RECONCILE_TIMEOUT_MS = 1_500;
+const BROWSER_RESUME_HEARTBEAT_TICK_MS = 15_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
 const NOOP = () => undefined;
 const SSH_HTTP_STATUS_RE = /^\[ssh_http:(\d+)\]\s/u;
@@ -839,6 +840,21 @@ function requestThreadDetailReconcile(
     return;
   }
   scheduleThreadDetailReconcile(entry, reason);
+}
+
+// Forces every actively-retained thread detail subscription in the
+// environment to re-fetch. Used after a browser-resume path so the open
+// chat catches up even when projection replay had no events for it (the
+// "navigate away and back" workaround the user otherwise has to do).
+function refreshActiveThreadDetailsForEnvironment(
+  environmentId: EnvironmentId,
+  reason: string,
+): void {
+  for (const entry of threadDetailSubscriptions.values()) {
+    if (entry.environmentId !== environmentId) continue;
+    if (entry.activeRefCount === 0) continue;
+    requestThreadDetailReconcile(entry.environmentId, entry.threadId, reason);
+  }
 }
 
 function requestThreadDetailReconcileAfterNotificationOpen(
@@ -2445,6 +2461,10 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
   reason: string,
 ): Promise<void> {
   const environmentId = connection.environmentId;
+  // The periodic heartbeat-tick is a liveness check; only user-visible
+  // resume events should force a detail refresh on the no-gap branch,
+  // otherwise we'd churn the active thread every tick.
+  const isUserResumeReason = reason !== "heartbeat-tick";
 
   // Fast path: if the heartbeat pong is stale, the underlying socket is
   // almost certainly dead (common on iOS PWA after backgrounding, where
@@ -2457,6 +2477,7 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
       reason,
     });
     await connection.reconnect();
+    refreshActiveThreadDetailsForEnvironment(environmentId, `browser-resume:reconnect:${reason}`);
     return;
   }
 
@@ -2479,6 +2500,12 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
     const latestSequenceAfterProbe =
       readLastAppliedProjectionVersion(environmentId)?.sequence ?? currentSequence;
     if (!syncProbe.behind || syncProbe.serverSequence <= latestSequenceAfterProbe) {
+      if (isUserResumeReason) {
+        refreshActiveThreadDetailsForEnvironment(
+          environmentId,
+          `browser-resume:up-to-date:${reason}`,
+        );
+      }
       return;
     }
 
@@ -2507,6 +2534,7 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
     if (highestReplayedSequence > recoveredSequence) {
       queueProjectionRecovery(environmentId, highestReplayedSequence);
     }
+    refreshActiveThreadDetailsForEnvironment(environmentId, `browser-resume:replay:${reason}`);
   } catch (error) {
     if (readEnvironmentConnection(environmentId) !== connection) {
       return;
@@ -2518,6 +2546,10 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
       error: formatUnknownError(error),
     });
     await connection.reconnect();
+    refreshActiveThreadDetailsForEnvironment(
+      environmentId,
+      `browser-resume:reconnect-after-error:${reason}`,
+    );
   }
 }
 
@@ -2806,11 +2838,25 @@ function subscribeBrowserResumeReconnects(): () => void {
     );
   };
 
+  // Top-level liveness tick. Visibility/pageshow/focus only fire on
+  // transitions; a connection that silently dies while the tab stays
+  // visible (network blip, server restart, etc.) is only caught by the
+  // 5s active-thread probe — and that probe doesn't run on views with
+  // no retained thread (sidebar/home). Reuse the browser-resume path
+  // so the cooldown and per-environment queueing apply unchanged.
+  const heartbeatTickIntervalId = setInterval(() => {
+    if (document.visibilityState !== "visible") {
+      return;
+    }
+    reconcileEnvironmentConnectionsAfterBrowserResume("heartbeat-tick");
+  }, BROWSER_RESUME_HEARTBEAT_TICK_MS);
+
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("pagehide", handlePageHide);
   window.addEventListener("pageshow", handlePageShow);
   window.addEventListener("focus", handleWindowFocus);
   return () => {
+    clearInterval(heartbeatTickIntervalId);
     document.removeEventListener("visibilitychange", handleVisibilityChange);
     window.removeEventListener("pagehide", handlePageHide);
     window.removeEventListener("pageshow", handlePageShow);

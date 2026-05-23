@@ -3344,7 +3344,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("keeps foreground resume projection-only when backend cursor is current", async () => {
+  it("force-refreshes active thread detail on foreground resume when backend cursor is current", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -3416,7 +3416,10 @@ describe("retainThreadDetailSubscription", () => {
     });
     await vi.advanceTimersByTimeAsync(300);
     expect(mockReplayEvents).not.toHaveBeenCalled();
-    await expectThreadDetailReconcileCallCount(0);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId }),
+    );
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
@@ -3425,7 +3428,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("does not force-refresh active running thread detail on current foreground resume", async () => {
+  it("force-refreshes active running thread detail on current foreground resume", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -3508,7 +3511,10 @@ describe("retainThreadDetailSubscription", () => {
     });
     await vi.advanceTimersByTimeAsync(300);
     expect(mockReplayEvents).not.toHaveBeenCalled();
-    await expectThreadDetailReconcileCallCount(0);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId }),
+    );
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
@@ -3517,7 +3523,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("does not update streaming assistant text from detail on current foreground resume", async () => {
+  it("does not clobber streaming assistant text during foreground resume refresh", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -3604,7 +3610,12 @@ describe("retainThreadDetailSubscription", () => {
     });
     await vi.advanceTimersByTimeAsync(300);
     expect(mockReplayEvents).not.toHaveBeenCalled();
-    await expectThreadDetailReconcileCallCount(0);
+    // The forced refresh on foreground resume reconciles the active thread,
+    // but the server reports it is current so streaming text is preserved.
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId }),
+    );
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
 
     const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
@@ -3977,7 +3988,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("does not force-refresh active empty thread detail on current foreground resume", async () => {
+  it("force-refreshes active empty thread detail on current foreground resume", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -4060,7 +4071,10 @@ describe("retainThreadDetailSubscription", () => {
     });
     await vi.advanceTimersByTimeAsync(300);
     expect(mockReplayEvents).not.toHaveBeenCalled();
-    await expectThreadDetailReconcileCallCount(0);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId }),
+    );
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
@@ -4159,7 +4173,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("keeps completed-but-running foreground resume projection-only when backend cursor is current", async () => {
+  it("force-refreshes completed-but-running active thread detail on current foreground resume", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
     const windowTarget = new EventTarget();
@@ -4212,7 +4226,10 @@ describe("retainThreadDetailSubscription", () => {
     });
     await vi.advanceTimersByTimeAsync(300);
     expect(mockReplayEvents).not.toHaveBeenCalled();
-    await expectThreadDetailReconcileCallCount(0);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId }),
+    );
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
@@ -4898,6 +4915,239 @@ describe("retainThreadDetailSubscription", () => {
     });
     expect(mockProbeSync).not.toHaveBeenCalled();
     expect(mockReplayEvents).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("refreshes active thread detail when browser resume probe is up to date", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const documentTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-resume-up-to-date-refresh");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({ threadId, sessionStatus: "running" }),
+      environmentId,
+    );
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "running",
+      }),
+    });
+
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    visibilityState = "visible";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledTimes(1);
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    await vi.waitFor(() => {
+      expect(mockReconcileThreadDetail).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId }),
+      );
+    });
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("refreshes active thread detail after replay even when no events touch the active thread", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const documentTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    mockProbeSync.mockResolvedValueOnce({
+      clientSequence: 1,
+      serverSequence: 2,
+      behind: true,
+    });
+    mockReplayEvents.mockResolvedValueOnce([
+      makeThreadSessionSetEvent({
+        sequence: 2,
+        threadId: ThreadId.make("thread-other-untouched"),
+        status: "ready",
+      }),
+    ]);
+
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-resume-replay-refresh");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({ threadId, sessionStatus: "running" }),
+      environmentId,
+    );
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "running",
+      }),
+    });
+
+    visibilityState = "hidden";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+    visibilityState = "visible";
+    documentTarget.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    await vi.waitFor(() => {
+      expect(mockReconcileThreadDetail).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId }),
+      );
+    });
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("reconnects on the visibility heartbeat tick when the connection silently dies", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const documentTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    mockCreateWsRpcClient.mockReturnValue({
+      server: {
+        getConfig: vi.fn(async () => ({
+          environment: {
+            environmentId: EnvironmentId.make("env-remote"),
+            label: "Remote env",
+            platform: { os: "darwin", arch: "arm64" },
+            serverVersion: "0.0.0-test",
+            capabilities: { repositoryIdentity: true },
+          },
+        })),
+      },
+      isHeartbeatFresh: vi.fn(() => false),
+      orchestration: {
+        subscribeThread: mockSubscribeThread,
+        probeSync: mockProbeSync,
+        replayEvents: mockReplayEvents,
+        reconcileThreadDetail: mockReconcileThreadDetail,
+      },
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+    expect(mockProbeSync).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("suppresses the visibility heartbeat tick while document is hidden", async () => {
+    let visibilityState: DocumentVisibilityState = "hidden";
+    const documentTarget = new EventTarget();
+    vi.stubGlobal("document", {
+      addEventListener: documentTarget.addEventListener.bind(documentTarget),
+      removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    mockCreateWsRpcClient.mockReturnValue({
+      server: {
+        getConfig: vi.fn(async () => ({
+          environment: {
+            environmentId: EnvironmentId.make("env-remote"),
+            label: "Remote env",
+            platform: { os: "darwin", arch: "arm64" },
+            serverVersion: "0.0.0-test",
+            capabilities: { repositoryIdentity: true },
+          },
+        })),
+      },
+      isHeartbeatFresh: vi.fn(() => false),
+      orchestration: {
+        subscribeThread: mockSubscribeThread,
+        probeSync: mockProbeSync,
+        replayEvents: mockReplayEvents,
+        reconcileThreadDetail: mockReconcileThreadDetail,
+      },
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+    expect(mockProbeSync).not.toHaveBeenCalled();
 
     stop();
     await resetEnvironmentServiceForTests();
