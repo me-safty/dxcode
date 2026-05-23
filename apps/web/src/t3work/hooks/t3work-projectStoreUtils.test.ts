@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectId, type EnvironmentId } from "@t3tools/contracts";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import type { Project } from "~/types";
@@ -35,6 +35,10 @@ function makeLiveProject(overrides: Partial<Project> = {}): Project {
     ...overrides,
   };
 }
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("deriveLooseWorkspaceProjects", () => {
   it("adds live local workspaces that are not already part of a t3work project", () => {
@@ -129,6 +133,24 @@ describe("deriveLooseWorkspaceProjects", () => {
         }),
       ],
       [makeLiveProject({ cwd: "/workspace/references/repo" })],
+    );
+
+    expect(looseWorkspaceProjects).toEqual([]);
+  });
+
+  it("does not duplicate a live workspace when the saved project root uses a home shortcut", () => {
+    vi.stubEnv("HOME", "/Users/tester");
+
+    const looseWorkspaceProjects = deriveLooseWorkspaceProjects(
+      [
+        makeStoredProject({
+          workspace: {
+            rootPath: "~/workspace/saved",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        }),
+      ],
+      [makeLiveProject({ cwd: "/Users/tester/workspace/saved" })],
     );
 
     expect(looseWorkspaceProjects).toEqual([]);

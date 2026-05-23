@@ -9,6 +9,7 @@ import type {
   ThreadStatusPill,
   ViewState,
 } from "~/t3work/t3work-types";
+import { readActiveThreadIdFromView } from "~/t3work/t3work-types";
 import { useAddToChat } from "~/t3work/hooks/t3work-useAddToChat";
 import { readLinkedRepositoryUrlsFromProject } from "~/t3work/hooks/t3work-createProjectBootstrap";
 import { SidebarMenuButton, SidebarMenuSub } from "~/t3work/components/ui/t3work-sidebar";
@@ -71,6 +72,7 @@ export function LocalWorkspaceSidebarRow({
       ? sortedProjectThreads.slice(0, threadPreviewCount)
       : sortedProjectThreads;
   const hiddenThreadCount = Math.max(0, sortedProjectThreads.length - visibleThreads.length);
+  const activeThreadId = readActiveThreadIdFromView(view);
 
   return (
     <>
@@ -146,7 +148,7 @@ export function LocalWorkspaceSidebarRow({
             <ThreadRow
               key={thread.id}
               thread={thread}
-              isActive={view?.type === "thread" && view.threadId === thread.id}
+              isActive={activeThreadId === thread.id}
               onSelect={() => onSelectThread(project.id, thread.id)}
               onDelete={() => onDeleteThread(thread.id)}
               onRename={(newTitle) => onRenameThread(thread.id, newTitle)}

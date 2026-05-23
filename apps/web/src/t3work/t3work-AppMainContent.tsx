@@ -1,62 +1,59 @@
 import type { ProjectShellProject } from "@t3tools/project-context";
-import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
-import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
-import { ThreadChatView } from "~/t3work/chat/t3work-ThreadChatView";
 import { useBackendState } from "~/t3work/backend/t3work-index";
-import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
-import type { ProjectThread, ViewState } from "~/t3work/t3work-types";
-import { ProjectDashboardKickoffAside } from "~/t3work/t3work-ProjectDashboardKickoffAside";
-import { ResizableRightSidebarLayout } from "~/t3work/t3work-ResizableRightSidebarLayout";
+import type {
+  ProjectKickoffThreadInput,
+  TicketKickoffThreadInput,
+} from "~/t3work/t3work-kickoffTypes";
+import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
+import {
+  readActiveThreadIdFromView,
+  type ProjectThread,
+  type ViewState,
+} from "~/t3work/t3work-types";
+import { AppDashboardPane } from "~/t3work/t3work-AppDashboardPane";
+import { AppThreadPane } from "~/t3work/t3work-AppThreadPane";
+import { AppMainContentHomeEmptyState } from "~/t3work/t3work-AppMainContentHomeEmptyState";
 import { isHomeProjectId } from "~/t3work/t3work-homeProject";
 import { useThreadResolutionDebug } from "~/t3work/t3work-useThreadResolutionDebug";
-import {
-  ProjectBrowserEmptyWithChat,
-  useHomeProjectChat,
-  useSyncActiveChatTarget,
-} from "./t3work-AppMainContentShell";
+import { useHomeProjectChat, useSyncActiveChatTarget } from "./t3work-AppMainContentShell";
 
 type MainContentProps = {
   view: ViewState | null;
+  activeDashboardMode: ProjectDashboardMode;
+  selectedProjectId: string | null;
   projects: ProjectShellProject[];
   allProjects: ProjectShellProject[];
   getThreadsForProject: (projectId: string) => ProjectThread[];
   onOpenTicket: (projectId: string, ticketId: string) => void;
   onOpenThread: (projectId: string, threadId: string) => void;
-  onKickoffProjectThread: (input: {
-    projectId: string;
-    kickoffMessage: string;
-    kickoffModelSelection: ModelSelection;
-    kickoffRuntimeMode: RuntimeMode;
-    kickoffInteractionMode: ProviderInteractionMode;
-    kickoffContextAttachments: ReadonlyArray<T3WorkContextAttachment>;
-  }) => void;
-  onKickoffTicketThread: (input: {
-    projectId: string;
-    ticketId: string;
-    ticketDisplayId: string;
-    githubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
-    kickoffMessage: string;
-    kickoffModelSelection: ModelSelection;
-    kickoffRuntimeMode: RuntimeMode;
-    kickoffInteractionMode: ProviderInteractionMode;
-    kickoffContextAttachments: ReadonlyArray<T3WorkContextAttachment>;
-  }) => void;
+  onOpenFullThread: (projectId: string, threadId: string) => void;
+  onKickoffProjectThread: (input: ProjectKickoffThreadInput) => void;
+  onKickoffTicketThread: (input: TicketKickoffThreadInput) => void;
   onThreadKickoffConsumed: (threadId: string) => void;
   onBackToDashboard: (projectId: string) => void;
   onCreate: () => void;
+  onInlineProjectCreated: (project: ProjectShellProject) => void;
   renderDashboard: (project: ProjectShellProject) => React.ReactNode;
-  renderTicketDetail: (project: ProjectShellProject, ticketId: string) => React.ReactNode;
+  renderTicketDetail: (
+    project: ProjectShellProject,
+    ticketId: string,
+    activeThreadId?: string,
+  ) => React.ReactNode;
 };
 
 export function AppMainContent({
   view,
+  activeDashboardMode,
+  selectedProjectId,
   projects,
   allProjects,
   getThreadsForProject,
   onOpenThread,
+  onOpenFullThread,
   onKickoffProjectThread,
   onBackToDashboard,
   onCreate,
+  onInlineProjectCreated,
   renderDashboard,
   renderTicketDetail,
   onThreadKickoffConsumed,
@@ -66,21 +63,34 @@ export function AppMainContent({
     projects,
     getThreadsForProject,
   });
+  const hasAnyProjects = allProjects.length > 0;
+  const isFirstRunSetup = !view && !hasAnyProjects;
+  const homeProject =
+    !view && hasAnyProjects
+      ? (allProjects.find((candidate) => candidate.id === selectedProjectId) ??
+        allProjects[0] ??
+        null)
+      : null;
+
   const renderHomeBrowserEmpty = () => (
-    <ProjectBrowserEmptyWithChat
+    <AppMainContentHomeEmptyState
       onCreate={onCreate}
-      project={homeChatProject}
-      projectThreads={homeChatProject ? getThreadsForProject(homeChatProject.id) : []}
+      onInlineProjectCreated={onInlineProjectCreated}
+      isFirstRunSetup={isFirstRunSetup}
+      showAside={projects.length > 0}
+      homeChatProject={homeChatProject}
+      homeChatProjectThreads={homeChatProject ? getThreadsForProject(homeChatProject.id) : []}
       providers={backendState.providers}
       isConnected={backendState.connectionStatus === "connected"}
-      onOpenThread={(threadId) => {
+      onOpenHomeThread={(threadId) => {
         if (homeChatProject) onOpenThread(homeChatProject.id, threadId);
       }}
-      onKickoffThread={(
+      onKickoffHomeThread={(
         kickoffMessage,
         kickoffModelSelection,
         kickoffRuntimeMode,
         kickoffInteractionMode,
+        selectedToolIds,
         kickoffContextAttachments,
       ) => {
         if (!homeChatProject) return;
@@ -90,6 +100,7 @@ export function AppMainContent({
           kickoffModelSelection,
           kickoffRuntimeMode,
           kickoffInteractionMode,
+          selectedToolIds,
           kickoffContextAttachments,
         });
       }}
@@ -102,19 +113,20 @@ export function AppMainContent({
     homeChatThreadId,
   });
 
-  const threadView = view?.type === "thread" ? view : null;
-  const threadProject = threadView
-    ? (allProjects.find((candidate) => candidate.id === threadView.projectId) ??
-      (isHomeProjectId(threadView.projectId) ? homeChatProject : null))
-    : null;
+  const activeThreadId = readActiveThreadIdFromView(view);
+  const threadProject =
+    activeThreadId && view
+      ? (allProjects.find((candidate) => candidate.id === view.projectId) ??
+        (view.type === "thread" && isHomeProjectId(view.projectId) ? homeChatProject : null))
+      : null;
   const threadProjectThreads = threadProject ? getThreadsForProject(threadProject.id) : [];
-  const resolvedThread = threadView
-    ? (threadProjectThreads.find((candidate) => candidate.id === threadView.threadId) ?? null)
+  const resolvedThread = activeThreadId
+    ? (threadProjectThreads.find((candidate) => candidate.id === activeThreadId) ?? null)
     : null;
 
   useThreadResolutionDebug({
-    routeProjectId: threadView?.projectId ?? null,
-    routeThreadId: threadView?.threadId ?? null,
+    routeProjectId: view?.projectId ?? null,
+    routeThreadId: activeThreadId,
     resolvedProjectId: threadProject?.id ?? null,
     resolvedProjectWorkspaceRoot: threadProject?.workspace?.rootPath ?? null,
     projectThreadCount: threadProjectThreads.length,
@@ -124,37 +136,38 @@ export function AppMainContent({
     kickoffPending: resolvedThread?.kickoffPending ?? null,
   });
 
-  if (!view) return renderHomeBrowserEmpty();
+  if (!view) {
+    if (homeProject) {
+      return (
+        <AppDashboardPane
+          activeDashboardMode={activeDashboardMode}
+          project={homeProject}
+          projectThreads={getThreadsForProject(homeProject.id)}
+          activeThread={null}
+          activeThreadId={null}
+          providers={backendState.providers}
+          isConnected={backendState.connectionStatus === "connected"}
+          onOpenThread={onOpenThread}
+          onOpenFullThread={onOpenFullThread}
+          onThreadKickoffConsumed={onThreadKickoffConsumed}
+          onKickoffProjectThread={onKickoffProjectThread}
+          renderDashboard={renderDashboard}
+        />
+      );
+    }
+
+    return renderHomeBrowserEmpty();
+  }
 
   if (view.type === "thread") {
     return (
-      <ThreadChatView
-        threadId={view.threadId}
-        projectId={view.projectId}
-        projectTitle={threadProject?.title ?? view.projectId}
-        {...(threadProject?.workspace?.rootPath
-          ? { projectWorkspaceRoot: threadProject.workspace.rootPath }
-          : {})}
-        title={resolvedThread?.title ?? "New thread"}
-        {...(resolvedThread?.kickoffMessage
-          ? { kickoffMessage: resolvedThread.kickoffMessage }
-          : {})}
-        {...(resolvedThread?.kickoffPending && resolvedThread.kickoffMessage
-          ? { initialUserMessage: resolvedThread.kickoffMessage }
-          : {})}
-        {...(resolvedThread?.kickoffModelSelection
-          ? { initialModelSelection: resolvedThread.kickoffModelSelection }
-          : {})}
-        {...(resolvedThread?.kickoffRuntimeMode
-          ? { initialRuntimeMode: resolvedThread.kickoffRuntimeMode }
-          : {})}
-        {...(resolvedThread?.kickoffInteractionMode
-          ? { initialInteractionMode: resolvedThread.kickoffInteractionMode }
-          : {})}
-        onInitialUserMessageSent={() => {
-          if (resolvedThread) onThreadKickoffConsumed(resolvedThread.id);
-        }}
-        onBack={() => onBackToDashboard(view.projectId)}
+      <AppThreadPane
+        view={view}
+        threadProject={threadProject}
+        resolvedThread={resolvedThread}
+        onOpenThread={onOpenThread}
+        onThreadKickoffConsumed={onThreadKickoffConsumed}
+        onBackToDashboard={onBackToDashboard}
       />
     );
   }
@@ -166,45 +179,26 @@ export function AppMainContent({
 
   if (view.type === "dashboard") {
     return (
-      <ResizableRightSidebarLayout
-        storageKey="t3work_dashboard_right_sidebar"
-        minAsideWidth={22 * 16}
-        defaultAsideWidth={24 * 16}
-        main={
-          <div className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden">
-            {renderDashboard(project)}
-          </div>
-        }
-        aside={
-          <ProjectDashboardKickoffAside
-            project={project}
-            projectThreads={getThreadsForProject(project.id)}
-            providers={backendState.providers}
-            isConnected={backendState.connectionStatus === "connected"}
-            onOpenThread={(threadId) => onOpenThread(project.id, threadId)}
-            onKickoffThread={(
-              kickoffMessage,
-              kickoffModelSelection,
-              kickoffRuntimeMode,
-              kickoffInteractionMode,
-              kickoffContextAttachments,
-            ) => {
-              onKickoffProjectThread({
-                projectId: project.id,
-                kickoffMessage,
-                kickoffModelSelection,
-                kickoffRuntimeMode,
-                kickoffInteractionMode,
-                kickoffContextAttachments,
-              });
-            }}
-          />
-        }
+      <AppDashboardPane
+        activeDashboardMode={activeDashboardMode}
+        project={project}
+        projectThreads={getThreadsForProject(project.id)}
+        activeThread={resolvedThread}
+        activeThreadId={view.embeddedThreadId ?? null}
+        providers={backendState.providers}
+        isConnected={backendState.connectionStatus === "connected"}
+        onOpenThread={onOpenThread}
+        onOpenFullThread={onOpenFullThread}
+        onThreadKickoffConsumed={onThreadKickoffConsumed}
+        onKickoffProjectThread={onKickoffProjectThread}
+        renderDashboard={renderDashboard}
       />
     );
   }
 
-  if (view.type === "ticket") return <>{renderTicketDetail(project, view.ticketId)}</>;
+  if (view.type === "ticket") {
+    return <>{renderTicketDetail(project, view.ticketId, view.embeddedThreadId)}</>;
+  }
 
   return renderHomeBrowserEmpty();
 }

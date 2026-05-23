@@ -18,8 +18,11 @@ import { prepareThreadContextAttachments } from "~/t3work/chat/t3work-prepareThr
 import { ContextAttachmentStrip } from "~/t3work/components/t3work-ContextAttachmentChip";
 import { useThreadBootstrap } from "~/t3work/chat/t3work-useThreadBootstrap";
 import { resolveCanonicalProjectIdForWorkspaceRoot } from "~/t3work/hooks/t3work-threadBridge";
+import { useAddToChatComposerDropTarget } from "~/t3work/hooks/t3work-useAddToChatComposerDropTarget";
 import { useT3WorkAddToChatStore } from "~/t3work/t3work-addToChatStore";
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
+import { createT3workTurnToolContext } from "~/t3work/t3work-threadToolContext";
+import type { T3workThreadToolId } from "~/t3work/t3work-types";
 
 const EMPTY_ATTACHMENTS: T3WorkContextAttachment[] = [];
 
@@ -31,11 +34,14 @@ export interface ThreadChatViewProps {
   title: string;
   onBack?: () => void;
   hideHeader?: boolean;
+  embeddedMode?: boolean;
   kickoffMessage?: string;
   initialUserMessage?: string;
   initialModelSelection?: ModelSelection;
   initialRuntimeMode?: RuntimeMode;
   initialInteractionMode?: ProviderInteractionMode;
+  ticketId?: string;
+  selectedToolIds?: ReadonlyArray<T3workThreadToolId>;
   onInitialUserMessageSent?: () => void;
 }
 
@@ -45,11 +51,15 @@ export function ThreadChatView({
   projectTitle,
   projectWorkspaceRoot,
   title,
+  hideHeader = false,
+  embeddedMode = false,
   kickoffMessage,
   initialUserMessage,
   initialModelSelection,
   initialRuntimeMode,
   initialInteractionMode,
+  ticketId,
+  selectedToolIds,
   onInitialUserMessageSent,
 }: ThreadChatViewProps) {
   const backend = useBackend();
@@ -76,6 +86,19 @@ export function ThreadChatView({
     kickoffMessage,
     serverMessageCount,
   });
+  const turnToolContext = useMemo(
+    () =>
+      createT3workTurnToolContext({
+        projectId,
+        projectTitle,
+        ...(projectWorkspaceRoot ? { workspaceRoot: projectWorkspaceRoot } : {}),
+        threadId,
+        threadTitle: title,
+        ...(ticketId ? { ticketId } : {}),
+        ...(selectedToolIds !== undefined ? { selectedToolIds } : {}),
+      }),
+    [projectId, projectTitle, projectWorkspaceRoot, selectedToolIds, threadId, ticketId, title],
+  );
 
   useThreadBootstrap({
     backend,
@@ -90,6 +113,7 @@ export function ThreadChatView({
     initialModelSelection,
     initialRuntimeMode,
     initialInteractionMode,
+    initialToolContext: turnToolContext,
     onInitialUserMessageSent,
     serverThread,
   });
@@ -131,11 +155,23 @@ export function ThreadChatView({
     contextAttachmentsOrUndefined ?? EMPTY_ATTACHMENTS;
   const removeContextAttachment = useT3WorkAddToChatStore((state) => state.removeThreadAttachment);
   const clearThreadAttachments = useT3WorkAddToChatStore((state) => state.clearThreadAttachments);
+  const composerDropTarget = useAddToChatComposerDropTarget();
 
   const prepareComposerContextAttachments = useCallback(
     () => prepareThreadContextAttachments({ threadId, backend }),
     [backend, threadId],
   );
+
+  const prepareTurnStart = useCallback(async () => {
+    if (!backend) {
+      return;
+    }
+
+    await backend.syncThreadToolContext({
+      threadId,
+      toolContext: turnToolContext ?? null,
+    });
+  }, [backend, threadId, turnToolContext]);
 
   const contextAttachmentSlot =
     contextAttachments.length > 0 ? (
@@ -146,11 +182,11 @@ export function ThreadChatView({
     ) : null;
 
   if (!environmentId) {
-    return <div className="flex min-h-0 flex-1 bg-background" />;
+    return <div className="flex h-full min-h-0 flex-1 bg-background" />;
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
       {showKickoffPlaceholder && kickoffMessage ? (
         <ThreadKickoffPlaceholder message={kickoffMessage} />
       ) : null}
@@ -159,7 +195,13 @@ export function ThreadChatView({
           environmentId={environmentId}
           threadId={threadId as never}
           routeKind="server"
+          hideHeader={hideHeader || embeddedMode}
+          hideBranchToolbar={embeddedMode}
+          minimalComposer={embeddedMode}
+          beforeDispatchTurnStart={prepareTurnStart}
           composerContextAttachmentSlot={contextAttachmentSlot}
+          composerContainerProps={composerDropTarget.composerContainerProps}
+          composerContainerOverlay={composerDropTarget.composerContainerOverlay}
           composerContextAttachments={contextAttachments}
           prepareComposerContextAttachments={prepareComposerContextAttachments}
           onComposerContextAttachmentsConsumed={() => clearThreadAttachments(threadId)}

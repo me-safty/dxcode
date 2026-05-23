@@ -1,5 +1,12 @@
 import type { ProjectThread, ProjectTicket } from "~/t3work/t3work-types";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
+import { buildTicketSidebarPinnedItemId } from "~/t3work/t3work-sidebarPinningTypes";
+import {
+  filterHiddenSidebarItemsById,
+  filterHiddenSidebarItems,
+  sortSidebarItemsByStoredOrderById,
+  sortSidebarItemsByStoredOrder,
+} from "~/t3work/t3work-sidebarNavPreferences";
 import {
   TicketSidebarEntry,
   type TicketSidebarEntryProps,
@@ -13,6 +20,9 @@ interface TicketTreeNodeProps extends Omit<
   childrenByParentId: ReadonlyMap<string, readonly ProjectTicket[]>;
   ticketThreadsById: ReadonlyMap<string, readonly ProjectThread[]>;
   githubActivityByWorkItem: ReadonlyMap<string, ReadonlyArray<GitHubWorkActivityItem>>;
+  hiddenSidebarItemIds: ReadonlyArray<string>;
+  orderedSidebarItemIds: ReadonlyArray<string>;
+  siblingSidebarItemIds: ReadonlyArray<string>;
   depth?: number;
 }
 
@@ -25,6 +35,9 @@ export function TicketTreeNode({
   childrenByParentId,
   ticketThreadsById,
   githubActivityByWorkItem,
+  hiddenSidebarItemIds,
+  orderedSidebarItemIds,
+  siblingSidebarItemIds,
   jiraLastCheckedAt,
   githubActivityLastCheckedAt,
   showGitHubActivity,
@@ -35,7 +48,19 @@ export function TicketTreeNode({
   onRenameThread,
   depth = 0,
 }: TicketTreeNodeProps) {
-  const children = childrenByParentId.get(ticket.id) ?? [];
+  const children = sortSidebarItemsByStoredOrderById(
+    filterHiddenSidebarItemsById(
+      childrenByParentId.get(ticket.id) ?? [],
+      hiddenSidebarItemIds,
+      (child) => buildTicketSidebarPinnedItemId({ projectId, ticketId: child.id }),
+    ),
+    orderedSidebarItemIds,
+    (child) => buildTicketSidebarPinnedItemId({ projectId, ticketId: child.id }),
+  );
+  const childSidebarItemIds = children.map((child) =>
+    buildTicketSidebarPinnedItemId({ projectId, ticketId: child.id }),
+  );
+
   return (
     <div className={depth > 0 ? "ml-2 border-l border-border/60 pl-2" : ""}>
       <TicketSidebarEntry
@@ -54,6 +79,7 @@ export function TicketTreeNode({
         onSelectThread={onSelectThread}
         onDeleteThread={onDeleteThread}
         onRenameThread={onRenameThread}
+        sidebarNavOrderScopeIds={siblingSidebarItemIds}
       />
       {children.length > 0 ? (
         <div className="mt-1 space-y-0.5">
@@ -78,6 +104,9 @@ export function TicketTreeNode({
               onSelectThread={onSelectThread}
               onDeleteThread={onDeleteThread}
               onRenameThread={onRenameThread}
+              hiddenSidebarItemIds={hiddenSidebarItemIds}
+              orderedSidebarItemIds={orderedSidebarItemIds}
+              siblingSidebarItemIds={childSidebarItemIds}
               depth={depth + 1}
             />
           ))}

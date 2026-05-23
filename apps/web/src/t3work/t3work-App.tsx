@@ -1,30 +1,30 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ProjectShellProject } from "@t3tools/project-context";
-import {
-  Sidebar,
-  SidebarInset,
-  SidebarProvider,
-  SidebarRail,
-} from "~/t3work/components/ui/t3work-sidebar";
+import { Sidebar, SidebarProvider, SidebarRail } from "~/t3work/components/ui/t3work-sidebar";
+import { AppContentPane } from "~/t3work/t3work-AppContentPane";
 import { ProjectSidebar } from "~/t3work/components/t3work-ProjectSidebar";
+import { useProjectSidebarState } from "~/t3work/hooks/t3work-useProjectSidebarState";
 import { useProjectStore } from "~/t3work/hooks/t3work-useProjectStore";
 import type { ViewState } from "~/t3work/t3work-types";
-import { CreateProjectDialog } from "~/t3work/t3work-CreateProjectDialog";
-import { ManageProjectRepositoriesDialog } from "~/t3work/t3work-ManageProjectRepositoriesDialog";
-import { AppMainContent } from "~/t3work/t3work-AppMainContent";
-import { ProjectDashboard } from "~/t3work/t3work-ProjectDashboard";
-import { TicketDetailView } from "~/t3work/t3work-TicketDetailView";
+import { AppOverlays } from "~/t3work/t3work-AppOverlays";
+import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
 import { useAppHandlers } from "~/t3work/t3work-useAppHandlers";
-import { T3workCommandPalette } from "~/t3work/components/t3work-CommandPalette";
+import { useResolvedViewSync } from "~/t3work/t3work-useResolvedViewSync";
+import { useHydratePinnedSidebarItems } from "~/t3work/hooks/t3work-useHydratePinnedSidebarItems";
 
 type AppProps = {
   view?: ViewState | null;
+  dashboardMode?: ProjectDashboardMode;
   showCreate?: boolean;
   onCreateOpenChange?: (open: boolean) => void;
   onOpenHome?: () => void;
   onOpenSettings?: () => void;
-  onOpenDashboard?: (projectId: string) => void;
-  onOpenTicket?: (projectId: string, ticketId: string) => void;
+  onOpenDashboard?: (
+    projectId: string,
+    dashboardMode?: ProjectDashboardMode,
+    embeddedThreadId?: string | null,
+  ) => void;
+  onOpenTicket?: (projectId: string, ticketId: string, embeddedThreadId?: string | null) => void;
   onOpenThread?: (projectId: string, threadId: string) => void;
   onProjectCreated?: (project: ProjectShellProject) => void;
 };
@@ -35,6 +35,7 @@ const T3WORK_MAIN_CONTENT_MIN_WIDTH = 44 * 16;
 
 export function App({
   view,
+  dashboardMode,
   showCreate: showCreateProp,
   onCreateOpenChange,
   onOpenHome,
@@ -45,6 +46,8 @@ export function App({
   onProjectCreated,
 }: AppProps = {}) {
   const store = useProjectStore();
+  useHydratePinnedSidebarItems();
+  const { state: sidebarState, setState: setSidebarState } = useProjectSidebarState();
   const [showCreateInternal, setShowCreateInternal] = useState(false);
   const [showSearchPalette, setShowSearchPalette] = useState(false);
   const [manageRepositoriesProjectId, setManageRepositoriesProjectId] = useState<string | null>(
@@ -54,14 +57,27 @@ export function App({
   const showCreate = showCreateProp ?? showCreateInternal;
   const setShowCreate = onCreateOpenChange ?? setShowCreateInternal;
   const activeView = view ?? store.view;
-  const selectedProjectId = activeView?.projectId ?? store.selectedProjectId;
+  const resolvedView = useMemo(() => {
+    if (!activeView) {
+      return activeView;
+    }
+
+    const resolvedProjectId = store.resolveProjectId(activeView.projectId);
+    return resolvedProjectId === activeView.projectId
+      ? activeView
+      : { ...activeView, projectId: resolvedProjectId };
+  }, [activeView, store]);
+  const activeDashboardMode = dashboardMode ?? "my-work";
+  const selectedProjectId = resolvedView?.projectId ?? store.selectedProjectId;
   const manageRepositoriesProject = manageRepositoriesProjectId
     ? (store.projects.find((candidate) => candidate.id === manageRepositoriesProjectId) ?? null)
     : null;
   const {
     handleSelectProject,
+    handleSelectProjectDashboardMode,
     handleSelectTicket,
     handleSelectThread,
+    handleOpenFullThread,
     handleCreateThread,
     handleCreateProjectKickoffThread,
     handleCreateTicketKickoffThread,
@@ -71,11 +87,20 @@ export function App({
     handleDeleteThread,
   } = useAppHandlers({
     store,
-    activeView,
+    activeView: resolvedView,
     onOpenHome,
     onOpenDashboard,
     onOpenTicket,
     onOpenThread,
+  });
+  useResolvedViewSync({
+    activeDashboardMode,
+    onOpenDashboard,
+    onOpenThread,
+    onOpenTicket,
+    resolvedView,
+    store,
+    view,
   });
 
   return (
@@ -99,11 +124,14 @@ export function App({
             expandedIds={store.expandedProjectIds}
             threads={store.threads}
             getThreadsForProject={store.getThreadsForProject}
-            view={activeView}
-            projectSortOrder={store.projectSortOrder}
-            threadSortOrder={store.threadSortOrder}
-            threadPreviewCount={store.threadPreviewCount}
+            view={resolvedView}
+            projectSortOrder={sidebarState.projectSortOrder}
+            threadSortOrder={sidebarState.threadSortOrder}
+            threadPreviewCount={sidebarState.threadPreviewCount}
+            sidebarState={sidebarState}
+            activeDashboardMode={activeDashboardMode}
             onSelectProject={handleSelectProject}
+            onSelectProjectDashboardMode={handleSelectProjectDashboardMode}
             onSelectTicket={handleSelectTicket}
             onSelectThread={handleSelectThread}
             onToggleExpand={store.toggleProjectExpanded}
@@ -117,85 +145,55 @@ export function App({
             onCreateTicketThread={handleCreateTicketThreadFromSidebar}
             onDeleteThread={handleDeleteThread}
             onRenameThread={store.renameThread}
-            onProjectSortOrderChange={store.setProjectSortOrder}
-            onThreadSortOrderChange={store.setThreadSortOrder}
-            onThreadPreviewCountChange={store.setThreadPreviewCount}
+            onProjectSortOrderChange={(projectSortOrder) => {
+              setSidebarState((current) => ({ ...current, projectSortOrder }));
+            }}
+            onThreadSortOrderChange={(threadSortOrder) => {
+              setSidebarState((current) => ({ ...current, threadSortOrder }));
+            }}
+            onThreadPreviewCountChange={(threadPreviewCount) => {
+              setSidebarState((current) => ({ ...current, threadPreviewCount }));
+            }}
+            onSidebarStateChange={setSidebarState}
           />
         </div>
         <SidebarRail />
       </Sidebar>
 
-      <SidebarInset className="h-full min-h-0 overflow-hidden bg-background text-foreground">
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <AppMainContent
-            view={activeView}
-            projects={store.projects}
-            allProjects={store.allProjects}
-            getThreadsForProject={store.getThreadsForProject}
-            onOpenTicket={handleSelectTicket}
-            onOpenThread={handleSelectThread}
-            onKickoffProjectThread={handleCreateProjectKickoffThread}
-            onKickoffTicketThread={handleCreateTicketKickoffThread}
-            onThreadKickoffConsumed={handleThreadKickoffConsumed}
-            onBackToDashboard={handleSelectProject}
-            onCreate={() => setShowCreate(true)}
-            renderDashboard={(project) => (
-              <ProjectDashboard
-                project={project}
-                tickets={[]}
-                onOpenTicket={handleSelectTicket}
-                onManageRepositories={setManageRepositoriesProjectId}
-              />
-            )}
-            renderTicketDetail={(project, ticketId) => (
-              <TicketDetailView
-                project={project}
-                ticketId={ticketId}
-                projectThreads={store.getThreadsForProject(project.id)}
-                onOpenTicket={handleSelectTicket}
-                onOpenThread={handleSelectThread}
-                onKickoffThread={handleCreateTicketKickoffThread}
-                onBack={() => handleSelectProject(project.id)}
-              />
-            )}
-          />
-        </div>
-      </SidebarInset>
+      <AppContentPane
+        activeDashboardMode={activeDashboardMode}
+        resolvedView={resolvedView}
+        store={store}
+        onCreate={() => setShowCreate(true)}
+        onOpenTicket={handleSelectTicket}
+        onOpenThread={handleSelectThread}
+        onOpenFullThread={handleOpenFullThread}
+        onKickoffProjectThread={handleCreateProjectKickoffThread}
+        onKickoffTicketThread={handleCreateTicketKickoffThread}
+        onThreadKickoffConsumed={handleThreadKickoffConsumed}
+        onBackToDashboard={handleSelectProject}
+        onManageRepositories={setManageRepositoriesProjectId}
+      />
 
-      {showCreate && (
-        <CreateProjectDialog
-          onClose={() => setShowCreate(false)}
-          onCreated={(project) => {
-            store.addProject(project);
-            onProjectCreated?.(project);
-            if (!onProjectCreated) {
-              setShowCreate(false);
-            }
-          }}
-        />
-      )}
-
-      <T3workCommandPalette
-        open={showSearchPalette}
-        onOpenChange={setShowSearchPalette}
+      <AppOverlays
+        showCreate={showCreate}
+        setShowCreate={setShowCreate}
+        addProject={store.addProject}
         projects={store.projects}
         threads={store.threads}
-        threadSortOrder={store.threadSortOrder}
+        threadSortOrder={sidebarState.threadSortOrder}
         getTicketsForProject={store.getTicketsForProject}
         onSelectProject={handleSelectProject}
         onSelectTicket={handleSelectTicket}
         onSelectThread={handleSelectThread}
-        onOpenSettings={onOpenSettings}
-        onOpenCreateProject={() => setShowCreate(true)}
+        showSearchPalette={showSearchPalette}
+        setShowSearchPalette={setShowSearchPalette}
+        manageRepositoriesProject={manageRepositoriesProject}
+        setManageRepositoriesProjectId={setManageRepositoriesProjectId}
+        updateProject={store.updateProject}
+        {...(onProjectCreated ? { onProjectCreated } : {})}
+        {...(onOpenSettings ? { onOpenSettings } : {})}
       />
-
-      {manageRepositoriesProject ? (
-        <ManageProjectRepositoriesDialog
-          project={manageRepositoriesProject}
-          onClose={() => setManageRepositoriesProjectId(null)}
-          onProjectUpdated={(nextProject) => store.updateProject(nextProject.id, nextProject)}
-        />
-      ) : null}
     </SidebarProvider>
   );
 }

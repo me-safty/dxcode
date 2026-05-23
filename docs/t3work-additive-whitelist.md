@@ -39,8 +39,12 @@ Prefix policy:
   - Parse and render context attachment chips from user message text, then strip the inline attachment block from message body rendering so timeline displays clean content.
 - `apps/web/src/composerDraftStore.ts`
   - Add optional `contextAttachments?: ComposerContextAttachment[]` field + 3 CRUD methods (`addContextAttachment`, `removeContextAttachment`, `clearContextAttachments`) to per-thread draft state. Generic, upstreamable extension point for ephemeral context attachments.
+- `apps/server/src/provider/Layers/CodexSessionRuntime.ts`
+  - Bind the in-process t3work tool broker into Codex session startup so dynamic tool registration and MCP-backed view/thread actions work per thread without introducing a second provider stack.
+- `apps/server/src/provider/Layers/CodexSessionRuntime.test.ts`
+  - Cover the Codex runtime's dynamic-tool thread-start payload and MCP binding behavior alongside the owning upstream runtime file.
 - `packages/contracts/src/settings.ts`
-  - Add an optional `t3workStoredProjectsJson` client-setting key so desktop-stable t3work project persistence can reuse the existing local client-settings seam without widening unrelated runtime APIs.
+  - Add optional `t3workStoredProjectsJson` / `t3workStoredSidebarPinsJson` client-setting keys so desktop-stable t3work project and sidebar-pin persistence can reuse the existing local client-settings seam without widening unrelated runtime APIs.
 - `packages/t3-adapter/src/workspace.ts`
   - Move managed workspace default path from `project-shell` to `t3work`.
 - `bun.lock`
@@ -52,4 +56,5 @@ Prefix policy:
 - Any new entry requires a one-line reason in this document.
 - Any changed file listed in `allowedModifiedFiles` must auto-merge cleanly against `baseRef` (`upstream/main` by default). If auto-merge is not possible, additive guard fails and prints a diff; user/agent must manually merge.
 - Prefer additive `t3work-*` or `t3work.*` files over editing upstream files.
+- Additive `.test`, `.browser`, `.stories`, and `*Fixtures` files use a higher LOC ceiling because they are validation/demo artifacts rather than shipped runtime surfaces.
 - Remove entries when no longer needed.

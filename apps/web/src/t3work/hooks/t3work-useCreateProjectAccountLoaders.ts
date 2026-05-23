@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { ExternalProject, IntegrationAccount } from "@t3tools/integrations-core";
 import type { BackendApi } from "~/t3work/backend/t3work-types";
+import { runT3workViewTransition } from "~/t3work/t3work-runViewTransition";
 import { persistLastAccountId } from "./t3work-createProjectUtils";
 import { readIntegrationCache, writeIntegrationCache } from "./t3work-integrationCache";
 import type { CreateProjectStep } from "./t3work-useCreateProject";
@@ -26,11 +27,16 @@ export async function loadProjectsForAccount(input: {
   const cachedProjects =
     readIntegrationCache<ReadonlyArray<ExternalProject>>(cacheKey)?.value ?? [];
   if (cachedProjects.length > 0) {
-    input.setSelectedAccount(account);
-    persistLastAccountId(account.id);
-    input.setSelectedProject(null);
-    input.setProjects(cachedProjects);
-    input.setStep("project");
+    runT3workViewTransition(
+      () => {
+        input.setSelectedAccount(account);
+        persistLastAccountId(account.id);
+        input.setSelectedProject(null);
+        input.setProjects(cachedProjects);
+        input.setStep("project");
+      },
+      { types: ["t3work-wizard-forward"] },
+    );
   }
 
   try {
@@ -43,8 +49,13 @@ export async function loadProjectsForAccount(input: {
       provider: account.provider,
     });
     writeIntegrationCache(cacheKey, loadedProjects);
-    input.setProjects(loadedProjects);
-    input.setStep("project");
+    runT3workViewTransition(
+      () => {
+        input.setProjects(loadedProjects);
+        input.setStep("project");
+      },
+      { types: ["t3work-wizard-forward"] },
+    );
   } catch (error) {
     input.fail(error, "Failed to load Jira projects", "account");
   } finally {

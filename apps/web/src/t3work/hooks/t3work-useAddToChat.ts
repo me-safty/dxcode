@@ -1,7 +1,5 @@
 import { useCallback } from "react";
-import type { MouseEvent } from "react";
 import { useRouterState } from "@tanstack/react-router";
-import { readLocalApi } from "~/localApi";
 import { useT3WorkActiveChatStore } from "~/t3work/t3work-activeChatStore";
 import { useT3WorkAddToChatStore } from "~/t3work/t3work-addToChatStore";
 import { useBackend } from "~/t3work/backend/t3work-index";
@@ -21,7 +19,7 @@ function addContextAttachmentToThread(threadId: string, attachment: T3WorkContex
   useT3WorkAddToChatStore.getState().enqueueThreadAttachment(threadId, attachment);
 }
 
-type AddToChatTarget =
+export type AddToChatTarget =
   | { type: "thread"; threadId: string }
   | { type: "kickoff"; projectId: string; ticketId: string };
 
@@ -135,28 +133,7 @@ export function useAddToChat() {
     [activeChatTarget, backend, pathname],
   );
 
-  const showAddToChatContextMenu = useCallback(
-    async (event: MouseEvent, request: AddToChatRequest) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const localApi = readLocalApi();
-      if (!localApi) {
-        return;
-      }
-      const action = await localApi.contextMenu.show(
-        [{ id: "add-to-chat", label: "Add to chat" }],
-        { x: event.clientX, y: event.clientY },
-      );
-      if (action !== "add-to-chat") {
-        return;
-      }
-      await addToChatFromRequest(request);
-    },
-    [addToChatFromRequest],
-  );
-
   return {
     addToChatFromRequest,
-    showAddToChatContextMenu,
   };
 }

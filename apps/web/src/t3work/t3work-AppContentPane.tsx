@@ -1,0 +1,84 @@
+import { SidebarInset } from "~/t3work/components/ui/t3work-sidebar";
+import { useProjectStore } from "~/t3work/hooks/t3work-useProjectStore";
+import { AppMainContent } from "~/t3work/t3work-AppMainContent";
+import { ProjectDashboard } from "~/t3work/t3work-ProjectDashboard";
+import { TicketDetailView } from "~/t3work/t3work-TicketDetailView";
+import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
+import type { ViewState } from "~/t3work/t3work-types";
+
+export function AppContentPane({
+  activeDashboardMode,
+  resolvedView,
+  store,
+  onCreate,
+  onOpenTicket,
+  onOpenThread,
+  onOpenFullThread,
+  onKickoffProjectThread,
+  onKickoffTicketThread,
+  onThreadKickoffConsumed,
+  onBackToDashboard,
+  onManageRepositories,
+}: {
+  activeDashboardMode: ProjectDashboardMode;
+  resolvedView: ViewState | null;
+  store: ReturnType<typeof useProjectStore>;
+  onCreate: () => void;
+  onOpenTicket: (projectId: string, ticketId: string) => void;
+  onOpenThread: (projectId: string, threadId: string) => void;
+  onOpenFullThread: (projectId: string, threadId: string) => void;
+  onKickoffProjectThread: Parameters<typeof AppMainContent>[0]["onKickoffProjectThread"];
+  onKickoffTicketThread: Parameters<typeof AppMainContent>[0]["onKickoffTicketThread"];
+  onThreadKickoffConsumed: (threadId: string) => void;
+  onBackToDashboard: (projectId: string) => void;
+  onManageRepositories: (projectId: string | null) => void;
+}) {
+  return (
+    <SidebarInset className="h-full min-h-0 overflow-hidden bg-background text-foreground">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <AppMainContent
+          view={resolvedView}
+          activeDashboardMode={activeDashboardMode}
+          selectedProjectId={store.selectedProjectId}
+          projects={store.projects}
+          allProjects={store.allProjects}
+          getThreadsForProject={store.getThreadsForProject}
+          onOpenTicket={onOpenTicket}
+          onOpenThread={onOpenThread}
+          onOpenFullThread={onOpenFullThread}
+          onKickoffProjectThread={onKickoffProjectThread}
+          onKickoffTicketThread={onKickoffTicketThread}
+          onThreadKickoffConsumed={onThreadKickoffConsumed}
+          onBackToDashboard={onBackToDashboard}
+          onCreate={onCreate}
+          onInlineProjectCreated={(project) => {
+            store.addProject(project);
+            onBackToDashboard(project.id);
+          }}
+          renderDashboard={(project) => (
+            <ProjectDashboard
+              project={project}
+              tickets={[]}
+              onOpenTicket={onOpenTicket}
+              onManageRepositories={onManageRepositories}
+            />
+          )}
+          renderTicketDetail={(project, ticketId, activeThreadId) => (
+            <TicketDetailView
+              project={project}
+              ticketId={ticketId}
+              {...(activeThreadId ? { activeThreadId } : {})}
+              projectThreads={store.getThreadsForProject(project.id)}
+              onOpenTicket={onOpenTicket}
+              onOpenThread={onOpenThread}
+              onOpenFullThread={onOpenFullThread}
+              onKickoffThread={onKickoffTicketThread}
+              onThreadKickoffConsumed={onThreadKickoffConsumed}
+              onBack={() => onBackToDashboard(project.id)}
+            />
+          )}
+        />
+      </div>
+    </SidebarInset>
+  );
+}

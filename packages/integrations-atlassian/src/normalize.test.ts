@@ -30,6 +30,7 @@ describe("normalizeProject", () => {
       key: "TEST",
       url: "https://test.atlassian.net/rest/api/3/project/10001",
       description: undefined,
+      iconUrl: "https://example.com/48.png",
       raw: {
         siteUrl: "https://test.atlassian.net",
         projectTypeKey: "software",
@@ -147,6 +148,10 @@ describe("normalizeIssueSearch", () => {
           self: "https://test.atlassian.net/rest/api/3/issue/10042",
           fields: {
             summary: "Fix the bug",
+            description: {
+              type: "doc",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Search text." }] }],
+            },
             issuetype: { name: "Bug" },
             project: { id: "10001" },
           },
@@ -171,6 +176,7 @@ describe("normalizeIssueSearch", () => {
     expect(result).toHaveLength(2);
     expect(result[0]?.id).toBe("TEST-1");
     expect(result[0]?.title).toBe("Fix the bug");
+    expect(result[0]?.description).toBe("Search text.");
     expect(result[0]?.type).toBe("Bug");
     expect(result[1]?.id).toBe("TEST-2");
     expect(result[1]?.title).toBe("Add feature");

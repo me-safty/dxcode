@@ -1,6 +1,13 @@
 import { useMemo, useState } from "react";
 import type { ProjectShellProject } from "@t3tools/project-context";
+import { readProjectSetupProfileIdFromProject } from "~/t3work/hooks/t3work-createProjectBootstrap";
+import { useProjectKanbanBoardColumns } from "~/t3work/hooks/t3work-useProjectKanbanBoardColumns";
 import { useProjectResources } from "~/t3work/hooks/t3work-useProjectResources";
+import {
+  buildProjectTicketKanbanColumns,
+  getProjectTicketKanbanLaneRank,
+  matchesProjectTicketStatusCategory,
+} from "~/t3work/t3work-projectTicketStatus";
 import { buildProjectTicketHierarchy } from "~/t3work/t3work-ticketHierarchy";
 import type { ProjectTicket } from "~/t3work/t3work-types";
 
@@ -12,35 +19,24 @@ export function useProjectDashboardState({
   fallbackTickets: ProjectTicket[];
 }) {
   const { tickets: fetchedTickets, lastCheckedAt } = useProjectResources(project);
+  const { boardColumns } = useProjectKanbanBoardColumns(project);
   const tickets = fetchedTickets.length > 0 ? fetchedTickets : fallbackTickets;
+  const kanbanProfileId = useMemo(() => readProjectSetupProfileIdFromProject(project), [project]);
 
-  const openTickets = tickets.filter(
-    (ticket) =>
-      ticket.status === "Open" ||
-      ticket.status === "In Progress" ||
-      ticket.status === "To Do" ||
-      ticket.status === "In Development",
+  const openTickets = tickets.filter((ticket) =>
+    matchesProjectTicketStatusCategory(ticket.status, "active"),
   );
-  const inReviewTickets = tickets.filter(
-    (ticket) =>
-      ticket.status === "In Review" || ticket.status === "In QA" || ticket.status === "Review",
+  const inReviewTickets = tickets.filter((ticket) =>
+    matchesProjectTicketStatusCategory(ticket.status, "review"),
   );
-  const doneTickets = tickets.filter(
-    (ticket) =>
-      ticket.status === "Done" || ticket.status === "Closed" || ticket.status === "Resolved",
+  const doneTickets = tickets.filter((ticket) =>
+    matchesProjectTicketStatusCategory(ticket.status, "done"),
   );
 
   const workItems = useMemo(() => {
-    const statusRank = (status: string): number => {
-      if (status === "In Progress" || status === "In Development") return 0;
-      if (status === "In Review" || status === "In QA" || status === "Review") return 1;
-      if (status === "Open" || status === "To Do") return 2;
-      if (status === "Done" || status === "Resolved" || status === "Closed") return 3;
-      return 4;
-    };
-
     return tickets.toSorted((a, b) => {
-      const byStatus = statusRank(a.status) - statusRank(b.status);
+      const byStatus =
+        getProjectTicketKanbanLaneRank(a.status) - getProjectTicketKanbanLaneRank(b.status);
       if (byStatus !== 0) return byStatus;
       return a.ref.displayId.localeCompare(b.ref.displayId, undefined, { numeric: true });
     });
@@ -86,21 +82,7 @@ export function useProjectDashboardState({
     const normalizedQuery = query.trim().toLowerCase();
     return workItems.filter((ticket) => {
       if (statusCategory !== "all") {
-        const normalizedStatus = ticket.status.toLowerCase();
-        const matchesCategory =
-          statusCategory === "active"
-            ? normalizedStatus === "open" ||
-              normalizedStatus === "to do" ||
-              normalizedStatus === "in progress" ||
-              normalizedStatus === "in development"
-            : statusCategory === "review"
-              ? normalizedStatus === "in review" ||
-                normalizedStatus === "review" ||
-                normalizedStatus === "in qa"
-              : normalizedStatus === "done" ||
-                normalizedStatus === "closed" ||
-                normalizedStatus === "resolved";
-        if (!matchesCategory) return false;
+        if (!matchesProjectTicketStatusCategory(ticket.status, statusCategory)) return false;
       }
 
       if (selectedType !== "all") {
@@ -126,28 +108,11 @@ export function useProjectDashboardState({
   }, [query, selectedPriority, selectedStatus, selectedType, statusCategory, workItems]);
 
   const kanbanColumns = useMemo(() => {
-    const columns = {
-      todo: { title: "To do", items: [] as ProjectTicket[] },
-      inProgress: { title: "In progress", items: [] as ProjectTicket[] },
-      review: { title: "In review", items: [] as ProjectTicket[] },
-      done: { title: "Done", items: [] as ProjectTicket[] },
-      other: { title: "Other", items: [] as ProjectTicket[] },
-    };
-
-    const normalizeStatus = (status: string): keyof typeof columns => {
-      const s = status.toLowerCase();
-      if (s === "to do" || s === "open" || s === "backlog") return "todo";
-      if (s === "in progress" || s === "in development") return "inProgress";
-      if (s === "in review" || s === "review" || s === "in qa") return "review";
-      if (s === "done" || s === "closed" || s === "resolved") return "done";
-      return "other";
-    };
-
-    for (const ticket of filteredWorkItems) {
-      columns[normalizeStatus(ticket.status)].items.push(ticket);
-    }
-    return columns;
-  }, [filteredWorkItems]);
+    return buildProjectTicketKanbanColumns(filteredWorkItems, {
+      profileId: kanbanProfileId,
+      boardColumns,
+    });
+  }, [boardColumns, filteredWorkItems, kanbanProfileId]);
 
   const parentChildGroups = useMemo(
     () => buildProjectTicketHierarchy(filteredWorkItems),

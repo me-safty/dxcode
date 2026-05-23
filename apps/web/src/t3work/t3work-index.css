@@ -84,6 +84,184 @@
   animation-duration: 0s !important;
 }
 
+@keyframes t3work-create-project-step-out-forward {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+
+@keyframes t3work-create-project-step-in-forward {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes t3work-create-project-step-out-back {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+@keyframes t3work-create-project-step-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes t3work-create-project-entry-out-forward {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+
+  to {
+    opacity: 0.22;
+    transform: translateX(-72px) scale(0.985);
+  }
+}
+
+@keyframes t3work-create-project-entry-in-forward {
+  from {
+    opacity: 0.22;
+    transform: translateX(84px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes t3work-create-project-entry-out-back {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+
+  to {
+    opacity: 0.22;
+    transform: translateX(72px) scale(0.985);
+  }
+}
+
+@keyframes t3work-create-project-entry-in-back {
+  from {
+    opacity: 0.22;
+    transform: translateX(-84px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@supports (view-transition-name: none) {
+  ::view-transition-group(t3work-right-sidebar-shell),
+  ::view-transition-group(t3work-right-sidebar-panel) {
+    animation-duration: 180ms;
+    animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  ::view-transition-group(t3work-create-project-step-panel) {
+    animation-duration: 240ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  ::view-transition-group(t3work-create-project-entry-surface) {
+    animation-duration: 320ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  ::view-transition-old(t3work-create-project-step-panel),
+  ::view-transition-new(t3work-create-project-step-panel) {
+    animation-duration: 240ms;
+    animation-fill-mode: both;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    mix-blend-mode: normal;
+  }
+
+  ::view-transition-old(t3work-create-project-step-panel) {
+    animation-name: t3work-create-project-step-out-forward;
+  }
+
+  ::view-transition-new(t3work-create-project-step-panel) {
+    animation-name: t3work-create-project-step-in-forward;
+  }
+
+  ::view-transition-old(t3work-create-project-entry-surface),
+  ::view-transition-new(t3work-create-project-entry-surface) {
+    animation-duration: 320ms;
+    animation-fill-mode: both;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    mix-blend-mode: normal;
+  }
+
+  ::view-transition-old(t3work-create-project-entry-surface) {
+    animation-name: t3work-create-project-entry-out-forward;
+  }
+
+  ::view-transition-new(t3work-create-project-entry-surface) {
+    animation-name: t3work-create-project-entry-in-forward;
+  }
+
+  html[data-t3work-view-transition-types~="t3work-wizard-forward"] {
+    view-transition-name: none;
+  }
+
+  html[data-t3work-view-transition-types~="t3work-wizard-back"] {
+    view-transition-name: none;
+  }
+
+  html[data-t3work-view-transition-types~="t3work-wizard-back"]::view-transition-old(
+      t3work-create-project-step-panel
+    ) {
+    animation-name: t3work-create-project-step-out-back;
+  }
+
+  html[data-t3work-view-transition-types~="t3work-wizard-back"]::view-transition-old(
+      t3work-create-project-entry-surface
+    ) {
+    animation-name: t3work-create-project-entry-out-back;
+  }
+
+  html[data-t3work-view-transition-types~="t3work-wizard-back"]::view-transition-new(
+      t3work-create-project-step-panel
+    ) {
+    animation-name: t3work-create-project-step-in-back;
+  }
+
+  html[data-t3work-view-transition-types~="t3work-wizard-back"]::view-transition-new(
+      t3work-create-project-entry-surface
+    ) {
+    animation-name: t3work-create-project-entry-in-back;
+  }
+}
+
 :root {
   color-scheme: light;
   --radius: 0.625rem;
@@ -547,6 +725,18 @@ label:has(> select#reasoning-effort) select {
 
 .ultrathink-chroma {
   animation: ultrathink-chroma-shift 10s linear infinite;
+}
+
+[data-t3work-minimal-composer="true"] [data-chat-composer-footer="true"] {
+  justify-content: flex-end;
+}
+
+[data-t3work-minimal-composer="true"] [data-chat-composer-footer="true"] > :first-child {
+  display: none;
+}
+
+[data-t3work-minimal-composer="true"] [data-chat-composer-actions="right"] > :not(:last-child) {
+  display: none;
 }
 
 .ultrathink-pill {

@@ -4,6 +4,7 @@ import type {
   ServerLifecycleStreamEvent,
 } from "@t3tools/contracts";
 import { MockIntegrationProvider } from "@t3tools/integrations-core/mock";
+import { createMockAtlassianBackendApi } from "./t3work-mockBackendAtlassian";
 import { createMockGitHubBackendApi } from "./t3work-mockBackendGitHub";
 import { emitMockWelcome, simulateMockConversation } from "./t3work-mockBackendEvents";
 import { INITIAL_MOCK_BACKEND_STATE } from "./t3work-mockBackendState";
@@ -27,38 +28,10 @@ export function createMockBackend(): BackendApi {
   const shellListeners = new Set<(event: unknown) => void>();
   const threadListeners = new Map<string, Set<(event: unknown) => void>>();
   const github = createMockGitHubBackendApi();
-  const atlassian: T3workPollingBackend["atlassian"] = {
-    listAccounts: async () => mockIntegrationProvider.listAccounts(),
-    connectBasic: async () => mockIntegrationProvider.listAccounts(),
-    connectOAuth: async () => mockIntegrationProvider.listAccounts(),
-    exchangeOAuthCode: async () => ({
-      token: {
-        accessToken: "mock-access-token",
-        refreshToken: "mock-refresh-token",
-        expiresIn: 3600,
-      },
-      sites: [],
-    }),
-    listProjects: async (account) => mockIntegrationProvider.listProjects(account),
-    listResources: async (input) => mockIntegrationProvider.listResources(input),
-    pollResources: async (input) =>
-      toMockPollResult(
-        await mockIntegrationProvider.listResources({
-          account: input.account,
-          externalProjectId: input.externalProjectId,
-          ...(input.limit !== undefined ? { limit: input.limit } : {}),
-        }),
-      ),
-    getResource: async (ref) => mockIntegrationProvider.getResource(ref.ref),
-    downloadAsset: async (input) => {
-      const asset = await mockIntegrationProvider.downloadAsset(input.url);
-      return {
-        base64Contents: Buffer.from(asset.bytes).toString("base64"),
-        ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
-        sizeBytes: asset.bytes.byteLength,
-      };
-    },
-  };
+  const atlassian: T3workPollingBackend["atlassian"] = createMockAtlassianBackendApi({
+    mockIntegrationProvider,
+    toMockPollResult,
+  });
   const githubBackend: T3workPollingBackend["github"] = {
     ...github,
     pollInbox: async (input) =>
@@ -126,6 +99,8 @@ export function createMockBackend(): BackendApi {
       }
       await new Promise((resolve) => setTimeout(resolve, 200));
     },
+
+    async syncThreadToolContext() {},
 
     atlassian,
 

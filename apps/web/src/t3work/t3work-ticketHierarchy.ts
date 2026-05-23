@@ -4,6 +4,7 @@ export interface ProjectTicketHierarchy {
   roots: readonly ProjectTicket[];
   unresolvedChildren: readonly ProjectTicket[];
   childrenByParentId: ReadonlyMap<string, readonly ProjectTicket[]>;
+  parentByChildId: ReadonlyMap<string, string>;
 }
 
 function looksLikeChildTicket(ticket: ProjectTicket): boolean {
@@ -86,5 +87,6 @@ export function buildProjectTicketHierarchy(
     roots,
     unresolvedChildren,
     childrenByParentId: mutableChildrenByParentId,
+    parentByChildId: resolvedParentByChildId,
   };
 }

@@ -19,6 +19,15 @@ const LOC_CHECK_EXTENSIONS = new Set([
   ".html",
 ]);
 
+const NON_PRODUCTION_LOC_WARN_THRESHOLD = 300;
+const NON_PRODUCTION_LOC_FAIL_THRESHOLD = 600;
+const NON_PRODUCTION_LOC_PATTERNS = [
+  /\.test\.[^.]+$/i,
+  /\.browser\.[^.]+$/i,
+  /\.stories\.[^.]+$/i,
+  /fixtures\.[^.]+$/i,
+];
+
 export function globToRegExp(glob) {
   const escaped = glob
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
@@ -83,25 +92,36 @@ export function classifyPrefixedLocResult({
   locFailThreshold,
   counterpartPath,
 }) {
-  if (loc > locFailThreshold) {
+  const baseName = path.basename(filePath);
+  const usesNonProductionThresholds = NON_PRODUCTION_LOC_PATTERNS.some((pattern) =>
+    pattern.test(baseName),
+  );
+  const effectiveWarnThreshold = usesNonProductionThresholds
+    ? NON_PRODUCTION_LOC_WARN_THRESHOLD
+    : locWarnThreshold;
+  const effectiveFailThreshold = usesNonProductionThresholds
+    ? NON_PRODUCTION_LOC_FAIL_THRESHOLD
+    : locFailThreshold;
+
+  if (loc > effectiveFailThreshold) {
     if (counterpartPath) {
       return {
         kind: "warning",
         message:
-          `Prefixed migrated file exceeds ${locFailThreshold} LOC (warning only due to upstream counterpart): ` +
+          `Prefixed migrated file exceeds ${effectiveFailThreshold} LOC (warning only due to upstream counterpart): ` +
           `${filePath} (${loc} non-empty lines) -> ${counterpartPath}.`,
       };
     }
     return {
       kind: "violation",
-      message: `Prefixed file exceeds ${locFailThreshold} LOC: ${filePath} (${loc} non-empty lines).`,
+      message: `Prefixed file exceeds ${effectiveFailThreshold} LOC: ${filePath} (${loc} non-empty lines).`,
     };
   }
 
-  if (loc > locWarnThreshold) {
+  if (loc > effectiveWarnThreshold) {
     return {
       kind: "warning",
-      message: `Prefixed file is above ${locWarnThreshold} LOC warning threshold: ${filePath} (${loc} non-empty lines).`,
+      message: `Prefixed file is above ${effectiveWarnThreshold} LOC warning threshold: ${filePath} (${loc} non-empty lines).`,
     };
   }
 

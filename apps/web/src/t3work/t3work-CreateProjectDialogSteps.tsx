@@ -1,9 +1,7 @@
 import type { ExternalProject, IntegrationAccount } from "@t3tools/integrations-core";
-import { Button } from "~/t3work/components/ui/t3work-button";
 import { Input } from "~/t3work/components/ui/t3work-input";
 import { ProjectAvatar } from "~/t3work/components/t3work-ProjectAvatar";
 import { Skeleton } from "~/t3work/components/ui/t3work-skeleton";
-import { ConfirmStep, CreatingStep } from "~/t3work/t3work-CreateProjectDialogConfirmStep";
 
 export function SourceStep({
   loading,
@@ -13,9 +11,6 @@ export function SourceStep({
   setSiteUrl,
   setEmail,
   setApiToken,
-  onConnectBasic,
-  onConnectOAuth,
-  isValidUrl,
 }: {
   loading: boolean;
   siteUrl: string;
@@ -24,9 +19,6 @@ export function SourceStep({
   setSiteUrl: (value: string) => void;
   setEmail: (value: string) => void;
   setApiToken: (value: string) => void;
-  onConnectBasic: () => void;
-  onConnectOAuth: () => void;
-  isValidUrl: (value: string) => boolean;
 }) {
   if (loading) {
     return (
@@ -38,10 +30,6 @@ export function SourceStep({
         <Skeleton className="h-10 w-full rounded-md" />
         <Skeleton className="h-10 w-full rounded-md" />
         <Skeleton className="h-10 w-full rounded-md" />
-        <div className="flex gap-2">
-          <Skeleton className="h-9 w-40 rounded-md" />
-          <Skeleton className="h-9 w-32 rounded-md" />
-        </div>
       </section>
     );
   }
@@ -66,14 +54,6 @@ export function SourceStep({
         onChange={(event) => setApiToken(event.target.value)}
         placeholder="API token"
       />
-      <div className="flex items-center gap-2">
-        <Button onClick={onConnectBasic} disabled={!isValidUrl(siteUrl)}>
-          Connect with API token
-        </Button>
-        <Button variant="outline" onClick={onConnectOAuth}>
-          Connect with OAuth
-        </Button>
-      </div>
     </section>
   );
 }
@@ -99,8 +79,8 @@ export function AccountStep({
       </div>
       <div className="space-y-2">
         {loading
-          ? Array.from({ length: 3 }).map((_, index) => (
-              <Skeleton key={index} className="h-14 w-full rounded-md" />
+          ? ["account-1", "account-2", "account-3"].map((key) => (
+              <Skeleton key={key} className="h-14 w-full rounded-md" />
             ))
           : accounts.map((account) => (
               <button
@@ -133,6 +113,8 @@ export function ProjectStep({
   onSelectProject: (project: ExternalProject) => void;
   loading: boolean;
 }) {
+  const showLoadingSkeletons = loading && filteredProjects.length === 0;
+
   return (
     <section className="space-y-3">
       <div>
@@ -145,12 +127,12 @@ export function ProjectStep({
         value={projectQuery}
         onChange={(event) => setProjectQuery(event.target.value)}
         placeholder="Search by name or key..."
-        disabled={loading}
+        disabled={showLoadingSkeletons}
       />
       <div className="space-y-2">
-        {loading
-          ? Array.from({ length: 4 }).map((_, index) => (
-              <Skeleton key={index} className="h-14 w-full rounded-md" />
+        {showLoadingSkeletons
+          ? ["project-1", "project-2", "project-3", "project-4"].map((key) => (
+              <Skeleton key={key} className="h-14 w-full rounded-md" />
             ))
           : filteredProjects.map((project) => (
               <button

@@ -1,4 +1,5 @@
 import type { ProjectShellProject } from "@t3tools/project-context";
+import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
 import type {
   ProjectThread,
   ProjectTicket,
@@ -16,6 +17,7 @@ export interface ProjectRowProps {
   expanded: boolean;
   projectStatus: ThreadStatusPill | null;
   view: ViewState | null;
+  activeDashboardMode: ProjectDashboardMode;
   threadSortOrder: ThreadSortOrder;
   threadPreviewCount: number;
   ticketViewMode: TicketViewMode;
@@ -23,6 +25,7 @@ export interface ProjectRowProps {
   showJiraItems: boolean;
   showGitHubActivity: boolean;
   onSelectProject: (id: string) => void;
+  onSelectProjectDashboardMode: (projectId: string, dashboardMode: ProjectDashboardMode) => void;
   onToggleExpand: (id: string) => void;
   onSelectThread: (projectId: string, threadId: string) => void;
   onSelectTicket: (projectId: string, ticketId: string) => void;

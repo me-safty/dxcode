@@ -1,7 +1,6 @@
 {
   "name": "@t3tools/integrations-core",
   "version": "0.0.1",
-  "private": true,
   "type": "module",
   "exports": {
     ".": {
@@ -15,7 +14,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@t3tools/project-context": "workspace:*",

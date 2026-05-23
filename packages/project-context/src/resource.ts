@@ -10,6 +10,7 @@ export const ExternalResourceRef = Schema.Struct({
   parentId: Schema.optional(Schema.String),
   displayId: Schema.optional(Schema.String),
   title: Schema.String,
+  description: Schema.optional(Schema.String),
   type: Schema.optional(Schema.String),
   issueTypeIconUrl: Schema.optional(Schema.String),
   url: Schema.optional(Schema.String),

@@ -4,16 +4,7 @@ import type {
   ServerConfigStreamEvent,
   ServerProvider,
 } from "@t3tools/contracts";
-import type {
-  AtlassianAccessibleResource,
-  TokenExchangeResult,
-} from "@t3tools/integrations-atlassian";
-import type {
-  ExternalProject,
-  IntegrationAccount,
-  IntegrationAccountRef,
-} from "@t3tools/integrations-core";
-import type { ResourcePage, ResourceSnapshot } from "@t3tools/project-context";
+import type { AtlassianBackendApi } from "./t3work-atlassianBackendTypes";
 import type {
   GitHubAssetDownloadRequest,
   GitHubDownloadedAsset,
@@ -22,6 +13,7 @@ import type {
   GitHubPullRequestContextRequest,
   GitHubPullRequestContextResponse,
 } from "~/t3work/backend/t3work-githubTypes";
+import type { T3workTurnToolContext } from "~/t3work/t3work-threadToolContext";
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
@@ -37,6 +29,10 @@ export interface BackendApi {
   readonly connect: () => Promise<void>;
   readonly disconnect: () => Promise<void>;
   readonly dispatchCommand: (command: ClientOrchestrationCommand) => Promise<void>;
+  readonly syncThreadToolContext: (input: {
+    readonly threadId: string;
+    readonly toolContext?: T3workTurnToolContext | null;
+  }) => Promise<void>;
   readonly atlassian: AtlassianBackendApi;
   readonly github: GitHubBackendApi;
   readonly projectWorkspace: ProjectWorkspaceBackendApi;
@@ -136,62 +132,22 @@ export interface GitHubBackendApi {
   readonly downloadAsset: (input: GitHubAssetDownloadRequest) => Promise<GitHubDownloadedAsset>;
 }
 
-export type AtlassianBasicConnectInput = {
-  readonly siteUrl: string;
-  readonly email: string;
-  readonly apiToken: string;
-};
-
-export type AtlassianOAuthConnectInput = {
-  readonly sites: ReadonlyArray<AtlassianAccessibleResource>;
-  readonly token: TokenExchangeResult;
-};
-
-export type AtlassianOAuthExchangeInput = {
-  readonly code: string;
-  readonly codeVerifier: string;
-  readonly redirectUri: string;
-};
-
-export type AtlassianOAuthExchangeResult = {
-  readonly token: TokenExchangeResult;
-  readonly sites: ReadonlyArray<AtlassianAccessibleResource>;
-};
-
-export type AtlassianDownloadedAsset = {
-  readonly base64Contents: string;
-  readonly mimeType?: string;
-  readonly sizeBytes: number;
-};
-
-export interface AtlassianBackendApi {
-  readonly listAccounts: () => Promise<ReadonlyArray<IntegrationAccount>>;
-  readonly connectBasic: (
-    input: AtlassianBasicConnectInput,
-  ) => Promise<ReadonlyArray<IntegrationAccount>>;
-  readonly connectOAuth: (
-    input: AtlassianOAuthConnectInput,
-  ) => Promise<ReadonlyArray<IntegrationAccount>>;
-  readonly exchangeOAuthCode: (
-    input: AtlassianOAuthExchangeInput,
-  ) => Promise<AtlassianOAuthExchangeResult>;
-  readonly listProjects: (
-    account: IntegrationAccountRef,
-  ) => Promise<ReadonlyArray<ExternalProject>>;
-  readonly listResources: (input: {
-    readonly account: IntegrationAccountRef;
-    readonly externalProjectId: string;
-    readonly limit?: number;
-  }) => Promise<ResourcePage>;
-  readonly getResource: (input: {
-    readonly accountId: string;
-    readonly ref: unknown;
-  }) => Promise<ResourceSnapshot>;
-  readonly downloadAsset: (input: {
-    readonly accountId: string;
-    readonly url: string;
-  }) => Promise<AtlassianDownloadedAsset>;
-}
+export type {
+  AtlassianAssignableUser,
+  AtlassianBacklogBoard,
+  AtlassianBacklogBoardColumn,
+  AtlassianBacklogBoardColumnStatus,
+  AtlassianBacklogCapabilities,
+  AtlassianBoardColumnsResponse,
+  AtlassianBacklogResponse,
+  AtlassianBacklogSavedFilter,
+  AtlassianBacklogSprint,
+  AtlassianBasicConnectInput,
+  AtlassianDownloadedAsset,
+  AtlassianOAuthConnectInput,
+  AtlassianOAuthExchangeInput,
+  AtlassianOAuthExchangeResult,
+} from "./t3work-atlassianBackendTypes";
 
 export interface T3WorkEnvironmentConnection {
   readonly environmentId: string;

@@ -2,7 +2,6 @@ import { FolderPlusIcon } from "lucide-react";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import { SidebarGroup, SidebarMenu, SidebarMenuItem } from "~/t3work/components/ui/t3work-sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/t3work/components/ui/t3work-tooltip";
-import type { ProjectThread, ViewState } from "~/t3work/t3work-types";
 import { ProjectSortMenu } from "./t3work-ProjectSortMenu";
 import { ProjectRowWithTickets } from "./t3work-ProjectSidebarProjectRow";
 import { resolveProjectStatusIndicator, type TicketViewMode } from "./t3work-projectSidebarShared";
@@ -14,10 +13,12 @@ type ProjectSidebarProjectsSectionProps = Pick<
   | "expandedIds"
   | "getThreadsForProject"
   | "view"
+  | "activeDashboardMode"
   | "projectSortOrder"
   | "threadSortOrder"
   | "threadPreviewCount"
   | "onSelectProject"
+  | "onSelectProjectDashboardMode"
   | "onSelectTicket"
   | "onSelectThread"
   | "onToggleExpand"
@@ -51,6 +52,7 @@ export function ProjectSidebarProjectsSection({
   expandedIds,
   getThreadsForProject,
   view,
+  activeDashboardMode,
   projectSortOrder,
   threadSortOrder,
   threadPreviewCount,
@@ -61,6 +63,7 @@ export function ProjectSidebarProjectsSection({
   onShowJiraItemsChange,
   onShowGitHubActivityChange,
   onSelectProject,
+  onSelectProjectDashboardMode,
   onSelectTicket,
   onSelectThread,
   onToggleExpand,
@@ -131,6 +134,7 @@ export function ProjectSidebarProjectsSection({
                 expanded={expanded}
                 projectStatus={projectStatus}
                 view={view}
+                activeDashboardMode={activeDashboardMode}
                 threadSortOrder={threadSortOrder}
                 threadPreviewCount={threadPreviewCount}
                 ticketViewMode={ticketViewMode}
@@ -138,6 +142,7 @@ export function ProjectSidebarProjectsSection({
                 showJiraItems={showJiraItems}
                 showGitHubActivity={showGitHubActivity}
                 onSelectProject={onSelectProject}
+                onSelectProjectDashboardMode={onSelectProjectDashboardMode}
                 onToggleExpand={onToggleExpand}
                 onSelectThread={onSelectThread}
                 onSelectTicket={onSelectTicket}

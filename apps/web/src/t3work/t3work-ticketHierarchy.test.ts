@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildProjectTicketHierarchy } from "~/t3work/t3work-ticketHierarchy";
-import type { ProjectTicket } from "~/t3work/t3work-types";
+import { buildProjectTicketHierarchy } from "./t3work-ticketHierarchy";
+import type { ProjectTicket } from "./t3work-types";
 
 type TicketOverride = Omit<Partial<ProjectTicket>, "ref"> & {
   ref?: Partial<ProjectTicket["ref"]>;
@@ -76,6 +76,8 @@ describe("buildProjectTicketHierarchy", () => {
     expect(hierarchy.childrenByParentId.get(subtask.id)?.map((ticket) => ticket.id)).toEqual([
       nestedBug.id,
     ]);
+    expect(hierarchy.parentByChildId.get(subtask.id)).toBe(story.id);
+    expect(hierarchy.parentByChildId.get(nestedBug.id)).toBe(subtask.id);
     expect(hierarchy.unresolvedChildren.map((ticket) => ticket.id)).toEqual([orphanSubtask.id]);
   });
 
@@ -97,6 +99,7 @@ describe("buildProjectTicketHierarchy", () => {
     expect(hierarchy.childrenByParentId.get(task.id)?.map((ticket) => ticket.id)).toEqual([
       child.id,
     ]);
+    expect(hierarchy.parentByChildId.get(child.id)).toBe(task.id);
     expect(hierarchy.unresolvedChildren).toHaveLength(0);
   });
 });

@@ -1,11 +1,15 @@
-import { TicketWorkItemCard, TicketWorkItemRow } from "~/t3work/t3work-ProjectDashboardItemViews";
 import { ProjectDashboardHierarchyContent } from "~/t3work/t3work-ProjectDashboardHierarchyContent";
 import { ProjectDashboardKanban } from "~/t3work/t3work-ProjectDashboardKanban";
 import { T3SurfacePanel } from "~/t3work/components/ui/t3work-surface";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
+import type { ProjectTicketKanbanColumns } from "~/t3work/t3work-projectTicketStatus";
 import type { ProjectTicket } from "~/t3work/t3work-types";
 import type { ProjectShellProject } from "@t3tools/project-context";
-import { useTicketAddToChatContextMenus } from "~/t3work/hooks/t3work-useTicketAddToChatContextMenus";
+import {
+  DraggableTicketWorkItemCard,
+  DraggableTicketWorkItemRow,
+} from "~/t3work/t3work-DraggableTicketWorkItems";
+import { useTicketAgentContext } from "~/t3work/hooks/t3work-useTicketAgentContext";
 import { ProjectDashboardTicketGitHubActivity } from "~/t3work/t3work-ProjectDashboardTicketGitHubActivity";
 
 type TicketHierarchy = {
@@ -35,13 +39,7 @@ export function ProjectDashboardContent({
   isHierarchyMode: boolean;
   showJiraItems: boolean;
   showGitHubActivity: boolean;
-  kanbanColumns: {
-    todo: { title: string; items: ProjectTicket[] };
-    inProgress: { title: string; items: ProjectTicket[] };
-    review: { title: string; items: ProjectTicket[] };
-    done: { title: string; items: ProjectTicket[] };
-    other: { title: string; items: ProjectTicket[] };
-  };
+  kanbanColumns: ProjectTicketKanbanColumns;
   parentChildGroups: TicketHierarchy;
   githubActivityByWorkItem: ReadonlyMap<string, ReadonlyArray<GitHubWorkActivityItem>>;
   jiraLastCheckedAt?: number;
@@ -49,9 +47,13 @@ export function ProjectDashboardContent({
   projectId: string;
   onOpenTicket: (projectId: string, ticketId: string) => void;
 }) {
-  const { openTicketContextMenu, openGitHubActivityContextMenu } = useTicketAddToChatContextMenus({
+  const {
+    getTicketAgentContext,
+    getGitHubActivityAgentContext,
+    openTicketAgentContextMenu,
+    openGitHubActivityAgentContextMenu,
+  } = useTicketAgentContext({
     project,
-    projectId,
     projectTickets: filteredWorkItems,
     githubActivityByWorkItem,
   });
@@ -78,8 +80,8 @@ export function ProjectDashboardContent({
         githubActivityByWorkItem={githubActivityByWorkItem}
         projectId={projectId}
         onOpenTicket={onOpenTicket}
-        onTicketContextMenu={openTicketContextMenu}
-        onGitHubActivityContextMenu={openGitHubActivityContextMenu}
+        onTicketContextMenu={openTicketAgentContextMenu}
+        onGitHubActivityContextMenu={openGitHubActivityAgentContextMenu}
       />
     );
   }
@@ -94,8 +96,12 @@ export function ProjectDashboardContent({
         {...(jiraLastCheckedAt !== undefined ? { jiraLastCheckedAt } : {})}
         {...(githubLastCheckedAt !== undefined ? { githubLastCheckedAt } : {})}
         projectId={projectId}
-        onTicketContextMenu={openTicketContextMenu}
-        onGitHubActivityContextMenu={openGitHubActivityContextMenu}
+        onTicketContextMenu={openTicketAgentContextMenu}
+        onGitHubActivityContextMenu={openGitHubActivityAgentContextMenu}
+        getTicketAgentContext={getTicketAgentContext}
+        getGitHubActivityDragCapabilities={(ticket, item) =>
+          getGitHubActivityAgentContext(ticket, item)
+        }
         onOpenTicket={onOpenTicket}
       />
     );
@@ -106,10 +112,12 @@ export function ProjectDashboardContent({
       <T3SurfacePanel tone="muted" className="divide-y divide-border/70">
         {filteredWorkItems.map((ticket) => (
           <div key={ticket.id} className="px-3 py-2.5 transition-colors hover:bg-accent/30">
-            <TicketWorkItemRow
+            <DraggableTicketWorkItemRow
+              capabilities={getTicketAgentContext(ticket)}
+              dragLabel={`${ticket.ref.displayId} ${ticket.ref.title}`}
               ticket={ticket}
               {...(jiraLastCheckedAt !== undefined ? { lastCheckedAt: jiraLastCheckedAt } : {})}
-              onContextMenu={(event) => openTicketContextMenu(event, ticket)}
+              onContextMenu={(event) => openTicketAgentContextMenu(event, ticket)}
               extraChildren={
                 <ProjectDashboardTicketGitHubActivity
                   items={githubActivityByWorkItem.get(ticket.ref.displayId) ?? []}
@@ -119,8 +127,9 @@ export function ProjectDashboardContent({
                     ? { lastCheckedAt: githubLastCheckedAt }
                     : {})}
                   onItemContextMenu={(event, item) =>
-                    openGitHubActivityContextMenu(event, ticket, item)
+                    openGitHubActivityAgentContextMenu(event, ticket, item)
                   }
+                  getItemDragCapabilities={(item) => getGitHubActivityAgentContext(ticket, item)}
                 />
               }
               onOpen={() => onOpenTicket(projectId, ticket.id)}
@@ -135,11 +144,13 @@ export function ProjectDashboardContent({
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {filteredWorkItems.map((ticket) => (
         <T3SurfacePanel key={ticket.id} tone="muted" className="px-2.5 py-2">
-          <TicketWorkItemCard
+          <DraggableTicketWorkItemCard
+            capabilities={getTicketAgentContext(ticket)}
+            dragLabel={`${ticket.ref.displayId} ${ticket.ref.title}`}
             ticket={ticket}
             flat
             {...(jiraLastCheckedAt !== undefined ? { lastCheckedAt: jiraLastCheckedAt } : {})}
-            onContextMenu={(event) => openTicketContextMenu(event, ticket)}
+            onContextMenu={(event) => openTicketAgentContextMenu(event, ticket)}
             extraChildren={
               <ProjectDashboardTicketGitHubActivity
                 items={githubActivityByWorkItem.get(ticket.ref.displayId) ?? []}
@@ -149,8 +160,9 @@ export function ProjectDashboardContent({
                   ? { lastCheckedAt: githubLastCheckedAt }
                   : {})}
                 onItemContextMenu={(event, item) =>
-                  openGitHubActivityContextMenu(event, ticket, item)
+                  openGitHubActivityAgentContextMenu(event, ticket, item)
                 }
+                getItemDragCapabilities={(item) => getGitHubActivityAgentContext(ticket, item)}
               />
             }
             onOpen={() => onOpenTicket(projectId, ticket.id)}

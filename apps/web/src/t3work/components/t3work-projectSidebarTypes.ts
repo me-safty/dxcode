@@ -1,4 +1,6 @@
 import type { ProjectShellProject } from "@t3tools/project-context";
+import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
+import type { ProjectSidebarState } from "~/t3work/t3work-projectSidebarState";
 import type {
   ProjectSortOrder,
   ProjectThread,
@@ -17,7 +19,10 @@ export interface ProjectSidebarProps {
   projectSortOrder: ProjectSortOrder;
   threadSortOrder: ThreadSortOrder;
   threadPreviewCount: number;
+  sidebarState: ProjectSidebarState;
+  activeDashboardMode: ProjectDashboardMode;
   onSelectProject: (id: string) => void;
+  onSelectProjectDashboardMode: (projectId: string, dashboardMode: ProjectDashboardMode) => void;
   onSelectTicket: (projectId: string, ticketId: string) => void;
   onSelectThread: (projectId: string, threadId: string) => void;
   onToggleExpand: (id: string) => void;
@@ -38,4 +43,7 @@ export interface ProjectSidebarProps {
   onProjectSortOrderChange: (sortOrder: ProjectSortOrder) => void;
   onThreadSortOrderChange: (sortOrder: ThreadSortOrder) => void;
   onThreadPreviewCountChange: (count: number) => void;
+  onSidebarStateChange: (
+    value: ProjectSidebarState | ((current: ProjectSidebarState) => ProjectSidebarState),
+  ) => void;
 }

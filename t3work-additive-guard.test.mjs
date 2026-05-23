@@ -54,4 +54,36 @@ describe("t3work additive guard loc classification", () => {
     expect(result?.kind).toBe("warning");
     expect(result?.message).toContain("warning only due to upstream counterpart");
   });
+
+  it("uses higher thresholds for additive test artifacts", () => {
+    const result = classifyPrefixedLocResult({
+      filePath: "apps/web/src/t3work/t3work-projectDashboardKanbanMatrix.test.ts",
+      loc: 500,
+      locWarnThreshold: 150,
+      locFailThreshold: 200,
+      counterpartPath: null,
+    });
+
+    expect(result).toEqual({
+      kind: "warning",
+      message:
+        "Prefixed file is above 300 LOC warning threshold: apps/web/src/t3work/t3work-projectDashboardKanbanMatrix.test.ts (500 non-empty lines).",
+    });
+  });
+
+  it("uses higher thresholds for additive fixture artifacts", () => {
+    const result = classifyPrefixedLocResult({
+      filePath: "apps/web/src/t3work/t3work-projectDashboardKanbanMatrixFixtures.tsx",
+      loc: 550,
+      locWarnThreshold: 150,
+      locFailThreshold: 200,
+      counterpartPath: null,
+    });
+
+    expect(result).toEqual({
+      kind: "warning",
+      message:
+        "Prefixed file is above 300 LOC warning threshold: apps/web/src/t3work/t3work-projectDashboardKanbanMatrixFixtures.tsx (550 non-empty lines).",
+    });
+  });
 });

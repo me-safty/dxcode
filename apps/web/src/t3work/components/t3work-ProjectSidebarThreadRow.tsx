@@ -12,10 +12,19 @@ interface ThreadRowProps {
   onSelect: () => void;
   onDelete: () => void;
   onRename: (newTitle: string) => void;
+  wrapWithMenuItem?: boolean;
 }
 
 export const ThreadRow = memo(function ThreadRow(props: ThreadRowProps) {
-  const { thread, variant = "default", isActive, onSelect, onDelete, onRename } = props;
+  const {
+    thread,
+    variant = "default",
+    isActive,
+    onSelect,
+    onDelete,
+    onRename,
+    wrapWithMenuItem = true,
+  } = props;
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameTitle, setRenameTitle] = useState(thread.title);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
@@ -85,62 +94,74 @@ export const ThreadRow = memo(function ThreadRow(props: ThreadRowProps) {
     setIsRenaming(false);
   }, [renameTitle, thread.title, onRename]);
 
+  const content = (
+    <SidebarMenuSubButton
+      size="sm"
+      isActive={isActive}
+      className={`h-7 w-full translate-x-0 cursor-pointer justify-start px-2 text-left select-none ${
+        variant === "issue" ? "rounded-md bg-muted/25 hover:bg-accent/70" : ""
+      }`}
+      onClick={onSelect}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+        {variant === "issue" ? (
+          <MessageSquareIcon className="size-3 shrink-0 text-muted-foreground/70" />
+        ) : null}
+        {statusPill && (
+          <span
+            className={`inline-flex size-1.5 shrink-0 rounded-full ${statusPill.dotClass} ${statusPill.pulse ? "animate-pulse" : ""}`}
+            title={statusPill.label}
+          />
+        )}
+        {isRenaming ? (
+          <input
+            ref={renameInputRef}
+            className="min-w-0 flex-1 truncate text-xs bg-transparent outline-none border border-ring rounded px-0.5"
+            value={renameTitle}
+            onChange={(e) => setRenameTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleRenameSubmit();
+              else if (e.key === "Escape") {
+                setRenameTitle(thread.title);
+                setIsRenaming(false);
+              }
+            }}
+            onBlur={handleRenameSubmit}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
+        )}
+      </div>
+      <div className="ml-auto flex shrink-0 items-center">
+        <div className="relative flex min-w-12 justify-end pr-1">
+          <button
+            type="button"
+            aria-label={`Thread actions for ${thread.title}`}
+            className="absolute top-1/2 right-0 inline-flex size-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-muted-foreground/55 opacity-0 transition-opacity duration-150 hover:bg-accent hover:text-foreground group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:opacity-100"
+            onClick={handleOpenMenu}
+          >
+            <EllipsisIcon className="size-3" />
+          </button>
+          <span className="pointer-events-none text-[10px] text-muted-foreground/40 transition-opacity duration-150 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0">
+            {formatRelativeTime(thread.lastMessageAt)}
+          </span>
+        </div>
+      </div>
+    </SidebarMenuSubButton>
+  );
+
+  if (!wrapWithMenuItem) {
+    return (
+      <div className="group/menu-sub-item relative w-full" onContextMenu={handleContextMenu}>
+        {content}
+      </div>
+    );
+  }
+
   return (
     <SidebarMenuSubItem className="w-full" onContextMenu={handleContextMenu}>
-      <SidebarMenuSubButton
-        size="sm"
-        isActive={isActive}
-        className={`h-7 w-full translate-x-0 cursor-pointer justify-start px-2 text-left select-none ${
-          variant === "issue" ? "rounded-md bg-muted/25 hover:bg-accent/70" : ""
-        }`}
-        onClick={onSelect}
-      >
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
-          {variant === "issue" ? (
-            <MessageSquareIcon className="size-3 shrink-0 text-muted-foreground/70" />
-          ) : null}
-          {statusPill && (
-            <span
-              className={`inline-flex size-1.5 shrink-0 rounded-full ${statusPill.dotClass} ${statusPill.pulse ? "animate-pulse" : ""}`}
-              title={statusPill.label}
-            />
-          )}
-          {isRenaming ? (
-            <input
-              ref={renameInputRef}
-              className="min-w-0 flex-1 truncate text-xs bg-transparent outline-none border border-ring rounded px-0.5"
-              value={renameTitle}
-              onChange={(e) => setRenameTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleRenameSubmit();
-                else if (e.key === "Escape") {
-                  setRenameTitle(thread.title);
-                  setIsRenaming(false);
-                }
-              }}
-              onBlur={handleRenameSubmit}
-              onClick={(e) => e.stopPropagation()}
-            />
-          ) : (
-            <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
-          )}
-        </div>
-        <div className="ml-auto flex shrink-0 items-center">
-          <div className="relative flex min-w-12 justify-end pr-1">
-            <button
-              type="button"
-              aria-label={`Thread actions for ${thread.title}`}
-              className="absolute top-1/2 right-0 inline-flex size-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-muted-foreground/55 opacity-0 transition-opacity duration-150 hover:bg-accent hover:text-foreground group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:opacity-100"
-              onClick={handleOpenMenu}
-            >
-              <EllipsisIcon className="size-3" />
-            </button>
-            <span className="pointer-events-none text-[10px] text-muted-foreground/40 transition-opacity duration-150 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0">
-              {formatRelativeTime(thread.lastMessageAt)}
-            </span>
-          </div>
-        </div>
-      </SidebarMenuSubButton>
+      {content}
     </SidebarMenuSubItem>
   );
 });

@@ -17,6 +17,7 @@ release-mock/
 .idea/
 apps/web/.playwright
 apps/web/playwright-report
+apps/web/storybook-static/
 apps/web/src/components/__screenshots__
 .vitest-*
 __screenshots__/
@@ -24,6 +25,7 @@ __screenshots__/
 squashfs-root/
 .vercel
 .gstack/
+worktrees/
 dist-electron/
 .electron-runtime/
 apps/server/~/.t3code/

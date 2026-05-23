@@ -17,11 +17,13 @@ import {
   TurnId,
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
@@ -41,7 +43,32 @@ import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
+import {
+  NoopT3workToolBroker,
+  T3workToolBroker,
+  T3WORK_MCP_SERVER_NAME,
+  type T3workToolBinding,
+  type T3workToolCallResult,
+} from "../../t3work-toolBroker.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
+const decodeV2ThreadStartResponse = Schema.decodeUnknownEffect(
+  EffectCodexSchema.V2ThreadStartResponse,
+);
+const decodeV2ThreadResumeResponse = Schema.decodeUnknownEffect(
+  EffectCodexSchema.V2ThreadResumeResponse,
+);
+const decodeMcpServerStatusListParams = Schema.decodeUnknownEffect(
+  EffectCodexSchema.ClientRequest__ListMcpServerStatusParams,
+);
+const decodeMcpServerToolCallParams = Schema.decodeUnknownEffect(
+  EffectCodexSchema.ClientRequest__McpServerToolCallParams,
+);
+const decodeMcpResourceReadParams = Schema.decodeUnknownEffect(
+  EffectCodexSchema.ClientRequest__McpResourceReadParams,
+);
+const decodeDynamicToolCallResponse = Schema.decodeUnknownEffect(
+  EffectCodexSchema.DynamicToolCallResponse,
+);
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
@@ -78,12 +105,23 @@ const CodexTurnStartParamsWithCollaborationMode = EffectCodexSchema.V2TurnStartP
     collaborationMode: Schema.optionalKey(EffectCodexSchema.V2TurnStartParams__CollaborationMode),
   }),
 );
+const CodexThreadStartParamsWithDynamicTools = EffectCodexSchema.V2ThreadStartParams.pipe(
+  Schema.fieldsAssign({
+    dynamicTools: Schema.optionalKey(
+      Schema.Array(EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec),
+    ),
+  }),
+);
+const decodeCodexThreadStartParamsWithDynamicTools = Schema.decodeUnknownEffect(
+  CodexThreadStartParamsWithDynamicTools,
+);
 const decodeCodexTurnStartParamsWithCollaborationMode = Schema.decodeUnknownEffect(
   CodexTurnStartParamsWithCollaborationMode,
 );
 
 export type CodexTurnStartParamsWithCollaborationMode =
   typeof CodexTurnStartParamsWithCollaborationMode.Type;
+type CodexThreadStartParamsWithDynamicTools = typeof CodexThreadStartParamsWithDynamicTools.Type;
 const formatSchemaIssue = SchemaIssue.makeFormatterDefault();
 
 export type CodexResumeCursor = typeof CodexResumeCursorSchema.Type;
@@ -201,6 +239,47 @@ export class CodexSessionRuntimeThreadIdMissingError extends Schema.TaggedErrorC
   }
 }
 
+const emptyMcpStatusResponse = {
+  data: [],
+  nextCursor: null,
+} satisfies EffectCodexSchema.V2ListMcpServerStatusResponse;
+
+const noMcpToolsEnabled = (message: string) =>
+  ({
+    content: [{ type: "text" as const, text: message }],
+    isError: true,
+    structuredContent: { error: message },
+  }) satisfies EffectCodexSchema.V2McpServerToolCallResponse;
+
+const unavailableMcpResource = (uri: string, message: string) =>
+  ({
+    contents: [
+      { uri, mimeType: "application/json", text: JSON.stringify({ error: message }, null, 2) },
+    ],
+  }) satisfies EffectCodexSchema.V2McpResourceReadResponse;
+
+const toCodexMcpServerStatus = (
+  status: T3workToolBinding extends never
+    ? never
+    : ReturnType<T3workToolBinding["listServers"]>[number],
+): EffectCodexSchema.V2ListMcpServerStatusResponse__McpServerStatus => ({
+  authStatus: status.authStatus,
+  name: status.name,
+  resourceTemplates: status.resourceTemplates,
+  resources: status.resources,
+  tools: Object.fromEntries(
+    Object.entries(status.tools).map(([toolId, tool]) => [
+      toolId,
+      {
+        name: tool.name,
+        ...(tool.title ? { title: tool.title } : {}),
+        ...(tool.description ? { description: tool.description } : {}),
+        inputSchema: tool.inputSchema,
+      },
+    ]),
+  ),
+});
+
 interface PendingApproval {
   readonly requestId: ApprovalRequestId;
   readonly jsonRpcId: string;
@@ -282,20 +361,111 @@ function runtimeModeToThreadConfig(input: RuntimeMode): {
   }
 }
 
+interface CodexDynamicToolRegistration {
+  readonly serverName: string;
+  readonly originalName: string;
+  readonly dynamicName: string;
+  readonly description: string;
+  readonly inputSchema: EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec["inputSchema"];
+}
+
+function sanitizeDynamicToolName(name: string): string {
+  const sanitized = name.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+  return sanitized.length > 0 ? sanitized : "tool";
+}
+
+function listCodexDynamicToolRegistrations(
+  binding: T3workToolBinding,
+): ReadonlyArray<CodexDynamicToolRegistration> {
+  const usedNames = new Set<string>();
+  const registrations: Array<CodexDynamicToolRegistration> = [];
+
+  for (const server of binding.listServers()) {
+    for (const tool of Object.values(server.tools)) {
+      const baseName = sanitizeDynamicToolName(tool.name);
+      let dynamicName = baseName;
+      let suffix = 2;
+      while (usedNames.has(dynamicName)) {
+        dynamicName = `${baseName}_${suffix}`;
+        suffix += 1;
+      }
+      usedNames.add(dynamicName);
+
+      const description = tool.description ?? tool.title ?? tool.name;
+      registrations.push({
+        serverName: server.name,
+        originalName: tool.name,
+        dynamicName,
+        description:
+          dynamicName === tool.name
+            ? description
+            : `${description}\nOriginal tool id: ${tool.name}`,
+        inputSchema: tool.inputSchema,
+      });
+    }
+  }
+
+  return registrations;
+}
+
+function resolveCodexDynamicToolRegistration(
+  binding: T3workToolBinding,
+  dynamicToolName: string,
+): CodexDynamicToolRegistration | undefined {
+  return listCodexDynamicToolRegistrations(binding).find(
+    (registration) =>
+      registration.dynamicName === dynamicToolName || registration.originalName === dynamicToolName,
+  );
+}
+
 function buildThreadStartParams(input: {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
-}): EffectCodexSchema.V2ThreadStartParams {
+  readonly toolBinding?: T3workToolBinding;
+}): Effect.Effect<
+  CodexThreadStartParamsWithDynamicTools,
+  CodexErrors.CodexAppServerProtocolParseError
+> {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
-  return {
+  const dynamicTools = input.toolBinding
+    ? listCodexDynamicToolRegistrations(input.toolBinding).map((registration) => ({
+        name: registration.dynamicName,
+        description: registration.description,
+        inputSchema: registration.inputSchema,
+      }))
+    : undefined;
+
+  return decodeCodexThreadStartParamsWithDynamicTools({
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
-  };
+    ...(dynamicTools && dynamicTools.length > 0 ? { dynamicTools } : {}),
+  }).pipe(
+    Effect.mapError((error) => toProtocolParseError("Invalid thread/start request payload", error)),
+  );
+}
+
+function toDynamicToolCallResponse(
+  result: T3workToolCallResult,
+): Effect.Effect<
+  EffectCodexSchema.DynamicToolCallResponse,
+  CodexErrors.CodexAppServerProtocolParseError
+> {
+  return decodeDynamicToolCallResponse({
+    success: !result.isError,
+    contentItems: result.content.map((content) => ({
+      type: "inputText",
+      text: content.text,
+    })),
+  }).pipe(
+    Effect.mapError((error) =>
+      toProtocolParseError("Invalid item/tool/call response payload", error),
+    ),
+  );
 }
 
 function runtimeModeToTurnSandboxPolicy(
@@ -423,10 +593,12 @@ type CodexThreadOpenResponse =
 type CodexThreadOpenMethod = "thread/start" | "thread/resume";
 
 interface CodexThreadOpenClient {
-  readonly request: <M extends CodexThreadOpenMethod>(
-    method: M,
-    payload: CodexRpc.ClientRequestParamsByMethod[M],
-  ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexErrors.CodexAppServerError>;
+  readonly raw: {
+    readonly request: <M extends CodexThreadOpenMethod>(
+      method: M,
+      payload: unknown,
+    ) => Effect.Effect<unknown, CodexErrors.CodexAppServerError>;
+  };
 }
 
 export const openCodexThread = (input: {
@@ -437,35 +609,59 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  readonly toolBinding?: T3workToolBinding;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
-  const startParams = buildThreadStartParams({
-    cwd: input.cwd,
-    runtimeMode: input.runtimeMode,
-    model: input.requestedModel,
-    serviceTier: input.serviceTier,
+  return Effect.gen(function* () {
+    const startParams = yield* buildThreadStartParams({
+      cwd: input.cwd,
+      runtimeMode: input.runtimeMode,
+      model: input.requestedModel,
+      serviceTier: input.serviceTier,
+      ...(input.toolBinding ? { toolBinding: input.toolBinding } : {}),
+    });
+
+    const requestStart = () =>
+      input.client.raw
+        .request("thread/start", startParams)
+        .pipe(
+          Effect.flatMap((rawResponse) =>
+            decodeV2ThreadStartResponse(rawResponse).pipe(
+              Effect.mapError((error) =>
+                toProtocolParseError("Invalid thread/start response payload", error),
+              ),
+            ),
+          ),
+        );
+
+    if (resumeThreadId === undefined) {
+      return yield* requestStart();
+    }
+
+    return yield* input.client.raw
+      .request("thread/resume", {
+        threadId: resumeThreadId,
+        ...startParams,
+      })
+      .pipe(
+        Effect.flatMap((rawResponse) =>
+          decodeV2ThreadResumeResponse(rawResponse).pipe(
+            Effect.mapError((error) =>
+              toProtocolParseError("Invalid thread/resume response payload", error),
+            ),
+          ),
+        ),
+        Effect.catchIf(isRecoverableThreadResumeError, (error) =>
+          Effect.logWarning("codex app-server thread resume fell back to fresh start", {
+            threadId: input.threadId,
+            requestedRuntimeMode: input.runtimeMode,
+            resumeThreadId,
+            recoverable: true,
+            cause: error.message,
+          }).pipe(Effect.andThen(requestStart())),
+        ),
+      );
   });
-
-  if (resumeThreadId === undefined) {
-    return input.client.request("thread/start", startParams);
-  }
-
-  return input.client
-    .request("thread/resume", {
-      threadId: resumeThreadId,
-      ...startParams,
-    })
-    .pipe(
-      Effect.catchIf(isRecoverableThreadResumeError, (error) =>
-        Effect.logWarning("codex app-server thread resume fell back to fresh start", {
-          threadId: input.threadId,
-          requestedRuntimeMode: input.runtimeMode,
-          resumeThreadId,
-          recoverable: true,
-          cause: error.message,
-        }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
-      ),
-    );
 };
 
 function readNotificationThreadId(notification: CodexServerNotification): string | undefined {
@@ -702,12 +898,26 @@ export const makeCodexSessionRuntime = (
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const runtimeScope = yield* Scope.Scope;
+    const runtimeContext = yield* Effect.context<
+      ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
+    >();
     const events = yield* Queue.unbounded<ProviderEvent>();
     const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
     const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
     const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
     const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>());
     const closedRef = yield* Ref.make(false);
+    const toolBroker = Option.getOrElse(
+      Context.getOption(
+        runtimeContext as Context.Context<
+          ChildProcessSpawner.ChildProcessSpawner | Scope.Scope | T3workToolBroker
+        >,
+        T3workToolBroker,
+      ),
+      () => NoopT3workToolBroker,
+    );
+    const bindToolContext = () => toolBroker.bindSession({ threadId: options.threadId });
+    const toolBindingRef = yield* Ref.make<T3workToolBinding | undefined>(undefined);
 
     // `~` is not shell-expanded when env vars are set via
     // `child_process.spawn`; `expandHomePath` lets a configured
@@ -1093,9 +1303,100 @@ export const makeCodexSessionRuntime = (
       }),
     );
 
-    yield* client.handleUnknownServerRequest((method) =>
-      Effect.fail(CodexErrors.CodexAppServerRequestError.methodNotFound(method)),
+    yield* client.handleServerRequest("item/tool/call", (payload) =>
+      Effect.gen(function* () {
+        const turnId = TurnId.make(payload.turnId);
+
+        yield* emitEvent({
+          kind: "notification",
+          threadId: options.threadId,
+          method: "item/tool/call",
+          turnId,
+          payload,
+        });
+
+        const binding = yield* Ref.get(toolBindingRef);
+        const registration = binding
+          ? resolveCodexDynamicToolRegistration(binding, payload.tool)
+          : undefined;
+        const result = binding
+          ? yield* binding.callTool({
+              server: registration?.serverName ?? payload.namespace ?? T3WORK_MCP_SERVER_NAME,
+              tool: registration?.originalName ?? payload.tool,
+              arguments: payload.arguments,
+              threadId: payload.threadId,
+            })
+          : {
+              content: [
+                { type: "text" as const, text: "No t3work tools are enabled for this thread." },
+              ],
+              isError: true,
+            };
+
+        return yield* toDynamicToolCallResponse(result);
+      }),
     );
+
+    yield* client.handleUnknownServerRequest((method, params) => {
+      switch (method) {
+        case "mcpServerStatus/list":
+          return decodeMcpServerStatusListParams(params).pipe(
+            Effect.mapError((error) =>
+              CodexErrors.CodexAppServerRequestError.invalidParams(error.message),
+            ),
+            Effect.flatMap(() => Ref.get(toolBindingRef)),
+            Effect.map((binding) =>
+              binding
+                ? ({
+                    data: binding.listServers().map(toCodexMcpServerStatus),
+                    nextCursor: null,
+                  } satisfies EffectCodexSchema.V2ListMcpServerStatusResponse)
+                : emptyMcpStatusResponse,
+            ),
+          );
+        case "mcpServer/tool/call":
+          return decodeMcpServerToolCallParams(params).pipe(
+            Effect.mapError((error) =>
+              CodexErrors.CodexAppServerRequestError.invalidParams(error.message),
+            ),
+            Effect.flatMap((payload) =>
+              Ref.get(toolBindingRef).pipe(
+                Effect.flatMap((binding) =>
+                  binding
+                    ? binding.callTool(payload)
+                    : Effect.succeed(
+                        noMcpToolsEnabled("No t3work MCP tools are enabled for this thread."),
+                      ),
+                ),
+              ),
+            ),
+          );
+        case "mcpServer/resource/read":
+          return decodeMcpResourceReadParams(params).pipe(
+            Effect.mapError((error) =>
+              CodexErrors.CodexAppServerRequestError.invalidParams(error.message),
+            ),
+            Effect.flatMap((payload) =>
+              Ref.get(toolBindingRef).pipe(
+                Effect.flatMap((binding) =>
+                  binding
+                    ? binding.readResource(payload)
+                    : Effect.succeed(
+                        unavailableMcpResource(
+                          payload.uri,
+                          "No t3work MCP resources are enabled for this thread.",
+                        ),
+                      ),
+                ),
+              ),
+            ),
+          );
+        case "config/mcpServer/reload":
+          return Effect.succeed({});
+        default:
+          return Effect.fail(CodexErrors.CodexAppServerRequestError.methodNotFound(method));
+      }
+    });
 
     const registerServerNotification = <M extends CodexRpc.ServerNotificationMethod>(method: M) =>
       client.handleServerNotification(method, (params) =>
@@ -1183,6 +1484,8 @@ export const makeCodexSessionRuntime = (
       yield* client.notify("initialized", undefined);
 
       const requestedModel = normalizeCodexModelSlug(options.model);
+      const toolBinding = yield* bindToolContext();
+      yield* Ref.set(toolBindingRef, toolBinding);
 
       const opened = yield* openCodexThread({
         client,
@@ -1192,6 +1495,7 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        ...(toolBinding ? { toolBinding } : {}),
       });
 
       const providerThreadId = opened.thread.id;
@@ -1240,6 +1544,8 @@ export const makeCodexSessionRuntime = (
       getSession: Ref.get(sessionRef),
       sendTurn: (input) =>
         Effect.gen(function* () {
+          const toolBinding = yield* bindToolContext();
+          yield* Ref.set(toolBindingRef, toolBinding);
           const providerThreadId = yield* readProviderThreadId;
           const normalizedModel = normalizeCodexModelSlug(
             input.model ?? (yield* Ref.get(sessionRef)).model,

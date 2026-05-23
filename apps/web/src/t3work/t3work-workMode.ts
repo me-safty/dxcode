@@ -14,7 +14,7 @@ export function readT3workWorkMode(): T3workWorkMode {
 export function writeT3workWorkMode(mode: T3workWorkMode): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(T3WORK_WORK_MODE_STORAGE_KEY, mode);
-  window.dispatchEvent(
+  window.dispatchEvent?.(
     new CustomEvent<T3workWorkMode>(T3WORK_WORK_MODE_CHANGED_EVENT, { detail: mode }),
   );
 }

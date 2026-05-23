@@ -92,6 +92,7 @@ import {
   t3workAtlassianAccountsRouteLayer,
   t3workAtlassianAssetRouteLayer,
   t3workAtlassianAssetContentRouteLayer,
+  t3workAtlassianBacklogRouteLayer,
   t3workAtlassianConnectBasicRouteLayer,
   t3workAtlassianConnectOAuthRouteLayer,
   t3workAtlassianProjectsRouteLayer,
@@ -106,6 +107,9 @@ import {
   t3workGitHubPullRequestContextRouteLayer,
 } from "./t3work-github-routes.ts";
 import { t3workProjectWorkspaceBootstrapRouteLayer } from "./t3work-project-repository-routes.ts";
+import { t3workThreadToolContextRouteLayer } from "./t3work-thread-tool-context-routes.ts";
+import { T3workThreadToolContextStoreLive } from "./t3work-threadToolContextStore.ts";
+import { T3workToolBrokerLive } from "./t3work-toolBrokerLive.ts";
 import * as NetService from "@t3tools/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
@@ -270,6 +274,12 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
+  Layer.provideMerge(
+    T3workToolBrokerLive.pipe(
+      Layer.provideMerge(T3workThreadToolContextStoreLive),
+      Layer.provide(OrchestrationLayerLive),
+    ),
+  ),
   // The instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
@@ -328,6 +338,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   t3workAtlassianAccountsRouteLayer,
   t3workAtlassianAssetRouteLayer,
   t3workAtlassianAssetContentRouteLayer,
+  t3workAtlassianBacklogRouteLayer,
   t3workAtlassianConnectBasicRouteLayer,
   t3workAtlassianConnectOAuthRouteLayer,
   t3workAtlassianOAuthExchangeRouteLayer,
@@ -338,6 +349,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   t3workGitHubInboxRouteLayer,
   t3workGitHubPullRequestContextRouteLayer,
   t3workProjectWorkspaceBootstrapRouteLayer,
+  t3workThreadToolContextRouteLayer,
   t3workProjectWorkspaceWriteContextFilesRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,

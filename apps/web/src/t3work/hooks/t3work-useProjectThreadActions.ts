@@ -2,7 +2,10 @@ import { useCallback } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 
-import type { ProjectThread, ViewState } from "~/t3work/t3work-types";
+import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
+import type { ProjectThreadDisplayMode } from "~/t3work/t3work-projectThreadViewState";
+import { buildProjectThreadViewState } from "~/t3work/t3work-projectThreadViewState";
+import type { ProjectThread, T3workThreadToolId, ViewState } from "~/t3work/t3work-types";
 import { createTicketThread } from "./t3work-projectThreadFactories";
 import { buildThreadForProject } from "./t3work-projectStoreUtils";
 
@@ -12,11 +15,14 @@ type SetThreads = Dispatch<SetStateAction<ProjectThread[]>>;
 type CreateThreadOptions = {
   title?: string;
   ticketId?: string;
+  dashboardMode?: ProjectDashboardMode;
+  viewMode?: ProjectThreadDisplayMode;
   kickoffMessage?: string;
   kickoffPending?: boolean;
   kickoffModelSelection?: ModelSelection;
   kickoffRuntimeMode?: RuntimeMode;
   kickoffInteractionMode?: ProviderInteractionMode;
+  selectedToolIds?: ReadonlyArray<T3workThreadToolId>;
 };
 
 export function useProjectThreadActions(input: {
@@ -34,7 +40,15 @@ export function useProjectThreadActions(input: {
       setThreads((prev) => [...prev, newThread]);
       setSelectedProjectId(projectId);
       setExpandedProjectIds((prev) => new Set(prev).add(projectId));
-      setView({ type: "thread", projectId, threadId: newThread.id });
+      setView(
+        buildProjectThreadViewState({
+          projectId,
+          threadId: newThread.id,
+          ...(options?.ticketId ? { ticketId: options.ticketId } : {}),
+          ...(options?.dashboardMode ? { dashboardMode: options.dashboardMode } : {}),
+          ...(options?.viewMode ? { displayMode: options.viewMode } : {}),
+        }),
+      );
       return newThread;
     },
     [setExpandedProjectIds, setSelectedProjectId, setThreads, setView],
@@ -49,6 +63,7 @@ export function useProjectThreadActions(input: {
       kickoffModelSelection: ModelSelection;
       kickoffRuntimeMode: RuntimeMode;
       kickoffInteractionMode: ProviderInteractionMode;
+      selectedToolIds: ReadonlyArray<T3workThreadToolId>;
     }) =>
       createTicketThread({
         ...ticketInput,
@@ -72,9 +87,23 @@ export function useProjectThreadActions(input: {
   const deleteThread = useCallback(
     (threadId: string) => {
       setThreads((prev) => prev.filter((thread) => thread.id !== threadId));
-      setView((prev) =>
-        prev && prev.type === "thread" && prev.threadId === threadId ? null : prev,
-      );
+      setView((prev) => {
+        if (!prev) {
+          return prev;
+        }
+
+        if (prev.type === "thread") {
+          return prev.threadId === threadId ? null : prev;
+        }
+
+        if (prev.embeddedThreadId !== threadId) {
+          return prev;
+        }
+
+        return prev.type === "ticket"
+          ? { type: "ticket", projectId: prev.projectId, ticketId: prev.ticketId }
+          : { type: "dashboard", projectId: prev.projectId };
+      });
     },
     [setThreads, setView],
   );

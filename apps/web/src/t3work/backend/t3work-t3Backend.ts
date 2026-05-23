@@ -13,7 +13,7 @@ import {
   createAtlassianPollingBackendApi,
   createGitHubPollingBackendApi,
 } from "./t3work-pollingBackend";
-import { resolveHttpBaseUrl, resolveWsUrl } from "./t3work-t3BackendHttp";
+import { postJson, resolveHttpBaseUrl, resolveWsUrl } from "./t3work-t3BackendHttp";
 
 export function createT3Backend(wsBaseUrl: string): BackendApi {
   const httpBaseUrl = resolveHttpBaseUrl(wsBaseUrl);
@@ -66,6 +66,14 @@ export function createT3Backend(wsBaseUrl: string): BackendApi {
     await api.orchestration.dispatchCommand(command);
   }
 
+  async function syncThreadToolContext(input: Parameters<BackendApi["syncThreadToolContext"]>[0]) {
+    await postJson<typeof input, { ok: true }>(
+      httpBaseUrl,
+      "/api/t3work/thread/tool-context",
+      input,
+    );
+  }
+
   const atlassian = {
     ...createAtlassianBackendApi(httpBaseUrl),
     ...createAtlassianPollingBackendApi(httpBaseUrl),
@@ -83,6 +91,7 @@ export function createT3Backend(wsBaseUrl: string): BackendApi {
     connect,
     disconnect,
     dispatchCommand: dispatch,
+    syncThreadToolContext,
     atlassian,
     github,
     projectWorkspace,

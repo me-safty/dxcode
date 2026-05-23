@@ -8,6 +8,7 @@ import {
 } from "~/t3work/t3work-addToChatUtils";
 import { useT3WorkAddToChatStore } from "~/t3work/t3work-addToChatStore";
 import { registerContextAttachmentRequest } from "~/t3work/t3work-contextAttachmentSync";
+import type { T3workTurnToolContext } from "~/t3work/t3work-threadToolContext";
 
 function createBackend(): BackendApi {
   return {
@@ -20,6 +21,7 @@ function createBackend(): BackendApi {
     connect: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
     dispatchCommand: vi.fn(async () => undefined),
+    syncThreadToolContext: vi.fn(async () => undefined),
     atlassian: {} as BackendApi["atlassian"],
     github: {} as BackendApi["github"],
     projectWorkspace: {
@@ -62,6 +64,24 @@ beforeEach(() => {
   });
 });
 
+const TEST_TOOL_CONTEXT: T3workTurnToolContext = {
+  surface: "t3work",
+  tools: [
+    {
+      id: "t3work.view.read",
+      label: "Read current view",
+      capabilities: ["read"],
+    },
+  ],
+  state: {
+    view: {
+      kind: "ticket",
+      projectId: "project-alpha",
+      ticketId: "ticket-1",
+    },
+  },
+};
+
 describe("runThreadBootstrap", () => {
   it("includes queued thread context in kickoff messages and clears it after success", async () => {
     const backend = createBackend();
@@ -86,6 +106,7 @@ describe("runThreadBootstrap", () => {
       kickoffModelSelection: { instanceId: "codex" as any, model: "gpt-5.4" },
       kickoffRuntimeMode: "full-access",
       kickoffInteractionMode: "default",
+      toolContext: TEST_TOOL_CONTEXT,
       createdAt: "2026-05-19T12:00:00.000Z",
       shouldEnsureProject: false,
       action: "kickoff",
@@ -100,6 +121,10 @@ describe("runThreadBootstrap", () => {
 
     expect(backend.projectWorkspace.bootstrapWorkspace).toHaveBeenCalledWith({
       workspaceRoot: "/tmp/project-alpha",
+    });
+    expect(backend.syncThreadToolContext).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      toolContext: TEST_TOOL_CONTEXT,
     });
     expect(backend.dispatchCommand).toHaveBeenCalledTimes(1);
     expect(backend.dispatchCommand).toHaveBeenCalledWith(
@@ -135,6 +160,7 @@ describe("runThreadBootstrap", () => {
       kickoffModelSelection: { instanceId: "codex" as any, model: "gpt-5.4" },
       kickoffRuntimeMode: "full-access",
       kickoffInteractionMode: "default",
+      toolContext: TEST_TOOL_CONTEXT,
       createdAt: "2026-05-19T12:00:00.000Z",
       shouldEnsureProject: false,
       action: "kickoff",
@@ -149,6 +175,10 @@ describe("runThreadBootstrap", () => {
 
     expect(backend.projectWorkspace.bootstrapWorkspace).toHaveBeenCalledWith({
       workspaceRoot: "/tmp/project-alpha",
+    });
+    expect(backend.syncThreadToolContext).toHaveBeenCalledWith({
+      threadId: "thread-2",
+      toolContext: TEST_TOOL_CONTEXT,
     });
     expect(backend.projectWorkspace.writeContextFiles).toHaveBeenCalledTimes(1);
     expect(backend.dispatchCommand).toHaveBeenCalledWith(

@@ -13,7 +13,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import { ServerConfig } from "./config.ts";
-import { toAtlassianError } from "./t3work-atlassian-http.ts";
+import { toAtlassianError, tryAtlassianPromise } from "./t3work-atlassian-http.ts";
 
 export type BasicConnectInput = {
   readonly auth: {
@@ -170,10 +170,10 @@ function refreshOAuthAuthIfNeeded(accountId: string, auth: JiraApiAuth) {
       return auth;
     }
 
-    const token = yield* Effect.tryPromise({
-      try: () => refreshAccessToken(config, auth.refreshToken!),
-      catch: toAtlassianError("Failed to refresh Atlassian OAuth token."),
-    });
+    const token = yield* tryAtlassianPromise(
+      () => refreshAccessToken(config, auth.refreshToken!),
+      "Failed to refresh Atlassian OAuth token.",
+    );
     const nextAuth: JiraApiAuth = {
       kind: "oauth",
       cloudId: auth.cloudId,

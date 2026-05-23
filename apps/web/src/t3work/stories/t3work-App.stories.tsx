@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { App } from "~/t3work/t3work-App";
 
 const meta = {
-  title: "App",
+  title: "Archived/App",
   component: App,
   parameters: {
     layout: "fullscreen",

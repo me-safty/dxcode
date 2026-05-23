@@ -2,8 +2,9 @@ import type { ProjectShellProject } from "@t3tools/project-context";
 import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import type { Project } from "~/types";
 import { MOCK_TICKETS } from "~/t3work/data/t3work-mockThreads";
-import type { ProjectThread } from "~/t3work/t3work-types";
-import { normalizeWorkspaceRootPath } from "./t3work-threadBridge";
+import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
+import type { ProjectThread, T3workThreadToolId } from "~/t3work/t3work-types";
+import { normalizeWorkspaceRootPath, readOwnedWorkspaceRoots } from "./t3work-threadBridge";
 
 let projectIdCounter = 0;
 let threadIdCounter = 0;
@@ -25,11 +26,13 @@ export function buildThreadForProject(
   options?: {
     title?: string;
     ticketId?: string;
+    dashboardMode?: ProjectDashboardMode;
     kickoffMessage?: string;
     kickoffPending?: boolean;
     kickoffModelSelection?: ModelSelection;
     kickoffRuntimeMode?: RuntimeMode;
     kickoffInteractionMode?: ProviderInteractionMode;
+    selectedToolIds?: ReadonlyArray<T3workThreadToolId>;
   },
 ): ProjectThread {
   const now = new Date().toISOString();
@@ -37,6 +40,7 @@ export function buildThreadForProject(
     id: generateThreadId(),
     projectId,
     ...(options?.ticketId ? { ticketId: options.ticketId } : {}),
+    ...(options?.dashboardMode ? { dashboardMode: options.dashboardMode } : {}),
     title: options?.title ?? "New thread",
     status: "idle",
     lastMessageAt: now,
@@ -51,6 +55,7 @@ export function buildThreadForProject(
     ...(options?.kickoffInteractionMode
       ? { kickoffInteractionMode: options.kickoffInteractionMode }
       : {}),
+    ...(options?.selectedToolIds !== undefined ? { selectedToolIds: options.selectedToolIds } : {}),
   };
 }
 
@@ -68,47 +73,6 @@ function dedupeProjects(projects: ProjectShellProject[]): ProjectShellProject[] 
     bySourceKey.set(projectSourceKey(project), project);
   }
   return [...bySourceKey.values()];
-}
-
-function readOwnedWorkspaceRoots(project: ProjectShellProject): ReadonlyArray<string> {
-  const ownedRoots = new Set<string>();
-
-  const workspaceRoot = normalizeWorkspaceRootPath(project.workspace?.rootPath);
-  if (workspaceRoot) {
-    ownedRoots.add(workspaceRoot);
-  }
-
-  const raw = project.source.raw;
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return [...ownedRoots];
-  }
-
-  const agentReferences = (raw as Record<string, unknown>).agentReferences;
-  if (
-    typeof agentReferences !== "object" ||
-    agentReferences === null ||
-    Array.isArray(agentReferences)
-  ) {
-    return [...ownedRoots];
-  }
-
-  const linkedRepositories = (agentReferences as Record<string, unknown>).linkedRepositories;
-  if (!Array.isArray(linkedRepositories)) {
-    return [...ownedRoots];
-  }
-
-  for (const entry of linkedRepositories) {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      continue;
-    }
-    const localPath = (entry as Record<string, unknown>).localPath;
-    const normalizedLocalPath = normalizeWorkspaceRootPath(localPath as string | undefined);
-    if (normalizedLocalPath) {
-      ownedRoots.add(normalizedLocalPath);
-    }
-  }
-
-  return [...ownedRoots];
 }
 
 function synthesizeLooseWorkspaceProject(project: Project): ProjectShellProject {

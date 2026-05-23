@@ -1,44 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { SearchIcon } from "lucide-react";
-import type {
-  ModelSelection,
-  ProviderInteractionMode,
-  RuntimeMode,
-  ServerProvider,
-} from "@t3tools/contracts";
-import type { ProjectShellProject } from "@t3tools/project-context";
 import { Card, CardContent } from "~/t3work/components/ui/t3work-card";
 import { Input } from "~/t3work/components/ui/t3work-input";
 import { ScrollArea } from "~/t3work/components/ui/t3work-scroll-area";
+import type { ProjectDashboardKickoffAsideProps } from "~/t3work/t3work-ProjectDashboardKickoffAsideTypes";
 import { useT3WorkAddToChatStore } from "~/t3work/t3work-addToChatStore";
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
 import { formatRelativeTime } from "~/t3work/t3work-AppTicketHelpers";
 import { mergeContextAttachmentsById } from "~/t3work/t3work-contextAttachmentMerge";
+import { EmbeddedThreadAside } from "~/t3work/t3work-EmbeddedThreadAside";
 import { ProjectDashboardKickoffComposer } from "~/t3work/t3work-ProjectDashboardKickoffComposer";
 import { PROJECT_DASHBOARD_KICKOFF_QUICK_STARTS } from "~/t3work/t3work-projectDashboardKickoffQuickStarts";
-import type { ProjectThread } from "~/t3work/t3work-types";
+import { runT3workViewTransition } from "~/t3work/t3work-runViewTransition";
 
 export function ProjectDashboardKickoffAside({
   project,
   projectThreads,
+  activeThread,
   providers,
   isConnected,
   onOpenThread,
+  onOpenFullThread,
+  onThreadKickoffConsumed,
   onKickoffThread,
-}: {
-  project: ProjectShellProject;
-  projectThreads: ProjectThread[];
-  providers: ReadonlyArray<ServerProvider>;
-  isConnected: boolean;
-  onOpenThread: (threadId: string) => void;
-  onKickoffThread: (
-    kickoffMessage: string,
-    kickoffModelSelection: ModelSelection,
-    kickoffRuntimeMode: RuntimeMode,
-    kickoffInteractionMode: ProviderInteractionMode,
-    kickoffContextAttachments: ReadonlyArray<T3WorkContextAttachment>,
-  ) => void;
-}) {
+}: ProjectDashboardKickoffAsideProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [prefillText, setPrefillText] = useState<string | undefined>(undefined);
   const [injectedContextAttachments, setInjectedContextAttachments] = useState<
@@ -101,8 +86,23 @@ export function ProjectDashboardKickoffAside({
     });
   }, [normalizedQuery, recentThreads]);
 
+  if (activeThread) {
+    return (
+      <EmbeddedThreadAside
+        thread={activeThread}
+        projectId={project.id}
+        projectTitle={project.title}
+        {...(project.workspace?.rootPath
+          ? { projectWorkspaceRoot: project.workspace.rootPath }
+          : {})}
+        {...(onOpenFullThread ? { onOpenFullThread: () => onOpenFullThread(activeThread.id) } : {})}
+        onThreadKickoffConsumed={onThreadKickoffConsumed}
+      />
+    );
+  }
+
   return (
-    <aside className="flex min-h-0 flex-col overflow-hidden border-l border-border/70">
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l border-border/70 bg-background [view-transition-name:t3work-right-sidebar-panel]">
       <div className="border-b border-border px-4 py-4 sm:px-5">
         <h3 className="text-base font-semibold">Kick off a project thread</h3>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">
@@ -159,7 +159,7 @@ export function ProjectDashboardKickoffAside({
                 key={thread.id}
                 type="button"
                 className="block w-full text-left"
-                onClick={() => onOpenThread(thread.id)}
+                onClick={() => runT3workViewTransition(() => onOpenThread(thread.id))}
               >
                 <Card className="border-border/70 bg-transparent transition-colors hover:bg-accent/35">
                   <CardContent className="p-3.5">
@@ -181,17 +181,20 @@ export function ProjectDashboardKickoffAside({
         isConnected={isConnected}
         injectedContextAttachments={injectedContextAttachments}
         onRemoveContextAttachment={removeContextAttachment}
-        onSubmit={(text, selection, runtimeMode, interactionMode) => {
-          onKickoffThread(
-            text,
-            selection,
-            runtimeMode,
-            interactionMode,
-            injectedContextAttachments,
-          );
-          setPrefillText(undefined);
-          setInjectedContextAttachments([]);
-          setDismissedAttachmentIds(new Set());
+        onSubmit={(text, selection, runtimeMode, interactionMode, selectedToolIds) => {
+          runT3workViewTransition(() => {
+            onKickoffThread(
+              text,
+              selection,
+              runtimeMode,
+              interactionMode,
+              selectedToolIds,
+              injectedContextAttachments,
+            );
+            setPrefillText(undefined);
+            setInjectedContextAttachments([]);
+            setDismissedAttachmentIds(new Set());
+          });
         }}
       />
     </aside>

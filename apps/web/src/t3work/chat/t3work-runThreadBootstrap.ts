@@ -11,6 +11,7 @@ import {
 } from "~/t3work/chat/t3work-prepareThreadContextAttachments";
 import type { ThreadBootstrapDispatchState } from "~/t3work/chat/t3work-threadBootstrapPlan";
 import { useT3WorkAddToChatStore } from "~/t3work/t3work-addToChatStore";
+import type { T3workTurnToolContext } from "~/t3work/t3work-threadToolContext";
 
 type ThreadBootstrapBackend = BackendApi;
 
@@ -26,6 +27,7 @@ type RunThreadBootstrapInput = {
   kickoffModelSelection: ModelSelection;
   kickoffRuntimeMode: RuntimeMode;
   kickoffInteractionMode: ProviderInteractionMode;
+  toolContext?: T3workTurnToolContext;
   createdAt: string;
   shouldEnsureProject: boolean;
   action: ThreadBootstrapAction;
@@ -45,6 +47,7 @@ export async function runThreadBootstrap({
   kickoffModelSelection,
   kickoffRuntimeMode,
   kickoffInteractionMode,
+  toolContext,
   createdAt,
   shouldEnsureProject,
   action,
@@ -105,6 +108,10 @@ export async function runThreadBootstrap({
     const preparedContextAttachments = await prepareThreadContextAttachments({
       threadId,
       backend,
+    });
+    await backend.syncThreadToolContext({
+      threadId,
+      toolContext: toolContext ?? null,
     });
     const bootstrapMessage = appendContextAttachmentsToPrompt(
       initialUserMessage,

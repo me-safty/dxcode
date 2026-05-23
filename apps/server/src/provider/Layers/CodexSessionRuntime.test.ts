@@ -16,6 +16,7 @@ import {
   isRecoverableThreadResumeError,
   openCodexThread,
 } from "./CodexSessionRuntime.ts";
+import type { T3workToolBinding } from "../../t3work-toolBroker.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
 function makeThreadOpenResponse(
@@ -27,18 +28,51 @@ function makeThreadOpenResponse(
     modelProvider: "openai",
     approvalPolicy: "never",
     approvalsReviewer: "user",
-    sandbox: { type: "danger-full-access" },
+    sandbox: { type: "dangerFullAccess" },
     thread: {
       id: threadId,
-      createdAt: "2026-04-18T00:00:00.000Z",
-      source: { session: "cli" },
+      cliVersion: "0.0.0-test",
+      createdAt: 1_776_470_400,
+      cwd: "/tmp/project",
+      ephemeral: false,
+      modelProvider: "openai",
+      preview: "",
+      sessionId: "session-1",
+      source: "cli",
       turns: [],
       status: {
-        state: "idle",
-        activeFlags: [],
+        type: "idle",
       },
+      updatedAt: 1_776_470_400,
     },
   } as unknown as CodexRpc.ClientRequestResponsesByMethod["thread/start"];
+}
+
+function makeToolBinding(): T3workToolBinding {
+  return {
+    threadId: ThreadId.make("thread-1"),
+    listServers: () => [
+      {
+        authStatus: "unsupported",
+        name: "t3work",
+        resourceTemplates: [],
+        resources: [],
+        tools: {
+          "t3work.view.read": {
+            name: "t3work.view.read",
+            description: "Read current t3work view",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {},
+            },
+          },
+        },
+      },
+    ],
+    callTool: () => Effect.die("not implemented"),
+    readResource: () => Effect.die("not implemented"),
+  };
 }
 
 describe("buildTurnStartParams", () => {
@@ -197,24 +231,71 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
+  it("includes dynamic tools on thread/start when a tool binding exists", async () => {
+    const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
+    const client = {
+      raw: {
+        request: <M extends "thread/start" | "thread/resume">(method: M, payload: unknown) => {
+          calls.push({ method, payload });
+          return Effect.succeed(makeThreadOpenResponse("fresh-thread"));
+        },
+      },
+    };
+
+    await Effect.runPromise(
+      openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: undefined,
+        toolBinding: makeToolBinding(),
+      }),
+    );
+
+    assert.deepStrictEqual(calls, [
+      {
+        method: "thread/start",
+        payload: {
+          cwd: "/tmp/project",
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          model: "gpt-5.3-codex",
+          dynamicTools: [
+            {
+              name: "t3work_view_read",
+              description: "Read current t3work view\nOriginal tool id: t3work.view.read",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {},
+              },
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
   it("falls back to thread/start when resume fails recoverably", async () => {
     const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
     const started = makeThreadOpenResponse("fresh-thread");
     const client = {
-      request: <M extends "thread/start" | "thread/resume">(
-        method: M,
-        payload: CodexRpc.ClientRequestParamsByMethod[M],
-      ) => {
-        calls.push({ method, payload });
-        if (method === "thread/resume") {
-          return Effect.fail(
-            new CodexErrors.CodexAppServerRequestError({
-              code: -32603,
-              errorMessage: "thread not found",
-            }),
-          );
-        }
-        return Effect.succeed(started as CodexRpc.ClientRequestResponsesByMethod[M]);
+      raw: {
+        request: <M extends "thread/start" | "thread/resume">(method: M, payload: unknown) => {
+          calls.push({ method, payload });
+          if (method === "thread/resume") {
+            return Effect.fail(
+              new CodexErrors.CodexAppServerRequestError({
+                code: -32603,
+                errorMessage: "thread not found",
+              }),
+            );
+          }
+          return Effect.succeed(started);
+        },
       },
     };
 
@@ -239,21 +320,18 @@ describe("openCodexThread", () => {
 
   it("propagates non-recoverable resume failures", async () => {
     const client = {
-      request: <M extends "thread/start" | "thread/resume">(
-        method: M,
-        _payload: CodexRpc.ClientRequestParamsByMethod[M],
-      ) => {
-        if (method === "thread/resume") {
-          return Effect.fail(
-            new CodexErrors.CodexAppServerRequestError({
-              code: -32603,
-              errorMessage: "timed out waiting for server",
-            }),
-          );
-        }
-        return Effect.succeed(
-          makeThreadOpenResponse("fresh-thread") as CodexRpc.ClientRequestResponsesByMethod[M],
-        );
+      raw: {
+        request: <M extends "thread/start" | "thread/resume">(method: M, _payload: unknown) => {
+          if (method === "thread/resume") {
+            return Effect.fail(
+              new CodexErrors.CodexAppServerRequestError({
+                code: -32603,
+                errorMessage: "timed out waiting for server",
+              }),
+            );
+          }
+          return Effect.succeed(makeThreadOpenResponse("fresh-thread"));
+        },
       },
     };
 

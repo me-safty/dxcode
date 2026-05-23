@@ -64,8 +64,8 @@ recipes/
     recipe.json
     prompt.md
     action.mdx
-    visible.mjs
-    init.mjs
+    visible.ts
+    init.ts
     files/
       test-plan.md
       jira-comment.md
@@ -108,11 +108,11 @@ Example manifest:
   "icon": "{{ workitem.type === 'Bug' ? 'bug' : 'clipboard-check' }}",
   "surfaces": ["workitem.detail.sidepanel"],
   "rank": "{{ workitem.priority === 'High' ? 90 : 50 }}",
-  "visibleWhen": "./visible.mjs",
+  "visibleWhen": "./visible.ts",
   "actionView": "./action.mdx",
   "prompt": "./prompt.md",
   "files": ["./files/test-plan.md", "./files/jira-comment.md"],
-  "initScript": "./init.mjs",
+  "initScript": "./init.ts",
   "allowedToolGroups": ["integration.read", "artifact.rw", "ui.render"]
 }
 ```
@@ -134,8 +134,8 @@ Simple expression:
 
 Script rule:
 
-```js
-export async function visible(ctx, tools) {
+```ts
+export async function visible(ctx, api) {
   const issueType = ctx.workitem?.type;
 
   return {
@@ -149,6 +149,160 @@ export async function visible(ctx, tools) {
 Scripts run in their own recipe evaluation context. They may use local system access and
 scoped tools because recipes are trusted project code. The implementation should still
 record evaluation errors and timeouts so a broken recipe does not break the whole page.
+
+## Recipe Script Runtime
+
+For the MVP, recipe scripts should run server-side on the host Node runtime.
+
+- Desktop uses the Node runtime already bundled inside Electron.
+- Standalone/server deployments should require Node 24+ for recipe-script support.
+- Do not ship Bun as a recipe runtime.
+- Do not install a script runtime or third-party dependencies on demand.
+
+This keeps recipe execution inside the runtime the app already owns and avoids adding a
+second shipped JavaScript engine just for project-local scripts.
+
+### File Types
+
+Use these file names for recipe-owned code:
+
+- `visible.ts`
+- `init.ts`
+- relative helper modules such as `helpers.ts`
+
+`action.mdx` stays separate. It is a renderable action view, not a general-purpose Node
+script entrypoint.
+
+### Module Contract
+
+Recipe scripts are ESM modules loaded with normal server-side `import(...)`.
+
+```ts
+type RecipeVisibilityResult = {
+  visible: boolean;
+  rank?: number;
+  reason?: string;
+};
+
+type RecipeInitResult = {
+  summary?: string;
+  filesWritten?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+type RecipeScriptApi = {
+  tools: {
+    call<TOutput = unknown>(name: string, input?: Record<string, unknown>): Promise<TOutput>;
+    readResource(uri: string): Promise<unknown>;
+  };
+  workspace: {
+    rootPath: string;
+    recipePath: string;
+    runPath?: string;
+    readText(relativePath: string): Promise<string>;
+    writeText(relativePath: string, content: string): Promise<void>;
+    exists(relativePath: string): Promise<boolean>;
+  };
+  log: {
+    info(message: string, fields?: Record<string, unknown>): void;
+    warn(message: string, fields?: Record<string, unknown>): void;
+    error(message: string, fields?: Record<string, unknown>): void;
+  };
+  fetch: typeof fetch;
+};
+
+export type RecipeVisibleModule = {
+  visible: (
+    ctx: ActionRecipeRenderContext,
+    api: RecipeScriptApi,
+  ) => Promise<boolean | RecipeVisibilityResult> | boolean | RecipeVisibilityResult;
+};
+
+export type RecipeInitModule = {
+  init: (
+    ctx: ActionRecipeContext,
+    api: RecipeScriptApi,
+  ) => Promise<void | RecipeInitResult> | void | RecipeInitResult;
+};
+```
+
+Contract rules:
+
+- `visible.ts` must export `visible`.
+- `init.ts` must export `init`.
+- `api.tools` is capability-scoped from `allowedToolGroups` and should be the preferred
+  way to interact with t3work state.
+- `api.fetch` and Node built-ins may still be used directly because recipes are trusted
+  project code in the MVP.
+- If a script needs reusable helpers, keep them in the recipe directory and import them
+  with relative paths.
+
+### Supported TypeScript Subset
+
+Scripts should use only TypeScript syntax that Node 24 can run with built-in type
+stripping.
+
+Supported authoring style:
+
+- ESM modules
+- type annotations
+- interfaces and type aliases
+- generics
+- `import type`
+- relative imports to other `.ts` files in the recipe
+- `node:` built-in imports
+
+Unsupported for the MVP:
+
+- JSX or `.tsx`
+- decorators
+- `enum`
+- namespaces with runtime output
+- parameter properties
+- CommonJS modules
+- tsconfig path aliases such as `~/foo` or `@/foo`
+- package imports that require `npm` or `bun install`
+- any TypeScript feature that needs emit/transforms beyond stripping types
+
+Authoring rule:
+
+```text
+If the script would need TypeScript compilation to change runtime behavior,
+it is out of scope for the MVP.
+```
+
+This is intentionally conservative. It gives recipe authors native TypeScript ergonomics
+without forcing the product to bundle a compiler/transpiler pipeline for project-local
+scripts.
+
+### Dependency Policy
+
+Recipe scripts should not declare or depend on third-party packages.
+
+- No `package.json` inside recipes.
+- No per-project `npm install` or `bun install` step.
+- No hidden background dependency resolution.
+
+If a recipe needs a capability repeatedly, expose it through the host `RecipeScriptApi`
+or a t3work tool instead of asking recipe authors to install a library.
+
+### Execution Rules
+
+- `visible.ts` should be fast and mostly side-effect-free.
+- `init.ts` may write local files and prepare run artifacts.
+- Direct external writes should still prefer t3work tools so results remain reviewable in
+  the UI.
+- Script failures must be isolated to the current recipe.
+- Visibility timeouts should hide only the broken recipe.
+- Init failures should be recorded in `init-result.json` and surfaced in the run.
+
+Suggested runtime limits:
+
+- `visible.ts`: 1-2s budget
+- `init.ts`: 5-10s budget
+
+The host may implement this isolation with a worker thread or child process. Recipe
+authors should only depend on the stable module contract above.
 
 ## MDX Action Views
 
@@ -206,7 +360,7 @@ Instantiation steps:
 2. Render all templated metadata and files.
 3. Copy rendered contents into the instance directory.
 4. Write `context.json`, `context.schema.json`, and `context-map.md`.
-5. Run optional `init.mjs`.
+5. Run optional `init.ts`.
 6. Start or focus the normal chat thread.
 7. Insert a special recipe launch message, not a normal user message.
 8. Instruct the agent to follow the instantiated recipe path.

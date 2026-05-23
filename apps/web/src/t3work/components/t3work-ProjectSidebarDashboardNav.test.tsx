@@ -1,0 +1,58 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+
+import { ProjectSidebarDashboardNav } from "./t3work-ProjectSidebarDashboardNav";
+
+function renderNav(
+  overrides: Partial<React.ComponentProps<typeof ProjectSidebarDashboardNav>> = {},
+): string {
+  return renderToStaticMarkup(
+    <ProjectSidebarDashboardNav
+      isBacklogActive={false}
+      isMyWorkActive={false}
+      myWorkExpanded
+      myWorkThreadCount={0}
+      onMyWorkExpandedChange={() => {}}
+      onSelectBacklog={() => {}}
+      onSelectMyWork={() => {}}
+      backlogContent={undefined}
+      myWorkContent={undefined}
+      showJiraItems={false}
+      currentIssueCount={0}
+      currentIssuesContent={<div>Current issues</div>}
+      showGitHubActivity={false}
+      githubItems={[]}
+      {...overrides}
+    />,
+  );
+}
+
+describe("ProjectSidebarDashboardNav", () => {
+  it("hides the my work chevron when the section has no children", () => {
+    const markup = renderNav({ myWorkContent: <div>My work threads</div> });
+
+    expect(markup).not.toContain("Expand my work");
+    expect(markup).not.toContain("Collapse my work");
+    expect(markup).not.toContain("My work threads");
+  });
+
+  it("shows the my work chevron when jira items keep the section populated", () => {
+    const markup = renderNav({
+      showJiraItems: true,
+      currentIssueCount: 1,
+    });
+
+    expect(markup).toContain("Collapse my work");
+    expect(markup).toContain("Current issues");
+  });
+
+  it("shows pinned items inside my work when pins are present", () => {
+    const markup = renderNav({
+      pinnedItemCount: 1,
+      pinnedContent: <div>Pinned items</div>,
+    });
+
+    expect(markup).toContain("Collapse my work");
+    expect(markup).toContain("Pinned items");
+  });
+});

@@ -1,7 +1,20 @@
 import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { browserApiCorsHeaders } from "./httpCors.ts";
+
+export const ATLASSIAN_REQUEST_TIMEOUT_MS = 12_000;
+
+const ATLASSIAN_REQUEST_TIMEOUT = Duration.millis(ATLASSIAN_REQUEST_TIMEOUT_MS);
+
+function atlassianTimeoutError(message: string) {
+  return new T3workAtlassianError({
+    message:
+      `${message} Atlassian request timed out after ${ATLASSIAN_REQUEST_TIMEOUT_MS}ms. ` +
+      "Check Jira auth and network connectivity.",
+  });
+}
 
 export class T3workAtlassianError extends Data.TaggedError("T3workAtlassianError")<{
   readonly message: string;
@@ -26,10 +39,15 @@ export function readJsonBody<T>() {
 }
 
 export function tryAtlassianPromise<T>(thunk: () => Promise<T>, message: string) {
-  return Effect.tryPromise({
-    try: thunk,
-    catch: toAtlassianError(message),
-  });
+  return Effect.raceFirst(
+    Effect.tryPromise({
+      try: thunk,
+      catch: toAtlassianError(message),
+    }),
+    Effect.sleep(ATLASSIAN_REQUEST_TIMEOUT).pipe(
+      Effect.flatMap(() => Effect.fail(atlassianTimeoutError(message))),
+    ),
+  );
 }
 
 export function okJson(body: unknown) {

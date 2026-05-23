@@ -1,16 +1,62 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useAddToChat } from "~/t3work/hooks/t3work-useAddToChat";
 import { buildProjectTicketHierarchy } from "~/t3work/t3work-ticketHierarchy";
-import type { ProjectThread } from "~/t3work/t3work-types";
+import type { ProjectTicket } from "~/t3work/t3work-types";
 import { sortThreads } from "./t3work-projectSidebarShared";
 import type { ProjectRowProps } from "./t3work-projectSidebarProjectRowTypes";
 import { readLinkedRepositoryUrlsFromProject } from "~/t3work/hooks/t3work-createProjectBootstrap";
 import { buildProjectSidebarAddToChatRequest } from "./t3work-projectSidebarAddToChatRequests";
 import { useProjectGitHubActivity } from "~/t3work/hooks/t3work-useProjectGitHubActivity";
-import {
-  deriveTicketVisibility,
-  showProjectContextMenu,
-} from "./t3work-projectSidebarProjectRow.helpers";
+import { buildProjectSidebarThreadGroups } from "./t3work-projectSidebarThreadGroups";
+import { useProjectSidebarProjectRename } from "./t3work-useProjectSidebarProjectRename";
+import { useProjectSidebarNavItemPreferences } from "./t3work-useProjectSidebarNavItemPreferences";
+import { deriveTicketVisibility } from "./t3work-projectSidebarProjectRow.helpers";
+
+function collectVisibleTicketIds(
+  ticket: ProjectTicket,
+  childrenByParentId: ReadonlyMap<string, readonly ProjectTicket[]>,
+  visibleTicketIds: Set<string>,
+): void {
+  if (visibleTicketIds.has(ticket.id)) {
+    return;
+  }
+
+  visibleTicketIds.add(ticket.id);
+  for (const child of childrenByParentId.get(ticket.id) ?? []) {
+    collectVisibleTicketIds(child, childrenByParentId, visibleTicketIds);
+  }
+}
+
+function buildVisibleTicketIdSet(input: {
+  showJiraItems: boolean;
+  ticketViewMode: ProjectRowProps["ticketViewMode"];
+  visibleFlatTickets: ReadonlyArray<ProjectTicket>;
+  visibleTreeRoots: ReadonlyArray<ProjectTicket>;
+  visibleTreeUnresolvedChildren: ReadonlyArray<ProjectTicket>;
+  childrenByParentId: ReadonlyMap<string, readonly ProjectTicket[]>;
+}): ReadonlySet<string> {
+  const visibleTicketIds = new Set<string>();
+
+  if (!input.showJiraItems) {
+    return visibleTicketIds;
+  }
+
+  if (input.ticketViewMode === "flat") {
+    for (const ticket of input.visibleFlatTickets) {
+      visibleTicketIds.add(ticket.id);
+    }
+    return visibleTicketIds;
+  }
+
+  for (const ticket of input.visibleTreeRoots) {
+    collectVisibleTicketIds(ticket, input.childrenByParentId, visibleTicketIds);
+  }
+  for (const ticket of input.visibleTreeUnresolvedChildren) {
+    collectVisibleTicketIds(ticket, input.childrenByParentId, visibleTicketIds);
+  }
+
+  return visibleTicketIds;
+}
 
 export function useProjectSidebarProjectRow(props: ProjectRowProps) {
   const {
@@ -20,6 +66,7 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     threadSortOrder,
     threadPreviewCount,
     ticketViewMode,
+    showJiraItems,
     expanded,
     onSelectProject,
     onToggleExpand,
@@ -29,10 +76,8 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     onCreateThread,
   } = props;
 
-  const [isRenaming, setIsRenaming] = useState(false);
-  const [renameTitle, setRenameTitle] = useState(project.title);
   const [expandedThreadList, setExpandedThreadList] = useState(false);
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const [myWorkExpanded, setMyWorkExpanded] = useState(true);
   const { addToChatFromRequest } = useAddToChat();
   const linkedRepositoryUrls = useMemo(
     () => readLinkedRepositoryUrlsFromProject(project),
@@ -48,27 +93,7 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     () => sortThreads(projectThreads, threadSortOrder),
     [projectThreads, threadSortOrder],
   );
-  const projectLevelThreads = useMemo(
-    () => sortedThreads.filter((thread) => !thread.ticketId),
-    [sortedThreads],
-  );
-
-  const ticketThreadsById = useMemo(() => {
-    const map = new Map<string, ProjectThread[]>();
-    for (const thread of sortedThreads) {
-      if (!thread.ticketId) continue;
-      const existing = map.get(thread.ticketId) ?? [];
-      existing.push(thread);
-      map.set(thread.ticketId, existing);
-    }
-    return map;
-  }, [sortedThreads]);
-
-  const hasOverflowingThreads = projectLevelThreads.length > threadPreviewCount;
-  const visibleThreads =
-    expandedThreadList || !hasOverflowingThreads
-      ? projectLevelThreads
-      : projectLevelThreads.slice(0, threadPreviewCount);
+  const { hiddenItemIds, orderedItemIds } = useProjectSidebarNavItemPreferences(project.id);
 
   const ticketHierarchy = useMemo(
     () => buildProjectTicketHierarchy(projectTickets),
@@ -78,12 +103,59 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     useMemo(
       () =>
         deriveTicketVisibility({
+          projectId: project.id,
           projectTickets,
           ticketHierarchy,
           ticketViewMode,
+          hiddenItemIds,
+          orderedItemIds,
         }),
-      [projectTickets, ticketHierarchy, ticketViewMode],
+      [hiddenItemIds, orderedItemIds, project.id, projectTickets, ticketHierarchy, ticketViewMode],
     );
+  const visibleTicketIds = useMemo(
+    () =>
+      buildVisibleTicketIdSet({
+        showJiraItems,
+        ticketViewMode,
+        visibleFlatTickets,
+        visibleTreeRoots,
+        visibleTreeUnresolvedChildren,
+        childrenByParentId: ticketHierarchy.childrenByParentId,
+      }),
+    [
+      showJiraItems,
+      ticketViewMode,
+      visibleFlatTickets,
+      visibleTreeRoots,
+      visibleTreeUnresolvedChildren,
+      ticketHierarchy,
+    ],
+  );
+  const { projectLevelThreads, dashboardThreadsByMode, ticketThreadsById } = useMemo(
+    () => buildProjectSidebarThreadGroups(sortedThreads, { visibleTicketIds }),
+    [sortedThreads, visibleTicketIds],
+  );
+  const {
+    isRenaming,
+    renameTitle,
+    renameInputRef,
+    setRenameTitle,
+    handleContextMenu,
+    handleOpenMenu,
+    handleRenameSubmit,
+    handleRenameKeyDown,
+  } = useProjectSidebarProjectRename({
+    project,
+    onDeleteProject,
+    onManageProjectRepositories,
+    onRenameProject,
+  });
+
+  const hasOverflowingThreads = projectLevelThreads.length > threadPreviewCount;
+  const visibleThreads =
+    expandedThreadList || !hasOverflowingThreads
+      ? projectLevelThreads
+      : projectLevelThreads.slice(0, threadPreviewCount);
 
   const handleProjectClick = useCallback(() => {
     onSelectProject(project.id);
@@ -109,76 +181,6 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     [addToChatFromRequest, linkedRepositoryUrls, onCreateThread, project, projectTickets],
   );
 
-  const handleContextMenu = useCallback(
-    async (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      await showProjectContextMenu({
-        clientX: e.clientX,
-        clientY: e.clientY,
-        projectId: project.id,
-        projectTitle: project.title,
-        onManageProjectRepositories,
-        onDeleteProject,
-        onBeginRename: () => {
-          setRenameTitle(project.title);
-          setIsRenaming(true);
-          requestAnimationFrame(() => {
-            renameInputRef.current?.focus();
-            renameInputRef.current?.select();
-          });
-        },
-      });
-    },
-    [onDeleteProject, onManageProjectRepositories, project],
-  );
-
-  const handleOpenMenu = useCallback(
-    async (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const rect = e.currentTarget.getBoundingClientRect();
-      await showProjectContextMenu({
-        clientX: Math.round(rect.left + rect.width / 2),
-        clientY: Math.round(rect.bottom),
-        projectId: project.id,
-        projectTitle: project.title,
-        onManageProjectRepositories,
-        onDeleteProject,
-        onBeginRename: () => {
-          setRenameTitle(project.title);
-          setIsRenaming(true);
-          requestAnimationFrame(() => {
-            renameInputRef.current?.focus();
-            renameInputRef.current?.select();
-          });
-        },
-      });
-    },
-    [onDeleteProject, onManageProjectRepositories, project],
-  );
-
-  const handleRenameSubmit = useCallback(() => {
-    const trimmed = renameTitle.trim();
-    if (trimmed && trimmed !== project.title) {
-      onRenameProject(project.id, trimmed);
-    } else {
-      setRenameTitle(project.title);
-    }
-    setIsRenaming(false);
-  }, [renameTitle, project, onRenameProject]);
-
-  const handleRenameKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter") handleRenameSubmit();
-      else if (e.key === "Escape") {
-        setRenameTitle(project.title);
-        setIsRenaming(false);
-      }
-    },
-    [handleRenameSubmit, project.title],
-  );
-
   return {
     isRenaming,
     renameTitle,
@@ -187,6 +189,10 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     hasOverflowingThreads,
     expandedThreadList,
     setExpandedThreadList,
+    myWorkExpanded,
+    setMyWorkExpanded,
+    backlogThreads: dashboardThreadsByMode.backlog,
+    myWorkThreads: dashboardThreadsByMode["my-work"],
     visibleThreads,
     ticketHierarchy,
     ticketThreadsById,
@@ -195,6 +201,7 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     visibleTreeUnresolvedChildren,
     hiddenTicketCount,
     githubActivityByWorkItem: githubActivity.activityByWorkItem,
+    unlinkedGitHubActivityItems: githubActivity.unlinkedActivityItems,
     githubActivityLastCheckedAt: githubActivity.lastCheckedAt,
     handleProjectClick,
     handleToggleExpand,

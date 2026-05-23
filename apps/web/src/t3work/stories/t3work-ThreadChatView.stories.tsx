@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { ThreadChatView } from "~/t3work/chat/t3work-ThreadChatView";
 
 const meta = {
-  title: "Chat/ThreadChatView",
+  title: "Archived/Chat/ThreadChatView",
   component: ThreadChatView,
   parameters: {
     layout: "fullscreen",
@@ -16,6 +16,7 @@ export const Default: Story = {
   args: {
     threadId: "thread-1",
     projectId: "proj-einb",
+    projectTitle: "EinB Desktop",
     title: "Signature pad iOS fix",
     onBack: () => console.log("back"),
   },

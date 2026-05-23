@@ -1,9 +1,7 @@
 import type { ProjectShellProject } from "@t3tools/project-context";
 
-import { useBackend } from "~/t3work/backend/t3work-index";
-import { useAddToChat } from "~/t3work/hooks/t3work-useAddToChat";
+import { useTicketAgentContext } from "~/t3work/hooks/t3work-useTicketAgentContext";
 import { GitHubActivitySection } from "~/t3work/t3work-GitHubActivitySection";
-import { createGitHubActivityAddToChatRequest } from "~/t3work/t3work-githubActivityAttachmentRequest";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 
 export function ProjectDashboardUnmatchedActivity({
@@ -20,25 +18,24 @@ export function ProjectDashboardUnmatchedActivity({
     lastCheckedAt: number | undefined;
   };
 }) {
-  const backend = useBackend();
-  const { showAddToChatContextMenu } = useAddToChat();
+  const { getGitHubActivityAgentContext, openGitHubActivityAgentContextMenu } =
+    useTicketAgentContext({
+      project,
+      projectTickets: [],
+    });
 
   return (
     <GitHubActivitySection
       title="Unmatched GitHub activity"
       items={githubActivity.unlinkedActivityItems}
       onItemContextMenu={(event, item) => {
-        void showAddToChatContextMenu(
-          event,
-          createGitHubActivityAddToChatRequest({
-            backend,
-            project,
-            item,
-            linkedWorkItem: null,
-            fallbackHost: githubActivity.host,
-          }),
-        );
+        openGitHubActivityAgentContextMenu(event, null, item, {
+          fallbackHost: githubActivity.host,
+        });
       }}
+      getItemDragCapabilities={(item) =>
+        getGitHubActivityAgentContext(null, item, { fallbackHost: githubActivity.host })
+      }
       {...(githubActivity.warning ? { warning: githubActivity.warning } : {})}
       {...(githubActivity.suggestedRepositoryCount > 0
         ? { suggestedRepositoryCount: githubActivity.suggestedRepositoryCount }

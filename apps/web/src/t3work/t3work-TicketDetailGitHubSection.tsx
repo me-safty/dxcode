@@ -1,11 +1,11 @@
+import { useMemo } from "react";
+
 import { GitHubActivitySection } from "~/t3work/t3work-GitHubActivitySection";
-import type { MouseEvent } from "react";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectShellProject } from "@t3tools/project-context";
-import type { AddToChatRequest } from "~/t3work/t3work-addToChatUtils";
 import type { ProjectTicket } from "~/t3work/t3work-types";
 import type { BackendApi } from "~/t3work/backend/t3work-types";
-import { createGitHubActivityAddToChatRequest } from "~/t3work/t3work-githubActivityAttachmentRequest";
+import { useTicketAgentContext } from "~/t3work/hooks/t3work-useTicketAgentContext";
 
 export function TicketDetailGitHubSection({
   backend,
@@ -14,7 +14,6 @@ export function TicketDetailGitHubSection({
   projectTickets,
   displayId: _displayId,
   githubActivityItems,
-  showAddToChatContextMenu,
   githubActivityLoading,
   githubActivityWarning,
   githubHost,
@@ -27,13 +26,28 @@ export function TicketDetailGitHubSection({
   projectTickets: ReadonlyArray<ProjectTicket>;
   displayId: string;
   githubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
-  showAddToChatContextMenu: (event: MouseEvent, request: AddToChatRequest) => Promise<void>;
   githubActivityLoading?: boolean;
   githubActivityWarning?: string;
   githubHost?: string;
   githubAccount?: string;
   githubActivityLastCheckedAt?: number;
 }) {
+  const githubActivityByWorkItem = useMemo(
+    () =>
+      ticket
+        ? new Map<string, readonly GitHubWorkActivityItem[]>([
+            [ticket.ref.displayId, githubActivityItems],
+          ])
+        : undefined,
+    [githubActivityItems, ticket],
+  );
+  const { getGitHubActivityAgentContext, openGitHubActivityAgentContextMenu } =
+    useTicketAgentContext({
+      project,
+      projectTickets,
+      ...(githubActivityByWorkItem ? { githubActivityByWorkItem } : {}),
+    });
+
   return (
     <GitHubActivitySection
       title="Related GitHub activity"
@@ -42,19 +56,15 @@ export function TicketDetailGitHubSection({
         ? { lastCheckedAt: githubActivityLastCheckedAt }
         : {})}
       onItemContextMenu={(event, item) => {
-        void showAddToChatContextMenu(
-          event,
-          createGitHubActivityAddToChatRequest({
-            backend,
-            project,
-            item,
-            linkedWorkItem: ticket ?? null,
-            projectTickets,
-            githubActivityItems,
-            ...(githubHost ? { fallbackHost: githubHost } : {}),
-          }),
-        );
+        openGitHubActivityAgentContextMenu(event, ticket ?? null, item, {
+          ...(githubHost ? { fallbackHost: githubHost } : {}),
+        });
       }}
+      getItemDragCapabilities={(item) =>
+        getGitHubActivityAgentContext(ticket ?? null, item, {
+          ...(githubHost ? { fallbackHost: githubHost } : {}),
+        })
+      }
       {...(githubActivityLoading ? { loading: githubActivityLoading } : {})}
       {...(githubActivityWarning ? { warning: githubActivityWarning } : {})}
       {...(githubHost ? { host: githubHost } : {})}

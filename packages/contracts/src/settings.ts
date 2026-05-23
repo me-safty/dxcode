@@ -89,7 +89,10 @@ export const ClientSettingsSchema = Schema.Struct({
   sidebarThreadPreviewCount: SidebarThreadPreviewCount.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT)),
   ),
+  t3workStoredSidebarNavPreferencesJson: Schema.optionalKey(TrimmedString),
   t3workStoredProjectsJson: Schema.optionalKey(TrimmedString),
+  t3workStoredSidebarPinsJson: Schema.optionalKey(TrimmedString),
+  t3workStoredThreadsJson: Schema.optionalKey(TrimmedString),
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
   ),
@@ -509,6 +512,9 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarProjectSortOrder: Schema.optionalKey(SidebarProjectSortOrder),
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
+  t3workStoredProjectsJson: Schema.optionalKey(TrimmedString),
+  t3workStoredSidebarPinsJson: Schema.optionalKey(TrimmedString),
+  t3workStoredThreadsJson: Schema.optionalKey(TrimmedString),
   timestampFormat: Schema.optionalKey(TimestampFormat),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

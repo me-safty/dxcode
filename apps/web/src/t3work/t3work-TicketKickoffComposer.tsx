@@ -13,8 +13,11 @@ import {
 import { getProviderInteractionModeToggle } from "~/providerModels";
 import { deriveProviderInstanceEntries, sortProviderInstanceEntries } from "~/providerInstances";
 import { cn } from "~/lib/utils";
+import { useAddToChatComposerDropTarget } from "~/t3work/hooks/t3work-useAddToChatComposerDropTarget";
 import { TicketKickoffComposerControls } from "~/t3work/t3work-TicketKickoffComposerControls";
+import { DEFAULT_T3WORK_THREAD_TOOL_IDS } from "~/t3work/t3work-threadToolContext";
 import { runtimeModeConfig, runtimeModeOptions } from "~/t3work/t3work-ticketKickoffRuntimeConfig";
+import type { T3workThreadToolId } from "~/t3work/t3work-types";
 
 export function TicketKickoffComposer({
   prefillText,
@@ -30,6 +33,7 @@ export function TicketKickoffComposer({
     selection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,
+    selectedToolIds: ReadonlyArray<T3workThreadToolId>,
   ) => void;
 }) {
   const availableProviders = useMemo(
@@ -100,6 +104,9 @@ export function TicketKickoffComposer({
   const showInteractionModeToggle = selectedProviderEntry
     ? getProviderInteractionModeToggle(availableProviders, selectedProviderEntry.driverKind)
     : true;
+  const selectedToolIds: ReadonlyArray<T3workThreadToolId> = DEFAULT_T3WORK_THREAD_TOOL_IDS;
+  const composerDropTarget = useAddToChatComposerDropTarget();
+
   const handleSubmit = useCallback(() => {
     const next = text.trim();
     if (!next || !isConnected || !selectedProviderEntry) return;
@@ -108,6 +115,7 @@ export function TicketKickoffComposer({
       { instanceId: selectedProviderEntry.instanceId, model: selectedModel },
       runtimeMode,
       interactionMode,
+      selectedToolIds,
     );
     setText("");
     setCursor(0);
@@ -116,6 +124,7 @@ export function TicketKickoffComposer({
     isConnected,
     onSubmit,
     runtimeMode,
+    selectedToolIds,
     selectedModel,
     selectedProviderEntry,
     text,
@@ -136,11 +145,13 @@ export function TicketKickoffComposer({
       <div className="group rounded-[22px] p-px transition-colors duration-200">
         <div
           className={cn(
-            "rounded-[20px] border bg-card transition-colors duration-200 has-focus-visible:border-ring/45",
+            "relative rounded-[20px] border bg-card transition-colors duration-200 has-focus-visible:border-ring/45",
             "border-border",
             !isConnected ? "opacity-75" : null,
           )}
+          {...composerDropTarget.composerContainerProps}
         >
+          {composerDropTarget.composerContainerOverlay}
           <div className="relative px-3 pb-2 pt-3.5 sm:px-4 sm:pt-4">
             <ComposerPromptEditor
               editorRef={editorRef}

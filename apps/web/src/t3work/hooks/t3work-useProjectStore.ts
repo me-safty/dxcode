@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -6,24 +6,19 @@ import {
   selectThreadsAcrossEnvironments,
   useStore,
 } from "~/store";
-import type {
-  ProjectSortOrder,
-  ThreadSortOrder,
-  ViewState,
-  ProjectThread,
-} from "~/t3work/t3work-types";
-import { MOCK_THREADS } from "~/t3work/data/t3work-mockThreads";
+import type { ViewState, ProjectThread } from "~/t3work/t3work-types";
+import { useProjectStoreActions } from "./t3work-useProjectStoreActions";
 import { useProjectStoreQueries } from "./t3work-useProjectStoreQueries";
 import { useProjectThreadActions } from "./t3work-useProjectThreadActions";
 import { useHydrateStoredProjects } from "./t3work-useHydrateStoredProjects";
+import { useHydrateStoredThreads } from "./t3work-useHydrateStoredThreads";
 import {
   generateProjectId,
   deriveLooseWorkspaceProjects,
   loadStoredProjects,
-  saveStoredProjects,
-  upsertProjectBySource,
 } from "./t3work-projectStoreUtils";
-import { hydrateStoredProjects, persistStoredProjects } from "./t3work-projectStorePersistence";
+import { persistStoredThreads } from "./t3work-projectThreadPersistence";
+import { remapProjectThreadToStoredProject, resolveStoredProjectId } from "./t3work-threadBridge";
 
 export function useProjectStore() {
   const [storedProjects, setStoredProjects] = useState<ProjectShellProject[]>(loadStoredProjects);
@@ -34,10 +29,8 @@ export function useProjectStore() {
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
     () => new Set(loadStoredProjects().map((p) => p.id)),
   );
-  const [threads, setThreads] = useState<ProjectThread[]>(MOCK_THREADS);
-  const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>("updated_at");
-  const [threadSortOrder, setThreadSortOrder] = useState<ThreadSortOrder>("updated_at");
-  const [threadPreviewCount, setThreadPreviewCount] = useState(5);
+  const [threads, setThreads] = useState<ProjectThread[]>([]);
+  const [threadsHydrated, setThreadsHydrated] = useState(false);
   const liveProjects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const liveThreads = useStore(useShallow(selectThreadsAcrossEnvironments));
   useHydrateStoredProjects({
@@ -45,10 +38,45 @@ export function useProjectStore() {
     setSelectedProjectId,
     setExpandedProjectIds,
   });
+  useHydrateStoredThreads({ setThreads, setThreadsHydrated });
+
+  useEffect(() => {
+    if (!threadsHydrated) {
+      return;
+    }
+
+    persistStoredThreads(threads);
+  }, [threads, threadsHydrated]);
+
+  useEffect(() => {
+    setThreads((currentThreads) => {
+      let changed = false;
+      const nextThreads = currentThreads.map((thread) => {
+        const normalizedThread = remapProjectThreadToStoredProject(
+          thread,
+          storedProjects,
+          liveProjects,
+        );
+        if (normalizedThread !== thread) {
+          changed = true;
+        }
+        return normalizedThread;
+      });
+      return changed ? nextThreads : currentThreads;
+    });
+  }, [liveProjects, storedProjects]);
 
   const looseWorkspaceProjects = useMemo(
     () => deriveLooseWorkspaceProjects(storedProjects, liveProjects),
     [liveProjects, storedProjects],
+  );
+  const resolveProjectId = useCallback(
+    (projectId: string) => resolveStoredProjectId(projectId, storedProjects, liveProjects),
+    [liveProjects, storedProjects],
+  );
+  const visibleLooseWorkspaceProjects = useMemo(
+    () => looseWorkspaceProjects.filter((project) => resolveProjectId(project.id) === project.id),
+    [looseWorkspaceProjects, resolveProjectId],
   );
   const allProjects = useMemo(
     () => [...storedProjects, ...looseWorkspaceProjects],
@@ -61,95 +89,25 @@ export function useProjectStore() {
     liveProjects,
     liveThreads,
   });
-
-  const addProject = useCallback((project: ProjectShellProject) => {
-    setStoredProjects((prev) => {
-      const next = upsertProjectBySource(prev, project);
-      saveStoredProjects(next);
-      persistStoredProjects(next);
-      return next;
-    });
-    setSelectedProjectId(project.id);
-    setExpandedProjectIds((prev) => new Set(prev).add(project.id));
-    setView({ type: "dashboard", projectId: project.id });
-  }, []);
-
-  const deleteProject = useCallback((id: string) => {
-    setStoredProjects((prev) => {
-      const next = prev.filter((p) => p.id !== id);
-      saveStoredProjects(next);
-      persistStoredProjects(next);
-      return next;
-    });
-    setThreads((prev) => prev.filter((t) => t.projectId !== id));
-    setSelectedProjectId((prev) => (prev === id ? null : prev));
-    setView((prev) => (prev && prev.projectId === id ? null : prev));
-    setExpandedProjectIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  }, []);
-
-  const renameProject = useCallback(
-    (id: string, newTitle: string) => {
-      setStoredProjects((prev) => {
-        const existingProject = prev.find((candidate) => candidate.id === id);
-        const sourceProject =
-          existingProject ?? allProjects.find((candidate) => candidate.id === id);
-        if (!sourceProject) {
-          return prev;
-        }
-        const updatedProject = { ...sourceProject, title: newTitle };
-        const next = existingProject
-          ? prev.map((candidate) => (candidate.id === id ? updatedProject : candidate))
-          : [...prev, updatedProject];
-        saveStoredProjects(next);
-        persistStoredProjects(next);
-        return next;
-      });
-    },
-    [allProjects],
-  );
-
-  const updateProject = useCallback((id: string, nextProject: ProjectShellProject) => {
-    setStoredProjects((prev) => {
-      const existingProject = prev.some((candidate) => candidate.id === id);
-      const next = existingProject
-        ? prev.map((candidate) => (candidate.id === id ? nextProject : candidate))
-        : [...prev, nextProject];
-      saveStoredProjects(next);
-      persistStoredProjects(next);
-      return next;
-    });
-  }, []);
-
-  const toggleProjectExpanded = useCallback((id: string) => {
-    setExpandedProjectIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
-
-  const selectProject = useCallback((id: string) => {
-    setSelectedProjectId(id);
-    setView({ type: "dashboard", projectId: id });
-  }, []);
-
-  const selectTicket = useCallback((projectId: string, ticketId: string) => {
-    setSelectedProjectId(projectId);
-    setView({ type: "ticket", projectId, ticketId });
-  }, []);
-
-  const selectThread = useCallback((projectId: string, threadId: string) => {
-    setSelectedProjectId(projectId);
-    setView({ type: "thread", projectId, threadId });
-  }, []);
+  const {
+    addProject,
+    deleteProject,
+    renameProject,
+    updateProject,
+    toggleProjectExpanded,
+    selectProject,
+    selectTicket,
+    selectThread,
+    selectStandaloneThread,
+  } = useProjectStoreActions({
+    allProjects,
+    getThreadsForProject,
+    setExpandedProjectIds,
+    setSelectedProjectId,
+    setStoredProjects,
+    setThreads,
+    setView,
+  });
 
   const {
     createThread,
@@ -169,16 +127,13 @@ export function useProjectStore() {
 
   return {
     projects: storedProjects,
-    looseWorkspaceProjects,
+    looseWorkspaceProjects: visibleLooseWorkspaceProjects,
     allProjects,
     selectedProject,
     selectedProjectId,
     view,
     expandedProjectIds,
     threads,
-    projectSortOrder,
-    threadSortOrder,
-    threadPreviewCount,
     getThreadsForProject,
     getTicketsForProject,
     addProject,
@@ -189,14 +144,13 @@ export function useProjectStore() {
     selectProject,
     selectTicket,
     selectThread,
+    selectStandaloneThread,
     createThread,
     createThreadForTicket,
     markThreadKickoffConsumed,
     deleteThread,
     renameThread,
-    setProjectSortOrder,
-    setThreadSortOrder,
-    setThreadPreviewCount,
+    resolveProjectId,
     setView,
   };
 }

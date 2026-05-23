@@ -31,6 +31,12 @@ export function renderAgentsMd(profile: ProjectSetupProfileDefinition): string {
 - ${complexityLine}
 - Explain what changed, why it matters, and what the user should do next.
 
+## Thread Naming
+
+- Keep the thread title current as the topic changes.
+- When a thread name no longer describes the work, rename it in a few words.
+- Example: change "Initial question" to "Fix OAuth callback" after the work shifts there.
+
 ## Start With Project Context
 
 Use these project files before asking the user to restate context:

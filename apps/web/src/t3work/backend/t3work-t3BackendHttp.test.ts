@@ -38,6 +38,7 @@ describe("postJson", () => {
         workspaceRoot: "/tmp/project-alpha",
         files: [],
       }),
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -55,5 +56,29 @@ describe("postJson", () => {
     ).rejects.toThrow(
       "Failed to reach backend /api/t3work/atlassian/accounts at http://127.0.0.1:13773. Fetch error: Failed to fetch. Browser origin: http://127.0.0.1:5733. This is a cross-origin browser request. If the backend is running, a CORS mismatch or blocked preflight likely prevented the request from reaching the route.",
     );
+  });
+
+  it("times out hung backend requests instead of waiting forever", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("The operation was aborted.", "AbortError"));
+            });
+          }),
+      ),
+    );
+
+    const request = expect(
+      postJson("http://127.0.0.1:13773/", "/api/t3work/atlassian/backlog", {}),
+    ).rejects.toThrow(
+      "Failed to reach backend /api/t3work/atlassian/backlog at http://127.0.0.1:13773. Fetch error: Backend request timed out after 15000ms.",
+    );
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await request;
   });
 });

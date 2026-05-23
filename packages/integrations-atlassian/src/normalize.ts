@@ -299,6 +299,13 @@ function extractIssueTypeIconUrl(issueType: unknown): string | undefined {
   return undefined;
 }
 
+function extractIssueTypeIsSubtask(issueType: unknown): boolean | undefined {
+  if (issueType === null || issueType === undefined) return undefined;
+  if (typeof issueType !== "object") return undefined;
+  const obj = issueType as Record<string, unknown>;
+  return typeof obj.subtask === "boolean" ? obj.subtask : undefined;
+}
+
 function formatComments(comments: ReadonlyArray<JiraComment>): string {
   return comments
     .map((c) => {
@@ -320,15 +327,20 @@ function extractComments(commentField: unknown): ReadonlyArray<JiraComment> {
   return Array.isArray(comments) ? (comments as ReadonlyArray<JiraComment>) : [];
 }
 
+function extractDescriptionText(description: unknown): string | undefined {
+  const text =
+    typeof description === "string"
+      ? description
+      : convertAdfToMarkdown(description) || extractTextFromADF(description);
+
+  return typeof text === "string" && text.trim().length > 0 ? text.trim() : undefined;
+}
+
 export function normalizeIssue(issue: JiraIssue, siteUrl: string): ResourceSnapshot {
   const fields = issue.fields;
   const key = issue.key;
   const summary = typeof fields.summary === "string" ? fields.summary : key;
-  const description = fields.description;
-  const descriptionText =
-    typeof description === "string"
-      ? description
-      : convertAdfToMarkdown(description) || extractTextFromADF(description);
+  const descriptionText = extractDescriptionText(fields.description);
   const comments = extractComments(fields.comment);
   const renderedFields =
     issue && typeof issue === "object" && "renderedFields" in issue
@@ -453,8 +465,14 @@ export function normalizeIssueSearch(
       parentId: extractParentKey(jiraIssue.fields.parent),
       displayId: key,
       title: summary,
+      ...(extractDescriptionText(jiraIssue.fields.description)
+        ? { description: extractDescriptionText(jiraIssue.fields.description) }
+        : {}),
       type: extractIssueTypeName(jiraIssue.fields.issuetype),
       issueTypeIconUrl: extractIssueTypeIconUrl(jiraIssue.fields.issuetype),
+      ...(extractIssueTypeIsSubtask(jiraIssue.fields.issuetype) !== undefined
+        ? { issueTypeIsSubtask: extractIssueTypeIsSubtask(jiraIssue.fields.issuetype) }
+        : {}),
       url: `${siteUrl}/browse/${key}`,
       projectId,
       status: extractStatusName(jiraIssue.fields.status),

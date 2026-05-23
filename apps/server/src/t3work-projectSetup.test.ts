@@ -28,6 +28,7 @@ describe("renderT3WorkProjectSetupFiles", () => {
     );
 
     expect(agents?.contents).toContain("Use plain, non-technical language");
+    expect(agents?.contents).toContain("Keep the thread title current as the topic changes.");
     expect(agents?.contents).toContain(T3WORK_PROJECT_CONTEXT_ENTRYPOINT_PATH);
     expect(manifest?.writeMode).toBe("overwrite");
     expect(manifest?.contents).toContain(DEFAULT_T3WORK_PROJECT_SETUP_PROFILE_ID);

@@ -1,6 +1,7 @@
 import type { ExternalProject, IntegrationAccount } from "@t3tools/integrations-core";
 import type { Dispatch, SetStateAction } from "react";
 import type { BackendApi } from "~/t3work/backend/t3work-types";
+import { runT3workViewTransition } from "~/t3work/t3work-runViewTransition";
 import type { CreateProjectStep } from "./t3work-useCreateProject";
 import { persistLastAccountId, pickPreferredAccount } from "./t3work-createProjectUtils";
 import { readIntegrationCache, writeIntegrationCache } from "./t3work-integrationCache";
@@ -27,18 +28,25 @@ export async function loadPersistedAccountsStep(input: {
   const cachedAccounts =
     readIntegrationCache<ReadonlyArray<IntegrationAccount>>("atlassian:listAccounts")?.value ?? [];
   if (cachedAccounts.length > 0) {
-    input.setAccounts(cachedAccounts);
     const cachedPreferredAccount = pickPreferredAccount(cachedAccounts);
-    input.setSelectedAccount(cachedPreferredAccount);
     if (cachedPreferredAccount) {
       persistLastAccountId(cachedPreferredAccount.id);
       const cachedProjects =
         readIntegrationCache<ReadonlyArray<ExternalProject>>(
           `atlassian:listProjects:${cachedPreferredAccount.provider}:${cachedPreferredAccount.id}`,
         )?.value ?? [];
-      input.setSelectedProject(null);
-      input.setProjects(cachedProjects);
-      input.setStep(cachedAccounts.length === 1 ? "project" : "account");
+      runT3workViewTransition(
+        () => {
+          input.setAccounts(cachedAccounts);
+          input.setSelectedAccount(cachedPreferredAccount);
+          input.setSelectedProject(null);
+          input.setProjects(cachedProjects);
+          input.setStep(cachedAccounts.length === 1 ? "project" : "account");
+        },
+        { types: ["t3work-wizard-forward"] },
+      );
+    } else {
+      input.setAccounts(cachedAccounts);
     }
   }
 
@@ -48,9 +56,7 @@ export async function loadPersistedAccountsStep(input: {
     writeIntegrationCache("atlassian:listAccounts", loadedAccounts);
     if (loadedAccounts.length === 0) return;
 
-    input.setAccounts(loadedAccounts);
     const preferredAccount = pickPreferredAccount(loadedAccounts);
-    input.setSelectedAccount(preferredAccount);
     if (preferredAccount) persistLastAccountId(preferredAccount.id);
 
     if (loadedAccounts.length === 1 && preferredAccount) {
@@ -63,14 +69,28 @@ export async function loadPersistedAccountsStep(input: {
         `atlassian:listProjects:${preferredAccount.provider}:${preferredAccount.id}`,
         projects,
       );
-      input.setSelectedProject(null);
-      input.setProjects(projects);
-      input.setStep("project");
+      runT3workViewTransition(
+        () => {
+          input.setAccounts(loadedAccounts);
+          input.setSelectedAccount(preferredAccount);
+          input.setSelectedProject(null);
+          input.setProjects(projects);
+          input.setStep("project");
+        },
+        { types: ["t3work-wizard-forward"] },
+      );
       return;
     }
 
-    input.setProjects([]);
-    input.setStep("account");
+    runT3workViewTransition(
+      () => {
+        input.setAccounts(loadedAccounts);
+        input.setSelectedAccount(preferredAccount);
+        input.setProjects([]);
+        input.setStep("account");
+      },
+      { types: ["t3work-wizard-forward"] },
+    );
   } catch (error) {
     input.fail(error, "Failed to load saved Atlassian settings");
   } finally {

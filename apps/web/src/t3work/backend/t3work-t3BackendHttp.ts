@@ -22,6 +22,8 @@ export function resolveHttpBaseUrl(rawUrl: string): string {
   return resolved.toString();
 }
 
+const BACKEND_POST_TIMEOUT_MS = 15_000;
+
 function buildBackendFetchErrorMessage(input: { url: URL; error: unknown }): string {
   const reason = input.error instanceof Error ? input.error.message : String(input.error);
   const browserOrigin = globalThis.location?.origin;
@@ -51,6 +53,13 @@ export async function postJson<TInput extends object, TResponse>(
   body: TInput,
 ): Promise<TResponse> {
   const url = new URL(routePath, httpBaseUrl);
+  const abortController = new AbortController();
+  let didTimeout = false;
+  const timeoutHandle = globalThis.setTimeout(() => {
+    didTimeout = true;
+    abortController.abort();
+  }, BACKEND_POST_TIMEOUT_MS);
+
   const response = await fetch(url, {
     method: "POST",
     credentials: "same-origin",
@@ -58,14 +67,21 @@ export async function postJson<TInput extends object, TResponse>(
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
-  }).catch((error) => {
-    throw new Error(
-      buildBackendFetchErrorMessage({
-        url,
-        error,
-      }),
-    );
-  });
+    signal: abortController.signal,
+  })
+    .catch((error) => {
+      throw new Error(
+        buildBackendFetchErrorMessage({
+          url,
+          error: didTimeout
+            ? new Error(`Backend request timed out after ${BACKEND_POST_TIMEOUT_MS}ms`)
+            : error,
+        }),
+      );
+    })
+    .finally(() => {
+      globalThis.clearTimeout(timeoutHandle);
+    });
 
   const payload = (await response.json().catch(() => null)) as
     | { error?: string }

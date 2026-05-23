@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent } from "~/t3work/components/ui/t3work-card";
 import { ScrollArea } from "~/t3work/components/ui/t3work-scroll-area";
-import type { ProjectThread } from "~/t3work/t3work-types";
+import type { ProjectThread, T3workThreadToolId } from "~/t3work/t3work-types";
 import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
 import { formatRelativeTime } from "./t3work-AppTicketHelpers";
@@ -18,6 +18,7 @@ type TicketKickoffPanelProps = {
     selection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,
+    selectedToolIds: ReadonlyArray<T3workThreadToolId>,
     contextAttachments: ReadonlyArray<T3WorkContextAttachment>,
   ) => void;
   renderComposer: (props: {
@@ -27,6 +28,7 @@ type TicketKickoffPanelProps = {
       selection: ModelSelection,
       runtimeMode: RuntimeMode,
       interactionMode: ProviderInteractionMode,
+      selectedToolIds: ReadonlyArray<T3workThreadToolId>,
     ) => void;
   }) => React.ReactNode;
 };
@@ -172,8 +174,15 @@ export function TicketKickoffPanel({
         )}
         {renderComposer({
           ...(prefill ? { prefillText: prefill } : {}),
-          onSubmit: (text, selection, runtimeMode, interactionMode) => {
-            onKickoff(text, selection, runtimeMode, interactionMode, localContextAttachments);
+          onSubmit: (text, selection, runtimeMode, interactionMode, selectedToolIds) => {
+            onKickoff(
+              text,
+              selection,
+              runtimeMode,
+              interactionMode,
+              selectedToolIds,
+              localContextAttachments,
+            );
             setPrefill(undefined);
             setLocalContextAttachments([]);
             setDismissedAttachmentIds(new Set());

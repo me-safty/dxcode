@@ -1,4 +1,4 @@
-import { FolderPlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { SearchIcon, SettingsIcon } from "lucide-react";
 import {
   SidebarFooter,
   SidebarGroup,
@@ -9,12 +9,10 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from "~/t3work/components/ui/t3work-sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "~/t3work/components/ui/t3work-tooltip";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import { isElectron } from "~/env";
 import { LocalWorkspaceSidebarSection } from "./t3work-LocalWorkspaceSidebarSection";
 import { ProjectSidebarProjectsSection } from "./t3work-ProjectSidebarProjectsSection";
-import { ProjectSortMenu } from "./t3work-ProjectSortMenu";
 import type { TicketViewMode } from "./t3work-projectSidebarShared";
 import type { ProjectSidebarProps } from "./t3work-projectSidebarTypes";
 
@@ -31,7 +29,7 @@ type ProjectSidebarLayoutProps = {
   onShowGitHubActivityChange: (show: boolean) => void;
   onOpenSearch: () => void;
   onOpenSettings: (() => void) | undefined;
-} & ProjectSidebarProps;
+} & Omit<ProjectSidebarProps, "sidebarState" | "onSidebarStateChange">;
 
 export function ProjectSidebarLayout({
   sortedProjects,
@@ -43,6 +41,7 @@ export function ProjectSidebarLayout({
   expandedIds,
   getThreadsForProject,
   view,
+  activeDashboardMode,
   projectSortOrder,
   threadSortOrder,
   threadPreviewCount,
@@ -53,6 +52,7 @@ export function ProjectSidebarLayout({
   onShowJiraItemsChange,
   onShowGitHubActivityChange,
   onOpenSearch,
+  onSelectProjectDashboardMode,
   onSelectProject,
   onSelectTicket,
   onSelectThread,
@@ -110,6 +110,7 @@ export function ProjectSidebarLayout({
               expandedIds={expandedIds}
               getThreadsForProject={getThreadsForProject}
               view={view}
+              activeDashboardMode={activeDashboardMode}
               projectSortOrder={projectSortOrder}
               threadSortOrder={threadSortOrder}
               threadPreviewCount={threadPreviewCount}
@@ -120,6 +121,7 @@ export function ProjectSidebarLayout({
               onShowJiraItemsChange={onShowJiraItemsChange}
               onShowGitHubActivityChange={onShowGitHubActivityChange}
               onSelectProject={onSelectProject}
+              onSelectProjectDashboardMode={onSelectProjectDashboardMode}
               onSelectTicket={onSelectTicket}
               onSelectThread={onSelectThread}
               onToggleExpand={onToggleExpand}

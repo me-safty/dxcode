@@ -1,7 +1,5 @@
 import { useMemo } from "react";
 import type { ProjectShellProject } from "@t3tools/project-context";
-import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
-import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
 import { ScrollArea } from "~/t3work/components/ui/t3work-scroll-area";
 import { t3SurfaceBackdrops } from "~/t3work/components/ui/t3work-surface";
 import { useBackendState } from "~/t3work/backend/t3work-index";
@@ -14,7 +12,9 @@ import { useProjectGitHubActivity } from "~/t3work/hooks/t3work-useProjectGitHub
 import { useProjectResources } from "~/t3work/hooks/t3work-useProjectResources";
 import { useRelatedTickets } from "~/t3work/hooks/t3work-useRelatedTickets";
 import { useTicketDetail } from "~/t3work/hooks/t3work-useTicketDetail";
+import type { TicketKickoffThreadInput } from "~/t3work/t3work-kickoffTypes";
 import { ResizableRightSidebarLayout } from "~/t3work/t3work-ResizableRightSidebarLayout";
+import { getTicketRightSidebarCollapsedStorageKey } from "~/t3work/t3work-rightSidebarPersistence";
 import { TicketDetailHeader } from "~/t3work/t3work-TicketDetailHeader";
 import { TicketDetailKickoffAside } from "~/t3work/t3work-TicketDetailKickoffAside";
 import { TicketDetailMainColumn } from "~/t3work/t3work-TicketDetailMainColumn";
@@ -23,34 +23,29 @@ import {
   resolveHtmlBaseUrl,
   sortCommentItems,
 } from "~/t3work/t3work-ticketDetailUtils";
-import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectThread } from "~/t3work/t3work-types";
 
 export function TicketDetailView({
   project,
   ticketId,
+  activeThreadId,
   projectThreads,
   onOpenTicket,
   onOpenThread,
+  onOpenFullThread,
   onKickoffThread,
+  onThreadKickoffConsumed,
   onBack,
 }: {
   project: ProjectShellProject;
   ticketId: string;
+  activeThreadId?: string;
   projectThreads: ProjectThread[];
   onOpenTicket: (projectId: string, ticketId: string) => void;
   onOpenThread: (projectId: string, threadId: string) => void;
-  onKickoffThread: (input: {
-    projectId: string;
-    ticketId: string;
-    ticketDisplayId: string;
-    githubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
-    kickoffMessage: string;
-    kickoffModelSelection: ModelSelection;
-    kickoffRuntimeMode: RuntimeMode;
-    kickoffInteractionMode: ProviderInteractionMode;
-    kickoffContextAttachments: ReadonlyArray<T3WorkContextAttachment>;
-  }) => void;
+  onOpenFullThread: (projectId: string, threadId: string) => void;
+  onKickoffThread: (input: TicketKickoffThreadInput) => void;
+  onThreadKickoffConsumed: (threadId: string) => void;
   onBack: () => void;
 }) {
   const backendState = useBackendState();
@@ -90,6 +85,9 @@ export function TicketDetailView({
     [snapshot?.fields.commentItems],
   );
   const issueThreads = projectThreads.filter((thread) => thread.ticketId === ticketId);
+  const activeThread = activeThreadId
+    ? (projectThreads.find((candidate) => candidate.id === activeThreadId) ?? null)
+    : null;
   const githubActivity = useProjectGitHubActivity({
     project,
     linkedRepositoryUrls: readLinkedRepositoryUrlsFromProject(project),
@@ -115,6 +113,18 @@ export function TicketDetailView({
 
       <ResizableRightSidebarLayout
         storageKey="t3work_ticket_right_sidebar"
+        collapsedStorageKey={getTicketRightSidebarCollapsedStorageKey(
+          activeThreadId
+            ? {
+                projectId: project.id,
+                ticketId,
+                embeddedThreadId: activeThreadId,
+              }
+            : {
+                projectId: project.id,
+                ticketId,
+              },
+        )}
         className={t3SurfaceBackdrops.ticketContent}
         minAsideWidth={22 * 16}
         defaultAsideWidth={24 * 16}
@@ -167,11 +177,18 @@ export function TicketDetailView({
             displayId={displayId}
             issueThreads={issueThreads}
             projectId={project.id}
+            projectTitle={project.title}
+            {...(project.workspace?.rootPath
+              ? { projectWorkspaceRoot: project.workspace.rootPath }
+              : {})}
             ticketId={ticketId}
+            activeThread={activeThread}
             githubActivityItems={matchedGitHubActivityItems}
             providers={backendState.providers}
             isConnected={backendState.connectionStatus === "connected"}
             onOpenThread={onOpenThread}
+            onOpenFullThread={onOpenFullThread}
+            onThreadKickoffConsumed={onThreadKickoffConsumed}
             onKickoffThread={onKickoffThread}
           />
         }

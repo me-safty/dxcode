@@ -11,12 +11,14 @@ import * as Schema from "effect/Schema";
 import { cn } from "~/lib/utils";
 import { useMediaQuery } from "~/t3work/hooks/t3work-useMediaQuery";
 import { getLocalStorageItem, setLocalStorageItem } from "~/t3work/hooks/t3work-useLocalStorage";
+import { runT3workViewTransition } from "~/t3work/t3work-runViewTransition";
 import { ResizableRightSidebarAside } from "./t3work-ResizableRightSidebarAside";
 
 type ResizableRightSidebarLayoutProps = {
   main: ReactNode;
   aside: ReactNode;
   storageKey: string;
+  collapsedStorageKey?: string;
   className?: string;
   mainClassName?: string;
   asideClassName?: string;
@@ -55,6 +57,7 @@ export function ResizableRightSidebarLayout({
   main,
   aside,
   storageKey,
+  collapsedStorageKey,
   className,
   mainClassName,
   asideClassName,
@@ -67,7 +70,7 @@ export function ResizableRightSidebarLayout({
   const [asideWidth, setAsideWidth] = useState(defaultAsideWidth);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const widthStorageKey = `${storageKey}:width`;
-  const collapsedStorageKey = `${storageKey}:collapsed`;
+  const effectiveCollapsedStorageKey = collapsedStorageKey ?? `${storageKey}:collapsed`;
   const dragStateRef = useRef<{
     currentWidth: number;
     pointerId: number;
@@ -82,10 +85,8 @@ export function ResizableRightSidebarLayout({
       setAsideWidth(storedWidth);
     }
 
-    if (readStoredCollapsedState(collapsedStorageKey)) {
-      setIsCollapsed(true);
-    }
-  }, [collapsedStorageKey, widthStorageKey]);
+    setIsCollapsed(readStoredCollapsedState(effectiveCollapsedStorageKey));
+  }, [effectiveCollapsedStorageKey, widthStorageKey]);
 
   useEffect(
     () => () => {
@@ -97,10 +98,12 @@ export function ResizableRightSidebarLayout({
 
   const setCollapsedState = useCallback(
     (nextCollapsed: boolean) => {
-      setIsCollapsed(nextCollapsed);
-      setLocalStorageItem(collapsedStorageKey, nextCollapsed, Schema.Boolean);
+      runT3workViewTransition(() => {
+        setIsCollapsed(nextCollapsed);
+        setLocalStorageItem(effectiveCollapsedStorageKey, nextCollapsed, Schema.Boolean);
+      });
     },
-    [collapsedStorageKey],
+    [effectiveCollapsedStorageKey],
   );
 
   const handleResizePointerDown = useCallback(

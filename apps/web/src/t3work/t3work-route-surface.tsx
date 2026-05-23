@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useRouterState } from "@tanstack/react-router";
+import { useNavigate, useRouterState, useSearch } from "@tanstack/react-router";
 
 import { BackendProvider, createT3Backend } from "~/t3work/backend/t3work-index";
 import { App as T3workApp } from "~/t3work/t3work-App";
 import type { ProjectShellProject } from "@t3tools/project-context";
-import type { ViewState } from "~/t3work/t3work-types";
 import { recordT3WorkThreadDebug } from "~/t3work/chat/t3work-threadDebug";
+import {
+  parseT3workRouteSearch,
+  parseT3workViewFromPath,
+  T3WORK_CREATE_PATH,
+  type T3workRouteSearch,
+} from "~/t3work/t3work-routeState";
+import { readActiveThreadIdFromView } from "~/t3work/t3work-types";
 
 import "~/t3work/t3work-index.css";
 
@@ -23,47 +29,23 @@ function resolveWsBaseUrl(): string {
   return "ws://localhost:3773";
 }
 
-const T3WORK_BASE_PATH = "/t3work";
-const T3WORK_CREATE_PATH = "/t3work/new";
-const T3WORK_PATH_SEGMENT = "projects";
-const T3WORK_TICKET_SEGMENT = "tickets";
-const T3WORK_THREAD_SEGMENT = "threads";
-
 type AuthState = "checking" | "authenticated" | "unauthenticated";
 
-function parseT3workViewFromPath(pathname: string): ViewState | null {
-  if (pathname === T3WORK_BASE_PATH || pathname === T3WORK_CREATE_PATH) {
-    return null;
-  }
+function buildRouteSearch(
+  search: T3workRouteSearch,
+  input: {
+    projectView?: T3workRouteSearch["projectView"];
+    chatThreadId?: string | null;
+  } = {},
+): T3workRouteSearch {
+  const { chatThreadId: _ignoredChatThreadId, ...rest } = search;
+  const projectView = input.projectView ?? search.projectView;
 
-  const suffix = pathname.startsWith(`${T3WORK_BASE_PATH}/`)
-    ? pathname.slice(T3WORK_BASE_PATH.length + 1)
-    : "";
-
-  if (!suffix) {
-    return null;
-  }
-
-  const segments = suffix.split("/").map((part) => decodeURIComponent(part));
-  if (segments.length < 2 || segments[0] !== T3WORK_PATH_SEGMENT || !segments[1]) {
-    return null;
-  }
-
-  const projectId = segments[1];
-
-  if (segments.length === 2) {
-    return { type: "dashboard", projectId };
-  }
-
-  if (segments.length === 4 && segments[2] === T3WORK_TICKET_SEGMENT && segments[3]) {
-    return { type: "ticket", projectId, ticketId: segments[3] };
-  }
-
-  if (segments.length === 4 && segments[2] === T3WORK_THREAD_SEGMENT && segments[3]) {
-    return { type: "thread", projectId, threadId: segments[3] };
-  }
-
-  return null;
+  return {
+    ...rest,
+    ...(projectView ? { projectView } : {}),
+    ...(input.chatThreadId ? { chatThreadId: input.chatThreadId } : {}),
+  };
 }
 
 export function T3workRouteSurface() {
@@ -71,11 +53,15 @@ export function T3workRouteSurface() {
   const [authState, setAuthState] = useState<AuthState>("checking");
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const view = parseT3workViewFromPath(pathname);
+  const search = useSearch({
+    strict: false,
+    select: (search) => parseT3workRouteSearch(search as Record<string, unknown>),
+  });
+  const view = parseT3workViewFromPath(pathname, search);
   const isCreateRoute = pathname === T3WORK_CREATE_PATH;
   const viewType = view?.type ?? null;
   const viewProjectId = view?.projectId ?? null;
-  const viewThreadId = view?.type === "thread" ? view.threadId : null;
+  const viewThreadId = readActiveThreadIdFromView(view);
   const viewTicketId = view?.type === "ticket" ? view.ticketId : null;
 
   useEffect(() => {
@@ -154,35 +140,51 @@ export function T3workRouteSurface() {
     <BackendProvider backend={backend}>
       <T3workApp
         view={view}
+        dashboardMode={search.projectView ?? "my-work"}
         showCreate={isCreateRoute}
         onCreateOpenChange={(open) => {
-          void navigate({ to: open ? "/t3work/new" : "/t3work" });
+          void navigate({
+            to: open ? "/t3work/new" : "/t3work",
+            search: buildRouteSearch(search),
+          });
         }}
         onOpenHome={() => {
-          void navigate({ to: "/t3work" });
+          void navigate({ to: "/t3work", search: buildRouteSearch(search) });
         }}
         onOpenSettings={() => {
           void navigate({ to: "/settings" });
         }}
-        onOpenDashboard={(projectId) => {
-          void navigate({ to: "/t3work/projects/$projectId", params: { projectId } });
+        onOpenDashboard={(projectId, dashboardMode, embeddedThreadId) => {
+          void navigate({
+            to: "/t3work/projects/$projectId",
+            params: { projectId },
+            search: buildRouteSearch(search, {
+              projectView: dashboardMode,
+              chatThreadId: embeddedThreadId ?? null,
+            }),
+          });
         }}
-        onOpenTicket={(projectId, ticketId) => {
+        onOpenTicket={(projectId, ticketId, embeddedThreadId) => {
           void navigate({
             to: "/t3work/projects/$projectId/tickets/$ticketId",
             params: { projectId, ticketId },
+            search: buildRouteSearch(search, {
+              chatThreadId: embeddedThreadId ?? null,
+            }),
           });
         }}
         onOpenThread={(projectId, threadId) => {
           void navigate({
             to: "/t3work/projects/$projectId/threads/$threadId",
             params: { projectId, threadId },
+            search: buildRouteSearch(search),
           });
         }}
         onProjectCreated={(project: ProjectShellProject) => {
           void navigate({
             to: "/t3work/projects/$projectId",
             params: { projectId: project.id },
+            search: buildRouteSearch(search),
           });
         }}
       />

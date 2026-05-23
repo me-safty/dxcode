@@ -341,16 +341,25 @@ type ChatViewProps =
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
+      hideHeader?: boolean;
+      hideBranchToolbar?: boolean;
+      minimalComposer?: boolean;
       routeKind: "server";
       draftId?: never;
       /** Optional slot rendered above the image chip strip inside the composer. */
       composerContextAttachmentSlot?: React.ReactNode;
+      /** Optional props applied to the outer composer container. */
+      composerContainerProps?: React.HTMLAttributes<HTMLDivElement>;
+      /** Optional overlay rendered inside the composer container. */
+      composerContainerOverlay?: React.ReactNode;
       /** Optional ephemeral context attachments prepended on send by host surfaces. */
       composerContextAttachments?: ReadonlyArray<{ contextText: string }>;
       /** Optional hook to refresh host-managed context attachments before send. */
       prepareComposerContextAttachments?:
         | (() => Promise<ReadonlyArray<{ contextText: string }>>)
         | undefined;
+      /** Optional hook fired immediately before dispatching a turn-start command. */
+      beforeDispatchTurnStart?: (() => Promise<void>) | undefined;
       /** Optional callback fired after a send consumes composer context attachments. */
       onComposerContextAttachmentsConsumed?: (() => void) | undefined;
     }
@@ -359,16 +368,25 @@ type ChatViewProps =
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
+      hideHeader?: boolean;
+      hideBranchToolbar?: boolean;
+      minimalComposer?: boolean;
       routeKind: "draft";
       draftId: DraftId;
       /** Optional slot rendered above the image chip strip inside the composer. */
       composerContextAttachmentSlot?: React.ReactNode;
+      /** Optional props applied to the outer composer container. */
+      composerContainerProps?: React.HTMLAttributes<HTMLDivElement>;
+      /** Optional overlay rendered inside the composer container. */
+      composerContainerOverlay?: React.ReactNode;
       /** Optional ephemeral context attachments prepended on send by host surfaces. */
       composerContextAttachments?: ReadonlyArray<{ contextText: string }>;
       /** Optional hook to refresh host-managed context attachments before send. */
       prepareComposerContextAttachments?:
         | (() => Promise<ReadonlyArray<{ contextText: string }>>)
         | undefined;
+      /** Optional hook fired immediately before dispatching a turn-start command. */
+      beforeDispatchTurnStart?: (() => Promise<void>) | undefined;
       /** Optional callback fired after a send consumes composer context attachments. */
       onComposerContextAttachmentsConsumed?: (() => void) | undefined;
     };
@@ -631,9 +649,15 @@ export default function ChatView(props: ChatViewProps) {
     routeKind,
     onDiffPanelOpen,
     reserveTitleBarControlInset = true,
+    hideHeader = false,
+    hideBranchToolbar = false,
+    minimalComposer = false,
     composerContextAttachmentSlot,
+    composerContainerProps,
+    composerContainerOverlay,
     composerContextAttachments = [],
     prepareComposerContextAttachments,
+    beforeDispatchTurnStart,
     onComposerContextAttachmentsConsumed,
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
@@ -2910,6 +2934,7 @@ export default function ChatView(props: ChatViewProps) {
             }
           : undefined;
       beginLocalDispatch({ preparingWorktree: false });
+      await beforeDispatchTurnStart?.();
       await api.orchestration.dispatchCommand({
         type: "thread.turn.start",
         commandId: newCommandId(),
@@ -3225,6 +3250,7 @@ export default function ChatView(props: ChatViewProps) {
           nextInteractionMode,
         );
 
+        await beforeDispatchTurnStart?.();
         await api.orchestration.dispatchCommand({
           type: "thread.turn.start",
           commandId: newCommandId(),
@@ -3348,6 +3374,9 @@ export default function ChatView(props: ChatViewProps) {
         branch: activeThreadBranch,
         worktreePath: activeThread.worktreePath,
         createdAt,
+      })
+      .then(() => {
+        return beforeDispatchTurnStart?.();
       })
       .then(() => {
         return api.orchestration.dispatchCommand({
@@ -3554,47 +3583,48 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
-      {/* Top bar */}
-      <header
-        className={cn(
-          "border-b border-border",
-          isElectron
-            ? cn(
-                "drag-region flex h-[52px] items-center px-3 sm:px-5 wco:h-[env(titlebar-area-height)]",
-                reserveTitleBarControlInset &&
-                  "wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
-              )
-            : "pb-2 pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-2 sm:pb-3 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-3",
-        )}
-      >
-        <ChatHeader
-          activeThreadEnvironmentId={activeThread.environmentId}
-          activeThreadId={activeThread.id}
-          {...(routeKind === "draft" && draftId ? { draftId } : {})}
-          activeThreadTitle={activeThread.title}
-          activeProjectName={activeProject?.name}
-          isGitRepo={isGitRepo}
-          openInCwd={gitCwd}
-          activeProjectScripts={activeProject?.scripts}
-          preferredScriptId={
-            activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-          }
-          keybindings={keybindings}
-          availableEditors={availableEditors}
-          terminalAvailable={activeProject !== undefined}
-          terminalOpen={terminalState.terminalOpen}
-          terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-          diffToggleShortcutLabel={diffPanelShortcutLabel}
-          gitCwd={gitCwd}
-          diffOpen={diffOpen}
-          onRunProjectScript={runProjectScript}
-          onAddProjectScript={saveProjectScript}
-          onUpdateProjectScript={updateProjectScript}
-          onDeleteProjectScript={deleteProjectScript}
-          onToggleTerminal={toggleTerminalVisibility}
-          onToggleDiff={onToggleDiff}
-        />
-      </header>
+      {!hideHeader ? (
+        <header
+          className={cn(
+            "border-b border-border",
+            isElectron
+              ? cn(
+                  "drag-region flex h-[52px] items-center px-3 sm:px-5 wco:h-[env(titlebar-area-height)]",
+                  reserveTitleBarControlInset &&
+                    "wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
+                )
+              : "pb-2 pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-2 sm:pb-3 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-3",
+          )}
+        >
+          <ChatHeader
+            activeThreadEnvironmentId={activeThread.environmentId}
+            activeThreadId={activeThread.id}
+            {...(routeKind === "draft" && draftId ? { draftId } : {})}
+            activeThreadTitle={activeThread.title}
+            activeProjectName={activeProject?.name}
+            isGitRepo={isGitRepo}
+            openInCwd={gitCwd}
+            activeProjectScripts={activeProject?.scripts}
+            preferredScriptId={
+              activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+            }
+            keybindings={keybindings}
+            availableEditors={availableEditors}
+            terminalAvailable={activeProject !== undefined}
+            terminalOpen={terminalState.terminalOpen}
+            terminalToggleShortcutLabel={terminalToggleShortcutLabel}
+            diffToggleShortcutLabel={diffPanelShortcutLabel}
+            gitCwd={gitCwd}
+            diffOpen={diffOpen}
+            onRunProjectScript={runProjectScript}
+            onAddProjectScript={saveProjectScript}
+            onUpdateProjectScript={updateProjectScript}
+            onDeleteProjectScript={deleteProjectScript}
+            onToggleTerminal={toggleTerminalVisibility}
+            onToggleDiff={onToggleDiff}
+          />
+        </header>
+      ) : null}
 
       {/* Error banner */}
       <ProviderStatusBanner status={activeProviderStatus} />
@@ -3661,7 +3691,12 @@ export default function ChatView(props: ChatViewProps) {
           >
             <div className="relative isolate">
               <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
-              <div className="relative z-10">
+              <div
+                {...composerContainerProps}
+                data-t3work-minimal-composer={minimalComposer ? "true" : undefined}
+                className={cn("relative z-10", composerContainerProps?.className)}
+              >
+                {composerContainerOverlay}
                 {composerContextAttachmentSlot != null && (
                   <div className="mb-2">{composerContextAttachmentSlot}</div>
                 )}
@@ -3738,7 +3773,7 @@ export default function ChatView(props: ChatViewProps) {
                 />
               </div>
             </div>
-            {isGitRepo && (
+            {isGitRepo && !hideBranchToolbar && (
               <BranchToolbar
                 environmentId={activeThread.environmentId}
                 threadId={activeThread.id}

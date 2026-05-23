@@ -1,5 +1,6 @@
 import type { ExternalProject, IntegrationAccount } from "@t3tools/integrations-core";
 import type { Dispatch, SetStateAction } from "react";
+import { runT3workViewTransition } from "~/t3work/t3work-runViewTransition";
 import type { CreateProjectStep } from "./t3work-useCreateProject";
 import { pickPreferredAccount } from "./t3work-createProjectUtils";
 
@@ -31,7 +32,12 @@ export function applyLoadedAccounts(input: {
   }
 
   const preferredAccount = pickPreferredAccount(input.loadedAccounts);
-  input.setSelectedAccount(preferredAccount);
-  input.setStep("account");
+  runT3workViewTransition(
+    () => {
+      input.setSelectedAccount(preferredAccount);
+      input.setStep("account");
+    },
+    { types: ["t3work-wizard-forward"] },
+  );
   return preferredAccount;
 }

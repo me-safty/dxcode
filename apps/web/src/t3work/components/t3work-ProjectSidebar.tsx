@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import type { ProjectThread } from "~/t3work/t3work-types";
+import { clampProjectSidebarThreadPreviewCount } from "~/t3work/t3work-projectSidebarState";
 import { sortProjects, type TicketViewMode } from "./t3work-projectSidebarShared";
 import { ProjectSidebarLayout } from "./t3work-ProjectSidebarLayout";
 import type { ProjectSidebarProps } from "./t3work-projectSidebarTypes";
@@ -16,7 +17,10 @@ export function ProjectSidebar({
   projectSortOrder,
   threadSortOrder,
   threadPreviewCount,
+  sidebarState,
+  activeDashboardMode,
   onSelectProject,
+  onSelectProjectDashboardMode,
   onSelectTicket,
   onSelectThread,
   onToggleExpand,
@@ -33,12 +37,8 @@ export function ProjectSidebar({
   onProjectSortOrderChange,
   onThreadSortOrderChange,
   onThreadPreviewCountChange,
+  onSidebarStateChange,
 }: ProjectSidebarProps) {
-  const [ticketViewMode, setTicketViewMode] = useState<TicketViewMode>("tree");
-  const [showProjectThreads, setShowProjectThreads] = useState(true);
-  const [showJiraItems, setShowJiraItems] = useState(true);
-  const [showGitHubActivity, setShowGitHubActivity] = useState(true);
-
   const threadsByProject = useMemo(() => {
     const map = new Map<string, ProjectThread[]>();
     for (const thread of threads) {
@@ -70,29 +70,47 @@ export function ProjectSidebar({
         [
           {
             id: "toggle-project-threads",
-            label: showProjectThreads ? "Hide project threads" : "Show project threads",
+            label: sidebarState.showProjectThreads
+              ? "Hide project threads"
+              : "Show project threads",
           },
           {
             id: "toggle-jira-items",
-            label: showJiraItems ? "Hide Jira items" : "Show Jira items",
+            label: sidebarState.showJiraItems ? "Hide Jira items" : "Show Jira items",
           },
           {
             id: "toggle-github-activity",
-            label: showGitHubActivity ? "Hide GitHub activity" : "Show GitHub activity",
+            label: sidebarState.showGitHubActivity
+              ? "Hide GitHub activity"
+              : "Show GitHub activity",
           },
         ],
         { x: event.clientX, y: event.clientY },
       );
 
       if (action === "toggle-project-threads") {
-        setShowProjectThreads((prev) => !prev);
+        onSidebarStateChange((current) => ({
+          ...current,
+          showProjectThreads: !current.showProjectThreads,
+        }));
       } else if (action === "toggle-jira-items") {
-        setShowJiraItems((prev) => !prev);
+        onSidebarStateChange((current) => ({
+          ...current,
+          showJiraItems: !current.showJiraItems,
+        }));
       } else if (action === "toggle-github-activity") {
-        setShowGitHubActivity((prev) => !prev);
+        onSidebarStateChange((current) => ({
+          ...current,
+          showGitHubActivity: !current.showGitHubActivity,
+        }));
       }
     },
-    [showGitHubActivity, showJiraItems, showProjectThreads],
+    [
+      onSidebarStateChange,
+      sidebarState.showGitHubActivity,
+      sidebarState.showJiraItems,
+      sidebarState.showProjectThreads,
+    ],
   );
 
   return (
@@ -103,24 +121,34 @@ export function ProjectSidebar({
       <ProjectSidebarLayout
         sortedProjects={sortedProjects}
         looseWorkspaceProjects={looseWorkspaceProjects}
-        ticketViewMode={ticketViewMode}
-        setTicketViewMode={setTicketViewMode}
+        ticketViewMode={sidebarState.ticketViewMode}
+        setTicketViewMode={(ticketViewMode: TicketViewMode) => {
+          onSidebarStateChange((current) => ({ ...current, ticketViewMode }));
+        }}
         projects={projects}
         selectedId={selectedId}
         expandedIds={expandedIds}
         threads={threads}
         getThreadsForProject={getThreadsForProject}
         view={view}
+        activeDashboardMode={activeDashboardMode}
         projectSortOrder={projectSortOrder}
         threadSortOrder={threadSortOrder}
         threadPreviewCount={threadPreviewCount}
-        showProjectThreads={showProjectThreads}
-        showJiraItems={showJiraItems}
-        showGitHubActivity={showGitHubActivity}
-        onShowProjectThreadsChange={setShowProjectThreads}
-        onShowJiraItemsChange={setShowJiraItems}
-        onShowGitHubActivityChange={setShowGitHubActivity}
+        showProjectThreads={sidebarState.showProjectThreads}
+        showJiraItems={sidebarState.showJiraItems}
+        showGitHubActivity={sidebarState.showGitHubActivity}
+        onShowProjectThreadsChange={(showProjectThreads) => {
+          onSidebarStateChange((current) => ({ ...current, showProjectThreads }));
+        }}
+        onShowJiraItemsChange={(showJiraItems) => {
+          onSidebarStateChange((current) => ({ ...current, showJiraItems }));
+        }}
+        onShowGitHubActivityChange={(showGitHubActivity) => {
+          onSidebarStateChange((current) => ({ ...current, showGitHubActivity }));
+        }}
         onSelectProject={onSelectProject}
+        onSelectProjectDashboardMode={onSelectProjectDashboardMode}
         onSelectTicket={onSelectTicket}
         onSelectThread={onSelectThread}
         onToggleExpand={onToggleExpand}
@@ -136,7 +164,9 @@ export function ProjectSidebar({
         onRenameThread={onRenameThread}
         onProjectSortOrderChange={onProjectSortOrderChange}
         onThreadSortOrderChange={onThreadSortOrderChange}
-        onThreadPreviewCountChange={onThreadPreviewCountChange}
+        onThreadPreviewCountChange={(count) => {
+          onThreadPreviewCountChange(clampProjectSidebarThreadPreviewCount(count));
+        }}
       />
     </div>
   );

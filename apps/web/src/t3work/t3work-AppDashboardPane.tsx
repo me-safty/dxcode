@@ -1,0 +1,85 @@
+import type { ServerProvider } from "@t3tools/contracts";
+import type { ProjectShellProject } from "@t3tools/project-context";
+import type { ProjectKickoffThreadInput } from "~/t3work/t3work-kickoffTypes";
+import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
+import { ProjectDashboardKickoffAside } from "~/t3work/t3work-ProjectDashboardKickoffAside";
+import { ResizableRightSidebarLayout } from "~/t3work/t3work-ResizableRightSidebarLayout";
+import { getProjectDashboardRightSidebarCollapsedStorageKey } from "~/t3work/t3work-rightSidebarPersistence";
+import type { ProjectThread } from "~/t3work/t3work-types";
+
+export function AppDashboardPane({
+  activeDashboardMode,
+  project,
+  projectThreads,
+  activeThread,
+  activeThreadId,
+  providers,
+  isConnected,
+  onOpenThread,
+  onOpenFullThread,
+  onThreadKickoffConsumed,
+  onKickoffProjectThread,
+  renderDashboard,
+}: {
+  activeDashboardMode: ProjectDashboardMode;
+  project: ProjectShellProject;
+  projectThreads: ProjectThread[];
+  activeThread: ProjectThread | null;
+  activeThreadId: string | null;
+  providers: ReadonlyArray<ServerProvider>;
+  isConnected: boolean;
+  onOpenThread: (projectId: string, threadId: string) => void;
+  onOpenFullThread: (projectId: string, threadId: string) => void;
+  onThreadKickoffConsumed: (threadId: string) => void;
+  onKickoffProjectThread: (input: ProjectKickoffThreadInput) => void;
+  renderDashboard: (project: ProjectShellProject) => React.ReactNode;
+}) {
+  return (
+    <ResizableRightSidebarLayout
+      storageKey="t3work_dashboard_right_sidebar"
+      collapsedStorageKey={getProjectDashboardRightSidebarCollapsedStorageKey({
+        projectId: project.id,
+        dashboardMode: activeDashboardMode,
+        embeddedThreadId: activeThreadId,
+      })}
+      minAsideWidth={22 * 16}
+      defaultAsideWidth={24 * 16}
+      main={
+        <div className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden">
+          {renderDashboard(project)}
+        </div>
+      }
+      aside={
+        <ProjectDashboardKickoffAside
+          project={project}
+          projectThreads={projectThreads}
+          activeThread={activeThread}
+          providers={providers}
+          isConnected={isConnected}
+          onOpenThread={(threadId) => onOpenThread(project.id, threadId)}
+          onOpenFullThread={(threadId) => onOpenFullThread(project.id, threadId)}
+          onThreadKickoffConsumed={onThreadKickoffConsumed}
+          onKickoffThread={(
+            kickoffMessage,
+            kickoffModelSelection,
+            kickoffRuntimeMode,
+            kickoffInteractionMode,
+            selectedToolIds,
+            kickoffContextAttachments,
+          ) => {
+            onKickoffProjectThread({
+              projectId: project.id,
+              dashboardMode: activeDashboardMode,
+              kickoffMessage,
+              kickoffModelSelection,
+              kickoffRuntimeMode,
+              kickoffInteractionMode,
+              selectedToolIds,
+              kickoffContextAttachments,
+            });
+          }}
+        />
+      }
+    />
+  );
+}

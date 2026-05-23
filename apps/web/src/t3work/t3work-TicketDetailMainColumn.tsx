@@ -1,12 +1,11 @@
 import { Loader2 } from "lucide-react";
-import type { MouseEvent } from "react";
 import { T3SurfaceCard, T3SurfaceCardContent } from "~/t3work/components/ui/t3work-surface";
 import { TicketMetadata } from "~/t3work/components/ticket/t3work-TicketMetadata";
 import { TicketRichContent } from "~/t3work/components/ticket/t3work-TicketRichContent";
 import { buildTicketRelationships } from "~/t3work/t3work-ticketRelationships-helpers";
 import { TicketParentSummary, TicketRelatedLinks } from "~/t3work/t3work-TicketRelationships";
 import { useBackend } from "~/t3work/backend/t3work-index";
-import { useAddToChat } from "~/t3work/hooks/t3work-useAddToChat";
+import { useAgentContext } from "~/t3work/hooks/t3work-useAgentContext";
 import { TicketDetailGitHubSection } from "~/t3work/t3work-TicketDetailGitHubSection";
 import type { TicketDetailMainColumnProps } from "~/t3work/t3work-TicketDetailMainColumn.types";
 import {
@@ -20,7 +19,7 @@ import {
 export function TicketDetailMainColumn({
   snapshot,
   displayId,
-  title,
+  title: _title,
   status,
   priority,
   assignee,
@@ -48,7 +47,7 @@ export function TicketDetailMainColumn({
   githubAccount,
 }: TicketDetailMainColumnProps) {
   const backend = useBackend();
-  const { showAddToChatContextMenu } = useAddToChat();
+  const { showAgentContextMenu } = useAgentContext();
   const ticket = projectTickets.find((candidate) => candidate.id === ticketId);
   const relationshipData = buildTicketRelationships({
     projectTickets,
@@ -66,7 +65,7 @@ export function TicketDetailMainColumn({
     projectTickets,
     githubActivityItems,
     snapshot,
-    showAddToChatContextMenu,
+    showAgentContextMenu,
   });
   const parentContextMenuData = buildParentContextMenuData({
     displayId,
@@ -127,7 +126,6 @@ export function TicketDetailMainColumn({
         displayId={displayId}
         githubActivityItems={githubActivityItems}
         {...(githubActivityLastCheckedAt !== undefined ? { githubActivityLastCheckedAt } : {})}
-        showAddToChatContextMenu={showAddToChatContextMenu}
         {...(githubActivityLoading ? { githubActivityLoading } : {})}
         {...(githubActivityWarning ? { githubActivityWarning } : {})}
         {...(githubHost ? { githubHost } : {})}

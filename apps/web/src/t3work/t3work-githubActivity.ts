@@ -23,6 +23,11 @@ export type GitHubWorkActivityItem = {
   readonly workItemKey?: string;
 };
 
+function normalizeWorkItemKey(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.toUpperCase() : undefined;
+}
+
 function isPullRequestActivity(item: GitHubWorkActivityItem): boolean {
   return (item.subjectType ?? "").trim().toLowerCase() === "pullrequest";
 }
@@ -92,11 +97,12 @@ export function toGitHubWorkActivityItems(
 ): ReadonlyArray<GitHubWorkActivityItem> {
   return sortGitHubActivityItems(
     inboxItems.map((item) => {
-      const workItemKey =
+      const workItemKey = normalizeWorkItemKey(
         extractWorkItemKey(item.subjectTitle) ??
-        extractWorkItemKey(item.subjectBranch) ??
-        extractWorkItemKey(item.repository) ??
-        undefined;
+          extractWorkItemKey(item.subjectBranch) ??
+          extractWorkItemKey(item.repository) ??
+          undefined,
+      );
       return {
         id: item.id,
         repository: item.repository,
@@ -131,13 +137,26 @@ export function groupGitHubActivityByWorkItem(
 ): ReadonlyMap<string, ReadonlyArray<GitHubWorkActivityItem>> {
   const map = new Map<string, GitHubWorkActivityItem[]>();
   for (const item of items) {
-    if (!item.workItemKey) continue;
-    const existing = map.get(item.workItemKey) ?? [];
+    const workItemKey = normalizeWorkItemKey(item.workItemKey);
+    if (!workItemKey) continue;
+    const existing = map.get(workItemKey) ?? [];
     existing.push(item);
-    map.set(item.workItemKey, existing);
+    map.set(workItemKey, existing);
   }
   for (const [workItemKey, groupedItems] of map) {
     map.set(workItemKey, [...sortGitHubActivityItems(groupedItems)]);
   }
   return map;
+}
+
+export function getGitHubActivityItemsForWorkItem(
+  itemsByWorkItem: ReadonlyMap<string, ReadonlyArray<GitHubWorkActivityItem>>,
+  workItemKey: string | undefined,
+): ReadonlyArray<GitHubWorkActivityItem> {
+  const normalizedWorkItemKey = normalizeWorkItemKey(workItemKey);
+  if (!normalizedWorkItemKey) {
+    return [];
+  }
+
+  return itemsByWorkItem.get(normalizedWorkItemKey) ?? [];
 }

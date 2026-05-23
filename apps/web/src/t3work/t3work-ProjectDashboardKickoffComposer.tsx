@@ -8,6 +8,7 @@ import type {
 import { ContextAttachmentChip } from "~/t3work/components/t3work-ContextAttachmentChip";
 import { TicketKickoffComposer } from "~/t3work/t3work-TicketKickoffComposer";
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
+import type { T3workThreadToolId } from "~/t3work/t3work-types";
 
 export function ProjectDashboardKickoffComposer(input: {
   prefillText?: string;
@@ -20,6 +21,7 @@ export function ProjectDashboardKickoffComposer(input: {
     selection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,
+    selectedToolIds: ReadonlyArray<T3workThreadToolId>,
   ) => void;
 }) {
   return (

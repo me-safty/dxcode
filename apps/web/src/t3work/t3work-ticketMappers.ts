@@ -5,6 +5,10 @@ function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
+function readOptionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function readAssignee(value: unknown): string | undefined {
   const direct = readOptionalString(value);
   if (direct) return direct;
@@ -35,7 +39,51 @@ export function resourceRefToProjectTicket(
   projectId: string,
   ref: ExternalResourceRef,
 ): ProjectTicket {
-  const resourceWithParent = ref as ExternalResourceRef & { parentId?: unknown };
+  const resourceWithParent = ref as ExternalResourceRef & {
+    parentId?: unknown;
+    description?: unknown;
+    assigneeAccountId?: unknown;
+    estimateValue?: unknown;
+    issueTypeIsSubtask?: unknown;
+    timeOriginalEstimateSeconds?: unknown;
+    timeRemainingEstimateSeconds?: unknown;
+    aggregateTimeOriginalEstimateSeconds?: unknown;
+    aggregateTimeRemainingEstimateSeconds?: unknown;
+    subtaskCount?: unknown;
+    sprintId?: unknown;
+    sprintName?: unknown;
+    sprintState?: unknown;
+    sprintBoardId?: unknown;
+    sprintGoal?: unknown;
+    sprintStartDate?: unknown;
+    sprintEndDate?: unknown;
+    sprintCompleteDate?: unknown;
+  };
+  const description = readOptionalString(resourceWithParent.description);
+  const assigneeAccountId = readOptionalString(resourceWithParent.assigneeAccountId);
+  const estimateValue = readOptionalNumber(resourceWithParent.estimateValue);
+  const issueTypeIsSubtask = resourceWithParent.issueTypeIsSubtask === true;
+  const timeOriginalEstimateSeconds = readOptionalNumber(
+    resourceWithParent.timeOriginalEstimateSeconds,
+  );
+  const timeRemainingEstimateSeconds = readOptionalNumber(
+    resourceWithParent.timeRemainingEstimateSeconds,
+  );
+  const aggregateTimeOriginalEstimateSeconds = readOptionalNumber(
+    resourceWithParent.aggregateTimeOriginalEstimateSeconds,
+  );
+  const aggregateTimeRemainingEstimateSeconds = readOptionalNumber(
+    resourceWithParent.aggregateTimeRemainingEstimateSeconds,
+  );
+  const subtaskCount = readOptionalNumber(resourceWithParent.subtaskCount);
+  const sprintId = readOptionalString(resourceWithParent.sprintId);
+  const sprintName = readOptionalString(resourceWithParent.sprintName);
+  const sprintState = readOptionalString(resourceWithParent.sprintState);
+  const sprintBoardId = readOptionalString(resourceWithParent.sprintBoardId);
+  const sprintGoal = readOptionalString(resourceWithParent.sprintGoal);
+  const sprintStartDate = readOptionalString(resourceWithParent.sprintStartDate);
+  const sprintEndDate = readOptionalString(resourceWithParent.sprintEndDate);
+  const sprintCompleteDate = readOptionalString(resourceWithParent.sprintCompleteDate);
 
   return {
     id: ref.id,
@@ -43,6 +91,7 @@ export function resourceRefToProjectTicket(
     ...(typeof resourceWithParent.parentId === "string"
       ? { parentId: resourceWithParent.parentId }
       : {}),
+    ...(description ? { description } : {}),
     ref: {
       provider: ref.provider,
       kind: ref.kind,
@@ -55,10 +104,30 @@ export function resourceRefToProjectTicket(
       ...(ref.issueTypeIconUrl !== undefined ? { issueTypeIconUrl: ref.issueTypeIconUrl } : {}),
     },
     ...(ref.type !== undefined ? { issueType: ref.type } : {}),
+    ...(issueTypeIsSubtask ? { issueTypeIsSubtask: true } : {}),
     ...(ref.issueTypeIconUrl !== undefined ? { issueTypeIconUrl: ref.issueTypeIconUrl } : {}),
     status: ref.status ?? "Unknown",
     ...(ref.assignee !== undefined ? { assignee: ref.assignee } : {}),
+    ...(assigneeAccountId ? { assigneeAccountId } : {}),
     ...(ref.priority !== undefined ? { priority: ref.priority } : {}),
+    ...(estimateValue !== undefined ? { estimateValue } : {}),
+    ...(timeOriginalEstimateSeconds !== undefined ? { timeOriginalEstimateSeconds } : {}),
+    ...(timeRemainingEstimateSeconds !== undefined ? { timeRemainingEstimateSeconds } : {}),
+    ...(aggregateTimeOriginalEstimateSeconds !== undefined
+      ? { aggregateTimeOriginalEstimateSeconds }
+      : {}),
+    ...(aggregateTimeRemainingEstimateSeconds !== undefined
+      ? { aggregateTimeRemainingEstimateSeconds }
+      : {}),
+    ...(subtaskCount !== undefined ? { subtaskCount } : {}),
+    ...(sprintId ? { sprintId } : {}),
+    ...(sprintName ? { sprintName } : {}),
+    ...(sprintState ? { sprintState } : {}),
+    ...(sprintBoardId ? { sprintBoardId } : {}),
+    ...(sprintGoal ? { sprintGoal } : {}),
+    ...(sprintStartDate ? { sprintStartDate } : {}),
+    ...(sprintEndDate ? { sprintEndDate } : {}),
+    ...(sprintCompleteDate ? { sprintCompleteDate } : {}),
     updatedAt: ref.updatedAt ?? new Date().toISOString(),
   };
 }
@@ -76,12 +145,14 @@ export function snapshotToProjectTicket(
   const issueType = readIssueType(fields.type) ?? readIssueType(fields.issuetype);
   const issueTypeIconUrl =
     readIssueTypeIconUrl(fields.typeIconUrl) ?? readIssueTypeIconUrl(fields.issuetype);
+  const description = readOptionalString(fields.description);
 
   return {
     ...base,
     ...(status ? { status } : {}),
     ...(priority ? { priority } : {}),
     ...(assignee ? { assignee } : {}),
+    ...(description ? { description } : {}),
     ...(issueType ? { issueType } : {}),
     ...(issueTypeIconUrl ? { issueTypeIconUrl } : {}),
   };

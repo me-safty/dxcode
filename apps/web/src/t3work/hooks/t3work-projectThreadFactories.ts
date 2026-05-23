@@ -1,6 +1,6 @@
 import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 
-import type { ProjectThread } from "~/t3work/t3work-types";
+import type { ProjectThread, T3workThreadToolId } from "~/t3work/t3work-types";
 
 export function createTicketThread(input: {
   projectId: string;
@@ -10,6 +10,7 @@ export function createTicketThread(input: {
   kickoffModelSelection: ModelSelection;
   kickoffRuntimeMode: RuntimeMode;
   kickoffInteractionMode: ProviderInteractionMode;
+  selectedToolIds: ReadonlyArray<T3workThreadToolId>;
   existingThreads: ReadonlyArray<ProjectThread>;
   createThread: (
     projectId: string,
@@ -21,6 +22,7 @@ export function createTicketThread(input: {
       kickoffModelSelection?: ModelSelection;
       kickoffRuntimeMode?: RuntimeMode;
       kickoffInteractionMode?: ProviderInteractionMode;
+      selectedToolIds?: ReadonlyArray<T3workThreadToolId>;
     },
   ) => ProjectThread;
 }) {
@@ -37,5 +39,6 @@ export function createTicketThread(input: {
     kickoffModelSelection: input.kickoffModelSelection,
     kickoffRuntimeMode: input.kickoffRuntimeMode,
     kickoffInteractionMode: input.kickoffInteractionMode,
+    selectedToolIds: input.selectedToolIds,
   });
 }

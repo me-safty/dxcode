@@ -214,6 +214,11 @@ The agent should receive both:
 - user-visible text containing the reference
 - structured resource context with normalized fields and source URL
 
+For context-bound chat, this file-backed context should be the default way to give the
+agent broad project, work-item, backlog, and GitHub activity data. Dedicated read tools
+should focus on freshness, narrow live queries, view state, and small option lists rather
+than duplicating attached context files.
+
 ## Visual Treatment
 
 Use the same inline chip behavior as file mentions.

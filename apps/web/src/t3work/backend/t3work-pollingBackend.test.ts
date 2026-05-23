@@ -70,4 +70,49 @@ describe("t3work polling backend", () => {
 
     expect(result).toEqual({ unchanged: false, fingerprint: "sha256:new", value: page });
   });
+
+  it("posts Atlassian backlog polling requests with the known fingerprint", async () => {
+    const response = {
+      page: { items: [{ id: "ticket-1" }] },
+      capabilities: { canCreateSubtasks: true },
+      boards: [],
+      sprints: [],
+      savedFilters: [],
+      cache: {
+        source: "live" as const,
+        updatedAt: 123,
+        fingerprint: "sha256:new",
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("http://localhost:13775/api/t3work/atlassian/backlog/poll");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        account: { id: "acct-1", provider: "atlassian" },
+        externalProjectId: "PROJ",
+        boardId: "95",
+        sprintId: "3185",
+        poll: { enabled: true, knownFingerprint: "sha256:known" },
+      });
+
+      return new Response(
+        JSON.stringify({ unchanged: false, fingerprint: "sha256:new", value: response }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const api = createAtlassianPollingBackendApi("http://localhost:13775/");
+    const result = await api.pollBacklog({
+      account: { id: "acct-1", provider: "atlassian" },
+      externalProjectId: "PROJ",
+      boardId: "95",
+      sprintId: "3185",
+      knownFingerprint: "sha256:known",
+    });
+
+    expect(result).toEqual({ unchanged: false, fingerprint: "sha256:new", value: response });
+  });
 });

@@ -43,7 +43,7 @@ export function ResizableRightSidebarAside({
       </div>
       <aside
         className={cn(
-          "relative h-full min-h-0 shrink-0 overflow-hidden",
+          "relative h-full min-h-0 shrink-0 overflow-hidden [view-transition-name:t3work-right-sidebar-shell]",
           isCollapsed ? "border-l-0" : "border-l border-border/70",
           asideClassName,
         )}

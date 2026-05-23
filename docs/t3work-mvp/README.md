@@ -62,6 +62,8 @@ The user should be able to:
 - [Epic 17: Build-Time Localization Spike](./17-build-time-localization.md)
 - [Epic 18: Integration Freshness Polling Plan](./18-integration-freshness-polling-plan.md)
 - [Epic 19: Workspace Miniapps](./19-workspace-miniapps.md)
+- [Epic 20: Embedded Chat And Agent Handoffs](./20-embedded-chat-and-handoffs.md)
+- [Epic 21: Context Tool Catalog](./21-context-tool-catalog.md)
 
 ## Supporting Docs
 

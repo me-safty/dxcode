@@ -2,7 +2,11 @@ import type { ProjectShellProject, ResourceSnapshot } from "@t3tools/project-con
 import type { MouseEvent } from "react";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectTicket } from "~/t3work/t3work-types";
-import type { AddToChatPayloadInput, AddToChatRequest } from "~/t3work/t3work-addToChatUtils";
+import type { AddToChatPayloadInput } from "~/t3work/t3work-addToChatUtils";
+import {
+  buildAddToChatAgentContextCapabilities,
+  type AgentContextCapabilities,
+} from "~/t3work/t3work-agentContext";
 import type { BackendApi } from "~/t3work/backend/t3work-types";
 import { buildTicketDetailContextBundle } from "~/t3work/t3work-ticketDetailContextBundle";
 import type { TicketDetailContextTarget } from "~/t3work/t3work-ticketDetailContextBundle";
@@ -24,7 +28,10 @@ export function createSectionContextMenuHandler(input: {
   projectTickets: ReadonlyArray<ProjectTicket>;
   githubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
   snapshot: ResourceSnapshot | null;
-  showAddToChatContextMenu: (event: MouseEvent, request: AddToChatRequest) => Promise<void>;
+  showAgentContextMenu: (
+    event: MouseEvent,
+    capabilities: AgentContextCapabilities,
+  ) => Promise<boolean>;
 }) {
   return (
     event: MouseEvent,
@@ -42,33 +49,36 @@ export function createSectionContextMenuHandler(input: {
     const resolvedKind = options?.kind ?? `jira-ticket-${target}`;
     const resolvedDedupeKey =
       options?.dedupeKey ?? `${input.projectId}:${input.ticket.id}:${target}`;
-    void input.showAddToChatContextMenu(event, {
-      projectId: input.projectId,
-      projectTitle: input.project.title,
-      projectWorkspaceRoot: input.project.workspace?.rootPath,
-      targetLabel,
-      targetType: "Ticket Detail Item",
-      kind: resolvedKind,
-      ...(options?.jiraIssueType ? { jiraIssueType: options.jiraIssueType } : {}),
-      ...(options?.jiraIssueTypeIconUrl
-        ? { jiraIssueTypeIconUrl: options.jiraIssueTypeIconUrl }
-        : {}),
-      dedupeKey: resolvedDedupeKey,
-      ...(summaryItems ? { summaryItems } : {}),
-      payload: (progress?: AddToChatPayloadInput) =>
-        buildTicketDetailContextBundle({
-          backend: input.backend as BackendApi,
-          project: input.project,
-          ticket: input.ticket as ProjectTicket,
-          projectTickets: input.projectTickets,
-          githubActivityItems: input.githubActivityItems,
-          target,
-          targetLabel,
-          ...(summaryItems ? { summaryItems } : {}),
-          primarySnapshot: input.snapshot,
-          ...(progress?.reportProgress ? { onProgress: progress.reportProgress } : {}),
-        }),
-    });
+    void input.showAgentContextMenu(
+      event,
+      buildAddToChatAgentContextCapabilities({
+        projectId: input.projectId,
+        projectTitle: input.project.title,
+        projectWorkspaceRoot: input.project.workspace?.rootPath,
+        targetLabel,
+        targetType: "Ticket Detail Item",
+        kind: resolvedKind,
+        ...(options?.jiraIssueType ? { jiraIssueType: options.jiraIssueType } : {}),
+        ...(options?.jiraIssueTypeIconUrl
+          ? { jiraIssueTypeIconUrl: options.jiraIssueTypeIconUrl }
+          : {}),
+        dedupeKey: resolvedDedupeKey,
+        ...(summaryItems ? { summaryItems } : {}),
+        payload: (progress?: AddToChatPayloadInput) =>
+          buildTicketDetailContextBundle({
+            backend: input.backend as BackendApi,
+            project: input.project,
+            ticket: input.ticket as ProjectTicket,
+            projectTickets: input.projectTickets,
+            githubActivityItems: input.githubActivityItems,
+            target,
+            targetLabel,
+            ...(summaryItems ? { summaryItems } : {}),
+            primarySnapshot: input.snapshot,
+            ...(progress?.reportProgress ? { onProgress: progress.reportProgress } : {}),
+          }),
+      }),
+    );
   };
 }
 

@@ -7,12 +7,25 @@ import {
   AtlassianApiError,
   AtlassianAuthError,
   AtlassianNetworkError,
+  type JiraBoard,
+  type JiraBoardConfigurationResponse,
+  type JiraBoardSearchResponse,
+  type JiraCreateMetaResponse,
   type JiraCommentsResponse,
+  type JiraField,
+  type JiraFilter,
+  type JiraFilterSearchResponse,
   type JiraIssue,
+  type JiraIssueEditMetaResponse,
+  type JiraIssueCreateResponse,
+  type JiraIssueTransition,
+  type JiraIssueTransitionsResponse,
   type JiraIssueSearchResponse,
   type JiraMyself,
   type JiraProject,
   type JiraProjectSearchResponse,
+  type JiraSprintSearchResponse,
+  type JiraUser,
 } from "./client.ts";
 
 export type JiraApiAuth =
@@ -29,6 +42,57 @@ export type JiraApiAuth =
       readonly email: string;
       readonly apiToken: string;
     };
+
+export const JIRA_API_TIMEOUT_MS = 10_000;
+
+async function fetchWithJiraTimeout(url: string, init?: RequestInit): Promise<Response> {
+  const abortController = new AbortController();
+  const upstreamSignal = init?.signal ?? undefined;
+  const timeoutSignal = AbortSignal.timeout(JIRA_API_TIMEOUT_MS);
+  let didTimeout = false;
+
+  const onTimeoutAbort = () => {
+    didTimeout = true;
+    abortController.abort(timeoutSignal.reason);
+  };
+
+  const onUpstreamAbort = () => {
+    abortController.abort(upstreamSignal?.reason);
+  };
+
+  if (timeoutSignal.aborted) {
+    onTimeoutAbort();
+  } else {
+    timeoutSignal.addEventListener("abort", onTimeoutAbort, { once: true });
+  }
+
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) {
+      onUpstreamAbort();
+    } else {
+      upstreamSignal.addEventListener("abort", onUpstreamAbort, { once: true });
+    }
+  }
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: abortController.signal,
+    });
+  } catch (cause) {
+    if (didTimeout) {
+      throw new Error(`Atlassian request timed out after ${JIRA_API_TIMEOUT_MS}ms`, {
+        cause,
+      });
+    }
+    throw cause;
+  } finally {
+    timeoutSignal.removeEventListener("abort", onTimeoutAbort);
+    if (upstreamSignal) {
+      upstreamSignal.removeEventListener("abort", onUpstreamAbort);
+    }
+  }
+}
 
 export class JiraApiClient {
   private readonly auth: JiraApiAuth;
@@ -84,7 +148,7 @@ export class JiraApiClient {
     const { url, path } = this.resolveUrl(pathOrUrl);
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await fetchWithJiraTimeout(url, {
         ...init,
         headers: {
           Authorization: this.authHeader,
@@ -133,6 +197,31 @@ export class JiraApiClient {
     }
   }
 
+  private buildIssueFields(extraFields: ReadonlyArray<string> = []): string {
+    const baseFields = [
+      "key",
+      "summary",
+      "parent",
+      "subtasks",
+      "issuelinks",
+      "issuetype",
+      "status",
+      "priority",
+      "assignee",
+      "reporter",
+      "labels",
+      "description",
+      "updated",
+      "created",
+      "comment",
+      "project",
+      "attachment",
+    ];
+
+    const merged = [...new Set([...baseFields, ...extraFields])];
+    return merged.join(",");
+  }
+
   async downloadAsset(url: string): Promise<{ bytes: Uint8Array; mimeType?: string }> {
     const { response } = await this.fetchResponse(url, undefined, {
       accept: "*/*",
@@ -160,53 +249,156 @@ export class JiraApiClient {
     return this.fetchJson<JiraProject>(`/rest/api/3/project/${encoded}`);
   }
 
-  async searchIssues(jql: string, maxResults = 50): Promise<JiraIssueSearchResponse> {
-    const encodedJql = encodeURIComponent(jql);
-    const fields = [
-      "key",
-      "summary",
-      "parent",
-      "subtasks",
-      "issuelinks",
-      "issuetype",
-      "status",
-      "priority",
-      "assignee",
-      "reporter",
-      "labels",
-      "description",
-      "updated",
-      "created",
-      "comment",
-      "project",
-    ].join(",");
-    return this.fetchJson<JiraIssueSearchResponse>(
-      `/rest/api/3/search/jql?jql=${encodedJql}&fields=${fields}&maxResults=${maxResults}`,
+  async listBoards(projectKeyOrId: string): Promise<JiraBoardSearchResponse> {
+    const params = new URLSearchParams({
+      projectKeyOrId,
+      maxResults: "100",
+    });
+    return this.fetchJson<JiraBoardSearchResponse>(`/rest/agile/1.0/board?${params.toString()}`);
+  }
+
+  async getBoard(boardId: string): Promise<JiraBoard> {
+    return this.fetchJson<JiraBoard>(`/rest/agile/1.0/board/${encodeURIComponent(boardId)}`);
+  }
+
+  async getBoardConfiguration(boardId: string): Promise<JiraBoardConfigurationResponse> {
+    return this.fetchJson<JiraBoardConfigurationResponse>(
+      `/rest/agile/1.0/board/${encodeURIComponent(boardId)}/configuration`,
     );
   }
 
-  async getIssue(issueIdOrKey: string): Promise<JiraIssue> {
-    const fields = [
-      "key",
-      "summary",
-      "parent",
-      "subtasks",
-      "issuelinks",
-      "issuetype",
-      "status",
-      "priority",
-      "assignee",
-      "reporter",
-      "labels",
-      "description",
-      "attachment",
-      "updated",
-      "created",
-      "comment",
-      "project",
-    ].join(",");
+  async listBoardSprints(
+    boardId: string,
+    states: ReadonlyArray<"active" | "future" | "closed"> = ["active", "future", "closed"],
+  ): Promise<JiraSprintSearchResponse> {
+    const params = new URLSearchParams({
+      maxResults: "100",
+    });
+    if (states.length > 0) {
+      params.set("state", states.join(","));
+    }
+    return this.fetchJson<JiraSprintSearchResponse>(
+      `/rest/agile/1.0/board/${encodeURIComponent(boardId)}/sprint?${params.toString()}`,
+    );
+  }
+
+  async listFavouriteFilters(): Promise<ReadonlyArray<JiraFilter>> {
+    return this.fetchJson<ReadonlyArray<JiraFilter>>(
+      "/rest/api/3/filter/favourite?expand=owner,jql",
+    );
+  }
+
+  async searchFilters(maxResults = 50): Promise<JiraFilterSearchResponse> {
+    const params = new URLSearchParams({
+      expand: "owner,jql",
+      maxResults: String(maxResults),
+    });
+    return this.fetchJson<JiraFilterSearchResponse>(`/rest/api/3/filter/search?${params}`);
+  }
+
+  async searchIssues(
+    jql: string,
+    maxResults = 50,
+    extraFields: ReadonlyArray<string> = [],
+    startAt = 0,
+  ): Promise<JiraIssueSearchResponse> {
+    const encodedJql = encodeURIComponent(jql);
+    const fields = this.buildIssueFields(extraFields);
+    const params = [`jql=${encodedJql}`, `fields=${fields}`, `maxResults=${maxResults}`];
+    if (startAt > 0) {
+      params.push(`startAt=${startAt}`);
+    }
+    return this.fetchJson<JiraIssueSearchResponse>(`/rest/api/3/search/jql?${params.join("&")}`);
+  }
+
+  async getIssue(
+    issueIdOrKey: string,
+    extraFields: ReadonlyArray<string> = [],
+  ): Promise<JiraIssue> {
+    const fields = this.buildIssueFields(extraFields);
     return this.fetchJson<JiraIssue>(
       `/rest/api/3/issue/${issueIdOrKey}?fields=${fields}&expand=renderedFields`,
+    );
+  }
+
+  async getIssueEditMeta(issueIdOrKey: string): Promise<JiraIssueEditMetaResponse> {
+    return this.fetchJson<JiraIssueEditMetaResponse>(`/rest/api/3/issue/${issueIdOrKey}/editmeta`);
+  }
+
+  async getIssueTransitions(issueIdOrKey: string): Promise<ReadonlyArray<JiraIssueTransition>> {
+    const response = await this.fetchJson<JiraIssueTransitionsResponse>(
+      `/rest/api/3/issue/${issueIdOrKey}/transitions`,
+    );
+    return response.transitions;
+  }
+
+  async listFields(): Promise<ReadonlyArray<JiraField>> {
+    return this.fetchJson<ReadonlyArray<JiraField>>("/rest/api/3/field");
+  }
+
+  async searchAssignableUsers(issueIdOrKey: string, query = ""): Promise<ReadonlyArray<JiraUser>> {
+    const params = new URLSearchParams({ issueKey: issueIdOrKey });
+    if (query.trim().length > 0) {
+      params.set("query", query.trim());
+    }
+    return this.fetchJson<ReadonlyArray<JiraUser>>(
+      `/rest/api/3/user/assignable/search?${params.toString()}`,
+    );
+  }
+
+  async updateIssue(issueIdOrKey: string, fields: Record<string, unknown>): Promise<void> {
+    await this.fetchResponse(
+      `/rest/api/3/issue/${issueIdOrKey}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ fields }),
+      },
+      {
+        accept: "application/json",
+        contentType: "application/json",
+      },
+    );
+  }
+
+  async assignIssue(issueIdOrKey: string, accountId: string | null): Promise<void> {
+    await this.fetchResponse(
+      `/rest/api/3/issue/${issueIdOrKey}/assignee`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ accountId }),
+      },
+      {
+        accept: "application/json",
+        contentType: "application/json",
+      },
+    );
+  }
+
+  async transitionIssue(issueIdOrKey: string, transitionId: string): Promise<void> {
+    await this.fetchResponse(
+      `/rest/api/3/issue/${issueIdOrKey}/transitions`,
+      {
+        method: "POST",
+        body: JSON.stringify({ transition: { id: transitionId } }),
+      },
+      {
+        accept: "application/json",
+        contentType: "application/json",
+      },
+    );
+  }
+
+  async createIssue(fields: Record<string, unknown>): Promise<JiraIssueCreateResponse> {
+    return this.fetchJson<JiraIssueCreateResponse>("/rest/api/3/issue", {
+      method: "POST",
+      body: JSON.stringify({ fields }),
+    });
+  }
+
+  async getCreateMeta(projectId: string): Promise<JiraCreateMetaResponse> {
+    const encodedProjectId = encodeURIComponent(projectId);
+    return this.fetchJson<JiraCreateMetaResponse>(
+      `/rest/api/3/issue/createmeta?projectIds=${encodedProjectId}&expand=projects.issuetypes.fields`,
     );
   }
 

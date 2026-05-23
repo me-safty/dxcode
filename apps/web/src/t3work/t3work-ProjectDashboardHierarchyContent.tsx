@@ -1,7 +1,11 @@
-import { TicketWorkItemCard, TicketWorkItemRow } from "~/t3work/t3work-ProjectDashboardItemViews";
+import type { AgentContextCapabilities } from "~/t3work/t3work-agentContext";
 import { T3SurfacePanel } from "~/t3work/components/ui/t3work-surface";
 import type { ProjectTicket } from "~/t3work/t3work-types";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
+import {
+  DraggableTicketWorkItemCard,
+  DraggableTicketWorkItemRow,
+} from "~/t3work/t3work-DraggableTicketWorkItems";
 import { ProjectDashboardTicketGitHubActivity } from "~/t3work/t3work-ProjectDashboardTicketGitHubActivity";
 
 type TicketHierarchy = {
@@ -20,6 +24,8 @@ export function ProjectDashboardHierarchyContent({
   projectId,
   onTicketContextMenu,
   onGitHubActivityContextMenu,
+  getTicketAgentContext,
+  getGitHubActivityDragCapabilities,
   onOpenTicket,
 }: {
   viewMode: "grid" | "list";
@@ -35,6 +41,11 @@ export function ProjectDashboardHierarchyContent({
     ticket: ProjectTicket,
     item: GitHubWorkActivityItem,
   ) => void;
+  getTicketAgentContext: (ticket: ProjectTicket) => AgentContextCapabilities | null;
+  getGitHubActivityDragCapabilities: (
+    ticket: ProjectTicket,
+    item: GitHubWorkActivityItem,
+  ) => AgentContextCapabilities;
   onOpenTicket: (projectId: string, ticketId: string) => void;
 }) {
   const renderGitHubActivity = (ticket: ProjectTicket, limit: number, compact?: boolean) => (
@@ -45,6 +56,7 @@ export function ProjectDashboardHierarchyContent({
       {...(compact ? { compact } : {})}
       {...(githubLastCheckedAt !== undefined ? { lastCheckedAt: githubLastCheckedAt } : {})}
       onItemContextMenu={(event, item) => onGitHubActivityContextMenu(event, ticket, item)}
+      getItemDragCapabilities={(item) => getGitHubActivityDragCapabilities(ticket, item)}
     />
   );
 
@@ -55,7 +67,9 @@ export function ProjectDashboardHierarchyContent({
           const children = parentChildGroups.childrenByParentId.get(parent.id) ?? [];
           return (
             <T3SurfacePanel key={parent.id} tone="muted" className="px-3 py-2.5">
-              <TicketWorkItemRow
+              <DraggableTicketWorkItemRow
+                capabilities={getTicketAgentContext(parent)}
+                dragLabel={`${parent.ref.displayId} ${parent.ref.title}`}
                 ticket={parent}
                 childCount={children.length}
                 {...(jiraLastCheckedAt !== undefined ? { lastCheckedAt: jiraLastCheckedAt } : {})}
@@ -67,8 +81,10 @@ export function ProjectDashboardHierarchyContent({
                 <T3SurfacePanel tone="inset" className="mt-2 ml-3 rounded-md px-2 py-1.5">
                   <div className="space-y-1.5 border-l-2 border-border/70 pl-2">
                     {children.map((child) => (
-                      <TicketWorkItemRow
+                      <DraggableTicketWorkItemRow
                         key={child.id}
+                        capabilities={getTicketAgentContext(child)}
+                        dragLabel={`${child.ref.displayId} ${child.ref.title}`}
                         ticket={child}
                         child
                         {...(jiraLastCheckedAt !== undefined
@@ -91,8 +107,10 @@ export function ProjectDashboardHierarchyContent({
             <div className="mb-2 text-xs font-medium text-muted-foreground">Unlinked subtasks</div>
             <div className="space-y-1.5">
               {parentChildGroups.unresolvedChildren.map((child) => (
-                <TicketWorkItemRow
+                <DraggableTicketWorkItemRow
                   key={child.id}
+                  capabilities={getTicketAgentContext(child)}
+                  dragLabel={`${child.ref.displayId} ${child.ref.title}`}
                   ticket={child}
                   child
                   {...(jiraLastCheckedAt !== undefined ? { lastCheckedAt: jiraLastCheckedAt } : {})}
@@ -114,7 +132,9 @@ export function ProjectDashboardHierarchyContent({
         const children = parentChildGroups.childrenByParentId.get(ticket.id) ?? [];
         return (
           <T3SurfacePanel key={ticket.id} tone="muted" className="px-2.5 py-2">
-            <TicketWorkItemCard
+            <DraggableTicketWorkItemCard
+              capabilities={getTicketAgentContext(ticket)}
+              dragLabel={`${ticket.ref.displayId} ${ticket.ref.title}`}
               ticket={ticket}
               flat
               childCount={children.length}
@@ -127,8 +147,10 @@ export function ProjectDashboardHierarchyContent({
               <T3SurfacePanel tone="inset" className="mt-2 ml-2 rounded-md px-2 py-1.5">
                 <div className="space-y-1.5 border-l-2 border-border/70 pl-2">
                   {children.map((child) => (
-                    <TicketWorkItemCard
+                    <DraggableTicketWorkItemCard
                       key={child.id}
+                      capabilities={getTicketAgentContext(child)}
+                      dragLabel={`${child.ref.displayId} ${child.ref.title}`}
                       ticket={child}
                       compact
                       flat
