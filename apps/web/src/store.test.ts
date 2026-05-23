@@ -67,6 +67,7 @@ function withActiveEnvironmentState(
   return {
     activeEnvironmentId,
     environmentStateById,
+    accountRateLimitsByInstanceId: {},
   };
 }
 
@@ -520,6 +521,7 @@ describe("environment state removal", () => {
         [remoteEnvironmentId]: removedState,
         [localEnvironmentId]: keptState,
       },
+      accountRateLimitsByInstanceId: {},
     };
 
     const next = removeEnvironmentState(state, remoteEnvironmentId);
@@ -1233,6 +1235,7 @@ describe("thread detail pagination", () => {
         [localEnvironmentId]: localState,
         [remoteEnvironmentId]: remoteState,
       },
+      accountRateLimitsByInstanceId: {},
     };
     const pageInfo = makePageInfo({ hasMoreBefore: true, startIndex: 1 });
 
@@ -1290,6 +1293,7 @@ describe("setThreadBranch", () => {
         [localEnvironmentId]: environmentStateOf(makeState(localThread), localEnvironmentId),
         [remoteEnvironmentId]: environmentStateOf(makeState(remoteThread), remoteEnvironmentId),
       },
+      accountRateLimitsByInstanceId: {},
     };
 
     const next = setThreadBranch(

@@ -5,6 +5,8 @@ import type { DraftId } from "../composerDraftStore";
 
 export const NOTIFICATION_CLICK_MESSAGE_TYPE = "t3.notification-click";
 
+let lastNotificationNavigationTarget: NotificationNavigationTarget | null = null;
+
 interface NotificationClickClientMessage {
   readonly type: typeof NOTIFICATION_CLICK_MESSAGE_TYPE;
   readonly url: string;
@@ -122,6 +124,14 @@ export function parseNotificationNavigationTarget(
   return null;
 }
 
+export function getLastNotificationNavigationTarget(): NotificationNavigationTarget | null {
+  return lastNotificationNavigationTarget;
+}
+
+export function resetNotificationNavigationStateForTests(): void {
+  lastNotificationNavigationTarget = null;
+}
+
 export function installServiceWorkerNotificationNavigation(router: AppRouter): () => void {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
     return () => undefined;
@@ -138,6 +148,7 @@ export function installServiceWorkerNotificationNavigation(router: AppRouter): (
       return;
     }
 
+    lastNotificationNavigationTarget = target;
     void navigateToNotificationTarget(router, target);
   };
 

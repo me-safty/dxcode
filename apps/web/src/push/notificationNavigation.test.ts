@@ -2,9 +2,11 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 
 import type { AppRouter } from "../router";
 import {
+  getLastNotificationNavigationTarget,
   installServiceWorkerNotificationNavigation,
   isNotificationClickClientMessage,
   parseNotificationNavigationTarget,
+  resetNotificationNavigationStateForTests,
   resolveNotificationUrl,
 } from "./notificationNavigation";
 
@@ -42,6 +44,7 @@ function makeRouter() {
 describe("notificationNavigation", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    resetNotificationNavigationStateForTests();
   });
 
   it("recognizes notification click service worker messages", () => {
@@ -121,6 +124,11 @@ describe("notificationNavigation", () => {
         threadId: "thread-1",
       },
       search: {},
+    });
+    expect(getLastNotificationNavigationTarget()).toEqual({
+      kind: "thread",
+      environmentId: "env-1",
+      threadId: "thread-1",
     });
 
     cleanup();

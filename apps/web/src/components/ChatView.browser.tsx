@@ -18,6 +18,7 @@ import {
   WS_METHODS,
   OrchestrationSessionStatus,
   DEFAULT_SERVER_SETTINGS,
+  EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
   ServerConfig as ServerConfigSchema,
 } from "@t3tools/contracts";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
@@ -50,7 +51,10 @@ import {
 } from "../lib/terminalContext";
 import { isMacPlatform } from "../lib/utils";
 import { __resetLocalApiForTests } from "../localApi";
-import { installServiceWorkerNotificationNavigation } from "../push/notificationNavigation";
+import {
+  installServiceWorkerNotificationNavigation,
+  resetNotificationNavigationStateForTests,
+} from "../push/notificationNavigation";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { getServerConfig } from "../rpc/serverState";
 import { getRouter } from "../router";
@@ -71,6 +75,7 @@ vi.mock("../lib/gitStatusState", () => ({
 }));
 
 const THREAD_ID = "thread-browser-test" as ThreadId;
+const NOTIFICATION_RECOVERY_OTHER_THREAD_ID = "thread-notification-recovery-other" as ThreadId;
 const THREAD_TITLE = "Browser test thread";
 const ARCHIVED_SECONDARY_THREAD_ID = "thread-secondary-project-archived" as ThreadId;
 const PROJECT_ID = "project-1" as ProjectId;
@@ -417,6 +422,49 @@ function buildFixture(snapshot: OrchestrationReadModel): TestFixture {
       bootstrapProjectId: PROJECT_ID,
       bootstrapThreadId: THREAD_ID,
     },
+  };
+}
+
+function createSnapshotForNotificationThreadRecovery(options: {
+  targetMessageId: MessageId;
+  targetText: string;
+}): {
+  snapshot: OrchestrationReadModel;
+  recoveryThread: OrchestrationReadModel["threads"][number];
+} {
+  const fullSnapshot = createSnapshotForTargetUser(options);
+  const recoveryThread = fullSnapshot.threads.find((thread) => thread.id === THREAD_ID);
+  if (!recoveryThread) {
+    throw new Error("Missing notification recovery thread fixture.");
+  }
+
+  const bootstrapThread: OrchestrationReadModel["threads"][number] = {
+    ...recoveryThread,
+    id: NOTIFICATION_RECOVERY_OTHER_THREAD_ID,
+    title: "Notification recovery bootstrap thread",
+    messages: [],
+    queuedTurns: [],
+    activities: [],
+    proposedPlans: [],
+    checkpoints: [],
+    latestTurn: null,
+    session: {
+      threadId: NOTIFICATION_RECOVERY_OTHER_THREAD_ID,
+      status: "ready",
+      providerName: "codex",
+      runtimeMode: "full-access",
+      activeTurnId: null,
+      lastError: null,
+      updatedAt: NOW_ISO,
+    },
+  };
+
+  return {
+    snapshot: {
+      ...fullSnapshot,
+      threads: [bootstrapThread],
+    },
+    recoveryThread,
   };
 }
 
@@ -1019,6 +1067,54 @@ function createSnapshotWithPlanFollowUpPrompt(options?: {
         : thread,
     ),
   };
+}
+
+function getDefaultInitialStreamValues(
+  request: NormalizedWsRpcRequestBody,
+): ReadonlyArray<unknown> | undefined {
+  if (request._tag === WS_METHODS.subscribeServerLifecycle) {
+    return [
+      {
+        version: 1,
+        sequence: 1,
+        type: "welcome",
+        payload: fixture.welcome,
+      },
+    ];
+  }
+  if (request._tag === WS_METHODS.subscribeServerConfig) {
+    return [
+      {
+        version: 1,
+        type: "snapshot",
+        config: encodeServerConfig(fixture.serverConfig),
+      },
+    ];
+  }
+  if (request._tag === ORCHESTRATION_WS_METHODS.subscribeShell) {
+    return [
+      {
+        kind: "snapshot",
+        snapshot: toShellSnapshot(fixture.snapshot),
+      },
+    ];
+  }
+  if (request._tag === ORCHESTRATION_WS_METHODS.subscribeThread) {
+    const thread = fixture.snapshot.threads.find((entry) => entry.id === request.threadId);
+    return thread
+      ? [
+          {
+            kind: "snapshot",
+            snapshot: {
+              snapshotSequence: fixture.snapshot.snapshotSequence,
+              thread,
+              pageInfo: EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+            },
+          },
+        ]
+      : [];
+  }
+  return [];
 }
 
 function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
@@ -1745,11 +1841,24 @@ async function mountChatView(options: {
   snapshot: OrchestrationReadModel;
   configureFixture?: (fixture: TestFixture) => void;
   resolveRpc?: (body: NormalizedWsRpcRequestBody) => unknown | undefined;
+  getInitialStreamValues?: (
+    request: NormalizedWsRpcRequestBody,
+  ) => ReadonlyArray<unknown> | undefined;
   initialPath?: string;
 }): Promise<MountedChatView> {
   fixture = buildFixture(options.snapshot);
   options.configureFixture?.(fixture);
   customWsRpcResolver = options.resolveRpc ?? null;
+  await rpcHarness.reset({
+    resolveUnary: resolveWsRpc,
+    getInitialStreamValues: (request) => {
+      const customValues = options.getInitialStreamValues?.(request);
+      if (customValues !== undefined) {
+        return customValues;
+      }
+      return getDefaultInitialStreamValues(request);
+    },
+  });
   await setViewport(options.viewport);
   await waitForProductionStyles();
 
@@ -1830,50 +1939,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   beforeEach(async () => {
     await rpcHarness.reset({
       resolveUnary: resolveWsRpc,
-      getInitialStreamValues: (request) => {
-        if (request._tag === WS_METHODS.subscribeServerLifecycle) {
-          return [
-            {
-              version: 1,
-              sequence: 1,
-              type: "welcome",
-              payload: fixture.welcome,
-            },
-          ];
-        }
-        if (request._tag === WS_METHODS.subscribeServerConfig) {
-          return [
-            {
-              version: 1,
-              type: "snapshot",
-              config: encodeServerConfig(fixture.serverConfig),
-            },
-          ];
-        }
-        if (request._tag === ORCHESTRATION_WS_METHODS.subscribeShell) {
-          return [
-            {
-              kind: "snapshot",
-              snapshot: toShellSnapshot(fixture.snapshot),
-            },
-          ];
-        }
-        if (request._tag === ORCHESTRATION_WS_METHODS.subscribeThread) {
-          const thread = fixture.snapshot.threads.find((entry) => entry.id === request.threadId);
-          return thread
-            ? [
-                {
-                  kind: "snapshot",
-                  snapshot: {
-                    snapshotSequence: fixture.snapshot.snapshotSequence,
-                    thread,
-                  },
-                },
-              ]
-            : [];
-        }
-        return [];
-      },
+      getInitialStreamValues: getDefaultInitialStreamValues,
     });
     await __resetLocalApiForTests();
     await setViewport(DEFAULT_VIEWPORT);
@@ -1881,6 +1947,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     document.body.innerHTML = "";
     wsRequests.length = 0;
     customWsRpcResolver = null;
+    resetNotificationNavigationStateForTests();
     __resetEnvironmentApiOverridesForTests();
     resetSavedEnvironmentRegistryStoreForTests();
     resetSavedEnvironmentRuntimeStoreForTests();
@@ -4241,6 +4308,147 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("keeps the notification target when the startup bootstrap thread differs", async () => {
+    const bootstrapThreadId = NOTIFICATION_RECOVERY_OTHER_THREAD_ID;
+    const snapshot = addThreadToSnapshot(
+      createSnapshotForTargetUser({
+        targetMessageId: "msg-user-notification-bootstrap-race-test" as MessageId,
+        targetText: "notification bootstrap race test",
+      }),
+      bootstrapThreadId,
+    );
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+      initialPath: "/",
+      configureFixture: (fixture) => {
+        fixture.welcome = {
+          ...fixture.welcome,
+          bootstrapThreadId,
+        };
+      },
+    });
+    const cleanupNotificationNavigation = installServiceWorkerNotificationNavigation(
+      mounted.router,
+    );
+
+    try {
+      wsRequests.length = 0;
+      navigator.serviceWorker.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            type: "t3.notification-click",
+            url: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`,
+            openedAt: Date.now(),
+          },
+        }),
+      );
+
+      await waitForURL(
+        mounted.router,
+        (path) => path === serverThreadPath(THREAD_ID),
+        "Notification clicks should win over startup bootstrap navigation.",
+      );
+      await waitForLayout();
+      expect(mounted.router.state.location.pathname).toBe(serverThreadPath(THREAD_ID));
+      expect(mounted.router.state.location.pathname).not.toBe(serverThreadPath(bootstrapThreadId));
+      expect(
+        wsRequests.some(
+          (request) => request._tag === ORCHESTRATION_WS_METHODS.reconcileThreadDetail,
+        ),
+      ).toBe(false);
+    } finally {
+      cleanupNotificationNavigation();
+      await mounted.cleanup();
+    }
+  });
+
+  it("recovers notification thread routes when the target thread is missing from client state", async () => {
+    const { snapshot, recoveryThread } = createSnapshotForNotificationThreadRecovery({
+      targetMessageId: "msg-user-notification-thread-recovery-test" as MessageId,
+      targetText: "notification thread recovery test",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+      initialPath: "/",
+      getInitialStreamValues: (request) => {
+        if (
+          request._tag === ORCHESTRATION_WS_METHODS.subscribeThread &&
+          request.threadId === THREAD_ID
+        ) {
+          return [
+            {
+              kind: "snapshot",
+              snapshot: {
+                snapshotSequence: snapshot.snapshotSequence + 1,
+                thread: recoveryThread,
+                pageInfo: EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+              },
+            },
+          ];
+        }
+        return undefined;
+      },
+      resolveRpc: (body) => {
+        if (
+          body._tag === ORCHESTRATION_WS_METHODS.reconcileThreadDetail &&
+          body.threadId === THREAD_ID
+        ) {
+          fixture.snapshot = {
+            ...fixture.snapshot,
+            snapshotSequence: fixture.snapshot.snapshotSequence + 1,
+            threads: [...fixture.snapshot.threads, recoveryThread],
+          };
+          return {
+            kind: "snapshot",
+            reason: "missing-client-verification",
+            serverSequence: fixture.snapshot.snapshotSequence,
+            serverFingerprint: {
+              version: 1,
+              value: `fingerprint-${fixture.snapshot.snapshotSequence}`,
+            },
+            snapshot: {
+              snapshotSequence: fixture.snapshot.snapshotSequence,
+              thread: recoveryThread,
+              pageInfo: EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+            },
+          };
+        }
+        return undefined;
+      },
+    });
+    const cleanupNotificationNavigation = installServiceWorkerNotificationNavigation(
+      mounted.router,
+    );
+
+    try {
+      wsRequests.length = 0;
+      navigator.serviceWorker.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            type: "t3.notification-click",
+            url: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`,
+            openedAt: Date.now(),
+          },
+        }),
+      );
+
+      await waitForURL(
+        mounted.router,
+        (path) => path === serverThreadPath(THREAD_ID),
+        "Notification clicks should navigate to the target thread route.",
+      );
+
+      await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
+      expect(mounted.router.state.location.pathname).toBe(serverThreadPath(THREAD_ID));
+      expect(mounted.router.state.location.pathname).not.toBe("/");
+    } finally {
+      cleanupNotificationNavigation();
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps a sent draft message visible while promotion waits for thread detail", async () => {
     const sentText = "Keep this visible after promotion";
     const mounted = await mountChatView({
@@ -6456,6 +6664,39 @@ describe("ChatView timeline estimator parity (full app)", () => {
           );
         },
         { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens implementation actions on the first tap at mobile width", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotWithPlanFollowUpPrompt(),
+    });
+
+    try {
+      const expandComposerButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Expand composer"]'),
+        "Unable to find collapsed mobile composer expand control.",
+      );
+      expandComposerButton.click();
+
+      const implementActionsButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label="Implementation actions"]'),
+        "Unable to find implementation actions trigger.",
+      );
+
+      implementActionsButton.click();
+
+      await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll('[data-slot="menu-item"]')).find((item) =>
+            item.textContent?.includes("Implement in a new thread"),
+          ) ?? null,
+        "Implementation actions menu did not open on the first tap.",
       );
     } finally {
       await mounted.cleanup();

@@ -374,7 +374,8 @@ export function resolveThreadStatusPill(input: {
     !thread.hasPendingUserInput &&
     thread.interactionMode === "plan" &&
     isLatestTurnSettled(thread.latestTurn, thread.session) &&
-    thread.hasActionableProposedPlan;
+    thread.hasActionableProposedPlan &&
+    hasUnseenCompletion(thread);
   if (hasPlanReadyPrompt) {
     return {
       label: "Plan Ready",

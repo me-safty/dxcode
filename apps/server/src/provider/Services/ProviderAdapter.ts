@@ -120,6 +120,11 @@ export interface ProviderAdapterShape<TError> {
   readonly refreshUsage?: () => Effect.Effect<void, TError>;
 
   /**
+   * Best-effort account-level rate limits without an active session.
+   */
+  readonly getAccountRateLimits?: () => Effect.Effect<unknown | undefined, TError>;
+
+  /**
    * Stop all sessions owned by this adapter.
    */
   readonly stopAll: () => Effect.Effect<void, TError>;

@@ -619,6 +619,42 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Plan Ready", pulse: false });
   });
 
+  it("clears plan ready once the thread has been visited after the plan-mode turn completed", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          hasActionableProposedPlan: true,
+          latestTurn: makeLatestTurn({ completedAt: "2026-03-09T10:05:00.000Z" }),
+          lastVisitedAt: "2026-03-09T10:05:00.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("still shows plan ready when the plan-mode turn completed after the last visit", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          hasActionableProposedPlan: true,
+          latestTurn: makeLatestTurn({ completedAt: "2026-03-09T10:05:00.000Z" }),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Plan Ready", pulse: false });
+  });
+
   it("does not show plan ready after the proposed plan was implemented elsewhere", () => {
     expect(
       resolveThreadStatusPill({

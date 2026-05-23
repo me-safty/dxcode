@@ -239,12 +239,35 @@ function parseClaudeWindow(
   });
 }
 
+function statusToUsedPercent(status: string | null): number | null {
+  switch (status) {
+    case "rejected":
+    case "rate_limit_reached":
+    case "workspace_owner_usage_limit_reached":
+    case "workspace_member_usage_limit_reached":
+      return 100;
+    case "allowed_warning":
+      return 80;
+    case "allowed":
+      return 0;
+    default:
+      return null;
+  }
+}
+
 function isNewerOrMoreRelevantWindow(
   candidate: SidebarUsageWindow,
   current: SidebarUsageWindow | null,
 ): boolean {
   if (!current) {
     return true;
+  }
+  if (
+    candidate.usedPercent === null &&
+    current.usedPercent !== null &&
+    isFreshUsageWindow(current)
+  ) {
+    return false;
   }
   const dateComparison = candidate.updatedAt.localeCompare(current.updatedAt);
   if (dateComparison !== 0) {
@@ -371,19 +394,7 @@ function usageWindowScore(window: SidebarUsageWindow): number {
   if (window.usedPercent !== null) {
     return window.usedPercent;
   }
-  switch (window.status) {
-    case "rejected":
-    case "rate_limit_reached":
-    case "workspace_owner_usage_limit_reached":
-    case "workspace_member_usage_limit_reached":
-      return 100;
-    case "allowed_warning":
-      return 80;
-    case "allowed":
-      return 0;
-    default:
-      return -1;
-  }
+  return statusToUsedPercent(window.status) ?? -1;
 }
 
 function getLatestWindow(windows: SidebarUsageWindowMap): SidebarUsageWindow | null {
@@ -424,9 +435,30 @@ export function getSidebarUsageDisplayPercent(window: SidebarUsageWindow | null)
   return window?.remainingPercent ?? null;
 }
 
+export function getSidebarUsageBarPercent(window: SidebarUsageWindow | null): number | null {
+  if (!window) {
+    return null;
+  }
+  if (typeof window.remainingPercent === "number") {
+    return window.remainingPercent;
+  }
+  const statusUsedPercent = statusToUsedPercent(window.status);
+  if (typeof statusUsedPercent === "number") {
+    return 100 - statusUsedPercent;
+  }
+  return null;
+}
+
 export function deriveSidebarUsageProviderRows(input: {
   readonly providerInstances: ReadonlyArray<SidebarUsageProviderInstanceInput>;
   readonly threads: ReadonlyArray<SidebarUsageThreadInput>;
+  readonly accountRateLimitsByInstanceId?: Record<
+    string,
+    {
+      readonly rateLimits: unknown;
+      readonly updatedAt: string;
+    }
+  >;
 }): ReadonlyArray<SidebarUsageProviderRow> {
   const driverIdByInstanceId = new Map<string, SidebarUsageDriverId>();
   for (const instance of input.providerInstances) {
@@ -457,6 +489,28 @@ export function deriveSidebarUsageProviderRows(input: {
     }
     return entry;
   };
+
+  for (const instance of input.providerInstances) {
+    const accountLimits = input.accountRateLimitsByInstanceId?.[String(instance.instanceId)];
+    if (!accountLimits) {
+      continue;
+    }
+
+    const driverId = driverIdByInstanceId.get(String(instance.instanceId));
+    if (!driverId) {
+      continue;
+    }
+
+    const windows = collectRateLimitWindows(accountLimits.rateLimits, accountLimits.updatedAt);
+    if (windows.length === 0) {
+      continue;
+    }
+
+    const current = ensureEntry(driverId);
+    for (const window of windows) {
+      mergeWindow(current.windows, window);
+    }
+  }
 
   for (const thread of input.threads) {
     for (const activity of thread.activities) {

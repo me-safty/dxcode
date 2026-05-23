@@ -202,11 +202,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           <MenuTrigger
             render={
               <Button
+                type="button"
                 size="sm"
                 variant="default"
-                className="h-9 rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8"
+                className="h-9 min-w-9 touch-manipulation rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8 sm:min-w-0"
                 aria-label="Implementation actions"
-                {...pointerFocusProps}
                 disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
               />
             }

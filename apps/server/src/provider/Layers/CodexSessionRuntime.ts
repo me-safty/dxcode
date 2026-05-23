@@ -57,7 +57,7 @@ const BENIGN_ERROR_LOG_SNIPPETS = [
 ];
 const CODEX_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
 const CODEX_USAGE_REFRESH_INTERVAL = Duration.seconds(30);
-const CODEX_USAGE_REFRESH_TIMEOUT = Duration.seconds(10);
+export const CODEX_USAGE_REFRESH_TIMEOUT = Duration.seconds(10);
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "not found",
   "missing thread",
@@ -715,26 +715,29 @@ function parseThreadSnapshot(
   };
 }
 
-export const makeCodexSessionRuntime = (
-  options: CodexSessionRuntimeOptions,
+export interface MakeCodexAppServerClientOptions {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly cwd: string;
+  readonly environment?: NodeJS.ProcessEnv;
+}
+
+export interface CodexAppServerClientHandle {
+  readonly client: CodexClient.CodexAppServerClientShape;
+  readonly child: ChildProcessSpawner.ChildProcessHandle;
+}
+
+export const makeCodexAppServerClient = (
+  options: MakeCodexAppServerClientOptions,
 ): Effect.Effect<
-  CodexSessionRuntimeShape,
+  CodexAppServerClientHandle,
   CodexErrors.CodexAppServerError,
   ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
 > =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const runtimeScope = yield* Scope.Scope;
-    const events = yield* Queue.unbounded<ProviderEvent>();
-    const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
-    const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
-    const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
-    const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>());
-    const closedRef = yield* Ref.make(false);
+    const clientScope = yield* Scope.Scope;
 
-    // `~` is not shell-expanded when env vars are set via
-    // `child_process.spawn`; `expandHomePath` lets a configured
-    // `CODEX_HOME=~/.codex_work` reach codex as an absolute path.
     const resolvedHomePath = options.homePath ? expandHomePath(options.homePath) : undefined;
     const env = {
       ...(options.environment ?? process.env),
@@ -750,7 +753,7 @@ export const makeCodexSessionRuntime = (
         }),
       )
       .pipe(
-        Effect.provideService(Scope.Scope, runtimeScope),
+        Effect.provideService(Scope.Scope, clientScope),
         Effect.mapError(
           (cause) =>
             new CodexErrors.CodexAppServerSpawnError({
@@ -762,11 +765,39 @@ export const makeCodexSessionRuntime = (
 
     const clientContext = yield* CodexClient.layerChildProcess(child).pipe(
       Layer.build,
-      Effect.provideService(Scope.Scope, runtimeScope),
+      Effect.provideService(Scope.Scope, clientScope),
     );
     const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
       Effect.provide(clientContext),
     );
+
+    yield* client.request("initialize", buildCodexInitializeParams());
+    yield* client.notify("initialized", undefined);
+    return { client, child } satisfies CodexAppServerClientHandle;
+  });
+
+export const makeCodexSessionRuntime = (
+  options: CodexSessionRuntimeOptions,
+): Effect.Effect<
+  CodexSessionRuntimeShape,
+  CodexErrors.CodexAppServerError,
+  ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
+> =>
+  Effect.gen(function* () {
+    const runtimeScope = yield* Scope.Scope;
+    const events = yield* Queue.unbounded<ProviderEvent>();
+    const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
+    const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
+    const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
+    const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>());
+    const closedRef = yield* Ref.make(false);
+
+    const { client, child } = yield* makeCodexAppServerClient({
+      binaryPath: options.binaryPath,
+      ...(options.homePath ? { homePath: options.homePath } : {}),
+      cwd: options.cwd,
+      ...(options.environment ? { environment: options.environment } : {}),
+    });
     const serverNotifications = yield* Queue.unbounded<CodexServerNotification>();
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -1247,8 +1278,6 @@ export const makeCodexSessionRuntime = (
 
     const start = Effect.fn("CodexSessionRuntime.start")(function* () {
       yield* emitSessionEvent("session/connecting", "Starting Codex App Server session.");
-      yield* client.request("initialize", buildCodexInitializeParams());
-      yield* client.notify("initialized", undefined);
 
       const requestedModel = normalizeCodexModelSlug(options.model);
 

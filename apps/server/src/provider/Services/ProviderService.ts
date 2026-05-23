@@ -12,6 +12,7 @@
  * @module ProviderService
  */
 import type {
+  ProviderDriverKind,
   ProviderInterruptTurnInput,
   ProviderInstanceId,
   ProviderRespondToRequestInput,
@@ -108,7 +109,13 @@ export interface ProviderServiceShape {
   /**
    * Best-effort refresh for usage/rate-limit telemetry on active sessions.
    */
-  readonly refreshUsage: () => Effect.Effect<void>;
+  readonly refreshUsage: () => Effect.Effect<{
+    readonly accountRateLimits: ReadonlyArray<{
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly provider: ProviderDriverKind;
+      readonly rateLimits: unknown;
+    }>;
+  }>;
 
   /**
    * Canonical provider runtime event stream.

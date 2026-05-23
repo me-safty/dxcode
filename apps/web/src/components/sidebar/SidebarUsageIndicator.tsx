@@ -13,6 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/colla
 import { useSidebar } from "../ui/sidebar";
 import {
   deriveSidebarUsageProviderRows,
+  getSidebarUsageBarPercent,
   getSidebarUsageDisplayPercent,
   getSidebarUsagePrimaryWindow,
   getSidebarUsageSummary,
@@ -136,7 +137,7 @@ function formatProviderTitle(
 }
 
 function usageBarColor(row: SidebarUsageProviderRow, window: SidebarUsageWindow | null): string {
-  const displayPercent = getSidebarUsageDisplayPercent(window);
+  const displayPercent = getSidebarUsageBarPercent(window);
   if (window?.status === "rejected" || (displayPercent != null && displayPercent <= 5)) {
     return "bg-destructive";
   }
@@ -155,10 +156,7 @@ function SidebarUsageWindowMeter({
   window: SidebarUsageWindow | null;
   fallbackLabel: string;
 }) {
-  const normalizedPercentage = Math.max(
-    0,
-    Math.min(100, getSidebarUsageDisplayPercent(window) ?? 0),
-  );
+  const normalizedPercentage = Math.max(0, Math.min(100, getSidebarUsageBarPercent(window) ?? 0));
 
   return (
     <div className="min-w-0 rounded-md bg-muted/35 px-2 py-1.5">
@@ -215,6 +213,21 @@ function SidebarUsageProviderRowView({ row }: { row: SidebarUsageProviderRow }) 
   );
 }
 
+function accountRateLimitsToStoreRecord(
+  accountRateLimits: ReadonlyArray<{
+    readonly providerInstanceId: string;
+    readonly rateLimits: unknown;
+  }>,
+  fetchedAt: string,
+): AppState["accountRateLimitsByInstanceId"] {
+  return Object.fromEntries(
+    accountRateLimits.map((entry) => [
+      String(entry.providerInstanceId),
+      { rateLimits: entry.rateLimits, updatedAt: fetchedAt },
+    ]),
+  );
+}
+
 export function SidebarUsageIndicator() {
   const [expanded, setExpanded] = useLocalStorage(
     SIDEBAR_USAGE_EXPANDED_STORAGE_KEY,
@@ -222,6 +235,10 @@ export function SidebarUsageIndicator() {
     Schema.Boolean,
   );
   const environmentStateById = useStore((state) => state.environmentStateById);
+  const accountRateLimitsByInstanceId = useStore((state) => state.accountRateLimitsByInstanceId);
+  const setAccountRateLimitsByInstanceId = useStore(
+    (state) => state.setAccountRateLimitsByInstanceId,
+  );
   const providers = useServerProviders();
   const { isMobile, open, openMobile } = useSidebar();
   const sidebarVisible = isMobile ? openMobile : open;
@@ -239,8 +256,9 @@ export function SidebarUsageIndicator() {
           driverKind: provider.driver,
         })),
         threads,
+        accountRateLimitsByInstanceId,
       }),
-    [providers, threads],
+    [accountRateLimitsByInstanceId, providers, threads],
   );
   const summary = useMemo(() => getSidebarUsageSummary(rows), [rows]);
 
@@ -253,8 +271,24 @@ export function SidebarUsageIndicator() {
 
     void ensureLocalApi()
       .server.refreshUsageLimits()
+      .then((result) => {
+        setAccountRateLimitsByInstanceId(
+          accountRateLimitsToStoreRecord(result.accountRateLimits, new Date().toISOString()),
+        );
+      })
       .catch(() => undefined);
-  }, [expanded, sidebarVisible]);
+  }, [expanded, setAccountRateLimitsByInstanceId, sidebarVisible]);
+
+  useEffect(() => {
+    void ensureLocalApi()
+      .server.refreshUsageLimits()
+      .then((result) => {
+        setAccountRateLimitsByInstanceId(
+          accountRateLimitsToStoreRecord(result.accountRateLimits, new Date().toISOString()),
+        );
+      })
+      .catch(() => undefined);
+  }, [setAccountRateLimitsByInstanceId]);
 
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>

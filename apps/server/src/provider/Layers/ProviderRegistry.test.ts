@@ -1131,6 +1131,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             const initialCheckedAt = initialCodex?.checkedAt;
             assert.notStrictEqual(initialCheckedAt, undefined);
 
+            // Let the settings watcher fiber subscribe before publishing the
+            // mutation, then advance the virtual clock so `checkedAt` can
+            // distinguish the fresh probe from the boot probe.
+            yield* Effect.yieldNow;
+            yield* TestClock.adjust("1 second");
+
             // Drive a settings change. The Hydration layer's
             // `SettingsWatcherLive` consumes this via `streamChanges`,
             // calls `reconcile`, which rebuilds the codex instance (the

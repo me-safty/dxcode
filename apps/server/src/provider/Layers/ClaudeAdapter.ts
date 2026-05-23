@@ -3971,6 +3971,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return context !== undefined && !context.stopped;
     });
 
+  const getAccountRateLimits: NonNullable<ClaudeAdapterShape["getAccountRateLimits"]> = () =>
+    Effect.gen(function* () {
+      const usage = yield* readClaudeOAuthUsage();
+      return normalizeClaudeAccountUsageRateLimits(usage, "claude.oauth.usage");
+    }).pipe(Effect.catch(() => Effect.void));
+
   const refreshUsage: NonNullable<ClaudeAdapterShape["refreshUsage"]> = () =>
     Effect.forEach(
       Array.from(sessions.values()).filter((context) => !context.stopped),
@@ -4024,6 +4030,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     listSessions,
     hasSession,
     refreshUsage,
+    getAccountRateLimits,
     stopAll,
     get streamEvents() {
       return Stream.fromQueue(runtimeEventQueue);

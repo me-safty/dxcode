@@ -24,6 +24,7 @@ import {
   openLastUsedRightPanel,
   useRegisterRightPanel,
 } from "../rightPanelGesture";
+import { retainActiveThreadDetailSubscription } from "../environments/runtime/service";
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
@@ -49,6 +50,7 @@ const DIFF_INLINE_DEFAULT_WIDTH = "clamp(24rem,34vw,36rem)";
 const DIFF_INLINE_SIDEBAR_MIN_WIDTH = 22 * 16;
 const DIFF_INLINE_SIDEBAR_MAX_WIDTH = 256 * 16;
 const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
+const MISSING_THREAD_ROUTE_RECOVERY_GRACE_MS = 3_000;
 
 const DiffLoadingFallback = (props: { mode: DiffPanelMode }) => {
   return (
@@ -361,15 +363,34 @@ function ChatThreadRouteView() {
     startSurface: "panel",
   });
 
+  const isRecoveringMissingThread =
+    bootstrapComplete && threadRef !== null && !routeThreadExists && environmentHasAnyThreads;
+
   useEffect(() => {
-    if (!threadRef || !bootstrapComplete) {
+    if (!threadRef || draftThreadExists) {
+      return;
+    }
+    return retainActiveThreadDetailSubscription(threadRef.environmentId, threadRef.threadId);
+  }, [draftThreadExists, threadRef]);
+
+  useEffect(() => {
+    if (!isRecoveringMissingThread) {
       return;
     }
 
-    if (!routeThreadExists && environmentHasAnyThreads) {
-      void navigate({ to: "/", replace: true });
-    }
-  }, [bootstrapComplete, environmentHasAnyThreads, navigate, routeThreadExists, threadRef]);
+    const timeoutId = window.setTimeout(() => {
+      const latestThreadExists = selectThreadExistsByRef(useStore.getState(), threadRef);
+      const latestDraftExists =
+        useComposerDraftStore.getState().getDraftThreadByRef(threadRef) !== null;
+      if (!latestThreadExists && !latestDraftExists) {
+        void navigate({ to: "/", replace: true });
+      }
+    }, MISSING_THREAD_ROUTE_RECOVERY_GRACE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isRecoveringMissingThread, navigate, threadRef]);
 
   useEffect(() => {
     if (!threadRef || !serverThreadStarted || !draftThread?.promotedTo) {
@@ -379,10 +400,22 @@ function ChatThreadRouteView() {
   }, [draftThread?.promotedTo, serverThreadStarted, threadRef]);
 
   const shouldRenderThreadRoute =
-    threadRef !== null && (routeThreadExists || draftThreadExists || !bootstrapComplete);
+    threadRef !== null &&
+    (routeThreadExists || draftThreadExists || !bootstrapComplete || isRecoveringMissingThread);
 
   if (!shouldRenderThreadRoute) {
     return null;
+  }
+
+  if (isRecoveringMissingThread) {
+    return (
+      <SidebarInset
+        className="flex h-svh min-h-0 items-center justify-center overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh"
+        data-testid="thread-route-recovery"
+      >
+        <DiffPanelLoadingState label="Loading conversation..." />
+      </SidebarInset>
+    );
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;

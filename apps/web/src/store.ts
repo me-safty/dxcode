@@ -109,6 +109,13 @@ export interface EnvironmentState {
 export interface AppState {
   activeEnvironmentId: EnvironmentId | null;
   environmentStateById: Record<string, EnvironmentState>;
+  accountRateLimitsByInstanceId: Record<
+    string,
+    {
+      readonly rateLimits: unknown;
+      readonly updatedAt: string;
+    }
+  >;
 }
 
 const initialEnvironmentState: EnvironmentState = {
@@ -137,6 +144,7 @@ const initialEnvironmentState: EnvironmentState = {
 const initialState: AppState = {
   activeEnvironmentId: null,
   environmentStateById: {},
+  accountRateLimitsByInstanceId: {},
 };
 
 interface ThreadDetailWriteOptions {
@@ -2897,6 +2905,7 @@ export function setThreadBranch(
 }
 
 interface AppStore extends AppState {
+  setAccountRateLimitsByInstanceId: (limits: AppState["accountRateLimitsByInstanceId"]) => void;
   setActiveEnvironmentId: (environmentId: EnvironmentId) => void;
   removeEnvironmentState: (environmentId: EnvironmentId) => void;
   hydrateCachedEnvironmentState: (
@@ -2939,6 +2948,7 @@ interface AppStore extends AppState {
 
 export const useStore = create<AppStore>((set) => ({
   ...initialState,
+  setAccountRateLimitsByInstanceId: (limits) => set({ accountRateLimitsByInstanceId: limits }),
   setActiveEnvironmentId: (environmentId) =>
     set((state) => setActiveEnvironmentId(state, environmentId)),
   removeEnvironmentState: (environmentId) =>

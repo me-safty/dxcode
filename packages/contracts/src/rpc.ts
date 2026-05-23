@@ -50,7 +50,7 @@ import {
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
-import { ProviderInstanceId } from "./providerInstance.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import {
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
@@ -215,9 +215,17 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
   success: ServerProviderUpdatedPayload,
 });
 
+export const WsServerRefreshUsageLimitsAccountRateLimit = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  provider: ProviderDriverKind,
+  rateLimits: Schema.Unknown,
+});
+
 export const WsServerRefreshUsageLimitsRpc = Rpc.make(WS_METHODS.serverRefreshUsageLimits, {
   payload: Schema.Struct({}),
-  success: Schema.Struct({}),
+  success: Schema.Struct({
+    accountRateLimits: Schema.Array(WsServerRefreshUsageLimitsAccountRateLimit),
+  }),
 });
 
 export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvider, {

@@ -434,6 +434,75 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("returns account rate limits without an active session", () => {
+    const homeDir = mkdtempSync(path.join(os.tmpdir(), "claude-oauth-account-"));
+    const credentialsDir = path.join(homeDir, ".claude");
+    mkdirSync(credentialsDir, { recursive: true });
+    writeFileSync(
+      path.join(credentialsDir, ".credentials.json"),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "test-access-token",
+          refreshToken: "test-refresh-token",
+          expiresAt: 4_102_444_800_000,
+          scopes: ["user:profile", "user:inference"],
+          subscriptionType: "pro",
+          rateLimitTier: "default_claude_ai",
+        },
+      }),
+    );
+
+    const harness = makeHarness({
+      claudeConfig: { homePath: homeDir },
+      enableOAuthUsage: true,
+      fetchOAuthUsage: async ({ accessToken }) => {
+        assert.equal(accessToken, "test-access-token");
+        return {
+          five_hour: {
+            utilization: 18,
+            resets_at: "2026-05-18T06:20:00.000Z",
+          },
+          seven_day: {
+            utilization: 27,
+            resets_at: "2026-05-19T18:00:00.000Z",
+          },
+        };
+      },
+    });
+
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() =>
+          rmSync(homeDir, {
+            recursive: true,
+            force: true,
+          }),
+        ),
+      );
+
+      const adapter = yield* ClaudeAdapter;
+      const getAccountRateLimits = adapter.getAccountRateLimits;
+      assert.ok(getAccountRateLimits);
+      const rateLimits = yield* getAccountRateLimits();
+      assert.deepEqual(rateLimits, {
+        source: "claude.oauth.usage",
+        primary: {
+          usedPercent: 18,
+          windowDurationMins: 300,
+          resetsAt: "2026-05-18T06:20:00.000Z",
+        },
+        secondary: {
+          usedPercent: 27,
+          windowDurationMins: 10080,
+          resetsAt: "2026-05-19T18:00:00.000Z",
+        },
+      });
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("emits Claude subscription usage from the OAuth usage endpoint", () => {
     const homeDir = mkdtempSync(path.join(os.tmpdir(), "claude-oauth-usage-"));
     const credentialsDir = path.join(homeDir, ".claude");

@@ -92,6 +92,7 @@ describe("orchestration projector", () => {
         deletedAt: null,
         messages: [],
         proposedPlans: [],
+        queuedTurns: [],
         activities: [],
         checkpoints: [],
         session: null,

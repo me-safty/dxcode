@@ -17,6 +17,7 @@ import { BackNavigationBlocker } from "../components/BackNavigationBlocker";
 import { CommandPalette } from "../components/CommandPalette";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
+import { PwaPushNotificationPrompt } from "../components/pwa-push-notification-prompt";
 import {
   SlowRpcAckToastCoordinator,
   WebSocketConnectionCoordinator,
@@ -67,6 +68,7 @@ import {
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+import { getLastNotificationNavigationTarget } from "../push/notificationNavigation";
 import { shouldNavigateToStartupBootstrapThread } from "../startupNavigation";
 
 export const Route = createRootRouteWithContext<{
@@ -159,6 +161,7 @@ function RootRouteView() {
         <HostedStaticEnvironmentBootstrap />
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
         {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
+        {primaryEnvironmentAuthenticated ? <PwaPushNotificationPrompt /> : null}
         {primaryEnvironmentAuthenticated ? <WebSocketConnectionCoordinator /> : null}
         {primaryEnvironmentAuthenticated ? <SlowRpcAckToastCoordinator /> : null}
         {primaryEnvironmentAuthenticated ? (
@@ -372,6 +375,7 @@ function EventRouter() {
           pathname: readPathname(),
           bootstrapThreadId,
           handledBootstrapThreadId: handledBootstrapThreadIdRef.current,
+          lastNotificationNavigationTarget: getLastNotificationNavigationTarget(),
           isStandalonePwa: isStandalonePwa(),
         })
       ) {

@@ -27,12 +27,14 @@ import {
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as FileSystem from "effect/FileSystem";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
@@ -55,10 +57,14 @@ import { ServerConfig } from "../../config.ts";
 import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
+  CODEX_USAGE_REFRESH_TIMEOUT,
+  makeCodexAppServerClient,
   makeCodexSessionRuntime,
+  type CodexAppServerClientHandle,
   type CodexSessionRuntimeError,
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeShape,
+  type MakeCodexAppServerClientOptions,
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError);
@@ -78,6 +84,13 @@ export interface CodexAdapterLiveOptions {
   ) => Effect.Effect<
     CodexSessionRuntimeShape,
     CodexSessionRuntimeError,
+    ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
+  >;
+  readonly makeCodexAppServerClient?: (
+    options: MakeCodexAppServerClientOptions,
+  ) => Effect.Effect<
+    CodexAppServerClientHandle,
+    CodexErrors.CodexAppServerError,
     ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
   >;
   readonly nativeEventLogPath?: string;
@@ -1434,6 +1447,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const sessions = new Map<ThreadId, CodexAdapterSessionContext>();
+  let accountClient:
+    | {
+        readonly scope: Scope.Scope;
+        readonly client: CodexClient.CodexAppServerClientShape;
+      }
+    | undefined;
 
   const startSession: CodexAdapterShape["startSession"] = (input) =>
     Effect.scoped(
@@ -1755,14 +1774,63 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       { concurrency: "unbounded", discard: true },
     ).pipe(Effect.asVoid);
 
+  const getAccountRateLimits: NonNullable<CodexAdapterShape["getAccountRateLimits"]> = () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") {
+        return undefined;
+      }
+
+      if (!accountClient) {
+        const accountScope = yield* Scope.make("sequential");
+        const createAccountClient = options?.makeCodexAppServerClient ?? makeCodexAppServerClient;
+        const handle = yield* createAccountClient({
+          binaryPath: codexConfig.binaryPath,
+          ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+          cwd: process.cwd(),
+          ...(options?.environment ? { environment: options.environment } : {}),
+        }).pipe(
+          Effect.provideService(Scope.Scope, accountScope),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+        );
+        accountClient = {
+          scope: accountScope,
+          client: handle.client,
+        };
+      }
+
+      return yield* accountClient.client.request("account/rateLimits/read", undefined).pipe(
+        Effect.timeoutOption(CODEX_USAGE_REFRESH_TIMEOUT),
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.void,
+            onSome: (value) => Effect.succeed(value),
+          }),
+        ),
+      );
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logDebug("codex.account-rate-limits.failed", { cause }).pipe(Effect.as(undefined)),
+      ),
+    );
+
   const stopAll: CodexAdapterShape["stopAll"] = () =>
     Effect.forEach(Array.from(sessions.values()), stopSessionInternal, {
       concurrency: 1,
       discard: true,
     }).pipe(Effect.asVoid);
 
+  const closeAccountClient = Effect.gen(function* () {
+    if (!accountClient) {
+      return;
+    }
+    const current = accountClient;
+    accountClient = undefined;
+    yield* Scope.close(current.scope, Exit.void);
+  });
+
   yield* Effect.acquireRelease(Effect.void, () =>
     stopAll().pipe(
+      Effect.andThen(closeAccountClient),
       Effect.andThen(Queue.shutdown(runtimeEventQueue)),
       Effect.andThen(managedNativeEventLogger?.close() ?? Effect.void),
       Effect.ignore,
@@ -1785,6 +1853,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     listSessions,
     hasSession,
     refreshUsage,
+    getAccountRateLimits,
     stopAll,
     get streamEvents() {
       return Stream.fromQueue(runtimeEventQueue);

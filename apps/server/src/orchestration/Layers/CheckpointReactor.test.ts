@@ -124,7 +124,7 @@ function createProviderServiceHarness(
         },
       }),
     rollbackConversation,
-    refreshUsage: () => Effect.void,
+    refreshUsage: () => Effect.succeed({ accountRateLimits: [] }),
     get streamEvents() {
       return Stream.fromPubSub(runtimeEventPubSub);
     },

@@ -1131,13 +1131,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverRefreshUsageLimits]: (_input) =>
-          observeRpcEffect(
-            WS_METHODS.serverRefreshUsageLimits,
-            providerService.refreshUsage().pipe(Effect.as({})),
-            {
-              "rpc.aggregate": "server",
-            },
-          ),
+          observeRpcEffect(WS_METHODS.serverRefreshUsageLimits, providerService.refreshUsage(), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverUpdateProvider]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverUpdateProvider,

@@ -9,8 +9,10 @@ import {
 
 import {
   deriveSidebarUsageProviderRows,
+  getSidebarUsageBarPercent,
   getSidebarUsageDisplayPercent,
   getSidebarUsageSummary,
+  type SidebarUsageWindow,
 } from "./SidebarUsageIndicator.logic";
 
 const FUTURE_RESET_SECONDS = 4_102_444_800;
@@ -354,5 +356,310 @@ describe("SidebarUsageIndicator.logic", () => {
     expect(claudeRow?.windows.fiveHour?.remainingPercent).toBe(100);
     expect(claudeRow?.windows.weekly?.usedPercent).toBe(0);
     expect(claudeRow?.threadId).toBe("thread-claude-zero");
+  });
+
+  describe("getSidebarUsageBarPercent", () => {
+    function makeStatusOnlyWindow(input: {
+      readonly status: string;
+      readonly usedPercent?: number;
+    }): SidebarUsageWindow {
+      const usedPercent = input.usedPercent ?? null;
+      return {
+        id: "fiveHour",
+        label: "5h",
+        usedPercent,
+        remainingPercent: usedPercent === null ? null : 100 - usedPercent,
+        resetsAtMs: FUTURE_RESET_SECONDS * 1000,
+        status: input.status,
+        updatedAt: "2026-05-13T05:00:00.000Z",
+      };
+    }
+
+    it('returns 100 for status-only "allowed" Claude 5h window without utilization', () => {
+      const window = makeStatusOnlyWindow({ status: "allowed" });
+      expect(getSidebarUsageBarPercent(window)).toBe(100);
+      expect(getSidebarUsageDisplayPercent(window)).toBeNull();
+    });
+
+    it('returns 20 for status-only "allowed_warning" and 0 for status-only "rejected"', () => {
+      expect(getSidebarUsageBarPercent(makeStatusOnlyWindow({ status: "allowed_warning" }))).toBe(
+        20,
+      );
+      expect(getSidebarUsageBarPercent(makeStatusOnlyWindow({ status: "rejected" }))).toBe(0);
+    });
+
+    it("prefers numeric remainingPercent when both numeric and status are present", () => {
+      const window = makeStatusOnlyWindow({ status: "allowed", usedPercent: 75 });
+      expect(getSidebarUsageBarPercent(window)).toBe(25);
+    });
+
+    it("returns null when status is unknown and there is no numeric data", () => {
+      const window = makeStatusOnlyWindow({ status: "unknown_status" });
+      expect(getSidebarUsageBarPercent(window)).toBeNull();
+      expect(getSidebarUsageDisplayPercent(window)).toBeNull();
+    });
+  });
+
+  it("populates provider rows from account-level limits when no threads exist", () => {
+    const rows = deriveSidebarUsageProviderRows({
+      providerInstances: [
+        {
+          instanceId: ProviderInstanceId.make("codex_work"),
+          driverKind: ProviderDriverKind.make("codex"),
+        },
+      ],
+      threads: [],
+      accountRateLimitsByInstanceId: {
+        codex_work: {
+          updatedAt: "2026-05-01T00:00:00.000Z",
+          rateLimits: {
+            rateLimits: {
+              primary: {
+                usedPercent: 33,
+                windowDurationMins: 300,
+                resetsAt: FUTURE_RESET_SECONDS,
+              },
+              secondary: {
+                usedPercent: 11,
+                windowDurationMins: 10_080,
+                resetsAt: LATER_FUTURE_RESET_SECONDS,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(rows[0]?.windows.fiveHour?.usedPercent).toBe(33);
+    expect(rows[0]?.windows.weekly?.usedPercent).toBe(11);
+    expect(rows[0]?.threadId).toBeNull();
+  });
+
+  it("populates Claude and Codex rows from account-level limits", () => {
+    const rows = deriveSidebarUsageProviderRows({
+      providerInstances: [
+        {
+          instanceId: ProviderInstanceId.make("codex_work"),
+          driverKind: ProviderDriverKind.make("codex"),
+        },
+        {
+          instanceId: ProviderInstanceId.make("claude_personal"),
+          driverKind: ProviderDriverKind.make("claudeAgent"),
+        },
+      ],
+      threads: [],
+      accountRateLimitsByInstanceId: {
+        codex_work: {
+          updatedAt: "2026-05-01T00:00:00.000Z",
+          rateLimits: {
+            primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: FUTURE_RESET_SECONDS },
+          },
+        },
+        claude_personal: {
+          updatedAt: "2026-05-01T00:00:00.000Z",
+          rateLimits: {
+            source: "claude.oauth.usage",
+            primary: { usedPercent: 8, windowDurationMins: 300, resetsAt: FUTURE_RESET_SECONDS },
+            secondary: {
+              usedPercent: 15,
+              windowDurationMins: 10_080,
+              resetsAt: LATER_FUTURE_RESET_SECONDS,
+            },
+          },
+        },
+      },
+    });
+
+    expect(rows[0]?.windows.fiveHour?.usedPercent).toBe(20);
+    expect(rows[1]?.windows.fiveHour?.usedPercent).toBe(8);
+    expect(rows[1]?.windows.weekly?.usedPercent).toBe(15);
+  });
+
+  it("prefers newer thread activity over older account-level limits", () => {
+    const rows = deriveSidebarUsageProviderRows({
+      providerInstances: [
+        {
+          instanceId: ProviderInstanceId.make("claude_personal"),
+          driverKind: ProviderDriverKind.make("claudeAgent"),
+        },
+      ],
+      threads: [
+        {
+          id: "thread-claude",
+          title: "Claude",
+          modelSelectionInstanceId: ProviderInstanceId.make("claude_personal"),
+          activities: [
+            makeRateLimitActivity({
+              id: "activity-thread",
+              createdAt: "2026-05-20T00:00:00.000Z",
+              payload: {
+                provider: "claudeAgent",
+                providerInstanceId: "claude_personal",
+                rateLimits: {
+                  source: "claude.oauth.usage",
+                  primary: {
+                    usedPercent: 55,
+                    windowDurationMins: 300,
+                    resetsAt: FUTURE_RESET_SECONDS,
+                  },
+                },
+              },
+            }),
+          ],
+        },
+      ],
+      accountRateLimitsByInstanceId: {
+        claude_personal: {
+          updatedAt: "2026-05-10T00:00:00.000Z",
+          rateLimits: {
+            source: "claude.oauth.usage",
+            primary: {
+              usedPercent: 10,
+              windowDurationMins: 300,
+              resetsAt: FUTURE_RESET_SECONDS,
+            },
+          },
+        },
+      },
+    });
+
+    const claudeRow = rows.find((row) => row.driverId === "claudeAgent");
+    expect(claudeRow?.windows.fiveHour?.usedPercent).toBe(55);
+    expect(claudeRow?.threadId).toBe("thread-claude");
+  });
+
+  it("ignores account-level limits for unknown provider drivers", () => {
+    const rows = deriveSidebarUsageProviderRows({
+      providerInstances: [
+        {
+          instanceId: ProviderInstanceId.make("opencode"),
+          driverKind: ProviderDriverKind.make("opencode"),
+        },
+      ],
+      threads: [],
+      accountRateLimitsByInstanceId: {
+        opencode: {
+          updatedAt: "2026-05-01T00:00:00.000Z",
+          rateLimits: {
+            primary: { usedPercent: 99, windowDurationMins: 300, resetsAt: FUTURE_RESET_SECONDS },
+          },
+        },
+      },
+    });
+
+    expect(rows.every((row) => row.windows.fiveHour === null && row.windows.weekly === null)).toBe(
+      true,
+    );
+  });
+
+  describe("deriveSidebarUsageProviderRows merge tightening", () => {
+    const claudeProvider = {
+      instanceId: ProviderInstanceId.make("claude_personal"),
+      driverKind: ProviderDriverKind.make("claudeAgent"),
+    } as const;
+
+    it("keeps precise OAuth usedPercent when a later status-only allowed SDK event arrives", () => {
+      const rows = deriveSidebarUsageProviderRows({
+        providerInstances: [claudeProvider],
+        threads: [
+          {
+            id: "thread-claude-merge",
+            title: "Claude merge",
+            modelSelectionInstanceId: ProviderInstanceId.make("claude_personal"),
+            activities: [
+              makeRateLimitActivity({
+                id: "activity-claude-oauth",
+                createdAt: "2026-05-13T05:00:00.000Z",
+                payload: {
+                  provider: "claudeAgent",
+                  providerInstanceId: "claude_personal",
+                  rateLimits: {
+                    source: "claude.oauth.usage",
+                    primary: {
+                      usedPercent: 0,
+                      windowDurationMins: 300,
+                      resetsAt: FUTURE_RESET_SECONDS,
+                    },
+                  },
+                },
+              }),
+              makeRateLimitActivity({
+                id: "activity-claude-sdk-allowed",
+                createdAt: "2026-05-13T06:00:00.000Z",
+                payload: {
+                  provider: "claudeAgent",
+                  providerInstanceId: "claude_personal",
+                  rateLimits: {
+                    type: "rate_limit_event",
+                    rate_limit_info: {
+                      status: "allowed",
+                      rateLimitType: "five_hour",
+                      resetsAt: FUTURE_RESET_SECONDS,
+                    },
+                  },
+                },
+              }),
+            ],
+          },
+        ],
+      });
+
+      const claudeRow = rows.find((row) => row.driverId === "claudeAgent");
+      expect(claudeRow?.windows.fiveHour?.usedPercent).toBe(0);
+      expect(claudeRow?.windows.fiveHour?.remainingPercent).toBe(100);
+      expect(getSidebarUsageBarPercent(claudeRow?.windows.fiveHour ?? null)).toBe(100);
+    });
+
+    it("does not let a later status-only rejected SDK event clobber a fresh precise OAuth reading", () => {
+      const rows = deriveSidebarUsageProviderRows({
+        providerInstances: [claudeProvider],
+        threads: [
+          {
+            id: "thread-claude-rejected-merge",
+            title: "Claude rejected merge",
+            modelSelectionInstanceId: ProviderInstanceId.make("claude_personal"),
+            activities: [
+              makeRateLimitActivity({
+                id: "activity-claude-oauth-precise",
+                createdAt: "2026-05-13T05:00:00.000Z",
+                payload: {
+                  provider: "claudeAgent",
+                  providerInstanceId: "claude_personal",
+                  rateLimits: {
+                    source: "claude.oauth.usage",
+                    primary: {
+                      usedPercent: 5,
+                      windowDurationMins: 300,
+                      resetsAt: FUTURE_RESET_SECONDS,
+                    },
+                  },
+                },
+              }),
+              makeRateLimitActivity({
+                id: "activity-claude-sdk-rejected",
+                createdAt: "2026-05-13T06:00:00.000Z",
+                payload: {
+                  provider: "claudeAgent",
+                  providerInstanceId: "claude_personal",
+                  rateLimits: {
+                    type: "rate_limit_event",
+                    rate_limit_info: {
+                      status: "rejected",
+                      rateLimitType: "five_hour",
+                      resetsAt: FUTURE_RESET_SECONDS,
+                    },
+                  },
+                },
+              }),
+            ],
+          },
+        ],
+      });
+
+      const claudeRow = rows.find((row) => row.driverId === "claudeAgent");
+      expect(claudeRow?.windows.fiveHour?.usedPercent).toBe(5);
+      expect(claudeRow?.windows.fiveHour?.remainingPercent).toBe(95);
+      expect(getSidebarUsageBarPercent(claudeRow?.windows.fiveHour ?? null)).toBe(95);
+    });
   });
 });

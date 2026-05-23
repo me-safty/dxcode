@@ -998,6 +998,39 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         },
         { concurrency: "unbounded", discard: true },
       );
+
+      const accountRateLimits = yield* Effect.forEach(
+        entries,
+        ([instanceId, adapter]) =>
+          Effect.gen(function* () {
+            const getAccountRateLimits = adapter.getAccountRateLimits;
+            if (!getAccountRateLimits) {
+              return [];
+            }
+            const rateLimits = yield* getAccountRateLimits().pipe(
+              Effect.catchCause((cause) =>
+                Effect.logDebug("provider.account-rate-limits.failed", {
+                  instanceId,
+                  provider: adapter.provider,
+                  cause,
+                }).pipe(Effect.as(undefined)),
+              ),
+            );
+            if (rateLimits === undefined) {
+              return [];
+            }
+            return [
+              {
+                providerInstanceId: instanceId,
+                provider: adapter.provider,
+                rateLimits,
+              },
+            ];
+          }),
+        { concurrency: "unbounded" },
+      ).pipe(Effect.map((results) => results.flat()));
+
+      return { accountRateLimits };
     },
   );
 

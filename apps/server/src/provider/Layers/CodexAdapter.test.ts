@@ -32,6 +32,7 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
 import { ServerConfig } from "../../config.ts";
@@ -40,11 +41,13 @@ import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import {
+  type CodexAppServerClientHandle,
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeSendTurnInput,
   type CodexSessionRuntimeShape,
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
+import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner";
 import { makeCodexAdapter } from "./CodexAdapter.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
@@ -1216,6 +1219,74 @@ scopedFailureLayer("CodexAdapterLive scoped startup failure", (it) => {
     }),
   );
 });
+
+it.effect("reuses a lazy account client for getAccountRateLimits and closes it on shutdown", () =>
+  Effect.gen(function* () {
+    const request = vi.fn(() =>
+      Effect.succeed({
+        rateLimits: {
+          primary: {
+            usedPercent: 41,
+            windowDurationMins: 300,
+          },
+        },
+      }),
+    );
+    const createAccountClient = vi.fn(
+      (): Effect.Effect<CodexAppServerClientHandle, CodexErrors.CodexAppServerError> =>
+        Effect.succeed({
+          client: {
+            request,
+          } as unknown as CodexClient.CodexAppServerClientShape,
+          child: {} as ChildProcessHandle,
+        }),
+    );
+    const scope = yield* Scope.make("sequential");
+    let scopeClosed = false;
+
+    try {
+      const layer = Layer.effect(
+        CodexAdapter,
+        Effect.gen(function* () {
+          const codexConfig = decodeCodexSettings({});
+          return yield* makeCodexAdapter(codexConfig, {
+            makeCodexAppServerClient: createAccountClient,
+          });
+        }),
+      ).pipe(
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(ServerSettingsService.layerTest()),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      const context = yield* Layer.buildWithScope(layer, scope);
+      const adapter = yield* Effect.service(CodexAdapter).pipe(Effect.provide(context));
+      const getAccountRateLimits = adapter.getAccountRateLimits;
+      assert.ok(getAccountRateLimits);
+
+      const first = yield* getAccountRateLimits();
+      const second = yield* getAccountRateLimits();
+      assert.equal(createAccountClient.mock.calls.length, 1);
+      assert.equal(request.mock.calls.length, 2);
+      assert.deepEqual(first, {
+        rateLimits: {
+          primary: {
+            usedPercent: 41,
+            windowDurationMins: 300,
+          },
+        },
+      });
+      assert.deepEqual(second, first);
+
+      yield* Scope.close(scope, Exit.void);
+      scopeClosed = true;
+    } finally {
+      if (!scopeClosed) {
+        yield* Scope.close(scope, Exit.void);
+      }
+    }
+  }),
+);
 
 it.effect("flushes managed native logs when the adapter layer shuts down", () =>
   Effect.gen(function* () {

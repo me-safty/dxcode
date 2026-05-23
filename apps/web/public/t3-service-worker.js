@@ -56,24 +56,50 @@ function resolveNotificationUrl(rawUrl) {
   }
 }
 
+function normalizePathname(pathname) {
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    return pathname.slice(0, -1);
+  }
+  return pathname;
+}
+
+function clientMatchesNotificationUrl(clientUrl, notificationUrl) {
+  try {
+    const client = new URL(clientUrl);
+    const target = new URL(notificationUrl);
+    return (
+      client.origin === target.origin &&
+      normalizePathname(client.pathname) === normalizePathname(target.pathname) &&
+      client.search === target.search &&
+      client.hash === target.hash
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function openNotificationUrl(url) {
   const clients = await self.clients.matchAll({
     type: "window",
     includeUncontrolled: true,
   });
-  const targetClient = selectNotificationClient(clients, url);
-
-  if (!targetClient) {
+  const sameOriginClients = clients.filter((client) => isSameOriginUrl(client.url));
+  if (sameOriginClients.length === 0) {
     return self.clients.openWindow(url);
   }
 
-  if ("focus" in targetClient) {
-    const focusedClient = await targetClient.focus();
-    postNotificationClickMessage(focusedClient || targetClient, url);
+  const targetClient = selectNotificationClient(sameOriginClients, url);
+  return focusClientAndPostNotificationClick(targetClient, url);
+}
+
+async function focusClientAndPostNotificationClick(client, url) {
+  if ("focus" in client) {
+    const focusedClient = await client.focus();
+    postNotificationClickMessage(focusedClient || client, url);
     return focusedClient;
   }
 
-  postNotificationClickMessage(targetClient, url);
+  postNotificationClickMessage(client, url);
   return undefined;
 }
 
@@ -93,10 +119,9 @@ function postNotificationClickMessage(client, url) {
   client.postMessage(message);
 }
 
-function selectNotificationClient(clients, url) {
-  const sameOriginClients = clients.filter((client) => isSameOriginUrl(client.url));
+function selectNotificationClient(sameOriginClients, url) {
   return (
-    sameOriginClients.find((client) => client.url === url) ||
+    sameOriginClients.find((client) => clientMatchesNotificationUrl(client.url, url)) ||
     sameOriginClients.find((client) => client.focused) ||
     sameOriginClients.find((client) => client.visibilityState === "visible") ||
     sameOriginClients[0] ||

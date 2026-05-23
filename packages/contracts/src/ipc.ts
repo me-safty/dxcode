@@ -29,7 +29,7 @@ import type {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project.ts";
-import type { ProviderInstanceId } from "./providerInstance.ts";
+import type { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import type {
   ServerConfig,
   ServerProcessDiagnosticsResult,
@@ -486,7 +486,13 @@ export interface LocalApi {
     refreshProviders: (input?: {
       readonly instanceId?: ProviderInstanceId;
     }) => Promise<ServerProviderUpdatedPayload>;
-    refreshUsageLimits: () => Promise<void>;
+    refreshUsageLimits: () => Promise<{
+      readonly accountRateLimits: ReadonlyArray<{
+        readonly providerInstanceId: ProviderInstanceId;
+        readonly provider: ProviderDriverKind;
+        readonly rateLimits: unknown;
+      }>;
+    }>;
     updateProvider: (input: ServerProviderUpdateInput) => Promise<ServerProviderUpdatedPayload>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     removeKeybinding: (input: ServerRemoveKeybindingInput) => Promise<ServerRemoveKeybindingResult>;

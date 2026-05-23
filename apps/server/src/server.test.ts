@@ -558,7 +558,7 @@ const buildAppUnderTest = (options?: {
               },
             }),
           rollbackConversation: () => Effect.die("Unsupported provider service call in test"),
-          refreshUsage: () => Effect.void,
+          refreshUsage: () => Effect.succeed({ accountRateLimits: [] }),
           streamEvents: Stream.empty,
           ...options?.layers?.providerService,
         }),
