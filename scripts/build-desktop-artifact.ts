@@ -593,6 +593,12 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
+      entitlements: "apps/desktop/resources/entitlements.mac.plist",
+      entitlementsInherit: "apps/desktop/resources/entitlements.mac.plist",
+      extendInfo: {
+        NSAppleEventsUsageDescription:
+          "T3 Code needs Automation access so Codex Computer Use can inspect and control apps you explicitly ask it to use.",
+      },
     };
   }
 
