@@ -328,8 +328,9 @@ export function resolveThreadRowClassName(input: {
 
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
+  isActiveThread?: boolean;
 }): ThreadStatusPill | null {
-  const { thread } = input;
+  const { isActiveThread = false, thread } = input;
 
   if (thread.hasPendingApprovals) {
     return {
@@ -385,7 +386,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (hasUnseenCompletion(thread)) {
+  if (hasUnseenCompletion(thread) && !isActiveThread) {
     return {
       label: "Completed",
       colorClass: "text-emerald-600 dark:text-emerald-300/90",

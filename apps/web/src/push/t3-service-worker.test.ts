@@ -9,6 +9,7 @@ const ORIGIN = "https://t3.example";
 const TARGET_URL = `${ORIGIN}/env-1/thread-1`;
 const HOME_URL = `${ORIGIN}/`;
 const CROSS_ORIGIN_URL = "https://elsewhere.example/env-1/thread-1";
+const DEFAULT_NOTIFICATION_TITLE = "Salchi";
 
 interface MockClientState {
   readonly url: string;
@@ -63,6 +64,7 @@ function createServiceWorkerTestHarness(): ServiceWorkerTestHarness {
   vm.runInContext(
     `${source}
 this.__t3ServiceWorkerTestExports = {
+  notificationTitle,
   openNotificationUrl,
 };`,
     context,
@@ -121,6 +123,15 @@ async function openNotificationUrl(harness: ServiceWorkerTestHarness, url: strin
   );
 }
 
+function notificationTitle(harness: ServiceWorkerTestHarness, rawTitle: unknown): string {
+  return String(
+    vm.runInContext(
+      `__t3ServiceWorkerTestExports.notificationTitle(${JSON.stringify(rawTitle)})`,
+      harness.context,
+    ),
+  );
+}
+
 describe("t3-service-worker notification click navigation", () => {
   let harness: ServiceWorkerTestHarness;
 
@@ -130,6 +141,12 @@ describe("t3-service-worker notification click navigation", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("strips the app source suffix from notification titles", () => {
+    expect(notificationTitle(harness, "Investigate deploy from Salchi")).toBe("Investigate deploy");
+    expect(notificationTitle(harness, "Investigate deploy")).toBe("Investigate deploy");
+    expect(notificationTitle(harness, "from Salchi")).toBe(DEFAULT_NOTIFICATION_TITLE);
   });
 
   it("opens a new window with the full URL when no same-origin client exists", async () => {

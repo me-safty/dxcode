@@ -11,7 +11,7 @@ import {
 import { useEffect, useEffectEvent, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
-import { APP_DISPLAY_NAME } from "../branding";
+import { APP_BASE_NAME, APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { BackNavigationBlocker } from "../components/BackNavigationBlocker";
 import { CommandPalette } from "../components/CommandPalette";
@@ -115,7 +115,7 @@ export const Route = createRootRouteWithContext<{
   component: RootRouteView,
   errorComponent: RootRouteErrorView,
   head: () => ({
-    meta: [{ name: "title", content: APP_DISPLAY_NAME }],
+    meta: [{ name: "title", content: APP_BASE_NAME }],
   }),
 });
 

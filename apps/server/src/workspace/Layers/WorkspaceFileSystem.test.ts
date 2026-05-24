@@ -1,4 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as fsPromises from "node:fs/promises";
 import { it, describe, expect } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -112,6 +114,128 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
         if (error._tag === "WorkspaceFileSystemError") {
           expect(error.detail).toContain("Workspace file appears to be binary.");
         }
+      }),
+    );
+
+    it.effect("reads valid symlinks inside the workspace root", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+        yield* writeTextFile(cwd, "target.md", "linked file\n");
+        yield* Effect.promise(() => fsPromises.symlink("target.md", path.join(cwd, "LINK.md")));
+
+        const result = yield* workspaceFileSystem.readFile({
+          cwd,
+          relativePath: "LINK.md",
+        });
+
+        expect(result).toEqual({
+          relativePath: "LINK.md",
+          contents: "linked file\n",
+          truncated: false,
+          sizeBytes: "linked file\n".length,
+        });
+      }),
+    );
+
+    it.effect("reports broken symlinks with a workspace-specific error", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+        yield* Effect.promise(() => fsPromises.symlink("missing.md", path.join(cwd, "BROKEN.md")));
+
+        const error = yield* workspaceFileSystem
+          .readFile({
+            cwd,
+            relativePath: "BROKEN.md",
+          })
+          .pipe(Effect.flip);
+
+        expect(error).toMatchObject({
+          _tag: "WorkspaceFileSystemError",
+          detail: expect.stringContaining(
+            'Workspace file is a broken symlink: BROKEN.md -> "missing.md"',
+          ),
+        });
+      }),
+    );
+
+    it.effect("preserves broken symlink target whitespace in the error message", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+        yield* writeTextFile(cwd, "AGENTS.md", "agent instructions\n");
+        yield* Effect.promise(() =>
+          fsPromises.symlink("AGENTS.md\n\n", path.join(cwd, "CLAUDE.md")),
+        );
+
+        const error = yield* workspaceFileSystem
+          .readFile({
+            cwd,
+            relativePath: "CLAUDE.md",
+          })
+          .pipe(Effect.flip);
+
+        expect(error).toMatchObject({
+          _tag: "WorkspaceFileSystemError",
+          detail: expect.stringContaining(
+            'Workspace file is a broken symlink: CLAUDE.md -> "AGENTS.md\\n\\n"',
+          ),
+        });
+      }),
+    );
+
+    it.effect("rejects symlinks that resolve outside the workspace root", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const outsideCwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+        yield* writeTextFile(outsideCwd, "outside.md", "outside\n");
+        const outsidePath = path.join(outsideCwd, "outside.md");
+        yield* Effect.promise(() => fsPromises.symlink(outsidePath, path.join(cwd, "OUTSIDE.md")));
+
+        const error = yield* workspaceFileSystem
+          .readFile({
+            cwd,
+            relativePath: "OUTSIDE.md",
+          })
+          .pipe(Effect.flip);
+
+        expect(error).toMatchObject({
+          _tag: "WorkspaceFileSystemError",
+          detail: expect.stringContaining(
+            "Workspace symlink target must stay within the project root",
+          ),
+        });
+      }),
+    );
+
+    it.effect("rejects symlinks that point to directories", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* fileSystem.makeDirectory(path.join(cwd, "docs"), { recursive: true });
+        yield* Effect.promise(() => fsPromises.symlink("docs", path.join(cwd, "DOCS.md")));
+
+        const error = yield* workspaceFileSystem
+          .readFile({
+            cwd,
+            relativePath: "DOCS.md",
+          })
+          .pipe(Effect.flip);
+
+        expect(error).toMatchObject({
+          _tag: "WorkspaceFileSystemError",
+          detail: expect.stringContaining(
+            'Workspace symlink target is not a file: DOCS.md -> "docs"',
+          ),
+        });
       }),
     );
   });

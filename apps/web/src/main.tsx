@@ -9,7 +9,7 @@ import "./index.css";
 import { isElectron } from "./env";
 import { installIosStandaloneBackSwipeGuard } from "./iosStandaloneBackSwipeGuard";
 import { getRouter } from "./router";
-import { APP_DISPLAY_NAME } from "./branding";
+import { APP_BASE_NAME } from "./branding";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
 import { installServiceWorkerNotificationNavigation } from "./push/notificationNavigation";
 
@@ -25,7 +25,7 @@ if (isElectron) {
 
 installIosStandaloneBackSwipeGuard();
 
-document.title = APP_DISPLAY_NAME;
+document.title = APP_BASE_NAME;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

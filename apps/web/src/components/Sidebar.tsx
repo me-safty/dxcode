@@ -384,6 +384,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       ...thread,
       lastVisitedAt,
     },
+    isActiveThread: isActive,
   });
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
@@ -1127,14 +1128,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       ]),
     );
     const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
-      const lastVisitedAt = lastVisitedAtByThreadKey.get(
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      );
+      const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+      const lastVisitedAt = lastVisitedAtByThreadKey.get(threadKey);
       return resolveThreadStatusPill({
         thread: {
           ...thread,
           ...(lastVisitedAt !== null && lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
         },
+        isActiveThread: threadKey === activeRouteThreadKey,
       });
     };
     const visibleProjectThreads = sortThreads(
@@ -1151,7 +1152,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       projectStatus,
       visibleProjectThreads,
     };
-  }, [projectThreads, threadLastVisitedAts, threadSortOrder]);
+  }, [activeRouteThreadKey, projectThreads, threadLastVisitedAts, threadSortOrder]);
 
   const pinnedCollapsedThread = useMemo(() => {
     const activeThreadKey = activeRouteThreadKey ?? undefined;
@@ -1180,14 +1181,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       ]),
     );
     const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
-      const lastVisitedAt = lastVisitedAtByThreadKey.get(
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      );
+      const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+      const lastVisitedAt = lastVisitedAtByThreadKey.get(threadKey);
       return resolveThreadStatusPill({
         thread: {
           ...thread,
           ...(lastVisitedAt !== null && lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
         },
+        isActiveThread: threadKey === activeRouteThreadKey,
       });
     };
     const hasOverflowingThreads = visibleProjectThreads.length > sidebarThreadPreviewCount;
@@ -1219,6 +1220,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       shouldShowThreadPanel: projectExpanded || pinnedCollapsedThread !== null,
     };
   }, [
+    activeRouteThreadKey,
     isThreadListExpanded,
     pinnedCollapsedThread,
     projectExpanded,

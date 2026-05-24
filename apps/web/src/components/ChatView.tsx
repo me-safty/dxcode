@@ -106,6 +106,11 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useMobileEdgeSwipe } from "../hooks/useMobileEdgeSwipe";
 import { markRightPanelUsed, useRegisterRightPanel } from "../rightPanelGesture";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
+import {
+  closeWorkspaceFilePreview,
+  openWorkspaceFileExplorer,
+  useWorkspaceFilePanelState,
+} from "../workspaceFilePreview";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
@@ -736,6 +741,7 @@ export default function ChatView(props: ChatViewProps) {
     useState<Record<string, number>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const filePanelState = useWorkspaceFilePanelState();
   const canAutoOpenPlanSidebar = autoOpenPlanSidebar && !shouldUsePlanSidebarSheet;
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
@@ -1725,6 +1731,23 @@ export default function ChatView(props: ChatViewProps) {
       : (storeServerTerminalLaunchContext ?? null);
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const fileExplorerAvailable = activeWorkspaceRoot !== undefined;
+  const fileExplorerOpen = filePanelState.open && filePanelState.view === "explorer";
+  const toggleFileExplorerSidebar = useCallback(() => {
+    if (fileExplorerOpen) {
+      closeWorkspaceFilePreview();
+      return;
+    }
+    if (!activeWorkspaceRoot) {
+      return;
+    }
+    setPlanSidebarOpen(false);
+    openWorkspaceFileExplorer({
+      environmentId,
+      cwd: activeWorkspaceRoot,
+      ...(activeProject?.name !== undefined ? { projectName: activeProject.name } : {}),
+    });
+  }, [activeProject?.name, activeWorkspaceRoot, environmentId, fileExplorerOpen]);
   const terminalShortcutLabelOptions = useMemo(
     () => ({
       context: {
@@ -1768,6 +1791,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     if (!diffOpen) {
+      closeWorkspaceFilePreview();
       onDiffPanelOpen?.();
     }
     void navigate({
@@ -2273,6 +2297,7 @@ export default function ChatView(props: ChatViewProps) {
   }, []);
   const openPlanSidebar = useCallback(() => {
     planSidebarDismissedForTurnRef.current = null;
+    closeWorkspaceFilePreview();
     markRightPanelUsed("plan");
     setPlanSidebarOpen(true);
   }, []);
@@ -2283,6 +2308,7 @@ export default function ChatView(props: ChatViewProps) {
           activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
       } else {
         planSidebarDismissedForTurnRef.current = null;
+        closeWorkspaceFilePreview();
         markRightPanelUsed("plan");
       }
       return !open;
@@ -3986,10 +4012,13 @@ export default function ChatView(props: ChatViewProps) {
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
+          fileExplorerAvailable={fileExplorerAvailable}
+          fileExplorerOpen={fileExplorerOpen}
           onRunProjectScript={runProjectScript}
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
+          onToggleFileExplorer={toggleFileExplorerSidebar}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
         />

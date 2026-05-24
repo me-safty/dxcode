@@ -74,6 +74,16 @@ const searchWorkspaceEntries = (input: { cwd: string; query: string; limit: numb
     return yield* workspaceEntries.search(input);
   });
 
+const listWorkspaceDirectoryEntries = (input: {
+  cwd: string;
+  directoryPath?: string;
+  limit: number;
+}) =>
+  Effect.gen(function* () {
+    const workspaceEntries = yield* WorkspaceEntries;
+    return yield* workspaceEntries.listDirectory(input);
+  });
+
 const appendSeparator = (input: string) =>
   input.endsWith("/") || input.endsWith("\\")
     ? input
@@ -309,6 +319,59 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
         yield* Fiber.join(search);
 
         expect(peakReads).toBeLessThanOrEqual(32);
+      }),
+    );
+  });
+
+  describe("listDirectory", () => {
+    it.effect("returns immediate root children with directories before files", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-list-root-" });
+        yield* writeTextFile(cwd, "src/index.ts", "export {};\n");
+        yield* writeTextFile(cwd, "docs/guide.md", "# Guide\n");
+        yield* writeTextFile(cwd, "README.md", "# Readme\n");
+
+        const result = yield* listWorkspaceDirectoryEntries({ cwd, limit: 100 });
+
+        expect(result.entries.map((entry) => `${entry.kind}:${entry.path}`)).toEqual([
+          "directory:docs",
+          "directory:src",
+          "file:README.md",
+        ]);
+        expect(result.truncated).toBe(false);
+      }),
+    );
+
+    it.effect("returns immediate children for a nested directory", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-list-nested-" });
+        yield* writeTextFile(cwd, "src/components/App.tsx", "export {};\n");
+        yield* writeTextFile(cwd, "src/index.ts", "export {};\n");
+
+        const result = yield* listWorkspaceDirectoryEntries({
+          cwd,
+          directoryPath: "src",
+          limit: 100,
+        });
+
+        expect(result.entries.map((entry) => `${entry.kind}:${entry.path}`)).toEqual([
+          "directory:src/components",
+          "file:src/index.ts",
+        ]);
+      }),
+    );
+
+    it.effect("rejects directory paths that escape the workspace", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-list-invalid-" });
+
+        const error = yield* listWorkspaceDirectoryEntries({
+          cwd,
+          directoryPath: "../outside",
+          limit: 100,
+        }).pipe(Effect.flip);
+
+        expect(error.detail).toBe("Workspace directory path must not contain traversal segments.");
       }),
     );
   });

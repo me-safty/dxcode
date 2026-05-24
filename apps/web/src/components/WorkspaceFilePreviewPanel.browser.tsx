@@ -140,6 +140,7 @@ function createMockEnvironmentApi(
     projects: {
       readFile,
       searchEntries: vi.fn(),
+      listDirectoryEntries: vi.fn(),
       writeFile: vi.fn(),
     },
   } as unknown as EnvironmentApi;
@@ -159,8 +160,10 @@ async function renderPreview(input: {
   contents?: string;
   line?: number;
   onReturn?: (target: WorkspaceFilePreviewReturnTarget) => void;
+  onShowExplorer?: () => void;
   relativePath?: string;
   returnTarget?: WorkspaceFilePreviewReturnTarget;
+  showExplorerButton?: boolean;
   sizeBytes?: number;
   truncated?: boolean;
 }) {
@@ -193,6 +196,10 @@ async function renderPreview(input: {
     ),
     ...(input.returnTarget ? { returnTarget: input.returnTarget } : {}),
     ...(input.onReturn ? { onReturn: input.onReturn } : {}),
+    ...(input.onShowExplorer ? { onShowExplorer: input.onShowExplorer } : {}),
+    ...(input.showExplorerButton !== undefined
+      ? { showExplorerButton: input.showExplorerButton }
+      : {}),
   };
 
   const screen = await render(
@@ -378,6 +385,39 @@ describe("WorkspaceFilePreviewPanel", () => {
     try {
       await page.getByRole("button", { name: "Back to diff" }).click();
       expect(onReturn).toHaveBeenCalledWith(returnTarget);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("calls the return handler when an explorer return target is present", async () => {
+    const onReturn = vi.fn();
+    const returnTarget = {
+      kind: "explorer",
+    } satisfies WorkspaceFilePreviewReturnTarget;
+    const mounted = await renderPreview({
+      contents: DEFAULT_CONTENTS,
+      onReturn,
+      returnTarget,
+    });
+    try {
+      await page.getByRole("button", { name: "Back to explorer" }).click();
+      expect(onReturn).toHaveBeenCalledWith(returnTarget);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders the file explorer header button when enabled", async () => {
+    const onShowExplorer = vi.fn();
+    const mounted = await renderPreview({
+      contents: DEFAULT_CONTENTS,
+      onShowExplorer,
+      showExplorerButton: true,
+    });
+    try {
+      await page.getByRole("button", { name: "Show file explorer" }).click();
+      expect(onShowExplorer).toHaveBeenCalledOnce();
     } finally {
       await mounted.cleanup();
     }

@@ -4,6 +4,7 @@ import {
   ArrowLeftIcon,
   CheckIcon,
   CopyIcon,
+  FolderTreeIcon,
   PanelRightCloseIcon,
   TextWrapIcon,
 } from "lucide-react";
@@ -170,6 +171,8 @@ export function WorkspaceFilePreviewPanel(props: {
   target: WorkspaceFilePreviewTarget | null;
   returnTarget?: WorkspaceFilePreviewReturnTarget | null;
   onReturn?: (target: WorkspaceFilePreviewReturnTarget) => void;
+  onShowExplorer?: () => void;
+  showExplorerButton?: boolean;
 }) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
@@ -228,6 +231,8 @@ export function WorkspaceFilePreviewPanel(props: {
     : "No file selected";
   const title = props.target ? basenameOfPath(props.target.relativePath) : "File preview";
   const subtitle = props.target?.displayPath ?? displayPath;
+  const returnButtonLabel =
+    props.returnTarget?.kind === "explorer" ? "Back to explorer" : "Back to diff";
 
   useEffect(() => {
     if (!targetLine || !props.target || !query.data) {
@@ -295,8 +300,8 @@ export function WorkspaceFilePreviewPanel(props: {
           <Button
             size="icon-xs"
             variant="ghost"
-            aria-label="Back to diff"
-            title="Back to diff"
+            aria-label={returnButtonLabel}
+            title={returnButtonLabel}
             onClick={() => {
               if (props.returnTarget) {
                 props.onReturn?.(props.returnTarget);
@@ -304,6 +309,17 @@ export function WorkspaceFilePreviewPanel(props: {
             }}
           >
             <ArrowLeftIcon className="size-3.5" />
+          </Button>
+        ) : null}
+        {props.showExplorerButton ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Show file explorer"
+            title="Show file explorer"
+            onClick={props.onShowExplorer}
+          >
+            <FolderTreeIcon className="size-3.5" />
           </Button>
         ) : null}
         {!isImagePreviewTarget ? (

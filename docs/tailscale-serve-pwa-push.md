@@ -1,6 +1,6 @@
 # Tailscale Serve for PWA Push Notifications
 
-Use this setup when T3 Code is running on a VPS or remote machine and you want the browser/PWA to support service workers and push notifications without exposing the app to the public internet.
+Use this setup when Salchi is running on a VPS or remote machine and you want the browser/PWA to support service workers and push notifications without exposing the app to the public internet.
 
 ## Why this is needed
 
@@ -24,7 +24,7 @@ The final URL will look like:
 https://your-vps.your-tailnet.ts.net
 ```
 
-## Run T3 Code privately over HTTPS
+## Run Salchi privately over HTTPS
 
 Use the local Tailnet command. It binds the app server to loopback, enables Tailscale Serve, and prints a pairing URL that uses the MagicDNS HTTPS name when it is available:
 
@@ -68,14 +68,14 @@ http://100.x.y.z:3773
 
 ## Security checklist
 
-- Keep the T3 Code server bound to `127.0.0.1`.
+- Keep the Salchi server bound to `127.0.0.1`.
 - Do not open port `3773` in the VPS firewall or cloud security group.
 - Use `tailscale serve`, not `tailscale funnel`.
 - Confirm only intended users/devices can reach the machine through Tailscale ACLs.
 
 ## Enable notifications in the PWA
 
-1. Open T3 Code at the HTTPS `*.ts.net` URL.
+1. Open Salchi at the HTTPS `*.ts.net` URL.
 2. Go to `Settings -> General`.
 3. Enable `Push notifications`.
 4. Use `Test` to confirm delivery.
@@ -84,7 +84,7 @@ On iOS and iPadOS, install the site to the Home Screen first, then enable notifi
 
 ## Operational notes
 
-- The server stores VAPID keys in the T3 Code secrets directory so browser subscriptions survive restarts.
+- The server stores VAPID keys in the Salchi secrets directory so browser subscriptions survive restarts.
 - Browser subscriptions are tied to authenticated sessions. Revoked or expired sessions are skipped when notifications are sent.
 - If a browser push endpoint expires or is rejected by the upstream push service, the server disables that subscription.
 - Notification delivery uses the browser vendor push service, so the VPS needs outbound internet access.

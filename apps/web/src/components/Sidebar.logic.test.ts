@@ -688,6 +688,44 @@ describe("resolveThreadStatusPill", () => {
       }),
     ).toMatchObject({ label: "Completed", pulse: false });
   });
+
+  it("does not show completed for the active thread even with unseen completion", () => {
+    expect(
+      resolveThreadStatusPill({
+        isActiveThread: true,
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("still shows plan ready for the active thread when completion is unseen", () => {
+    expect(
+      resolveThreadStatusPill({
+        isActiveThread: true,
+        thread: {
+          ...baseThread,
+          hasActionableProposedPlan: true,
+          latestTurn: makeLatestTurn({ completedAt: "2026-03-09T10:05:00.000Z" }),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Plan Ready", pulse: false });
+  });
 });
 
 describe("resolveThreadRowClassName", () => {

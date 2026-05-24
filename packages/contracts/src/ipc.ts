@@ -24,6 +24,8 @@ import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem
 import type {
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectListDirectoryEntriesInput,
+  ProjectListDirectoryEntriesResult,
   ProjectReadFileInput,
   ProjectReadFileResult,
   ProjectWriteFileInput,
@@ -539,6 +541,9 @@ export interface EnvironmentApi {
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
+    listDirectoryEntries: (
+      input: ProjectListDirectoryEntriesInput,
+    ) => Promise<ProjectListDirectoryEntriesResult>;
     readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };

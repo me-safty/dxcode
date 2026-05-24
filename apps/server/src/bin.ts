@@ -20,13 +20,13 @@ import {
 export const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
 export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run the T3 Code server."),
+  Command.withDescription("Run the Salchi server."),
   Command.withHandler((flags) => runServerCommand(flags)),
   Command.withSubcommands([startCommand, serveCommand, localCommand, authCommand, projectCommand]),
 );
 
 export const t3localCli = Command.make("t3local", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run T3 Code privately over HTTPS with Tailscale Serve."),
+  Command.withDescription("Run Salchi privately over HTTPS with Tailscale Serve."),
   Command.withHandler((flags) => runLocalServerCommand(flags)),
 );
 

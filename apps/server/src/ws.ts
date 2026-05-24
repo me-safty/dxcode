@@ -24,6 +24,7 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
+  ProjectListDirectoryEntriesError,
   ProjectReadFileError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
@@ -1273,6 +1274,20 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 (cause) =>
                   new ProjectSearchEntriesError({
                     message: `Failed to search workspace entries: ${cause.detail}`,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsListDirectoryEntries]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsListDirectoryEntries,
+            workspaceEntries.listDirectory(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProjectListDirectoryEntriesError({
+                    message: `Failed to list workspace entries: ${cause.detail}`,
                     cause,
                   }),
               ),

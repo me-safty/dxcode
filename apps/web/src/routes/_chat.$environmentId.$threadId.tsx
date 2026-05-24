@@ -36,19 +36,19 @@ import {
   SidebarRail,
   useSidebar,
 } from "~/components/ui/sidebar";
-import { WorkspaceFilePreviewPanel } from "../components/WorkspaceFilePreviewPanel";
+import { WorkspaceFilesPanel } from "../components/WorkspaceFilesPanel";
 import {
   closeWorkspaceFilePreview,
-  reopenWorkspaceFilePreview,
-  type WorkspaceFilePreviewReturnTarget,
-  useWorkspaceFilePreviewState,
+  reopenWorkspaceFilePanel,
+  type WorkspaceFilePreviewDiffReturnTarget,
+  useWorkspaceFilePanelState,
 } from "../workspaceFilePreview";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
 const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
-const DIFF_INLINE_DEFAULT_WIDTH = "clamp(24rem,34vw,36rem)";
-const DIFF_INLINE_SIDEBAR_MIN_WIDTH = 22 * 16;
-const DIFF_INLINE_SIDEBAR_MAX_WIDTH = 256 * 16;
+const RIGHT_INLINE_PANEL_DEFAULT_WIDTH = "clamp(24rem,34vw,36rem)";
+const RIGHT_INLINE_PANEL_MIN_WIDTH = 22 * 16;
+const RIGHT_INLINE_PANEL_MAX_WIDTH = 256 * 16;
 const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
 const MISSING_THREAD_ROUTE_RECOVERY_GRACE_MS = 3_000;
 
@@ -137,15 +137,15 @@ const DiffPanelInlineSidebar = (props: {
       open={diffOpen}
       onOpenChange={onOpenChange}
       className="w-auto min-h-0 flex-none bg-transparent"
-      style={{ "--sidebar-width": DIFF_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
+      style={{ "--sidebar-width": RIGHT_INLINE_PANEL_DEFAULT_WIDTH } as React.CSSProperties}
     >
       <Sidebar
         side="right"
         collapsible="offcanvas"
         className="border-l border-border bg-card text-foreground"
         resizable={{
-          maxWidth: DIFF_INLINE_SIDEBAR_MAX_WIDTH,
-          minWidth: DIFF_INLINE_SIDEBAR_MIN_WIDTH,
+          maxWidth: RIGHT_INLINE_PANEL_MAX_WIDTH,
+          minWidth: RIGHT_INLINE_PANEL_MIN_WIDTH,
           shouldAcceptWidth: shouldAcceptInlineSidebarWidth,
           storageKey: DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
@@ -157,16 +157,15 @@ const DiffPanelInlineSidebar = (props: {
   );
 };
 
-const FilePreviewInlineSidebar = (props: {
+const WorkspaceFilesInlineSidebar = (props: {
   open: boolean;
   renderContent: boolean;
-  onReturn: (target: WorkspaceFilePreviewReturnTarget) => void;
+  onReturnToDiff: (target: WorkspaceFilePreviewDiffReturnTarget) => void;
 }) => {
-  const { onReturn, open, renderContent } = props;
-  const filePreview = useWorkspaceFilePreviewState();
+  const { onReturnToDiff, open, renderContent } = props;
   const onOpenChange = useCallback((nextOpen: boolean) => {
     if (nextOpen) {
-      reopenWorkspaceFilePreview();
+      reopenWorkspaceFilePanel();
       return;
     }
     closeWorkspaceFilePreview();
@@ -178,25 +177,20 @@ const FilePreviewInlineSidebar = (props: {
       open={open}
       onOpenChange={onOpenChange}
       className="w-auto min-h-0 flex-none bg-transparent"
-      style={{ "--sidebar-width": DIFF_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
+      style={{ "--sidebar-width": RIGHT_INLINE_PANEL_DEFAULT_WIDTH } as React.CSSProperties}
     >
       <Sidebar
         side="right"
         collapsible="offcanvas"
         className="border-l border-border bg-card text-foreground"
         resizable={{
-          maxWidth: DIFF_INLINE_SIDEBAR_MAX_WIDTH,
-          minWidth: DIFF_INLINE_SIDEBAR_MIN_WIDTH,
+          maxWidth: RIGHT_INLINE_PANEL_MAX_WIDTH,
+          minWidth: RIGHT_INLINE_PANEL_MIN_WIDTH,
           storageKey: "chat_file_preview_sidebar_width",
         }}
       >
         {renderContent ? (
-          <WorkspaceFilePreviewPanel
-            mode="sidebar"
-            target={filePreview.target}
-            returnTarget={filePreview.returnTarget}
-            onReturn={onReturn}
-          />
+          <WorkspaceFilesPanel mode="sidebar" onReturnToDiff={onReturnToDiff} />
         ) : null}
         <SidebarRail />
       </Sidebar>
@@ -235,8 +229,8 @@ function ChatThreadRouteView() {
   const serverThreadStarted = threadHasStarted(serverThread);
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
   const diffOpen = search.diff === "1";
-  const filePreview = useWorkspaceFilePreviewState();
-  const filePreviewOpen = filePreview.open && filePreview.target !== null;
+  const filePanel = useWorkspaceFilePanelState();
+  const filePanelOpen = filePanel.open;
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
   const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
@@ -285,12 +279,12 @@ function ChatThreadRouteView() {
     });
   }, [markDiffOpened, navigate, threadRef]);
   const openFilePreview = useCallback(() => {
-    reopenWorkspaceFilePreview();
+    reopenWorkspaceFilePanel();
   }, []);
   const returnFromFilePreview = useCallback(
-    (returnTarget: WorkspaceFilePreviewReturnTarget) => {
+    (returnTarget: WorkspaceFilePreviewDiffReturnTarget) => {
       closeWorkspaceFilePreview();
-      if (!threadRef || returnTarget.kind !== "diff") {
+      if (!threadRef) {
         return;
       }
       markRightPanelUsed("diff");
@@ -327,10 +321,10 @@ function ChatThreadRouteView() {
   }, [diffOpen]);
 
   useEffect(() => {
-    if (filePreviewOpen) {
+    if (filePanelOpen) {
       markRightPanelUsed("file");
     }
-  }, [filePreviewOpen]);
+  }, [filePanelOpen]);
 
   useRegisterRightPanel({
     close: closeDiff,
@@ -358,6 +352,15 @@ function ChatThreadRouteView() {
     action: "close",
     enabled: shouldUseDiffSheet && diffOpen,
     onSwipe: closeDiff,
+    side: "right",
+    startArea: "screen",
+    startSurface: "panel",
+  });
+
+  useMobileEdgeSwipe({
+    action: "close",
+    enabled: shouldUseDiffSheet && filePanelOpen,
+    onSwipe: closeWorkspaceFilePreview,
     side: "right",
     startArea: "screen",
     startSurface: "panel",
@@ -419,8 +422,9 @@ function ChatThreadRouteView() {
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
-  const shouldRenderFilePreviewContent = filePreviewOpen || filePreview.target !== null;
-  const shouldRenderCodePanelProvider = shouldRenderDiffContent || shouldRenderFilePreviewContent;
+  const shouldRenderFilePanelContent =
+    filePanelOpen || filePanel.target !== null || filePanel.explorerContext !== null;
+  const shouldRenderCodePanelProvider = shouldRenderDiffContent || shouldRenderFilePanelContent;
 
   if (!shouldUseDiffSheet) {
     const rightPanels = (
@@ -431,10 +435,10 @@ function ChatThreadRouteView() {
           onOpenDiff={openDiff}
           renderDiffContent={shouldRenderDiffContent}
         />
-        <FilePreviewInlineSidebar
-          open={filePreviewOpen}
-          renderContent={shouldRenderFilePreviewContent}
-          onReturn={returnFromFilePreview}
+        <WorkspaceFilesInlineSidebar
+          open={filePanelOpen}
+          renderContent={shouldRenderFilePanelContent}
+          onReturnToDiff={returnFromFilePreview}
         />
       </>
     );
@@ -464,14 +468,9 @@ function ChatThreadRouteView() {
       <RightPanelSheet open={diffOpen} onClose={closeDiff}>
         {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
       </RightPanelSheet>
-      <RightPanelSheet open={filePreviewOpen} onClose={closeWorkspaceFilePreview}>
-        {shouldRenderFilePreviewContent ? (
-          <WorkspaceFilePreviewPanel
-            mode="sheet"
-            target={filePreview.target}
-            returnTarget={filePreview.returnTarget}
-            onReturn={returnFromFilePreview}
-          />
+      <RightPanelSheet open={filePanelOpen} onClose={closeWorkspaceFilePreview}>
+        {shouldRenderFilePanelContent ? (
+          <WorkspaceFilesPanel mode="sheet" onReturnToDiff={returnFromFilePreview} />
         ) : null}
       </RightPanelSheet>
     </>

@@ -395,7 +395,7 @@ export const makeWebPushService = Effect.gen(function* () {
         });
       }
       const result = yield* sendToRecords([matchingSubscription], {
-        title: "T3 Code notifications are enabled",
+        title: "Salchi notifications are enabled",
         body: "You will receive alerts when an agent needs attention or finishes a turn.",
         url: "/",
         tag: "t3code:test",

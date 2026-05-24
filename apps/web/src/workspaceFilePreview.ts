@@ -8,12 +8,20 @@ import { readLocalApi } from "./localApi";
 import { openRightPanel } from "./rightPanelGesture";
 import { splitPathAndPosition } from "./terminal-links";
 
-export interface WorkspaceFilePreviewReturnTarget {
+export interface WorkspaceFilePreviewDiffReturnTarget {
   kind: "diff";
   diffSource?: DiffRouteSource;
   diffTurnId?: TurnId;
   diffFilePath?: string;
 }
+
+export interface WorkspaceFilePreviewExplorerReturnTarget {
+  kind: "explorer";
+}
+
+export type WorkspaceFilePreviewReturnTarget =
+  | WorkspaceFilePreviewDiffReturnTarget
+  | WorkspaceFilePreviewExplorerReturnTarget;
 
 export interface WorkspaceFilePreviewTarget {
   environmentId: EnvironmentId;
@@ -24,28 +32,134 @@ export interface WorkspaceFilePreviewTarget {
   column?: number;
 }
 
+export interface WorkspaceFileExplorerContext {
+  environmentId: EnvironmentId;
+  cwd: string;
+  projectName?: string;
+}
+
+export interface WorkspaceFilePreviewReturnPreview {
+  target: WorkspaceFilePreviewTarget;
+  returnTarget: WorkspaceFilePreviewReturnTarget | null;
+}
+
+export type WorkspaceFilePanelView = "explorer" | "preview";
+
 interface WorkspaceFilePreviewState {
   open: boolean;
+  view: WorkspaceFilePanelView;
   target: WorkspaceFilePreviewTarget | null;
+  explorerContext: WorkspaceFileExplorerContext | null;
+  explorerReturnPreview: WorkspaceFilePreviewReturnPreview | null;
   returnTarget: WorkspaceFilePreviewReturnTarget | null;
   openPreview: (
     target: WorkspaceFilePreviewTarget,
     options?: { returnTarget?: WorkspaceFilePreviewReturnTarget | null },
   ) => void;
+  openExplorer: (
+    context: WorkspaceFileExplorerContext,
+    options?: { returnToPreview?: WorkspaceFilePreviewReturnPreview | null },
+  ) => void;
+  reopenPanel: () => void;
   reopenPreview: () => void;
+  returnExplorerToPreview: () => void;
+  returnPreviewToExplorer: (context: WorkspaceFileExplorerContext) => void;
   closePreview: () => void;
+}
+
+function deriveExplorerContextFromTarget(
+  target: WorkspaceFilePreviewTarget,
+  existingContext: WorkspaceFileExplorerContext | null,
+): WorkspaceFileExplorerContext {
+  if (
+    existingContext &&
+    existingContext.environmentId === target.environmentId &&
+    existingContext.cwd === target.cwd
+  ) {
+    return existingContext;
+  }
+  return {
+    environmentId: target.environmentId,
+    cwd: target.cwd,
+  };
 }
 
 const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => ({
   open: false,
+  view: "preview",
   target: null,
+  explorerContext: null,
+  explorerReturnPreview: null,
   returnTarget: null,
   openPreview: (target, options) =>
-    set({ open: true, target, returnTarget: options?.returnTarget ?? null }),
+    set((state) => ({
+      open: true,
+      view: "preview",
+      target,
+      explorerContext: deriveExplorerContextFromTarget(target, state.explorerContext),
+      explorerReturnPreview: null,
+      returnTarget: options?.returnTarget ?? null,
+    })),
+  openExplorer: (context, options) =>
+    set({
+      open: true,
+      view: "explorer",
+      explorerContext: context,
+      explorerReturnPreview: options?.returnToPreview ?? null,
+      returnTarget: null,
+    }),
+  reopenPanel: () =>
+    set((state) => {
+      if (!state.target && !state.explorerContext) {
+        return state;
+      }
+      if (state.view === "explorer" && state.explorerContext) {
+        return { ...state, open: true };
+      }
+      if (state.target) {
+        return { ...state, open: true, view: "preview" };
+      }
+      return { ...state, open: true, view: "explorer" };
+    }),
   reopenPreview: () =>
-    set((state) => (state.target && !state.open ? { ...state, open: true } : state)),
+    set((state) =>
+      state.target && (!state.open || state.view !== "preview")
+        ? { ...state, open: true, view: "preview", explorerReturnPreview: null }
+        : state,
+    ),
+  returnExplorerToPreview: () =>
+    set((state) => {
+      if (!state.explorerReturnPreview) {
+        return state;
+      }
+      return {
+        ...state,
+        open: true,
+        view: "preview",
+        target: state.explorerReturnPreview.target,
+        explorerContext: deriveExplorerContextFromTarget(
+          state.explorerReturnPreview.target,
+          state.explorerContext,
+        ),
+        returnTarget: state.explorerReturnPreview.returnTarget,
+        explorerReturnPreview: null,
+      };
+    }),
+  returnPreviewToExplorer: (context) =>
+    set((state) => ({
+      ...state,
+      open: true,
+      view: "explorer",
+      explorerContext: context,
+      explorerReturnPreview: null,
+      returnTarget: null,
+    })),
   closePreview: () =>
-    set((state) => (state.open ? { ...state, open: false, returnTarget: null } : state)),
+    set((state) =>
+      state.open || state.returnTarget || state.explorerReturnPreview
+        ? { ...state, open: false, returnTarget: null, explorerReturnPreview: null }
+        : state,
+    ),
 }));
 
 function normalizePathSeparators(value: string): string {
@@ -132,6 +246,14 @@ export function openWorkspaceFilePreview(
   openRightPanel("file");
 }
 
+export function openWorkspaceFileExplorer(
+  context: WorkspaceFileExplorerContext,
+  options?: { returnToPreview?: WorkspaceFilePreviewReturnPreview | null },
+): void {
+  useWorkspaceFilePreviewStore.getState().openExplorer(context, options);
+  openRightPanel("file");
+}
+
 export async function openPathInPreferredEditorOrFilePreview(input: {
   targetPath: string;
   environmentId?: EnvironmentId | undefined;
@@ -171,11 +293,16 @@ export function useWorkspaceFilePreviewState() {
   return useWorkspaceFilePreviewStore(
     useShallow((state) => ({
       open: state.open,
+      view: state.view,
       target: state.target,
+      explorerContext: state.explorerContext,
+      explorerReturnPreview: state.explorerReturnPreview,
       returnTarget: state.returnTarget,
     })),
   );
 }
+
+export const useWorkspaceFilePanelState = useWorkspaceFilePreviewState;
 
 export function closeWorkspaceFilePreview(): void {
   useWorkspaceFilePreviewStore.getState().closePreview();
@@ -183,4 +310,33 @@ export function closeWorkspaceFilePreview(): void {
 
 export function reopenWorkspaceFilePreview(): void {
   useWorkspaceFilePreviewStore.getState().reopenPreview();
+}
+
+export function reopenWorkspaceFilePanel(): void {
+  useWorkspaceFilePreviewStore.getState().reopenPanel();
+}
+
+export function __readWorkspaceFilePanelStateForTests() {
+  const { open, view, target, explorerContext, explorerReturnPreview, returnTarget } =
+    useWorkspaceFilePreviewStore.getState();
+  return { open, view, target, explorerContext, explorerReturnPreview, returnTarget };
+}
+
+export function __resetWorkspaceFilePanelStateForTests(): void {
+  useWorkspaceFilePreviewStore.setState({
+    open: false,
+    view: "preview",
+    target: null,
+    explorerContext: null,
+    explorerReturnPreview: null,
+    returnTarget: null,
+  });
+}
+
+export function returnWorkspaceFileExplorerToPreview(): void {
+  useWorkspaceFilePreviewStore.getState().returnExplorerToPreview();
+}
+
+export function returnWorkspaceFilePreviewToExplorer(context: WorkspaceFileExplorerContext): void {
+  useWorkspaceFilePreviewStore.getState().returnPreviewToExplorer(context);
 }

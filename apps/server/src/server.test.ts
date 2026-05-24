@@ -2478,6 +2478,37 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes websocket rpc projects.listDirectoryEntries", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-ws-project-list-directory-",
+      });
+      yield* fs.makeDirectory(path.join(workspaceDir, "src"), { recursive: true });
+      yield* fs.writeFileString(path.join(workspaceDir, "src", "index.ts"), "export {};");
+      yield* fs.writeFileString(path.join(workspaceDir, "README.md"), "# Readme\n");
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsListDirectoryEntries]({
+            cwd: workspaceDir,
+            limit: 10,
+          }),
+        ),
+      );
+
+      assert.deepEqual(
+        response.entries.map((entry) => `${entry.kind}:${entry.path}`),
+        ["directory:src", "file:README.md"],
+      );
+      assert.equal(response.truncated, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc projects.writeFile", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

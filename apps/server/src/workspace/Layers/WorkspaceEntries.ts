@@ -11,7 +11,11 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
-import { type FilesystemBrowseInput, type ProjectEntry } from "@t3tools/contracts";
+import {
+  type FilesystemBrowseInput,
+  type ProjectEntry,
+  type ProjectListDirectoryEntriesInput,
+} from "@t3tools/contracts";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
 import {
   insertRankedSearchResult,
@@ -88,6 +92,16 @@ function basenameOf(input: string): string {
   return input.slice(separatorIndex + 1);
 }
 
+function compareWorkspaceEntries(left: ProjectEntry, right: ProjectEntry): number {
+  if (left.kind !== right.kind) {
+    return left.kind === "directory" ? -1 : 1;
+  }
+  return (
+    basenameOf(left.path).localeCompare(basenameOf(right.path)) ||
+    left.path.localeCompare(right.path)
+  );
+}
+
 function toSearchableWorkspaceEntry(entry: ProjectEntry): SearchableWorkspaceEntry {
   const normalizedPath = entry.path.toLowerCase();
   return {
@@ -148,6 +162,42 @@ function directoryAncestorsOf(relativePath: string): string[] {
   }
   return directories;
 }
+
+const normalizeWorkspaceDirectoryPath = (
+  cwd: string,
+  directoryPath: ProjectListDirectoryEntriesInput["directoryPath"],
+): Effect.Effect<string | undefined, WorkspaceEntriesError> =>
+  Effect.gen(function* () {
+    if (!directoryPath) {
+      return undefined;
+    }
+
+    if (directoryPath.startsWith("/") || isWindowsAbsolutePath(directoryPath)) {
+      return yield* new WorkspaceEntriesError({
+        cwd,
+        operation: "workspaceEntries.normalizeDirectoryPath",
+        detail: "Workspace directory path must be relative to the project root.",
+      });
+    }
+
+    const normalized = toPosixPath(directoryPath)
+      .replace(/^\.\/+/, "")
+      .replace(/\/+$/, "");
+    if (!normalized || normalized === ".") {
+      return undefined;
+    }
+
+    const segments = normalized.split("/").filter((segment) => segment.length > 0);
+    if (segments.some((segment) => segment === "." || segment === "..")) {
+      return yield* new WorkspaceEntriesError({
+        cwd,
+        operation: "workspaceEntries.normalizeDirectoryPath",
+        detail: "Workspace directory path must not contain traversal segments.",
+      });
+    }
+
+    return segments.join("/");
+  });
 
 const resolveBrowseTarget = (
   input: FilesystemBrowseInput,
@@ -475,6 +525,43 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     },
   );
 
+  const listDirectory: WorkspaceEntriesShape["listDirectory"] = Effect.fn(
+    "WorkspaceEntries.listDirectory",
+  )(function* (input) {
+    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+    const directoryPath = yield* normalizeWorkspaceDirectoryPath(
+      normalizedCwd,
+      input.directoryPath,
+    );
+    const limit = Math.max(1, Math.floor(input.limit));
+
+    return yield* Cache.get(workspaceIndexCache, normalizedCwd).pipe(
+      Effect.map((index) => {
+        const entries = index.entries
+          .filter((entry) => entry.parentPath === directoryPath)
+          .map(
+            (entry): ProjectEntry =>
+              entry.parentPath
+                ? {
+                    path: entry.path,
+                    kind: entry.kind,
+                    parentPath: entry.parentPath,
+                  }
+                : {
+                    path: entry.path,
+                    kind: entry.kind,
+                  },
+          )
+          .toSorted(compareWorkspaceEntries);
+
+        return {
+          entries: entries.slice(0, limit),
+          truncated: index.truncated || entries.length > limit,
+        };
+      }),
+    );
+  });
+
   const search: WorkspaceEntriesShape["search"] = Effect.fn("WorkspaceEntries.search")(
     function* (input) {
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
@@ -513,6 +600,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
   return {
     browse,
     invalidate,
+    listDirectory,
     search,
   } satisfies WorkspaceEntriesShape;
 });

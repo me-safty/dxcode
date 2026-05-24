@@ -1,6 +1,7 @@
-const DEFAULT_NOTIFICATION_TITLE = "T3 Code";
+const DEFAULT_NOTIFICATION_TITLE = "Salchi";
 const DEFAULT_NOTIFICATION_URL = "/";
 const NOTIFICATION_CLICK_MESSAGE_TYPE = "t3.notification-click";
+const NOTIFICATION_TITLE_SOURCE_SUFFIX = /(?:^|\s+)from\s+Salchi\s*$/i;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
@@ -12,7 +13,7 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("push", (event) => {
   const payload = readPushPayload(event);
-  const title = payload.title || DEFAULT_NOTIFICATION_TITLE;
+  const title = notificationTitle(payload.title);
   const notification = {
     body: payload.body || undefined,
     icon: "/pwa-192.png",
@@ -43,6 +44,12 @@ function readPushPayload(event) {
   } catch {
     return {};
   }
+}
+
+function notificationTitle(rawTitle) {
+  const title = typeof rawTitle === "string" ? rawTitle.trim() : "";
+  const strippedTitle = title.replace(NOTIFICATION_TITLE_SOURCE_SUFFIX, "").trim();
+  return strippedTitle || DEFAULT_NOTIFICATION_TITLE;
 }
 
 function resolveNotificationUrl(rawUrl) {
