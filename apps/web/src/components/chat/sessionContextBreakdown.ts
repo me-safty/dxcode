@@ -2,12 +2,7 @@ import type { OrchestrationThreadActivity } from "@t3tools/contracts";
 
 import type { ChatMessage } from "~/types";
 
-export type SessionContextBreakdownKey =
-  | "system"
-  | "user"
-  | "assistant"
-  | "tool"
-  | "other";
+export type SessionContextBreakdownKey = "system" | "user" | "assistant" | "tool" | "other";
 
 export interface SessionContextBreakdownSegment {
   key: SessionContextBreakdownKey;
@@ -17,13 +12,7 @@ export interface SessionContextBreakdownSegment {
 }
 
 const CHARS_PER_TOKEN = 4;
-const ORDERED_KEYS: SessionContextBreakdownKey[] = [
-  "system",
-  "user",
-  "assistant",
-  "tool",
-  "other",
-];
+const ORDERED_KEYS: SessionContextBreakdownKey[] = ["system", "user", "assistant", "tool", "other"];
 
 function charsToTokens(chars: number): number {
   if (chars <= 0) return 0;

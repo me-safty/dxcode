@@ -45,8 +45,7 @@ export function getSessionContextMetrics(
 
   const limit = snapshot?.maxTokens ?? null;
   const usedTokens = snapshot?.usedTokens ?? null;
-  const hasAnyToken =
-    input !== null || output !== null || reasoning !== null || cacheRead !== null;
+  const hasAnyToken = input !== null || output !== null || reasoning !== null || cacheRead !== null;
   const total =
     usedTokens ??
     (hasAnyToken ? (input ?? 0) + (output ?? 0) + (reasoning ?? 0) + (cacheRead ?? 0) : null);

@@ -11,7 +11,12 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type ChatMessage, type Thread } from "~/types";
+import {
+  DEFAULT_INTERACTION_MODE,
+  DEFAULT_RUNTIME_MODE,
+  type ChatMessage,
+  type Thread,
+} from "~/types";
 import { getSessionContextMetrics } from "./sessionContextMetrics";
 
 const environmentId = EnvironmentId.make("env-1");

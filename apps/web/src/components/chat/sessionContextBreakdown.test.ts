@@ -136,10 +136,7 @@ describe("sessionContextBreakdown", () => {
 
   it("emits widths matching the per-segment ratios", () => {
     const breakdown = estimateSessionContextBreakdown({
-      messages: [
-        makeMessage("user", "a".repeat(400)),
-        makeMessage("assistant", "b".repeat(400)),
-      ],
+      messages: [makeMessage("user", "a".repeat(400)), makeMessage("assistant", "b".repeat(400))],
       activities: [],
       input: 1000,
     });
