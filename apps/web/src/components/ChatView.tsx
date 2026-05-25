@@ -340,6 +340,7 @@ type ChatViewProps =
       environmentId: EnvironmentId;
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
+      onOpenContextTab?: () => void;
       reserveTitleBarControlInset?: boolean;
       routeKind: "server";
       draftId?: never;
@@ -348,6 +349,7 @@ type ChatViewProps =
       environmentId: EnvironmentId;
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
+      onOpenContextTab?: () => void;
       reserveTitleBarControlInset?: boolean;
       routeKind: "draft";
       draftId: DraftId;
@@ -3676,6 +3678,7 @@ export default function ChatView(props: ChatViewProps) {
                   scheduleComposerFocus={scheduleComposerFocus}
                   setThreadError={setThreadError}
                   onExpandImage={onExpandTimelineImage}
+                  {...(props.onOpenContextTab ? { onOpenContextTab: props.onOpenContextTab } : {})}
                 />
               </div>
             </div>
