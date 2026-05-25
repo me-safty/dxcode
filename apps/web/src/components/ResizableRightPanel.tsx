@@ -14,7 +14,18 @@ import { cn } from "~/lib/utils";
 const DEFAULT_RATIO = 0.4;
 const MIN_RATIO = 0.3;
 const MAX_RATIO = 0.8;
+const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
 let bodyResizeStyleOwner: symbol | null = null;
+
+type ResizeState = {
+  frameId: number | null;
+  handle: HTMLDivElement;
+  latestX: number;
+  panel: HTMLDivElement;
+  pointerId: number;
+  startWidth: number;
+  startX: number;
+};
 
 const clampRatio = (ratio: number) => Math.max(MIN_RATIO, Math.min(ratio, MAX_RATIO));
 
@@ -42,6 +53,69 @@ const clearBodyResizeStyles = (owner: symbol) => {
   bodyResizeStyleOwner = null;
 };
 
+const resolveResizeRatio = (
+  resizeState: Pick<ResizeState, "panel" | "startWidth" | "startX">,
+  clientX: number,
+) => {
+  const containerWidth = resizeState.panel.parentElement?.clientWidth ?? 0;
+  if (containerWidth <= 0) return null;
+
+  const nextWidth = resizeState.startWidth + resizeState.startX - clientX;
+  return clampRatio(nextWidth / containerWidth);
+};
+
+const measureWithPanelRatio = <T,>(panel: HTMLDivElement, ratio: number, measure: () => T) => {
+  const previousWidth = panel.style.width;
+  panel.style.width = `${ratio * 100}%`;
+
+  try {
+    return measure();
+  } finally {
+    if (previousWidth.length > 0) {
+      panel.style.width = previousWidth;
+    } else {
+      panel.style.removeProperty("width");
+    }
+  }
+};
+
+const canAcceptComposerWidth = (panel: HTMLDivElement, ratio: number) => {
+  const composerForm = document.querySelector<HTMLElement>("[data-chat-composer-form='true']");
+  if (!composerForm) return true;
+  const composerViewport = composerForm.parentElement;
+  if (!composerViewport) return true;
+
+  return measureWithPanelRatio(panel, ratio, () => {
+    const viewportStyle = window.getComputedStyle(composerViewport);
+    const viewportPaddingLeft = Number.parseFloat(viewportStyle.paddingLeft) || 0;
+    const viewportPaddingRight = Number.parseFloat(viewportStyle.paddingRight) || 0;
+    const viewportContentWidth = Math.max(
+      0,
+      composerViewport.clientWidth - viewportPaddingLeft - viewportPaddingRight,
+    );
+    const formRect = composerForm.getBoundingClientRect();
+    const composerFooter = composerForm.querySelector<HTMLElement>(
+      "[data-chat-composer-footer='true']",
+    );
+    const composerRightActions = composerForm.querySelector<HTMLElement>(
+      "[data-chat-composer-actions='right']",
+    );
+    const composerRightActionsWidth = composerRightActions?.getBoundingClientRect().width ?? 0;
+    const composerFooterGap = composerFooter
+      ? Number.parseFloat(window.getComputedStyle(composerFooter).columnGap) ||
+        Number.parseFloat(window.getComputedStyle(composerFooter).gap) ||
+        0
+      : 0;
+    const minimumComposerWidth =
+      COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX + composerRightActionsWidth + composerFooterGap;
+    const hasComposerOverflow = composerForm.scrollWidth > composerForm.clientWidth + 0.5;
+    const overflowsViewport = formRect.width > viewportContentWidth + 0.5;
+    const violatesMinimumComposerWidth = composerForm.clientWidth + 0.5 < minimumComposerWidth;
+
+    return !hasComposerOverflow && !overflowsViewport && !violatesMinimumComposerWidth;
+  });
+};
+
 export function ResizableRightPanel({
   children,
   className,
@@ -54,16 +128,10 @@ export function ResizableRightPanel({
   const [widthRatio, setWidthRatio] = useState(() => readStoredRatio(storageKey));
   const resizeOwnerRef = useRef(Symbol("ResizableRightPanel"));
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const storageKeyRef = useRef(storageKey);
   const widthRatioRef = useRef(widthRatio);
-  const resizeStateRef = useRef<{
-    frameId: number | null;
-    handle: HTMLDivElement;
-    latestX: number;
-    panel: HTMLDivElement;
-    pointerId: number;
-    startWidth: number;
-    startX: number;
-  } | null>(null);
+  const resizeStateRef = useRef<ResizeState | null>(null);
+  storageKeyRef.current = storageKey;
 
   const commitWidthRatio = useCallback((ratio: number) => {
     widthRatioRef.current = ratio;
@@ -71,19 +139,10 @@ export function ResizableRightPanel({
   }, []);
 
   const commitResizePosition = useCallback(
-    (
-      resizeState: {
-        panel: HTMLDivElement;
-        startWidth: number;
-        startX: number;
-      },
-      clientX: number,
-    ) => {
-      const containerWidth = resizeState.panel.parentElement?.clientWidth ?? 0;
-      if (containerWidth <= 0) return;
-
-      const nextWidth = resizeState.startWidth + resizeState.startX - clientX;
-      commitWidthRatio(clampRatio(nextWidth / containerWidth));
+    (resizeState: ResizeState, clientX: number) => {
+      const nextRatio = resolveResizeRatio(resizeState, clientX);
+      if (nextRatio === null || !canAcceptComposerWidth(resizeState.panel, nextRatio)) return;
+      commitWidthRatio(nextRatio);
     },
     [commitWidthRatio],
   );
@@ -163,6 +222,19 @@ export function ResizableRightPanel({
       const resizeState = resizeStateRef.current;
       if (resizeState?.frameId !== null && resizeState?.frameId !== undefined) {
         window.cancelAnimationFrame(resizeState.frameId);
+      }
+      if (resizeState) {
+        const nextRatio = resolveResizeRatio(resizeState, resizeState.latestX);
+        if (nextRatio !== null && canAcceptComposerWidth(resizeState.panel, nextRatio)) {
+          widthRatioRef.current = nextRatio;
+        }
+        if (storageKeyRef.current) {
+          setLocalStorageItem(storageKeyRef.current, widthRatioRef.current, Schema.Finite);
+        }
+        if (resizeState.handle.hasPointerCapture(resizeState.pointerId)) {
+          resizeState.handle.releasePointerCapture(resizeState.pointerId);
+        }
+        resizeStateRef.current = null;
       }
       clearBodyResizeStyles(resizeOwner);
     };
