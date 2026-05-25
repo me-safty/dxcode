@@ -265,7 +265,7 @@ function ChatThreadRouteView() {
       params: buildThreadRouteParams(threadRef),
       search: (previous) => {
         const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1" };
+        return { ...rest, diff: "1", tab: undefined };
       },
     });
   }, [markDiffOpened, navigate, threadRef]);
