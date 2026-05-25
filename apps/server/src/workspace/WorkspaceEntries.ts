@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import type { Dirent } from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 
@@ -60,6 +61,41 @@ export class WorkspaceEntries extends Context.Service<
   }
 >()("t3/workspace/WorkspaceEntries") {}
 
+const WINDOWS_LEGACY_PROFILE_JUNCTION_NAMES = new Set([
+  "Application Data",
+  "Cookies",
+  "Local Settings",
+  "My Documents",
+  "NetHood",
+  "PrintHood",
+  "Recent",
+  "SendTo",
+  "Start Menu",
+  "Templates",
+]);
+
+async function isDirectoryEntry(
+  dirent: Dirent,
+  fullPath: string,
+  platform: NodeJS.Platform,
+): Promise<boolean> {
+  if (dirent.isDirectory()) {
+    return true;
+  }
+  if (!dirent.isSymbolicLink()) {
+    return false;
+  }
+  if (platform === "win32" && WINDOWS_LEGACY_PROFILE_JUNCTION_NAMES.has(dirent.name)) {
+    return false;
+  }
+
+  try {
+    return (await NodeFSP.stat(fullPath)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function expandHomePath(input: string, path: Path.Path): string {
   if (input === "~") {
     return NodeOS.homedir();
@@ -103,6 +139,7 @@ const resolveBrowseTarget = (
 
 const make = Effect.gen(function* () {
   const path = yield* Path.Path;
+  const platform = yield* HostProcessPlatform;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const workspaceSearchIndexes = yield* WorkspaceSearchIndex.WorkspaceSearchIndexMap;
 
@@ -177,23 +214,28 @@ const make = Effect.gen(function* () {
 
       const showHidden = endsWithSeparator || prefix.startsWith(".");
       const lowerPrefix = prefix.toLowerCase();
-      const entries: Array<{ readonly name: string; readonly fullPath: string }> = [];
-      for (const dirent of dirents) {
-        if (
-          dirent.isDirectory() &&
-          dirent.name.toLowerCase().startsWith(lowerPrefix) &&
-          (showHidden || !dirent.name.startsWith("."))
-        ) {
-          entries.push({
-            name: dirent.name,
-            fullPath: path.join(parentPath, dirent.name),
-          });
-        }
-      }
+      const entries = yield* Effect.forEach(
+        dirents,
+        (dirent) =>
+          Effect.promise(async () => {
+            const fullPath = path.join(parentPath, dirent.name);
+            if (
+              !dirent.name.toLowerCase().startsWith(lowerPrefix) ||
+              (!showHidden && dirent.name.startsWith(".")) ||
+              !(await isDirectoryEntry(dirent, fullPath, platform))
+            ) {
+              return null;
+            }
+            return { name: dirent.name, fullPath };
+          }),
+        { concurrency: 16 },
+      );
 
       return {
         parentPath,
-        entries: entries.toSorted((left, right) => left.name.localeCompare(right.name)),
+        entries: entries
+          .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+          .toSorted((left, right) => left.name.localeCompare(right.name)),
       };
     },
   );
