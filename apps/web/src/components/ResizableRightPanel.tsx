@@ -58,6 +58,7 @@ export function ResizableRightPanel({
   const resizeStateRef = useRef<{
     frameId: number | null;
     handle: HTMLDivElement;
+    latestX: number;
     panel: HTMLDivElement;
     pointerId: number;
     startWidth: number;
@@ -69,13 +70,32 @@ export function ResizableRightPanel({
     setWidthRatio(ratio);
   }, []);
 
+  const commitResizePosition = useCallback(
+    (
+      resizeState: {
+        panel: HTMLDivElement;
+        startWidth: number;
+        startX: number;
+      },
+      clientX: number,
+    ) => {
+      const containerWidth = resizeState.panel.parentElement?.clientWidth ?? 0;
+      if (containerWidth <= 0) return;
+
+      const nextWidth = resizeState.startWidth + resizeState.startX - clientX;
+      commitWidthRatio(clampRatio(nextWidth / containerWidth));
+    },
+    [commitWidthRatio],
+  );
+
   const stopResize = useCallback(
-    (pointerId: number) => {
+    (pointerId: number, finalClientX?: number) => {
       const resizeState = resizeStateRef.current;
       if (!resizeState) return;
       if (resizeState.frameId !== null) {
         window.cancelAnimationFrame(resizeState.frameId);
       }
+      commitResizePosition(resizeState, finalClientX ?? resizeState.latestX);
       if (resizeState.handle.hasPointerCapture(pointerId)) {
         resizeState.handle.releasePointerCapture(pointerId);
       }
@@ -85,7 +105,7 @@ export function ResizableRightPanel({
         setLocalStorageItem(storageKey, widthRatioRef.current, Schema.Finite);
       }
     },
-    [storageKey],
+    [commitResizePosition, storageKey],
   );
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -98,6 +118,7 @@ export function ResizableRightPanel({
     resizeStateRef.current = {
       frameId: null,
       handle: event.currentTarget,
+      latestX: event.clientX,
       panel,
       pointerId: event.pointerId,
       startWidth: panel.getBoundingClientRect().width,
@@ -113,29 +134,25 @@ export function ResizableRightPanel({
       if (!resizeState || resizeState.pointerId !== event.pointerId) return;
 
       event.preventDefault();
-      if (resizeState.frameId !== null) return;
+      resizeState.latestX = event.clientX;
 
-      const clientX = event.clientX;
+      if (resizeState.frameId !== null) return;
       resizeState.frameId = window.requestAnimationFrame(() => {
         const activeResizeState = resizeStateRef.current;
         if (!activeResizeState) return;
 
         activeResizeState.frameId = null;
-        const containerWidth = activeResizeState.panel.parentElement?.clientWidth ?? 0;
-        if (containerWidth <= 0) return;
-
-        const nextWidth = activeResizeState.startWidth + activeResizeState.startX - clientX;
-        commitWidthRatio(clampRatio(nextWidth / containerWidth));
+        commitResizePosition(activeResizeState, activeResizeState.latestX);
       });
     },
-    [commitWidthRatio],
+    [commitResizePosition],
   );
 
   const handlePointerUp = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const resizeState = resizeStateRef.current;
       if (!resizeState || resizeState.pointerId !== event.pointerId) return;
-      stopResize(event.pointerId);
+      stopResize(event.pointerId, event.clientX);
     },
     [stopResize],
   );
