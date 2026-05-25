@@ -1,13 +1,14 @@
 import "../index.css";
 
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { ThreadId } from "@t3tools/contracts";
+import { ThreadId, type TerminalEvent } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 const {
   terminalConstructorSpy,
   terminalDisposeSpy,
+  terminalWriteSpy,
   fitAddonFitSpy,
   fitAddonLoadSpy,
   environmentApiById,
@@ -16,9 +17,19 @@ const {
 } = vi.hoisted(() => ({
   terminalConstructorSpy: vi.fn(),
   terminalDisposeSpy: vi.fn(),
+  terminalWriteSpy: vi.fn(),
   fitAddonFitSpy: vi.fn(),
   fitAddonLoadSpy: vi.fn(),
-  environmentApiById: new Map<string, { terminal: { open: ReturnType<typeof vi.fn> } }>(),
+  environmentApiById: new Map<
+    string,
+    {
+      terminal: {
+        open: ReturnType<typeof vi.fn>;
+        onEvent: ReturnType<typeof vi.fn>;
+      };
+      emitTerminalEvent: (event: TerminalEvent) => void;
+    }
+  >(),
   readEnvironmentApiMock: vi.fn((environmentId: string) => environmentApiById.get(environmentId)),
   readLocalApiMock: vi.fn<
     () =>
@@ -62,7 +73,9 @@ vi.mock("@xterm/xterm", () => ({
 
     open() {}
 
-    write() {}
+    write(data: string) {
+      terminalWriteSpy(data);
+    }
 
     clear() {}
 
@@ -124,6 +137,7 @@ import { TerminalViewport } from "./ThreadTerminalDrawer";
 const THREAD_ID = ThreadId.make("thread-terminal-browser");
 
 function createEnvironmentApi() {
+  const terminalEventListeners = new Set<(event: TerminalEvent) => void>();
   return {
     terminal: {
       open: vi.fn(async () => ({
@@ -140,6 +154,19 @@ function createEnvironmentApi() {
       })),
       write: vi.fn(async () => undefined),
       resize: vi.fn(async () => undefined),
+      clear: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      onEvent: vi.fn((listener: (event: TerminalEvent) => void) => {
+        terminalEventListeners.add(listener);
+        return () => {
+          terminalEventListeners.delete(listener);
+        };
+      }),
+    },
+    emitTerminalEvent: (event: TerminalEvent) => {
+      for (const listener of terminalEventListeners) {
+        listener(event);
+      }
     },
   };
 }
@@ -215,6 +242,7 @@ describe("TerminalViewport", () => {
     readLocalApiMock.mockClear();
     terminalConstructorSpy.mockClear();
     terminalDisposeSpy.mockClear();
+    terminalWriteSpy.mockClear();
     fitAddonFitSpy.mockClear();
     fitAddonLoadSpy.mockClear();
   });
@@ -313,6 +341,37 @@ describe("TerminalViewport", () => {
           }),
         }),
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("applies output from the viewport-owned terminal event stream", async () => {
+    const environment = createEnvironmentApi();
+    environmentApiById.set("environment-a", environment);
+
+    const mounted = await mountTerminalViewport({
+      threadRef: scopeThreadRef("environment-a" as never, THREAD_ID),
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(environment.terminal.open).toHaveBeenCalledTimes(1);
+        expect(environment.terminal.onEvent).toHaveBeenCalledTimes(1);
+      });
+      terminalWriteSpy.mockClear();
+
+      environment.emitTerminalEvent({
+        type: "output",
+        threadId: THREAD_ID,
+        terminalId: "default",
+        createdAt: "2026-04-07T00:00:01.000Z",
+        data: "ls\r\n",
+      });
+
+      await vi.waitFor(() => {
+        expect(terminalWriteSpy).toHaveBeenCalledWith("ls\r\n");
+      });
     } finally {
       await mounted.cleanup();
     }

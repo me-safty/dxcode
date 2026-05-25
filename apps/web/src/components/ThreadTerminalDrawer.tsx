@@ -52,6 +52,7 @@ import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalSt
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
 const MULTI_CLICK_SELECTION_ACTION_DELAY_MS = 260;
+const MAX_APPLIED_TERMINAL_EVENT_KEYS = 500;
 
 function maxDrawerHeight(): number {
   if (typeof window === "undefined") return DEFAULT_THREAD_TERMINAL_HEIGHT;
@@ -87,6 +88,45 @@ export function selectPendingTerminalEventEntries(
   lastAppliedTerminalEventId: number,
 ): ReadonlyArray<{ id: number; event: TerminalEvent }> {
   return entries.filter((entry) => entry.id > lastAppliedTerminalEventId);
+}
+
+function terminalEventDedupeKey(event: TerminalEvent): string {
+  switch (event.type) {
+    case "output":
+      return [event.threadId, event.terminalId, event.createdAt, event.type, event.data].join("\0");
+    case "started":
+    case "restarted":
+      return [
+        event.threadId,
+        event.terminalId,
+        event.createdAt,
+        event.type,
+        event.snapshot.updatedAt,
+      ].join("\0");
+    case "activity":
+      return [
+        event.threadId,
+        event.terminalId,
+        event.createdAt,
+        event.type,
+        String(event.hasRunningSubprocess),
+      ].join("\0");
+    case "error":
+      return [event.threadId, event.terminalId, event.createdAt, event.type, event.message].join(
+        "\0",
+      );
+    case "exited":
+      return [
+        event.threadId,
+        event.terminalId,
+        event.createdAt,
+        event.type,
+        String(event.exitCode),
+        String(event.exitSignal),
+      ].join("\0");
+    case "cleared":
+      return [event.threadId, event.terminalId, event.createdAt, event.type].join("\0");
+  }
 }
 
 function normalizeComputedColor(value: string | null | undefined, fallback: string): string {
@@ -292,6 +332,7 @@ export function TerminalViewport({
   const selectionActionTimerRef = useRef<number | null>(null);
   const keybindingsRef = useRef(keybindings);
   const lastAppliedTerminalEventIdRef = useRef(0);
+  const appliedTerminalEventKeysRef = useRef<Set<string>>(new Set());
   const terminalHydratedRef = useRef(false);
   const handleSessionExited = useEffectEvent(() => {
     onSessionExited();
@@ -405,6 +446,40 @@ export function TerminalViewport({
       }
     };
 
+    const terminalOpenInput = () => {
+      const activeTerminal = terminalRef.current;
+      const activeFitAddon = fitAddonRef.current;
+      if (!activeTerminal || !activeFitAddon) {
+        return null;
+      }
+      activeFitAddon.fit();
+      return {
+        threadId,
+        terminalId,
+        cwd,
+        ...(worktreePath !== undefined ? { worktreePath } : {}),
+        cols: activeTerminal.cols,
+        rows: activeTerminal.rows,
+        ...(runtimeEnv ? { env: runtimeEnv } : {}),
+      };
+    };
+
+    const markTerminalEventApplied = (event: TerminalEvent) => {
+      const key = terminalEventDedupeKey(event);
+      const keys = appliedTerminalEventKeysRef.current;
+      if (keys.has(key)) {
+        return false;
+      }
+      keys.add(key);
+      if (keys.size > MAX_APPLIED_TERMINAL_EVENT_KEYS) {
+        const oldestKey = keys.values().next().value;
+        if (typeof oldestKey === "string") {
+          keys.delete(oldestKey);
+        }
+      }
+      return true;
+    };
+
     const sendTerminalInput = async (data: string, fallbackError: string) => {
       const activeTerminal = terminalRef.current;
       if (!activeTerminal) return;
@@ -514,14 +589,7 @@ export function TerminalViewport({
     });
 
     const inputDisposable = terminal.onData((data) => {
-      void api.terminal
-        .write({ threadId, terminalId, data })
-        .catch((err) =>
-          writeSystemMessage(
-            terminal,
-            err instanceof Error ? err.message : "Terminal write failed",
-          ),
-        );
+      void sendTerminalInput(data, "Terminal write failed");
     });
 
     const selectionDisposable = terminal.onSelectionChange(() => {
@@ -570,6 +638,9 @@ export function TerminalViewport({
     const applyTerminalEvent = (event: TerminalEvent) => {
       const activeTerminal = terminalRef.current;
       if (!activeTerminal) {
+        return;
+      }
+      if (!markTerminalEventApplied(event)) {
         return;
       }
 
@@ -663,6 +734,12 @@ export function TerminalViewport({
 
       applyPendingTerminalEvents(nextEntries);
     });
+    const unsubscribeLiveTerminalEvents = api.terminal.onEvent((event) => {
+      if (event.threadId !== threadId || event.terminalId !== terminalId) {
+        return;
+      }
+      applyTerminalEvent(event);
+    });
 
     const openTerminal = async () => {
       try {
@@ -670,15 +747,9 @@ export function TerminalViewport({
         const activeFitAddon = fitAddonRef.current;
         if (!activeTerminal || !activeFitAddon) return;
         activeFitAddon.fit();
-        const snapshot = await api.terminal.open({
-          threadId,
-          terminalId,
-          cwd,
-          ...(worktreePath !== undefined ? { worktreePath } : {}),
-          cols: activeTerminal.cols,
-          rows: activeTerminal.rows,
-          ...(runtimeEnv ? { env: runtimeEnv } : {}),
-        });
+        const input = terminalOpenInput();
+        if (!input) return;
+        const snapshot = await api.terminal.open(input);
         if (disposed) return;
         writeTerminalSnapshot(activeTerminal, snapshot);
         const bufferedEntries = selectTerminalEventEntries(
@@ -734,7 +805,9 @@ export function TerminalViewport({
       disposed = true;
       terminalHydratedRef.current = false;
       lastAppliedTerminalEventIdRef.current = 0;
+      appliedTerminalEventKeysRef.current.clear();
       unsubscribeTerminalEvents();
+      unsubscribeLiveTerminalEvents();
       window.clearTimeout(fitTimer);
       inputDisposable.dispose();
       selectionDisposable.dispose();
