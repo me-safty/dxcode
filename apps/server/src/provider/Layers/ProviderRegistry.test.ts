@@ -992,6 +992,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                   codex: { enabled: false },
                   claudeAgent: { enabled: false },
                   cursor: { enabled: false },
+                  grok: { enabled: false },
                   opencode: { enabled: false },
                 },
                 // `providerInstances` keys are branded `ProviderInstanceId`;
@@ -1086,6 +1087,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                   codex: { enabled: true, binaryPath: firstMissing },
                   claudeAgent: { enabled: false },
                   cursor: { enabled: false },
+                  grok: { enabled: false },
                   opencode: { enabled: false },
                 },
               }),
@@ -1181,6 +1183,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                   codex: { enabled: false },
                   claudeAgent: { enabled: false },
                   cursor: { enabled: false },
+                  grok: { enabled: false },
                   opencode: { enabled: false },
                 },
                 providerInstances: {
@@ -1238,6 +1241,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                       enabled: false,
                     },
                     cursor: {
+                      enabled: false,
+                    },
+                    grok: {
                       enabled: false,
                     },
                   },
@@ -1300,6 +1306,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                 "claudeAgent",
                 "codex",
                 "cursor",
+                "grok",
                 "opencode",
               ]);
               assert.strictEqual(cursorProvider?.enabled, false);

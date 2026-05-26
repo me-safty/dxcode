@@ -123,6 +123,7 @@ function createBaseServerConfig(): ServerConfig {
           launchArgs: "",
         },
         cursor: { enabled: true, binaryPath: "", apiEndpoint: "", customModels: [] },
+        grok: { enabled: true, binaryPath: "", customModels: [] },
         opencode: {
           enabled: true,
           binaryPath: "",
