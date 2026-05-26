@@ -237,6 +237,21 @@ function modeState(): AcpSchema.SessionModeState {
   };
 }
 
+const grokAcpModels: ReadonlyArray<AcpSchema.ModelInfo> = [
+  { modelId: "grok-build", name: "Grok Build" },
+  { modelId: "grok-mock-alt", name: "Grok Mock Alt" },
+];
+
+function modelState(): AcpSchema.SessionModelState {
+  const modelId = grokAcpModels.some((model) => model.modelId === currentModelId)
+    ? currentModelId
+    : "grok-build";
+  return {
+    currentModelId: modelId,
+    availableModels: grokAcpModels,
+  };
+}
+
 const program = Effect.gen(function* () {
   const agent = yield* EffectAcpAgent.AcpAgent;
 
@@ -257,6 +272,7 @@ const program = Effect.gen(function* () {
     Effect.succeed({
       sessionId,
       modes: modeState(),
+      models: modelState(),
       configOptions: configOptions(),
     }),
   );
@@ -273,9 +289,26 @@ const program = Effect.gen(function* () {
       .pipe(
         Effect.as({
           modes: modeState(),
+          models: modelState(),
           configOptions: configOptions(),
         }),
       ),
+  );
+
+  yield* agent.handleSetSessionModel((request) =>
+    Effect.gen(function* () {
+      if (!grokAcpModels.some((model) => model.modelId === request.modelId)) {
+        return yield* AcpError.AcpRequestError.invalidParams(
+          `Unknown mock model id: ${request.modelId}`,
+          {
+            method: "session/set_model",
+            params: request,
+          },
+        );
+      }
+      currentModelId = request.modelId;
+      return {};
+    }),
   );
 
   yield* agent.handleSetSessionConfigOption((request) =>
