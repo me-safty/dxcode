@@ -78,7 +78,10 @@ interface PendingExtensionUI {
   readonly piId: string;
   readonly questionId: string;
   readonly deferred: Deferred.Deferred<ProviderUserInputAnswers, never>;
-  readonly method: "select" | "confirm";
+  readonly method: "select" | "confirm" | "input";
+  // Populated for `input` requests that were parsed as numbered lists.
+  // Used to map selected labels back to 1-based indices for Pi's multi-select protocol.
+  readonly numberedOptions?: ReadonlyArray<string>;
 }
 
 interface PiSessionContext {
@@ -152,6 +155,19 @@ function classifyToolItemType(toolName: string): CanonicalItemType {
     return "image_view";
   }
   return "dynamic_tool_call";
+}
+
+// Pi's RPC multi-select fallback encodes options as a numbered list in the title:
+//   "Which colors?\n1. Red\n2. Blue\n3. Green"
+// Returns the question title and extracted option strings, or null if no list found.
+function parseNumberedList(text: string): { title: string; items: ReadonlyArray<string> } | null {
+  const lines = text.split("\n");
+  const items: string[] = [];
+  for (const line of lines.slice(1)) {
+    const m = /^\d+\.\s+(.+)$/.exec(line.trim());
+    if (m?.[1]) items.push(m[1]);
+  }
+  return items.length >= 2 ? { title: lines[0] ?? text, items } : null;
 }
 
 function tryParseJsonObject(text: string): Record<string, unknown> | null {
@@ -480,28 +496,29 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       return;
     }
 
-    // Free-text inputs: no structured equivalent in our contracts, cancel
-    if (event.method === "input" || event.method === "editor") {
+    // editor: no useful mapping, cancel immediately
+    if (event.method === "editor") {
       yield* context.writeExtensionResponse({ type: "extension_ui_response", id: event.id, cancelled: true });
       return;
     }
 
-    // select / confirm: surface as user-input.requested
+    // select / confirm / input: surface as user-input.requested
     const ourRequestId = ApprovalRequestId.make(yield* Random.nextUUIDv4);
     const questionId = String(ourRequestId);
     const deferred = yield* Deferred.make<ProviderUserInputAnswers, never>();
 
     let question: UserInputQuestion;
+    let numberedOptions: ReadonlyArray<string> | undefined;
+
     if (event.method === "select") {
       question = {
         id: questionId,
         header: event.title.slice(0, 12),
         question: event.title,
-        options: event.options.map((label) => ({ label, description: label })),
+        options: event.options.map((label: string) => ({ label, description: label })),
         multiSelect: false,
       };
-    } else {
-      // confirm
+    } else if (event.method === "confirm") {
       const body = event.message.length > 0 ? `${event.title}\n${event.message}` : event.title;
       question = {
         id: questionId,
@@ -513,6 +530,29 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
         ],
         multiSelect: false,
       };
+    } else {
+      // input — Pi uses this for multi-select (numbered list in title) and freeform.
+      // If the title contains a numbered list, parse it into real options with multiSelect.
+      // Otherwise surface with empty options; T3's auto-added "Other" field handles free text.
+      const parsed = parseNumberedList(event.title);
+      if (parsed) {
+        numberedOptions = parsed.items;
+        question = {
+          id: questionId,
+          header: parsed.title.slice(0, 12),
+          question: parsed.title,
+          options: parsed.items.map((item) => ({ label: item, description: item })),
+          multiSelect: true,
+        };
+      } else {
+        question = {
+          id: questionId,
+          header: event.title.slice(0, 12),
+          question: event.title,
+          options: [],
+          multiSelect: false,
+        };
+      }
     }
 
     context.pendingExtensionUIs.set(ourRequestId, {
@@ -520,6 +560,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       questionId,
       deferred,
       method: event.method,
+      ...(numberedOptions ? { numberedOptions } : {}),
     });
 
     const stamp = yield* makeEventStamp();
@@ -946,11 +987,26 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       if (pending.method === "confirm") {
         const answer = answers[pending.questionId];
         piResponse = { type: "extension_ui_response", id: pending.piId, confirmed: answer === "Yes" };
+      } else if (pending.method === "input" && pending.numberedOptions) {
+        // Multi-select numbered list: map selected labels back to 1-based indices
+        const raw = answers[pending.questionId];
+        const selected: string[] = Array.isArray(raw)
+          ? raw.map(String)
+          : typeof raw === "string" && raw.length > 0
+            ? [raw]
+            : [];
+        const indices = selected
+          .map((label) => {
+            const idx = pending.numberedOptions!.indexOf(label);
+            return idx >= 0 ? String(idx + 1) : null;
+          })
+          .filter((i): i is string => i !== null);
+        piResponse = { type: "extension_ui_response", id: pending.piId, value: indices.join(",") };
       } else {
-        const answer = typeof answers[pending.questionId] === "string"
-          ? (answers[pending.questionId] as string)
-          : "";
-        piResponse = { type: "extension_ui_response", id: pending.piId, value: answer };
+        // select or freeform input: answer is a string value
+        const answer = answers[pending.questionId];
+        const value = typeof answer === "string" ? answer : "";
+        piResponse = { type: "extension_ui_response", id: pending.piId, value };
       }
 
       yield* context.writeExtensionResponse(piResponse);
