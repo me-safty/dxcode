@@ -4,6 +4,7 @@ import {
   type ServerProviderModel,
   type T3ChatSettings,
 } from "@t3tools/contracts";
+import { createModelCapabilities } from "@t3tools/shared/model";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -12,6 +13,8 @@ import * as Result from "effect/Result";
 
 import { T3ChatBridgeError, T3ChatRuntime } from "../t3chatRuntime.ts";
 import {
+  buildBooleanOptionDescriptor,
+  buildSelectOptionDescriptor,
   buildServerProvider,
   ProviderCommandExecutionError,
   type ServerProviderDraft,
@@ -89,13 +92,33 @@ const FALLBACK_MODELS: T3ChatModel[] = [
   { id: "grok-3", label: "Grok 3", provider: "Grok" },
 ];
 
+const T3CHAT_MODEL_CAPABILITIES = createModelCapabilities({
+  optionDescriptors: [
+    buildSelectOptionDescriptor({
+      id: "effort",
+      label: "Reasoning",
+      options: [
+        { value: "none", label: "None" },
+        { value: "low", label: "Low" },
+        { value: "medium", label: "Medium", isDefault: true },
+        { value: "high", label: "High" },
+      ],
+    }),
+    buildBooleanOptionDescriptor({
+      id: "includeSearch",
+      label: "Search",
+      currentValue: false,
+    }),
+  ],
+});
+
 function toServerModels(models: T3ChatModel[]): ServerProviderModel[] {
   return models.map((m) => ({
     slug: m.id,
     name: m.label,
     subProvider: m.provider,
     isCustom: false,
-    capabilities: null,
+    capabilities: T3CHAT_MODEL_CAPABILITIES,
   }));
 }
 
@@ -197,7 +220,7 @@ export const makePendingT3ChatProvider = (
 
     return buildServerProvider({
       driver: DRIVER_KIND,
-      presentation: { displayName: "T3 Chat" },
+      presentation: { displayName: "T3 Chat", showInteractionModeToggle: false },
       enabled: settings.enabled,
       checkedAt,
       models: toServerModels(FALLBACK_MODELS),
@@ -245,7 +268,7 @@ export const checkT3ChatProviderStatus = (
         error.detail.toLowerCase().includes("enoent");
       return buildServerProvider({
         driver: DRIVER_KIND,
-        presentation: { displayName: "T3 Chat" },
+        presentation: { displayName: "T3 Chat", showInteractionModeToggle: false },
         enabled: settings.enabled,
         checkedAt,
         models: toServerModels(FALLBACK_MODELS),
@@ -275,7 +298,7 @@ export const checkT3ChatProviderStatus = (
     if (!hasAuth) {
       return buildServerProvider({
         driver: DRIVER_KIND,
-        presentation: { displayName: "T3 Chat" },
+        presentation: { displayName: "T3 Chat", showInteractionModeToggle: false },
         enabled: settings.enabled,
         checkedAt,
         models: toServerModels(FALLBACK_MODELS),
@@ -313,7 +336,7 @@ export const checkT3ChatProviderStatus = (
     if (Result.isFailure(bridgeProbeResult)) {
       return buildServerProvider({
         driver: DRIVER_KIND,
-        presentation: { displayName: "T3 Chat" },
+        presentation: { displayName: "T3 Chat", showInteractionModeToggle: false },
         enabled: settings.enabled,
         checkedAt,
         models: toServerModels(FALLBACK_MODELS),
@@ -330,7 +353,7 @@ export const checkT3ChatProviderStatus = (
     if (Option.isNone(bridgeProbeResult.success)) {
       return buildServerProvider({
         driver: DRIVER_KIND,
-        presentation: { displayName: "T3 Chat" },
+        presentation: { displayName: "T3 Chat", showInteractionModeToggle: false },
         enabled: settings.enabled,
         checkedAt,
         models: toServerModels(FALLBACK_MODELS),
@@ -369,7 +392,7 @@ export const checkT3ChatProviderStatus = (
 
     return buildServerProvider({
       driver: DRIVER_KIND,
-      presentation: { displayName: "T3 Chat" },
+      presentation: { displayName: "T3 Chat", showInteractionModeToggle: false },
       enabled: settings.enabled,
       checkedAt,
       models: toServerModels(models),

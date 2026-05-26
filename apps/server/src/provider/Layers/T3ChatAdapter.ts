@@ -1,6 +1,8 @@
 import {
+  type ChatAttachment,
   EventId,
   ProviderDriverKind,
+  type ModelSelection,
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderSendTurnInput,
@@ -11,14 +13,21 @@ import {
   type ThreadId,
   TurnId,
 } from "@t3tools/contracts";
+import {
+  getModelSelectionBooleanOptionValue,
+  getModelSelectionStringOptionValue,
+} from "@t3tools/shared/model";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 
+import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { ServerConfig } from "../../config.ts";
 import {
   ProviderAdapterRequestError,
   ProviderAdapterSessionNotFoundError,
@@ -29,10 +38,20 @@ import { T3ChatRuntime } from "../t3chatRuntime.ts";
 
 const PROVIDER = ProviderDriverKind.make("t3chat");
 
+interface T3ChatUploadedAttachment {
+  readonly key: string;
+  readonly type: "image";
+  readonly fileName: string;
+  readonly mimeType: string;
+  readonly fileSize: number;
+  readonly url: string;
+}
+
 interface T3ChatMessage {
   readonly id: string;
   readonly role: "user" | "assistant";
   readonly content: string;
+  readonly attachments?: T3ChatUploadedAttachment[];
 }
 
 interface T3ChatTurnSnapshot {
@@ -50,19 +69,38 @@ interface T3ChatSessionContext {
   model: string;
 }
 
-function extractDelta(value: Record<string, unknown>): string | null {
-  if (typeof value.delta === "string") return value.delta;
-  if (value.delta && typeof value.delta === "object") {
+const REASONING_TYPES = new Set([
+  "reasoning",
+  "thinking",
+  "thought",
+  "reasoning-delta",
+  "reasoning_delta",
+]);
+
+interface DeltaResult {
+  readonly text: string;
+  readonly kind: "text" | "reasoning";
+}
+
+function extractDelta(value: Record<string, unknown>): DeltaResult | null {
+  const isReasoning =
+    (typeof value.type === "string" && REASONING_TYPES.has(value.type)) ||
+    (typeof value.object === "string" && value.object.includes("reasoning"));
+
+  let text: string | null = null;
+  if (typeof value.delta === "string") text = value.delta;
+  else if (value.delta && typeof value.delta === "object") {
     const d = value.delta as Record<string, unknown>;
-    if (typeof d.text === "string") return d.text;
+    if (typeof d.text === "string") text = d.text;
   }
-  if (typeof value.text === "string") return value.text;
-  if (Array.isArray(value.content)) {
-    return value.content
+  if (text === null && typeof value.text === "string") text = value.text;
+  if (text === null && Array.isArray(value.content)) {
+    text = value.content
       .map((item: Record<string, unknown>) => (typeof item.text === "string" ? item.text : ""))
       .join("");
   }
-  return null;
+  if (text === null) return null;
+  return { text, kind: isReasoning ? "reasoning" : "text" };
 }
 
 function tryParseJson(data: string): Record<string, unknown> | null {
@@ -73,6 +111,61 @@ function tryParseJson(data: string): Record<string, unknown> | null {
   }
 }
 
+function uploadT3ChatAttachments(
+  bridgeURL: string,
+  attachments: ReadonlyArray<ChatAttachment>,
+  deps: { readonly fileSystem: FileSystem.FileSystem; readonly attachmentsDir: string },
+) {
+  return Effect.gen(function* () {
+    const uploaded: T3ChatUploadedAttachment[] = [];
+
+    for (const attachment of attachments) {
+      if (attachment.type !== "image") continue;
+
+      const attachmentPath = resolveAttachmentPath({
+        attachmentsDir: deps.attachmentsDir,
+        attachment,
+      });
+      if (!attachmentPath) continue;
+
+      const bytes = yield* deps.fileSystem.readFile(attachmentPath).pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!bytes) continue;
+
+      const response = yield* Effect.tryPromise(() =>
+        fetch(`${bridgeURL}/upload`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            size: attachment.sizeBytes,
+            data: Buffer.from(bytes).toString("base64"),
+          }),
+        }),
+      ).pipe(Effect.orElseSucceed(() => null));
+
+      if (!response || !response.ok) continue;
+
+      const result = yield* Effect.tryPromise(
+        () => response.json() as Promise<{ key: string; url: string }>,
+      ).pipe(Effect.orElseSucceed(() => null));
+
+      if (!result || !result.url) continue;
+
+      uploaded.push({
+        key: result.key,
+        type: "image",
+        fileName: attachment.name,
+        mimeType: attachment.mimeType,
+        fileSize: attachment.sizeBytes,
+        url: result.url,
+      });
+    }
+
+    return uploaded;
+  });
+}
+
 export const makeT3ChatAdapter = Effect.fn("makeT3ChatAdapter")(function* (
   settings: T3ChatSettings & { readonly enabled: boolean },
   adapterOptions: {
@@ -81,6 +174,8 @@ export const makeT3ChatAdapter = Effect.fn("makeT3ChatAdapter")(function* (
   },
 ) {
   const t3ChatRuntime = yield* T3ChatRuntime;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const serverConfig = yield* ServerConfig;
   const bridge = yield* t3ChatRuntime.connectToT3ChatBridge({
     binaryPath: settings.binaryPath,
     serverUrl: settings.serverUrl,
@@ -242,28 +337,40 @@ export const makeT3ChatAdapter = Effect.fn("makeT3ChatAdapter")(function* (
     turnId: TurnId;
     itemId: RuntimeItemId;
     model: string;
+    modelSelection: ModelSelection | undefined;
     abortSignal: AbortSignal;
   }) {
-    const { ctx, threadId, turnId, itemId, model, abortSignal } = input;
+    const { ctx, threadId, turnId, itemId, model, modelSelection, abortSignal } = input;
     const bridgeURL = yield* requireBridge();
+
+    const reasoningEffort =
+      getModelSelectionStringOptionValue(modelSelection, "effort") ?? "medium";
+    const includeSearch =
+      getModelSelectionBooleanOptionValue(modelSelection, "includeSearch") ?? false;
 
     const body = {
       messages: ctx.messages.map((m) => ({
         id: m.id,
-        parts: [{ type: "text", text: m.content }],
+        parts: [{ type: "text" as const, text: m.content }],
         role: m.role,
-        attachments: [],
+        attachments: m.attachments ?? [],
       })),
       threadMetadata: { id: threadId },
+      clientAuth: { isSignedIn: true },
       responseMessageId: crypto.randomUUID(),
       model,
       convexSessionId: settings.convexSessionId,
-      modelParams: { reasoningEffort: "medium", includeSearch: false },
-      preferences: { name: "", occupation: "", selectedTraits: [], additionalInfo: "" },
+      modelParams: {
+        reasoningEffort,
+        includeSearch,
+        ...(includeSearch ? { searchLimit: 1 } : {}),
+      },
+      preferences: {},
       userInfo: {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         locale: "en-US",
       },
+      isEphemeral: false,
     };
 
     const response = yield* Effect.tryPromise({
@@ -353,16 +460,21 @@ export const makeT3ChatAdapter = Effect.fn("makeT3ChatAdapter")(function* (
       });
     }
 
-    yield* requireBridge();
-
     const turnId = TurnId.make(yield* Random.nextUUIDv4);
     const itemId = RuntimeItemId.make(yield* Random.nextUUIDv4);
     const stamp = yield* makeEventStamp;
+
+    const bridgeURL = yield* requireBridge();
+    const uploadedAttachments = yield* uploadT3ChatAttachments(bridgeURL, input.attachments ?? [], {
+      fileSystem,
+      attachmentsDir: serverConfig.attachmentsDir,
+    });
 
     ctx.messages.push({
       id: yield* Random.nextUUIDv4,
       role: "user",
       content: input.input,
+      ...(uploadedAttachments.length > 0 ? { attachments: uploadedAttachments } : {}),
     });
 
     const model = input.modelSelection?.model ?? ctx.model;
@@ -406,6 +518,7 @@ export const makeT3ChatAdapter = Effect.fn("makeT3ChatAdapter")(function* (
       turnId,
       itemId,
       model,
+      modelSelection: input.modelSelection,
       abortSignal: abortController.signal,
     }).pipe(
       Effect.matchEffect({
@@ -663,7 +776,11 @@ const readSSEStream = (
 
           const delta = extractDelta(parsed);
           if (delta) {
-            accumulated += delta;
+            const streamKind =
+              delta.kind === "reasoning" ? "reasoning_text" : "assistant_text";
+            if (delta.kind === "text") {
+              accumulated += delta.text;
+            }
             const stamp = yield* makeEventStamp;
             yield* emitEvent({
               eventId: stamp.eventId,
@@ -674,7 +791,7 @@ const readSSEStream = (
               turnId,
               itemId,
               type: "content.delta",
-              payload: { streamKind: "assistant_text", delta },
+              payload: { streamKind, delta: delta.text },
             });
           }
         }

@@ -636,23 +636,14 @@ export const AntigravityIcon: Icon = (props) => (
 );
 
 export const T3ChatIcon: Icon = (props) => (
-  <svg {...props} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <svg {...props} viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path
-      d="M12 2C6.48 2 2 5.58 2 10c0 2.52 1.47 4.77 3.78 6.27-.13 1.25-.72 2.37-1.63 3.17a.5.5 0 0 0 .34.87c2.09-.05 3.9-.92 5.13-2.07.78.15 1.58.26 2.38.26 5.52 0 10-3.58 10-8S17.52 2 12 2Z"
-      fill="currentColor"
+      d="M90 32c-35.9 0-65 23.3-65 52 0 15.5 8.5 29.4 21.8 39.1l-2.3 21.4c-.2 1.8 1.9 3 3.4 1.9l22.6-15.7c6.2 2 12.8 3.3 19.5 3.3 35.9 0 65-23.3 65-52S125.9 32 90 32Z"
+      stroke="currentColor"
+      strokeWidth="12"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     />
-    <text
-      x="12"
-      y="12"
-      textAnchor="middle"
-      dominantBaseline="central"
-      fontSize="7"
-      fontWeight="bold"
-      fontFamily="system-ui, sans-serif"
-      fill="var(--background, #fff)"
-    >
-      T3
-    </text>
   </svg>
 );
 

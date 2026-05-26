@@ -8,7 +8,6 @@ import { useEffect } from "react";
 
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { PersistentPullRequestView } from "../components/PersistentPullRequestView";
-import { PersistentT3ChatView } from "../components/PersistentT3ChatView";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import {
   startNewLocalThreadFromContext,

@@ -1,10 +1,13 @@
 import { ProviderDriverKind, T3ChatSettings, type ServerProvider } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { TextGenerationError } from "@t3tools/contracts";
 import { ChildProcessSpawner } from "effect/unstable/process";
+
+import { ServerConfig } from "../../config.ts";
 
 import type { TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -73,7 +76,9 @@ const makeT3ChatTextGeneration = (): TextGenerationShape => ({
 
 export type T3ChatDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
+  | FileSystem.FileSystem
   | ProviderEventLoggers
+  | ServerConfig
   | T3ChatRuntime;
 
 export const T3ChatDriver: ProviderDriver<T3ChatSettings, T3ChatDriverEnv> = {

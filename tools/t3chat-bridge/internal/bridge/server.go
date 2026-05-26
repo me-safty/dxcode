@@ -45,6 +45,7 @@ func NewServer(config Config) *Server {
 	mux.HandleFunc("/models", server.handleModels)
 	mux.HandleFunc("/auth/check", server.handleAuthCheck)
 	mux.HandleFunc("/chat", server.handleChat)
+	mux.HandleFunc("/upload", server.handleUpload)
 
 	return server
 }

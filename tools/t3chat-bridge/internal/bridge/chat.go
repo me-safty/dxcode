@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 )
 
@@ -21,6 +22,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("[chat] request body: %s", string(body))
+
 	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, chatURL, bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("create upstream request: %v", err), http.StatusInternalServerError)
@@ -31,10 +34,21 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	response, err := s.config.Client.Do(request)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("chat upstream request failed: %v", err), http.StatusBadGateway)
-		fmt.Println(err)
+		log.Printf("[chat] upstream error: %v", err)
 		return
 	}
 	defer response.Body.Close()
+
+	log.Printf("[chat] upstream status: %d", response.StatusCode)
+
+	if response.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(response.Body)
+		log.Printf("[chat] upstream error body: %s", string(respBody))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(response.StatusCode)
+		w.Write(respBody)
+		return
+	}
 
 	copyHeader(w.Header(), response.Header, "Content-Type", "Cache-Control")
 	w.Header().Set("Connection", "keep-alive")
