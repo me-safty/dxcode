@@ -133,8 +133,7 @@ export const GitPostPullRequestReviewCommentInput = Schema.Struct({
   path: TrimmedNonEmptyStringSchema,
   line: PositiveInt,
 });
-export type GitPostPullRequestReviewCommentInput =
-  typeof GitPostPullRequestReviewCommentInput.Type;
+export type GitPostPullRequestReviewCommentInput = typeof GitPostPullRequestReviewCommentInput.Type;
 
 export const GitPostPullRequestIssueCommentInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,

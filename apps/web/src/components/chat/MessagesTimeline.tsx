@@ -880,11 +880,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
           );
         }
 
-        return (
-          <div className="text-sm leading-relaxed text-foreground">
-            {inlineNodes}
-          </div>
-        );
+        return <div className="text-sm leading-relaxed text-foreground">{inlineNodes}</div>;
       }
     }
 
@@ -912,20 +908,14 @@ const UserMessageBody = memo(function UserMessageBody(props: {
       return null;
     }
 
-    return (
-      <div className="text-sm leading-relaxed text-foreground">
-        {inlineNodes}
-      </div>
-    );
+    return <div className="text-sm leading-relaxed text-foreground">{inlineNodes}</div>;
   }
 
   if (props.text.length === 0) {
     return null;
   }
 
-  return (
-    <ChatMarkdown text={props.text} cwd={undefined} skills={props.skills} />
-  );
+  return <ChatMarkdown text={props.text} cwd={undefined} skills={props.skills} />;
 });
 
 // ---------------------------------------------------------------------------

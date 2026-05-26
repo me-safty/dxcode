@@ -6,9 +6,7 @@ import {
   type PullRequestCheck,
   type PullRequestSummary,
 } from "@t3tools/contracts";
-import type {
-  GitHubPullRequestListEntry,
-} from "../Services/GitHubCli.ts";
+import type { GitHubPullRequestListEntry } from "../Services/GitHubCli.ts";
 import type { GitHubCliShape } from "../Services/GitHubCli.ts";
 import { GitHubCliError } from "../../sourceControl/GitHubCli.ts";
 import type { GitManagerShape } from "../GitManager.ts";
@@ -117,12 +115,10 @@ type PRMethods = Pick<
 
 export function makeGitManagerPRMethods(gitHubCli: GitHubCliShape): PRMethods {
   const fetchCurrentUserLogin = (cwd: string) =>
-    gitHubCli
-      .execute({ cwd, args: ["api", "user", "--jq", ".login"] })
-      .pipe(
-        Effect.map((result) => result.stdout.trim()),
-        Effect.catch(() => Effect.succeed("")),
-      );
+    gitHubCli.execute({ cwd, args: ["api", "user", "--jq", ".login"] }).pipe(
+      Effect.map((result) => result.stdout.trim()),
+      Effect.catch(() => Effect.succeed("")),
+    );
 
   const listPullRequests: PRMethods["listPullRequests"] = (input) =>
     wrapGhError(

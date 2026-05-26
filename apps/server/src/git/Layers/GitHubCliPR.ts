@@ -231,8 +231,7 @@ export function makeGitHubCliPRMethods(execute: Execute) {
       Effect.catchTag("GitHubCliError", (error) =>
         Effect.succeed({
           ghAvailable: false as const,
-          error:
-            error.detail ?? "GitHub CLI is not authenticated. Run `gh auth login` and retry.",
+          error: error.detail ?? "GitHub CLI is not authenticated. Run `gh auth login` and retry.",
         }),
       ),
     );
@@ -624,16 +623,14 @@ export function makeGitHubCliPRMethods(execute: Execute) {
     }).pipe(
       Effect.map((result) => {
         const raw = JSON.parse(result.stdout) as Record<string, any>;
-        const checks = (raw.statusCheckRollup ?? []).map(
-          (check: Record<string, any>) => ({
-            name: check.name ?? check.context ?? "unknown",
-            status: classifyCheckStatus({
-              status: check.status ?? null,
-              conclusion: check.conclusion ?? null,
-              state: check.state ?? null,
-            }),
+        const checks = (raw.statusCheckRollup ?? []).map((check: Record<string, any>) => ({
+          name: check.name ?? check.context ?? "unknown",
+          status: classifyCheckStatus({
+            status: check.status ?? null,
+            conclusion: check.conclusion ?? null,
+            state: check.state ?? null,
           }),
-        );
+        }));
 
         const reviewMap = new Map<string, string>();
         for (const review of raw.reviews ?? []) {
@@ -653,9 +650,7 @@ export function makeGitHubCliPRMethods(execute: Execute) {
           color: label.color ?? "",
         }));
 
-        const assignees = (raw.assignees ?? []).map(
-          (a: Record<string, any>) => a.login ?? "",
-        );
+        const assignees = (raw.assignees ?? []).map((a: Record<string, any>) => a.login ?? "");
 
         return {
           title: raw.title ?? "",
@@ -728,12 +723,7 @@ export function makeGitHubCliPRMethods(execute: Execute) {
         }
         return execute({
           cwd: input.cwd,
-          args: [
-            "api",
-            `repos/${repo}/collaborators`,
-            "--jq",
-            ".[].login",
-          ],
+          args: ["api", `repos/${repo}/collaborators`, "--jq", ".[].login"],
         }).pipe(
           Effect.map((result) =>
             result.stdout

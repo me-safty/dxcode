@@ -155,9 +155,7 @@ const CommentEntry = memo(function CommentEntry({ item }: { item: CommentListIte
           {typeof item.line === "number" && item.line > 0 ? `:${item.line}` : ""}
         </p>
       ) : null}
-      {item.body.length > 0 ? (
-        <ChatMarkdown text={item.body} cwd={undefined} />
-      ) : null}
+      {item.body.length > 0 ? <ChatMarkdown text={item.body} cwd={undefined} /> : null}
     </article>
   );
 });
@@ -313,14 +311,10 @@ export function PullRequestReviewView({
       ) : diffQuery.isError ? (
         <div className="flex flex-col items-center gap-1 px-3 py-6 text-center text-xs text-destructive">
           <AlertCircleIcon className="size-4" aria-hidden="true" />
-          {diffQuery.error instanceof Error
-            ? diffQuery.error.message
-            : "Failed to load diff."}
+          {diffQuery.error instanceof Error ? diffQuery.error.message : "Failed to load diff."}
         </div>
       ) : files.length === 0 ? (
-        <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-          No files changed.
-        </p>
+        <p className="px-3 py-6 text-center text-xs text-muted-foreground">No files changed.</p>
       ) : (
         <ul className="space-y-0.5">
           {files.map((file) => {
@@ -362,10 +356,7 @@ export function PullRequestReviewView({
                       title={`${statusLabel(file.status)} · ${file.path}`}
                     >
                       <span
-                        className={cn(
-                          "block truncate font-mono text-xs",
-                          viewed && "line-through",
-                        )}
+                        className={cn("block truncate font-mono text-xs", viewed && "line-through")}
                       >
                         {basenameOfPath(file.path)}
                       </span>

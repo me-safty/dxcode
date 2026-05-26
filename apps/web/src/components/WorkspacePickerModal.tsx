@@ -144,10 +144,7 @@ function WorkspacePickerContent({ setOpen }: { setOpen: (open: boolean) => void 
 
       // Use a map keyed by worktreePath (null = main checkout)
       // Always include the main checkout entry
-      const worktreeMap = new Map<
-        string | null,
-        { branch: string | null; count: number }
-      >();
+      const worktreeMap = new Map<string | null, { branch: string | null; count: number }>();
       worktreeMap.set(null, { branch: null, count: 0 });
 
       for (const thread of projectThreads) {
@@ -203,10 +200,7 @@ function WorkspacePickerContent({ setOpen }: { setOpen: (open: boolean) => void 
   }, [workspaceGroups, searchQuery]);
 
   // Flat ordered list of selectable items for keyboard navigation
-  const selectableItems = useMemo(
-    () => filteredGroups.flatMap((g) => g.items),
-    [filteredGroups],
-  );
+  const selectableItems = useMemo(() => filteredGroups.flatMap((g) => g.items), [filteredGroups]);
 
   const clampedIndex = Math.min(selectedIndex, Math.max(0, selectableItems.length - 1));
 
@@ -287,9 +281,7 @@ function WorkspacePickerContent({ setOpen }: { setOpen: (open: boolean) => void 
       {/* Workspace list */}
       <div ref={listRef} className="overflow-y-auto max-h-[440px] min-h-0">
         {filteredGroups.length === 0 ? (
-          <div className="py-10 text-center text-sm text-muted-foreground">
-            No workspaces found
-          </div>
+          <div className="py-10 text-center text-sm text-muted-foreground">No workspaces found</div>
         ) : (
           filteredGroups.map((group) => (
             <WorkspaceGroupRow
@@ -371,10 +363,7 @@ function WorkspaceGroupRow({
     <div>
       {/* Project header */}
       <div className="flex items-center gap-2 px-4 py-2 sticky top-0 bg-popover z-10">
-        <ProjectFavicon
-          environmentId={group.project.environmentId}
-          cwd={group.project.cwd}
-        />
+        <ProjectFavicon environmentId={group.project.environmentId} cwd={group.project.cwd} />
         <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase font-mono">
           {group.project.name}
         </span>
@@ -436,11 +425,7 @@ function WorktreeRow({
       <span className="text-sm flex-1 min-w-0 truncate font-mono">
         <span className="font-semibold">{label}</span>
         {item.branch && (
-          <span
-            className={cn(
-              isSelected ? "text-accent-foreground/60" : "text-muted-foreground",
-            )}
-          >
+          <span className={cn(isSelected ? "text-accent-foreground/60" : "text-muted-foreground")}>
             ({item.branch})
           </span>
         )}

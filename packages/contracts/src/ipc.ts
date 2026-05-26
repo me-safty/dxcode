@@ -588,9 +588,7 @@ export interface EnvironmentApi {
     setPullRequestFileViewed: (input: GitSetPullRequestFileViewedInput) => Promise<void>;
     submitPullRequestReview: (input: GitSubmitPullRequestReviewInput) => Promise<void>;
     mergePullRequest: (input: GitMergePullRequestInput) => Promise<void>;
-    getPullRequestDetail: (
-      input: GitPullRequestDetailInput,
-    ) => Promise<GitPullRequestDetailResult>;
+    getPullRequestDetail: (input: GitPullRequestDetailInput) => Promise<GitPullRequestDetailResult>;
     editPullRequest: (input: GitEditPullRequestInput) => Promise<void>;
     getRepositoryCollaborators: (
       input: GitRepositoryCollaboratorsInput,

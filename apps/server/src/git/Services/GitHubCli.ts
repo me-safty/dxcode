@@ -10,11 +10,7 @@ import type { Effect } from "effect";
 
 import type { ProcessRunResult } from "../../processRunner.ts";
 import type { GitHubCliError } from "../../sourceControl/GitHubCli.ts";
-import type {
-  PullRequestCheck,
-  PullRequestReviewer,
-  PullRequestLabel,
-} from "@t3tools/contracts";
+import type { PullRequestCheck, PullRequestReviewer, PullRequestLabel } from "@t3tools/contracts";
 
 export interface GitHubPullRequestSummary {
   readonly number: number;

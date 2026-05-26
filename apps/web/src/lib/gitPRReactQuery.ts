@@ -1,4 +1,9 @@
-import { type EnvironmentId, type ThreadId } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  type PullRequestMergeMethod,
+  type PullRequestReviewEvent,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { mutationOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { ensureEnvironmentApi } from "../environmentApi";
 import { gitMutationKeys, invalidateGitQueries } from "./gitReactQuery";
@@ -14,6 +19,8 @@ const GIT_PR_COMMENTS_STALE_TIME_MS = 15_000;
 const GIT_PR_COMMENTS_REFETCH_INTERVAL_MS = 60_000;
 const GIT_PR_BODY_STALE_TIME_MS = 60_000;
 const GIT_PR_VIEWED_FILES_STALE_TIME_MS = 30_000;
+const GIT_PR_DETAIL_STALE_TIME_MS = 30_000;
+const GIT_PR_DETAIL_REFETCH_INTERVAL_MS = 60_000;
 
 export const gitQueryKeys = {
   all: ["git"] as const,
@@ -31,6 +38,8 @@ export const gitQueryKeys = {
     ["git", "pull-request", "body", cwd, prNumber] as const,
   pullRequestViewedFiles: (cwd: string | null, prNumber: number | null) =>
     ["git", "pull-request", "viewed-files", cwd, prNumber] as const,
+  pullRequestDetail: (cwd: string | null, prNumber: number | null) =>
+    ["git", "pull-request", "detail", cwd, prNumber] as const,
 };
 
 export const gitPRMutationKeys = {
@@ -203,8 +212,7 @@ export function gitPullRequestBodyQueryOptions(input: {
   return queryOptions({
     queryKey: gitQueryKeys.pullRequestBody(input.cwd, input.prNumber),
     queryFn: async () => {
-      if (!input.cwd || input.prNumber === null)
-        throw new Error("Pull request body unavailable.");
+      if (!input.cwd || input.prNumber === null) throw new Error("Pull request body unavailable.");
       if (!input.environmentId) throw new Error("Pull request body unavailable.");
       const api = ensureEnvironmentApi(input.environmentId);
       return api.git.getPullRequestBody({ cwd: input.cwd, prNumber: input.prNumber });
@@ -339,4 +347,105 @@ export function gitPreparePullRequestThreadMutationOptions(input: {
       });
     },
   });
+}
+
+export function gitPullRequestDetailQueryOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  prNumber: number | null;
+}) {
+  return queryOptions({
+    queryKey: gitQueryKeys.pullRequestDetail(input.cwd, input.prNumber),
+    queryFn: async () => {
+      if (!input.cwd || input.prNumber === null)
+        throw new Error("Pull request detail unavailable.");
+      if (!input.environmentId) throw new Error("Pull request detail unavailable.");
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.git.getPullRequestDetail({ cwd: input.cwd, prNumber: input.prNumber });
+    },
+    enabled: input.cwd !== null && input.prNumber !== null && input.environmentId !== null,
+    staleTime: GIT_PR_DETAIL_STALE_TIME_MS,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    refetchInterval: GIT_PR_DETAIL_REFETCH_INTERVAL_MS,
+  });
+}
+
+export function gitSubmitPullRequestReviewMutationOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  prNumber: number | null;
+  queryClient: QueryClient;
+}) {
+  return mutationOptions({
+    mutationFn: async (payload: { event: PullRequestReviewEvent; body?: string }) => {
+      if (!input.cwd || input.prNumber === null || !input.environmentId)
+        throw new Error("Submit review unavailable.");
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.git.submitPullRequestReview({
+        cwd: input.cwd,
+        prNumber: input.prNumber,
+        event: payload.event,
+        ...(payload.body ? { body: payload.body } : {}),
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        invalidatePullRequestComments(input.queryClient, input.cwd, input.prNumber),
+        input.queryClient.invalidateQueries({
+          queryKey: gitQueryKeys.pullRequestDetail(input.cwd, input.prNumber),
+        }),
+        input.queryClient.invalidateQueries({
+          queryKey: gitQueryKeys.pullRequests(input.cwd),
+        }),
+      ]);
+    },
+  });
+}
+
+export function gitMergePullRequestMutationOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  prNumber: number | null;
+  queryClient: QueryClient;
+}) {
+  return mutationOptions({
+    mutationFn: async (payload: { method: PullRequestMergeMethod; deleteBranch?: boolean }) => {
+      if (!input.cwd || input.prNumber === null || !input.environmentId)
+        throw new Error("Merge unavailable.");
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.git.mergePullRequest({
+        cwd: input.cwd,
+        prNumber: input.prNumber,
+        method: payload.method,
+        ...(payload.deleteBranch !== undefined ? { deleteBranch: payload.deleteBranch } : {}),
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        input.queryClient.invalidateQueries({
+          queryKey: gitQueryKeys.pullRequestDetail(input.cwd, input.prNumber),
+        }),
+        input.queryClient.invalidateQueries({
+          queryKey: gitQueryKeys.pullRequests(input.cwd),
+        }),
+      ]);
+    },
+  });
+}
+
+export function invalidateAllPullRequestData(
+  queryClient: QueryClient,
+  cwd: string | null,
+  prNumber: number | null,
+) {
+  return Promise.all([
+    invalidatePullRequestComments(queryClient, cwd, prNumber),
+    queryClient.invalidateQueries({
+      queryKey: gitQueryKeys.pullRequestDetail(cwd, prNumber),
+    }),
+    queryClient.invalidateQueries({
+      queryKey: gitQueryKeys.pullRequests(cwd),
+    }),
+  ]);
 }

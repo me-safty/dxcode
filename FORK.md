@@ -47,13 +47,13 @@ This makes it trivial to grep for all upstream touchpoints (`grep -r '\[FORK\]' 
 
 ### Composition patterns
 
-| Situation | What to do |
-|---|---|
-| Upstream exports a function you want to extend | Create `_lempire/wrappedFn.ts` that re-exports with additions |
-| Upstream defines a type you want to augment | Intersection type in `_lempire/types.ts` |
+| Situation                                              | What to do                                                                                    |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| Upstream exports a function you want to extend         | Create `_lempire/wrappedFn.ts` that re-exports with additions                                 |
+| Upstream defines a type you want to augment            | Intersection type in `_lempire/types.ts`                                                      |
 | Upstream has a router/server you want to add routes to | New route file in `_lempire/`, register with one `// [FORK]` line in the upstream router file |
-| Upstream has a React component you want to modify | Wrap it in `_lempire/WrappedComponent.tsx`, use the wrapper instead |
-| Upstream has a config you want to extend | Import upstream config in `_lempire/`, spread and override |
+| Upstream has a React component you want to modify      | Wrap it in `_lempire/WrappedComponent.tsx`, use the wrapper instead                           |
+| Upstream has a config you want to extend               | Import upstream config in `_lempire/`, spread and override                                    |
 
 ---
 
@@ -88,9 +88,9 @@ Run `grep -rn '\[FORK\]' . --include='*.ts' --include='*.tsx'` to get the curren
 > **Agents: update this table every time you add a `// [FORK]` marker to an upstream file.**
 > If you remove a fork change from an upstream file, remove it from this table too.
 
-| File | Reason | PR / Feature |
-|---|---|---|
-| _(none yet)_ | | |
+| File         | Reason | PR / Feature |
+| ------------ | ------ | ------------ |
+| _(none yet)_ |        |              |
 
 ---
 
@@ -98,14 +98,14 @@ Run `grep -rn '\[FORK\]' . --include='*.ts' --include='*.tsx'` to get the curren
 
 > Track what this fork adds, so it's easy to audit what needs carrying forward after a large upstream rebase.
 
-| Feature | Location | Notes |
-|---|---|---|
-| _(none yet)_ | | |
+| Feature      | Location | Notes |
+| ------------ | -------- | ----- |
+| _(none yet)_ |          |       |
 
 ---
 
 ## Rebase Log
 
-| Date | From commit | To commit | Conflicts | Notes |
-|---|---|---|---|---|
-| _(none yet)_ | | | | |
+| Date         | From commit | To commit | Conflicts | Notes |
+| ------------ | ----------- | --------- | --------- | ----- |
+| _(none yet)_ |             |           |           |       |

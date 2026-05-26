@@ -6,7 +6,10 @@ type RpcMethod<TTag extends RpcTag> = WsRpcProtocolClient[TTag];
 type RpcInput<TTag extends RpcTag> = Parameters<RpcMethod<TTag>>[0];
 
 type RpcUnaryMethod<TTag extends RpcTag> =
-  RpcMethod<TTag> extends (input: any, options?: any) => import("effect").Effect.Effect<infer TSuccess, any, any>
+  RpcMethod<TTag> extends (
+    input: any,
+    options?: any,
+  ) => import("effect").Effect.Effect<infer TSuccess, any, any>
     ? (input: RpcInput<TTag>) => Promise<TSuccess>
     : never;
 
@@ -30,12 +33,8 @@ export type WsRpcClientPRGitMethods = {
   readonly getPullRequestViewedFiles: RpcUnaryMethod<
     typeof WS_METHODS.gitGetPullRequestViewedFiles
   >;
-  readonly setPullRequestFileViewed: RpcUnaryMethod<
-    typeof WS_METHODS.gitSetPullRequestFileViewed
-  >;
-  readonly submitPullRequestReview: RpcUnaryMethod<
-    typeof WS_METHODS.gitSubmitPullRequestReview
-  >;
+  readonly setPullRequestFileViewed: RpcUnaryMethod<typeof WS_METHODS.gitSetPullRequestFileViewed>;
+  readonly submitPullRequestReview: RpcUnaryMethod<typeof WS_METHODS.gitSubmitPullRequestReview>;
   readonly mergePullRequest: RpcUnaryMethod<typeof WS_METHODS.gitMergePullRequest>;
   readonly getPullRequestDetail: RpcUnaryMethod<typeof WS_METHODS.gitGetPullRequestDetail>;
   readonly editPullRequest: RpcUnaryMethod<typeof WS_METHODS.gitEditPullRequest>;

@@ -8,10 +8,11 @@ import { useShallow } from "zustand/react/shallow";
 
 import { useComposerDraftStore } from "../composerDraftStore";
 import { PullRequestListPanel } from "../components/PullRequestListPanel";
+import { buildPullRequestReviewPrompt } from "../components/PullRequestReviewView";
 import {
-  buildPullRequestReviewPrompt,
-  PullRequestReviewView,
-} from "../components/PullRequestReviewView";
+  PullRequestWorkspace,
+  type PullRequestWorkspaceView,
+} from "../components/PullRequestWorkspace";
 import {
   Select,
   SelectItem,
@@ -23,28 +24,16 @@ import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
 import { toastManager } from "../components/ui/toast";
 import { ensureEnvironmentApi } from "../environmentApi";
 import { newCommandId, newMessageId, newThreadId } from "../lib/utils";
-import { gitPullRequestsQueryOptions } from "../lib/gitPRReactQuery";
-import { readLocalApi } from "../localApi";
 import {
-  selectEnvironmentState,
-  selectProjectsAcrossEnvironments,
-  useStore,
-} from "../store";
+  gitPreparePullRequestThreadMutationOptions,
+  gitPullRequestsQueryOptions,
+} from "../lib/gitPRReactQuery";
+import { readLocalApi } from "../localApi";
+import { selectEnvironmentState, selectProjectsAcrossEnvironments, useStore } from "../store";
 import type { Project } from "../types";
 import { DEFAULT_INTERACTION_MODE } from "../types";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-/**
- * Pick the model/provider for a new agent chat spawned from the PR review view.
- *
- * Priority:
- *   1. Most recently updated non-archived thread for this project
- *      (mirrors "the last model the user was actually working with").
- *   2. Globally sticky model/provider from the composer draft store
- *      (covers the case where the project has no threads yet but the user
- *       has been working in other projects with a non-default model).
- *   3. The project's configured default model selection.
- *   4. Hardcoded Codex default (legacy fallback).
- */
 function resolveReviewModelSelection(project: Project): ModelSelection {
   const envState = selectEnvironmentState(useStore.getState(), project.environmentId);
   const projectThreadIds = envState.threadIdsByProjectId[project.id] ?? [];
@@ -86,10 +75,13 @@ function resolveReviewModelSelection(project: Project): ModelSelection {
 const PR_LAST_PROJECT_KEY = "t3code:pr-last-project-id";
 const PR_LAST_STATE_KEY = "t3code:pr-last-state";
 
+const VALID_VIEWS = new Set<PullRequestWorkspaceView>(["overview", "files", "conversation"]);
+
 export interface PullRequestsSearch {
   readonly projectId?: string | undefined;
   readonly prNumber?: number | undefined;
   readonly filePath?: string | undefined;
+  readonly view?: PullRequestWorkspaceView | undefined;
 }
 
 function parsePullRequestsSearch(search: Record<string, unknown>): PullRequestsSearch {
@@ -116,15 +108,23 @@ function parsePullRequestsSearch(search: Record<string, unknown>): PullRequestsS
       ? rawFilePath.trim()
       : undefined;
 
+  const rawView = search.view;
+  const view =
+    typeof rawView === "string" && VALID_VIEWS.has(rawView as PullRequestWorkspaceView)
+      ? (rawView as PullRequestWorkspaceView)
+      : undefined;
+
   return {
     ...(projectId !== undefined ? { projectId } : {}),
     ...(prNumber !== undefined ? { prNumber } : {}),
     ...(filePath !== undefined ? { filePath } : {}),
+    ...(view !== undefined ? { view } : {}),
   };
 }
 
 function PullRequestsRouteView() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const search = Route.useSearch();
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
 
@@ -155,14 +155,16 @@ function PullRequestsRouteView() {
   const cwd = activeProject?.cwd ?? null;
   const selectedPrNumber = search.prNumber ?? null;
   const selectedFilePath = search.filePath ?? null;
+  const selectedView: PullRequestWorkspaceView = search.view ?? "overview";
 
   useEffect(() => {
     const state: Record<string, unknown> = {};
     if (activeProjectKey) state.projectId = activeProjectKey;
     if (selectedPrNumber !== null) state.prNumber = selectedPrNumber;
     if (selectedFilePath !== null) state.filePath = selectedFilePath;
+    if (selectedView !== "overview") state.view = selectedView;
     window.localStorage.setItem(PR_LAST_STATE_KEY, JSON.stringify(state));
-  }, [activeProjectKey, selectedPrNumber, selectedFilePath]);
+  }, [activeProjectKey, selectedPrNumber, selectedFilePath, selectedView]);
 
   const pullRequestsQuery = useQuery(gitPullRequestsQueryOptions({ environmentId, cwd }));
 
@@ -192,7 +194,7 @@ function PullRequestsRouteView() {
       if (!activeProjectKey) return;
       void navigate({
         to: "/pull-requests" as string,
-        search: { projectId: activeProjectKey, prNumber: pr.number },
+        search: { projectId: activeProjectKey, prNumber: pr.number, view: "overview" },
       } as any);
     },
     [activeProjectKey, navigate],
@@ -238,6 +240,7 @@ function PullRequestsRouteView() {
         search: {
           projectId: activeProjectKey,
           prNumber: selectedPrNumber,
+          view: "files" as PullRequestWorkspaceView,
           ...(filePath !== null ? { filePath } : {}),
         },
         replace: true,
@@ -246,8 +249,25 @@ function PullRequestsRouteView() {
     [activeProjectKey, selectedPrNumber, navigate],
   );
 
+  const handleViewChange = useCallback(
+    (view: PullRequestWorkspaceView) => {
+      if (!activeProjectKey || selectedPrNumber === null) return;
+      void navigate({
+        to: "/pull-requests" as string,
+        search: {
+          projectId: activeProjectKey,
+          prNumber: selectedPrNumber,
+          view,
+          ...(view === "files" && selectedFilePath !== null ? { filePath: selectedFilePath } : {}),
+        },
+        replace: true,
+      } as any);
+    },
+    [activeProjectKey, selectedPrNumber, selectedFilePath, navigate],
+  );
+
+  // Agent review
   const [isReviewPending, setIsReviewPending] = useState(false);
-  const hasFileOpen = selectedFilePath !== null;
 
   const handleReview = useCallback(async () => {
     if (!activeProject || selectedPrNumber === null) return;
@@ -303,6 +323,44 @@ function PullRequestsRouteView() {
     }
   }, [activeProject, selectedPrNumber, selectedPullRequest]);
 
+  // Checkout / worktree
+  const preparePrMutation = useMutation(
+    gitPreparePullRequestThreadMutationOptions({ environmentId, cwd, queryClient }),
+  );
+  const [checkoutPending, setCheckoutPending] = useState<"local" | "worktree" | null>(null);
+
+  const handleCheckout = useCallback(
+    async (mode: "local" | "worktree") => {
+      if (selectedPrNumber === null || !cwd || !environmentId) return;
+      setCheckoutPending(mode);
+      try {
+        const result = await preparePrMutation.mutateAsync({
+          reference: String(selectedPrNumber),
+          mode,
+        });
+        toastManager.add({
+          type: "success",
+          title: mode === "local" ? "Branch checked out" : "Worktree created",
+          description:
+            mode === "local"
+              ? `Switched to branch ${result.branch}`
+              : `Worktree created at ${result.worktreePath ?? result.branch}`,
+        });
+      } catch (err) {
+        toastManager.add({
+          type: "error",
+          title: mode === "local" ? "Checkout failed" : "Worktree creation failed",
+          description: err instanceof Error ? err.message : "An error occurred.",
+        });
+      } finally {
+        setCheckoutPending(null);
+      }
+    },
+    [cwd, environmentId, preparePrMutation, selectedPrNumber],
+  );
+
+  const hasFileOpen = selectedFilePath !== null && selectedView === "files";
+
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden">
       <div className="flex h-full min-h-0 flex-col">
@@ -342,8 +400,9 @@ function PullRequestsRouteView() {
           ) : null}
         </header>
         <div className="flex min-h-0 flex-1 overflow-hidden">
+          {/* Inbox rail — hidden when a file is open in files view on narrow screens */}
           {(!hasFileOpen || selectedPrNumber === null) && (
-            <div className="w-80 shrink-0 border-r border-border/70">
+            <div className="w-72 shrink-0 border-r border-border/70">
               <PullRequestListPanel
                 environmentId={environmentId}
                 cwd={cwd}
@@ -359,19 +418,24 @@ function PullRequestsRouteView() {
                 Select a pull request from the list to start reviewing.
               </div>
             ) : (
-              <PullRequestReviewView
+              <PullRequestWorkspace
                 environmentId={environmentId}
                 cwd={cwd}
                 prNumber={selectedPrNumber}
-                title={selectedPullRequest?.title ?? null}
-                headRefName={selectedPullRequest?.headRefName ?? null}
-                authorLogin={selectedPullRequest?.author ?? null}
-                url={selectedPullRequest?.url ?? null}
-                onClose={handleClose}
-                onOpenExternal={handleOpenExternal}
+                prSummary={selectedPullRequest}
+                view={selectedView}
+                onViewChange={handleViewChange}
                 openFilePath={selectedFilePath}
                 onFilePathChange={handleFilePathChange}
-                {...(activeProject ? { onReview: handleReview, isReviewPending } : {})}
+                onOpenExternal={handleOpenExternal}
+                {...(activeProject
+                  ? {
+                      onReviewWithAgent: handleReview,
+                      isAgentReviewPending: isReviewPending,
+                      onCheckout: handleCheckout,
+                      isCheckoutPending: checkoutPending,
+                    }
+                  : {})}
               />
             )}
           </div>

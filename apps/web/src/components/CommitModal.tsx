@@ -50,7 +50,10 @@ export function CommitModal({
     enabled: open && !!gitCwd && !!environmentId,
   });
 
-  const allFiles = useMemo((): readonly WorkingTreeFile[] => gitStatus?.workingTree.files ?? [], [gitStatus]);
+  const allFiles = useMemo(
+    (): readonly WorkingTreeFile[] => gitStatus?.workingTree.files ?? [],
+    [gitStatus],
+  );
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(() => new Set());
   const [newBranch, setNewBranch] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");

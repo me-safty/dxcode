@@ -141,23 +141,17 @@ export function makePRHandlers(gitManager: GitManagerShape): PRHandlers {
         { "rpc.aggregate": "git" },
       ),
     [WS_METHODS.gitMergePullRequest]: (input) =>
-      observeRpcEffect(
-        WS_METHODS.gitMergePullRequest,
-        gitManager.mergePullRequest(input),
-        { "rpc.aggregate": "git" },
-      ),
+      observeRpcEffect(WS_METHODS.gitMergePullRequest, gitManager.mergePullRequest(input), {
+        "rpc.aggregate": "git",
+      }),
     [WS_METHODS.gitGetPullRequestDetail]: (input) =>
-      observeRpcEffect(
-        WS_METHODS.gitGetPullRequestDetail,
-        gitManager.getPullRequestDetail(input),
-        { "rpc.aggregate": "git" },
-      ),
+      observeRpcEffect(WS_METHODS.gitGetPullRequestDetail, gitManager.getPullRequestDetail(input), {
+        "rpc.aggregate": "git",
+      }),
     [WS_METHODS.gitEditPullRequest]: (input) =>
-      observeRpcEffect(
-        WS_METHODS.gitEditPullRequest,
-        gitManager.editPullRequest(input),
-        { "rpc.aggregate": "git" },
-      ),
+      observeRpcEffect(WS_METHODS.gitEditPullRequest, gitManager.editPullRequest(input), {
+        "rpc.aggregate": "git",
+      }),
     [WS_METHODS.gitGetRepositoryCollaborators]: (input) =>
       observeRpcEffect(
         WS_METHODS.gitGetRepositoryCollaborators,
