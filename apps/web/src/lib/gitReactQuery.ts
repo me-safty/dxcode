@@ -30,7 +30,17 @@ export const gitQueryKeys = {
     cwd: string | null,
     target: VcsWorkingTreeDiffTarget | null,
     ignoreWhitespace: boolean,
-  ) => ["git", "workingTreeDiff", environmentId ?? null, cwd, target, ignoreWhitespace] as const,
+    filePaths?: ReadonlyArray<string> | null,
+  ) =>
+    [
+      "git",
+      "workingTreeDiff",
+      environmentId ?? null,
+      cwd,
+      target,
+      ignoreWhitespace,
+      filePaths ?? null,
+    ] as const,
 };
 
 export const gitMutationKeys = {
@@ -139,6 +149,7 @@ export function gitWorkingTreeDiffQueryOptions(input: {
   cwd: string | null;
   target: VcsWorkingTreeDiffTarget | null;
   ignoreWhitespace: boolean;
+  filePaths?: ReadonlyArray<string> | null;
   enabled?: boolean;
 }) {
   return queryOptions({
@@ -147,6 +158,7 @@ export function gitWorkingTreeDiffQueryOptions(input: {
       input.cwd,
       input.target,
       input.ignoreWhitespace,
+      input.filePaths,
     ),
     queryFn: async () => {
       if (!input.cwd || !input.environmentId || !input.target) {
@@ -157,6 +169,9 @@ export function gitWorkingTreeDiffQueryOptions(input: {
         cwd: input.cwd,
         target: input.target,
         ignoreWhitespace: input.ignoreWhitespace,
+        ...(input.filePaths && input.filePaths.length > 0
+          ? { filePaths: [...input.filePaths] }
+          : {}),
       });
     },
     enabled:

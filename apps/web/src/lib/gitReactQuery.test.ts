@@ -65,12 +65,15 @@ describe("gitMutationKeys", () => {
 });
 
 describe("git working tree diff query options", () => {
-  it("includes target and ignoreWhitespace in the query key", () => {
+  it("includes target, ignoreWhitespace, and filePaths in the query key", () => {
     expect(gitQueryKeys.workingTreeDiff(ENVIRONMENT_A, "/repo", "unstaged", false)).not.toEqual(
       gitQueryKeys.workingTreeDiff(ENVIRONMENT_A, "/repo", "staged", false),
     );
     expect(gitQueryKeys.workingTreeDiff(ENVIRONMENT_A, "/repo", "unstaged", false)).not.toEqual(
       gitQueryKeys.workingTreeDiff(ENVIRONMENT_A, "/repo", "unstaged", true),
+    );
+    expect(gitQueryKeys.workingTreeDiff(ENVIRONMENT_A, "/repo", "all", false)).not.toEqual(
+      gitQueryKeys.workingTreeDiff(ENVIRONMENT_A, "/repo", "all", false, ["src/app.ts"]),
     );
   });
 
@@ -87,15 +90,17 @@ describe("git working tree diff query options", () => {
       gitWorkingTreeDiffQueryOptions({
         environmentId: ENVIRONMENT_A,
         cwd: "/repo",
-        target: "unstaged",
+        target: "all",
         ignoreWhitespace: true,
+        filePaths: ["src/app.ts"],
       }),
     );
 
     expect(getWorkingTreeDiff).toHaveBeenCalledWith({
       cwd: "/repo",
-      target: "unstaged",
+      target: "all",
       ignoreWhitespace: true,
+      filePaths: ["src/app.ts"],
     });
   });
 });

@@ -40,6 +40,7 @@ import {
   isRemoteEnvironmentAuthHttpError,
   resolveRemoteWebSocketConnectionUrl,
 } from "../remote/api";
+import type { NotificationNavigationTarget } from "../../push/notificationNavigation";
 import { resolveRemotePairingTarget } from "../remote/target";
 import {
   getSavedEnvironmentRecord,
@@ -171,6 +172,10 @@ let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
 let lastBrowserHiddenAt: number | null = null;
 let lastBrowserResumeReconcileAt = Number.NEGATIVE_INFINITY;
+let pendingNotificationThreadReconcile: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+} | null = null;
 
 // Thread detail subscription cache policy:
 // - Active consumers keep a subscription retained via refCount.
@@ -1341,15 +1346,20 @@ function retainThreadDetailSubscriptionInternal(
     if (!attachThreadDetailSubscription(existing)) {
       watchThreadDetailSubscriptionConnection(existing);
     }
-    if (
-      options.active &&
-      !wasActive &&
-      (existing.latestDetailSequence !== null || existing.reconcileOnNextActiveRetain)
-    ) {
-      existing.reconcileOnNextActiveRetain = false;
-      scheduleThreadDetailReconcile(existing, "active-retain");
-    } else {
-      scheduleThreadDetailReconcileToCurrentProjectionIfBehind(existing);
+    if (options.active) {
+      if (consumePendingNotificationThreadReconcile(environmentId, threadId)) {
+        existing.reconcileOnNextActiveRetain = true;
+        scheduleThreadDetailReconcile(existing, "active-retain");
+        existing.reconcileOnNextActiveRetain = false;
+      } else if (
+        !wasActive &&
+        (existing.latestDetailSequence !== null || existing.reconcileOnNextActiveRetain)
+      ) {
+        existing.reconcileOnNextActiveRetain = false;
+        scheduleThreadDetailReconcile(existing, "active-retain");
+      } else {
+        scheduleThreadDetailReconcileToCurrentProjectionIfBehind(existing);
+      }
     }
     reconcileThreadDetailSubscriptionEvictionState(existing);
     let released = false;
@@ -1393,6 +1403,11 @@ function retainThreadDetailSubscriptionInternal(
   threadDetailSubscriptions.set(key, entry);
   if (!attachThreadDetailSubscription(entry)) {
     watchThreadDetailSubscriptionConnection(entry);
+  }
+  if (options.active && consumePendingNotificationThreadReconcile(environmentId, threadId)) {
+    entry.reconcileOnNextActiveRetain = true;
+    scheduleThreadDetailReconcile(entry, "active-retain");
+    entry.reconcileOnNextActiveRetain = false;
   }
   reconcileThreadDetailSubscriptionEvictionState(entry);
   evictIdleThreadDetailSubscriptionsToCapacity();
@@ -2665,6 +2680,43 @@ function reconcileEnvironmentConnectionsAfterBrowserResume(reason: string): void
   }
 }
 
+function consumePendingNotificationThreadReconcile(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+): boolean {
+  if (
+    pendingNotificationThreadReconcile?.environmentId === environmentId &&
+    pendingNotificationThreadReconcile.threadId === threadId
+  ) {
+    pendingNotificationThreadReconcile = null;
+    return true;
+  }
+  return false;
+}
+
+export function reconcileAfterNotificationClick(target: NotificationNavigationTarget): void {
+  // Notification click is a single, explicit user signal. Bypass the
+  // 2s browser-resume cooldown so we don't get coalesced with a
+  // visibilitychange that may have fired moments earlier. Note: if a
+  // browser-resume reconcile is already in flight for an environment,
+  // the per-env coalescing in queueEnvironmentBrowserResumeReconciliation
+  // still drops this call — that's fine, because the in-flight one is
+  // doing the same work for the same reason.
+  lastBrowserResumeReconcileAt = Number.NEGATIVE_INFINITY;
+  reconcileEnvironmentConnectionsAfterBrowserResume("notification-click");
+
+  if (target.kind === "thread") {
+    // The thread route hasn't mounted yet, so its detail subscription
+    // doesn't exist. Stash the target so the next matching
+    // retainActiveThreadDetailSubscription call forces an immediate
+    // reconcile, even on the no-events-replayed branch.
+    pendingNotificationThreadReconcile = {
+      environmentId: target.environmentId,
+      threadId: target.threadId,
+    };
+  }
+}
+
 function subscribeBrowserResumeReconnects(): () => void {
   if (typeof document === "undefined" || typeof window === "undefined") {
     return NOOP;
@@ -3026,6 +3078,7 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   stopActiveService();
   lastBrowserHiddenAt = null;
   lastBrowserResumeReconcileAt = Number.NEGATIVE_INFINITY;
+  pendingNotificationThreadReconcile = null;
   browserResumeReconciliationByEnvironment.clear();
   activeThreadProjectionReconciliationByEnvironment.clear();
   lastAppliedProjectionVersionByEnvironment.clear();

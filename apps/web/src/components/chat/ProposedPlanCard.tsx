@@ -33,11 +33,13 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   environmentId,
   cwd,
   workspaceRoot,
+  onBeforeExpandedChange,
 }: {
   planMarkdown: string;
   environmentId: EnvironmentId;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
+  onBeforeExpandedChange?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
@@ -71,6 +73,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
 
   const handleCopyPlan = () => {
     copyToClipboard(saveContents);
+  };
+
+  const handleExpandedChange = () => {
+    onBeforeExpandedChange?.();
+    setExpanded((value) => !value);
   };
 
   const openSaveDialog = () => {
@@ -187,7 +194,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
               size="sm"
               variant="outline"
               data-scroll-anchor-ignore
-              onClick={() => setExpanded((value) => !value)}
+              onClick={handleExpandedChange}
             >
               {expanded ? "Collapse plan" : "Expand plan"}
             </Button>

@@ -1,5 +1,6 @@
 import {
   type ProviderDriverKind,
+  type ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
   type ScopedThreadRef,
@@ -206,6 +207,7 @@ export function shouldRenderTraitsControls(input: {
 
 export interface TraitsMenuContentProps {
   provider: ProviderDriverKind;
+  instanceId?: ProviderInstanceId;
   models: ReadonlyArray<ServerProviderModel>;
   model: string | null | undefined;
   prompt: string;
@@ -218,6 +220,7 @@ export interface TraitsMenuContentProps {
 
 export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   provider,
+  instanceId,
   models,
   model,
   prompt,
@@ -238,11 +241,12 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
         return;
       }
       setProviderModelOptions(threadTarget, provider, nextOptions, {
+        ...(instanceId ? { instanceId } : {}),
         model,
         persistSticky: true,
       });
     },
-    [model, persistence, provider, setProviderModelOptions],
+    [instanceId, model, persistence, provider, setProviderModelOptions],
   );
   const {
     descriptors,
@@ -353,6 +357,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
 
 export const TraitsPicker = memo(function TraitsPicker({
   provider,
+  instanceId,
   models,
   model,
   prompt,
@@ -441,6 +446,7 @@ export const TraitsPicker = memo(function TraitsPicker({
       <MenuPopup align="start">
         <TraitsMenuContent
           provider={provider}
+          {...(instanceId ? { instanceId } : {})}
           models={models}
           model={model}
           prompt={prompt}

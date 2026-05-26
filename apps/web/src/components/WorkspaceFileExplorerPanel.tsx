@@ -10,15 +10,34 @@ import {
   SearchIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { memo, useCallback, useMemo, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  type UIEvent as ReactUIEvent,
+} from "react";
 
+import { useLongPressContextMenu } from "../hooks/useLongPressContextMenu";
 import { useTheme } from "../hooks/useTheme";
 import {
   projectListDirectoryEntriesQueryOptions,
   projectQueryKeys,
   projectSearchEntriesQueryOptions,
 } from "../lib/projectReactQuery";
+import { refreshGitStatus, useGitStatus } from "../lib/gitStatusState";
 import { cn } from "../lib/utils";
+import { readLocalApi } from "../localApi";
+import {
+  buildWorkspaceChangeDecorations,
+  parentPathsOf,
+  workspaceStatusBadge,
+  type WorkspaceChangedFile,
+  type WorkspaceEntryChangeDecoration,
+} from "../workspace-file-status";
 import { DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { Button } from "./ui/button";
@@ -27,21 +46,15 @@ import { Input } from "./ui/input";
 const EXPLORER_ROW_HEIGHT_CLASS_NAME = "h-7";
 const EXPLORER_DIRECTORY_ENTRY_LIMIT = 500;
 const EXPLORER_SEARCH_ENTRY_LIMIT = 120;
+const EMPTY_CHANGED_FILES: ReadonlyArray<WorkspaceChangedFile> = [];
+
+const ADD_TO_INPUT_CONTEXT_MENU_ITEMS = [
+  { id: "add-to-input", label: "Add to chat input" },
+] as const;
 
 function basenameOfPath(path: string): string {
   const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   return separatorIndex >= 0 ? path.slice(separatorIndex + 1) : path;
-}
-
-function parentPathsOf(path: string): string[] {
-  const segments = path.split("/").filter((segment) => segment.length > 0);
-  if (segments.length <= 1) return [];
-
-  const parents: string[] = [];
-  for (let index = 1; index < segments.length; index += 1) {
-    parents.push(segments.slice(0, index).join("/"));
-  }
-  return parents;
 }
 
 function entryDepth(entry: ProjectEntry): number {
@@ -85,20 +98,44 @@ const WorkspaceExplorerLoadingRows = memo(function WorkspaceExplorerLoadingRows(
 });
 
 const WorkspaceExplorerEntryRow = memo(function WorkspaceExplorerEntryRow(props: {
+  changeDecoration?: WorkspaceEntryChangeDecoration | undefined;
   entry: ProjectEntry;
   expanded: boolean;
   mode: "tree" | "search";
+  onAddFileToInput?: ((entry: ProjectEntry) => void) | undefined;
   onOpenFile: (entry: ProjectEntry) => void;
   onRevealDirectory: (path: string) => void;
   onToggleDirectory: (path: string) => void;
   resolvedTheme: "light" | "dark";
 }) {
-  const { entry, expanded, mode, onOpenFile, onRevealDirectory, onToggleDirectory, resolvedTheme } =
-    props;
+  const {
+    changeDecoration,
+    entry,
+    expanded,
+    mode,
+    onAddFileToInput,
+    onOpenFile,
+    onRevealDirectory,
+    onToggleDirectory,
+    resolvedTheme,
+  } = props;
   const depth = mode === "tree" ? entryDepth(entry) : 0;
   const isDirectory = entry.kind === "directory";
   const label = basenameOfPath(entry.path);
-  const title = mode === "search" ? entry.path : label;
+  const title = mode === "tree" ? label : entry.path;
+  const statusBadge = changeDecoration ? workspaceStatusBadge(changeDecoration.status) : null;
+  const statusChangedFileNoun = (changeDecoration?.descendantCount ?? 0) === 1 ? "file" : "files";
+  const statusBadgeLabel =
+    statusBadge && changeDecoration?.source === "directory"
+      ? `${entry.path} contains ${changeDecoration.descendantCount} changed ${statusChangedFileNoun}; highest status ${statusBadge.label}`
+      : statusBadge
+        ? `${entry.path} is ${statusBadge.label}`
+        : undefined;
+  const statusBadgeTitle =
+    statusBadge && changeDecoration?.source === "directory"
+      ? `Contains ${changeDecoration.descendantCount} changed ${statusChangedFileNoun}; highest status ${statusBadge.label}`
+      : statusBadge?.label;
+  const contextMenuEnabled = !isDirectory && onAddFileToInput !== undefined;
 
   const onClick = useCallback(() => {
     if (isDirectory) {
@@ -111,45 +148,115 @@ const WorkspaceExplorerEntryRow = memo(function WorkspaceExplorerEntryRow(props:
     }
     onOpenFile(entry);
   }, [entry, isDirectory, mode, onOpenFile, onRevealDirectory, onToggleDirectory]);
+  const openAddToInputContextMenu = useCallback(
+    async (position: { x: number; y: number }) => {
+      if (!contextMenuEnabled) {
+        return;
+      }
+      const api = readLocalApi();
+      if (!api) {
+        return;
+      }
+      const clicked = await api.contextMenu.show(ADD_TO_INPUT_CONTEXT_MENU_ITEMS, position);
+      if (clicked === "add-to-input") {
+        onAddFileToInput?.(entry);
+      }
+    },
+    [contextMenuEnabled, entry, onAddFileToInput],
+  );
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      if (!contextMenuEnabled) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      void openAddToInputContextMenu({ x: event.clientX, y: event.clientY });
+    },
+    [contextMenuEnabled, openAddToInputContextMenu],
+  );
+  const {
+    onClickCapture: handleLongPressClickCapture,
+    onContextMenuCapture: handleLongPressContextMenuCapture,
+    onPointerCancelCapture: handleLongPressPointerCancelCapture,
+    onPointerDownCapture: handleLongPressPointerDownCapture,
+    onPointerMoveCapture: handleLongPressPointerMoveCapture,
+    onPointerUpCapture: handleLongPressPointerUpCapture,
+  } = useLongPressContextMenu<HTMLButtonElement>({
+    enabled: contextMenuEnabled,
+    onLongPress: openAddToInputContextMenu,
+  });
 
   return (
-    <button
-      type="button"
+    <div
       className={cn(
         EXPLORER_ROW_HEIGHT_CLASS_NAME,
-        "group flex w-full min-w-0 items-center gap-1.5 px-2 text-left text-[13px] outline-none transition-colors hover:bg-accent/70 focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+        "group flex w-full min-w-0 select-none items-center pr-2 text-[13px] transition-colors [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [-webkit-user-select:none] hover:bg-accent/70 focus-within:bg-accent focus-within:ring-2 focus-within:ring-ring",
       )}
       style={{ paddingLeft: 8 + depth * 14 }}
-      title={entry.path}
-      onClick={onClick}
     >
-      <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground/65">
-        {isDirectory ? (
-          <ChevronRightIcon
-            className={cn(
-              "size-3.5 transition-transform",
-              expanded && mode === "tree" && "rotate-90",
-            )}
-          />
-        ) : null}
-      </span>
-      <VscodeEntryIcon
-        pathValue={entry.path}
-        kind={entry.kind}
-        theme={resolvedTheme}
-        className="size-4 shrink-0"
-      />
-      <span className="min-w-0 flex-1 truncate text-foreground/88">{title}</span>
-    </button>
+      <button
+        type="button"
+        className="flex h-full min-w-0 flex-1 select-none items-center gap-1.5 text-left outline-none [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [-webkit-user-select:none]"
+        title={entry.path}
+        onClick={onClick}
+        onClickCapture={handleLongPressClickCapture}
+        onContextMenu={handleContextMenu}
+        onContextMenuCapture={handleLongPressContextMenuCapture}
+        onPointerCancelCapture={handleLongPressPointerCancelCapture}
+        onPointerDownCapture={handleLongPressPointerDownCapture}
+        onPointerMoveCapture={handleLongPressPointerMoveCapture}
+        onPointerUpCapture={handleLongPressPointerUpCapture}
+      >
+        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground/65">
+          {isDirectory ? (
+            <ChevronRightIcon
+              className={cn(
+                "size-3.5 transition-transform",
+                expanded && mode === "tree" && "rotate-90",
+              )}
+            />
+          ) : null}
+        </span>
+        <VscodeEntryIcon
+          pathValue={entry.path}
+          kind={entry.kind}
+          theme={resolvedTheme}
+          className="size-4 shrink-0"
+        />
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate",
+            statusBadge ? statusBadge.className : "text-foreground/88",
+          )}
+        >
+          {title}
+        </span>
+      </button>
+      {statusBadge ? (
+        <span
+          aria-label={statusBadgeLabel}
+          title={statusBadgeTitle}
+          className={cn(
+            "ml-1 flex w-4 shrink-0 justify-center font-mono text-[10px] font-semibold",
+            statusBadge.className,
+          )}
+        >
+          {statusBadge.letter}
+        </span>
+      ) : null}
+    </div>
   );
 });
 
 function WorkspaceDirectoryEntries(props: {
+  changeDecorationsByPath: ReadonlyMap<string, WorkspaceEntryChangeDecoration>;
   cwd: string;
   depth: number;
   directoryPath?: string;
   environmentId: EnvironmentId;
   expandedDirectoryPaths: ReadonlySet<string>;
+  onAddFileToInput?: ((entry: ProjectEntry) => void) | undefined;
   onOpenFile: (entry: ProjectEntry) => void;
   onRevealDirectory: (path: string) => void;
   onToggleDirectory: (path: string) => void;
@@ -191,9 +298,11 @@ function WorkspaceDirectoryEntries(props: {
         return (
           <div key={entry.path}>
             <WorkspaceExplorerEntryRow
+              changeDecoration={props.changeDecorationsByPath.get(entry.path)}
               entry={entry}
               expanded={expanded}
               mode="tree"
+              onAddFileToInput={props.onAddFileToInput}
               onOpenFile={props.onOpenFile}
               onRevealDirectory={props.onRevealDirectory}
               onToggleDirectory={props.onToggleDirectory}
@@ -202,10 +311,12 @@ function WorkspaceDirectoryEntries(props: {
             {expanded ? (
               <WorkspaceDirectoryEntries
                 cwd={props.cwd}
+                changeDecorationsByPath={props.changeDecorationsByPath}
                 depth={props.depth + 1}
                 directoryPath={entry.path}
                 environmentId={props.environmentId}
                 expandedDirectoryPaths={props.expandedDirectoryPaths}
+                onAddFileToInput={props.onAddFileToInput}
                 onOpenFile={props.onOpenFile}
                 onRevealDirectory={props.onRevealDirectory}
                 onToggleDirectory={props.onToggleDirectory}
@@ -223,8 +334,10 @@ function WorkspaceDirectoryEntries(props: {
 }
 
 function WorkspaceSearchEntries(props: {
+  changeDecorationsByPath: ReadonlyMap<string, WorkspaceEntryChangeDecoration>;
   cwd: string;
   environmentId: EnvironmentId;
+  onAddFileToInput?: ((entry: ProjectEntry) => void) | undefined;
   onOpenFile: (entry: ProjectEntry) => void;
   onRevealDirectory: (path: string) => void;
   query: string;
@@ -263,9 +376,11 @@ function WorkspaceSearchEntries(props: {
       {entries.map((entry) => (
         <WorkspaceExplorerEntryRow
           key={`${entry.kind}:${entry.path}`}
+          changeDecoration={props.changeDecorationsByPath.get(entry.path)}
           entry={entry}
           expanded={false}
           mode="search"
+          onAddFileToInput={props.onAddFileToInput}
           onOpenFile={props.onOpenFile}
           onRevealDirectory={props.onRevealDirectory}
           onToggleDirectory={props.onRevealDirectory}
@@ -283,12 +398,16 @@ export function WorkspaceFileExplorerPanel(props: {
   expandedDirectoryPaths: ReadonlySet<string>;
   environmentId: EnvironmentId;
   mode: DiffPanelMode;
+  onAddFileToInput?: ((entry: ProjectEntry) => void) | undefined;
   onBackToPreview?: (() => void) | undefined;
   onClose: () => void;
   onExpandedDirectoryPathsChange: (paths: Set<string>) => void;
   onOpenFile: (entry: ProjectEntry) => void;
   onSearchQueryChange: (query: string) => void;
+  onScrollTopChange: (scrollTop: number) => void;
   projectName?: string | undefined;
+  scrollRestorationKey: string;
+  scrollTop: number;
   searchQuery: string;
   workspaceRoot: string;
 }) {
@@ -296,19 +415,30 @@ export function WorkspaceFileExplorerPanel(props: {
     expandedDirectoryPaths,
     environmentId,
     mode,
+    onAddFileToInput,
     onBackToPreview,
     onClose,
     onExpandedDirectoryPathsChange,
     onOpenFile,
     onSearchQueryChange,
+    onScrollTopChange,
     projectName,
+    scrollRestorationKey,
+    scrollTop,
     searchQuery,
     workspaceRoot,
   } = props;
   const { resolvedTheme } = useTheme();
   const queryClient = useQueryClient();
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const trimmedSearchQuery = searchQuery.trim();
   const workspaceLabel = projectName ?? basenameOfPath(workspaceRoot);
+  const gitStatus = useGitStatus({ environmentId, cwd: workspaceRoot });
+  const workingTreeFiles = gitStatus.data?.workingTree.files ?? EMPTY_CHANGED_FILES;
+  const changeDecorationsByPath = useMemo(
+    () => buildWorkspaceChangeDecorations(workingTreeFiles),
+    [workingTreeFiles],
+  );
 
   const onToggleDirectory = useCallback(
     (path: string) => {
@@ -338,7 +468,27 @@ export function WorkspaceFileExplorerPanel(props: {
 
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: projectQueryKeys.all });
-  }, [queryClient]);
+    void refreshGitStatus({ environmentId, cwd: workspaceRoot });
+  }, [environmentId, queryClient, workspaceRoot]);
+
+  useLayoutEffect(() => {
+    const element = scrollContainerRef.current;
+    if (!element) {
+      return;
+    }
+    element.scrollTop = scrollTop;
+    const frameId = window.requestAnimationFrame(() => {
+      element.scrollTop = scrollTop;
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [scrollRestorationKey, scrollTop]);
+
+  const handleExplorerScroll = useCallback(
+    (event: ReactUIEvent<HTMLDivElement>) => {
+      onScrollTopChange(event.currentTarget.scrollTop);
+    },
+    [onScrollTopChange],
+  );
 
   const header = useMemo(
     () => (
@@ -406,11 +556,18 @@ export function WorkspaceFileExplorerPanel(props: {
             />
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto py-1">
+        <div
+          ref={scrollContainerRef}
+          data-testid="workspace-file-explorer-scroll"
+          className="min-h-0 flex-1 select-none overflow-auto py-1 [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [touch-action:pan-y]"
+          onScroll={handleExplorerScroll}
+        >
           {trimmedSearchQuery ? (
             <WorkspaceSearchEntries
+              changeDecorationsByPath={changeDecorationsByPath}
               cwd={workspaceRoot}
               environmentId={environmentId}
+              onAddFileToInput={onAddFileToInput}
               onOpenFile={onOpenFile}
               onRevealDirectory={onRevealDirectory}
               query={trimmedSearchQuery}
@@ -418,10 +575,12 @@ export function WorkspaceFileExplorerPanel(props: {
             />
           ) : (
             <WorkspaceDirectoryEntries
+              changeDecorationsByPath={changeDecorationsByPath}
               cwd={workspaceRoot}
               depth={0}
               environmentId={environmentId}
               expandedDirectoryPaths={expandedDirectoryPaths}
+              onAddFileToInput={onAddFileToInput}
               onOpenFile={onOpenFile}
               onRevealDirectory={onRevealDirectory}
               onToggleDirectory={onToggleDirectory}

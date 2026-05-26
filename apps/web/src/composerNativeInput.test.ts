@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createComposerNativeInputTracker,
   isComposerNativeComposingKeyEvent,
+  isComposerNativeInputSettling,
+  markComposerNativeInputSuppression,
+  readComposerNativeInputChangeMetadata,
   shouldLetBrowserHandleComposerBeforeInput,
   shouldSuppressComposerTriggerForNativeInputType,
 } from "./composerNativeInput";
@@ -30,6 +34,33 @@ describe("composerNativeInput", () => {
     expect(shouldLetBrowserHandleComposerBeforeInput("insertText")).toBe(false);
   });
 
+  it("lets iOS WebKit own collapsed-cursor insertText so predictive text is preserved", () => {
+    expect(
+      shouldLetBrowserHandleComposerBeforeInput("insertText", {
+        isIosWebkit: true,
+        isSelectionCollapsed: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps Lexical's insertText handler when iOS has a selection range (surround feature)", () => {
+    expect(
+      shouldLetBrowserHandleComposerBeforeInput("insertText", {
+        isIosWebkit: true,
+        isSelectionCollapsed: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps Lexical's insertText handler on non-iOS platforms", () => {
+    expect(
+      shouldLetBrowserHandleComposerBeforeInput("insertText", {
+        isIosWebkit: false,
+        isSelectionCollapsed: true,
+      }),
+    ).toBe(false);
+  });
+
   it("treats composing keydown events as ineligible for command handling", () => {
     expect(isComposerNativeComposingKeyEvent({ isComposing: true, key: "a" })).toBe(true);
     expect(isComposerNativeComposingKeyEvent({ isComposing: false, key: "Process" })).toBe(true);
@@ -39,5 +70,31 @@ describe("composerNativeInput", () => {
     expect(isComposerNativeComposingKeyEvent({ isComposing: false, keyCode: 229 })).toBe(true);
     expect(isComposerNativeComposingKeyEvent({ isComposing: false, which: 229 })).toBe(true);
     expect(isComposerNativeComposingKeyEvent({ isComposing: false, key: "Enter" })).toBe(false);
+  });
+
+  it("reports settling while composition is active", () => {
+    const tracker = createComposerNativeInputTracker();
+    tracker.isComposing = true;
+
+    expect(isComposerNativeInputSettling(tracker, 1_000)).toBe(true);
+    expect(readComposerNativeInputChangeMetadata(tracker).suppressTriggerDetection).toBe(true);
+  });
+
+  it("reports settling during the suppression window", () => {
+    const tracker = createComposerNativeInputTracker();
+    markComposerNativeInputSuppression(tracker, "insertText");
+
+    expect(isComposerNativeInputSettling(tracker, tracker.suppressTriggerDetectionUntil - 1)).toBe(
+      true,
+    );
+    expect(readComposerNativeInputChangeMetadata(tracker).suppressTriggerDetection).toBe(true);
+  });
+
+  it("stops settling after the suppression window ends", () => {
+    const tracker = createComposerNativeInputTracker();
+    tracker.suppressTriggerDetectionUntil = 0;
+
+    expect(isComposerNativeInputSettling(tracker, 0)).toBe(false);
+    expect(readComposerNativeInputChangeMetadata(tracker).suppressTriggerDetection).toBe(false);
   });
 });

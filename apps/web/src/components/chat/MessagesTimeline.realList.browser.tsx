@@ -24,6 +24,8 @@ import {
 const ACTIVE_THREAD_ENVIRONMENT_ID: EnvironmentIdType = EnvironmentId.make("environment-local");
 const MESSAGE_CREATED_AT_MS = Date.parse("2026-05-19T12:00:00.000Z");
 const TIMELINE_ROW_COUNT = 44;
+const LONG_PLAN_ID = "plan-expand-scroll-regression";
+const LONG_PLAN_HIDDEN_DETAIL = "deep hidden plan expansion detail";
 
 interface ScrollSnapshot {
   readonly scrollTop: number;
@@ -78,7 +80,9 @@ function getScrollSnapshot(listRef: VirtualizedListHandle | null): ScrollSnapsho
   if (!scrollableNode) {
     throw new Error("Unable to resolve MessagesTimeline scroll node.");
   }
-  const renderedRows = Array.from(document.querySelectorAll<HTMLElement>("[data-timeline-row-id]"));
+  const renderedRows = Array.from(
+    document.querySelectorAll<HTMLElement>("[data-timeline-row-id]"),
+  ).toSorted((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top);
   return {
     scrollTop: scrollableNode.scrollTop,
     scrollHeight: scrollableNode.scrollHeight,
@@ -93,10 +97,63 @@ function distanceFromBottom(snapshot: ScrollSnapshot): number {
   return snapshot.maxScrollTop - snapshot.scrollTop;
 }
 
+function scrollElementDistanceFromBottom(scrollableNode: HTMLElement): number {
+  const maxScrollTop = Math.max(0, scrollableNode.scrollHeight - scrollableNode.clientHeight);
+  return maxScrollTop - scrollableNode.scrollTop;
+}
+
 async function waitForLayout(): Promise<void> {
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+function buildLongProposedPlanEntry(): Extract<TimelineEntry, { kind: "proposed-plan" }> {
+  const createdAt = new Date(MESSAGE_CREATED_AT_MS + TIMELINE_ROW_COUNT * 1_000).toISOString();
+  const planMarkdown = [
+    "# Preserve scroll position",
+    "",
+    ...Array.from(
+      { length: 34 },
+      (_, index) =>
+        `- Step ${index + 1}: keep the visible proposed plan row anchored during expansion`,
+    ),
+    "",
+    "```ts",
+    `export const hiddenPlanDetail = "${LONG_PLAN_HIDDEN_DETAIL}";`,
+    "```",
+  ].join("\n");
+
+  return {
+    id: LONG_PLAN_ID,
+    kind: "proposed-plan",
+    createdAt,
+    proposedPlan: {
+      id: LONG_PLAN_ID,
+      turnId: null,
+      planMarkdown,
+      implementedAt: null,
+      implementationThreadId: null,
+      createdAt,
+      updatedAt: createdAt,
+    },
+  };
+}
+
+function findExpandPlanButton(): HTMLButtonElement | null {
+  return (
+    Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.trim() === "Expand plan",
+    ) ?? null
+  );
+}
+
+function getPlanRowElement(): HTMLElement {
+  const row = document.querySelector<HTMLElement>(`[data-timeline-row-id="${LONG_PLAN_ID}"]`);
+  if (!row) {
+    throw new Error("Unable to find proposed plan row.");
+  }
+  return row;
 }
 
 const TimelineHarness = forwardRef<TimelineHarnessHandle>(function TimelineHarness(_, ref) {
@@ -333,6 +390,49 @@ describe("MessagesTimeline real virtualized timeline scrolling", () => {
       expect(afterTop).not.toBeNull();
       expect(Math.abs((afterTop ?? 0) - (beforeTop ?? 0))).toBeLessThan(24);
       expect(harnessRef.current?.snapshot().lastRenderedRowId).not.toBe("message-0");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("keeps the proposed plan row anchored when expanding from the bottom", async () => {
+    await page.viewport(1_000, 760);
+    const screen = await render(
+      <TimelineFixture
+        width={900}
+        timelineEntries={[
+          ...buildTimelineEntries(TIMELINE_ROW_COUNT),
+          buildLongProposedPlanEntry(),
+        ]}
+      />,
+    );
+
+    try {
+      await waitForLayout();
+      const scroller = document.querySelector<HTMLElement>(
+        "[data-testid='messages-timeline-list']",
+      );
+      expect(scroller).not.toBeNull();
+      scroller!.scrollTop = Math.max(0, scroller!.scrollHeight - scroller!.clientHeight);
+      scroller!.dispatchEvent(new Event("scroll", { bubbles: true }));
+      await waitForLayout();
+
+      await expect.poll(() => scrollElementDistanceFromBottom(scroller!)).toBeLessThan(2);
+
+      const beforeTop = getPlanRowElement().getBoundingClientRect().top;
+      expect(document.body.textContent).not.toContain(LONG_PLAN_HIDDEN_DETAIL);
+
+      const expandButton = findExpandPlanButton();
+      expect(expandButton).not.toBeNull();
+      expandButton!.click();
+
+      await expect
+        .poll(() => document.body.textContent?.includes(LONG_PLAN_HIDDEN_DETAIL) ?? false)
+        .toBe(true);
+      await expect
+        .poll(() => Math.abs(getPlanRowElement().getBoundingClientRect().top - beforeTop))
+        .toBeLessThan(24);
+      await expect.poll(() => scrollElementDistanceFromBottom(scroller!)).toBeGreaterThan(100);
     } finally {
       await screen.unmount();
     }

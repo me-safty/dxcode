@@ -210,28 +210,6 @@ export const ChatHeader = memo(function ChatHeader({
           </>
         )}
         {!isCompactHeader && renderGitActionsControl()}
-        <Menu>
-          <MenuTrigger
-            render={<Button size="icon-xs" variant="outline" aria-label="More thread actions" />}
-          >
-            <EllipsisIcon className="size-4" />
-          </MenuTrigger>
-          <MenuPopup align="end" side="bottom" className="min-w-48">
-            {showCompactOverflowActions && hasProjectScriptsControl
-              ? renderProjectScriptsControl(true)
-              : null}
-            {showCompactOverflowActions && hasGitActionsControl
-              ? renderGitActionsControl(true)
-              : null}
-            {showCompactOverflowActions && (hasProjectScriptsControl || hasGitActionsControl) ? (
-              <MenuSeparator />
-            ) : null}
-            <MenuItem onClick={forceRefreshApp}>
-              <RefreshCwIcon aria-hidden="true" className="size-4" />
-              Force refresh
-            </MenuItem>
-          </MenuPopup>
-        </Menu>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -302,6 +280,28 @@ export const ChatHeader = memo(function ChatHeader({
                 : "Toggle diff panel"}
           </TooltipPopup>
         </Tooltip>
+        <Menu>
+          <MenuTrigger
+            render={<Button size="icon-xs" variant="outline" aria-label="More thread actions" />}
+          >
+            <EllipsisIcon className="size-4" />
+          </MenuTrigger>
+          <MenuPopup align="end" side="bottom" className="min-w-48">
+            {showCompactOverflowActions && hasProjectScriptsControl
+              ? renderProjectScriptsControl(true)
+              : null}
+            {showCompactOverflowActions && hasGitActionsControl
+              ? renderGitActionsControl(true)
+              : null}
+            {showCompactOverflowActions && (hasProjectScriptsControl || hasGitActionsControl) ? (
+              <MenuSeparator />
+            ) : null}
+            <MenuItem onClick={forceRefreshApp}>
+              <RefreshCwIcon aria-hidden="true" className="size-4" />
+              Force refresh
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
       </div>
     </div>
   );

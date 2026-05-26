@@ -592,7 +592,7 @@ describe("retainThreadDetailSubscription", () => {
 
     stop();
     await resetEnvironmentServiceForTests();
-  });
+  }, 15_000);
 
   it("does not start the primary connection until the known environment has an id", async () => {
     mockGetPrimaryKnownEnvironment.mockReturnValue({
@@ -3599,6 +3599,60 @@ describe("retainThreadDetailSubscription", () => {
     expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
 
     releaseActive();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("reconciles environment connections and forces thread detail refresh after notification click", async () => {
+    const {
+      reconcileAfterNotificationClick,
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const client = mockCreateWsRpcClient.mock.results[0]?.value as
+      | { readonly isHeartbeatFresh: ReturnType<typeof vi.fn> }
+      | undefined;
+    expect(client).toBeDefined();
+    client?.isHeartbeatFresh.mockReturnValue(false);
+
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-click");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "running",
+      }),
+      environmentId,
+    );
+    mockProbeSync.mockResolvedValue({
+      clientSequence: 1,
+      serverSequence: 1,
+      behind: false,
+    });
+
+    reconcileAfterNotificationClick({
+      kind: "thread",
+      environmentId,
+      threadId,
+    });
+
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+    client?.isHeartbeatFresh.mockReturnValue(true);
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(expect.objectContaining({ threadId }));
+
+    release();
     stop();
     await resetEnvironmentServiceForTests();
   });

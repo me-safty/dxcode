@@ -38,6 +38,7 @@ import {
   __resetEnvironmentApiOverridesForTests,
   __setEnvironmentApiOverrideForTests,
 } from "../environmentApi";
+import { __resetWorkspaceFilePanelStateForTests } from "../workspaceFilePreview";
 import {
   resetSavedEnvironmentRegistryStoreForTests,
   resetSavedEnvironmentRuntimeStoreForTests,
@@ -1949,6 +1950,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     customWsRpcResolver = null;
     resetNotificationNavigationStateForTests();
     __resetEnvironmentApiOverridesForTests();
+    __resetWorkspaceFilePanelStateForTests();
     resetSavedEnvironmentRegistryStoreForTests();
     resetSavedEnvironmentRuntimeStoreForTests();
     Reflect.deleteProperty(window, "desktopBridge");
@@ -4262,6 +4264,61 @@ describe("ChatView timeline estimator parity (full app)", () => {
       // The composer should remain usable after canonicalization, regardless of
       // whether the promoted thread is still running.
       await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens the file explorer from an unsent draft chat", async () => {
+    const draftId = DraftId.make("draft-file-explorer-sidebar");
+    const draftThreadId = "thread-draft-file-explorer-sidebar" as ThreadId;
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [draftId]: {
+          threadId: draftThreadId,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: "main",
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: draftId,
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      initialPath: `/draft/${draftId}`,
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.projectsListDirectoryEntries) {
+          return {
+            entries: [{ kind: "file", path: "README.md" }],
+            truncated: false,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForComposerEditor();
+      const header = document.querySelector("header");
+      const headerButtons = Array.from(header?.querySelectorAll("button") ?? []);
+      expect(headerButtons.at(-1)?.getAttribute("aria-label")).toBe("More thread actions");
+
+      await page.getByRole("button", { name: "Toggle file explorer" }).click();
+
+      await expect
+        .element(page.getByRole("searchbox", { name: "Search workspace files" }))
+        .toBeVisible();
+      await expect.element(page.getByRole("button", { name: "README.md" })).toBeVisible();
     } finally {
       await mounted.cleanup();
     }

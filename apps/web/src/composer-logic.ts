@@ -278,3 +278,44 @@ export function replaceTextRange(
   const nextText = `${text.slice(0, safeStart)}${replacement}${text.slice(safeEnd)}`;
   return { text: nextText, cursor: safeStart + replacement.length };
 }
+
+export interface PathMentionInsertion {
+  rangeStart: number;
+  rangeEnd: number;
+  replacement: string;
+  text: string;
+  cursor: number;
+}
+
+export function resolvePathMentionInsertion(
+  text: string,
+  cursorInput: number,
+  path: string,
+): PathMentionInsertion | null {
+  const mentionPath = path.trim().replace(/^@+/, "");
+  if (mentionPath.length === 0) {
+    return null;
+  }
+
+  const cursor = clampCursor(text, cursorInput);
+  const needsLeadingSpace = cursor > 0 && !isWhitespace(text[cursor - 1] ?? "");
+  const replacement = `${needsLeadingSpace ? " " : ""}@${mentionPath} `;
+  const rangeEnd = text[cursor] === " " ? cursor + 1 : cursor;
+  const next = replaceTextRange(text, cursor, rangeEnd, replacement);
+  return {
+    rangeStart: cursor,
+    rangeEnd,
+    replacement,
+    text: next.text,
+    cursor: next.cursor,
+  };
+}
+
+export function insertPathMention(
+  text: string,
+  cursorInput: number,
+  path: string,
+): { text: string; cursor: number } | null {
+  const insertion = resolvePathMentionInsertion(text, cursorInput, path);
+  return insertion ? { text: insertion.text, cursor: insertion.cursor } : null;
+}

@@ -1,5 +1,6 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 
+import { reconcileAfterNotificationClick } from "../environments/runtime/service";
 import type { AppRouter } from "../router";
 import type { DraftId } from "../composerDraftStore";
 
@@ -149,6 +150,7 @@ export function installServiceWorkerNotificationNavigation(router: AppRouter): (
     }
 
     lastNotificationNavigationTarget = target;
+    reconcileAfterNotificationClick(target);
     void navigateToNotificationTarget(router, target);
   };
 

@@ -472,7 +472,9 @@ describe("when: working tree has local changes", () => {
         hasWorkingTreeChanges: true,
         aheadCount: 1,
         workingTree: {
-          files: [{ path: ".vercel/project.json", insertions: 1, deletions: 0 }],
+          files: [
+            { path: ".vercel/project.json", status: "modified", insertions: 1, deletions: 0 },
+          ],
           insertions: 1,
           deletions: 0,
         },

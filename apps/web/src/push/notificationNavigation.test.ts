@@ -45,6 +45,7 @@ describe("notificationNavigation", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     resetNotificationNavigationStateForTests();
+    vi.restoreAllMocks();
   });
 
   it("recognizes notification click service worker messages", () => {
@@ -106,7 +107,12 @@ describe("notificationNavigation", () => {
     expect(parseNotificationNavigationTarget("/env/%E0%A4%A", ORIGIN)).toBeNull();
   });
 
-  it("navigates service worker click messages through the app router", () => {
+  it("navigates service worker click messages through the app router", async () => {
+    const service = await import("../environments/runtime/service");
+    const reconcileSpy = vi
+      .spyOn(service, "reconcileAfterNotificationClick")
+      .mockImplementation(() => undefined);
+
     const serviceWorker = stubServiceWorker();
     const router = makeRouter();
 
@@ -126,6 +132,12 @@ describe("notificationNavigation", () => {
       search: {},
     });
     expect(getLastNotificationNavigationTarget()).toEqual({
+      kind: "thread",
+      environmentId: "env-1",
+      threadId: "thread-1",
+    });
+    expect(reconcileSpy).toHaveBeenCalledTimes(1);
+    expect(reconcileSpy).toHaveBeenCalledWith({
       kind: "thread",
       environmentId: "env-1",
       threadId: "thread-1",

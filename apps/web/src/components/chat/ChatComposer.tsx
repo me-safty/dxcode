@@ -44,6 +44,7 @@ import {
   collapseExpandedComposerCursor,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
+  resolvePathMentionInsertion,
   replaceTextRange,
 } from "../../composer-logic";
 import {
@@ -380,6 +381,8 @@ export interface ChatComposerHandle {
   }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
+  /** Insert an @path mention into the current prompt. */
+  addPathMention: (path: string) => boolean;
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     prompt: string;
@@ -1102,6 +1105,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const providerTraitsMenuContent = renderProviderTraitsMenuContent({
     provider: selectedProvider,
+    instanceId: selectedInstanceId,
     ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
     ...(routeKind === "draft" && draftId ? { draftId } : {}),
     model: selectedModel,
@@ -1112,6 +1116,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
   const providerTraitsPicker = renderProviderTraitsPicker({
     provider: selectedProvider,
+    instanceId: selectedInstanceId,
     ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
     ...(routeKind === "draft" && draftId ? { draftId } : {}),
     model: selectedModel,
@@ -2054,6 +2059,36 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           composerEditorRef.current?.focusAt(nextCollapsedCursor);
         });
       },
+      addPathMention: (path: string) => {
+        if (
+          isConnecting ||
+          isComposerApprovalState ||
+          (environmentUnavailable !== null && activePendingProgress === null)
+        ) {
+          return false;
+        }
+        const snapshot = readComposerSnapshot();
+        const insertion = resolvePathMentionInsertion(
+          snapshot.value,
+          snapshot.expandedCursor,
+          path,
+        );
+        if (!insertion) {
+          return false;
+        }
+        const applied = applyPromptReplacement(
+          insertion.rangeStart,
+          insertion.rangeEnd,
+          insertion.replacement,
+          {
+            expectedText: snapshot.value.slice(insertion.rangeStart, insertion.rangeEnd),
+          },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+        return applied;
+      },
       getSendContext: () => ({
         prompt: promptRef.current,
         images: composerImagesRef.current,
@@ -2068,11 +2103,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }),
     [
       activeThread,
+      activePendingProgress,
+      applyPromptReplacement,
       clearNativeInputTriggerDetectionTimeout,
       composerDraftTarget,
       composerCursor,
       composerTerminalContexts,
+      environmentUnavailable,
       insertComposerDraftTerminalContext,
+      isComposerApprovalState,
+      isConnecting,
       promptRef,
       composerImagesRef,
       composerTerminalContextsRef,

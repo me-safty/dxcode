@@ -16,7 +16,7 @@ export const GitStackedAction = Schema.Literals([
   "commit_push_pr",
 ]);
 export type GitStackedAction = typeof GitStackedAction.Type;
-export const VcsWorkingTreeDiffTarget = Schema.Literals(["unstaged", "staged"]);
+export const VcsWorkingTreeDiffTarget = Schema.Literals(["unstaged", "staged", "all"]);
 export type VcsWorkingTreeDiffTarget = typeof VcsWorkingTreeDiffTarget.Type;
 export const GitActionProgressPhase = Schema.Literals(["branch", "commit", "push", "pr"]);
 export type GitActionProgressPhase = typeof GitActionProgressPhase.Type;
@@ -85,6 +85,17 @@ export const VcsRef = Schema.Struct({
 });
 export type VcsRef = typeof VcsRef.Type;
 
+export const VcsWorkingTreeFileStatus = Schema.Literals([
+  "modified",
+  "added",
+  "deleted",
+  "renamed",
+  "copied",
+  "untracked",
+  "conflicted",
+]);
+export type VcsWorkingTreeFileStatus = typeof VcsWorkingTreeFileStatus.Type;
+
 const VcsWorktree = Schema.Struct({
   path: TrimmedNonEmptyStringSchema,
   refName: TrimmedNonEmptyStringSchema,
@@ -115,6 +126,9 @@ export const VcsWorkingTreeDiffInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   target: VcsWorkingTreeDiffTarget,
   ignoreWhitespace: Schema.optional(Schema.Boolean),
+  filePaths: Schema.optional(
+    Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
+  ),
 });
 export type VcsWorkingTreeDiffInput = typeof VcsWorkingTreeDiffInput.Type;
 
@@ -215,6 +229,7 @@ const VcsStatusLocalShape = {
     files: Schema.Array(
       Schema.Struct({
         path: TrimmedNonEmptyStringSchema,
+        status: VcsWorkingTreeFileStatus,
         insertions: NonNegativeInt,
         deletions: NonNegativeInt,
       }),

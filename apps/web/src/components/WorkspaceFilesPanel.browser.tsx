@@ -1,12 +1,14 @@
 import "../index.css";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { EnvironmentId, type EnvironmentApi } from "@t3tools/contracts";
+import { EnvironmentId, type EnvironmentApi, type ProjectEntry } from "@t3tools/contracts";
 import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 import { createElement, type ReactNode } from "react";
 
+import { ComposerHandleContext } from "../composerHandleContext";
+import type { ChatComposerHandle } from "./chat/ChatComposer";
 import {
   __resetEnvironmentApiOverridesForTests,
   __setEnvironmentApiOverrideForTests,
@@ -17,6 +19,21 @@ import {
   openWorkspaceFilePreview,
 } from "../workspaceFilePreview";
 import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
+
+const { localContextMenuShowMock, refreshGitStatusMock, toastAddMock, useGitStatusMock } =
+  vi.hoisted(() => ({
+    localContextMenuShowMock: vi.fn(async () => "add-to-input" as string | null),
+    refreshGitStatusMock: vi.fn<typeof import("../lib/gitStatusState").refreshGitStatus>(
+      async () => null,
+    ),
+    toastAddMock: vi.fn(() => "toast-1"),
+    useGitStatusMock: vi.fn<typeof import("../lib/gitStatusState").useGitStatus>(() => ({
+      data: null,
+      error: null,
+      cause: null,
+      isPending: false,
+    })),
+  }));
 
 vi.mock("../environments/runtime", () => ({
   addSavedEnvironment: vi.fn(),
@@ -44,6 +61,29 @@ vi.mock("../environments/runtime", () => ({
   useSavedEnvironmentRegistryStore: vi.fn(() => ({})),
   useSavedEnvironmentRuntimeStore: vi.fn(() => ({})),
   waitForSavedEnvironmentRegistryHydration: vi.fn(async () => undefined),
+}));
+
+vi.mock("../lib/gitStatusState", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/gitStatusState")>();
+  return {
+    ...actual,
+    refreshGitStatus: refreshGitStatusMock,
+    useGitStatus: useGitStatusMock,
+  };
+});
+
+vi.mock("../localApi", () => ({
+  readLocalApi: vi.fn(() => ({
+    contextMenu: {
+      show: localContextMenuShowMock,
+    },
+  })),
+}));
+
+vi.mock("./ui/toast", () => ({
+  toastManager: {
+    add: toastAddMock,
+  },
 }));
 
 vi.mock("@pierre/diffs/react", async () => {
@@ -76,17 +116,25 @@ vi.mock("@pierre/diffs/react", async () => {
 const ENVIRONMENT_ID = EnvironmentId.make("environment-files-panel-browser");
 const WORKSPACE_ROOT = "/repo/project";
 
-function createMockEnvironmentApi(): EnvironmentApi {
+function createMockEnvironmentApi(
+  input: {
+    rootEntries?: ProjectEntry[];
+    searchEntries?: ProjectEntry[];
+    srcEntries?: ProjectEntry[];
+  } = {},
+): EnvironmentApi {
+  const srcEntries = input.srcEntries ?? [{ kind: "file", path: "src/App.tsx", parentPath: "src" }];
+  const rootEntries = input.rootEntries ?? [
+    { kind: "directory", path: "src" },
+    { kind: "file", path: "README.md" },
+  ];
+  const searchEntries = input.searchEntries ?? [
+    { kind: "file", path: "src/App.tsx", parentPath: "src" },
+  ];
   return {
     projects: {
       listDirectoryEntries: vi.fn(async (input: { directoryPath?: string }) => ({
-        entries:
-          input.directoryPath === "src"
-            ? [{ kind: "file", path: "src/App.tsx", parentPath: "src" }]
-            : [
-                { kind: "directory", path: "src" },
-                { kind: "file", path: "README.md" },
-              ],
+        entries: input.directoryPath === "src" ? srcEntries : rootEntries,
         truncated: false,
       })),
       readFile: vi.fn(async (input: { relativePath: string }) => ({
@@ -96,7 +144,7 @@ function createMockEnvironmentApi(): EnvironmentApi {
         truncated: false,
       })),
       searchEntries: vi.fn(async () => ({
-        entries: [{ kind: "file", path: "src/App.tsx", parentPath: "src" }],
+        entries: searchEntries,
         truncated: false,
       })),
       writeFile: vi.fn(),
@@ -113,7 +161,33 @@ function createPreviewTarget(relativePath = "src/App.tsx") {
   };
 }
 
-async function renderFilesPanel(input: { initialize?: () => void } = {}) {
+function createComposerHandle(overrides: Partial<ChatComposerHandle> = {}): ChatComposerHandle {
+  return {
+    addPathMention: vi.fn(() => true),
+    addTerminalContext: vi.fn(),
+    focusAt: vi.fn(),
+    focusAtEnd: vi.fn(),
+    getSendContext: vi.fn(),
+    isModelPickerOpen: vi.fn(() => false),
+    openModelPicker: vi.fn(),
+    readSnapshot: vi.fn(() => ({
+      cursor: 0,
+      expandedCursor: 0,
+      terminalContextIds: [],
+      value: "",
+    })),
+    resetCursorState: vi.fn(),
+    toggleModelPicker: vi.fn(),
+    ...overrides,
+  } as unknown as ChatComposerHandle;
+}
+
+async function renderFilesPanel(
+  input: {
+    composerHandle?: ChatComposerHandle;
+    initialize?: () => void;
+  } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -140,10 +214,21 @@ async function renderFilesPanel(input: { initialize?: () => void } = {}) {
     createElement(
       QueryClientProvider,
       { client: queryClient },
-      createElement(WorkspaceFilesPanel, {
-        mode: "sidebar",
-        onReturnToDiff: vi.fn(),
-      }),
+      input.composerHandle
+        ? createElement(
+            ComposerHandleContext.Provider,
+            { value: { current: input.composerHandle } },
+            createElement(WorkspaceFilesPanel, {
+              mode: "sidebar",
+              onReturnToDiff: vi.fn(),
+              panelOpen: true,
+            }),
+          )
+        : createElement(WorkspaceFilesPanel, {
+            mode: "sidebar",
+            onReturnToDiff: vi.fn(),
+            panelOpen: true,
+          }),
     ),
     { container: host },
   );
@@ -161,8 +246,124 @@ describe("WorkspaceFilesPanel", () => {
   afterEach(() => {
     __resetEnvironmentApiOverridesForTests();
     __resetWorkspaceFilePanelStateForTests();
-    document.body.innerHTML = "";
     vi.restoreAllMocks();
+    refreshGitStatusMock.mockReset();
+    refreshGitStatusMock.mockResolvedValue(null);
+    localContextMenuShowMock.mockReset();
+    localContextMenuShowMock.mockResolvedValue("add-to-input");
+    toastAddMock.mockReset();
+    toastAddMock.mockReturnValue("toast-1");
+    useGitStatusMock.mockReset();
+    useGitStatusMock.mockReturnValue({
+      data: null,
+      error: null,
+      cause: null,
+      isPending: false,
+    });
+    document.body.innerHTML = "";
+  });
+
+  it("renders file status badges and adds a file to the composer from the context menu", async () => {
+    __setEnvironmentApiOverrideForTests(ENVIRONMENT_ID, createMockEnvironmentApi());
+    useGitStatusMock.mockReturnValue({
+      data: {
+        aheadCount: 0,
+        behindCount: 0,
+        hasPrimaryRemote: true,
+        hasUpstream: false,
+        hasWorkingTreeChanges: true,
+        isDefaultRef: false,
+        isRepo: true,
+        pr: null,
+        refName: "feature/files-panel",
+        workingTree: {
+          deletions: 1,
+          files: [
+            { path: "src/App.tsx", status: "modified", insertions: 5, deletions: 1 },
+            { path: "README.md", status: "untracked", insertions: 0, deletions: 0 },
+          ],
+          insertions: 5,
+        },
+      },
+      error: null,
+      cause: null,
+      isPending: false,
+    });
+    const addPathMention = vi.fn(() => true);
+    const mounted = await renderFilesPanel({
+      composerHandle: createComposerHandle({ addPathMention }),
+    });
+    try {
+      await expect.element(page.getByText("Modified")).not.toBeInTheDocument();
+      await expect.element(page.getByRole("button", { name: /^src$/ })).toBeVisible();
+      const explorerList = document.querySelector(".overflow-auto.py-1");
+      expect(explorerList?.className).toContain("select-none");
+      expect(explorerList?.className).toContain("[touch-action:pan-y]");
+      expect(explorerList?.className).toContain("[-webkit-touch-callout:none]");
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector(
+            '[aria-label="src contains 1 changed file; highest status modified"]',
+          )?.textContent,
+        ).toBe("M");
+        expect(document.querySelector('[aria-label="README.md is untracked"]')?.textContent).toBe(
+          "U",
+        );
+        expect(document.querySelector('button[title="src"] span.truncate')?.className).toContain(
+          "text-warning-foreground",
+        );
+        expect(
+          document.querySelector('button[title="README.md"] span.truncate')?.className,
+        ).toContain("text-success");
+      });
+      const srcDirectoryButton = document.querySelector<HTMLButtonElement>('button[title="src"]');
+      expect(srcDirectoryButton?.className).toContain("select-none");
+      srcDirectoryButton?.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 8,
+          clientY: 16,
+        }),
+      );
+      expect(localContextMenuShowMock).not.toHaveBeenCalled();
+
+      await page.getByRole("button", { name: /^src$/ }).click();
+      await expect.element(page.getByRole("button", { name: /^App\.tsx$/ })).toBeVisible();
+      expect(document.querySelector('[aria-label="src/App.tsx is modified"]')?.textContent).toBe(
+        "M",
+      );
+      expect(
+        document.querySelector('button[title="src/App.tsx"] span.truncate')?.className,
+      ).toContain("text-warning-foreground");
+      await expect
+        .element(page.getByRole("button", { name: "Add src/App.tsx to chat input" }))
+        .not.toBeInTheDocument();
+
+      document.querySelector<HTMLButtonElement>('button[title="src/App.tsx"]')?.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 12,
+          clientY: 24,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(localContextMenuShowMock).toHaveBeenCalledWith(
+          [{ id: "add-to-input", label: "Add to chat input" }],
+          { x: 12, y: 24 },
+        );
+        expect(addPathMention).toHaveBeenCalledWith("src/App.tsx");
+        expect(toastAddMock).toHaveBeenCalledWith({
+          type: "success",
+          title: "Added to input",
+          description: "@src/App.tsx",
+        });
+      });
+    } finally {
+      await mounted.cleanup();
+    }
   });
 
   it("previews explorer file clicks in the same panel and returns to preserved explorer state", async () => {
@@ -170,7 +371,7 @@ describe("WorkspaceFilesPanel", () => {
     __setEnvironmentApiOverrideForTests(ENVIRONMENT_ID, api);
     const mounted = await renderFilesPanel();
     try {
-      await page.getByRole("button", { name: "src" }).click();
+      await page.getByRole("button", { name: /^src$/ }).click();
       await vi.waitFor(() => {
         expect(api.projects.listDirectoryEntries).toHaveBeenCalledWith({
           cwd: WORKSPACE_ROOT,
@@ -180,10 +381,13 @@ describe("WorkspaceFilesPanel", () => {
       });
 
       await page.getByPlaceholder("Search files").fill("App");
-      await page.getByRole("button", { name: "src/App.tsx" }).click();
+      await page.getByRole("button", { name: /^src\/App\.tsx$/ }).click();
 
       await expect.element(page.getByText("export const component = true;")).toBeInTheDocument();
       await expect.element(page.getByRole("button", { name: "Back to explorer" })).toBeVisible();
+      await expect
+        .element(page.getByRole("button", { name: "Show file explorer" }))
+        .not.toBeInTheDocument();
 
       await page.getByRole("button", { name: "Back to explorer" }).click();
       await expect
@@ -195,8 +399,104 @@ describe("WorkspaceFilesPanel", () => {
       expect(searchInput?.value).toBe("App");
 
       await page.getByPlaceholder("Search files").fill("");
-      await expect.element(page.getByRole("button", { name: "src" })).toBeVisible();
-      await expect.element(page.getByRole("button", { name: "App.tsx" })).toBeVisible();
+      await expect.element(page.getByRole("button", { name: /^src$/ })).toBeVisible();
+      await expect.element(page.getByRole("button", { name: /^App\.tsx$/ })).toBeVisible();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("preserves tree scroll position when returning from preview", async () => {
+    const rootEntries = [
+      ...Array.from({ length: 40 }, (_, index) => ({
+        kind: "file" as const,
+        path: `docs/file-${String(index).padStart(2, "0")}.ts`,
+      })),
+      { kind: "file" as const, path: "src/App.tsx" },
+    ] satisfies ProjectEntry[];
+    __setEnvironmentApiOverrideForTests(ENVIRONMENT_ID, createMockEnvironmentApi({ rootEntries }));
+    const mounted = await renderFilesPanel();
+    try {
+      await expect.element(page.getByRole("button", { name: /^file-08\.ts$/ })).toBeVisible();
+      const explorerScroll = document.querySelector<HTMLElement>(
+        '[data-testid="workspace-file-explorer-scroll"]',
+      );
+      expect(explorerScroll).not.toBeNull();
+      explorerScroll!.scrollTop = 180;
+      explorerScroll!.dispatchEvent(new Event("scroll", { bubbles: true }));
+
+      document.querySelector<HTMLButtonElement>('button[title="docs/file-08.ts"]')?.click();
+      await expect.element(page.getByText("export const component = true;")).toBeInTheDocument();
+
+      await page.getByRole("button", { name: "Back to explorer" }).click();
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector<HTMLElement>('[data-testid="workspace-file-explorer-scroll"]')
+            ?.scrollTop,
+        ).toBe(180);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps tree and search scroll positions separate", async () => {
+    const rootEntries = Array.from({ length: 32 }, (_, index) => ({
+      kind: "file" as const,
+      path: `docs/file-${String(index).padStart(2, "0")}.ts`,
+    })) satisfies ProjectEntry[];
+    const searchEntries = Array.from({ length: 32 }, (_, index) => ({
+      kind: "file" as const,
+      path: `src/App-${String(index).padStart(2, "0")}.tsx`,
+      parentPath: "src",
+    })) satisfies ProjectEntry[];
+    __setEnvironmentApiOverrideForTests(
+      ENVIRONMENT_ID,
+      createMockEnvironmentApi({ rootEntries, searchEntries }),
+    );
+    const mounted = await renderFilesPanel();
+    try {
+      await expect.element(page.getByRole("button", { name: /^file-08\.ts$/ })).toBeVisible();
+      const treeScroll = document.querySelector<HTMLElement>(
+        '[data-testid="workspace-file-explorer-scroll"]',
+      );
+      expect(treeScroll).not.toBeNull();
+      treeScroll!.scrollTop = 160;
+      treeScroll!.dispatchEvent(new Event("scroll", { bubbles: true }));
+
+      await page.getByPlaceholder("Search files").fill("App");
+      await expect.element(page.getByRole("button", { name: /^src\/App-08\.tsx$/ })).toBeVisible();
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector<HTMLElement>('[data-testid="workspace-file-explorer-scroll"]')
+            ?.scrollTop,
+        ).toBe(0);
+      });
+      const searchScroll = document.querySelector<HTMLElement>(
+        '[data-testid="workspace-file-explorer-scroll"]',
+      );
+      expect(searchScroll).not.toBeNull();
+      searchScroll!.scrollTop = 80;
+      searchScroll!.dispatchEvent(new Event("scroll", { bubbles: true }));
+
+      document.querySelector<HTMLButtonElement>('button[title="src/App-08.tsx"]')?.click();
+      await expect.element(page.getByText("export const component = true;")).toBeInTheDocument();
+
+      await page.getByRole("button", { name: "Back to explorer" }).click();
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector<HTMLElement>('[data-testid="workspace-file-explorer-scroll"]')
+            ?.scrollTop,
+        ).toBe(80);
+      });
+
+      await page.getByPlaceholder("Search files").fill("");
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector<HTMLElement>('[data-testid="workspace-file-explorer-scroll"]')
+            ?.scrollTop,
+        ).toBe(160);
+      });
     } finally {
       await mounted.cleanup();
     }

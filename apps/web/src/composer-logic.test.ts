@@ -5,6 +5,7 @@ import {
   collapseExpandedComposerCursor,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
+  insertPathMention,
   isCollapsedCursorAdjacentToInlineToken,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
@@ -241,6 +242,37 @@ describe("replaceTextRange trailing space consumption", () => {
     const extendedEnd = text[rangeEnd] === " " ? rangeEnd + 1 : rangeEnd;
     const withConsume = replaceTextRange(text, rangeStart, extendedEnd, "@AGENTS.md ");
     expect(withConsume.text).toBe("and then @AGENTS.md summarize");
+  });
+});
+
+describe("insertPathMention", () => {
+  it("inserts a path mention into an empty prompt", () => {
+    expect(insertPathMention("", 0, "src/App.tsx")).toEqual({
+      text: "@src/App.tsx ",
+      cursor: "@src/App.tsx ".length,
+    });
+  });
+
+  it("inserts a path mention after existing text", () => {
+    expect(insertPathMention("Inspect", "Inspect".length, "src/App.tsx")).toEqual({
+      text: "Inspect @src/App.tsx ",
+      cursor: "Inspect @src/App.tsx ".length,
+    });
+  });
+
+  it("inserts before existing text without double spaces", () => {
+    expect(insertPathMention("summarize this", 0, "src/App.tsx")).toEqual({
+      text: "@src/App.tsx summarize this",
+      cursor: "@src/App.tsx ".length,
+    });
+  });
+
+  it("inserts after an existing mention", () => {
+    const text = "Compare @README.md ";
+    expect(insertPathMention(text, text.length, "src/App.tsx")).toEqual({
+      text: "Compare @README.md @src/App.tsx ",
+      cursor: "Compare @README.md @src/App.tsx ".length,
+    });
   });
 });
 

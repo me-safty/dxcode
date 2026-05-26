@@ -46,7 +46,7 @@ describe("GitPreparePullRequestThreadInput", () => {
 });
 
 describe("VcsWorkingTreeDiffInput", () => {
-  it("accepts staged and unstaged working tree diff targets", () => {
+  it("accepts staged, unstaged, and all working tree diff targets", () => {
     expect(
       decodeWorkingTreeDiffInput({
         cwd: "/repo",
@@ -68,13 +68,25 @@ describe("VcsWorkingTreeDiffInput", () => {
       cwd: "/repo",
       target: "staged",
     });
+
+    expect(
+      decodeWorkingTreeDiffInput({
+        cwd: "/repo",
+        target: "all",
+        filePaths: ["src/app.ts"],
+      }),
+    ).toEqual({
+      cwd: "/repo",
+      target: "all",
+      filePaths: ["src/app.ts"],
+    });
   });
 
   it("rejects invalid working tree diff targets", () => {
     expect(() =>
       decodeWorkingTreeDiffInput({
         cwd: "/repo",
-        target: "all",
+        target: "committed",
       }),
     ).toThrow();
   });

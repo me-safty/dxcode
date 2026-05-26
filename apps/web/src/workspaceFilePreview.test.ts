@@ -7,9 +7,11 @@ import {
   closeWorkspaceFilePreview,
   openWorkspaceFileExplorer,
   openWorkspaceFilePreview,
+  reopenWorkspaceFilePanel,
   resolveWorkspaceFilePreviewTarget,
   returnWorkspaceFileExplorerToPreview,
   returnWorkspaceFilePreviewToExplorer,
+  setActiveWorkspaceFileExplorerContext,
   type WorkspaceFilePreviewReturnTarget,
   type WorkspaceFilePreviewTarget,
 } from "./workspaceFilePreview";
@@ -278,6 +280,159 @@ describe("workspace file panel state", () => {
         environmentId,
         cwd: "/repo/project",
         relativePath: "src/next.ts",
+      },
+    });
+  });
+
+  it("reopens a stale explorer as the active project explorer", () => {
+    openWorkspaceFileExplorer({
+      environmentId,
+      cwd: "/repo/old",
+      projectName: "old",
+    });
+    closeWorkspaceFilePreview();
+    setActiveWorkspaceFileExplorerContext({
+      environmentId,
+      cwd: "/repo/new",
+      projectName: "new",
+    });
+
+    reopenWorkspaceFilePanel();
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "explorer",
+      target: null,
+      activeExplorerContext: {
+        environmentId,
+        cwd: "/repo/new",
+        projectName: "new",
+      },
+      explorerContext: {
+        environmentId,
+        cwd: "/repo/new",
+        projectName: "new",
+      },
+      explorerReturnPreview: null,
+      returnTarget: null,
+    });
+  });
+
+  it("reopens a stale preview as the active project explorer", () => {
+    openWorkspaceFilePreview({
+      environmentId,
+      cwd: "/repo/old",
+      relativePath: "README.md",
+      displayPath: "README.md",
+    });
+    closeWorkspaceFilePreview();
+    setActiveWorkspaceFileExplorerContext({
+      environmentId,
+      cwd: "/repo/new",
+      projectName: "new",
+    });
+
+    reopenWorkspaceFilePanel();
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "explorer",
+      target: null,
+      activeExplorerContext: {
+        environmentId,
+        cwd: "/repo/new",
+        projectName: "new",
+      },
+      explorerContext: {
+        environmentId,
+        cwd: "/repo/new",
+        projectName: "new",
+      },
+      explorerReturnPreview: null,
+      returnTarget: null,
+    });
+  });
+
+  it("preserves matching preview reopen behavior", () => {
+    setActiveWorkspaceFileExplorerContext({
+      environmentId,
+      cwd: "/repo/project",
+      projectName: "project",
+    });
+    const target = createPreviewTarget();
+    openWorkspaceFilePreview(target);
+    closeWorkspaceFilePreview();
+
+    reopenWorkspaceFilePanel();
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "preview",
+      target,
+      activeExplorerContext: {
+        environmentId,
+        cwd: "/repo/project",
+        projectName: "project",
+      },
+      explorerContext: {
+        environmentId,
+        cwd: "/repo/project",
+        projectName: "project",
+      },
+    });
+  });
+
+  it("reopens the active explorer when no stored file panel state exists", () => {
+    setActiveWorkspaceFileExplorerContext({
+      environmentId,
+      cwd: "/repo/project",
+      projectName: "project",
+    });
+
+    reopenWorkspaceFilePanel();
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "explorer",
+      target: null,
+      activeExplorerContext: {
+        environmentId,
+        cwd: "/repo/project",
+        projectName: "project",
+      },
+      explorerContext: {
+        environmentId,
+        cwd: "/repo/project",
+        projectName: "project",
+      },
+      explorerReturnPreview: null,
+      returnTarget: null,
+    });
+  });
+
+  it("updates projectName for the same explorer workspace", () => {
+    openWorkspaceFileExplorer({
+      environmentId,
+      cwd: "/repo/project",
+      projectName: "Old name",
+    });
+
+    setActiveWorkspaceFileExplorerContext({
+      environmentId,
+      cwd: "/repo/project",
+      projectName: "New name",
+    });
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      activeExplorerContext: {
+        environmentId,
+        cwd: "/repo/project",
+        projectName: "New name",
+      },
+      explorerContext: {
+        environmentId,
+        cwd: "/repo/project",
+        projectName: "New name",
       },
     });
   });

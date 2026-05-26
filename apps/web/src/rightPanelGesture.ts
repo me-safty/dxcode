@@ -2,13 +2,13 @@ import { useEffect } from "react";
 
 export type RightPanelKind = "diff" | "file" | "plan";
 
-interface RightPanelRegistration {
+export interface RightPanelRegistration {
   readonly close?: () => void;
   readonly open: () => void;
 }
 
 const registeredPanels = new Map<RightPanelKind, RightPanelRegistration>();
-let lastUsedRightPanel: RightPanelKind = "diff";
+let lastUsedRightPanel: RightPanelKind = "file";
 
 export function markRightPanelUsed(kind: RightPanelKind): void {
   lastUsedRightPanel = kind;
@@ -62,4 +62,22 @@ export function useRegisterRightPanel({
       }
     };
   }, [close, enabled, kind, open]);
+}
+
+export function __registerRightPanelForTests(
+  kind: RightPanelKind,
+  registration: RightPanelRegistration,
+): () => void {
+  registeredPanels.set(kind, registration);
+  return () => {
+    const currentRegistration = registeredPanels.get(kind);
+    if (currentRegistration === registration) {
+      registeredPanels.delete(kind);
+    }
+  };
+}
+
+export function __resetRightPanelGestureStateForTests(): void {
+  registeredPanels.clear();
+  lastUsedRightPanel = "file";
 }

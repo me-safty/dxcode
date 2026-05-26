@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   LONG_PRESS_CONTEXT_MENU_MOVE_TOLERANCE_PX,
+  clearDocumentSelection,
   hasLongPressMovedBeyondTolerance,
   shouldStartLongPressContextMenu,
 } from "./useLongPressContextMenu";
@@ -39,6 +40,23 @@ describe("shouldStartLongPressContextMenu", () => {
         pointerType: "touch",
       }),
     ).toBe(false);
+  });
+});
+
+describe("clearDocumentSelection", () => {
+  it("clears selection ranges when selection APIs are available", () => {
+    const removeAllRanges = vi.fn();
+
+    clearDocumentSelection({
+      getSelection: () => ({ removeAllRanges }),
+    });
+
+    expect(removeAllRanges).toHaveBeenCalledOnce();
+  });
+
+  it("does not throw when selection APIs are unavailable", () => {
+    expect(() => clearDocumentSelection(undefined)).not.toThrow();
+    expect(() => clearDocumentSelection({})).not.toThrow();
   });
 });
 

@@ -71,6 +71,11 @@ import {
 import { SkillInlineText } from "./SkillInlineText";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { VirtualizedList, type VirtualizedListHandle } from "../virtualization/VirtualizedList";
+import {
+  captureTimelineScrollAnchor,
+  scheduleTimelineScrollAnchorRestore,
+  type ScheduledTimelineScrollAnchorRestore,
+} from "./timelineScrollAnchor";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -90,6 +95,7 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onBeforePlanExpandedChange: () => void;
 }
 
 interface TimelineRowActivityState {
@@ -202,10 +208,36 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  const scheduledLocalResizeRestoreRef = useRef<ScheduledTimelineScrollAnchorRestore | null>(null);
+  const localResizeRestoreTokenRef = useRef(0);
+
+  const cancelScheduledLocalResizeRestore = useCallback(() => {
+    localResizeRestoreTokenRef.current += 1;
+    scheduledLocalResizeRestoreRef.current?.cancel();
+    scheduledLocalResizeRestoreRef.current = null;
+  }, []);
 
   const handleUserScrollIntent = useCallback(() => {
+    cancelScheduledLocalResizeRestore();
     onUserScrollIntent?.();
-  }, [onUserScrollIntent]);
+  }, [cancelScheduledLocalResizeRestore, onUserScrollIntent]);
+  const handleBeforePlanExpandedChange = useCallback(() => {
+    const anchor = captureTimelineScrollAnchor(listRef.current);
+    onUserScrollIntent?.();
+    cancelScheduledLocalResizeRestore();
+
+    if (!anchor) {
+      return;
+    }
+
+    const restoreToken = localResizeRestoreTokenRef.current + 1;
+    localResizeRestoreTokenRef.current = restoreToken;
+    scheduledLocalResizeRestoreRef.current = scheduleTimelineScrollAnchorRestore({
+      listRef,
+      anchor,
+      shouldCancel: () => localResizeRestoreTokenRef.current !== restoreToken,
+    });
+  }, [cancelScheduledLocalResizeRestore, listRef, onUserScrollIntent]);
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.target === event.currentTarget) {
@@ -266,6 +298,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       window.cancelAnimationFrame(frameId);
     };
   }, [listRef, onIsAtEndChange, rows.length]);
+  useEffect(() => cancelScheduledLocalResizeRestore, [cancelScheduledLocalResizeRestore]);
 
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
@@ -279,6 +312,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onBeforePlanExpandedChange: handleBeforePlanExpandedChange,
     }),
     [
       timestampFormat,
@@ -291,6 +325,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      handleBeforePlanExpandedChange,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -566,6 +601,7 @@ function ProposedPlanTimelineRow({
         environmentId={ctx.activeThreadEnvironmentId}
         cwd={ctx.markdownCwd}
         workspaceRoot={ctx.workspaceRoot}
+        onBeforeExpandedChange={ctx.onBeforePlanExpandedChange}
       />
     </div>
   );

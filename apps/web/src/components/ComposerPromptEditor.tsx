@@ -55,9 +55,13 @@ import {
   isCollapsedCursorAdjacentToInlineToken,
 } from "~/composer-logic";
 import {
-  COMPOSER_NATIVE_INPUT_SETTLE_MS,
   type ComposerNativeInputChangeMetadata,
+  type ComposerNativeInputTracker,
+  createComposerNativeInputTracker,
   isComposerNativeComposingKeyEvent,
+  isComposerNativeInputSettling,
+  markComposerNativeInputSuppression,
+  readComposerNativeInputChangeMetadata,
   shouldLetBrowserHandleComposerBeforeInput,
   shouldSuppressComposerTriggerForNativeInputType,
 } from "~/composerNativeInput";
@@ -65,6 +69,7 @@ import {
   selectionTouchesMentionBoundary,
   splitPromptIntoComposerSegments,
 } from "~/composer-editor-mentions";
+import { isIosWebkit } from "~/env";
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   type TerminalContextDraft,
@@ -83,6 +88,7 @@ import { formatProviderSkillDisplayName } from "~/providerSkillPresentation";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 const COMPOSER_EDITOR_HMR_KEY = `composer-editor-${Math.random().toString(36).slice(2)}`;
+const IS_IOS_WEBKIT = isIosWebkit();
 const SURROUND_SYMBOLS: [string, string][] = [
   ["(", ")"],
   ["[", "]"],
@@ -485,43 +491,6 @@ function skillSignature(skills: ReadonlyArray<ServerProviderSkill>): string {
 function clampExpandedCursor(value: string, cursor: number): number {
   if (!Number.isFinite(cursor)) return value.length;
   return Math.max(0, Math.min(value.length, Math.floor(cursor)));
-}
-
-type ComposerNativeInputTracker = {
-  isComposing: boolean;
-  lastInputType: string | null;
-  suppressTriggerDetectionUntil: number;
-};
-
-function nowMs(): number {
-  return typeof performance === "undefined" ? Date.now() : performance.now();
-}
-
-function createComposerNativeInputTracker(): ComposerNativeInputTracker {
-  return {
-    isComposing: false,
-    lastInputType: null,
-    suppressTriggerDetectionUntil: 0,
-  };
-}
-
-function markComposerNativeInputSuppression(
-  tracker: ComposerNativeInputTracker,
-  inputType: string | null,
-): void {
-  tracker.lastInputType = inputType;
-  tracker.suppressTriggerDetectionUntil = nowMs() + COMPOSER_NATIVE_INPUT_SETTLE_MS;
-}
-
-function readComposerNativeInputChangeMetadata(
-  tracker: ComposerNativeInputTracker,
-): ComposerNativeInputChangeMetadata {
-  return {
-    suppressTriggerDetection:
-      tracker.isComposing || nowMs() < tracker.suppressTriggerDetectionUntil,
-    isComposing: tracker.isComposing,
-    inputType: tracker.lastInputType,
-  };
 }
 
 function getComposerInlineTokenTextLength(_node: ComposerInlineTokenNode): 1 {
@@ -1180,7 +1149,15 @@ function ComposerNativeInputPlugin(props: {
 
     const onBeforeInput = (event: InputEvent) => {
       markInputType(event.inputType);
-      if (!shouldLetBrowserHandleComposerBeforeInput(event.inputType)) {
+      const target = event.target as HTMLElement | null;
+      const documentSelection = target?.ownerDocument?.defaultView?.getSelection?.();
+      const isSelectionCollapsed = documentSelection ? documentSelection.isCollapsed : true;
+      if (
+        !shouldLetBrowserHandleComposerBeforeInput(event.inputType, {
+          isIosWebkit: IS_IOS_WEBKIT,
+          isSelectionCollapsed,
+        })
+      ) {
         return;
       }
       event.stopPropagation();
@@ -1587,10 +1564,15 @@ function ComposerPromptEditorInner({
       return;
     }
 
+    const shouldRewriteEditorState =
+      previousSnapshot.value !== value || contextsChanged || skillsChanged;
+    const isSelectionOnlyUpdate = !shouldRewriteEditorState && isFocused;
+    if (isSelectionOnlyUpdate && isComposerNativeInputSettling(nativeInputTrackerRef.current)) {
+      return;
+    }
+
     isApplyingControlledUpdateRef.current = true;
     editor.update(() => {
-      const shouldRewriteEditorState =
-        previousSnapshot.value !== value || contextsChanged || skillsChanged;
       if (shouldRewriteEditorState) {
         $setComposerEditorPrompt(value, terminalContexts, skillMetadataRef.current);
       }
@@ -1749,6 +1731,7 @@ function ComposerPromptEditorInner({
               aria-placeholder={placeholder}
               autoCapitalize="sentences"
               autoCorrect="on"
+              enterKeyHint="send"
               inputMode="text"
               placeholder={<span />}
               onPaste={onPaste}

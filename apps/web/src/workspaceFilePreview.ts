@@ -49,6 +49,7 @@ interface WorkspaceFilePreviewState {
   open: boolean;
   view: WorkspaceFilePanelView;
   target: WorkspaceFilePreviewTarget | null;
+  activeExplorerContext: WorkspaceFileExplorerContext | null;
   explorerContext: WorkspaceFileExplorerContext | null;
   explorerReturnPreview: WorkspaceFilePreviewReturnPreview | null;
   returnTarget: WorkspaceFilePreviewReturnTarget | null;
@@ -64,18 +65,43 @@ interface WorkspaceFilePreviewState {
   reopenPreview: () => void;
   returnExplorerToPreview: () => void;
   returnPreviewToExplorer: (context: WorkspaceFileExplorerContext) => void;
+  setActiveExplorerContext: (context: WorkspaceFileExplorerContext | null) => void;
   closePreview: () => void;
+}
+
+function sameExplorerContextWorkspace(
+  left: WorkspaceFileExplorerContext | null,
+  right: WorkspaceFileExplorerContext | null,
+): boolean {
+  return (
+    left !== null &&
+    right !== null &&
+    left.environmentId === right.environmentId &&
+    left.cwd === right.cwd
+  );
+}
+
+function sameTargetWorkspace(
+  target: WorkspaceFilePreviewTarget | null,
+  context: WorkspaceFileExplorerContext | null,
+): boolean {
+  return (
+    target !== null &&
+    context !== null &&
+    target.environmentId === context.environmentId &&
+    target.cwd === context.cwd
+  );
 }
 
 function deriveExplorerContextFromTarget(
   target: WorkspaceFilePreviewTarget,
   existingContext: WorkspaceFileExplorerContext | null,
+  activeContext: WorkspaceFileExplorerContext | null,
 ): WorkspaceFileExplorerContext {
-  if (
-    existingContext &&
-    existingContext.environmentId === target.environmentId &&
-    existingContext.cwd === target.cwd
-  ) {
+  if (activeContext && sameTargetWorkspace(target, activeContext)) {
+    return activeContext;
+  }
+  if (existingContext && sameTargetWorkspace(target, existingContext)) {
     return existingContext;
   }
   return {
@@ -88,6 +114,7 @@ const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => 
   open: false,
   view: "preview",
   target: null,
+  activeExplorerContext: null,
   explorerContext: null,
   explorerReturnPreview: null,
   returnTarget: null,
@@ -96,7 +123,11 @@ const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => 
       open: true,
       view: "preview",
       target,
-      explorerContext: deriveExplorerContextFromTarget(target, state.explorerContext),
+      explorerContext: deriveExplorerContextFromTarget(
+        target,
+        state.explorerContext,
+        state.activeExplorerContext,
+      ),
       explorerReturnPreview: null,
       returnTarget: options?.returnTarget ?? null,
     })),
@@ -110,12 +141,48 @@ const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => 
     }),
   reopenPanel: () =>
     set((state) => {
+      const activeContext = state.activeExplorerContext;
+      const storedExplorerMatchesActive = sameExplorerContextWorkspace(
+        state.explorerContext,
+        activeContext,
+      );
+      const storedTargetMatchesActive = sameTargetWorkspace(state.target, activeContext);
+
+      if (activeContext && !storedExplorerMatchesActive && !storedTargetMatchesActive) {
+        return {
+          ...state,
+          open: true,
+          view: "explorer",
+          target: null,
+          explorerContext: activeContext,
+          explorerReturnPreview: null,
+          returnTarget: null,
+        };
+      }
+
       if (!state.target && !state.explorerContext) {
-        return state;
+        if (!activeContext) {
+          return state;
+        }
+        return {
+          ...state,
+          open: true,
+          view: "explorer",
+          explorerContext: activeContext,
+          explorerReturnPreview: null,
+          returnTarget: null,
+        };
       }
-      if (state.view === "explorer" && state.explorerContext) {
-        return { ...state, open: true };
+
+      if (state.view === "explorer") {
+        return {
+          ...state,
+          open: true,
+          explorerContext:
+            activeContext && storedExplorerMatchesActive ? activeContext : state.explorerContext,
+        };
       }
+
       if (state.target) {
         return { ...state, open: true, view: "preview" };
       }
@@ -127,6 +194,29 @@ const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => 
         ? { ...state, open: true, view: "preview", explorerReturnPreview: null }
         : state,
     ),
+  setActiveExplorerContext: (context) =>
+    set((state) => {
+      if (
+        sameExplorerContextWorkspace(state.activeExplorerContext, context) &&
+        state.activeExplorerContext?.projectName === context?.projectName
+      ) {
+        return state;
+      }
+
+      const nextState = { ...state, activeExplorerContext: context };
+      if (
+        context &&
+        sameExplorerContextWorkspace(state.explorerContext, context) &&
+        state.explorerContext?.projectName !== context.projectName
+      ) {
+        return {
+          ...nextState,
+          explorerContext: context,
+        };
+      }
+
+      return nextState;
+    }),
   returnExplorerToPreview: () =>
     set((state) => {
       if (!state.explorerReturnPreview) {
@@ -140,6 +230,7 @@ const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => 
         explorerContext: deriveExplorerContextFromTarget(
           state.explorerReturnPreview.target,
           state.explorerContext,
+          state.activeExplorerContext,
         ),
         returnTarget: state.explorerReturnPreview.returnTarget,
         explorerReturnPreview: null,
@@ -295,6 +386,7 @@ export function useWorkspaceFilePreviewState() {
       open: state.open,
       view: state.view,
       target: state.target,
+      activeExplorerContext: state.activeExplorerContext,
       explorerContext: state.explorerContext,
       explorerReturnPreview: state.explorerReturnPreview,
       returnTarget: state.returnTarget,
@@ -316,10 +408,31 @@ export function reopenWorkspaceFilePanel(): void {
   useWorkspaceFilePreviewStore.getState().reopenPanel();
 }
 
+export function setActiveWorkspaceFileExplorerContext(
+  context: WorkspaceFileExplorerContext | null,
+): void {
+  useWorkspaceFilePreviewStore.getState().setActiveExplorerContext(context);
+}
+
 export function __readWorkspaceFilePanelStateForTests() {
-  const { open, view, target, explorerContext, explorerReturnPreview, returnTarget } =
-    useWorkspaceFilePreviewStore.getState();
-  return { open, view, target, explorerContext, explorerReturnPreview, returnTarget };
+  const {
+    open,
+    view,
+    target,
+    activeExplorerContext,
+    explorerContext,
+    explorerReturnPreview,
+    returnTarget,
+  } = useWorkspaceFilePreviewStore.getState();
+  return {
+    open,
+    view,
+    target,
+    activeExplorerContext,
+    explorerContext,
+    explorerReturnPreview,
+    returnTarget,
+  };
 }
 
 export function __resetWorkspaceFilePanelStateForTests(): void {
@@ -327,6 +440,7 @@ export function __resetWorkspaceFilePanelStateForTests(): void {
     open: false,
     view: "preview",
     target: null,
+    activeExplorerContext: null,
     explorerContext: null,
     explorerReturnPreview: null,
     returnTarget: null,

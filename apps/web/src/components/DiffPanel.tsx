@@ -3,7 +3,7 @@ import { FileDiff, type FileDiffMetadata, Virtualizer } from "@pierre/diffs/reac
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import type { TurnId, VcsWorkingTreeDiffTarget } from "@t3tools/contracts";
+import type { TurnId } from "@t3tools/contracts";
 import {
   ChevronDownIcon,
   ChevronLeftIcon,
@@ -27,7 +27,11 @@ import { gitWorkingTreeDiffQueryOptions } from "~/lib/gitReactQuery";
 import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
 import { cn } from "~/lib/utils";
 import { resolvePathLinkTarget } from "../terminal-links";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import {
+  parseDiffRouteSearch,
+  stripDiffSearchParams,
+  type DiffRouteSource,
+} from "../diffRouteSearch";
 import { useTheme } from "../hooks/useTheme";
 import { buildPatchCacheKey } from "../lib/diffRendering";
 import { resolveDiffThemeName } from "../lib/diffRendering";
@@ -530,7 +534,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       },
     });
   };
-  const selectWorkingTreeDiff = (target: VcsWorkingTreeDiffTarget) => {
+  const selectWorkingTreeDiff = (target: DiffRouteSource) => {
     if (!activeThread) return;
     void navigate({
       to: "/$environmentId/$threadId",

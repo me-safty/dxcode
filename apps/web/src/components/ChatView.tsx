@@ -109,6 +109,7 @@ import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
   closeWorkspaceFilePreview,
   openWorkspaceFileExplorer,
+  setActiveWorkspaceFileExplorerContext,
   useWorkspaceFilePanelState,
 } from "../workspaceFilePreview";
 import { BranchToolbar } from "./BranchToolbar";
@@ -1725,6 +1726,17 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  const activeFileExplorerContext = useMemo(
+    () =>
+      activeWorkspaceRoot
+        ? {
+            environmentId,
+            cwd: activeWorkspaceRoot,
+            ...(activeProject?.name !== undefined ? { projectName: activeProject.name } : {}),
+          }
+        : null,
+    [activeProject?.name, activeWorkspaceRoot, environmentId],
+  );
   const activeTerminalLaunchContext =
     terminalLaunchContext?.threadId === activeThreadId
       ? terminalLaunchContext
@@ -1738,16 +1750,18 @@ export default function ChatView(props: ChatViewProps) {
       closeWorkspaceFilePreview();
       return;
     }
-    if (!activeWorkspaceRoot) {
+    if (!activeFileExplorerContext) {
       return;
     }
     setPlanSidebarOpen(false);
-    openWorkspaceFileExplorer({
-      environmentId,
-      cwd: activeWorkspaceRoot,
-      ...(activeProject?.name !== undefined ? { projectName: activeProject.name } : {}),
-    });
-  }, [activeProject?.name, activeWorkspaceRoot, environmentId, fileExplorerOpen]);
+    openWorkspaceFileExplorer(activeFileExplorerContext);
+  }, [activeFileExplorerContext, fileExplorerOpen]);
+  useEffect(() => {
+    setActiveWorkspaceFileExplorerContext(activeFileExplorerContext);
+    return () => {
+      setActiveWorkspaceFileExplorerContext(null);
+    };
+  }, [activeFileExplorerContext]);
   const terminalShortcutLabelOptions = useMemo(
     () => ({
       context: {
@@ -2437,14 +2451,20 @@ export default function ChatView(props: ChatViewProps) {
     (animated = false) => {
       markTimelineAtEnd();
       cancelScheduledStickToBottom();
-      void timelineListRef.current?.scrollToEnd?.({ animated });
+      void Promise.resolve(timelineListRef.current?.scrollToEnd?.({ animated })).catch(() => {
+        // Scrolling is best-effort; it should never block sending or surface as a chat error.
+      });
       if (animated) {
         return;
       }
 
       scheduledStickToBottomRef.current = scheduleStickToBottom({
         scrollToEnd: () => {
-          void timelineListRef.current?.scrollToEnd?.({ animated: false });
+          void Promise.resolve(timelineListRef.current?.scrollToEnd?.({ animated: false })).catch(
+            () => {
+              // Scrolling is best-effort; it should never block sending or surface as a chat error.
+            },
+          );
         },
       });
     },
@@ -3209,8 +3229,7 @@ export default function ChatView(props: ChatViewProps) {
     // Scroll to the current end *before* adding the optimistic message.
     // This marks the timeline as at-end so maintainScrollAtEnd automatically
     // pins to the new item when the data changes.
-    markTimelineAtEnd();
-    await timelineListRef.current?.scrollToEnd?.({ animated: false });
+    scrollToEnd(false);
 
     setOptimisticUserMessages((existing) => [
       ...existing,
@@ -3617,8 +3636,7 @@ export default function ChatView(props: ChatViewProps) {
       setThreadError(threadIdForSend, null);
 
       // Scroll to the current end *before* adding the optimistic message.
-      markTimelineAtEnd();
-      await timelineListRef.current?.scrollToEnd?.({ animated: false });
+      scrollToEnd(false);
 
       setOptimisticUserMessages((existing) => [
         ...existing,
@@ -3700,10 +3718,10 @@ export default function ChatView(props: ChatViewProps) {
       isSendBusy,
       isServerThread,
       forceStickToBottom,
-      markTimelineAtEnd,
       persistThreadSettingsForNextTurn,
       resetLocalDispatch,
       runtimeMode,
+      scrollToEnd,
       setComposerDraftInteractionMode,
       setThreadError,
       canAutoOpenPlanSidebar,

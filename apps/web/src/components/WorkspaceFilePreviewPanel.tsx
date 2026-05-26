@@ -1,14 +1,33 @@
-import { File, Virtualizer, type FileContents } from "@pierre/diffs/react";
+import {
+  File,
+  FileDiff,
+  Virtualizer,
+  VirtualizerContext,
+  type FileContents,
+  type LineAnnotation,
+} from "@pierre/diffs/react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeftIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   CopyIcon,
   FolderTreeIcon,
   PanelRightCloseIcon,
+  PlusIcon,
   TextWrapIcon,
+  XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from "react";
 
 import {
   CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH,
@@ -17,10 +36,13 @@ import {
   resolveCodeHighlightLanguageFromPath,
 } from "../codeHighlighting";
 import { readEnvironmentApi } from "../environmentApi";
+import { useFilePreviewWordWrapPreference } from "../filePreviewPreferences";
 import { formatWorkspaceRelativePath } from "../filePathDisplay";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useTheme } from "../hooks/useTheme";
 import { resolveDiffThemeName } from "../lib/diffRendering";
+import { gitWorkingTreeDiffQueryOptions } from "../lib/gitReactQuery";
+import { useGitStatus } from "../lib/gitStatusState";
 import type {
   WorkspaceFilePreviewReturnTarget,
   WorkspaceFilePreviewTarget,
@@ -30,18 +52,30 @@ import {
   isWorkspaceImagePreviewPath,
   resolveWorkspaceImagePreviewUrl,
 } from "../workspaceImagePreview";
+import {
+  buildWorkspaceFileDiffMarkers,
+  type WorkspaceFileDiffLineMarker,
+  type WorkspaceFileDiffMarkerKind,
+  type WorkspaceFileInlineDiffHunk,
+} from "../workspace-file-diff-markers";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { Button } from "./ui/button";
 
 const FILE_PREVIEW_LINE_HEIGHT = 20;
 const FILE_PREVIEW_VIRTUALIZER_CLASS_NAME = "workspace-file-preview-virtualizer";
+const FILE_PREVIEW_INLINE_DIFF_SELECTOR = '[data-workspace-file-inline-diff="true"]';
 
 const FILE_PREVIEW_RENDER_STYLE = {
+  "--diffs-bg": "var(--background)",
+  "--diffs-light-bg": "var(--background)",
+  "--diffs-dark-bg": "var(--background)",
+  "--diffs-bg-buffer-override": "var(--background)",
   "--diffs-font-size": "12px",
   "--diffs-line-height": `${FILE_PREVIEW_LINE_HEIGHT}px`,
   "--diffs-font-family":
     'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  backgroundColor: "var(--background)",
 } as CSSProperties;
 
 const FILE_PREVIEW_UNSAFE_CSS = `
@@ -80,6 +114,217 @@ const FILE_PREVIEW_UNSAFE_CSS = `
   --diffs-line-bg: color-mix(in srgb, var(--background) 88%, var(--primary)) !important;
 }
 `;
+
+const FILE_PREVIEW_INLINE_DIFF_UNSAFE_CSS = `
+${FILE_PREVIEW_UNSAFE_CSS}
+
+[data-diff],
+[data-file],
+[data-error-wrapper],
+[data-virtualizer-buffer] {
+  --diffs-bg: color-mix(in srgb, var(--background) 96%, var(--foreground)) !important;
+  --diffs-light-bg: color-mix(in srgb, var(--background) 96%, var(--foreground)) !important;
+  --diffs-dark-bg: color-mix(in srgb, var(--background) 96%, var(--foreground)) !important;
+  --diffs-bg-context-override: color-mix(in srgb, var(--background) 97%, var(--foreground));
+  --diffs-bg-hover-override: color-mix(in srgb, var(--background) 94%, var(--foreground));
+  --diffs-bg-addition-override: color-mix(in srgb, var(--background) 91%, var(--success));
+  --diffs-bg-addition-number-override: color-mix(in srgb, var(--background) 87%, var(--success));
+  --diffs-bg-deletion-override: color-mix(in srgb, var(--background) 91%, var(--destructive));
+  --diffs-bg-deletion-number-override: color-mix(in srgb, var(--background) 87%, var(--destructive));
+  background-color: var(--diffs-bg) !important;
+}
+
+[data-diffs-header],
+[data-file-info] {
+  display: none !important;
+}
+`;
+
+interface WorkspaceFileInlineDiffAnnotation {
+  readonly hunkId: string;
+}
+
+function normalizeWorkspacePath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/g, "");
+}
+
+function countPreviewLines(contents: string): number {
+  if (contents.length === 0) {
+    return 0;
+  }
+  const lineCount = contents.split("\n").length;
+  return contents.endsWith("\n") ? lineCount - 1 : lineCount;
+}
+
+function markerColor(kind: WorkspaceFileDiffMarkerKind): string {
+  switch (kind) {
+    case "added":
+      return "var(--success)";
+    case "modified":
+      return "var(--warning)";
+    case "deleted":
+      return "var(--destructive)";
+  }
+}
+
+function buildFilePreviewMarkerUnsafeCss(
+  markers: ReadonlyArray<WorkspaceFileDiffLineMarker>,
+): string {
+  if (markers.length === 0) {
+    return "";
+  }
+
+  return markers
+    .map((marker) => {
+      const lineNumber = String(marker.lineNumber);
+      const color = markerColor(marker.kind);
+      const numberSelector = `[data-column-number="${lineNumber}"]`;
+
+      return `
+${numberSelector} {
+  cursor: pointer !important;
+  background-image: linear-gradient(${color}, ${color}) !important;
+  background-position: left top !important;
+  background-repeat: no-repeat !important;
+  background-size: 4px 100% !important;
+  transition: background-size 120ms ease;
+}
+
+${numberSelector}:hover {
+  background-size: 6px 100% !important;
+}
+`;
+    })
+    .join("\n");
+}
+
+function parsePreviewLineNumber(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const lineNumber = Number(value);
+  return Number.isInteger(lineNumber) && lineNumber > 0 ? lineNumber : null;
+}
+
+function findPreviewShadowHost(path: readonly EventTarget[]): HTMLElement | null {
+  for (const target of path) {
+    if (
+      target instanceof HTMLElement &&
+      target.classList.contains("workspace-file-preview-render")
+    ) {
+      return target;
+    }
+  }
+  return null;
+}
+
+function findPreviewGutterLineNumberFromPoint(host: HTMLElement, event: MouseEvent): number | null {
+  const shadowRoot = host.shadowRoot;
+  if (!shadowRoot) {
+    return null;
+  }
+
+  const pointElements = shadowRoot.elementsFromPoint(event.clientX, event.clientY);
+  for (const element of pointElements) {
+    if (!(element instanceof HTMLElement)) {
+      continue;
+    }
+    const lineNumber = parsePreviewLineNumber(element.getAttribute("data-column-number"));
+    if (lineNumber !== null) {
+      return lineNumber;
+    }
+  }
+
+  const gutterHitSlopPx = 12;
+  const isInGutterRow = [...shadowRoot.querySelectorAll<HTMLElement>("[data-gutter]")].some(
+    (element) => {
+      const rect = element.getBoundingClientRect();
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom &&
+        event.clientX >= rect.left - gutterHitSlopPx &&
+        event.clientX <= rect.right + gutterHitSlopPx
+      );
+    },
+  );
+  if (!isInGutterRow) {
+    return null;
+  }
+
+  for (const element of shadowRoot.querySelectorAll<HTMLElement>("[data-column-number]")) {
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      continue;
+    }
+    if (event.clientY < rect.top || event.clientY > rect.bottom) {
+      continue;
+    }
+
+    const lineNumber = parsePreviewLineNumber(element.getAttribute("data-column-number"));
+    if (lineNumber !== null) {
+      return lineNumber;
+    }
+  }
+
+  return null;
+}
+
+function findPreviewClickLineNumber(event: MouseEvent): number | null {
+  const path = event.composedPath();
+
+  for (const target of path) {
+    if (!(target instanceof HTMLElement)) {
+      continue;
+    }
+    const lineNumber = parsePreviewLineNumber(target.getAttribute("data-column-number"));
+    if (lineNumber !== null) {
+      return lineNumber;
+    }
+  }
+
+  for (const target of path) {
+    if (!(target instanceof HTMLElement)) {
+      continue;
+    }
+    const lineNumber = parsePreviewLineNumber(target.getAttribute("data-line"));
+    if (lineNumber !== null) {
+      return lineNumber;
+    }
+  }
+
+  const host = findPreviewShadowHost(path);
+  return host ? findPreviewGutterLineNumberFromPoint(host, event) : null;
+}
+
+function isInlineDiffClick(path: readonly EventTarget[]): boolean {
+  return path.some(
+    (target) =>
+      target instanceof Element &&
+      (target.matches(FILE_PREVIEW_INLINE_DIFF_SELECTOR) ||
+        target.closest(FILE_PREVIEW_INLINE_DIFF_SELECTOR) !== null),
+  );
+}
+
+function buildWorkingTreeSignature(
+  files:
+    | ReadonlyArray<{
+        readonly deletions: number;
+        readonly insertions: number;
+        readonly path: string;
+        readonly status: string;
+      }>
+    | undefined,
+): string {
+  if (!files || files.length === 0) {
+    return "";
+  }
+  return files
+    .map((file) => `${file.path}:${file.status}:${file.insertions}:${file.deletions}`)
+    .toSorted()
+    .join("|");
+}
 
 function basenameOfPath(path: string): string {
   const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
@@ -128,6 +373,168 @@ function getFilePreviewScrollElement(root: HTMLElement | null): HTMLElement | nu
   return root?.querySelector<HTMLElement>(`.${FILE_PREVIEW_VIRTUALIZER_CLASS_NAME}`) ?? null;
 }
 
+function useFilePreviewVirtualizerLayoutRevision({
+  enabled,
+  layoutKey,
+  rootRef,
+}: {
+  enabled: boolean;
+  layoutKey: string | null;
+  rootRef: RefObject<HTMLElement | null>;
+}): number {
+  const [revisionState, setRevisionState] = useState<{ key: string | null; revision: number }>({
+    key: null,
+    revision: 0,
+  });
+  const refreshedKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!enabled || layoutKey === null) {
+      return;
+    }
+
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+
+    let firstFrameId: number | null = null;
+    let secondFrameId: number | null = null;
+    let cancelled = false;
+
+    const cancelScheduledFrames = () => {
+      if (firstFrameId !== null) {
+        window.cancelAnimationFrame(firstFrameId);
+        firstFrameId = null;
+      }
+      if (secondFrameId !== null) {
+        window.cancelAnimationFrame(secondFrameId);
+        secondFrameId = null;
+      }
+    };
+
+    const refreshAfterLayoutSettles = () => {
+      if (cancelled || refreshedKeyRef.current === layoutKey || firstFrameId !== null) {
+        return;
+      }
+
+      firstFrameId = window.requestAnimationFrame(() => {
+        firstFrameId = null;
+        secondFrameId = window.requestAnimationFrame(() => {
+          secondFrameId = null;
+          if (cancelled || refreshedKeyRef.current === layoutKey) {
+            return;
+          }
+
+          const rect = root.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) {
+            return;
+          }
+
+          refreshedKeyRef.current = layoutKey;
+          setRevisionState((current) =>
+            current.key === layoutKey
+              ? { key: layoutKey, revision: current.revision + 1 }
+              : { key: layoutKey, revision: 1 },
+          );
+        });
+      });
+    };
+
+    refreshAfterLayoutSettles();
+
+    const resizeObserver = new ResizeObserver(() => refreshAfterLayoutSettles());
+    resizeObserver.observe(root);
+
+    return () => {
+      cancelled = true;
+      resizeObserver.disconnect();
+      cancelScheduledFrames();
+    };
+  }, [enabled, layoutKey, rootRef]);
+
+  return revisionState.key === layoutKey ? revisionState.revision : 0;
+}
+
+function WorkspaceInlineDiffAnnotation(props: {
+  hunk: WorkspaceFileInlineDiffHunk;
+  onClose: () => void;
+  onNavigate: (direction: "prev" | "next") => void;
+  options: {
+    diffThemeName: string;
+    resolvedTheme: "dark" | "light" | "system";
+    wordWrap: boolean;
+  };
+}) {
+  const { hunk } = props;
+  const hasPrev = hunk.position > 1;
+  const hasNext = hunk.position < hunk.totalHunks;
+  return (
+    <div
+      className="border-y border-border/70 bg-muted/30"
+      data-testid="workspace-file-inline-diff"
+      data-workspace-file-inline-diff="true"
+    >
+      <div className="flex h-7 items-center justify-between gap-2 border-b border-border/50 bg-muted/60 pl-3 pr-1">
+        <p className="truncate text-[11px] font-medium text-muted-foreground">
+          Working tree change {hunk.position} of {hunk.totalHunks}
+        </p>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Previous change"
+            title="Previous change"
+            disabled={!hasPrev}
+            onClick={() => props.onNavigate("prev")}
+          >
+            <ChevronUpIcon className="size-3.5" />
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Next change"
+            title="Next change"
+            disabled={!hasNext}
+            onClick={() => props.onNavigate("next")}
+          >
+            <ChevronDownIcon className="size-3.5" />
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Close inline diff"
+            title="Close inline diff"
+            onClick={props.onClose}
+          >
+            <XIcon className="size-3.5" />
+          </Button>
+        </div>
+      </div>
+      <div className="max-h-[min(28rem,45vh)] overflow-y-auto overscroll-contain">
+        <VirtualizerContext.Provider value={undefined}>
+          <FileDiff
+            className="workspace-file-preview-inline-diff min-w-full"
+            fileDiff={hunk.fileDiff}
+            style={FILE_PREVIEW_RENDER_STYLE}
+            options={{
+              diffStyle: "unified",
+              disableFileHeader: true,
+              hunkSeparators: "simple",
+              lineDiffType: "word",
+              overflow: props.options.wordWrap ? "wrap" : "scroll",
+              theme: props.options.diffThemeName,
+              themeType: props.options.resolvedTheme,
+              tokenizeMaxLineLength: CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH,
+              unsafeCSS: FILE_PREVIEW_INLINE_DIFF_UNSAFE_CSS,
+            }}
+          />
+        </VirtualizerContext.Provider>
+      </div>
+    </div>
+  );
+}
+
 function WorkspaceImagePreview(props: { src: string; alt: string }) {
   const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
 
@@ -168,8 +575,10 @@ function WorkspaceImagePreview(props: { src: string; alt: string }) {
 
 export function WorkspaceFilePreviewPanel(props: {
   mode: DiffPanelMode;
+  panelOpen?: boolean;
   target: WorkspaceFilePreviewTarget | null;
   returnTarget?: WorkspaceFilePreviewReturnTarget | null;
+  onAddFileToInput?: (relativePath: string) => void;
   onReturn?: (target: WorkspaceFilePreviewReturnTarget) => void;
   onShowExplorer?: () => void;
   showExplorerButton?: boolean;
@@ -177,9 +586,12 @@ export function WorkspaceFilePreviewPanel(props: {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
-  const [wordWrap, setWordWrap] = useState(true);
+  const [wordWrap, setWordWrap] = useFilePreviewWordWrapPreference();
+  const [expandedDiffHunkId, setExpandedDiffHunkId] = useState<string | null>(null);
   const scrollRootRef = useRef<HTMLDivElement>(null);
   const lastAutoScrollKeyRef = useRef<string | null>(null);
+  const lastWorkingTreeSignatureRef = useRef<string | null>(null);
+  const panelOpen = props.panelOpen ?? true;
   const isImagePreviewTarget = useMemo(
     () => (props.target ? isWorkspaceImagePreviewPath(props.target.relativePath) : false),
     [props.target],
@@ -194,9 +606,86 @@ export function WorkspaceFilePreviewPanel(props: {
       relativePath: props.target.relativePath,
     });
   }, [props.target]);
+  const gitStatus = useGitStatus({
+    environmentId: props.target?.environmentId ?? null,
+    cwd: props.target?.cwd ?? null,
+  });
   const query = useQuery(workspaceFilePreviewQueryOptions(props.target, !isImagePreviewTarget));
   const fileContents = query.data?.contents ?? "";
   const previewContents = useMemo(() => normalizePreviewContents(fileContents), [fileContents]);
+  const previewLineCount = useMemo(() => countPreviewLines(previewContents), [previewContents]);
+  const targetRelativePath = props.target?.relativePath ?? null;
+  const normalizedTargetPath = useMemo(
+    () => (targetRelativePath ? normalizeWorkspacePath(targetRelativePath) : null),
+    [targetRelativePath],
+  );
+  const changedWorkingTreeFile = useMemo(() => {
+    if (!gitStatus.data?.isRepo || normalizedTargetPath === null) {
+      return null;
+    }
+
+    return (
+      gitStatus.data.workingTree.files.find(
+        (file) =>
+          file.status !== "deleted" && normalizeWorkspacePath(file.path) === normalizedTargetPath,
+      ) ?? null
+    );
+  }, [gitStatus.data, normalizedTargetPath]);
+  const previewDiffFilePaths = useMemo(
+    () => (targetRelativePath ? [targetRelativePath] : null),
+    [targetRelativePath],
+  );
+  const shouldQueryPreviewDiff =
+    props.target !== null &&
+    query.data !== undefined &&
+    !isImagePreviewTarget &&
+    gitStatus.data?.isRepo === true &&
+    changedWorkingTreeFile !== null;
+  const previewDiffQuery = useQuery(
+    gitWorkingTreeDiffQueryOptions({
+      environmentId: props.target?.environmentId ?? null,
+      cwd: props.target?.cwd ?? null,
+      target: "all",
+      ignoreWhitespace: false,
+      filePaths: previewDiffFilePaths,
+      enabled: shouldQueryPreviewDiff,
+    }),
+  );
+  const previewDiffDataUpdatedAt = previewDiffQuery.dataUpdatedAt;
+  const previewDiffErrorUpdatedAt = previewDiffQuery.errorUpdatedAt;
+  const refetchPreviewDiff = previewDiffQuery.refetch;
+  const workingTreeSignature = useMemo(
+    () => buildWorkingTreeSignature(gitStatus.data?.workingTree.files),
+    [gitStatus.data?.workingTree.files],
+  );
+  const diffMarkers = useMemo(
+    () =>
+      buildWorkspaceFileDiffMarkers({
+        diff: previewDiffQuery.data?.diff,
+        lineCount: previewLineCount,
+        relativePath: props.target?.relativePath ?? "",
+      }),
+    [previewDiffQuery.data?.diff, previewLineCount, props.target?.relativePath],
+  );
+  const previewUnsafeCss = useMemo(
+    () => `${FILE_PREVIEW_UNSAFE_CSS}\n${buildFilePreviewMarkerUnsafeCss(diffMarkers.markers)}`,
+    [diffMarkers.markers],
+  );
+  const expandedDiffHunk = expandedDiffHunkId
+    ? (diffMarkers.hunksById.get(expandedDiffHunkId) ?? null)
+    : null;
+  const lineAnnotations = useMemo<LineAnnotation<WorkspaceFileInlineDiffAnnotation>[]>(
+    () =>
+      expandedDiffHunk
+        ? [
+            {
+              lineNumber: expandedDiffHunk.anchorLine,
+              metadata: { hunkId: expandedDiffHunk.id },
+            },
+          ]
+        : [],
+    [expandedDiffHunk],
+  );
   const highlightLanguage = useMemo(
     () => (props.target ? resolveCodeHighlightLanguageFromPath(props.target.relativePath) : "text"),
     [props.target],
@@ -225,6 +714,29 @@ export function WorkspaceFilePreviewPanel(props: {
     () => (props.target?.line ? { start: props.target.line, end: props.target.line } : null),
     [props.target?.line],
   );
+  const previewVirtualizerLayoutKey = useMemo(() => {
+    if (!props.target || !query.data || !previewFile || isImagePreviewTarget) {
+      return null;
+    }
+
+    return [
+      props.target.environmentId,
+      props.target.cwd,
+      props.target.relativePath,
+      query.data.relativePath,
+      query.data.sizeBytes,
+      previewFile.cacheKey ?? previewFile.name,
+    ].join("\u0000");
+  }, [isImagePreviewTarget, previewFile, props.target, query.data]);
+  const virtualizerLayoutRevision = useFilePreviewVirtualizerLayoutRevision({
+    enabled: panelOpen && query.data !== undefined && !isImagePreviewTarget,
+    layoutKey: previewVirtualizerLayoutKey,
+    rootRef: scrollRootRef,
+  });
+  const previewVirtualizerKey =
+    previewVirtualizerLayoutKey === null
+      ? undefined
+      : `${previewVirtualizerLayoutKey}\u0000${virtualizerLayoutRevision}`;
   const targetLine = props.target?.line ?? null;
   const displayPath = props.target
     ? formatWorkspaceRelativePath(props.target.relativePath, props.target.cwd)
@@ -245,6 +757,7 @@ export function WorkspaceFilePreviewPanel(props: {
       targetLine,
       query.data.sizeBytes,
       previewContents.length,
+      virtualizerLayoutRevision,
     ].join(":");
     if (lastAutoScrollKeyRef.current === autoScrollKey) {
       return;
@@ -272,7 +785,150 @@ export function WorkspaceFilePreviewPanel(props: {
         window.cancelAnimationFrame(secondFrameId);
       }
     };
-  }, [previewContents.length, props.target, query.data, targetLine]);
+  }, [previewContents.length, props.target, query.data, targetLine, virtualizerLayoutRevision]);
+
+  useEffect(() => {
+    setExpandedDiffHunkId(null);
+  }, [props.target?.cwd, props.target?.environmentId, props.target?.relativePath]);
+
+  useEffect(() => {
+    if (expandedDiffHunkId !== null && !diffMarkers.hunksById.has(expandedDiffHunkId)) {
+      setExpandedDiffHunkId(null);
+    }
+  }, [diffMarkers.hunksById, expandedDiffHunkId]);
+
+  useEffect(() => {
+    const hasFetchedPreviewDiff = previewDiffDataUpdatedAt > 0 || previewDiffErrorUpdatedAt > 0;
+    if (!shouldQueryPreviewDiff) {
+      lastWorkingTreeSignatureRef.current = workingTreeSignature;
+      return;
+    }
+
+    if (lastWorkingTreeSignatureRef.current === null) {
+      lastWorkingTreeSignatureRef.current = workingTreeSignature;
+      return;
+    }
+
+    if (lastWorkingTreeSignatureRef.current === workingTreeSignature) {
+      return;
+    }
+
+    lastWorkingTreeSignatureRef.current = workingTreeSignature;
+    if (hasFetchedPreviewDiff) {
+      void refetchPreviewDiff();
+    }
+  }, [
+    previewDiffDataUpdatedAt,
+    previewDiffErrorUpdatedAt,
+    refetchPreviewDiff,
+    shouldQueryPreviewDiff,
+    workingTreeSignature,
+  ]);
+
+  const toggleInlineDiffForLineNumber = useCallback(
+    (lineNumber: number): boolean => {
+      const marker = diffMarkers.markersByLine.get(lineNumber);
+      if (!marker) {
+        return false;
+      }
+
+      setExpandedDiffHunkId((currentHunkId) =>
+        currentHunkId === marker.hunkId ? null : marker.hunkId,
+      );
+      return true;
+    },
+    [diffMarkers.markersByLine],
+  );
+
+  const handlePreviewClickCapture = useCallback(
+    (event: MouseEvent) => {
+      const path = event.composedPath();
+      if (isInlineDiffClick(path)) {
+        return;
+      }
+
+      const lineNumber = findPreviewClickLineNumber(event);
+      if (lineNumber === null || !toggleInlineDiffForLineNumber(lineNumber)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    [toggleInlineDiffForLineNumber],
+  );
+
+  useEffect(() => {
+    const element = scrollRootRef.current;
+    if (!element) {
+      return;
+    }
+
+    element.addEventListener("click", handlePreviewClickCapture, { capture: true });
+    return () => {
+      element.removeEventListener("click", handlePreviewClickCapture, { capture: true });
+    };
+  }, [handlePreviewClickCapture]);
+
+  const sortedDiffHunks = useMemo(
+    () => [...diffMarkers.hunksById.values()].toSorted((a, b) => a.position - b.position),
+    [diffMarkers.hunksById],
+  );
+
+  const scrollToHunkAnchor = useCallback((anchorLine: number) => {
+    const scrollElement = getFilePreviewScrollElement(scrollRootRef.current);
+    if (!scrollElement) {
+      return;
+    }
+    scrollElement.scrollTop = Math.max(0, (anchorLine - 1) * FILE_PREVIEW_LINE_HEIGHT);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const element = scrollElement.querySelector<HTMLElement>(`[data-line="${anchorLine}"]`);
+        element?.scrollIntoView({ block: "center" });
+      });
+    });
+  }, []);
+
+  const handleNavigateInlineDiff = useCallback(
+    (direction: "prev" | "next") => {
+      if (sortedDiffHunks.length === 0) {
+        return;
+      }
+      const currentIndex = sortedDiffHunks.findIndex((hunk) => hunk.id === expandedDiffHunkId);
+      const targetIndex =
+        currentIndex === -1
+          ? 0
+          : direction === "next"
+            ? Math.min(currentIndex + 1, sortedDiffHunks.length - 1)
+            : Math.max(currentIndex - 1, 0);
+      const targetHunk = sortedDiffHunks[targetIndex];
+      if (!targetHunk || targetHunk.id === expandedDiffHunkId) {
+        return;
+      }
+      setExpandedDiffHunkId(targetHunk.id);
+      scrollToHunkAnchor(targetHunk.anchorLine);
+    },
+    [expandedDiffHunkId, scrollToHunkAnchor, sortedDiffHunks],
+  );
+
+  const renderInlineDiffAnnotation = useCallback(
+    (annotation: LineAnnotation<WorkspaceFileInlineDiffAnnotation>) => {
+      const hunk = diffMarkers.hunksById.get(annotation.metadata.hunkId);
+      if (!hunk) {
+        return null;
+      }
+
+      return (
+        <WorkspaceInlineDiffAnnotation
+          hunk={hunk}
+          onClose={() => setExpandedDiffHunkId(null)}
+          onNavigate={handleNavigateInlineDiff}
+          options={{ diffThemeName, resolvedTheme, wordWrap }}
+        />
+      );
+    },
+    [diffMarkers.hunksById, diffThemeName, handleNavigateInlineDiff, resolvedTheme, wordWrap],
+  );
 
   const copyFile = useCallback(() => {
     if (!query.data) return;
@@ -282,20 +938,6 @@ export function WorkspaceFilePreviewPanel(props: {
   const header = (
     <>
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        {props.target ? (
-          <VscodeEntryIcon
-            pathValue={props.target.relativePath}
-            kind="file"
-            theme={resolvedTheme}
-            className="size-4 shrink-0 text-muted-foreground/80"
-          />
-        ) : null}
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-foreground">{title}</p>
-          <p className="truncate font-mono text-[11px] text-muted-foreground/70">{subtitle}</p>
-        </div>
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
         {props.returnTarget && props.onReturn ? (
           <Button
             size="icon-xs"
@@ -311,7 +953,21 @@ export function WorkspaceFilePreviewPanel(props: {
             <ArrowLeftIcon className="size-3.5" />
           </Button>
         ) : null}
-        {props.showExplorerButton ? (
+        {props.target ? (
+          <VscodeEntryIcon
+            pathValue={props.target.relativePath}
+            kind="file"
+            theme={resolvedTheme}
+            className="size-4 shrink-0 text-muted-foreground/80"
+          />
+        ) : null}
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-foreground">{title}</p>
+          <p className="truncate font-mono text-[11px] text-muted-foreground/70">{subtitle}</p>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {props.showExplorerButton && props.onShowExplorer ? (
           <Button
             size="icon-xs"
             variant="ghost"
@@ -320,6 +976,21 @@ export function WorkspaceFilePreviewPanel(props: {
             onClick={props.onShowExplorer}
           >
             <FolderTreeIcon className="size-3.5" />
+          </Button>
+        ) : null}
+        {props.target && props.onAddFileToInput ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label={`Add ${props.target.relativePath} to chat input`}
+            title={`Add ${props.target.relativePath} to chat input`}
+            onClick={() => {
+              if (props.target) {
+                props.onAddFileToInput?.(props.target.relativePath);
+              }
+            }}
+          >
+            <PlusIcon className="size-3.5" />
           </Button>
         ) : null}
         {!isImagePreviewTarget ? (
@@ -382,6 +1053,7 @@ export function WorkspaceFilePreviewPanel(props: {
           <div ref={scrollRootRef} className="min-h-0 flex-1 bg-background">
             {previewFile ? (
               <Virtualizer
+                key={previewVirtualizerKey}
                 className={`${FILE_PREVIEW_VIRTUALIZER_CLASS_NAME} h-full min-h-0 overflow-auto`}
                 contentClassName="min-w-full py-2"
                 config={{
@@ -392,15 +1064,18 @@ export function WorkspaceFilePreviewPanel(props: {
                 <File
                   className="workspace-file-preview-render min-w-full"
                   file={previewFile}
+                  lineAnnotations={lineAnnotations}
+                  renderAnnotation={renderInlineDiffAnnotation}
                   selectedLines={selectedLines}
                   style={FILE_PREVIEW_RENDER_STYLE}
                   options={{
                     disableFileHeader: true,
+                    lineHoverHighlight: "number",
                     overflow: wordWrap ? "wrap" : "scroll",
                     theme: diffThemeName,
                     themeType: resolvedTheme,
                     tokenizeMaxLineLength: CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH,
-                    unsafeCSS: FILE_PREVIEW_UNSAFE_CSS,
+                    unsafeCSS: previewUnsafeCss,
                   }}
                 />
               </Virtualizer>

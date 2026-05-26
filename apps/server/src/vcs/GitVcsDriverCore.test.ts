@@ -107,6 +107,36 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("reports per-file working tree statuses", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "modified.ts", "export const value = 1;\n");
+        yield* writeTextFile(cwd, "deleted.ts", "delete me\n");
+        yield* writeTextFile(cwd, "renamed-source.ts", "rename me\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "add status fixtures"]);
+
+        yield* writeTextFile(cwd, "modified.ts", "export const value = 2;\n");
+        yield* writeTextFile(cwd, "added.ts", "export const added = true;\n");
+        yield* writeTextFile(cwd, "untracked.ts", "export const untracked = true;\n");
+        yield* git(cwd, ["add", "added.ts"]);
+        yield* git(cwd, ["rm", "deleted.ts"]);
+        yield* git(cwd, ["mv", "renamed-source.ts", "renamed-target.ts"]);
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+        const statusesByPath = new Map(
+          status.workingTree.files.map((file) => [file.path, file.status]),
+        );
+
+        assert.equal(statusesByPath.get("modified.ts"), "modified");
+        assert.equal(statusesByPath.get("added.ts"), "added");
+        assert.equal(statusesByPath.get("untracked.ts"), "untracked");
+        assert.equal(statusesByPath.get("deleted.ts"), "deleted");
+        assert.equal(statusesByPath.get("renamed-target.ts"), "renamed");
+      }),
+    );
+
     it.effect("reports default-branch delta separately from upstream delta", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -260,6 +290,117 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
         assert.include(result.diff, "+unstaged change");
         assert.notInclude(result.diff, "+staged change");
+      }),
+    );
+
+    it.effect("returns staged and unstaged changes for all diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "staged.txt", "base\n");
+        yield* writeTextFile(cwd, "unstaged.txt", "base\n");
+        yield* git(cwd, ["add", "staged.txt", "unstaged.txt"]);
+        yield* git(cwd, ["commit", "-m", "add fixture files"]);
+        yield* writeTextFile(cwd, "staged.txt", "base\nstaged change\n");
+        yield* writeTextFile(cwd, "unstaged.txt", "base\nunstaged change\n");
+        yield* git(cwd, ["add", "staged.txt"]);
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "all",
+          ignoreWhitespace: false,
+        });
+
+        assert.include(result.diff, "+staged change");
+        assert.include(result.diff, "+unstaged change");
+      }),
+    );
+
+    it.effect("respects filePaths for all diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "included.txt", "base\n");
+        yield* writeTextFile(cwd, "excluded.txt", "base\n");
+        yield* git(cwd, ["add", "included.txt", "excluded.txt"]);
+        yield* git(cwd, ["commit", "-m", "add fixture files"]);
+        yield* writeTextFile(cwd, "included.txt", "base\nincluded change\n");
+        yield* writeTextFile(cwd, "excluded.txt", "base\nexcluded change\n");
+        yield* writeTextFile(cwd, "untracked.txt", "untracked change\n");
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "all",
+          ignoreWhitespace: false,
+          filePaths: ["included.txt"],
+        });
+
+        assert.include(result.diff, "+included change");
+        assert.notInclude(result.diff, "+excluded change");
+        assert.notInclude(result.diff, "+untracked change");
+      }),
+    );
+
+    it.effect("includes untracked files in all diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "untracked.txt", "untracked change\n");
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "all",
+          ignoreWhitespace: false,
+        });
+
+        assert.include(result.diff, "diff --git a/untracked.txt b/untracked.txt");
+        assert.include(result.diff, "+untracked change");
+      }),
+    );
+
+    it.effect("does not mutate the real git index for all diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "untracked.txt", "untracked change\n");
+        const beforeStatus = yield* git(cwd, ["status", "--porcelain"]);
+
+        yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "all",
+          ignoreWhitespace: false,
+        });
+
+        const afterStatus = yield* git(cwd, ["status", "--porcelain"]);
+        assert.equal(afterStatus, beforeStatus);
+        assert.include(afterStatus, "?? untracked.txt");
+      }),
+    );
+
+    it.effect("diffs against the empty tree before the first commit for all requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* driver.initRepo({ cwd });
+        yield* writeTextFile(cwd, "first.txt", "first file\n");
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "all",
+          ignoreWhitespace: false,
+        });
+
+        assert.include(result.diff, "diff --git a/first.txt b/first.txt");
+        assert.include(result.diff, "+first file");
       }),
     );
 

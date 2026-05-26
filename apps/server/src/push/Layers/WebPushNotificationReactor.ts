@@ -2,6 +2,7 @@ import type {
   EnvironmentId,
   OrchestrationEvent,
   OrchestrationMessage,
+  OrchestrationThread,
   OrchestrationThreadShell,
   ProviderRuntimeEvent,
   ServerPushNotificationPayload,
@@ -36,7 +37,9 @@ export type RuntimeContentTrackingEvent = Pick<
 
 interface RuntimeTurnNotificationContent {
   readonly contentByMessageKey: Map<string, string>;
+  readonly segmentIndexByBaseKey: Map<string, number>;
   latestMessageKey: string | null;
+  activeBaseKey: string | null;
 }
 
 export interface LatestProjectedThreadContent {
@@ -49,7 +52,7 @@ const TRACKED_RUNTIME_CONTENT_MAX_CHARS = 4_000;
 const INTERRUPTED_ACTION_BODY = "Agent interrupted. Open Salchi to choose the next action.";
 const THREAD_NOTIFICATION_DETAIL_PAGE = {
   limits: {
-    messages: 1,
+    messages: 16,
     proposedPlans: 1,
     activities: 1,
     checkpoints: 1,
@@ -95,7 +98,7 @@ function threadTurnKey(threadId: ThreadId, turnId: TurnId | undefined): string {
   return `${threadId}:${turnId ?? "unknown"}`;
 }
 
-function runtimeMessageKey(
+function runtimeMessageBaseKey(
   event: Pick<ProviderRuntimeEvent, "eventId" | "itemId" | "turnId">,
 ): string {
   if (event.itemId !== undefined) {
@@ -105,6 +108,14 @@ function runtimeMessageKey(
     return `turn:${event.turnId}`;
   }
   return `event:${event.eventId}`;
+}
+
+function runtimeSegmentedMessageKey(
+  content: RuntimeTurnNotificationContent,
+  baseKey: string,
+): string {
+  const segmentIndex = content.segmentIndexByBaseKey.get(baseKey) ?? 0;
+  return segmentIndex === 0 ? baseKey : `${baseKey}:segment:${segmentIndex}`;
 }
 
 function truncateTrackedRuntimeContent(value: string): string {
@@ -119,33 +130,41 @@ function getOrCreateRuntimeTurnNotificationContent(
   return (
     existing ?? {
       contentByMessageKey: new Map<string, string>(),
+      segmentIndexByBaseKey: new Map<string, number>(),
       latestMessageKey: null,
+      activeBaseKey: null,
     }
   );
 }
 
 function appendTrackedRuntimeMessageContent(
   existing: RuntimeTurnNotificationContent | undefined,
-  messageKey: string,
+  event: RuntimeContentTrackingEvent,
   delta: string,
 ): RuntimeTurnNotificationContent {
   const content = getOrCreateRuntimeTurnNotificationContent(existing);
+  const baseKey = runtimeMessageBaseKey(event);
+  const messageKey = runtimeSegmentedMessageKey(content, baseKey);
   content.contentByMessageKey.set(
     messageKey,
     truncateTrackedRuntimeContent(`${content.contentByMessageKey.get(messageKey) ?? ""}${delta}`),
   );
   content.latestMessageKey = messageKey;
+  content.activeBaseKey = baseKey;
   return content;
 }
 
 function setTrackedRuntimeMessageContent(
   existing: RuntimeTurnNotificationContent | undefined,
-  messageKey: string,
+  event: RuntimeContentTrackingEvent,
   text: string,
 ): RuntimeTurnNotificationContent {
   const content = getOrCreateRuntimeTurnNotificationContent(existing);
+  const baseKey = runtimeMessageBaseKey(event);
+  const messageKey = runtimeSegmentedMessageKey(content, baseKey);
   content.contentByMessageKey.set(messageKey, truncateTrackedRuntimeContent(text));
   content.latestMessageKey = messageKey;
+  content.activeBaseKey = baseKey;
   return content;
 }
 
@@ -155,10 +174,9 @@ function trackRuntimeContentDelta(
   delta: string,
 ): void {
   const key = threadTurnKey(event.threadId, event.turnId);
-  const messageKey = runtimeMessageKey(event);
   runtimeContentByTurn.set(
     key,
-    appendTrackedRuntimeMessageContent(runtimeContentByTurn.get(key), messageKey, delta),
+    appendTrackedRuntimeMessageContent(runtimeContentByTurn.get(key), event, delta),
   );
 }
 
@@ -168,11 +186,24 @@ function trackRuntimeMessageContent(
   text: string,
 ): void {
   const key = threadTurnKey(event.threadId, event.turnId);
-  const messageKey = runtimeMessageKey(event);
   runtimeContentByTurn.set(
     key,
-    setTrackedRuntimeMessageContent(runtimeContentByTurn.get(key), messageKey, text),
+    setTrackedRuntimeMessageContent(runtimeContentByTurn.get(key), event, text),
   );
+}
+
+function markRuntimeAssistantBoundary(
+  runtimeContentByTurn: Map<string, RuntimeTurnNotificationContent>,
+  event: RuntimeContentTrackingEvent,
+): void {
+  const key = threadTurnKey(event.threadId, event.turnId);
+  const content = runtimeContentByTurn.get(key);
+  if (content?.activeBaseKey === null || content?.activeBaseKey === undefined) {
+    return;
+  }
+  const nextSegmentIndex = (content.segmentIndexByBaseKey.get(content.activeBaseKey) ?? 0) + 1;
+  content.segmentIndexByBaseKey.set(content.activeBaseKey, nextSegmentIndex);
+  content.activeBaseKey = null;
 }
 
 function takeTrackedRuntimeThreadContent(
@@ -197,6 +228,15 @@ export function createRuntimeNotificationContentTrackerForTest() {
     setMessage: (event: RuntimeContentTrackingEvent, text: string) => {
       trackRuntimeMessageContent(runtimeContentByTurn, event, text);
     },
+    markBoundary: (event: RuntimeContentTrackingEvent) => {
+      markRuntimeAssistantBoundary(runtimeContentByTurn, event);
+    },
+    messageKeys: (event: RuntimeContentTrackingEvent) =>
+      Array.from(
+        runtimeContentByTurn
+          .get(threadTurnKey(event.threadId, event.turnId))
+          ?.contentByMessageKey.keys() ?? [],
+      ),
     take: (event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>) =>
       takeTrackedRuntimeThreadContent(runtimeContentByTurn, event),
   };
@@ -237,17 +277,28 @@ export function selectLatestThreadContentForTurnCompletion(input: {
   readonly runtimeContent: string | null;
   readonly projectedContent: LatestProjectedThreadContent | null;
 }): string | null {
-  const projectedBody = normalizeNotificationText(input.projectedContent?.content);
-  if (
-    projectedBody !== null &&
-    input.projectedContent !== null &&
-    input.event.turnId !== undefined &&
-    input.projectedContent.turnId === input.event.turnId &&
-    !input.projectedContent.streaming
-  ) {
-    return projectedBody;
+  const runtimeBody = normalizeNotificationText(input.runtimeContent);
+  if (runtimeBody !== null) {
+    return runtimeBody;
   }
-  return normalizeNotificationText(input.runtimeContent) ?? projectedBody;
+  const projectedBody = normalizeNotificationText(input.projectedContent?.content);
+  return projectedBody;
+}
+
+export function selectProjectedThreadContentForTurnCompletion(input: {
+  readonly event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>;
+  readonly thread: Pick<OrchestrationThread, "latestTurn" | "messages">;
+}): LatestProjectedThreadContent | null {
+  const latestTurn = input.thread.latestTurn;
+  const latestTurnAssistantMessage =
+    latestTurn !== null && latestTurn.turnId === input.event.turnId
+      ? latestTurn.assistantMessageId
+      : null;
+  const message =
+    latestTurnAssistantMessage !== null
+      ? input.thread.messages.find((entry) => entry.id === latestTurnAssistantMessage)
+      : undefined;
+  return latestProjectedThreadContent(message ?? input.thread.messages.at(-1));
 }
 
 function fallbackNotificationContent(event: NotificationEvent): string | null {
@@ -383,19 +434,25 @@ const make = Effect.gen(function* () {
       .getThreadShellById(threadId)
       .pipe(Effect.catch(() => Effect.succeed(Option.none<OrchestrationThreadShell>())));
 
-  const resolveLatestProjectedThreadContent = (threadId: ThreadId) =>
+  const resolveLatestProjectedThreadContent = (
+    event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>,
+  ) =>
     projectionSnapshotQuery
-      .getThreadDetailSnapshotById(threadId, THREAD_NOTIFICATION_DETAIL_PAGE)
+      .getThreadDetailSnapshotById(event.threadId, THREAD_NOTIFICATION_DETAIL_PAGE)
       .pipe(
         Effect.map(
           Option.match({
             onNone: () => null,
-            onSome: (snapshot) => latestProjectedThreadContent(snapshot.thread.messages.at(-1)),
+            onSome: (snapshot) =>
+              selectProjectedThreadContentForTurnCompletion({
+                event,
+                thread: snapshot.thread,
+              }),
           }),
         ),
         Effect.catchCause((cause) =>
           Effect.logWarning("failed to resolve web push notification body", {
-            threadId,
+            threadId: event.threadId,
             cause: Cause.pretty(cause),
           }).pipe(Effect.as(null)),
         ),
@@ -408,10 +465,7 @@ const make = Effect.gen(function* () {
       return takeTrackedRuntimeThreadContent(runtimeContentByTurn, event);
     });
 
-  const resolveLatestThreadContent = (
-    event: NotificationEvent,
-    threadId: ThreadId,
-  ): Effect.Effect<string | null> => {
+  const resolveLatestThreadContent = (event: NotificationEvent): Effect.Effect<string | null> => {
     if (event.type === "thread.activity-appended") {
       return Effect.succeed(normalizeNotificationText(event.payload.activity.summary));
     }
@@ -420,7 +474,7 @@ const make = Effect.gen(function* () {
     }
     return Effect.gen(function* () {
       const runtimeContent = yield* takeRuntimeThreadContent(event);
-      const projectedContent = yield* resolveLatestProjectedThreadContent(threadId);
+      const projectedContent = yield* resolveLatestProjectedThreadContent(event);
       return selectLatestThreadContentForTurnCompletion({
         event,
         runtimeContent,
@@ -445,7 +499,7 @@ const make = Effect.gen(function* () {
       onNone: () => "Salchi thread",
       onSome: (threadShell) => threadShell.title,
     });
-    const latestThreadContent = yield* resolveLatestThreadContent(event, threadId);
+    const latestThreadContent = yield* resolveLatestThreadContent(event);
     const payload = deriveWebPushPayloadForEvent({
       event,
       environmentId: environment.environmentId,
@@ -505,6 +559,11 @@ const make = Effect.gen(function* () {
                 trackRuntimeMessageContent(runtimeContentByTurn, event, detail);
               });
             }
+          }
+          if (event.type === "request.opened" || event.type === "user-input.requested") {
+            return Effect.sync(() => {
+              markRuntimeAssistantBoundary(runtimeContentByTurn, event);
+            });
           }
           if (event.type === "turn.started" || event.type === "turn.aborted") {
             return Effect.sync(() => {

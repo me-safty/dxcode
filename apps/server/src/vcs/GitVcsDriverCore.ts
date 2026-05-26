@@ -18,7 +18,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { GitCommandError, type VcsRef } from "@t3tools/contracts";
+import { GitCommandError, type VcsRef, type VcsWorkingTreeFileStatus } from "@t3tools/contracts";
 import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
@@ -40,6 +40,7 @@ const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
 const WORKING_TREE_DIFF_MAX_OUTPUT_BYTES = 10_000_000;
+const GIT_EMPTY_TREE_OBJECT_ID = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const WORKING_TREE_DIFF_GIT_ADD_MAX_ARG_BYTES = 64 * 1024;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
@@ -159,26 +160,68 @@ function chunkPathsForGitArgs(relativePaths: ReadonlyArray<string>): string[][] 
   return chunks;
 }
 
-function parsePorcelainPath(line: string): string | null {
-  if (line.startsWith("? ") || line.startsWith("! ")) {
-    const simple = line.slice(2).trim();
-    return simple.length > 0 ? simple : null;
-  }
+interface ParsedPorcelainFileStatus {
+  readonly path: string;
+  readonly status: VcsWorkingTreeFileStatus;
+}
 
-  if (!(line.startsWith("1 ") || line.startsWith("2 ") || line.startsWith("u "))) {
+function sliceAfterSpaceCount(value: string, spaceCount: number): string {
+  let cursor = -1;
+  for (let index = 0; index < spaceCount; index += 1) {
+    cursor = value.indexOf(" ", cursor + 1);
+    if (cursor < 0) {
+      return "";
+    }
+  }
+  return value.slice(cursor + 1);
+}
+
+function parsePorcelainPathAfterFieldCount(
+  line: string,
+  fieldCountBeforePath: number,
+): string | null {
+  const pathPart = sliceAfterSpaceCount(line, fieldCountBeforePath).trim();
+  if (pathPart.length === 0) {
     return null;
   }
+  const tabIndex = pathPart.indexOf("\t");
+  const filePath = tabIndex >= 0 ? pathPart.slice(0, tabIndex).trim() : pathPart;
+  return filePath.length > 0 ? filePath : null;
+}
 
-  const tabIndex = line.indexOf("\t");
-  if (tabIndex >= 0) {
-    const fromTab = line.slice(tabIndex + 1);
-    const [filePath] = fromTab.split("\t");
-    return filePath?.trim().length ? filePath.trim() : null;
+function statusFromPorcelainXY(xy: string): VcsWorkingTreeFileStatus {
+  if (xy.includes("D")) return "deleted";
+  if (xy.includes("A")) return "added";
+  return "modified";
+}
+
+function parsePorcelainFileStatus(line: string): ParsedPorcelainFileStatus | null {
+  if (line.startsWith("? ")) {
+    const path = line.slice(2).trim();
+    return path.length > 0 ? { path, status: "untracked" } : null;
   }
 
-  const parts = line.trim().split(/\s+/g);
-  const filePath = parts.at(-1) ?? "";
-  return filePath.length > 0 ? filePath : null;
+  if (line.startsWith("u ")) {
+    const path = parsePorcelainPathAfterFieldCount(line, 10);
+    return path ? { path, status: "conflicted" } : null;
+  }
+
+  if (line.startsWith("1 ")) {
+    const xy = line.slice(2, 4);
+    const path = parsePorcelainPathAfterFieldCount(line, 8);
+    return path ? { path, status: statusFromPorcelainXY(xy) } : null;
+  }
+
+  if (line.startsWith("2 ")) {
+    const xy = line.slice(2, 4);
+    const path = parsePorcelainPathAfterFieldCount(line, 9);
+    if (!path) return null;
+    if (xy.includes("R")) return { path, status: "renamed" };
+    if (xy.includes("C")) return { path, status: "copied" };
+    return { path, status: statusFromPorcelainXY(xy) };
+  }
+
+  return null;
 }
 
 function parseBranchLine(line: string): { name: string; current: boolean } | null {
@@ -1262,7 +1305,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     let behindCount = 0;
     let aheadOfDefaultCount = 0;
     let hasWorkingTreeChanges = false;
-    const changedFilesWithoutNumstat = new Set<string>();
+    const fileStatusByPath = new Map<string, VcsWorkingTreeFileStatus>();
 
     for (const line of statusStdout.split(/\r?\n/g)) {
       if (line.startsWith("# branch.head ")) {
@@ -1284,8 +1327,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
       if (line.trim().length > 0 && !line.startsWith("#")) {
         hasWorkingTreeChanges = true;
-        const pathValue = parsePorcelainPath(line);
-        if (pathValue) changedFilesWithoutNumstat.add(pathValue);
+        const parsedStatus = parsePorcelainFileStatus(line);
+        if (parsedStatus) {
+          fileStatusByPath.set(parsedStatus.path, parsedStatus.status);
+        }
       }
     }
 
@@ -1330,13 +1375,18 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       .map(([filePath, stat]) => {
         insertions += stat.insertions;
         deletions += stat.deletions;
-        return { path: filePath, insertions: stat.insertions, deletions: stat.deletions };
+        return {
+          path: filePath,
+          status: fileStatusByPath.get(filePath) ?? "modified",
+          insertions: stat.insertions,
+          deletions: stat.deletions,
+        };
       })
       .toSorted((a, b) => a.path.localeCompare(b.path));
 
-    for (const filePath of changedFilesWithoutNumstat) {
+    for (const [filePath, status] of fileStatusByPath) {
       if (fileStatMap.has(filePath)) continue;
-      files.push({ path: filePath, insertions: 0, deletions: 0 });
+      files.push({ path: filePath, status, insertions: 0, deletions: 0 });
     }
     files.sort((a, b) => a.path.localeCompare(b.path));
 
@@ -1395,9 +1445,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const readWorkingTreeDiff: GitVcsDriver.GitVcsDriverShape["readWorkingTreeDiff"] = Effect.fn(
     "readWorkingTreeDiff",
   )(function* (input) {
-    const diffArgs = [
-      "diff",
-      ...(input.target === "staged" ? ["--cached"] : []),
+    const commonDiffArgs = [
       "--patch",
       "--minimal",
       "--no-color",
@@ -1405,6 +1453,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       "--no-textconv",
       ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
     ];
+    const pathspecArgs =
+      input.filePaths && input.filePaths.length > 0 ? ["--", ...input.filePaths] : [];
     const diffOptions = {
       maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
       appendTruncationMarker: true,
@@ -1414,7 +1464,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       const diff = yield* runGitStdoutWithOptions(
         "GitVcsDriver.readWorkingTreeDiff.staged",
         input.cwd,
-        diffArgs,
+        ["diff", "--cached", ...commonDiffArgs, ...pathspecArgs],
         diffOptions,
       );
       return { diff };
@@ -1475,6 +1525,18 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       },
     ).pipe(Effect.map((result) => splitNullSeparatedPaths(result.stdout, result.stdoutTruncated)));
 
+    const shouldIncludeUntrackedPath = (untrackedPath: string) => {
+      if (!input.filePaths || input.filePaths.length === 0) {
+        return true;
+      }
+      return input.filePaths.some((filePath) => {
+        const normalizedFilePath = filePath.replace(/\/+$/g, "");
+        return (
+          untrackedPath === normalizedFilePath || untrackedPath.startsWith(`${normalizedFilePath}/`)
+        );
+      });
+    };
+
     const addUntrackedIntentToAdd = (untrackedPaths: ReadonlyArray<string>) =>
       Effect.forEach(
         chunkPathsForGitArgs(untrackedPaths),
@@ -1488,14 +1550,39 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         { discard: true },
       );
 
+    const resolveAllDiffBaseRef = Effect.fn("GitVcsDriver.readWorkingTreeDiff.resolveAllBase")(
+      function* () {
+        const result = yield* executeGit(
+          "GitVcsDriver.readWorkingTreeDiff.resolveHead",
+          input.cwd,
+          ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+          {
+            allowNonZeroExit: true,
+            maxOutputBytes: 4_096,
+          },
+        );
+        const headCommit = result.stdout.trim();
+        return result.exitCode === 0 && headCommit.length > 0
+          ? headCommit
+          : GIT_EMPTY_TREE_OBJECT_ID;
+      },
+    );
+
     const program = Effect.gen(function* () {
       yield* copyCurrentIndex;
-      const untrackedPaths = yield* readUntrackedPaths;
+      const untrackedPaths = (yield* readUntrackedPaths).filter(shouldIncludeUntrackedPath);
       if (untrackedPaths.length > 0) {
         yield* addUntrackedIntentToAdd(untrackedPaths);
       }
+      const allDiffBaseRef = input.target === "all" ? yield* resolveAllDiffBaseRef() : null;
+      const diffArgs =
+        allDiffBaseRef !== null
+          ? ["diff", ...commonDiffArgs, allDiffBaseRef, ...pathspecArgs]
+          : ["diff", ...commonDiffArgs, ...pathspecArgs];
       const diff = yield* runGitStdoutWithOptions(
-        "GitVcsDriver.readWorkingTreeDiff.unstaged",
+        input.target === "all"
+          ? "GitVcsDriver.readWorkingTreeDiff.all"
+          : "GitVcsDriver.readWorkingTreeDiff.unstaged",
         input.cwd,
         diffArgs,
         {

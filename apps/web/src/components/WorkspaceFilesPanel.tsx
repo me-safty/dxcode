@@ -1,7 +1,8 @@
 import type { ProjectEntry } from "@t3tools/contracts";
 import { FileIcon, PanelRightCloseIcon } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
+import { useComposerHandleContext } from "../composerHandleContext";
 import { formatWorkspaceRelativePath } from "../filePathDisplay";
 import type { WorkspaceFilePreviewDiffReturnTarget } from "../workspaceFilePreview";
 import {
@@ -17,6 +18,7 @@ import { DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { WorkspaceFileExplorerPanel } from "./WorkspaceFileExplorerPanel";
 import { WorkspaceFilePreviewPanel } from "./WorkspaceFilePreviewPanel";
 import { Button } from "./ui/button";
+import { toastManager } from "./ui/toast";
 
 interface ExplorerViewState {
   readonly contextKey: string | null;
@@ -26,6 +28,10 @@ interface ExplorerViewState {
 
 function explorerContextKey(context: WorkspaceFileExplorerContext | null): string | null {
   return context ? `${context.environmentId}:${context.cwd}` : null;
+}
+
+function explorerScrollKey(contextKey: string | null, searchQuery: string): string | null {
+  return contextKey ? `${contextKey}\n${searchQuery}` : null;
 }
 
 function explorerContextFromPreview(
@@ -81,11 +87,14 @@ function WorkspaceFilesUnavailablePanel(props: { mode: DiffPanelMode }) {
 export function WorkspaceFilesPanel(props: {
   mode: DiffPanelMode;
   onReturnToDiff: (target: WorkspaceFilePreviewDiffReturnTarget) => void;
+  panelOpen: boolean;
 }) {
-  const { mode, onReturnToDiff } = props;
+  const { mode, onReturnToDiff, panelOpen } = props;
   const filePanel = useWorkspaceFilePanelState();
+  const composerRef = useComposerHandleContext();
   const explorerContext = explorerContextFromPreview(filePanel.explorerContext, filePanel.target);
   const activeExplorerContextKey = explorerContextKey(explorerContext);
+  const explorerScrollTopByKeyRef = useRef(new Map<string, number>());
   const [explorerViewState, setExplorerViewState] = useState<ExplorerViewState>(() => ({
     contextKey: null,
     expandedDirectoryPaths: new Set<string>(),
@@ -98,6 +107,11 @@ export function WorkspaceFilesPanel(props: {
     explorerViewState.contextKey === activeExplorerContextKey
       ? explorerViewState.expandedDirectoryPaths
       : emptyExpandedDirectoryPaths;
+  const activeExplorerScrollKey = explorerScrollKey(activeExplorerContextKey, searchQuery);
+  const explorerScrollTop =
+    activeExplorerScrollKey !== null
+      ? (explorerScrollTopByKeyRef.current.get(activeExplorerScrollKey) ?? 0)
+      : 0;
 
   const setSearchQuery = useCallback(
     (nextSearchQuery: string) => {
@@ -122,6 +136,16 @@ export function WorkspaceFilesPanel(props: {
       }));
     },
     [activeExplorerContextKey],
+  );
+
+  const setExplorerScrollTop = useCallback(
+    (nextScrollTop: number) => {
+      if (!activeExplorerScrollKey) {
+        return;
+      }
+      explorerScrollTopByKeyRef.current.set(activeExplorerScrollKey, nextScrollTop);
+    },
+    [activeExplorerScrollKey],
   );
 
   const showExplorer = useCallback(() => {
@@ -154,6 +178,30 @@ export function WorkspaceFilesPanel(props: {
     [explorerContext],
   );
 
+  const addPathToInput = useCallback(
+    (path: string) => {
+      const added = composerRef?.current?.addPathMention(path) ?? false;
+      if (!added) {
+        return;
+      }
+      toastManager.add({
+        type: "success",
+        title: "Added to input",
+        description: `@${path}`,
+      });
+    },
+    [composerRef],
+  );
+  const addExplorerFileToInput = useCallback(
+    (entry: ProjectEntry) => {
+      if (entry.kind !== "file") {
+        return;
+      }
+      addPathToInput(entry.path);
+    },
+    [addPathToInput],
+  );
+
   const handleReturn = useCallback(
     (returnTarget: NonNullable<typeof filePanel.returnTarget>) => {
       if (returnTarget.kind === "explorer") {
@@ -179,27 +227,35 @@ export function WorkspaceFilesPanel(props: {
         onBackToPreview={
           filePanel.explorerReturnPreview ? returnWorkspaceFileExplorerToPreview : undefined
         }
+        onAddFileToInput={addExplorerFileToInput}
         onClose={closeWorkspaceFilePreview}
         onExpandedDirectoryPathsChange={setExpandedDirectoryPaths}
         onOpenFile={openExplorerFile}
         onSearchQueryChange={setSearchQuery}
+        onScrollTopChange={setExplorerScrollTop}
         {...(explorerContext.projectName !== undefined
           ? { projectName: explorerContext.projectName }
           : {})}
+        scrollRestorationKey={activeExplorerScrollKey ?? "none"}
+        scrollTop={explorerScrollTop}
         searchQuery={searchQuery}
         workspaceRoot={explorerContext.cwd}
       />
     );
   }
 
+  const previewOpenedFromExplorer = filePanel.returnTarget?.kind === "explorer";
+
   return (
     <WorkspaceFilePreviewPanel
       mode={mode}
+      panelOpen={panelOpen}
       target={filePanel.target}
       returnTarget={filePanel.returnTarget}
+      onAddFileToInput={addPathToInput}
       onReturn={handleReturn}
       onShowExplorer={showExplorer}
-      showExplorerButton={explorerContext !== null}
+      showExplorerButton={explorerContext !== null && !previewOpenedFromExplorer}
     />
   );
 }

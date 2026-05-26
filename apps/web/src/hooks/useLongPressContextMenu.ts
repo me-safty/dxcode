@@ -43,6 +43,10 @@ interface ActiveLongPress {
   readonly timerId: number;
 }
 
+interface SelectionDocumentLike {
+  readonly getSelection?: () => { readonly removeAllRanges: () => void } | null;
+}
+
 export function shouldStartLongPressContextMenu(input: LongPressPointerStartInput): boolean {
   return input.pointerType === "touch" && input.isPrimary && input.button === 0;
 }
@@ -55,6 +59,14 @@ export function hasLongPressMovedBeyondTolerance({
   tolerance = LONG_PRESS_CONTEXT_MENU_MOVE_TOLERANCE_PX,
 }: LongPressMoveInput): boolean {
   return Math.hypot(currentX - startX, currentY - startY) > tolerance;
+}
+
+export function clearDocumentSelection(
+  documentLike: SelectionDocumentLike | undefined = typeof document === "undefined"
+    ? undefined
+    : document,
+): void {
+  documentLike?.getSelection?.()?.removeAllRanges();
 }
 
 function hasNestedInteractiveTarget(
@@ -133,6 +145,7 @@ export function useLongPressContextMenu<TElement extends HTMLElement>({
         const suppressUntil = now() + SUPPRESS_FOLLOW_UP_EVENT_MS;
         suppressClickUntilRef.current = suppressUntil;
         suppressContextMenuUntilRef.current = suppressUntil;
+        clearDocumentSelection();
         void onLongPressRef.current({
           x: activeLongPress.lastX,
           y: activeLongPress.lastY,

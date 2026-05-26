@@ -4,6 +4,7 @@ import {
   EnvironmentId,
   EventId,
   MessageId,
+  type OrchestrationMessage,
   type OrchestrationThreadShell,
   ProviderDriverKind,
   RuntimeItemId,
@@ -19,6 +20,7 @@ import {
   createRuntimeNotificationContentTrackerForTest,
   deriveWebPushPayloadForEvent,
   selectLatestThreadContentForTurnCompletion,
+  selectProjectedThreadContentForTurnCompletion,
   shouldNotifyRuntimeTurnCompletion,
   type RuntimeContentTrackingEvent,
 } from "./WebPushNotificationReactor.ts";
@@ -131,6 +133,30 @@ function makeActivityAppendedEvent(
   };
 }
 
+function makeProjectedMessage(input: {
+  readonly id: string;
+  readonly text: string;
+  readonly turnId?: string | null;
+  readonly streaming?: boolean;
+  readonly createdAt?: string;
+}): OrchestrationMessage {
+  return {
+    id: MessageId.make(input.id),
+    role: "assistant",
+    text: input.text,
+    attachments: [],
+    turnId:
+      input.turnId === undefined
+        ? TurnId.make("turn-1")
+        : input.turnId === null
+          ? null
+          : TurnId.make(input.turnId),
+    streaming: input.streaming ?? false,
+    createdAt: input.createdAt ?? now,
+    updatedAt: input.createdAt ?? now,
+  };
+}
+
 describe("runtime notification content tracking", () => {
   it("uses the latest assistant message segment from a turn", () => {
     const tracker = createRuntimeNotificationContentTrackerForTest();
@@ -158,6 +184,58 @@ describe("runtime notification content tracking", () => {
     );
 
     expect(tracker.take(makeTurnCompletedEvent())).toBe("final segment");
+  });
+
+  it("starts a new notification segment after approval boundary for the same item", () => {
+    const tracker = createRuntimeNotificationContentTrackerForTest();
+    tracker.appendDelta(
+      makeRuntimeTrackingEvent({ eventId: "event-item-a-before", itemId: "item-a" }),
+      "before approval",
+    );
+    tracker.markBoundary(makeRuntimeTrackingEvent({ eventId: "event-request-opened" }));
+    tracker.appendDelta(
+      makeRuntimeTrackingEvent({ eventId: "event-item-a-after", itemId: "item-a" }),
+      " after approval",
+    );
+
+    expect(
+      tracker.messageKeys(makeRuntimeTrackingEvent({ eventId: "event-inspect", itemId: "item-a" })),
+    ).toEqual(["item:item-a", "item:item-a:segment:1"]);
+    expect(tracker.take(makeTurnCompletedEvent())).toBe("after approval");
+  });
+
+  it("starts a new notification segment after user input boundary for the same item", () => {
+    const tracker = createRuntimeNotificationContentTrackerForTest();
+    tracker.appendDelta(
+      makeRuntimeTrackingEvent({ eventId: "event-item-a-before", itemId: "item-a" }),
+      "before input",
+    );
+    tracker.markBoundary(makeRuntimeTrackingEvent({ eventId: "event-user-input-requested" }));
+    tracker.appendDelta(
+      makeRuntimeTrackingEvent({ eventId: "event-item-a-after", itemId: "item-a" }),
+      " after input",
+    );
+
+    expect(tracker.take(makeTurnCompletedEvent())).toBe("after input");
+  });
+
+  it("does not increment segments repeatedly without new assistant content", () => {
+    const tracker = createRuntimeNotificationContentTrackerForTest();
+    tracker.appendDelta(
+      makeRuntimeTrackingEvent({ eventId: "event-item-a-before", itemId: "item-a" }),
+      "first",
+    );
+    tracker.markBoundary(makeRuntimeTrackingEvent({ eventId: "event-request-opened" }));
+    tracker.markBoundary(makeRuntimeTrackingEvent({ eventId: "event-user-input-requested" }));
+    tracker.appendDelta(
+      makeRuntimeTrackingEvent({ eventId: "event-item-a-after", itemId: "item-a" }),
+      "second",
+    );
+
+    expect(
+      tracker.messageKeys(makeRuntimeTrackingEvent({ eventId: "event-inspect", itemId: "item-a" })),
+    ).toEqual(["item:item-a", "item:item-a:segment:1"]);
+    expect(tracker.take(makeTurnCompletedEvent())).toBe("second");
   });
 
   it("does not concatenate earlier assistant items into the body", () => {
@@ -197,18 +275,64 @@ describe("runtime notification content tracking", () => {
 });
 
 describe("selectLatestThreadContentForTurnCompletion", () => {
-  it("prefers projected completed-turn latest message over runtime content", () => {
+  it("prefers runtime content over projected same-turn content", () => {
     expect(
       selectLatestThreadContentForTurnCompletion({
         event: makeTurnCompletedEvent(),
-        runtimeContent: "runtime partial",
+        runtimeContent: "after approval",
         projectedContent: {
-          content: "canonical final",
+          content: "before approval",
           turnId: TurnId.make("turn-1"),
           streaming: false,
         },
       }),
-    ).toBe("canonical final");
+    ).toBe("after approval");
+  });
+
+  it("uses projected content when runtime content is unavailable", () => {
+    expect(
+      selectLatestThreadContentForTurnCompletion({
+        event: makeTurnCompletedEvent(),
+        runtimeContent: null,
+        projectedContent: {
+          content: "projected final",
+          turnId: TurnId.make("turn-1"),
+          streaming: false,
+        },
+      }),
+    ).toBe("projected final");
+  });
+});
+
+describe("selectProjectedThreadContentForTurnCompletion", () => {
+  it("uses latestTurn assistantMessageId when selecting projected fallback", () => {
+    expect(
+      selectProjectedThreadContentForTurnCompletion({
+        event: makeTurnCompletedEvent(),
+        thread: {
+          latestTurn: {
+            turnId: TurnId.make("turn-1"),
+            state: "completed",
+            requestedAt: now,
+            startedAt: now,
+            completedAt: now,
+            assistantMessageId: MessageId.make("assistant:item-a:segment:1"),
+          },
+          messages: [
+            makeProjectedMessage({
+              id: "assistant:item-a:segment:1",
+              text: " after approval",
+              createdAt: "2026-01-01T00:00:00.000Z",
+            }),
+            makeProjectedMessage({
+              id: "assistant:item-a",
+              text: "before approval",
+              createdAt: "2026-01-01T00:00:01.000Z",
+            }),
+          ],
+        },
+      })?.content,
+    ).toBe("after approval");
   });
 });
 
