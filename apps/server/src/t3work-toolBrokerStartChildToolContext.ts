@@ -2,9 +2,15 @@ import { type ThreadId } from "@t3tools/contracts";
 
 import type { T3workTurnToolContext } from "./t3work-toolBroker.ts";
 
-export function readTicketIdFromThreadToolContext(
+type ThreadToolContextView = {
+  readonly kind?: unknown;
+  readonly ticketId?: unknown;
+  readonly displayMode?: unknown;
+};
+
+function readThreadToolContextView(
   toolContext: T3workTurnToolContext | undefined,
-): string | undefined {
+): ThreadToolContextView | undefined {
   if (!toolContext || toolContext.surface !== "t3work") {
     return undefined;
   }
@@ -21,13 +27,27 @@ export function readTicketIdFromThreadToolContext(
     return undefined;
   }
 
-  const candidate = rawView as { readonly kind?: unknown; readonly ticketId?: unknown };
-  if (candidate.kind !== "thread" || typeof candidate.ticketId !== "string") {
+  const candidate = rawView as ThreadToolContextView;
+  return candidate.kind === "thread" ? candidate : undefined;
+}
+
+export function readTicketIdFromThreadToolContext(
+  toolContext: T3workTurnToolContext | undefined,
+): string | undefined {
+  const candidate = readThreadToolContextView(toolContext);
+  if (typeof candidate?.ticketId !== "string") {
     return undefined;
   }
 
   const ticketId = candidate.ticketId.trim();
   return ticketId.length > 0 ? ticketId : undefined;
+}
+
+export function readThreadDisplayModeFromToolContext(
+  toolContext: T3workTurnToolContext | undefined,
+): "embedded" | "thread" | undefined {
+  const displayMode = readThreadToolContextView(toolContext)?.displayMode;
+  return displayMode === "embedded" || displayMode === "thread" ? displayMode : undefined;
 }
 
 export function createChildThreadToolContext(input: {
@@ -55,6 +75,7 @@ export function createChildThreadToolContext(input: {
         workspaceRoot: input.workspaceRoot,
         threadId: input.threadId,
         threadTitle: input.threadTitle,
+        displayMode: "thread",
         ...(input.ticketId ? { ticketId: input.ticketId } : {}),
       },
     },

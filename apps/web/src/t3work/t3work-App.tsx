@@ -171,6 +171,7 @@ export function App({
         onKickoffProjectThread={handleCreateProjectKickoffThread}
         onKickoffTicketThread={handleCreateTicketKickoffThread}
         onThreadKickoffConsumed={handleThreadKickoffConsumed}
+        onThreadDisplayModeChange={store.updateThreadDisplayMode}
         onBackToDashboard={handleSelectProject}
         onManageRepositories={setManageRepositoriesProjectId}
       />

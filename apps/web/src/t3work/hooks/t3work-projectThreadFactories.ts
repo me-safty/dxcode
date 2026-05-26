@@ -1,5 +1,6 @@
 import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 
+import { matchesProjectThreadTicket } from "~/t3work/t3work-ticketLookup";
 import type { ProjectThread, T3workThreadToolId } from "~/t3work/t3work-types";
 
 export function createTicketThread(input: {
@@ -17,6 +18,7 @@ export function createTicketThread(input: {
     options?: {
       title?: string;
       ticketId?: string;
+      ticketDisplayId?: string;
       kickoffMessage?: string;
       kickoffPending?: boolean;
       kickoffModelSelection?: ModelSelection;
@@ -27,12 +29,15 @@ export function createTicketThread(input: {
   ) => ProjectThread;
 }) {
   const matching = input.existingThreads.filter(
-    (thread) => thread.projectId === input.projectId && thread.ticketId === input.ticketId,
+    (thread) =>
+      thread.projectId === input.projectId &&
+      matchesProjectThreadTicket(thread, input.ticketId, input.ticketDisplayId),
   );
   const sequence = matching.length + 1;
 
   return input.createThread(input.projectId, {
     ticketId: input.ticketId,
+    ticketDisplayId: input.ticketDisplayId,
     title: `${input.ticketDisplayId} kickoff ${sequence}`,
     kickoffMessage: input.kickoffMessage,
     kickoffPending: true,

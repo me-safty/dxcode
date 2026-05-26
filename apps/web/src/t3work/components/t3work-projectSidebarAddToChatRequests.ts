@@ -24,6 +24,7 @@ export function buildTicketSidebarAddToChatRequest(input: {
     targetLabel: `${ticket.ref.displayId} ${ticket.ref.title}`,
     targetType: "work-item",
     kind: "jira-work-item",
+    dedupeKey: `${project.id}:${ticket.ref.displayId}:work-item`,
     ...jiraSummary,
     payload: (input?: AddToChatPayloadInput) =>
       buildTicketContextBundle({

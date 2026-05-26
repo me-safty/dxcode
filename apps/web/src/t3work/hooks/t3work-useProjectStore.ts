@@ -115,6 +115,7 @@ export function useProjectStore() {
     markThreadKickoffConsumed,
     deleteThread,
     renameThread,
+    updateThreadDisplayMode,
   } = useProjectThreadActions({
     threads,
     setThreads,
@@ -150,6 +151,7 @@ export function useProjectStore() {
     markThreadKickoffConsumed,
     deleteThread,
     renameThread,
+    updateThreadDisplayMode,
     resolveProjectId,
     setView,
   };

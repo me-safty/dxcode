@@ -1,25 +1,23 @@
 import type { ProjectShellProject } from "@t3tools/project-context";
 import { useMemo, type MouseEvent } from "react";
 
-import { SidebarMenuSubButton } from "~/t3work/components/ui/t3work-sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "~/t3work/components/ui/t3work-tooltip";
-import { JiraIssueTypeIcon } from "~/t3work/components/ticket/t3work-JiraIssueType";
 import { useTicketAgentContext } from "~/t3work/hooks/t3work-useTicketAgentContext";
 import { T3WorkAgentContextDropOverlay } from "~/t3work/t3work-agentContextDrag";
-import { TicketCardDetailsTooltip } from "~/t3work/t3work-TicketCardDetailsTooltip";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import { useAgentContext } from "~/t3work/hooks/t3work-useAgentContext";
 import { buildTicketSidebarPinnedItemId } from "~/t3work/t3work-sidebarPinningTypes";
+import { ProjectSidebarTicketCard } from "./t3work-ProjectSidebarTicketCard";
 import { ThreadRow } from "./t3work-ProjectSidebarThreadRow";
-import { ProjectSidebarTicketEntryActions } from "./t3work-ProjectSidebarTicketEntryActions";
 import { ProjectSidebarTicketEntryGitHubActivity } from "./t3work-ProjectSidebarTicketEntryGitHubActivity";
-import { useProjectSidebarNavItemDnd } from "./t3work-useProjectSidebarNavItemDnd";
 import {
-  readActiveThreadIdFromView,
-  type ProjectThread,
-  type ProjectTicket,
-  type ViewState,
-} from "~/t3work/t3work-types";
+  getSidebarSurfaceClassName,
+  getSidebarThreadState,
+  getSidebarTicketState,
+} from "./t3work-projectSidebarItemState";
+import { buildProjectSidebarThreadTree } from "./t3work-projectSidebarThreadTree";
+import { useProjectSidebarNavItemDnd } from "./t3work-useProjectSidebarNavItemDnd";
+import { useAutoScrollIntoView } from "./t3work-useAutoScrollIntoView";
+import { type ProjectThread, type ProjectTicket, type ViewState } from "~/t3work/t3work-types";
 
 export interface TicketSidebarEntryProps {
   project: ProjectShellProject;
@@ -106,11 +104,41 @@ export function TicketSidebarEntry({
       { visibleInSidebar: true },
     );
   };
-  const activeThreadId = readActiveThreadIdFromView(view);
+  const ticketState = getSidebarTicketState({
+    view,
+    ticketId: ticket.id,
+    ticketThreads,
+  });
+  const rowRef = useAutoScrollIntoView<HTMLAnchorElement>(ticketState.isOpen);
+  const threadTree = useMemo(() => buildProjectSidebarThreadTree(ticketThreads), [ticketThreads]);
+
+  const renderThreadBranch = (thread: ProjectThread): React.ReactNode => {
+    const childThreads = threadTree.childThreadsByParentId.get(thread.id) ?? [];
+    const threadState = getSidebarThreadState({ view, threadId: thread.id });
+
+    return (
+      <div key={thread.id}>
+        <ThreadRow
+          thread={thread}
+          variant="issue"
+          state={threadState}
+          onSelect={() => onSelectThread(projectId, thread.id)}
+          onDelete={() => onDeleteThread(thread.id)}
+          onRename={(newTitle) => onRenameThread(thread.id, newTitle)}
+          wrapWithMenuItem={false}
+        />
+        {childThreads.length > 0 ? (
+          <div className="mt-1 ml-2 space-y-1 pl-2">
+            {childThreads.map((childThread) => renderThreadBranch(childThread))}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div
-      className="group/ticket relative rounded-md bg-background/25 px-1 py-0.5"
+      className={`group/ticket relative px-1 py-0.5 ${getSidebarSurfaceClassName(ticketState)}`}
       onContextMenu={handleContextMenu}
       draggable={dragProps.draggable}
       onDragStart={dragProps.onDragStart}
@@ -122,71 +150,32 @@ export function TicketSidebarEntry({
         label="Drop to move this work item"
         className="rounded-md"
       />
-      <div className="relative">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <SidebarMenuSubButton
-                size="sm"
-                isActive={view?.type === "ticket" && view.ticketId === ticket.id}
-                className="h-auto min-h-8 w-full cursor-grab flex-col items-start py-1 active:cursor-grabbing"
-                onClick={() => onSelectTicket(projectId, ticket.id)}
-              />
-            }
-          >
-            <div className="flex w-full items-center gap-1">
-              <JiraIssueTypeIcon
-                issueType={ticket.issueType}
-                issueTypeIconUrl={ticket.issueTypeIconUrl ?? ticket.ref.issueTypeIconUrl}
-              />
-              <span className="truncate text-[11px] font-medium">{ticket.ref.displayId}</span>
-              <span className="ml-1 text-[10px] text-muted-foreground/75">{ticket.status}</span>
-            </div>
-            <div className="w-full truncate text-[10px] leading-tight text-muted-foreground/70">
-              {ticket.ref.title}
-            </div>
-          </TooltipTrigger>
-          <TooltipPopup side="top" align="start" className="max-w-84">
-            <TicketCardDetailsTooltip
-              ticket={ticket}
-              {...(jiraLastCheckedAt !== undefined ? { lastCheckedAt: jiraLastCheckedAt } : {})}
-            />
-          </TooltipPopup>
-        </Tooltip>
-        <ProjectSidebarTicketEntryActions
-          displayId={ticket.ref.displayId}
-          onCreateThread={async (event) => {
-            event.stopPropagation();
-            const threadId = onCreateTicketThread({
-              projectId,
-              ticketId: ticket.id,
-              ticketDisplayId: ticket.ref.displayId,
-            });
-            if (!ticketAgentContext) {
-              return;
-            }
-            await runAgentContextAction(ticketAgentContext, "add-to-chat", {
-              addToChatTarget: { type: "thread", threadId },
-            });
-          }}
-          onOpenMenu={handleOpenMenu}
-        />
-      </div>
+      <ProjectSidebarTicketCard
+        ticket={ticket}
+        state={ticketState}
+        {...(jiraLastCheckedAt !== undefined ? { jiraLastCheckedAt } : {})}
+        rowRef={rowRef}
+        onSelectTicket={() => onSelectTicket(projectId, ticket.id)}
+        onCreateThread={async (event) => {
+          event.stopPropagation();
+          const threadId = onCreateTicketThread({
+            projectId,
+            ticketId: ticket.id,
+            ticketDisplayId: ticket.ref.displayId,
+          });
+          if (!ticketAgentContext) {
+            return;
+          }
+          await runAgentContextAction(ticketAgentContext, "add-to-chat", {
+            addToChatTarget: { type: "thread", threadId },
+          });
+        }}
+        onOpenMenu={handleOpenMenu}
+      />
 
-      {ticketThreads.length > 0 ? (
+      {threadTree.rootThreads.length > 0 ? (
         <div className="mt-1 ml-2 space-y-1 pl-2">
-          {ticketThreads.map((thread) => (
-            <ThreadRow
-              key={thread.id}
-              thread={thread}
-              variant="issue"
-              isActive={activeThreadId === thread.id}
-              onSelect={() => onSelectThread(projectId, thread.id)}
-              onDelete={() => onDeleteThread(thread.id)}
-              onRename={(newTitle) => onRenameThread(thread.id, newTitle)}
-              wrapWithMenuItem={false}
-            />
-          ))}
+          {threadTree.rootThreads.map((thread) => renderThreadBranch(thread))}
         </div>
       ) : null}
 
@@ -197,9 +186,15 @@ export function TicketSidebarEntry({
           ? { lastCheckedAt: githubActivityLastCheckedAt }
           : {})}
         onItemContextMenu={(event, item) => {
-          openGitHubActivityAgentContextMenu(event, ticket, item);
+          openGitHubActivityAgentContextMenu(event, ticket, item, {
+            visibleInSidebar: true,
+          });
         }}
-        getItemDragCapabilities={(item) => getGitHubActivityAgentContext(ticket, item)}
+        getItemDragCapabilities={(item) =>
+          getGitHubActivityAgentContext(ticket, item, {
+            visibleInSidebar: true,
+          })
+        }
       />
     </div>
   );

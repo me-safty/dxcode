@@ -3,8 +3,16 @@ import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3to
 import type { Project } from "~/types";
 import { MOCK_TICKETS } from "~/t3work/data/t3work-mockThreads";
 import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
-import type { ProjectThread, T3workThreadToolId } from "~/t3work/t3work-types";
-import { normalizeWorkspaceRootPath, readOwnedWorkspaceRoots } from "./t3work-threadBridge";
+import type {
+  ProjectThread,
+  ProjectThreadDisplayMode,
+  T3workThreadToolId,
+} from "~/t3work/t3work-types";
+import {
+  normalizeWorkspaceRootPath,
+  readLiveProjectRoots,
+  readOwnedWorkspaceRoots,
+} from "./t3work-threadBridge";
 
 let projectIdCounter = 0;
 let threadIdCounter = 0;
@@ -26,7 +34,9 @@ export function buildThreadForProject(
   options?: {
     title?: string;
     ticketId?: string;
+    ticketDisplayId?: string;
     dashboardMode?: ProjectDashboardMode;
+    viewMode?: ProjectThreadDisplayMode;
     kickoffMessage?: string;
     kickoffPending?: boolean;
     kickoffModelSelection?: ModelSelection;
@@ -40,7 +50,9 @@ export function buildThreadForProject(
     id: generateThreadId(),
     projectId,
     ...(options?.ticketId ? { ticketId: options.ticketId } : {}),
+    ...(options?.ticketDisplayId ? { ticketDisplayId: options.ticketDisplayId } : {}),
     ...(options?.dashboardMode ? { dashboardMode: options.dashboardMode } : {}),
+    ...(options?.viewMode ? { displayMode: options.viewMode } : {}),
     title: options?.title ?? "New thread",
     status: "idle",
     lastMessageAt: now,
@@ -104,9 +116,13 @@ export function deriveLooseWorkspaceProjects(
   liveProjects: ReadonlyArray<Project>,
 ): ProjectShellProject[] {
   const workspaceRoots = new Set(storedProjects.flatMap(readOwnedWorkspaceRoots));
+  const storedProjectIds = new Set(storedProjects.map((project) => String(project.id)));
   return liveProjects.flatMap((project) => {
-    const normalizedProjectCwd = normalizeWorkspaceRootPath(project.cwd);
-    if (normalizedProjectCwd && workspaceRoots.has(normalizedProjectCwd)) {
+    if (storedProjectIds.has(String(project.id))) {
+      return [];
+    }
+
+    if (readLiveProjectRoots(project).some((root) => workspaceRoots.has(root))) {
       return [];
     }
     return [synthesizeLooseWorkspaceProject(project)];

@@ -1,14 +1,20 @@
 import { memo, useCallback, useRef, useState } from "react";
 import { EllipsisIcon, MessageSquareIcon } from "lucide-react";
+import { resolveThreadRowClassName } from "~/components/Sidebar.logic";
 import type { ProjectThread } from "~/t3work/t3work-types";
 import { SidebarMenuSubButton, SidebarMenuSubItem } from "~/t3work/components/ui/t3work-sidebar";
 import { readLocalApi } from "~/localApi";
 import { formatRelativeTime, resolveThreadStatusPill } from "./t3work-projectSidebarShared";
+import {
+  getSidebarSurfaceClassName,
+  type SidebarItemState,
+} from "./t3work-projectSidebarItemState";
+import { useAutoScrollIntoView } from "./t3work-useAutoScrollIntoView";
 
 interface ThreadRowProps {
   thread: ProjectThread;
   variant?: "default" | "issue";
-  isActive: boolean;
+  state: SidebarItemState;
   onSelect: () => void;
   onDelete: () => void;
   onRename: (newTitle: string) => void;
@@ -19,7 +25,7 @@ export const ThreadRow = memo(function ThreadRow(props: ThreadRowProps) {
   const {
     thread,
     variant = "default",
-    isActive,
+    state,
     onSelect,
     onDelete,
     onRename,
@@ -28,6 +34,7 @@ export const ThreadRow = memo(function ThreadRow(props: ThreadRowProps) {
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameTitle, setRenameTitle] = useState(thread.title);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const rowRef = useAutoScrollIntoView<HTMLAnchorElement>(state.isOpen);
   const statusPill = resolveThreadStatusPill(thread);
 
   const openThreadMenu = useCallback(
@@ -96,11 +103,13 @@ export const ThreadRow = memo(function ThreadRow(props: ThreadRowProps) {
 
   const content = (
     <SidebarMenuSubButton
+      ref={rowRef}
       size="sm"
-      isActive={isActive}
-      className={`h-7 w-full translate-x-0 cursor-pointer justify-start px-2 text-left select-none ${
-        variant === "issue" ? "rounded-md bg-muted/25 hover:bg-accent/70" : ""
-      }`}
+      isActive={state.isSelected}
+      className={resolveThreadRowClassName({
+        isActive: state.isSelected,
+        isSelected: false,
+      })}
       onClick={onSelect}
     >
       <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
@@ -153,14 +162,20 @@ export const ThreadRow = memo(function ThreadRow(props: ThreadRowProps) {
 
   if (!wrapWithMenuItem) {
     return (
-      <div className="group/menu-sub-item relative w-full" onContextMenu={handleContextMenu}>
+      <div
+        className={`group/menu-sub-item relative w-full ${getSidebarSurfaceClassName(state)}`}
+        onContextMenu={handleContextMenu}
+      >
         {content}
       </div>
     );
   }
 
   return (
-    <SidebarMenuSubItem className="w-full" onContextMenu={handleContextMenu}>
+    <SidebarMenuSubItem
+      className={`w-full ${getSidebarSurfaceClassName(state)}`}
+      onContextMenu={handleContextMenu}
+    >
       {content}
     </SidebarMenuSubItem>
   );

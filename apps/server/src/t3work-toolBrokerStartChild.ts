@@ -4,10 +4,7 @@ import * as Effect from "effect/Effect";
 
 import type { OrchestrationEngineShape } from "./orchestration/Services/OrchestrationEngine.ts";
 import type { T3workThreadToolContextStoreShape } from "./t3work-threadToolContextStore.ts";
-import {
-  appendThreadActivity,
-  type T3workStartChildLoadThreadProject,
-} from "./t3work-toolBrokerStartChildActivity.ts";
+import { type T3workStartChildLoadThreadProject } from "./t3work-toolBrokerStartChildActivity.ts";
 import {
   buildStartChildModelSelection,
   mapKickoffModeToInteractionMode,
@@ -22,7 +19,12 @@ import {
   type T3workStartChildServices,
 } from "./t3work-toolBrokerStartChildContext.ts";
 import {
+  appendStartChildHandoffActivities,
+  resolveStartChildHandoffPlacement,
+} from "./t3work-toolBrokerStartChildHandoff.ts";
+import {
   createChildThreadToolContext,
+  readThreadDisplayModeFromToolContext,
   readTicketIdFromThreadToolContext,
 } from "./t3work-toolBrokerStartChildToolContext.ts";
 
@@ -48,7 +50,14 @@ export function makeStartChildThread(input: {
       }
 
       const childThreadId = ThreadId.make(crypto.randomUUID());
-      const ticketId = readTicketIdFromThreadToolContext(parentToolContext);
+      const currentTicketId = readTicketIdFromThreadToolContext(parentToolContext);
+      const currentDisplayMode = readThreadDisplayModeFromToolContext(parentToolContext);
+      const { parentThreadId, ticketId } = resolveStartChildHandoffPlacement({
+        currentDisplayMode,
+        currentTicketId,
+        requestedTicketId: args.ticketId,
+        threadId: thread.id,
+      });
       const modelSelection = buildStartChildModelSelection(baseModelSelection, args);
       const interactionMode = mapKickoffModeToInteractionMode(args.kickoffMode);
       const createdAt = DateTime.formatIso(yield* DateTime.now);
@@ -126,35 +135,20 @@ export function makeStartChildThread(input: {
         }
       }
 
-      const handoffPayload = {
-        parentThreadId: thread.id,
-        parentTitle: thread.title,
+      yield* appendStartChildHandoffActivities({
+        orchestration: input.orchestration,
+        threadId: thread.id,
+        threadTitle: thread.title,
         childThreadId,
         childTitle: args.name,
+        createdAt,
+        ...(parentThreadId ? { handoffParentThreadId: parentThreadId } : {}),
         ...(ticketId ? { ticketId } : {}),
         ...(repoFullName ? { repoFullName } : {}),
         ...(branch ? { branch } : {}),
         ...(worktreePath ? { worktreePath } : {}),
         ...(args.kickoffPrompt ? { kickoffPrompt: args.kickoffPrompt } : {}),
-      };
-
-      yield* Effect.all([
-        appendThreadActivity(input.orchestration, thread.id, {
-          kind: "t3work.handoff.started",
-          summary: `Started child session ${args.name}`,
-          payload: handoffPayload,
-          createdAt,
-        }),
-        appendThreadActivity(input.orchestration, childThreadId, {
-          kind: "t3work.handoff.created",
-          summary: `Created from ${thread.title}`,
-          payload: handoffPayload,
-          createdAt,
-        }),
-      ]).pipe(
-        Effect.asVoid,
-        Effect.catch(() => Effect.void),
-      );
+      });
 
       let started = false,
         startupError: string | undefined;
@@ -191,6 +185,9 @@ export function makeStartChildThread(input: {
       }
 
       const reasoningEffort = readModelSelectionReasoningEffort(modelSelection);
+      const requestedModel = args.model;
+      const modelNormalizedFrom =
+        requestedModel && requestedModel !== modelSelection.model ? requestedModel : undefined;
 
       return {
         ok: true,
@@ -201,11 +198,9 @@ export function makeStartChildThread(input: {
         interaction_mode: interactionMode,
         runtime_mode: thread.runtimeMode,
         model: modelSelection.model,
+        ...(modelNormalizedFrom ? { model_normalized_from: modelNormalizedFrom } : {}),
         setup_script_status: setupScriptStatus,
-        navigate_to: {
-          target: "project_session",
-          project_session_id: childThreadId,
-        },
+        navigate_to: { target: "project_session", project_session_id: childThreadId },
         ...(requestedKickoffMode ? { requested_kickoff_mode: requestedKickoffMode } : {}),
         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         ...(repoFullName ? { repo_full_name: repoFullName } : {}),

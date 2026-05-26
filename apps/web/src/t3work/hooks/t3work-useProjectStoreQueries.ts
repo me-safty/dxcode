@@ -12,6 +12,37 @@ import {
   resolveStoredProjectId,
 } from "./t3work-threadBridge";
 
+export function resolveProjectThreadsForQuery(input: {
+  projectId: string;
+  projects: ProjectShellProject[];
+  threads: ProjectThread[];
+  liveProjects: ReadonlyArray<Project>;
+  liveThreads: ReadonlyArray<Thread>;
+}) {
+  const { projectId, projects, threads, liveProjects, liveThreads } = input;
+  const resolvedProjectId = resolveStoredProjectId(projectId, projects, liveProjects);
+  const project =
+    projects.find((candidate) => candidate.id === resolvedProjectId) ??
+    projects.find((candidate) => candidate.id === projectId);
+  const canonicalProjectId = resolveCanonicalProjectId(project, liveProjects) ?? projectId;
+  const remappedLocalThreads = threads.map((thread) =>
+    remapProjectThreadToStoredProject(thread, projects, liveProjects),
+  );
+  const localThreads = remappedLocalThreads.filter(
+    (thread) => thread.projectId === resolvedProjectId,
+  );
+  const claimedThreadIds = new Set(
+    remappedLocalThreads
+      .filter((thread) => thread.projectId !== resolvedProjectId)
+      .map((thread) => thread.id),
+  );
+  const liveProjectThreads = liveThreads
+    .filter((thread) => thread.projectId === canonicalProjectId && !claimedThreadIds.has(thread.id))
+    .map((thread) => mapLiveThreadToProjectThread(thread, resolvedProjectId));
+
+  return mergeProjectThreads([...localThreads, ...liveProjectThreads]);
+}
+
 export function useProjectStoreQueries(input: {
   projects: ProjectShellProject[];
   threads: ProjectThread[];
@@ -21,21 +52,14 @@ export function useProjectStoreQueries(input: {
   const { projects, threads, liveProjects, liveThreads } = input;
 
   const getThreadsForProject = useCallback(
-    (projectId: string) => {
-      const resolvedProjectId = resolveStoredProjectId(projectId, projects, liveProjects);
-      const project =
-        projects.find((candidate) => candidate.id === resolvedProjectId) ??
-        projects.find((candidate) => candidate.id === projectId);
-      const canonicalProjectId = resolveCanonicalProjectId(project, liveProjects) ?? projectId;
-      const localThreads = threads
-        .map((thread) => remapProjectThreadToStoredProject(thread, projects, liveProjects))
-        .filter((thread) => thread.projectId === resolvedProjectId);
-      const liveProjectThreads = liveThreads
-        .filter((thread) => thread.projectId === canonicalProjectId)
-        .map((thread) => mapLiveThreadToProjectThread(thread, resolvedProjectId));
-
-      return mergeProjectThreads([...localThreads, ...liveProjectThreads]);
-    },
+    (projectId: string) =>
+      resolveProjectThreadsForQuery({
+        projectId,
+        projects,
+        threads,
+        liveProjects,
+        liveThreads,
+      }),
     [liveProjects, liveThreads, projects, threads],
   );
 

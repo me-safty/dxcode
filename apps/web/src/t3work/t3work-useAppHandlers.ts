@@ -4,6 +4,7 @@ import { useThreadActions } from "~/hooks/useThreadActions";
 import { useBackend } from "~/t3work/backend/t3work-index";
 import { useAddToChat } from "~/t3work/hooks/t3work-useAddToChat";
 import { useProjectStore } from "~/t3work/hooks/t3work-useProjectStore";
+import { matchesProjectThreadTicket } from "~/t3work/t3work-ticketLookup";
 import type {
   ProjectKickoffThreadInput,
   TicketKickoffThreadInput,
@@ -142,10 +143,13 @@ export function useAppHandlers({
       const resolvedProjectId = store.resolveProjectId(input.projectId);
       const matching = store
         .getThreadsForProject(resolvedProjectId)
-        .filter((thread) => thread.ticketId === input.ticketId);
+        .filter((thread) =>
+          matchesProjectThreadTicket(thread, input.ticketId, input.ticketDisplayId),
+        );
       const sequence = matching.length + 1;
       const thread = store.createThread(resolvedProjectId, {
         ticketId: input.ticketId,
+        ticketDisplayId: input.ticketDisplayId,
         title: `${input.ticketDisplayId} thread ${sequence}`,
       });
       onOpenTicket?.(resolvedProjectId, input.ticketId, thread.id);

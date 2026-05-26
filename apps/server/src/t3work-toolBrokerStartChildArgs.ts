@@ -1,11 +1,13 @@
 import { type ModelSelection, type ProviderInteractionMode } from "@t3tools/contracts";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+import { resolveModelSlugForProvider } from "@t3tools/shared/model";
 
 export type T3workStartChildKickoffMode = "plan" | "interactive" | "autopilot";
 export type T3workStartChildReasoningEffort = "low" | "medium" | "high";
 
 export type T3workStartChildArgs = {
   readonly name: string;
+  readonly ticketId?: string;
   readonly kickoffPrompt?: string;
   readonly kickoffMode?: T3workStartChildKickoffMode;
   readonly model?: string;
@@ -39,6 +41,7 @@ export const readStartChildArgs = (value: unknown): T3workStartChildArgsResult =
   const candidate = value as {
     readonly name?: unknown;
     readonly title?: unknown;
+    readonly ticket_id?: unknown;
     readonly kickoff_prompt?: unknown;
     readonly kickoff_mode?: unknown;
     readonly model?: unknown;
@@ -55,6 +58,10 @@ export const readStartChildArgs = (value: unknown): T3workStartChildArgsResult =
   }
 
   const name = rawName.trim();
+  const ticketId =
+    typeof candidate.ticket_id === "string" && candidate.ticket_id.trim().length > 0
+      ? candidate.ticket_id.trim()
+      : undefined;
   const kickoffPrompt =
     typeof candidate.kickoff_prompt === "string" && candidate.kickoff_prompt.trim().length > 0
       ? candidate.kickoff_prompt.trim()
@@ -115,6 +122,7 @@ export const readStartChildArgs = (value: unknown): T3workStartChildArgsResult =
     ok: true,
     value: {
       name,
+      ...(ticketId ? { ticketId } : {}),
       ...(kickoffPrompt ? { kickoffPrompt } : {}),
       ...(kickoffMode ? { kickoffMode } : {}),
       ...(model ? { model } : {}),
@@ -133,6 +141,10 @@ export const buildStartChildModelSelection = (
   input: Pick<T3workStartChildArgs, "model" | "reasoningEffort">,
 ): ModelSelection => {
   const nextModel = input.model ?? baseModelSelection.model;
+  const normalizedModel = resolveModelSlugForProvider(
+    baseModelSelection.instanceId as never,
+    nextModel,
+  );
   const nextSelections = input.reasoningEffort
     ? [
         ...(baseModelSelection.options ?? []).filter(
@@ -144,7 +156,7 @@ export const buildStartChildModelSelection = (
 
   return {
     ...baseModelSelection,
-    model: nextModel,
+    model: normalizedModel,
     ...(nextSelections ? { options: nextSelections } : {}),
   };
 };

@@ -63,6 +63,20 @@ describe("buildExistingProjectThreadViewState", () => {
       threadId: "thread-1",
     });
   });
+
+  it("reopens ticket-backed threads in full thread view when remembered", () => {
+    expect(
+      buildExistingProjectThreadViewState("project-1", {
+        id: "thread-1",
+        ticketId: "ticket-1",
+        displayMode: "thread",
+      }),
+    ).toEqual({
+      type: "thread",
+      projectId: "project-1",
+      threadId: "thread-1",
+    });
+  });
 });
 
 describe("isEmbeddedProjectThread", () => {

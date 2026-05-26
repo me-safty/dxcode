@@ -3,12 +3,16 @@ import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeS
 
 export type T3workThreadToolId = T3workToolId;
 
+export type ProjectThreadDisplayMode = "embedded" | "thread";
+
 export type ProjectThread = {
   id: string;
   projectId: string;
   parentThreadId?: string;
   ticketId?: string;
+  ticketDisplayId?: string;
   dashboardMode?: ProjectDashboardMode;
+  displayMode?: ProjectThreadDisplayMode;
   title: string;
   messageCount: number;
   lastMessageAt: string;

@@ -436,12 +436,13 @@ function buildThreadStartParams(input: {
         inputSchema: registration.inputSchema,
       }))
     : undefined;
+  const normalizedModel = normalizeCodexModelSlug(input.model);
 
   return decodeCodexThreadStartParamsWithDynamicTools({
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
-    ...(input.model ? { model: input.model } : {}),
+    ...(normalizedModel ? { model: normalizedModel } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     ...(dynamicTools && dynamicTools.length > 0 ? { dynamicTools } : {}),
   }).pipe(
@@ -538,9 +539,10 @@ export function buildTurnStartParams(input: {
   }
 
   const config = runtimeModeToThreadConfig(input.runtimeMode);
+  const normalizedModel = normalizeCodexModelSlug(input.model);
   const collaborationMode = buildCodexCollaborationMode({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
-    ...(input.model ? { model: input.model } : {}),
+    ...(normalizedModel ? { model: normalizedModel } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
   });
 
@@ -549,7 +551,7 @@ export function buildTurnStartParams(input: {
     input: turnInput,
     approvalPolicy: config.approvalPolicy,
     sandboxPolicy: runtimeModeToTurnSandboxPolicy(input.runtimeMode),
-    ...(input.model ? { model: input.model } : {}),
+    ...(normalizedModel ? { model: normalizedModel } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
     ...(collaborationMode ? { collaborationMode } : {}),

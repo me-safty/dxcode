@@ -3,13 +3,15 @@ import { describe, expect, it } from "vitest";
 
 import { ProjectSidebarDashboardNav } from "./t3work-ProjectSidebarDashboardNav";
 
+const inactiveState = { isSelected: false, isOpen: false };
+
 function renderNav(
   overrides: Partial<React.ComponentProps<typeof ProjectSidebarDashboardNav>> = {},
 ): string {
   return renderToStaticMarkup(
     <ProjectSidebarDashboardNav
-      isBacklogActive={false}
-      isMyWorkActive={false}
+      backlogState={inactiveState}
+      myWorkState={inactiveState}
       myWorkExpanded
       myWorkThreadCount={0}
       onMyWorkExpandedChange={() => {}}

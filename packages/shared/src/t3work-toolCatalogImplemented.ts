@@ -12,6 +12,12 @@ const START_CHILD_INPUT_SCHEMA = {
       description: "Name for the new child session.",
       minLength: 1,
     },
+    ticket_id: {
+      type: "string",
+      description:
+        "Optional project ticket ID to attach the child session to. When this differs from the current ticket, the new session is attached directly under that ticket instead of nesting under the current thread.",
+      minLength: 1,
+    },
     kickoff_prompt: {
       type: "string",
       description: "Optional first prompt sent to the child session.",
@@ -25,7 +31,8 @@ const START_CHILD_INPUT_SCHEMA = {
     },
     model: {
       type: "string",
-      description: "Optional model slug override for the child session.",
+      description:
+        "Optional canonical model slug override for the child session. Prefer omitting this to inherit the current thread model; if you set it, use a provider-specific canonical slug such as 'gpt-5.4' or 'gpt-5.3-codex', not a generic alias like 'gpt-5'.",
       minLength: 1,
     },
     reasoning_effort: {

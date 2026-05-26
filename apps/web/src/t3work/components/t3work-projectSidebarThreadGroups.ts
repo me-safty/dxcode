@@ -1,10 +1,12 @@
 import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
-import type { ProjectThread } from "~/t3work/t3work-types";
+import { resolveCanonicalProjectTicketId } from "~/t3work/t3work-ticketLookup";
+import type { ProjectThread, ProjectTicket } from "~/t3work/t3work-types";
 
 type DashboardThreadsByMode = Record<ProjectDashboardMode, ProjectThread[]>;
 
 type BuildProjectSidebarThreadGroupsOptions = {
   visibleTicketIds?: ReadonlySet<string>;
+  ticketLookup?: ReadonlyMap<string, ProjectTicket>;
 };
 
 export function buildProjectSidebarThreadGroups(
@@ -24,15 +26,17 @@ export function buildProjectSidebarThreadGroups(
   const visibleTicketIds = options.visibleTicketIds;
 
   for (const thread of threads) {
-    if (thread.ticketId) {
-      if (visibleTicketIds && !visibleTicketIds.has(thread.ticketId)) {
+    const ticketId = resolveCanonicalProjectTicketId(thread.ticketId, options.ticketLookup);
+
+    if (ticketId) {
+      if (visibleTicketIds && !visibleTicketIds.has(ticketId)) {
         projectLevelThreads.push(thread);
         continue;
       }
 
-      const existing = ticketThreadsById.get(thread.ticketId) ?? [];
+      const existing = ticketThreadsById.get(ticketId) ?? [];
       existing.push(thread);
-      ticketThreadsById.set(thread.ticketId, existing);
+      ticketThreadsById.set(ticketId, existing);
       continue;
     }
 

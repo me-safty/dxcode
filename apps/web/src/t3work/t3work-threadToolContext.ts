@@ -4,7 +4,11 @@ import {
   type T3workToolCapability,
 } from "@t3tools/project-context/t3workToolCatalog";
 
-import type { ProjectThread, T3workThreadToolId } from "~/t3work/t3work-types";
+import type {
+  ProjectThread,
+  ProjectThreadDisplayMode,
+  T3workThreadToolId,
+} from "~/t3work/t3work-types";
 
 export type T3workTurnToolCapability = T3workToolCapability;
 
@@ -40,6 +44,7 @@ type CreateT3workTurnToolContextInput = {
   workspaceRoot?: string;
   threadId: string;
   threadTitle: string;
+  displayMode?: ProjectThreadDisplayMode;
   ticketId?: string;
   selectedToolIds?: ReadonlyArray<T3workThreadToolId>;
 };
@@ -66,6 +71,7 @@ export function createT3workTurnToolContext(
         ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
         threadId: input.threadId,
         threadTitle: input.threadTitle,
+        displayMode: input.displayMode ?? "thread",
         ...(input.ticketId ? { ticketId: input.ticketId } : {}),
       },
     },
@@ -84,7 +90,9 @@ export function mergeProjectThreadLocalState(
     ...next,
     ...(existing.parentThreadId ? { parentThreadId: existing.parentThreadId } : {}),
     ...(existing.ticketId ? { ticketId: existing.ticketId } : {}),
+    ...(existing.ticketDisplayId ? { ticketDisplayId: existing.ticketDisplayId } : {}),
     ...(existing.dashboardMode ? { dashboardMode: existing.dashboardMode } : {}),
+    ...(existing.displayMode ? { displayMode: existing.displayMode } : {}),
     ...(existing.kickoffMessage ? { kickoffMessage: existing.kickoffMessage } : {}),
     ...(existing.kickoffPending !== undefined ? { kickoffPending: existing.kickoffPending } : {}),
     ...(existing.kickoffModelSelection

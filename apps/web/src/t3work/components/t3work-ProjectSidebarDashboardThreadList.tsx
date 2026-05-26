@@ -1,11 +1,12 @@
 import { SidebarMenuSub } from "~/t3work/components/ui/t3work-sidebar";
-import type { ProjectThread } from "~/t3work/t3work-types";
+import type { ProjectThread, ViewState } from "~/t3work/t3work-types";
 import { ThreadRow } from "./t3work-ProjectSidebarThreadRow";
+import { getSidebarThreadState } from "./t3work-projectSidebarItemState";
 
 type ProjectSidebarDashboardThreadListProps = {
   projectId: string;
   threads: ReadonlyArray<ProjectThread>;
-  activeThreadId: string | null;
+  view: ViewState | null;
   onSelectThread: (projectId: string, threadId: string) => void;
   onDeleteThread: (threadId: string) => void;
   onRenameThread: (threadId: string, newTitle: string) => void;
@@ -14,7 +15,7 @@ type ProjectSidebarDashboardThreadListProps = {
 export function ProjectSidebarDashboardThreadList({
   projectId,
   threads,
-  activeThreadId,
+  view,
   onSelectThread,
   onDeleteThread,
   onRenameThread,
@@ -30,7 +31,7 @@ export function ProjectSidebarDashboardThreadList({
           key={thread.id}
           thread={thread}
           variant="issue"
-          isActive={activeThreadId === thread.id}
+          state={getSidebarThreadState({ view, threadId: thread.id })}
           onSelect={() => onSelectThread(projectId, thread.id)}
           onDelete={() => onDeleteThread(thread.id)}
           onRename={(newTitle) => onRenameThread(thread.id, newTitle)}

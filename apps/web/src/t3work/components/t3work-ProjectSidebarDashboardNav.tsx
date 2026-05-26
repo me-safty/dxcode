@@ -9,10 +9,14 @@ import {
 import { useT3WorkPinnedSidebarStore } from "~/t3work/t3work-pinnedSidebarStore";
 import { useT3WorkSidebarNavPreferencesStore } from "~/t3work/t3work-sidebarNavPreferencesStore";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
+import {
+  getSidebarStandaloneButtonClassName,
+  type SidebarItemState,
+} from "./t3work-projectSidebarItemState";
 
 type ProjectSidebarDashboardNavProps = {
-  isBacklogActive: boolean;
-  isMyWorkActive: boolean;
+  backlogState: SidebarItemState;
+  myWorkState: SidebarItemState;
   myWorkExpanded: boolean;
   myWorkThreadCount: number;
   pinnedItemCount?: number;
@@ -31,8 +35,8 @@ type ProjectSidebarDashboardNavProps = {
 };
 
 export function ProjectSidebarDashboardNav({
-  isBacklogActive,
-  isMyWorkActive,
+  backlogState,
+  myWorkState,
   myWorkExpanded,
   myWorkThreadCount,
   pinnedItemCount = 0,
@@ -80,8 +84,10 @@ export function ProjectSidebarDashboardNav({
         <div className="w-full">
           <SidebarMenuSubButton
             size="sm"
-            isActive={isBacklogActive}
-            className="h-7 w-full translate-x-0 justify-start px-2 text-left text-[11px]"
+            isActive={backlogState.isSelected}
+            className={`h-7 w-full translate-x-0 justify-start px-2 text-left text-[11px] ${getSidebarStandaloneButtonClassName(
+              backlogState,
+            )}`}
             onClick={onSelectBacklog}
           >
             <span className="truncate">Backlog</span>
@@ -93,8 +99,10 @@ export function ProjectSidebarDashboardNav({
         <div className="relative w-full" {...dropProps}>
           <SidebarMenuSubButton
             size="sm"
-            isActive={isMyWorkActive}
-            className="h-7 w-full translate-x-0 justify-start px-2 pr-7 text-left text-[11px]"
+            isActive={myWorkState.isSelected}
+            className={`h-7 w-full translate-x-0 justify-start px-2 pr-7 text-left text-[11px] ${getSidebarStandaloneButtonClassName(
+              myWorkState,
+            )}`}
             onClick={onSelectMyWork}
           >
             <span className="truncate">My work</span>

@@ -7,6 +7,7 @@ import type {
 import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
 import {
   readActiveThreadIdFromView,
+  type ProjectThreadDisplayMode,
   type ProjectThread,
   type ViewState,
 } from "~/t3work/t3work-types";
@@ -30,6 +31,7 @@ type MainContentProps = {
   onKickoffProjectThread: (input: ProjectKickoffThreadInput) => void;
   onKickoffTicketThread: (input: TicketKickoffThreadInput) => void;
   onThreadKickoffConsumed: (threadId: string) => void;
+  onThreadDisplayModeChange: (threadId: string, displayMode: ProjectThreadDisplayMode) => void;
   onBackToDashboard: (projectId: string) => void;
   onCreate: () => void;
   onInlineProjectCreated: (project: ProjectShellProject) => void;
@@ -48,6 +50,7 @@ export function AppMainContent({
   projects,
   allProjects,
   getThreadsForProject,
+  onOpenTicket,
   onOpenThread,
   onOpenFullThread,
   onKickoffProjectThread,
@@ -57,6 +60,7 @@ export function AppMainContent({
   renderDashboard,
   renderTicketDetail,
   onThreadKickoffConsumed,
+  onThreadDisplayModeChange,
 }: MainContentProps) {
   const backendState = useBackendState();
   const { homeChatProject, homeChatThreadId } = useHomeProjectChat({
@@ -150,6 +154,7 @@ export function AppMainContent({
           onOpenThread={onOpenThread}
           onOpenFullThread={onOpenFullThread}
           onThreadKickoffConsumed={onThreadKickoffConsumed}
+          onRememberEmbeddedThread={(threadId) => onThreadDisplayModeChange(threadId, "embedded")}
           onKickoffProjectThread={onKickoffProjectThread}
           renderDashboard={renderDashboard}
         />
@@ -165,14 +170,15 @@ export function AppMainContent({
         view={view}
         threadProject={threadProject}
         resolvedThread={resolvedThread}
-        onOpenThread={onOpenThread}
+        onOpenTicket={onOpenTicket}
         onThreadKickoffConsumed={onThreadKickoffConsumed}
+        onRememberFullThread={(threadId) => onThreadDisplayModeChange(threadId, "thread")}
         onBackToDashboard={onBackToDashboard}
       />
     );
   }
 
-  const project = projects.find((candidate) => candidate.id === view.projectId);
+  const project = allProjects.find((candidate) => candidate.id === view.projectId);
   if (!project) {
     return renderHomeBrowserEmpty();
   }
@@ -190,6 +196,7 @@ export function AppMainContent({
         onOpenThread={onOpenThread}
         onOpenFullThread={onOpenFullThread}
         onThreadKickoffConsumed={onThreadKickoffConsumed}
+        onRememberEmbeddedThread={(threadId) => onThreadDisplayModeChange(threadId, "embedded")}
         onKickoffProjectThread={onKickoffProjectThread}
         renderDashboard={renderDashboard}
       />

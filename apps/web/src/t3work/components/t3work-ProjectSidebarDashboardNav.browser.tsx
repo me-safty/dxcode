@@ -5,6 +5,8 @@ import { render } from "vitest-browser-react";
 
 import { ProjectSidebarDashboardNav } from "./t3work-ProjectSidebarDashboardNav";
 
+const inactiveState = { isSelected: false, isOpen: false };
+
 afterEach(() => {
   document.body.innerHTML = "";
 });
@@ -20,8 +22,8 @@ async function renderNav(
     host,
     screen: await render(
       <ProjectSidebarDashboardNav
-        isBacklogActive={false}
-        isMyWorkActive={false}
+        backlogState={inactiveState}
+        myWorkState={inactiveState}
         myWorkExpanded
         myWorkThreadCount={0}
         onMyWorkExpandedChange={() => {}}

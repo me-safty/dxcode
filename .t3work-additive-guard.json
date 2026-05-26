@@ -23,7 +23,9 @@
     "apps/web/src/routeTree.gen.ts",
     "apps/server/src/provider/Layers/CodexSessionRuntime.ts",
     "apps/server/src/provider/Layers/CodexSessionRuntime.test.ts",
+    "packages/contracts/src/model.ts",
     "packages/contracts/src/settings.ts",
+    "packages/shared/src/model.test.ts",
     "packages/t3-adapter/src/workspace.ts"
   ],
   "allowedUnprefixedNewFiles": [

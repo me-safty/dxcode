@@ -4,13 +4,24 @@ import type { ProjectShellProject } from "@t3tools/project-context";
 import { useT3WorkPinnedSidebarStore } from "~/t3work/t3work-pinnedSidebarStore";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { T3WorkSidebarPinnedItem } from "~/t3work/t3work-sidebarPinningTypes";
-import type { ProjectTicket } from "~/t3work/t3work-types";
+import { buildProjectTicketLookup } from "~/t3work/t3work-ticketLookup";
+import type { ProjectThread, ProjectTicket } from "~/t3work/t3work-types";
+import { buildPinnedTicketThreadFallbacks } from "./t3work-projectSidebarItemState";
 
 export type ResolvedPinnedSidebarItem =
   | {
       kind: "jira-work-item";
       pinnedItem: Extract<T3WorkSidebarPinnedItem, { kind: "jira-work-item" }>;
       ticket: ProjectTicket;
+      ticketThreads: readonly ProjectThread[];
+    }
+  | {
+      kind: "jira-work-item-unresolved";
+      pinnedItem: Extract<T3WorkSidebarPinnedItem, { kind: "jira-work-item" }>;
+      ticketId: string;
+      ticketDisplayId: string;
+      title: string;
+      ticketThreads: readonly ProjectThread[];
     }
   | {
       kind: "github-activity";
@@ -22,15 +33,23 @@ export type ResolvedPinnedSidebarItem =
 export function useProjectSidebarPinnedItems(input: {
   project: ProjectShellProject;
   projectTickets: ReadonlyArray<ProjectTicket>;
+  projectThreads: ReadonlyArray<ProjectThread>;
   githubActivityByWorkItem: ReadonlyMap<string, ReadonlyArray<GitHubWorkActivityItem>>;
   unlinkedGitHubActivityItems: ReadonlyArray<GitHubWorkActivityItem>;
 }) {
-  const { project, projectTickets, githubActivityByWorkItem, unlinkedGitHubActivityItems } = input;
+  const {
+    project,
+    projectTickets,
+    projectThreads,
+    githubActivityByWorkItem,
+    unlinkedGitHubActivityItems,
+  } = input;
   const pinnedSidebarItems = useT3WorkPinnedSidebarStore((state) => state.items);
 
-  const ticketById = useMemo(
-    () => new Map(projectTickets.map((ticket) => [ticket.id, ticket] as const)),
-    [projectTickets],
+  const ticketLookup = useMemo(() => buildProjectTicketLookup(projectTickets), [projectTickets]);
+  const ticketThreadsById = useMemo(
+    () => buildPinnedTicketThreadFallbacks(projectThreads, ticketLookup),
+    [projectThreads, ticketLookup],
   );
   const githubActivityById = useMemo(() => {
     const resolvedItems = new Map<
@@ -60,9 +79,23 @@ export function useProjectSidebarPinnedItems(input: {
       }
 
       if (pinnedItem.kind === "jira-work-item") {
-        const ticket = ticketById.get(pinnedItem.ticketId);
+        const ticket = ticketLookup.get(pinnedItem.ticketId);
+        const ticketThreads = ticketThreadsById.get(pinnedItem.ticketId)?.ticketThreads ?? [];
         if (ticket) {
-          resolvedItems.push({ kind: "jira-work-item", pinnedItem, ticket });
+          resolvedItems.push({ kind: "jira-work-item", pinnedItem, ticket, ticketThreads });
+          continue;
+        }
+
+        const fallback = ticketThreadsById.get(pinnedItem.ticketId);
+        if (fallback) {
+          resolvedItems.push({
+            kind: "jira-work-item-unresolved",
+            pinnedItem,
+            ticketId: fallback.ticketId,
+            ticketDisplayId: fallback.ticketDisplayId,
+            title: fallback.title,
+            ticketThreads: fallback.ticketThreads,
+          });
         }
         continue;
       }
@@ -79,5 +112,5 @@ export function useProjectSidebarPinnedItems(input: {
     }
 
     return resolvedItems;
-  }, [githubActivityById, pinnedSidebarItems, project.id, ticketById]);
+  }, [githubActivityById, pinnedSidebarItems, project.id, ticketLookup, ticketThreadsById]);
 }

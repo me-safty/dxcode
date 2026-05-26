@@ -19,13 +19,22 @@ function makeThread(overrides: Partial<ProjectThread> = {}): ProjectThread {
 }
 
 describe("mergeProjectThreadLocalState", () => {
-  it("preserves dashboard ownership from local shadow thread state", () => {
-    const existing = makeThread({ dashboardMode: "backlog", kickoffMessage: "Plan this work" });
+  it("preserves dashboard ownership, ticket alias metadata, and display mode from local shadow thread state", () => {
+    const existing = makeThread({
+      ticketId: "ticket-1",
+      ticketDisplayId: "PROJ-1",
+      dashboardMode: "backlog",
+      displayMode: "thread",
+      kickoffMessage: "Plan this work",
+    });
     const next = makeThread({ title: "Live thread" });
 
     expect(mergeProjectThreadLocalState(existing, next)).toEqual({
       ...next,
+      ticketId: "ticket-1",
+      ticketDisplayId: "PROJ-1",
       dashboardMode: "backlog",
+      displayMode: "thread",
       kickoffMessage: "Plan this work",
     });
   });
@@ -68,6 +77,7 @@ describe("createT3workTurnToolContext", () => {
           workspaceRoot: "/workspace/project-alpha",
           threadId: "thread-1",
           threadTitle: "Kickoff",
+          displayMode: "thread",
         },
       },
     });
@@ -80,6 +90,7 @@ describe("createT3workTurnToolContext", () => {
       workspaceRoot: "/workspace/project-alpha",
       threadId: "thread-1",
       threadTitle: "Kickoff",
+      displayMode: "embedded",
       ticketId: "ticket-1",
       selectedToolIds: [
         "t3work.view.read",
@@ -116,6 +127,7 @@ describe("createT3workTurnToolContext", () => {
           workspaceRoot: "/workspace/project-alpha",
           threadId: "thread-1",
           threadTitle: "Kickoff",
+          displayMode: "embedded",
           ticketId: "ticket-1",
         },
       },

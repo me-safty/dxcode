@@ -4,7 +4,7 @@ import { AppMainContent } from "~/t3work/t3work-AppMainContent";
 import { ProjectDashboard } from "~/t3work/t3work-ProjectDashboard";
 import { TicketDetailView } from "~/t3work/t3work-TicketDetailView";
 import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
-import type { ViewState } from "~/t3work/t3work-types";
+import type { ProjectThreadDisplayMode, ViewState } from "~/t3work/t3work-types";
 
 export function AppContentPane({
   activeDashboardMode,
@@ -17,6 +17,7 @@ export function AppContentPane({
   onKickoffProjectThread,
   onKickoffTicketThread,
   onThreadKickoffConsumed,
+  onThreadDisplayModeChange,
   onBackToDashboard,
   onManageRepositories,
 }: {
@@ -30,6 +31,7 @@ export function AppContentPane({
   onKickoffProjectThread: Parameters<typeof AppMainContent>[0]["onKickoffProjectThread"];
   onKickoffTicketThread: Parameters<typeof AppMainContent>[0]["onKickoffTicketThread"];
   onThreadKickoffConsumed: (threadId: string) => void;
+  onThreadDisplayModeChange: (threadId: string, displayMode: ProjectThreadDisplayMode) => void;
   onBackToDashboard: (projectId: string) => void;
   onManageRepositories: (projectId: string | null) => void;
 }) {
@@ -49,6 +51,7 @@ export function AppContentPane({
           onKickoffProjectThread={onKickoffProjectThread}
           onKickoffTicketThread={onKickoffTicketThread}
           onThreadKickoffConsumed={onThreadKickoffConsumed}
+          onThreadDisplayModeChange={onThreadDisplayModeChange}
           onBackToDashboard={onBackToDashboard}
           onCreate={onCreate}
           onInlineProjectCreated={(project) => {
@@ -74,6 +77,9 @@ export function AppContentPane({
               onOpenFullThread={onOpenFullThread}
               onKickoffThread={onKickoffTicketThread}
               onThreadKickoffConsumed={onThreadKickoffConsumed}
+              onRememberEmbeddedThread={(threadId) =>
+                onThreadDisplayModeChange(threadId, "embedded")
+              }
               onBack={() => onBackToDashboard(project.id)}
             />
           )}

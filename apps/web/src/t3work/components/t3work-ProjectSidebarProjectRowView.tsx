@@ -9,7 +9,11 @@ import { ThreadRow } from "./t3work-ProjectSidebarThreadRow";
 import type { ProjectRowProps } from "./t3work-projectSidebarProjectRowTypes";
 import { useProjectSidebarPinnedItems } from "./t3work-useProjectSidebarPinnedItems";
 import { useProjectSidebarProjectRow } from "./t3work-useProjectSidebarProjectRow";
-import { readActiveThreadIdFromView } from "~/t3work/t3work-types";
+import {
+  getSidebarProjectSectionState,
+  getSidebarProjectState,
+  getSidebarThreadState,
+} from "./t3work-projectSidebarItemState";
 
 export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
   const state = useProjectSidebarProjectRow(props);
@@ -30,18 +34,23 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
     onDeleteThread,
     onRenameThread,
   } = props;
-  const isProjectViewActive = view?.projectId === project.id;
-  const activeThreadId = readActiveThreadIdFromView(view);
-  const isBacklogActive =
-    isProjectViewActive && view?.type === "dashboard" && activeDashboardMode === "backlog";
-  const isMyWorkActive =
-    isProjectViewActive &&
-    (view?.type === "ticket" ||
-      view?.type === "thread" ||
-      (view?.type === "dashboard" && (activeDashboardMode ?? "my-work") === "my-work"));
+  const projectState = getSidebarProjectState({ view, projectId: project.id });
+  const backlogState = getSidebarProjectSectionState({
+    activeDashboardMode,
+    dashboardMode: "backlog",
+    projectId: project.id,
+    view,
+  });
+  const myWorkState = getSidebarProjectSectionState({
+    activeDashboardMode,
+    dashboardMode: "my-work",
+    projectId: project.id,
+    view,
+  });
   const pinnedItems = useProjectSidebarPinnedItems({
     project,
     projectTickets: props.projectTickets,
+    projectThreads: props.projectThreads,
     githubActivityByWorkItem: state.githubActivityByWorkItem,
     unlinkedGitHubActivityItems: state.unlinkedGitHubActivityItems,
   });
@@ -50,6 +59,7 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
     <>
       <ProjectSidebarProjectHeader
         project={project}
+        state={projectState}
         expanded={expanded}
         projectStatus={projectStatus}
         isRenaming={state.isRenaming}
@@ -67,8 +77,8 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
 
       {expanded ? (
         <ProjectSidebarDashboardNav
-          isBacklogActive={isBacklogActive}
-          isMyWorkActive={isMyWorkActive}
+          backlogState={backlogState}
+          myWorkState={myWorkState}
           myWorkExpanded={state.myWorkExpanded}
           myWorkThreadCount={state.myWorkThreads.length}
           pinnedItemCount={pinnedItems.length}
@@ -82,7 +92,7 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
             <ProjectSidebarDashboardThreadList
               projectId={project.id}
               threads={state.backlogThreads}
-              activeThreadId={activeThreadId}
+              view={view}
               onSelectThread={onSelectThread}
               onDeleteThread={onDeleteThread}
               onRenameThread={onRenameThread}
@@ -92,7 +102,7 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
             <ProjectSidebarDashboardThreadList
               projectId={project.id}
               threads={state.myWorkThreads}
-              activeThreadId={activeThreadId}
+              view={view}
               onSelectThread={onSelectThread}
               onDeleteThread={onDeleteThread}
               onRenameThread={onRenameThread}
@@ -104,6 +114,8 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
               projectTickets={props.projectTickets}
               githubActivityByWorkItem={state.githubActivityByWorkItem}
               items={pinnedItems}
+              view={view}
+              visibleTicketIds={state.visibleTicketIds}
               {...(props.jiraLastCheckedAt !== undefined
                 ? { jiraLastCheckedAt: props.jiraLastCheckedAt }
                 : {})}
@@ -156,7 +168,7 @@ export function ProjectSidebarProjectRowView(props: ProjectRowProps) {
             <ThreadRow
               key={thread.id}
               thread={thread}
-              isActive={activeThreadId === thread.id}
+              state={getSidebarThreadState({ view, threadId: thread.id })}
               onSelect={() => onSelectThread(project.id, thread.id)}
               onDelete={() => onDeleteThread(thread.id)}
               onRename={(newTitle) => onRenameThread(thread.id, newTitle)}

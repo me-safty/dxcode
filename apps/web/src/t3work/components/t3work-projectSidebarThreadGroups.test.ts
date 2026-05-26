@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { buildProjectTicketLookup } from "~/t3work/t3work-ticketLookup";
+import type { ProjectThread, ProjectTicket } from "~/t3work/t3work-types";
 import { buildProjectSidebarThreadGroups } from "./t3work-projectSidebarThreadGroups";
-import type { ProjectThread } from "~/t3work/t3work-types";
 
 function makeThread(overrides: Partial<ProjectThread> = {}): ProjectThread {
   return {
@@ -12,6 +13,25 @@ function makeThread(overrides: Partial<ProjectThread> = {}): ProjectThread {
     messageCount: overrides.messageCount ?? 0,
     lastMessageAt: overrides.lastMessageAt ?? "2026-05-22T10:00:00.000Z",
     createdAt: overrides.createdAt ?? "2026-05-22T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeTicket(overrides: Partial<ProjectTicket> = {}): ProjectTicket {
+  return {
+    id: overrides.id ?? "ticket-1-internal",
+    projectId: overrides.projectId ?? "project-1",
+    ref: {
+      provider: overrides.ref?.provider ?? "atlassian",
+      kind: overrides.ref?.kind ?? "jira-issue",
+      id: overrides.ref?.id ?? overrides.id ?? "ticket-1-internal",
+      displayId: overrides.ref?.displayId ?? "TICKET-1",
+      title: overrides.ref?.title ?? "Ticket",
+      url: overrides.ref?.url ?? "",
+      projectId: overrides.ref?.projectId ?? "project-1",
+    },
+    status: overrides.status ?? "Open",
+    updatedAt: overrides.updatedAt ?? "2026-05-22T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -49,5 +69,31 @@ describe("buildProjectSidebarThreadGroups", () => {
     expect(groups.projectLevelThreads).toEqual([projectThread, hiddenTicketThread]);
     expect(groups.ticketThreadsById.get("ticket-1")).toEqual([visibleTicketThread]);
     expect(groups.ticketThreadsById.has("ticket-2")).toBe(false);
+  });
+
+  it("groups display-id thread metadata under the canonical ticket id", () => {
+    const aliasThread = makeThread({ id: "thread-display-id", ticketId: "IES-18425" });
+    const ticketLookup = buildProjectTicketLookup([
+      makeTicket({
+        id: "ticket-18425-internal",
+        ref: {
+          provider: "atlassian",
+          kind: "jira-issue",
+          id: "ticket-18425-internal",
+          displayId: "IES-18425",
+          title: "Review feat/ies-18419 form update",
+          url: "",
+          projectId: "project-1",
+        },
+      }),
+    ]);
+
+    const groups = buildProjectSidebarThreadGroups([aliasThread], {
+      visibleTicketIds: new Set(["ticket-18425-internal"]),
+      ticketLookup,
+    });
+
+    expect(groups.projectLevelThreads).toEqual([]);
+    expect(groups.ticketThreadsById.get("ticket-18425-internal")).toEqual([aliasThread]);
   });
 });

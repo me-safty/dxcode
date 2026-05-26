@@ -101,6 +101,15 @@ export function readOwnedWorkspaceRoots(
   return [...ownedRoots];
 }
 
+export function readLiveProjectRoots(project: Project): ReadonlyArray<string> {
+  const roots = new Set<string>();
+  const cwd = normalizeWorkspaceRootPath(project.cwd);
+  const repositoryRoot = normalizeWorkspaceRootPath(project.repositoryIdentity?.rootPath);
+  if (cwd) roots.add(cwd);
+  if (repositoryRoot) roots.add(repositoryRoot);
+  return [...roots];
+}
+
 function findLiveProjectForOwnedRoots(
   ownedWorkspaceRoots: ReadonlyArray<string>,
   liveProjects: ReadonlyArray<Project>,
@@ -109,10 +118,9 @@ function findLiveProjectForOwnedRoots(
     return undefined;
   }
 
-  return liveProjects.find((candidate) => {
-    const normalizedCandidateCwd = normalizeWorkspaceRootPath(candidate.cwd);
-    return normalizedCandidateCwd !== null && ownedWorkspaceRoots.includes(normalizedCandidateCwd);
-  });
+  return liveProjects.find((candidate) =>
+    readLiveProjectRoots(candidate).some((root) => ownedWorkspaceRoots.includes(root)),
+  );
 }
 
 export function resolveCanonicalProjectIdForWorkspaceRoot(
@@ -126,8 +134,8 @@ export function resolveCanonicalProjectIdForWorkspaceRoot(
   }
 
   return (
-    liveProjects.find(
-      (candidate) => normalizeWorkspaceRootPath(candidate.cwd) === normalizedWorkspaceRoot,
+    liveProjects.find((candidate) =>
+      readLiveProjectRoots(candidate).includes(normalizedWorkspaceRoot),
     )?.id ?? fallbackProjectId
   );
 }
@@ -146,14 +154,14 @@ export function resolveStoredProjectId(
     return projectId;
   }
 
-  const normalizedLiveWorkspaceRoot = normalizeWorkspaceRootPath(liveProject.cwd);
-  if (!normalizedLiveWorkspaceRoot) {
+  const liveProjectRoots = readLiveProjectRoots(liveProject);
+  if (liveProjectRoots.length === 0) {
     return projectId;
   }
 
   return (
     storedProjects.find((project) =>
-      readOwnedWorkspaceRoots(project).includes(normalizedLiveWorkspaceRoot),
+      liveProjectRoots.some((root) => readOwnedWorkspaceRoots(project).includes(root)),
     )?.id ?? projectId
   );
 }

@@ -76,6 +76,21 @@ function makeToolBinding(): T3workToolBinding {
 }
 
 describe("buildTurnStartParams", () => {
+  it("normalizes codex model aliases before sending turn/start", () => {
+    const params = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        prompt: "Review it",
+        model: "gpt-5",
+        interactionMode: "default",
+      }),
+    );
+
+    assert.equal(params.model, "gpt-5.4");
+    assert.equal(params.collaborationMode?.settings.model, "gpt-5.4");
+  });
+
   it("includes plan collaboration mode when requested", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
@@ -231,6 +246,42 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
+  it("normalizes codex model aliases before sending thread/start", async () => {
+    const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
+    const client = {
+      raw: {
+        request: <M extends "thread/start" | "thread/resume">(method: M, payload: unknown) => {
+          calls.push({ method, payload });
+          return Effect.succeed(makeThreadOpenResponse("fresh-thread"));
+        },
+      },
+    };
+
+    await Effect.runPromise(
+      openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5",
+        serviceTier: undefined,
+        resumeThreadId: undefined,
+      }),
+    );
+
+    assert.deepStrictEqual(calls, [
+      {
+        method: "thread/start",
+        payload: {
+          cwd: "/tmp/project",
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          model: "gpt-5.4",
+        },
+      },
+    ]);
+  });
+
   it("includes dynamic tools on thread/start when a tool binding exists", async () => {
     const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
     const client = {

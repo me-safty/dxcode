@@ -1,7 +1,7 @@
 import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
-import type { ProjectThread, ViewState } from "~/t3work/t3work-types";
+import type { ProjectThread, ProjectThreadDisplayMode, ViewState } from "~/t3work/t3work-types";
 
-export type ProjectThreadDisplayMode = "embedded" | "thread";
+export type { ProjectThreadDisplayMode } from "~/t3work/t3work-types";
 
 type ProjectThreadViewStateInput = {
   projectId: string;
@@ -18,6 +18,14 @@ export function buildProjectThreadViewState({
   dashboardMode,
   displayMode = "embedded",
 }: ProjectThreadViewStateInput): ViewState {
+  if (displayMode === "thread") {
+    return {
+      type: "thread",
+      projectId,
+      threadId,
+    };
+  }
+
   if (ticketId) {
     return {
       type: "ticket",
@@ -44,14 +52,15 @@ export function buildProjectThreadViewState({
 
 export function buildExistingProjectThreadViewState(
   projectId: string,
-  thread: Pick<ProjectThread, "id" | "ticketId" | "dashboardMode">,
+  thread: Pick<ProjectThread, "id" | "ticketId" | "dashboardMode" | "displayMode">,
 ): ViewState {
   return buildProjectThreadViewState({
     projectId,
     threadId: thread.id,
     ...(thread.ticketId ? { ticketId: thread.ticketId } : {}),
     ...(thread.dashboardMode ? { dashboardMode: thread.dashboardMode } : {}),
-    displayMode: thread.ticketId || thread.dashboardMode ? "embedded" : "thread",
+    displayMode:
+      thread.displayMode ?? (thread.ticketId || thread.dashboardMode ? "embedded" : "thread"),
   });
 }
 

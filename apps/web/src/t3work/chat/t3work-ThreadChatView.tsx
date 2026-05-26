@@ -17,11 +17,11 @@ import { ThreadPendingChat } from "~/t3work/chat/t3work-threadPendingChat";
 import { prepareThreadContextAttachments } from "~/t3work/chat/t3work-prepareThreadContextAttachments";
 import { ContextAttachmentStrip } from "~/t3work/components/t3work-ContextAttachmentChip";
 import { useThreadBootstrap } from "~/t3work/chat/t3work-useThreadBootstrap";
+import { useThreadChatTurnToolContext } from "~/t3work/chat/t3work-useThreadChatTurnToolContext";
 import { resolveCanonicalProjectIdForWorkspaceRoot } from "~/t3work/hooks/t3work-threadBridge";
 import { useAddToChatComposerDropTarget } from "~/t3work/hooks/t3work-useAddToChatComposerDropTarget";
 import { useT3WorkAddToChatStore } from "~/t3work/t3work-addToChatStore";
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
-import { createT3workTurnToolContext } from "~/t3work/t3work-threadToolContext";
 import type { T3workThreadToolId } from "~/t3work/t3work-types";
 
 const EMPTY_ATTACHMENTS: T3WorkContextAttachment[] = [];
@@ -86,19 +86,16 @@ export function ThreadChatView({
     kickoffMessage,
     serverMessageCount,
   });
-  const turnToolContext = useMemo(
-    () =>
-      createT3workTurnToolContext({
-        projectId,
-        projectTitle,
-        ...(projectWorkspaceRoot ? { workspaceRoot: projectWorkspaceRoot } : {}),
-        threadId,
-        threadTitle: title,
-        ...(ticketId ? { ticketId } : {}),
-        ...(selectedToolIds !== undefined ? { selectedToolIds } : {}),
-      }),
-    [projectId, projectTitle, projectWorkspaceRoot, selectedToolIds, threadId, ticketId, title],
-  );
+  const turnToolContext = useThreadChatTurnToolContext({
+    embeddedMode,
+    projectId,
+    projectTitle,
+    projectWorkspaceRoot,
+    selectedToolIds,
+    threadId,
+    ticketId,
+    title,
+  });
 
   useThreadBootstrap({
     backend,

@@ -15,6 +15,7 @@ type SetThreads = Dispatch<SetStateAction<ProjectThread[]>>;
 type CreateThreadOptions = {
   title?: string;
   ticketId?: string;
+  ticketDisplayId?: string;
   dashboardMode?: ProjectDashboardMode;
   viewMode?: ProjectThreadDisplayMode;
   kickoffMessage?: string;
@@ -117,11 +118,31 @@ export function useProjectThreadActions(input: {
     [setThreads],
   );
 
+  const updateThreadDisplayMode = useCallback(
+    (threadId: string, displayMode: ProjectThreadDisplayMode) => {
+      setThreads((prev) => {
+        let changed = false;
+        const next = prev.map((thread) => {
+          if (thread.id !== threadId || thread.displayMode === displayMode) {
+            return thread;
+          }
+
+          changed = true;
+          return { ...thread, displayMode };
+        });
+
+        return changed ? next : prev;
+      });
+    },
+    [setThreads],
+  );
+
   return {
     createThread,
     createThreadForTicket,
     markThreadKickoffConsumed,
     deleteThread,
     renameThread,
+    updateThreadDisplayMode,
   };
 }

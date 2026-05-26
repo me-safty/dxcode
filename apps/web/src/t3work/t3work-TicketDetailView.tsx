@@ -1,29 +1,32 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
+import { useCanGoBack } from "@tanstack/react-router";
 import type { ProjectShellProject } from "@t3tools/project-context";
-import { ScrollArea } from "~/t3work/components/ui/t3work-scroll-area";
-import { t3SurfaceBackdrops } from "~/t3work/components/ui/t3work-surface";
-import { useBackendState } from "~/t3work/backend/t3work-index";
+import { useBackend, useBackendState } from "~/t3work/backend/t3work-index";
 import {
   readIssueTypeFromSnapshotFields,
   readIssueTypeIconUrlFromSnapshotFields,
 } from "~/t3work/components/ticket/t3work-JiraIssueType";
 import { readLinkedRepositoryUrlsFromProject } from "~/t3work/hooks/t3work-createProjectBootstrap";
+import { useAddToChat } from "~/t3work/hooks/t3work-useAddToChat";
 import { useProjectGitHubActivity } from "~/t3work/hooks/t3work-useProjectGitHubActivity";
 import { useProjectResources } from "~/t3work/hooks/t3work-useProjectResources";
 import { useRelatedTickets } from "~/t3work/hooks/t3work-useRelatedTickets";
 import { useTicketDetail } from "~/t3work/hooks/t3work-useTicketDetail";
 import type { TicketKickoffThreadInput } from "~/t3work/t3work-kickoffTypes";
-import { ResizableRightSidebarLayout } from "~/t3work/t3work-ResizableRightSidebarLayout";
-import { getTicketRightSidebarCollapsedStorageKey } from "~/t3work/t3work-rightSidebarPersistence";
+import { TicketDetailBody } from "~/t3work/t3work-TicketDetailBody";
 import { TicketDetailHeader } from "~/t3work/t3work-TicketDetailHeader";
-import { TicketDetailKickoffAside } from "~/t3work/t3work-TicketDetailKickoffAside";
-import { TicketDetailMainColumn } from "~/t3work/t3work-TicketDetailMainColumn";
+import { navigateBackWithFallback } from "~/t3work/t3work-historyBack";
 import {
   asRecordArray,
   resolveHtmlBaseUrl,
   sortCommentItems,
 } from "~/t3work/t3work-ticketDetailUtils";
+import {
+  buildProjectTicketLookup,
+  resolveCanonicalProjectTicketId,
+} from "~/t3work/t3work-ticketLookup";
 import type { ProjectThread } from "~/t3work/t3work-types";
+import { useTicketDetailEmbeddedThreadEffects } from "~/t3work/t3work-useTicketDetailEmbeddedThreadEffects";
 
 export function TicketDetailView({
   project,
@@ -35,6 +38,7 @@ export function TicketDetailView({
   onOpenFullThread,
   onKickoffThread,
   onThreadKickoffConsumed,
+  onRememberEmbeddedThread,
   onBack,
 }: {
   project: ProjectShellProject;
@@ -46,13 +50,19 @@ export function TicketDetailView({
   onOpenFullThread: (projectId: string, threadId: string) => void;
   onKickoffThread: (input: TicketKickoffThreadInput) => void;
   onThreadKickoffConsumed: (threadId: string) => void;
+  onRememberEmbeddedThread: (threadId: string) => void;
   onBack: () => void;
 }) {
+  const backend = useBackend();
   const backendState = useBackendState();
+  const { addToChatFromRequest } = useAddToChat();
+  const canGoBack = useCanGoBack();
   const { tickets: projectTickets, lastCheckedAt: jiraLastCheckedAt } =
     useProjectResources(project);
-  const ticket = projectTickets.find((candidate) => candidate.id === ticketId);
-  const resourceId = ticket?.ref.id ?? ticketId;
+  const ticketLookup = useMemo(() => buildProjectTicketLookup(projectTickets), [projectTickets]);
+  const canonicalTicketId = resolveCanonicalProjectTicketId(ticketId, ticketLookup) ?? ticketId;
+  const ticket = ticketLookup.get(ticketId);
+  const resourceId = ticket?.ref.id ?? canonicalTicketId;
   const { snapshot, loading, error, reload } = useTicketDetail(project, resourceId);
   const issueType =
     ticket?.issueType ?? ticket?.ref.type ?? readIssueTypeFromSnapshotFields(snapshot?.fields);
@@ -84,7 +94,10 @@ export function TicketDetailView({
     () => sortCommentItems(asRecordArray(snapshot?.fields.commentItems)),
     [snapshot?.fields.commentItems],
   );
-  const issueThreads = projectThreads.filter((thread) => thread.ticketId === ticketId);
+  const issueThreads = projectThreads.filter(
+    (thread) =>
+      resolveCanonicalProjectTicketId(thread.ticketId, ticketLookup) === canonicalTicketId,
+  );
   const activeThread = activeThreadId
     ? (projectThreads.find((candidate) => candidate.id === activeThreadId) ?? null)
     : null;
@@ -93,10 +106,22 @@ export function TicketDetailView({
     linkedRepositoryUrls: readLinkedRepositoryUrlsFromProject(project),
     enabled: true,
   });
-  const matchedGitHubActivityItems = useMemo(
-    () => githubActivity.activityByWorkItem.get(displayId) ?? [],
-    [displayId, githubActivity.activityByWorkItem],
-  );
+  const matchedGitHubActivityItems = githubActivity.activityByWorkItem.get(displayId) ?? [];
+
+  useTicketDetailEmbeddedThreadEffects({
+    activeThread,
+    addToChatFromRequest,
+    backend,
+    githubActivityItems: matchedGitHubActivityItems,
+    onRememberEmbeddedThread,
+    project,
+    projectTickets,
+    ticket,
+  });
+
+  const handleBack = useCallback(() => {
+    navigateBackWithFallback({ canGoBack, onFallback: onBack });
+  }, [canGoBack, onBack]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -106,92 +131,66 @@ export function TicketDetailView({
         title={title}
         issueType={issueType}
         issueTypeIconUrl={issueTypeIconUrl}
-        onBack={onBack}
+        onBack={handleBack}
         onReload={() => void reload()}
         ticketUrl={ticketUrl}
       />
 
-      <ResizableRightSidebarLayout
-        storageKey="t3work_ticket_right_sidebar"
-        collapsedStorageKey={getTicketRightSidebarCollapsedStorageKey(
-          activeThreadId
-            ? {
-                projectId: project.id,
-                ticketId,
-                embeddedThreadId: activeThreadId,
-              }
-            : {
-                projectId: project.id,
-                ticketId,
-              },
-        )}
-        className={t3SurfaceBackdrops.ticketContent}
-        minAsideWidth={22 * 16}
-        defaultAsideWidth={24 * 16}
-        main={
-          <section
-            className={`flex h-full min-h-0 flex-col border-b border-border ${t3SurfaceBackdrops.ticketMainColumn} lg:border-r lg:border-b-0`}
-          >
-            <ScrollArea className="h-full">
-              <TicketDetailMainColumn
-                snapshot={snapshot}
-                displayId={displayId}
-                title={title}
-                status={status}
-                priority={priority}
-                assignee={assignee}
-                projectId={project.id}
-                project={project}
-                projectTickets={ticketsWithRelated}
-                ticketId={ticket?.id ?? ticketId}
-                ticketParentId={ticket?.parentId}
-                snapshotParentId={
-                  typeof snapshot?.ref.parentId === "string" ? snapshot.ref.parentId : undefined
-                }
-                snapshotRaw={snapshot?.raw}
-                onOpenTicket={onOpenTicket}
-                loading={loading}
-                error={error}
-                descriptionMarkdown={descriptionMarkdown}
-                descriptionHtml={descriptionHtml}
-                htmlBaseUrl={htmlBaseUrl}
-                attachments={attachments}
-                sortedComments={sortedComments}
-                {...(jiraLastCheckedAt !== undefined ? { jiraLastCheckedAt } : {})}
-                githubActivityItems={matchedGitHubActivityItems}
-                {...(githubActivity.lastCheckedAt !== undefined
-                  ? { githubActivityLastCheckedAt: githubActivity.lastCheckedAt }
-                  : {})}
-                githubActivityLoading={githubActivity.loading}
-                {...(githubActivity.warning
-                  ? { githubActivityWarning: githubActivity.warning }
-                  : {})}
-                {...(githubActivity.host ? { githubHost: githubActivity.host } : {})}
-                {...(githubActivity.account ? { githubAccount: githubActivity.account } : {})}
-              />
-            </ScrollArea>
-          </section>
-        }
-        aside={
-          <TicketDetailKickoffAside
-            displayId={displayId}
-            issueThreads={issueThreads}
-            projectId={project.id}
-            projectTitle={project.title}
-            {...(project.workspace?.rootPath
-              ? { projectWorkspaceRoot: project.workspace.rootPath }
-              : {})}
-            ticketId={ticketId}
-            activeThread={activeThread}
-            githubActivityItems={matchedGitHubActivityItems}
-            providers={backendState.providers}
-            isConnected={backendState.connectionStatus === "connected"}
-            onOpenThread={onOpenThread}
-            onOpenFullThread={onOpenFullThread}
-            onThreadKickoffConsumed={onThreadKickoffConsumed}
-            onKickoffThread={onKickoffThread}
-          />
-        }
+      <TicketDetailBody
+        projectId={project.id}
+        ticketId={ticketId}
+        activeThreadId={activeThreadId}
+        mainColumnProps={{
+          snapshot,
+          displayId,
+          title,
+          status,
+          priority,
+          assignee,
+          projectId: project.id,
+          project,
+          projectTickets: ticketsWithRelated,
+          ticketId: ticket?.id ?? canonicalTicketId,
+          ticketParentId: ticket?.parentId,
+          snapshotParentId:
+            typeof snapshot?.ref.parentId === "string" ? snapshot.ref.parentId : undefined,
+          snapshotRaw: snapshot?.raw,
+          onOpenTicket,
+          loading,
+          error,
+          descriptionMarkdown,
+          descriptionHtml,
+          htmlBaseUrl,
+          attachments,
+          sortedComments,
+          ...(jiraLastCheckedAt !== undefined ? { jiraLastCheckedAt } : {}),
+          githubActivityItems: matchedGitHubActivityItems,
+          ...(githubActivity.lastCheckedAt !== undefined
+            ? { githubActivityLastCheckedAt: githubActivity.lastCheckedAt }
+            : {}),
+          githubActivityLoading: githubActivity.loading,
+          ...(githubActivity.warning ? { githubActivityWarning: githubActivity.warning } : {}),
+          ...(githubActivity.host ? { githubHost: githubActivity.host } : {}),
+          ...(githubActivity.account ? { githubAccount: githubActivity.account } : {}),
+        }}
+        kickoffAsideProps={{
+          displayId,
+          issueThreads,
+          projectId: project.id,
+          projectTitle: project.title,
+          ...(project.workspace?.rootPath
+            ? { projectWorkspaceRoot: project.workspace.rootPath }
+            : {}),
+          ticketId: ticket?.id ?? canonicalTicketId,
+          activeThread,
+          githubActivityItems: matchedGitHubActivityItems,
+          providers: backendState.providers,
+          isConnected: backendState.connectionStatus === "connected",
+          onOpenThread,
+          onOpenFullThread,
+          onThreadKickoffConsumed,
+          onKickoffThread,
+        }}
       />
     </div>
   );

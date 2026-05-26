@@ -203,6 +203,7 @@ describe("T3workToolBrokerLive", () => {
                 threadId,
                 threadTitle: "Original title",
                 ticketId: "PROJ-123",
+                displayMode: "embedded",
               },
             },
           },
@@ -321,6 +322,87 @@ describe("T3workToolBrokerLive", () => {
         ],
       ]),
     );
+  });
+
+  it("attaches a child session at the ticket root for non-embedded or retargeted handoffs", async () => {
+    const dispatch = vi.fn((_command: unknown) => Promise.resolve({ sequence: 17 }));
+    const orchestrationMock: OrchestrationEngineShape = {
+      readEvents: () => Stream.empty,
+      dispatch: (command) => Effect.promise(() => dispatch(command)),
+      streamDomainEvents: Stream.empty,
+    };
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const broker = yield* T3workToolBroker;
+        const binding = yield* broker.bindSession({
+          threadId,
+          toolContext: {
+            surface: "t3work",
+            tools: [
+              {
+                id: "t3work.thread.start_child",
+                label: "Start child session",
+                capabilities: ["write"],
+              },
+            ],
+            state: {
+              view: {
+                kind: "thread",
+                projectId: "project-1",
+                projectTitle: "Project One",
+                workspaceRoot: "/workspace/project-1",
+                threadId,
+                threadTitle: "Original title",
+                ticketId: "proj-123",
+                displayMode: "thread",
+              },
+            },
+          },
+        });
+
+        return yield* binding!.callTool({
+          server: "t3work",
+          tool: "t3work.thread.start_child",
+          arguments: {
+            name: "Sibling ticket session",
+            ticket_id: "proj-456",
+          },
+        });
+      }).pipe(Effect.provide(makeBrokerLayer(orchestrationMock))),
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        structuredContent: expect.objectContaining({
+          ok: true,
+          name: "Sibling ticket session",
+          started: false,
+        }),
+      }),
+    );
+
+    const childThreadId = (result.structuredContent as { project_session_id: string })
+      .project_session_id;
+    const childCreatedActivity = dispatch.mock.calls
+      .map((call) => call[0])
+      .find(
+        (command) =>
+          typeof command === "object" &&
+          command !== null &&
+          (command as { type?: string }).type === "thread.activity.append" &&
+          (command as { threadId?: string }).threadId === childThreadId,
+      ) as { activity: { payload: Record<string, unknown> } } | undefined;
+
+    expect(childCreatedActivity?.activity.payload).toEqual(
+      expect.objectContaining({
+        childThreadId,
+        childTitle: "Sibling ticket session",
+        parentTitle: "Original title",
+        ticketId: "proj-456",
+      }),
+    );
+    expect(childCreatedActivity?.activity.payload).not.toHaveProperty("parentThreadId");
   });
 
   it("creates a child session without optional repo services", async () => {

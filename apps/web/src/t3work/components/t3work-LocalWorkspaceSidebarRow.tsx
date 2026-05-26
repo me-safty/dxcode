@@ -17,6 +17,11 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/t3work/components/ui/t3
 import { ThreadRow } from "./t3work-ProjectSidebarThreadRow";
 import { buildProjectSidebarAddToChatRequest } from "./t3work-projectSidebarAddToChatRequests";
 import { sortThreads } from "./t3work-projectSidebarShared";
+import {
+  getSidebarProjectState,
+  getSidebarStandaloneButtonClassName,
+  getSidebarThreadState,
+} from "./t3work-projectSidebarItemState";
 
 type LocalWorkspaceSidebarRowProps = {
   project: ProjectShellProject;
@@ -72,14 +77,16 @@ export function LocalWorkspaceSidebarRow({
       ? sortedProjectThreads.slice(0, threadPreviewCount)
       : sortedProjectThreads;
   const hiddenThreadCount = Math.max(0, sortedProjectThreads.length - visibleThreads.length);
-  const activeThreadId = readActiveThreadIdFromView(view);
+  const projectState = getSidebarProjectState({ view, projectId: project.id });
 
   return (
     <>
       <div className="group/project-header relative">
         <SidebarMenuButton
           size="sm"
-          className="gap-2 px-2 py-1.5 pr-8 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground max-sm:pr-14 cursor-pointer"
+          className={`gap-2 px-2 py-1.5 pr-8 text-left group-hover/project-header:text-sidebar-accent-foreground max-sm:pr-14 cursor-pointer ${getSidebarStandaloneButtonClassName(
+            projectState,
+          )}`}
           onClick={() => onToggleExpand(project.id)}
         >
           {!expanded && projectStatus ? (
@@ -148,7 +155,7 @@ export function LocalWorkspaceSidebarRow({
             <ThreadRow
               key={thread.id}
               thread={thread}
-              isActive={activeThreadId === thread.id}
+              state={getSidebarThreadState({ view, threadId: thread.id })}
               onSelect={() => onSelectThread(project.id, thread.id)}
               onDelete={() => onDeleteThread(thread.id)}
               onRename={(newTitle) => onRenameThread(thread.id, newTitle)}

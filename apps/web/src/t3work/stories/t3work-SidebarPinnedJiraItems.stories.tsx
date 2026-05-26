@@ -35,6 +35,7 @@ const pinnedItems: ReadonlyArray<ResolvedPinnedSidebarItem> = tickets.map((ticke
     pinnedAt: `2026-05-23T12:00:0${index}.000Z`,
   }) as Extract<T3WorkSidebarPinnedItem, { kind: "jira-work-item" }>,
   ticket,
+  ticketThreads: [],
 }));
 
 const backend = {
@@ -115,6 +116,8 @@ function SidebarPinnedJiraItemsStory({ orderedTicketIds = [] }: { orderedTicketI
             projectTickets={[...tickets]}
             githubActivityByWorkItem={new Map()}
             items={pinnedItems}
+            view={null}
+            visibleTicketIds={new Set(tickets.map((ticket) => ticket.id))}
             onSelectTicket={() => {}}
           />
         </div>

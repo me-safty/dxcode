@@ -74,6 +74,45 @@ describe("resolveCanonicalProjectId", () => {
 
     expect(canonicalProjectId).toBe(ProjectId.make("live-linked"));
   });
+
+  it("matches a live project through repository root identity when cwd is nested", () => {
+    const canonicalProjectId = resolveCanonicalProjectId(
+      makeStoredProject({
+        workspace: undefined,
+        source: {
+          provider: "atlassian",
+          externalProjectId: "jira-123",
+          raw: {
+            agentReferences: {
+              linkedRepositories: [
+                {
+                  url: "https://github.com/acme/repo",
+                  localPath: "/workspace/references/repo/",
+                },
+              ],
+            },
+          },
+        },
+      }),
+      [
+        makeLiveProject({
+          id: ProjectId.make("live-linked"),
+          cwd: "/workspace/references/repo/apps/web",
+          repositoryIdentity: {
+            canonicalKey: "github.com/acme/repo",
+            locator: {
+              source: "git-remote",
+              remoteName: "origin",
+              remoteUrl: "https://github.com/acme/repo",
+            },
+            rootPath: "/workspace/references/repo",
+          },
+        }),
+      ],
+    );
+
+    expect(canonicalProjectId).toBe(ProjectId.make("live-linked"));
+  });
 });
 
 describe("resolveCanonicalProjectIdForWorkspaceRoot", () => {
@@ -129,6 +168,48 @@ describe("resolveStoredProjectId", () => {
         }),
       ],
       [makeLiveProject({ id: ProjectId.make("live-linked"), cwd: "/workspace/references/repo" })],
+    );
+
+    expect(resolvedProjectId).toBe("stored-project");
+  });
+
+  it("maps an owned live workspace id back through repository root identity when cwd is nested", () => {
+    const resolvedProjectId = resolveStoredProjectId(
+      ProjectId.make("live-linked"),
+      [
+        makeStoredProject({
+          workspace: undefined,
+          source: {
+            provider: "atlassian",
+            externalProjectId: "jira-123",
+            raw: {
+              agentReferences: {
+                linkedRepositories: [
+                  {
+                    url: "https://github.com/acme/repo",
+                    localPath: "/workspace/references/repo/",
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      ],
+      [
+        makeLiveProject({
+          id: ProjectId.make("live-linked"),
+          cwd: "/workspace/references/repo/apps/web",
+          repositoryIdentity: {
+            canonicalKey: "github.com/acme/repo",
+            locator: {
+              source: "git-remote",
+              remoteName: "origin",
+              remoteUrl: "https://github.com/acme/repo",
+            },
+            rootPath: "/workspace/references/repo",
+          },
+        }),
+      ],
     );
 
     expect(resolvedProjectId).toBe("stored-project");
@@ -235,6 +316,44 @@ describe("remapProjectThreadToStoredProject", () => {
         id: "thread-child",
         parentThreadId: "thread-parent",
         ticketId: "PROJ-123",
+      }),
+    );
+  });
+
+  it("maps durable ticket metadata even when no parent thread is recorded", () => {
+    expect(
+      mapLiveThreadToProjectThread({
+        id: "thread-ticket-root",
+        projectId: ProjectId.make("live-saved"),
+        title: "Investigate sibling ticket",
+        messages: [],
+        activities: [
+          {
+            id: "activity-handoff-2",
+            tone: "info",
+            kind: "t3work.handoff.created",
+            summary: "Created from Parent thread",
+            payload: {
+              childThreadId: ThreadId.make("thread-ticket-root"),
+              ticketId: "proj-456",
+            },
+            turnId: null,
+            createdAt: "2026-05-22T09:00:00.000Z",
+          },
+        ],
+        latestTurn: null,
+        archivedAt: null,
+        error: null,
+        session: null,
+        createdAt: "2026-05-22T09:00:00.000Z",
+        updatedAt: "2026-05-22T10:00:00.000Z",
+        environmentId: "env-local" as EnvironmentId,
+        defaultModelSelection: null,
+      } as never),
+    ).toEqual(
+      expect.objectContaining({
+        id: "thread-ticket-root",
+        ticketId: "proj-456",
       }),
     );
   });

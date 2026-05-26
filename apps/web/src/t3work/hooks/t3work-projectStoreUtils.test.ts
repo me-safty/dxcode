@@ -155,4 +155,66 @@ describe("deriveLooseWorkspaceProjects", () => {
 
     expect(looseWorkspaceProjects).toEqual([]);
   });
+
+  it("does not duplicate a live workspace when the saved project already has the same id", () => {
+    const looseWorkspaceProjects = deriveLooseWorkspaceProjects(
+      [
+        makeStoredProject({
+          id: ProjectId.make("live-project") as never,
+          workspace: {
+            rootPath: "~/.t3code/t3work/projects/IES NG",
+            createdAt: "2026-05-01T00:00:00.000Z",
+          },
+        }),
+      ],
+      [
+        makeLiveProject({
+          id: ProjectId.make("live-project"),
+          cwd: "/Users/tester/.t3code/t3work/projects/IES NG",
+        }),
+      ],
+    );
+
+    expect(looseWorkspaceProjects).toEqual([]);
+  });
+
+  it("does not duplicate a live repo subdirectory when its repository root is owned", () => {
+    const looseWorkspaceProjects = deriveLooseWorkspaceProjects(
+      [
+        makeStoredProject({
+          workspace: undefined,
+          source: {
+            provider: "atlassian",
+            externalProjectId: "jira-123",
+            raw: {
+              agentReferences: {
+                linkedRepositories: [
+                  {
+                    url: "https://github.com/acme/repo",
+                    localPath: "/workspace/references/repo",
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      ],
+      [
+        makeLiveProject({
+          cwd: "/workspace/references/repo/apps/web",
+          repositoryIdentity: {
+            canonicalKey: "github.com/acme/repo",
+            locator: {
+              source: "git-remote",
+              remoteName: "origin",
+              remoteUrl: "https://github.com/acme/repo",
+            },
+            rootPath: "/workspace/references/repo",
+          },
+        }),
+      ],
+    );
+
+    expect(looseWorkspaceProjects).toEqual([]);
+  });
 });

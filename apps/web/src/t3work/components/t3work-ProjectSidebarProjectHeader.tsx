@@ -4,6 +4,10 @@ import { SidebarMenuButton } from "~/t3work/components/ui/t3work-sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/t3work/components/ui/t3work-tooltip";
 import { ProjectIcon } from "./t3work-ProjectIcon";
 import type { ProjectRowProps } from "./t3work-projectSidebarProjectRowTypes";
+import {
+  getSidebarStandaloneButtonClassName,
+  type SidebarItemState,
+} from "./t3work-projectSidebarItemState";
 
 type ProjectStatus = {
   label: string;
@@ -14,6 +18,7 @@ type ProjectStatus = {
 
 type ProjectSidebarProjectHeaderProps = {
   project: ProjectRowProps["project"];
+  state: SidebarItemState;
   expanded: boolean;
   projectStatus: ProjectStatus | null;
   isRenaming: boolean;
@@ -31,6 +36,7 @@ type ProjectSidebarProjectHeaderProps = {
 
 export function ProjectSidebarProjectHeader({
   project,
+  state,
   expanded,
   projectStatus,
   isRenaming,
@@ -49,7 +55,9 @@ export function ProjectSidebarProjectHeader({
     <div className="group/project-header relative mb-1">
       <SidebarMenuButton
         size="sm"
-        className="gap-2 px-2 py-1.5 pr-8 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground max-sm:pr-14 cursor-pointer"
+        className={`gap-2 px-2 py-1.5 pr-8 text-left group-hover/project-header:text-sidebar-accent-foreground max-sm:pr-14 cursor-pointer ${getSidebarStandaloneButtonClassName(
+          state,
+        )}`}
         onClick={onProjectClick}
         onContextMenu={onContextMenu}
       >

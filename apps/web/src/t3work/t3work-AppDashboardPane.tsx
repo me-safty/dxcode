@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { ServerProvider } from "@t3tools/contracts";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import type { ProjectKickoffThreadInput } from "~/t3work/t3work-kickoffTypes";
@@ -18,6 +19,7 @@ export function AppDashboardPane({
   onOpenThread,
   onOpenFullThread,
   onThreadKickoffConsumed,
+  onRememberEmbeddedThread,
   onKickoffProjectThread,
   renderDashboard,
 }: {
@@ -31,9 +33,18 @@ export function AppDashboardPane({
   onOpenThread: (projectId: string, threadId: string) => void;
   onOpenFullThread: (projectId: string, threadId: string) => void;
   onThreadKickoffConsumed: (threadId: string) => void;
+  onRememberEmbeddedThread: (threadId: string) => void;
   onKickoffProjectThread: (input: ProjectKickoffThreadInput) => void;
   renderDashboard: (project: ProjectShellProject) => React.ReactNode;
 }) {
+  useEffect(() => {
+    if (!activeThread) {
+      return;
+    }
+
+    onRememberEmbeddedThread(activeThread.id);
+  }, [activeThread, onRememberEmbeddedThread]);
+
   return (
     <ResizableRightSidebarLayout
       storageKey="t3work_dashboard_right_sidebar"

@@ -11,6 +11,7 @@ import { buildProjectSidebarThreadGroups } from "./t3work-projectSidebarThreadGr
 import { useProjectSidebarProjectRename } from "./t3work-useProjectSidebarProjectRename";
 import { useProjectSidebarNavItemPreferences } from "./t3work-useProjectSidebarNavItemPreferences";
 import { deriveTicketVisibility } from "./t3work-projectSidebarProjectRow.helpers";
+import { buildProjectTicketLookup } from "~/t3work/t3work-ticketLookup";
 
 function collectVisibleTicketIds(
   ticket: ProjectTicket,
@@ -79,10 +80,7 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
   const [expandedThreadList, setExpandedThreadList] = useState(false);
   const [myWorkExpanded, setMyWorkExpanded] = useState(true);
   const { addToChatFromRequest } = useAddToChat();
-  const linkedRepositoryUrls = useMemo(
-    () => readLinkedRepositoryUrlsFromProject(project),
-    [project],
-  );
+  const linkedRepositoryUrls = useMemo(() => readLinkedRepositoryUrlsFromProject(project), [project]);
   const githubActivity = useProjectGitHubActivity({
     project,
     linkedRepositoryUrls,
@@ -95,10 +93,8 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
   );
   const { hiddenItemIds, orderedItemIds } = useProjectSidebarNavItemPreferences(project.id);
 
-  const ticketHierarchy = useMemo(
-    () => buildProjectTicketHierarchy(projectTickets),
-    [projectTickets],
-  );
+  const ticketHierarchy = useMemo(() => buildProjectTicketHierarchy(projectTickets), [projectTickets]);
+  const ticketLookup = useMemo(() => buildProjectTicketLookup(projectTickets), [projectTickets]);
   const { visibleFlatTickets, visibleTreeRoots, visibleTreeUnresolvedChildren, hiddenTicketCount } =
     useMemo(
       () =>
@@ -132,8 +128,8 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     ],
   );
   const { projectLevelThreads, dashboardThreadsByMode, ticketThreadsById } = useMemo(
-    () => buildProjectSidebarThreadGroups(sortedThreads, { visibleTicketIds }),
-    [sortedThreads, visibleTicketIds],
+    () => buildProjectSidebarThreadGroups(sortedThreads, { visibleTicketIds, ticketLookup }),
+    [sortedThreads, ticketLookup, visibleTicketIds],
   );
   const {
     isRenaming,
@@ -194,6 +190,7 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     backlogThreads: dashboardThreadsByMode.backlog,
     myWorkThreads: dashboardThreadsByMode["my-work"],
     visibleThreads,
+    visibleTicketIds,
     ticketHierarchy,
     ticketThreadsById,
     visibleFlatTickets,
