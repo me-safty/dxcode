@@ -2072,9 +2072,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     const t3TurnCount = context.session.resumeCursor?.turnCount ?? 0;
-    if (t3TurnCount === 0) {
-      return;
-    }
 
     // Build the path to Claude's session .jsonl file.
     // Claude encodes the project path by prepending "-" and replacing "/" with "-".
@@ -2086,13 +2083,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       import("node:fs/promises").then((fs) => fs.readFile(jsonlPath, "utf-8")),
     ).pipe(
       Effect.map((content) => {
-        // Count user-originated turns by looking for `"type":"user"` lines.
-        // Each user message in the JSONL represents one turn boundary.
+        // Count user-prompt turns (not tool-result user entries).
+        // User prompts: `"type":"user"` with `"content":"text"` (string).
+        // Tool results: `"type":"user"` with `"content":[{"type":"tool_result",...}]` (array).
         const lines = content.split("\n");
         let fileTurnCount = 0;
         for (const line of lines) {
           if (line.length === 0) continue;
-          if (line.includes('"type":"user"')) {
+          if (line.includes('"type":"user"') && !line.includes('"tool_result"')) {
             fileTurnCount++;
           }
         }
