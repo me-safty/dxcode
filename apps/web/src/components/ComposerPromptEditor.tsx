@@ -26,6 +26,7 @@ import {
   KEY_TAB_COMMAND,
   COMMAND_PRIORITY_HIGH,
   KEY_BACKSPACE_COMMAND,
+  DELETE_CHARACTER_COMMAND,
   $getRoot,
   HISTORY_MERGE_TAG,
   DecoratorNode,
@@ -65,6 +66,7 @@ import {
   shouldLetBrowserHandleComposerBeforeInput,
   shouldSuppressComposerTriggerForNativeInputType,
 } from "~/composerNativeInput";
+import { $shouldUseNativeComposerBackspace, canUseBeforeInput } from "~/composerIosBackspace";
 import {
   selectionTouchesMentionBoundary,
   splitPromptIntoComposerSegments,
@@ -89,6 +91,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 const COMPOSER_EDITOR_HMR_KEY = `composer-editor-${Math.random().toString(36).slice(2)}`;
 const IS_IOS_WEBKIT = isIosWebkit();
+const USE_NATIVE_IOS_BACKSPACE = IS_IOS_WEBKIT && canUseBeforeInput();
 const SURROUND_SYMBOLS: [string, string][] = [
   ["(", ")"],
   ["[", "]"],
@@ -1065,7 +1068,7 @@ function ComposerInlineTokenSelectionNormalizePlugin() {
   return null;
 }
 
-function ComposerInlineTokenBackspacePlugin() {
+function ComposerBackspacePlugin() {
   const [editor] = useLexicalComposerContext();
   const { onRemoveTerminalContext } = use(ComposerTerminalContextActionsContext);
 
@@ -1074,56 +1077,63 @@ function ComposerInlineTokenBackspacePlugin() {
       KEY_BACKSPACE_COMMAND,
       (event) => {
         const selection = $getSelection();
-        if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
+        if (!$isRangeSelection(selection)) {
           return false;
         }
 
-        const anchorNode = selection.anchor.getNode();
-        const selectionOffset = $readSelectionOffsetFromEditorState(0);
-        const removeInlineTokenNode = (candidate: unknown): boolean => {
-          if (!isComposerInlineTokenNode(candidate)) {
-            return false;
-          }
-          const tokenStart = getAbsoluteOffsetForPoint(candidate, 0);
-          candidate.remove();
-          if (candidate instanceof ComposerTerminalContextNode) {
-            onRemoveTerminalContext(candidate.__context.id);
-            $setSelectionAtComposerOffset(selectionOffset);
-          } else {
-            $setSelectionAtComposerOffset(tokenStart);
-          }
-          event?.preventDefault();
-          return true;
-        };
-        if (removeInlineTokenNode(anchorNode)) {
-          return true;
-        }
-
-        if ($isTextNode(anchorNode)) {
-          if (selection.anchor.offset > 0) {
-            return false;
-          }
-          if (removeInlineTokenNode(anchorNode.getPreviousSibling())) {
+        if (selection.isCollapsed()) {
+          const anchorNode = selection.anchor.getNode();
+          const selectionOffset = $readSelectionOffsetFromEditorState(0);
+          const removeInlineTokenNode = (candidate: unknown): boolean => {
+            if (!isComposerInlineTokenNode(candidate)) {
+              return false;
+            }
+            const tokenStart = getAbsoluteOffsetForPoint(candidate, 0);
+            candidate.remove();
+            if (candidate instanceof ComposerTerminalContextNode) {
+              onRemoveTerminalContext(candidate.__context.id);
+              $setSelectionAtComposerOffset(selectionOffset);
+            } else {
+              $setSelectionAtComposerOffset(tokenStart);
+            }
+            event?.preventDefault();
+            return true;
+          };
+          if (removeInlineTokenNode(anchorNode)) {
             return true;
           }
-          const parent = anchorNode.getParent();
-          if ($isElementNode(parent)) {
-            const index = anchorNode.getIndexWithinParent();
-            if (index > 0 && removeInlineTokenNode(parent.getChildAtIndex(index - 1))) {
+
+          if ($isTextNode(anchorNode)) {
+            if (selection.anchor.offset === 0) {
+              if (removeInlineTokenNode(anchorNode.getPreviousSibling())) {
+                return true;
+              }
+              const parent = anchorNode.getParent();
+              if ($isElementNode(parent)) {
+                const index = anchorNode.getIndexWithinParent();
+                if (index > 0 && removeInlineTokenNode(parent.getChildAtIndex(index - 1))) {
+                  return true;
+                }
+              }
+            }
+          } else if ($isElementNode(anchorNode)) {
+            const childIndex = selection.anchor.offset - 1;
+            if (childIndex >= 0 && removeInlineTokenNode(anchorNode.getChildAtIndex(childIndex))) {
               return true;
             }
           }
+        }
+
+        if (!USE_NATIVE_IOS_BACKSPACE) {
           return false;
         }
 
-        if ($isElementNode(anchorNode)) {
-          const childIndex = selection.anchor.offset - 1;
-          if (childIndex >= 0 && removeInlineTokenNode(anchorNode.getChildAtIndex(childIndex))) {
-            return true;
-          }
+        if ($shouldUseNativeComposerBackspace(selection)) {
+          return true;
         }
 
-        return false;
+        event?.preventDefault();
+        return editor.dispatchCommand(DELETE_CHARACTER_COMMAND, true);
       },
       COMMAND_PRIORITY_HIGH,
     );
@@ -1753,7 +1763,7 @@ function ComposerPromptEditorInner({
         <ComposerNativeInputPlugin nativeInputTrackerRef={nativeInputTrackerRef} />
         <ComposerInlineTokenArrowPlugin />
         <ComposerInlineTokenSelectionNormalizePlugin />
-        <ComposerInlineTokenBackspacePlugin />
+        <ComposerBackspacePlugin />
         <HistoryPlugin />
       </div>
     </ComposerTerminalContextActionsContext>

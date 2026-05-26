@@ -312,6 +312,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   compact: boolean;
   activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>;
   isPreparingWorktree: boolean;
+  isInterrupting?: boolean;
   pendingAction: {
     questionIndex: number;
     isLastQuestion: boolean;
@@ -341,6 +342,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         compact={props.compact}
         pendingAction={props.pendingAction}
         isRunning={props.isRunning}
+        isInterrupting={props.isInterrupting ?? false}
         showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
         promptHasText={props.promptHasText}
         isSendBusy={props.isSendBusy}
@@ -420,6 +422,7 @@ export interface ChatComposerProps {
   isConnecting: boolean;
   isSendBusy: boolean;
   isPreparingWorktree: boolean;
+  isInterrupting?: boolean;
   environmentUnavailable: {
     readonly label: string;
     readonly connectionState: "connecting" | "disconnected" | "error";
@@ -534,6 +537,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isConnecting,
     isSendBusy,
     isPreparingWorktree,
+    isInterrupting = false,
     environmentUnavailable,
     queuedTurns,
     cancelingQueuedMessageIds,
@@ -2592,6 +2596,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   activeContextWindow={activeContextWindow}
                   pendingAction={pendingPrimaryAction}
                   isRunning={phase === "running"}
+                  isInterrupting={isInterrupting}
                   showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
                   promptHasText={prompt.trim().length > 0}
                   isSendBusy={isSendBusy}

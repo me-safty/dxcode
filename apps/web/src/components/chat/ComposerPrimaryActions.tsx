@@ -1,5 +1,11 @@
 import { memo, type PointerEventHandler } from "react";
-import { ArrowUpIcon, ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import {
+  ArrowUpIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  LoaderCircleIcon,
+  SquareIcon,
+} from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -16,6 +22,7 @@ interface ComposerPrimaryActionsProps {
   compact: boolean;
   pendingAction: PendingActionState | null;
   isRunning: boolean;
+  isInterrupting?: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
   isSendBusy: boolean;
@@ -55,6 +62,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   pendingAction,
   isRunning,
+  isInterrupting = false,
   showPlanFollowUpPrompt,
   promptHasText,
   isSendBusy,
@@ -127,14 +135,20 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
         <button
           type="button"
-          className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
+          className={cn(
+            "flex size-8 items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 disabled:cursor-wait disabled:opacity-80 sm:h-8 sm:w-8",
+            isInterrupting ? "hover:scale-100" : "cursor-pointer hover:bg-rose-500 hover:scale-105",
+          )}
           {...pointerFocusProps}
           onClick={onInterrupt}
-          aria-label="Stop generation"
+          disabled={isInterrupting}
+          aria-label={isInterrupting ? "Stopping generation" : "Stop generation"}
         >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-            <rect x="2" y="2" width="8" height="8" rx="1.5" />
-          </svg>
+          {isInterrupting ? (
+            <LoaderCircleIcon className="size-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <SquareIcon className="size-3 fill-current stroke-0" aria-hidden="true" />
+          )}
         </button>
         {hasSendableContent ? (
           <button

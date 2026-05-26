@@ -147,6 +147,7 @@ import {
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
+import { useLocalDispatchStore } from "../localDispatchStore";
 import {
   appendTerminalContextsToPrompt,
   formatTerminalContextLabel,
@@ -188,18 +189,20 @@ import {
   hasServerAcknowledgedLocalDispatch,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
-  type LocalDispatchSnapshot,
   PullRequestDialogState,
   cloneComposerImageForRetry,
+  deriveIsInterrupting,
   deriveLockedProvider,
   hasOlderThreadDetailPage,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  resolveInterruptTurnId,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   shouldShowThreadDetailLoading,
   shouldWriteThreadErrorToCurrentServerThread,
+  shouldIgnoreInterruptClick,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -391,18 +394,30 @@ type PersistentTerminalLaunchContext = Pick<TerminalLaunchContext, "cwd" | "work
 
 function useLocalDispatchState(input: {
   activeThread: Thread | undefined;
+  activeThreadKey: string | null;
   activeLatestTurn: Thread["latestTurn"] | null;
   phase: SessionPhase;
-  activePendingApproval: ApprovalRequestId | null;
-  activePendingUserInput: ApprovalRequestId | null;
+  activePendingApprovalCreatedAt: string | null;
+  activePendingUserInputCreatedAt: string | null;
   threadError: string | null | undefined;
 }) {
-  const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
+  const updateLocalDispatchByThreadKey = useLocalDispatchStore(
+    (store) => store.updateLocalDispatchByThreadKey,
+  );
+  const clearLocalDispatchByThreadKey = useLocalDispatchStore(
+    (store) => store.clearLocalDispatchByThreadKey,
+  );
+  const localDispatch = useLocalDispatchStore((store) =>
+    input.activeThreadKey ? (store.localDispatchByThreadKey[input.activeThreadKey] ?? null) : null,
+  );
 
   const beginLocalDispatch = useCallback(
     (options?: { preparingWorktree?: boolean }) => {
+      if (!input.activeThread || !input.activeThreadKey) {
+        return;
+      }
       const preparingWorktree = Boolean(options?.preparingWorktree);
-      setLocalDispatch((current) => {
+      updateLocalDispatchByThreadKey(input.activeThreadKey, (current) => {
         if (current) {
           return current.preparingWorktree === preparingWorktree
             ? current
@@ -411,12 +426,15 @@ function useLocalDispatchState(input: {
         return createLocalDispatchSnapshot(input.activeThread, options);
       });
     },
-    [input.activeThread],
+    [input.activeThread, input.activeThreadKey, updateLocalDispatchByThreadKey],
   );
 
   const resetLocalDispatch = useCallback(() => {
-    setLocalDispatch(null);
-  }, []);
+    if (!input.activeThreadKey) {
+      return;
+    }
+    clearLocalDispatchByThreadKey(input.activeThreadKey);
+  }, [clearLocalDispatchByThreadKey, input.activeThreadKey]);
 
   const serverAcknowledgedLocalDispatch = useMemo(
     () =>
@@ -425,14 +443,14 @@ function useLocalDispatchState(input: {
         phase: input.phase,
         latestTurn: input.activeLatestTurn,
         session: input.activeThread?.session ?? null,
-        hasPendingApproval: input.activePendingApproval !== null,
-        hasPendingUserInput: input.activePendingUserInput !== null,
+        pendingApprovalCreatedAt: input.activePendingApprovalCreatedAt,
+        pendingUserInputCreatedAt: input.activePendingUserInputCreatedAt,
         threadError: input.threadError,
       }),
     [
       input.activeLatestTurn,
-      input.activePendingApproval,
-      input.activePendingUserInput,
+      input.activePendingApprovalCreatedAt,
+      input.activePendingUserInputCreatedAt,
       input.activeThread?.session,
       input.phase,
       input.threadError,
@@ -717,7 +735,6 @@ export default function ChatView(props: ChatViewProps) {
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const showScrollToBottomRef = useRef(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
@@ -726,10 +743,10 @@ export default function ChatView(props: ChatViewProps) {
   const optimisticQueuedTurnsRef = useRef(optimisticQueuedTurns);
   optimisticQueuedTurnsRef.current = optimisticQueuedTurns;
   const [cancelingQueuedMessageIds, setCancelingQueuedMessageIds] = useState<MessageId[]>([]);
+  const [interruptingTurnId, setInterruptingTurnId] = useState<TurnId | null>(null);
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
     Record<string, string | null>
   >({});
-  const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
@@ -768,6 +785,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const timelineListRef = useRef<VirtualizedListHandle | null>(null);
   const isAtEndRef = useRef(true);
+  const shouldStickToBottomRef = useRef(true);
   const scheduledStickToBottomRef = useRef<ScheduledStickToBottom | null>(null);
   const scheduledOlderDetailPrependRestoreRef = useRef<ScheduledTimelineScrollAnchorRestore | null>(
     null,
@@ -1305,6 +1323,13 @@ export default function ChatView(props: ChatViewProps) {
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null, activeLatestTurn);
+  const isConnecting = phase === "connecting";
+  const activeInterruptTurnId = resolveInterruptTurnId(activeThread) ?? null;
+  const isInterrupting = deriveIsInterrupting({
+    interruptingTurnId,
+    phase,
+    activeTurnId: activeInterruptTurnId,
+  });
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
@@ -1393,13 +1418,15 @@ export default function ChatView(props: ChatViewProps) {
     isSendBusy,
   } = useLocalDispatchState({
     activeThread,
+    activeThreadKey,
     activeLatestTurn,
     phase,
-    activePendingApproval: activePendingApproval?.requestId ?? null,
-    activePendingUserInput: activePendingUserInput?.requestId ?? null,
+    activePendingApprovalCreatedAt: activePendingApproval?.createdAt ?? null,
+    activePendingUserInputCreatedAt: activePendingUserInput?.createdAt ?? null,
     threadError: activeThread?.error,
   });
-  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const isWorking =
+    phase === "running" || phase === "connecting" || isSendBusy || isRevertingCheckpoint;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -2411,7 +2438,6 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   const setScrollToBottomVisible = useCallback((visible: boolean) => {
-    showScrollToBottomRef.current = visible;
     setShowScrollToBottom(visible);
   }, []);
 
@@ -2429,16 +2455,18 @@ export default function ChatView(props: ChatViewProps) {
 
   const markTimelineAtEnd = useCallback(() => {
     isAtEndRef.current = true;
+    shouldStickToBottomRef.current = true;
     userScrollDetachUntilRef.current = 0;
     showScrollDebouncer.current.cancel();
     setScrollToBottomVisible(false);
   }, [setScrollToBottomVisible]);
 
-  const markTimelineAwayFromEnd = useCallback(() => {
-    const wasAtEnd = isAtEndRef.current;
+  const detachTimelineFromBottom = useCallback(() => {
+    const shouldShowPill = isAtEndRef.current || shouldStickToBottomRef.current;
     isAtEndRef.current = false;
+    shouldStickToBottomRef.current = false;
     cancelScheduledStickToBottom();
-    if (wasAtEnd) {
+    if (shouldShowPill) {
       showScrollDebouncer.current.maybeExecute();
     }
   }, [cancelScheduledStickToBottom]);
@@ -2486,22 +2514,24 @@ export default function ChatView(props: ChatViewProps) {
       }
       if (isAtEnd) {
         markTimelineAtEnd();
+      } else if (shouldStickToBottomRef.current) {
+        forceStickToBottom();
       } else {
-        markTimelineAwayFromEnd();
+        isAtEndRef.current = false;
       }
     },
-    [markTimelineAtEnd, markTimelineAwayFromEnd],
+    [forceStickToBottom, markTimelineAtEnd],
   );
 
   const onTimelineUserScrollIntent = useCallback(() => {
     cancelScheduledOlderDetailPrependRestore();
     stickToBottomLockUntilRef.current = 0;
     userScrollDetachUntilRef.current = performance.now() + USER_SCROLL_DETACH_GRACE_MS;
-    markTimelineAwayFromEnd();
-  }, [cancelScheduledOlderDetailPrependRestore, markTimelineAwayFromEnd]);
+    detachTimelineFromBottom();
+  }, [cancelScheduledOlderDetailPrependRestore, detachTimelineFromBottom]);
 
   useEffect(() => {
-    if (!isAtEndRef.current) {
+    if (!shouldStickToBottomRef.current) {
       return;
     }
     scrollToEnd(false);
@@ -2529,7 +2559,7 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     const shouldRestoreBottom = () => {
       const listState = timelineListRef.current?.getState?.();
-      return Boolean(listState?.isAtEnd || isAtEndRef.current || !showScrollToBottomRef.current);
+      return Boolean(shouldStickToBottomRef.current || listState?.isAtEnd || isAtEndRef.current);
     };
 
     const restoreBottom = () => {
@@ -2658,6 +2688,21 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThread?.id, activeThread?.queuedTurns, optimisticQueuedTurns]);
 
   useEffect(() => {
+    if (interruptingTurnId === null) {
+      return;
+    }
+    if (
+      !deriveIsInterrupting({
+        interruptingTurnId,
+        phase,
+        activeTurnId: activeInterruptTurnId,
+      })
+    ) {
+      setInterruptingTurnId(null);
+    }
+  }, [activeInterruptTurnId, interruptingTurnId, phase]);
+
+  useEffect(() => {
     setOptimisticUserMessages((existing) => {
       for (const message of existing) {
         revokeUserMessagePreviewUrls(message);
@@ -2673,9 +2718,9 @@ export default function ChatView(props: ChatViewProps) {
       return [];
     });
     setCancelingQueuedMessageIds([]);
-    resetLocalDispatch();
+    setInterruptingTurnId(null);
     setExpandedImage(null);
-  }, [activeThreadKey, resetLocalDispatch]);
+  }, [activeThreadKey]);
 
   const closeExpandedImage = useCallback(() => {
     setExpandedImage(null);
@@ -3413,12 +3458,30 @@ export default function ChatView(props: ChatViewProps) {
   const onInterrupt = async () => {
     const api = readEnvironmentApi(environmentId);
     if (!api || !activeThread) return;
-    await api.orchestration.dispatchCommand({
-      type: "thread.turn.interrupt",
-      commandId: newCommandId(),
-      threadId: activeThread.id,
-      createdAt: new Date().toISOString(),
-    });
+    const turnId = resolveInterruptTurnId(activeThread);
+    if (shouldIgnoreInterruptClick({ turnId, interruptingTurnId })) {
+      return;
+    }
+    if (turnId !== undefined) {
+      setInterruptingTurnId(turnId);
+    }
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.turn.interrupt",
+        commandId: newCommandId(),
+        threadId: activeThread.id,
+        ...(turnId !== undefined ? { turnId } : {}),
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      if (turnId !== undefined) {
+        setInterruptingTurnId((current) => (current === turnId ? null : current));
+      }
+      setThreadError(
+        activeThread.id,
+        err instanceof Error ? err.message : "Failed to stop generation.",
+      );
+    }
   };
 
   const onRespondToApproval = useCallback(
@@ -4163,10 +4226,11 @@ export default function ChatView(props: ChatViewProps) {
                   promptRef={promptRef}
                   composerImagesRef={composerImagesRef}
                   composerTerminalContextsRef={composerTerminalContextsRef}
-                  shouldAutoScrollRef={isAtEndRef}
+                  shouldAutoScrollRef={shouldStickToBottomRef}
                   scheduleStickToBottom={scrollToEnd}
                   onSend={onSend}
                   onInterrupt={onInterrupt}
+                  isInterrupting={isInterrupting}
                   onImplementPlanInNewThread={onImplementPlanInNewThread}
                   onRespondToApproval={onRespondToApproval}
                   onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}

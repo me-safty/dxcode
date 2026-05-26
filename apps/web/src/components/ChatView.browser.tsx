@@ -619,6 +619,60 @@ function appendUserMessageToThreadSnapshot(
   };
 }
 
+function appendReconciledTailMessageToThreadSnapshot(
+  snapshot: OrchestrationReadModel,
+  threadId: ThreadId,
+  input: {
+    repairedTailText: string;
+    appendedId: MessageId;
+    appendedText: string;
+  },
+): OrchestrationReadModel {
+  const nextSequence = snapshot.snapshotSequence + 1;
+  return {
+    ...snapshot,
+    snapshotSequence: nextSequence,
+    threads: snapshot.threads.map((thread) => {
+      if (thread.id !== threadId) {
+        return thread;
+      }
+
+      const lastMessage = thread.messages.at(-1);
+      const nextCreatedAt = new Date(
+        Math.max(Date.parse(lastMessage?.createdAt ?? NOW_ISO), BASE_TIME_MS) + 1_000,
+      ).toISOString();
+      const messages = thread.messages.map((message, index) =>
+        index === thread.messages.length - 1
+          ? {
+              ...message,
+              text: input.repairedTailText,
+              streaming: false,
+              updatedAt: nextCreatedAt,
+            }
+          : message,
+      );
+
+      return {
+        ...thread,
+        messages: [
+          ...messages,
+          {
+            ...createAssistantMessage({
+              id: input.appendedId,
+              text: input.appendedText,
+              offsetSeconds: 0,
+            }),
+            createdAt: nextCreatedAt,
+            updatedAt: nextCreatedAt,
+          },
+        ],
+        updatedAt: nextCreatedAt,
+      };
+    }),
+    updatedAt: new Date(BASE_TIME_MS + nextSequence * 1_000).toISOString(),
+  };
+}
+
 function sendShellThreadUpsert(
   threadId: ThreadId,
   options?: {
@@ -638,6 +692,21 @@ function sendShellThreadUpsert(
     kind: "thread-upserted",
     sequence: fixture.snapshot.snapshotSequence,
     thread: shellThread,
+  });
+}
+
+function emitThreadDetailSnapshot(threadId: ThreadId): void {
+  const thread = fixture.snapshot.threads.find((entry) => entry.id === threadId);
+  if (!thread) {
+    throw new Error(`Expected thread ${threadId} in snapshot.`);
+  }
+  rpcHarness.emitStreamValue(ORCHESTRATION_WS_METHODS.subscribeThread, {
+    kind: "snapshot",
+    snapshot: {
+      snapshotSequence: fixture.snapshot.snapshotSequence,
+      thread,
+      pageInfo: EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+    },
   });
 }
 
@@ -1334,6 +1403,29 @@ async function waitForElement<T extends Element>(
   return element;
 }
 
+function getMessagesTimelineScroller(): HTMLElement {
+  const scroller = document.querySelector<HTMLElement>("[data-testid='messages-timeline-list']");
+  if (!scroller) {
+    throw new Error("Unable to find messages timeline scroller.");
+  }
+  return scroller;
+}
+
+function distanceFromTimelineBottom(): number {
+  const scroller = getMessagesTimelineScroller();
+  const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  return maxScrollTop - scroller.scrollTop;
+}
+
+async function scrollTimelineToBottom(): Promise<HTMLElement> {
+  const scroller = getMessagesTimelineScroller();
+  scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+  await waitForLayout();
+  await expect.poll(() => distanceFromTimelineBottom()).toBeLessThan(2);
+  return scroller;
+}
+
 async function waitForURL(
   router: ReturnType<typeof getRouter>,
   predicate: (pathname: string) => boolean,
@@ -1986,6 +2078,74 @@ describe("ChatView timeline estimator parity (full app)", () => {
   afterEach(() => {
     customWsRpcResolver = null;
     document.body.innerHTML = "";
+  });
+
+  it("keeps auto-scroll pinned when a tail reconciliation snapshot arrives after passive drift", async () => {
+    const repairedTailText = "assistant tail repaired during reconciliation";
+    const appendedTailText = "assistant tail appended during reconciliation";
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-passive-scroll-reconciliation" as MessageId,
+        targetText: "passive scroll reconciliation",
+      }),
+    });
+
+    try {
+      const scroller = await scrollTimelineToBottom();
+
+      scroller.scrollTop = Math.max(0, scroller.scrollTop - 180);
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+
+      fixture.snapshot = appendReconciledTailMessageToThreadSnapshot(fixture.snapshot, THREAD_ID, {
+        repairedTailText,
+        appendedId: "msg-assistant-passive-reconciliation-tail" as MessageId,
+        appendedText: appendedTailText,
+      });
+      emitThreadDetailSnapshot(THREAD_ID);
+
+      await expect.element(page.getByText(repairedTailText)).toBeVisible();
+      await expect.element(page.getByText(appendedTailText)).toBeVisible();
+      await expect.poll(() => distanceFromTimelineBottom()).toBeLessThan(2);
+      await expect
+        .element(page.getByRole("button", { name: "Scroll to bottom" }))
+        .not.toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps auto-scroll detached after user scroll when a tail reconciliation snapshot arrives", async () => {
+    const appendedTailText = "assistant tail appended while manually detached";
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-manual-scroll-reconciliation" as MessageId,
+        targetText: "manual scroll reconciliation",
+      }),
+    });
+
+    try {
+      const scroller = await scrollTimelineToBottom();
+
+      scroller.dispatchEvent(new WheelEvent("wheel", { bubbles: true }));
+      scroller.scrollTop = Math.max(0, scroller.scrollTop - 260);
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      await expect.poll(() => distanceFromTimelineBottom()).toBeGreaterThan(80);
+
+      fixture.snapshot = appendReconciledTailMessageToThreadSnapshot(fixture.snapshot, THREAD_ID, {
+        repairedTailText: "assistant tail repaired while manually detached",
+        appendedId: "msg-assistant-manual-reconciliation-tail" as MessageId,
+        appendedText: appendedTailText,
+      });
+      emitThreadDetailSnapshot(THREAD_ID);
+
+      await waitForLayout();
+      await expect.poll(() => distanceFromTimelineBottom()).toBeGreaterThan(80);
+      await expect.element(page.getByRole("button", { name: "Scroll to bottom" })).toBeVisible();
+    } finally {
+      await mounted.cleanup();
+    }
   });
 
   it("renders locked single-environment mobile run context as a static workspace label", async () => {

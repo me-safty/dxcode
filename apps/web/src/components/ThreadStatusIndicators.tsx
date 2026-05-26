@@ -8,6 +8,7 @@ import {
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
 import { useGitStatus } from "../lib/gitStatusState";
+import { useLocalDispatchStore } from "../localDispatchStore";
 import { type AppState, selectProjectByRef, useStore } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
@@ -138,8 +139,10 @@ export function ThreadStatusLabel({
  */
 export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummary }) {
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-  const lastVisitedAt = useUiStateStore(
-    (state) => state.threadLastVisitedAtById[scopedThreadKey(threadRef)],
+  const threadKey = scopedThreadKey(threadRef);
+  const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
+  const hasActiveLocalDispatch = useLocalDispatchStore(
+    (state) => state.localDispatchByThreadKey[threadKey] !== undefined,
   );
   const threadProjectCwd = useStore(
     useMemo(
@@ -159,6 +162,7 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
+      hasActiveLocalDispatch,
       lastVisitedAt,
     },
   });

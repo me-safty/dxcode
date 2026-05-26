@@ -77,6 +77,34 @@ export function shouldWriteThreadErrorToCurrentServerThread(input: {
   );
 }
 
+export function resolveInterruptTurnId(
+  thread: Pick<Thread, "latestTurn" | "session"> | null | undefined,
+): TurnId | undefined {
+  if (thread?.latestTurn?.state === "running") {
+    return thread.latestTurn.turnId;
+  }
+  return thread?.session?.activeTurnId ?? undefined;
+}
+
+export function shouldIgnoreInterruptClick(input: {
+  readonly turnId: TurnId | undefined;
+  readonly interruptingTurnId: TurnId | null;
+}): boolean {
+  return input.turnId !== undefined && input.interruptingTurnId === input.turnId;
+}
+
+export function deriveIsInterrupting(input: {
+  readonly interruptingTurnId: TurnId | null;
+  readonly phase: SessionPhase;
+  readonly activeTurnId: TurnId | null;
+}): boolean {
+  return (
+    input.interruptingTurnId !== null &&
+    input.phase === "running" &&
+    input.activeTurnId === input.interruptingTurnId
+  );
+}
+
 export function reconcileMountedTerminalThreadIds(input: {
   currentThreadIds: ReadonlyArray<string>;
   openThreadIds: ReadonlyArray<string>;
@@ -398,28 +426,19 @@ export function hasServerAcknowledgedLocalDispatch(input: {
   phase: SessionPhase;
   latestTurn: Thread["latestTurn"] | null;
   session: Thread["session"] | null;
-  hasPendingApproval: boolean;
-  hasPendingUserInput: boolean;
+  pendingApprovalCreatedAt: string | null;
+  pendingUserInputCreatedAt: string | null;
   threadError: string | null | undefined;
 }): boolean {
   if (!input.localDispatch) {
     return false;
   }
-  if (input.hasPendingApproval || input.hasPendingUserInput || Boolean(input.threadError)) {
+  if (input.threadError) {
     return true;
   }
 
   const latestTurn = input.latestTurn ?? null;
   const session = input.session ?? null;
-  const latestTurnChanged =
-    input.localDispatch.latestTurnTurnId !== (latestTurn?.turnId ?? null) ||
-    input.localDispatch.latestTurnRequestedAt !== (latestTurn?.requestedAt ?? null) ||
-    input.localDispatch.latestTurnStartedAt !== (latestTurn?.startedAt ?? null) ||
-    input.localDispatch.latestTurnCompletedAt !== (latestTurn?.completedAt ?? null);
-
-  if (latestTurnChanged && latestTurn?.completedAt != null) {
-    return true;
-  }
 
   if (
     session?.orchestrationStatus === "error" ||
@@ -429,8 +448,26 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     return true;
   }
 
+  if (
+    isLocalDispatchFollowUpTimestamp(
+      input.pendingApprovalCreatedAt,
+      input.localDispatch.startedAt,
+    ) ||
+    isLocalDispatchFollowUpTimestamp(input.pendingUserInputCreatedAt, input.localDispatch.startedAt)
+  ) {
+    return true;
+  }
+
+  const latestTurnId = latestTurn?.turnId ?? null;
+  const hasNewLatestTurn =
+    latestTurnId !== null && latestTurnId !== input.localDispatch.latestTurnTurnId;
+
+  if (hasNewLatestTurn && latestTurn?.completedAt != null) {
+    return true;
+  }
+
   if (input.phase === "running") {
-    if (!latestTurnChanged) {
+    if (!hasNewLatestTurn) {
       return false;
     }
     if (latestTurn === null || latestTurn.startedAt == null) {
@@ -439,15 +476,26 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     if (latestTurn.completedAt != null) {
       return false;
     }
-    if (
-      session?.activeTurnId !== undefined &&
-      session.activeTurnId !== null &&
-      latestTurn?.turnId !== session.activeTurnId
-    ) {
+    if (session?.activeTurnId == null || latestTurn.turnId !== session.activeTurnId) {
       return false;
     }
     return true;
   }
 
   return false;
+}
+
+function isLocalDispatchFollowUpTimestamp(
+  timestamp: string | null,
+  localDispatchStartedAt: string,
+): boolean {
+  if (timestamp === null) {
+    return false;
+  }
+  const eventMs = Date.parse(timestamp);
+  const dispatchMs = Date.parse(localDispatchStartedAt);
+  if (!Number.isNaN(eventMs) && !Number.isNaN(dispatchMs)) {
+    return eventMs >= dispatchMs;
+  }
+  return timestamp >= localDispatchStartedAt;
 }

@@ -18,13 +18,16 @@ import {
   buildExpiredTerminalContextToastCopy,
   buildOlderThreadDetailPageCursors,
   createLocalDispatchSnapshot,
+  deriveIsInterrupting,
   deriveComposerSendState,
   hasOlderThreadDetailPage,
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
+  resolveInterruptTurnId,
   resolveSendEnvMode,
   shouldShowThreadDetailLoading,
   shouldWriteThreadErrorToCurrentServerThread,
+  shouldIgnoreInterruptClick,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 
@@ -258,6 +261,96 @@ const makeThread = (input?: {
   worktreePath: null,
   turnDiffSummaries: input?.turnDiffSummaries ?? [],
   activities: input?.activities ?? [],
+});
+
+describe("interrupt controls", () => {
+  it("uses the running latest turn id for stop commands", () => {
+    const runningTurnId = TurnId.make("turn-running");
+    const sessionTurnId = TurnId.make("turn-session");
+
+    expect(
+      resolveInterruptTurnId(
+        makeThread({
+          session: {
+            provider: ProviderDriverKind.make("cursor"),
+            status: "running",
+            createdAt: "2026-03-29T00:00:00.000Z",
+            updatedAt: "2026-03-29T00:00:01.000Z",
+            orchestrationStatus: "running",
+            activeTurnId: sessionTurnId,
+          },
+          latestTurn: {
+            turnId: runningTurnId,
+            state: "running",
+            requestedAt: "2026-03-29T00:00:00.000Z",
+            startedAt: "2026-03-29T00:00:01.000Z",
+            completedAt: null,
+          },
+        }),
+      ),
+    ).toBe(runningTurnId);
+  });
+
+  it("falls back to the active session turn id while projections catch up", () => {
+    const activeTurnId = TurnId.make("turn-active");
+
+    expect(
+      resolveInterruptTurnId(
+        makeThread({
+          session: {
+            provider: ProviderDriverKind.make("cursor"),
+            status: "running",
+            createdAt: "2026-03-29T00:00:00.000Z",
+            updatedAt: "2026-03-29T00:00:01.000Z",
+            orchestrationStatus: "running",
+            activeTurnId,
+          },
+          latestTurn: null,
+        }),
+      ),
+    ).toBe(activeTurnId);
+  });
+
+  it("suppresses repeated stop clicks for the same active turn", () => {
+    const turnId = TurnId.make("turn-1");
+
+    expect(shouldIgnoreInterruptClick({ turnId, interruptingTurnId: turnId })).toBe(true);
+    expect(
+      shouldIgnoreInterruptClick({
+        turnId,
+        interruptingTurnId: TurnId.make("turn-2"),
+      }),
+    ).toBe(false);
+    expect(shouldIgnoreInterruptClick({ turnId: undefined, interruptingTurnId: turnId })).toBe(
+      false,
+    );
+  });
+
+  it("only shows stopping state for the active running turn", () => {
+    const turnId = TurnId.make("turn-1");
+
+    expect(
+      deriveIsInterrupting({
+        interruptingTurnId: turnId,
+        phase: "running",
+        activeTurnId: turnId,
+      }),
+    ).toBe(true);
+    expect(
+      deriveIsInterrupting({
+        interruptingTurnId: turnId,
+        phase: "ready",
+        activeTurnId: turnId,
+      }),
+    ).toBe(false);
+    expect(
+      deriveIsInterrupting({
+        interruptingTurnId: turnId,
+        phase: "running",
+        activeTurnId: TurnId.make("turn-2"),
+      }),
+    ).toBe(false);
+  });
 });
 
 function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) {
@@ -675,8 +768,8 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
         phase: "ready",
         latestTurn: previousLatestTurn,
         session: previousSession,
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
     ).toBe(false);
@@ -713,8 +806,49 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
         phase: "ready",
         latestTurn: previousLatestTurn,
         session: previousSession,
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
+        threadError: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not clear local dispatch when the snapshotted completed turn is updated", () => {
+    const localDispatch = createLocalDispatchSnapshot({
+      id: ThreadId.make("thread-1"),
+      environmentId: localEnvironmentId,
+      codexThreadId: null,
+      projectId,
+      title: "Thread",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      session: previousSession,
+      messages: [],
+      queuedTurns: [],
+      proposedPlans: [],
+      error: null,
+      createdAt: "2026-03-29T00:00:00.000Z",
+      archivedAt: null,
+      updatedAt: "2026-03-29T00:00:10.000Z",
+      latestTurn: previousLatestTurn,
+      branch: null,
+      worktreePath: null,
+      turnDiffSummaries: [],
+      activities: [],
+    });
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch,
+        phase: "ready",
+        latestTurn: {
+          ...previousLatestTurn,
+          completedAt: "2026-03-29T00:00:11.000Z",
+        },
+        session: previousSession,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
     ).toBe(false);
@@ -760,8 +894,8 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
           ...previousSession,
           updatedAt: "2026-03-29T00:01:30.000Z",
         },
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
     ).toBe(true);
@@ -804,8 +938,8 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
           activeTurnId: TurnId.make("turn-2"),
           updatedAt: "2026-03-29T00:01:00.000Z",
         },
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
     ).toBe(false);
@@ -848,8 +982,8 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
           activeTurnId: undefined,
           updatedAt: "2026-03-29T00:01:00.000Z",
         },
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
     ).toBe(false);
@@ -899,8 +1033,8 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
           activeTurnId: TurnId.make("turn-2"),
           updatedAt: "2026-03-29T00:01:01.000Z",
         },
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
     ).toBe(true);
@@ -940,8 +1074,8 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
           ...previousSession,
           updatedAt: "2026-03-29T00:00:11.000Z",
         },
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
     ).toBe(false);
@@ -965,8 +1099,8 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
             ...terminalSession,
             updatedAt: "2026-03-29T00:00:11.000Z",
           },
-          hasPendingApproval: false,
-          hasPendingUserInput: false,
+          pendingApprovalCreatedAt: null,
+          pendingUserInputCreatedAt: null,
           threadError: null,
         }),
       ).toBe(true);
@@ -974,26 +1108,30 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
   });
 
   it("clears local dispatch for pending user action or thread error", () => {
+    const localDispatch = {
+      ...makeLocalDispatch(),
+      startedAt: "2026-03-29T00:00:11.000Z",
+    };
     const baseInput = {
-      localDispatch: makeLocalDispatch(),
+      localDispatch,
       phase: "ready" as const,
       latestTurn: previousLatestTurn,
       session: previousSession,
-      hasPendingApproval: false,
-      hasPendingUserInput: false,
+      pendingApprovalCreatedAt: null,
+      pendingUserInputCreatedAt: null,
       threadError: null,
     };
 
     expect(
       hasServerAcknowledgedLocalDispatch({
         ...baseInput,
-        hasPendingApproval: true,
+        pendingApprovalCreatedAt: "2026-03-29T00:00:12.000Z",
       }),
     ).toBe(true);
     expect(
       hasServerAcknowledgedLocalDispatch({
         ...baseInput,
-        hasPendingUserInput: true,
+        pendingUserInputCreatedAt: "2026-03-29T00:00:12.000Z",
       }),
     ).toBe(true);
     expect(
@@ -1002,5 +1140,33 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
         threadError: "Provider failed",
       }),
     ).toBe(true);
+  });
+
+  it("ignores pending user action state registered before local dispatch began", () => {
+    const baseInput = {
+      localDispatch: {
+        ...makeLocalDispatch(),
+        startedAt: "2026-03-29T00:00:11.000Z",
+      },
+      phase: "ready" as const,
+      latestTurn: previousLatestTurn,
+      session: previousSession,
+      pendingApprovalCreatedAt: null,
+      pendingUserInputCreatedAt: null,
+      threadError: null,
+    };
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...baseInput,
+        pendingApprovalCreatedAt: "2026-03-29T00:00:10.000Z",
+      }),
+    ).toBe(false);
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...baseInput,
+        pendingUserInputCreatedAt: "2026-03-29T00:00:10.000Z",
+      }),
+    ).toBe(false);
   });
 });

@@ -56,6 +56,7 @@ type ThreadStatusInput = Pick<
   | "latestTurn"
   | "session"
 > & {
+  hasActiveLocalDispatch?: boolean;
   lastVisitedAt?: string | undefined;
 };
 
@@ -347,6 +348,15 @@ export function resolveThreadStatusPill(input: {
       colorClass: "text-indigo-600 dark:text-indigo-300/90",
       dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
       pulse: false,
+    };
+  }
+
+  if (thread.hasActiveLocalDispatch) {
+    return {
+      label: "Working",
+      colorClass: "text-sky-600 dark:text-sky-300/80",
+      dotClass: "bg-sky-500 dark:bg-sky-300/80",
+      pulse: true,
     };
   }
 

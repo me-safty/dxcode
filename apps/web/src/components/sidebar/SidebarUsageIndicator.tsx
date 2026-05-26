@@ -206,7 +206,9 @@ function SidebarUsageProviderRowView({ row }: { row: SidebarUsageProviderRow }) 
           className="size-4"
           iconClassName="size-3.5"
         />
-        <span className="min-w-0 flex-1 truncate text-xs text-foreground/85">{row.label}</span>
+        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground/85 md:text-xs">
+          {row.label}
+        </span>
       </div>
       <SidebarUsageDetailsGrid row={row} />
     </div>
@@ -297,8 +299,8 @@ export function SidebarUsageIndicator() {
         className="flex h-7 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-muted-foreground/70 outline-hidden ring-ring transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2"
       >
         <GaugeIcon className="size-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-xs">Usage</span>
-        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+        <span className="min-w-0 flex-1 truncate text-[13px] md:text-xs">Usage</span>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70 md:text-[10px]">
           {formatSummary(summary)}
         </span>
         <ChevronDownIcon

@@ -110,7 +110,10 @@ export function SidebarUpdatePill() {
   return (
     <div className="flex flex-col gap-1">
       {showArm64Warning && arm64Description && (
-        <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8 text-xs">
+        <Alert
+          variant="warning"
+          className="rounded-2xl border-warning/40 bg-warning/8 text-[13px] md:text-xs"
+        >
           <TriangleAlertIcon />
           <AlertTitle>Intel build on Apple Silicon</AlertTitle>
           <AlertDescription>{arm64Description}</AlertDescription>
@@ -118,7 +121,7 @@ export function SidebarUpdatePill() {
       )}
       {visible && (
         <div
-          className={`group/update relative flex h-7 w-full items-center rounded-lg bg-primary/15 text-xs font-medium text-primary ${
+          className={`group/update relative flex h-7 w-full items-center rounded-lg bg-primary/15 text-[13px] font-medium text-primary md:text-xs ${
             disabled ? " cursor-not-allowed opacity-60" : ""
           }`}
         >

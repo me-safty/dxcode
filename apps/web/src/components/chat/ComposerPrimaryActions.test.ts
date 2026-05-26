@@ -1,6 +1,28 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import { formatPendingPrimaryActionLabel } from "./ComposerPrimaryActions";
+import { ComposerPrimaryActions, formatPendingPrimaryActionLabel } from "./ComposerPrimaryActions";
+
+const renderRunningPrimaryActions = (isInterrupting: boolean) =>
+  renderToStaticMarkup(
+    createElement(ComposerPrimaryActions, {
+      compact: false,
+      pendingAction: null,
+      isRunning: true,
+      isInterrupting,
+      showPlanFollowUpPrompt: false,
+      promptHasText: false,
+      isSendBusy: false,
+      isConnecting: false,
+      isEnvironmentUnavailable: false,
+      isPreparingWorktree: false,
+      hasSendableContent: false,
+      onPreviousPendingQuestion: () => {},
+      onInterrupt: () => {},
+      onImplementPlanInNewThread: () => {},
+    }),
+  );
 
 describe("formatPendingPrimaryActionLabel", () => {
   it("returns 'Submitting...' while responding", () => {
@@ -89,5 +111,23 @@ describe("formatPendingPrimaryActionLabel", () => {
         questionIndex: 5,
       }),
     ).toBe("Submit answers");
+  });
+});
+
+describe("ComposerPrimaryActions stop button", () => {
+  it("renders a disabled stopping affordance while interrupting", () => {
+    const markup = renderRunningPrimaryActions(true);
+
+    expect(markup).toContain('aria-label="Stopping generation"');
+    expect(markup).toContain("disabled=");
+    expect(markup).toContain("animate-spin");
+  });
+
+  it("keeps the normal stop action enabled before interruption is in flight", () => {
+    const markup = renderRunningPrimaryActions(false);
+
+    expect(markup).toContain('aria-label="Stop generation"');
+    expect(markup).not.toContain("disabled=");
+    expect(markup).not.toContain("animate-spin");
   });
 });

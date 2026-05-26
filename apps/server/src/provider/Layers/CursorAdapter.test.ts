@@ -13,6 +13,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { createModelSelection } from "@t3tools/shared/model";
 
 import {
@@ -21,6 +22,7 @@ import {
   ProviderDriverKind,
   type ProviderRuntimeEvent,
   ThreadId,
+  TurnId,
   ProviderInstanceId,
 } from "@t3tools/contracts";
 
@@ -919,7 +921,10 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       }
 
       const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
-      assert.isTrue(requests.some((entry) => entry.method === "session/cancel"));
+      const cancelRequests = requests.filter((entry) => entry.method === "session/cancel");
+      assert.lengthOf(cancelRequests, 1);
+      assert.notProperty(cancelRequests[0], "id");
+      assert.notProperty(cancelRequests[0], "headers");
       assert.isTrue(
         requests.some(
           (entry) =>
@@ -937,6 +942,171 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       yield* adapter.stopSession(threadId);
     }),
   );
+
+  it.effect("locally interrupts and stops the session when the ACP agent ignores cancel", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const resolveSettings = yield* makeResolveCursorSettings;
+      const adapter = yield* makeCursorAdapter(decodeCursorSettings({}), {
+        resolveSettings,
+        interruptGraceMs: 50,
+      });
+      const threadId = ThreadId.make("cursor-local-interrupt-fallback");
+      const tempDir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "cursor-acp-")));
+      const requestLogPath = path.join(tempDir, "requests.ndjson");
+      const argvLogPath = path.join(tempDir, "argv.txt");
+      yield* Effect.promise(() => writeFile(requestLogPath, "", "utf8"));
+      const wrapperPath = yield* Effect.promise(() =>
+        makeProbeWrapper(requestLogPath, argvLogPath, {
+          T3_ACP_EMIT_TOOL_CALLS: "1",
+          T3_ACP_IGNORE_CANCEL: "1",
+          T3_ACP_HANG_PROMPT_AFTER_PERMISSION: "1",
+        }),
+      );
+      yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const turnStartedReady = yield* Deferred.make<ProviderRuntimeEvent>();
+      const requestOpenedReady = yield* Deferred.make<ProviderRuntimeEvent>();
+      const turnCompletedReady = yield* Deferred.make<ProviderRuntimeEvent>();
+      const sessionExitedReady = yield* Deferred.make<ProviderRuntimeEvent>();
+
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) => {
+        if (String(event.threadId) !== String(threadId)) {
+          return Effect.void;
+        }
+        if (event.type === "turn.started") {
+          return Deferred.succeed(turnStartedReady, event).pipe(Effect.ignore);
+        }
+        if (event.type === "request.opened") {
+          return Deferred.succeed(requestOpenedReady, event).pipe(Effect.ignore);
+        }
+        if (event.type === "turn.completed") {
+          return Deferred.succeed(turnCompletedReady, event).pipe(Effect.ignore);
+        }
+        if (event.type === "session.exited") {
+          return Deferred.succeed(sessionExitedReady, event).pipe(Effect.ignore);
+        }
+        return Effect.void;
+      }).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+
+      const sendTurnFiber = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "cancel this turn locally",
+          attachments: [],
+        })
+        .pipe(Effect.forkChild);
+
+      const turnStarted = yield* Deferred.await(turnStartedReady);
+      yield* Deferred.await(requestOpenedReady);
+      assert.equal(turnStarted.type, "turn.started");
+      if (turnStarted.type !== "turn.started" || turnStarted.turnId === undefined) {
+        return yield* Effect.die(new Error("Expected turn.started with a turn id."));
+      }
+
+      const activeTurnId = TurnId.make(String(turnStarted.turnId));
+      yield* adapter.interruptTurn(threadId, activeTurnId);
+      yield* TestClock.adjust("50 millis");
+      yield* Effect.yieldNow;
+
+      const turnCompleted = yield* Deferred.await(turnCompletedReady);
+      assert.equal(turnCompleted.type, "turn.completed");
+      if (turnCompleted.type === "turn.completed") {
+        assert.equal(turnCompleted.payload.state, "interrupted");
+        assert.equal(turnCompleted.payload.stopReason, "local_interrupt_timeout");
+      }
+
+      const sentTurn = yield* Fiber.join(sendTurnFiber);
+      assert.equal(sentTurn.turnId, activeTurnId);
+      yield* Deferred.await(sessionExitedReady);
+      assert.equal(yield* adapter.hasSession(threadId), false);
+      yield* Fiber.interrupt(runtimeEventsFiber);
+    }),
+  );
+
+  it.effect("deduplicates repeated interrupts for the same active Cursor turn", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const serverSettings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-deduplicate-interrupts");
+      const tempDir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "cursor-acp-")));
+      const requestLogPath = path.join(tempDir, "requests.ndjson");
+      const argvLogPath = path.join(tempDir, "argv.txt");
+      yield* Effect.promise(() => writeFile(requestLogPath, "", "utf8"));
+      const wrapperPath = yield* Effect.promise(() =>
+        makeProbeWrapper(requestLogPath, argvLogPath, { T3_ACP_EMIT_TOOL_CALLS: "1" }),
+      );
+      yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const turnStartedReady = yield* Deferred.make<ProviderRuntimeEvent>();
+      const requestOpenedReady = yield* Deferred.make<ProviderRuntimeEvent>();
+      const turnCompletedReady = yield* Deferred.make<ProviderRuntimeEvent>();
+
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) => {
+        if (String(event.threadId) !== String(threadId)) {
+          return Effect.void;
+        }
+        if (event.type === "turn.started") {
+          return Deferred.succeed(turnStartedReady, event).pipe(Effect.ignore);
+        }
+        if (event.type === "request.opened") {
+          return Deferred.succeed(requestOpenedReady, event).pipe(Effect.ignore);
+        }
+        if (event.type === "turn.completed") {
+          return Deferred.succeed(turnCompletedReady, event).pipe(Effect.ignore);
+        }
+        return Effect.void;
+      }).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+
+      const sendTurnFiber = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "dedupe interrupts",
+          attachments: [],
+        })
+        .pipe(Effect.forkChild);
+
+      const turnStarted = yield* Deferred.await(turnStartedReady);
+      yield* Deferred.await(requestOpenedReady);
+      assert.equal(turnStarted.type, "turn.started");
+      if (turnStarted.type !== "turn.started" || turnStarted.turnId === undefined) {
+        return yield* Effect.die(new Error("Expected turn.started with a turn id."));
+      }
+
+      const activeTurnId = TurnId.make(String(turnStarted.turnId));
+      yield* adapter.interruptTurn(threadId, activeTurnId);
+      yield* adapter.interruptTurn(threadId, activeTurnId);
+      yield* adapter.interruptTurn(threadId, activeTurnId);
+
+      const turnCompleted = yield* Deferred.await(turnCompletedReady);
+      assert.equal(turnCompleted.type, "turn.completed");
+      yield* Fiber.join(sendTurnFiber);
+      yield* Fiber.interrupt(runtimeEventsFiber);
+
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+      const cancelRequests = requests.filter((entry) => entry.method === "session/cancel");
+      assert.lengthOf(cancelRequests, 1);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("stopping a session settles pending approval waits", () =>
     Effect.gen(function* () {
       const adapter = yield* CursorAdapter;

@@ -93,6 +93,10 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
             sessionId: "session-1",
           },
         });
+        assert.equal(
+          outbound,
+          '{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"session-1"}}\n',
+        );
 
         yield* Queue.offer(
           input,
@@ -153,20 +157,18 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
           direction: "outgoing",
           stage: "decoded",
           payload: {
-            _tag: "Request",
-            id: "",
-            tag: "session/cancel",
-            payload: {
+            _tag: "Notification",
+            method: "session/cancel",
+            params: {
               sessionId: "session-1",
             },
-            headers: [],
           },
         },
         {
           direction: "outgoing",
           stage: "raw",
           payload:
-            '{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"session-1"},"id":"","headers":[]}\n',
+            '{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"session-1"}}\n',
         },
       ]);
     }),

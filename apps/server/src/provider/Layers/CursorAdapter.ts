@@ -79,6 +79,9 @@ const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJ
 
 const PROVIDER = ProviderDriverKind.make("cursor");
 const CURSOR_RESUME_VERSION = 1 as const;
+const DEFAULT_CURSOR_INTERRUPT_GRACE_MS = 3000;
+const CURSOR_INTERRUPT_COMPLETION_WAIT_MS = 500;
+const CURSOR_LOCAL_INTERRUPT_STOP_REASON = "local_interrupt_timeout";
 const ACP_PLAN_MODE_ALIASES = ["plan", "architect"];
 const ACP_IMPLEMENT_MODE_ALIASES = ["code", "agent", "default", "chat", "implement"];
 const ACP_APPROVAL_MODE_ALIASES = ["ask"];
@@ -109,6 +112,7 @@ export interface CursorAdapterLiveOptions {
    * the latest snapshot so the closure isn't stale.
    */
   readonly resolveSettings?: Effect.Effect<CursorSettings>;
+  readonly interruptGraceMs?: number;
 }
 
 interface PendingApproval {
@@ -118,6 +122,14 @@ interface PendingApproval {
 
 interface PendingUserInput {
   readonly answers: Deferred.Deferred<ProviderUserInputAnswers>;
+}
+
+interface ActiveCursorTurn {
+  readonly id: TurnId;
+  readonly forceInterrupted: Deferred.Deferred<void>;
+  readonly completed: Deferred.Deferred<void>;
+  cancelRequestedAt: string | undefined;
+  fallbackFiber: Fiber.Fiber<void, never> | undefined;
 }
 
 interface CursorSessionContext {
@@ -130,6 +142,7 @@ interface CursorSessionContext {
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
+  activeTurn: ActiveCursorTurn | undefined;
   activeTurnId: TurnId | undefined;
   stopped: boolean;
 }
@@ -325,6 +338,9 @@ export function makeCursorAdapter(
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
 
     const sessions = new Map<ThreadId, CursorSessionContext>();
+    const interruptGraceMs = options?.interruptGraceMs ?? DEFAULT_CURSOR_INTERRUPT_GRACE_MS;
+    const workerScope = yield* Scope.make("sequential");
+    yield* Effect.addFinalizer(() => Scope.close(workerScope, Exit.void));
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
@@ -445,6 +461,69 @@ export function makeCursorAdapter(
           threadId: ctx.threadId,
           payload: { exitKind: "graceful" },
         });
+      });
+
+    const clearActiveTurnAfterPrompt = (
+      ctx: CursorSessionContext,
+      activeTurn: ActiveCursorTurn,
+      options: { readonly interruptFallback: boolean },
+    ) =>
+      Effect.gen(function* () {
+        if (ctx.activeTurn === activeTurn) {
+          const { activeTurnId: _activeTurnId, ...sessionWithoutActiveTurn } = ctx.session;
+          ctx.activeTurn = undefined;
+          ctx.activeTurnId = undefined;
+          ctx.session = {
+            ...sessionWithoutActiveTurn,
+            status: "ready",
+            updatedAt: yield* nowIso,
+          };
+        }
+        yield* Deferred.succeed(activeTurn.completed, undefined).pipe(Effect.ignore);
+        if (options.interruptFallback && activeTurn.fallbackFiber) {
+          yield* Fiber.interrupt(activeTurn.fallbackFiber).pipe(Effect.ignore);
+          activeTurn.fallbackFiber = undefined;
+        }
+      });
+
+    const startInterruptFallback = (ctx: CursorSessionContext, activeTurn: ActiveCursorTurn) =>
+      Effect.gen(function* () {
+        if (activeTurn.fallbackFiber) {
+          return;
+        }
+
+        const fallback = Effect.gen(function* () {
+          yield* Effect.sleep(interruptGraceMs);
+          if (
+            ctx.stopped ||
+            ctx.activeTurn !== activeTurn ||
+            activeTurn.cancelRequestedAt === undefined
+          ) {
+            return;
+          }
+
+          yield* Deferred.succeed(activeTurn.forceInterrupted, undefined).pipe(Effect.ignore);
+          yield* Deferred.await(activeTurn.completed).pipe(
+            Effect.timeoutOption(CURSOR_INTERRUPT_COMPLETION_WAIT_MS),
+            Effect.ignore,
+          );
+
+          if (!ctx.stopped) {
+            yield* stopSessionInternal(ctx);
+          }
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("cursor interrupt fallback failed", {
+              threadId: ctx.threadId,
+              turnId: activeTurn.id,
+              cause,
+            }),
+          ),
+        );
+
+        activeTurn.fallbackFiber = yield* fallback.pipe(
+          Effect.forkIn(workerScope, { startImmediately: true }),
+        );
       });
 
     const startSession: CursorAdapterShape["startSession"] = (input) =>
@@ -721,6 +800,7 @@ export function makeCursorAdapter(
             pendingUserInputs,
             turns: [],
             lastPlanFingerprint: undefined,
+            activeTurn: undefined,
             activeTurnId: undefined,
             stopped: false,
           };
@@ -864,23 +944,6 @@ export function makeCursorAdapter(
           mapError: ({ cause, method }) =>
             mapAcpToAdapterError(PROVIDER, input.threadId, method, cause),
         });
-        ctx.activeTurnId = turnId;
-        ctx.lastPlanFingerprint = undefined;
-        ctx.session = {
-          ...ctx.session,
-          activeTurnId: turnId,
-          updatedAt: yield* nowIso,
-        };
-
-        yield* offerRuntimeEvent({
-          type: "turn.started",
-          ...(yield* makeEventStamp()),
-          provider: PROVIDER,
-          threadId: input.threadId,
-          turnId,
-          payload: { model: resolvedModel },
-        });
-
         const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
         if (input.input?.trim()) {
           promptParts.push({ type: "text", text: input.input.trim() });
@@ -925,20 +988,104 @@ export function makeCursorAdapter(
           });
         }
 
-        const result = yield* ctx.acp
+        const activeTurn: ActiveCursorTurn = {
+          id: turnId,
+          forceInterrupted: yield* Deferred.make<void>(),
+          completed: yield* Deferred.make<void>(),
+          cancelRequestedAt: undefined,
+          fallbackFiber: undefined,
+        };
+        ctx.activeTurn = activeTurn;
+        ctx.activeTurnId = turnId;
+        ctx.lastPlanFingerprint = undefined;
+        ctx.session = {
+          ...ctx.session,
+          status: "running",
+          activeTurnId: turnId,
+          updatedAt: yield* nowIso,
+        };
+
+        yield* offerRuntimeEvent({
+          type: "turn.started",
+          ...(yield* makeEventStamp()),
+          provider: PROVIDER,
+          threadId: input.threadId,
+          turnId,
+          payload: { model: resolvedModel },
+        });
+
+        const promptEffect = ctx.acp
           .prompt({
             prompt: promptParts,
           })
           .pipe(
+            Effect.map((result) => ({ _tag: "provider" as const, result })),
             Effect.mapError((error) =>
               mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
             ),
           );
+        const promptResult =
+          yield* Deferred.make<
+            Exit.Exit<Effect.Success<typeof promptEffect>, Effect.Error<typeof promptEffect>>
+          >();
+        yield* promptEffect.pipe(
+          Effect.exit,
+          Effect.flatMap((exit) => Deferred.succeed(promptResult, exit)),
+          Effect.forkDetach({ startImmediately: true }),
+        );
 
-        ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
+        type PromptProviderOutcome = Effect.Success<typeof promptEffect>;
+        type PromptRaceOutcome = PromptProviderOutcome | { readonly _tag: "forced" };
+        type PromptError = Effect.Error<typeof promptEffect>;
+        const promptOutcome = yield* Effect.raceFirst(
+          Deferred.await(promptResult).pipe(
+            Effect.map((exit): Exit.Exit<PromptRaceOutcome, PromptError> => exit),
+          ),
+          Deferred.await(activeTurn.forceInterrupted).pipe(
+            Effect.as(Exit.succeed<PromptRaceOutcome>({ _tag: "forced" })),
+          ),
+        );
+
+        if (Exit.isFailure(promptOutcome)) {
+          yield* clearActiveTurnAfterPrompt(ctx, activeTurn, { interruptFallback: true });
+          return yield* Effect.failCause(promptOutcome.cause);
+        }
+
+        const completion = (() => {
+          const outcome = promptOutcome.value;
+          if (outcome._tag === "forced") {
+            return {
+              state: "interrupted" as const,
+              stopReason: CURSOR_LOCAL_INTERRUPT_STOP_REASON,
+            };
+          }
+          if (outcome.result.stopReason === "cancelled") {
+            return {
+              state: "cancelled" as const,
+              stopReason: "cancelled",
+            };
+          }
+          return {
+            state:
+              activeTurn.cancelRequestedAt === undefined
+                ? ("completed" as const)
+                : ("interrupted" as const),
+            stopReason: outcome.result.stopReason ?? null,
+          };
+        })();
+
+        ctx.turns.push({
+          id: turnId,
+          items: [
+            {
+              prompt: promptParts,
+              result:
+                promptOutcome.value._tag === "provider" ? promptOutcome.value.result : completion,
+            },
+          ],
+        });
         ctx.session = {
           ...ctx.session,
-          activeTurnId: turnId,
           updatedAt: yield* nowIso,
           model: resolvedModel,
         };
@@ -950,9 +1097,13 @@ export function makeCursorAdapter(
           threadId: input.threadId,
           turnId,
           payload: {
-            state: result.stopReason === "cancelled" ? "cancelled" : "completed",
-            stopReason: result.stopReason ?? null,
+            state: completion.state,
+            stopReason: completion.stopReason,
           },
+        });
+
+        yield* clearActiveTurnAfterPrompt(ctx, activeTurn, {
+          interruptFallback: promptOutcome.value._tag !== "forced",
         });
 
         return {
@@ -962,16 +1113,27 @@ export function makeCursorAdapter(
         };
       });
 
-    const interruptTurn: CursorAdapterShape["interruptTurn"] = (threadId) =>
+    const interruptTurn: CursorAdapterShape["interruptTurn"] = (threadId, turnId) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
         yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
-        yield* Effect.ignore(
-          ctx.acp.cancel.pipe(
-            Effect.mapError((error) =>
-              mapAcpToAdapterError(PROVIDER, threadId, "session/cancel", error),
-            ),
+        const activeTurn = ctx.activeTurn;
+        if (!activeTurn) {
+          return;
+        }
+        if (turnId !== undefined && activeTurn.id !== turnId) {
+          return;
+        }
+        if (activeTurn.cancelRequestedAt !== undefined) {
+          return;
+        }
+
+        activeTurn.cancelRequestedAt = yield* nowIso;
+        yield* startInterruptFallback(ctx, activeTurn);
+        yield* ctx.acp.cancel.pipe(
+          Effect.mapError((error) =>
+            mapAcpToAdapterError(PROVIDER, threadId, "session/cancel", error),
           ),
         );
       });
