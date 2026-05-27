@@ -21,6 +21,7 @@ function createBackend(): BackendApi {
     connect: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
     dispatchCommand: vi.fn(async () => undefined),
+    listThreadPlacements: vi.fn(async () => []),
     syncThreadToolContext: vi.fn(async () => undefined),
     atlassian: {} as BackendApi["atlassian"],
     github: {} as BackendApi["github"],

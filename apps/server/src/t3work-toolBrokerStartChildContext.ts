@@ -1,4 +1,3 @@
-import { sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type * as FileSystem from "effect/FileSystem";
@@ -13,6 +12,12 @@ import {
   REFERENCES_DIR_NAME,
   type LinkedRepositoryBootstrapResult,
 } from "./t3work-project-repository-utils.ts";
+import {
+  buildChildBranchName,
+  buildScopedChildWorktreePath,
+  findLinkedRepository,
+  readLinkedRepositories,
+} from "./t3work-toolBrokerStartChildLinkedRepository.ts";
 
 const LinkedRepositoryManifestJson = Schema.Struct({
   linkedRepositories: Schema.optional(Schema.Array(Schema.Unknown)),
@@ -47,65 +52,13 @@ export const hasProjectSetupScriptRunner = (
 ): services is Pick<T3workStartChildServices, "projectSetupScriptRunner"> =>
   services.projectSetupScriptRunner !== undefined;
 
-function normalizeRepositoryLookupKey(value: string): string {
-  const trimmed = value.trim().replace(/\.git$/i, "");
-  const sshMatch = /^git@([^:]+):(.+)$/i.exec(trimmed);
-  if (sshMatch) {
-    return `${sshMatch[1]}/${sshMatch[2] ?? ""}`.replace(/^\/+/, "").toLowerCase();
-  }
-
-  try {
-    const parsed = new URL(trimmed);
-    return `${parsed.host}${parsed.pathname}`
-      .replace(/\.git$/i, "")
-      .replace(/^\/+/, "")
-      .replace(/\/+/g, "/")
-      .toLowerCase();
-  } catch {
-    return trimmed.replace(/^\/+/, "").replace(/\/+/g, "/").toLowerCase();
-  }
-}
-
-function repositoryLookupCandidates(value: string): ReadonlyArray<string> {
-  const normalized = normalizeRepositoryLookupKey(value);
-  const candidates = new Set<string>([normalized]);
-  const firstSlashIndex = normalized.indexOf("/");
-  if (firstSlashIndex > 0 && firstSlashIndex < normalized.length - 1) {
-    candidates.add(normalized.slice(firstSlashIndex + 1));
-  }
-  return [...candidates];
-}
-
-function findLinkedRepository(
-  linkedRepositories: ReadonlyArray<LinkedRepositoryBootstrapResult>,
-  repoFullName: string,
-): LinkedRepositoryBootstrapResult | undefined {
-  const requestedCandidates = new Set(repositoryLookupCandidates(repoFullName));
-  return linkedRepositories.find((linkedRepository) =>
-    repositoryLookupCandidates(linkedRepository.url).some((candidate) =>
-      requestedCandidates.has(candidate),
-    ),
-  );
-}
-
-function buildChildBranchName(name: string): string {
-  return `${sanitizeFeatureBranchName(name)}-${crypto.randomUUID().slice(0, 8).toLowerCase()}`;
-}
-
-function readLinkedRepositories(
-  value: ReadonlyArray<unknown> | undefined,
-): ReadonlyArray<LinkedRepositoryBootstrapResult> {
-  return (value ?? []).filter(
-    (entry): entry is LinkedRepositoryBootstrapResult =>
-      typeof entry === "object" && entry !== null && !Array.isArray(entry),
-  );
-}
-
 export const resolveLinkedRepositoryWorktree = (input: {
   readonly services: T3workStartChildLinkedRepositoryServices;
   readonly projectWorkspaceRoot: string;
   readonly repoFullName: string;
+  readonly repoRef?: string;
   readonly sessionName: string;
+  readonly childThreadId: string;
 }) =>
   Effect.gen(function* () {
     const manifestPath = input.services.path.join(
@@ -164,25 +117,39 @@ export const resolveLinkedRepositoryWorktree = (input: {
       );
     }
 
-    const provider = yield* input.services.sourceControlProviders
-      .resolve({ cwd: repositoryPath })
-      .pipe(Effect.orElseSucceed(() => null));
-    const baseBranch = provider
-      ? yield* provider
-          .getDefaultBranch({ cwd: repositoryPath })
-          .pipe(Effect.orElseSucceed(() => "main"))
-      : "main";
+    const baseRef =
+      input.repoRef ??
+      ((yield* input.services.sourceControlProviders.resolve({ cwd: repositoryPath }).pipe(
+        Effect.flatMap((provider) => provider.getDefaultBranch({ cwd: repositoryPath })),
+        Effect.orElseSucceed(() => "main"),
+      )) ||
+        "main");
+
+    const scopedWorktreePath = buildScopedChildWorktreePath({
+      path: input.services.path,
+      projectWorkspaceRoot: input.projectWorkspaceRoot,
+      repoFullName: input.repoFullName,
+      repoRef: baseRef,
+      childThreadId: input.childThreadId,
+    });
+
+    yield* input.services.fileSystem.makeDirectory(
+      input.services.path.dirname(scopedWorktreePath),
+      {
+        recursive: true,
+      },
+    );
 
     const worktree = yield* input.services.gitWorkflow.createWorktree({
       cwd: repositoryPath,
-      refName:
-        typeof baseBranch === "string" && baseBranch.trim().length > 0 ? baseBranch.trim() : "main",
+      refName: typeof baseRef === "string" && baseRef.trim().length > 0 ? baseRef.trim() : "main",
       newRefName: buildChildBranchName(input.sessionName),
-      path: null,
+      path: scopedWorktreePath,
     });
 
     return {
       repoFullName: input.repoFullName,
+      repoRef: baseRef,
       branch: worktree.worktree.refName,
       worktreePath: worktree.worktree.path,
     };

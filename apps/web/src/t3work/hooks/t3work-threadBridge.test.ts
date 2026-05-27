@@ -9,6 +9,7 @@ import {
   resolveCanonicalProjectId,
   resolveCanonicalProjectIdForWorkspaceRoot,
   resolveStoredProjectId,
+  syncLiveThreadMetadataToLocalState,
 } from "./t3work-threadBridge";
 import {
   makeLiveProject,
@@ -356,5 +357,132 @@ describe("remapProjectThreadToStoredProject", () => {
         ticketId: "proj-456",
       }),
     );
+  });
+
+  it("shadows live child-thread metadata into local state during startup hydration", () => {
+    const storedProjects = [
+      makeStoredProject({
+        workspace: {
+          rootPath: "/workspace/saved",
+          createdAt: "2026-05-01T00:00:00.000Z",
+        },
+      }),
+    ];
+    const liveProjects = [
+      makeLiveProject({ id: ProjectId.make("live-saved"), cwd: "/workspace/saved" }),
+    ];
+
+    expect(
+      syncLiveThreadMetadataToLocalState({
+        threads: [],
+        storedProjects,
+        liveProjects,
+        liveThreads: [
+          {
+            id: "thread-child",
+            projectId: ProjectId.make("live-saved"),
+            title: "Investigate regression",
+            messages: [],
+            activities: [
+              {
+                id: "activity-handoff-1",
+                tone: "info",
+                kind: "t3work.handoff.created",
+                summary: "Created from Parent thread",
+                payload: {
+                  parentThreadId: ThreadId.make("thread-parent"),
+                  childThreadId: ThreadId.make("thread-child"),
+                  ticketId: "PROJ-123",
+                },
+                turnId: null,
+                createdAt: "2026-05-22T09:00:00.000Z",
+              },
+            ],
+            latestTurn: null,
+            archivedAt: null,
+            error: null,
+            session: null,
+            createdAt: "2026-05-22T09:00:00.000Z",
+            updatedAt: "2026-05-22T10:00:00.000Z",
+            environmentId: "env-local" as EnvironmentId,
+            defaultModelSelection: null,
+          } as never,
+        ],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        id: "thread-child",
+        projectId: "stored-project",
+        parentThreadId: "thread-parent",
+        ticketId: "PROJ-123",
+      }),
+    ]);
+  });
+
+  it("preserves remembered local display mode while syncing live child metadata", () => {
+    const storedProjects = [
+      makeStoredProject({
+        workspace: {
+          rootPath: "/workspace/saved",
+          createdAt: "2026-05-01T00:00:00.000Z",
+        },
+      }),
+    ];
+    const liveProjects = [
+      makeLiveProject({ id: ProjectId.make("live-saved"), cwd: "/workspace/saved" }),
+    ];
+
+    expect(
+      syncLiveThreadMetadataToLocalState({
+        threads: [
+          makeProjectThread({
+            id: "thread-child",
+            projectId: "stored-project",
+            displayMode: "thread",
+          }),
+        ],
+        storedProjects,
+        liveProjects,
+        liveThreads: [
+          {
+            id: "thread-child",
+            projectId: ProjectId.make("live-saved"),
+            title: "Investigate regression",
+            messages: [],
+            activities: [
+              {
+                id: "activity-handoff-1",
+                tone: "info",
+                kind: "t3work.handoff.created",
+                summary: "Created from Parent thread",
+                payload: {
+                  parentThreadId: ThreadId.make("thread-parent"),
+                  childThreadId: ThreadId.make("thread-child"),
+                  ticketId: "PROJ-123",
+                },
+                turnId: null,
+                createdAt: "2026-05-22T09:00:00.000Z",
+              },
+            ],
+            latestTurn: null,
+            archivedAt: null,
+            error: null,
+            session: null,
+            createdAt: "2026-05-22T09:00:00.000Z",
+            updatedAt: "2026-05-22T10:00:00.000Z",
+            environmentId: "env-local" as EnvironmentId,
+            defaultModelSelection: null,
+          } as never,
+        ],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        id: "thread-child",
+        projectId: "stored-project",
+        parentThreadId: "thread-parent",
+        ticketId: "PROJ-123",
+        displayMode: "thread",
+      }),
+    ]);
   });
 });

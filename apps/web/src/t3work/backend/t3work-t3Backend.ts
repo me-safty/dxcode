@@ -66,6 +66,13 @@ export function createT3Backend(wsBaseUrl: string): BackendApi {
     await api.orchestration.dispatchCommand(command);
   }
 
+  async function listThreadPlacements(input: Parameters<BackendApi["listThreadPlacements"]>[0]) {
+    return postJson<
+      typeof input,
+      { placements: Awaited<ReturnType<BackendApi["listThreadPlacements"]>> }
+    >(httpBaseUrl, "/api/t3work/thread/placements", input).then((response) => response.placements);
+  }
+
   async function syncThreadToolContext(input: Parameters<BackendApi["syncThreadToolContext"]>[0]) {
     await postJson<typeof input, { ok: true }>(
       httpBaseUrl,
@@ -91,6 +98,7 @@ export function createT3Backend(wsBaseUrl: string): BackendApi {
     connect,
     disconnect,
     dispatchCommand: dispatch,
+    listThreadPlacements,
     syncThreadToolContext,
     atlassian,
     github,

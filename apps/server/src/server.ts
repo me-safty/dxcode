@@ -107,6 +107,7 @@ import {
   t3workGitHubPullRequestContextRouteLayer,
 } from "./t3work-github-routes.ts";
 import { t3workProjectWorkspaceBootstrapRouteLayer } from "./t3work-project-repository-routes.ts";
+import { t3workThreadPlacementRouteLayer } from "./t3work-thread-placement-routes.ts";
 import { t3workThreadToolContextRouteLayer } from "./t3work-thread-tool-context-routes.ts";
 import { T3workThreadToolContextStoreLive } from "./t3work-threadToolContextStore.ts";
 import { T3workToolBrokerLive } from "./t3work-toolBrokerLive.ts";
@@ -349,6 +350,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   t3workGitHubInboxRouteLayer,
   t3workGitHubPullRequestContextRouteLayer,
   t3workProjectWorkspaceBootstrapRouteLayer,
+  t3workThreadPlacementRouteLayer,
   t3workThreadToolContextRouteLayer,
   t3workProjectWorkspaceWriteContextFilesRouteLayer,
   otlpTracesProxyRouteLayer,

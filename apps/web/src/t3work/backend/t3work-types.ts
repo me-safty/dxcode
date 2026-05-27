@@ -3,6 +3,7 @@ import type {
   ServerConfig,
   ServerConfigStreamEvent,
   ServerProvider,
+  ThreadId,
 } from "@t3tools/contracts";
 import type { AtlassianBackendApi } from "./t3work-atlassianBackendTypes";
 import type {
@@ -24,11 +25,20 @@ export interface BackendState {
   readonly error: string | null;
 }
 
+export type T3workThreadPlacement = {
+  readonly threadId: ThreadId;
+  readonly parentThreadId?: ThreadId;
+  readonly ticketId?: string;
+};
+
 export interface BackendApi {
   readonly state: BackendState;
   readonly connect: () => Promise<void>;
   readonly disconnect: () => Promise<void>;
   readonly dispatchCommand: (command: ClientOrchestrationCommand) => Promise<void>;
+  readonly listThreadPlacements: (input: {
+    readonly threadIds?: ReadonlyArray<string>;
+  }) => Promise<ReadonlyArray<T3workThreadPlacement>>;
   readonly syncThreadToolContext: (input: {
     readonly threadId: string;
     readonly toolContext?: T3workTurnToolContext | null;

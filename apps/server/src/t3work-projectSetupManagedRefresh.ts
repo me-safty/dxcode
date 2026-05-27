@@ -2,13 +2,12 @@ import { createHash } from "node:crypto";
 
 import { renderAgentsMd } from "./t3work-projectSetupContent.ts";
 import {
-  T3WORK_PROJECT_AGENTS_PATH,
-  T3WORK_PROJECT_CONTEXT_ENTRYPOINT_PATH,
-  T3WORK_PROJECT_CONTEXT_ROOT,
+  renderLegacyAgentsMd,
+  renderPreviousAgentsMd,
+} from "./t3work-projectSetupAgentsManagedRefresh.ts";
+import {
   T3WORK_PROJECT_PROFILE_MANIFEST_PATH,
-  T3WORK_PROJECT_RECIPES_ROOT,
   T3WORK_PROJECT_SETUP_VERSION,
-  T3WORK_PROJECT_SKILLS_ROOT,
   type ProjectSetupProfileDefinition,
   type T3WorkProjectSetupFile,
   type T3WorkProjectSetupManagedFileHashes,
@@ -29,63 +28,13 @@ export function createT3WorkProjectSetupContentHash(contents: string): string {
   return `sha256:${createHash("sha256").update(contents).digest("hex")}`;
 }
 
-function renderLegacyAgentsMd(profile: ProjectSetupProfileDefinition): string {
-  const technicalDepthLine =
-    profile.communicationStyle.technicalDepth === "high"
-      ? "Give implementation detail and verification notes when they materially change a decision."
-      : profile.communicationStyle.technicalDepth === "medium"
-        ? "Use only enough technical detail to explain tradeoffs, risks, or validation results."
-        : "Use plain, non-technical language unless the user explicitly asks for implementation detail.";
-  const complexityLine = profile.communicationStyle.hideImplementationComplexity
-    ? "Hide low-level implementation complexity unless it changes the outcome or the user asks for it."
-    : "Summarize the implementation approach clearly, but keep the final answer compact.";
-
-  return `# t3work Project Agent Guide
-
-## Conversation Style
-
-- Keep replies short and direct.
-- ${technicalDepthLine}
-- ${complexityLine}
-- Explain what changed, why it matters, and what the user should do next.
-
-## Thread Naming
-
-- Keep the thread title current as the topic changes.
-- When a thread name no longer describes the work, rename it in a few words.
-- Example: change "Initial question" to "Fix OAuth callback" after the work shifts there.
-
-## Start With Project Context
-
-Use these project files before asking the user to restate context:
-
-- ${T3WORK_PROJECT_CONTEXT_ENTRYPOINT_PATH}
-- ${T3WORK_PROJECT_CONTEXT_ROOT}/
-- .t3work/references/reference-repositories.json
-- ${T3WORK_PROJECT_PROFILE_MANIFEST_PATH}
-
-## Durable Outputs
-
-- Save durable project artifacts in the workspace, not only in chat.
-- Prefer project-local recipes under ${T3WORK_PROJECT_RECIPES_ROOT}/.
-- Prefer project-local skills under ${T3WORK_PROJECT_SKILLS_ROOT}/ for repeatable workflows.
-- After a workflow succeeds and looks reusable, proactively offer to create or update a project skill or recipe.
-- Offer first. Do not silently create project skills or recipes.
-
-## Scope
-
-- Keep work focused on this project.
-- If project context is missing or stale, refresh ${T3WORK_PROJECT_CONTEXT_ROOT} before continuing.
-`;
-}
-
 export function buildT3WorkProjectAgentsManagedRefresh(profile: ProjectSetupProfileDefinition) {
   const currentHash = createT3WorkProjectSetupContentHash(renderAgentsMd(profile));
+  const previousHash = createT3WorkProjectSetupContentHash(renderPreviousAgentsMd(profile));
   const legacyHash = createT3WorkProjectSetupContentHash(renderLegacyAgentsMd(profile));
 
   return {
-    knownContentHashes:
-      currentHash === legacyHash ? [currentHash] : ([legacyHash, currentHash] as const),
+    knownContentHashes: [...new Set([legacyHash, previousHash, currentHash])],
   };
 }
 

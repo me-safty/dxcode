@@ -100,6 +100,10 @@ export function createMockBackend(): BackendApi {
       await new Promise((resolve) => setTimeout(resolve, 200));
     },
 
+    async listThreadPlacements() {
+      return [];
+    },
+
     async syncThreadToolContext() {},
 
     atlassian,

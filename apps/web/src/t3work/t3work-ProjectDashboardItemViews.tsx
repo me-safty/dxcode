@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
 import type { ProjectTicket } from "~/t3work/t3work-types";
 import { JiraIssueTypeIcon } from "~/t3work/components/ticket/t3work-JiraIssueType";
-import { renderRelativeUpdatedAt } from "~/t3work/t3work-githubActivityViewUtils";
+import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
+import { ProjectDashboardTicketTooltip } from "~/t3work/t3work-ProjectDashboardItemViewParts";
 import {
-  ProjectDashboardTicketRelationshipBadge,
-  ProjectDashboardTicketTooltip,
-} from "~/t3work/t3work-ProjectDashboardItemViewParts";
+  TicketWorkItemCardMeta,
+  TicketWorkItemRowMeta,
+} from "~/t3work/t3work-ProjectDashboardItemMeta";
 
 export function TicketWorkItemCard({
   ticket,
@@ -18,6 +19,7 @@ export function TicketWorkItemCard({
   child,
   childCount,
   lastCheckedAt,
+  githubActivityItems,
   extraChildren,
   onContextMenu,
 }: {
@@ -31,11 +33,11 @@ export function TicketWorkItemCard({
   child?: boolean;
   childCount?: number;
   lastCheckedAt?: number;
+  githubActivityItems?: ReadonlyArray<GitHubWorkActivityItem>;
   extraChildren?: ReactNode;
   onContextMenu?: (event: React.MouseEvent) => void;
 }) {
   const showsChildRelationship = child || inlineChild;
-  const updatedLabel = compact ? renderRelativeUpdatedAt(ticket.updatedAt) : undefined;
   const cardContent = (
     <div
       className={`h-full overflow-hidden rounded-md border shadow-sm transition-all hover:-translate-y-px hover:bg-accent/35 hover:shadow-md @container/ticket-card ${
@@ -64,40 +66,14 @@ export function TicketWorkItemCard({
             className={compact ? "mt-0.5" : "mt-px"}
           />
           <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span
-                className={`truncate font-medium text-muted-foreground ${
-                  compact ? "text-[11px] @md/ticket-card:text-xs" : "text-xs"
-                }`}
-              >
-                {ticket.ref.displayId}
-              </span>
-              <ProjectDashboardTicketRelationshipBadge
-                child={showsChildRelationship}
-                childCount={childCount}
-              />
-              <span
-                className={`max-w-28 truncate text-[10px] text-muted-foreground/75 ${
-                  compact ? "hidden @md/ticket-card:inline" : ""
-                }`}
-              >
-                {ticket.status}
-              </span>
-              {ticket.priority && (
-                <span
-                  className={`max-w-24 truncate rounded bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground ${
-                    compact ? "hidden @lg/ticket-card:inline" : ""
-                  }`}
-                >
-                  {ticket.priority}
-                </span>
-              )}
-              {updatedLabel ? (
-                <span className="ml-auto hidden shrink-0 text-[10px] text-muted-foreground @lg/ticket-card:inline-flex">
-                  Updated {updatedLabel}
-                </span>
-              ) : null}
-            </div>
+            <TicketWorkItemCardMeta
+              ticket={ticket}
+              compact={compact}
+              child={child}
+              inlineChild={inlineChild}
+              childCount={childCount}
+              githubActivityItems={githubActivityItems}
+            />
             <div
               className={`mt-1 overflow-hidden font-medium ${
                 compact
@@ -146,6 +122,7 @@ export function TicketWorkItemRow({
   child,
   childCount,
   lastCheckedAt,
+  githubActivityItems,
   extraChildren,
   onContextMenu,
 }: {
@@ -154,6 +131,7 @@ export function TicketWorkItemRow({
   child?: boolean;
   childCount?: number;
   lastCheckedAt?: number;
+  githubActivityItems?: ReadonlyArray<GitHubWorkActivityItem>;
   extraChildren?: ReactNode;
   onContextMenu?: (event: React.MouseEvent) => void;
 }) {
@@ -176,18 +154,12 @@ export function TicketWorkItemRow({
           issueTypeIconUrl={ticket.issueTypeIconUrl ?? ticket.ref.issueTypeIconUrl}
         />
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs font-medium text-muted-foreground">
-              {ticket.ref.displayId}
-            </span>
-            <ProjectDashboardTicketRelationshipBadge child={child} childCount={childCount} />
-            <span className="text-[10px] text-muted-foreground/75">{ticket.status}</span>
-            {ticket.priority && (
-              <span className="rounded bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                {ticket.priority}
-              </span>
-            )}
-          </div>
+          <TicketWorkItemRowMeta
+            ticket={ticket}
+            child={child}
+            childCount={childCount}
+            githubActivityItems={githubActivityItems}
+          />
           <div className="mt-0.5 text-sm font-medium leading-5">{ticket.ref.title}</div>
           {ticket.assignee && (
             <div className="text-xs text-muted-foreground">Assigned to {ticket.assignee}</div>

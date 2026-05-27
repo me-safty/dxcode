@@ -32,6 +32,7 @@ const backend = {
   connect: async () => {},
   disconnect: async () => {},
   dispatchCommand: async () => {},
+  listThreadPlacements: async () => [],
   syncThreadToolContext: async () => {},
   atlassian: {},
   github: {},

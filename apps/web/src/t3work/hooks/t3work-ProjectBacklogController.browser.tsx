@@ -145,7 +145,7 @@ function createBackend(input: {
     listResources: vi.fn(async () => ({ items: [] })),
     listBacklog: input.listBacklog,
     pollBacklog: input.pollBacklog,
-    getBoardColumns: vi.fn(async () => ({ boardColumns: [] })),
+    getBoardColumns: vi.fn(async () => ({ availableStatuses: [], boardColumns: [] })),
     getResource: vi.fn(async () => ({
       ref: {
         provider: "atlassian",
@@ -174,6 +174,7 @@ function createBackend(input: {
     connect: async () => undefined,
     disconnect: async () => undefined,
     dispatchCommand: async () => undefined,
+    listThreadPlacements: async () => [],
     syncThreadToolContext: async () => undefined,
     atlassian: atlassian as BackendApi["atlassian"],
     github: {} as BackendApi["github"],

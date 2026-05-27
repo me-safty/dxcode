@@ -60,15 +60,15 @@ export function makeStartChildThread(input: {
       });
       const modelSelection = buildStartChildModelSelection(baseModelSelection, args);
       const interactionMode = mapKickoffModeToInteractionMode(args.kickoffMode);
-      const createdAt = DateTime.formatIso(yield* DateTime.now);
-      const requestedKickoffMode =
-        args.kickoffMode ?? (args.kickoffPrompt ? "interactive" : undefined);
+      const createdAt = DateTime.formatIso(yield* DateTime.now),
+        requestedKickoffMode = args.kickoffMode ?? (args.kickoffPrompt ? "interactive" : undefined);
 
-      let repoFullName: string | null = null;
-      let branch: string | null = null;
-      let worktreePath: string | null = null;
-      let setupScriptStatus: "not-requested" | "no-script" | "started" | "failed" = "not-requested";
-      let setupScriptTerminalId: string | null = null;
+      let repoFullName: string | null = null,
+        repoRef: string | null = null,
+        branch: string | null = null,
+        worktreePath: string | null = null;
+      let setupScriptStatus: "not-requested" | "no-script" | "started" | "failed" = "not-requested",
+        setupScriptTerminalId: string | null = null;
 
       if (args.repoFullName) {
         if (!hasLinkedRepositoryStartChildServices(input.services)) {
@@ -81,9 +81,11 @@ export function makeStartChildThread(input: {
           services: input.services,
           projectWorkspaceRoot: project.workspaceRoot,
           repoFullName: args.repoFullName,
+          ...(args.repoRef ? { repoRef: args.repoRef } : {}),
           sessionName: args.name,
+          childThreadId,
         });
-        ({ repoFullName, branch, worktreePath } = resolvedRepository);
+        ({ repoFullName, repoRef, branch, worktreePath } = resolvedRepository);
       }
 
       const childToolContext = createChildThreadToolContext({
@@ -145,6 +147,7 @@ export function makeStartChildThread(input: {
         ...(parentThreadId ? { handoffParentThreadId: parentThreadId } : {}),
         ...(ticketId ? { ticketId } : {}),
         ...(repoFullName ? { repoFullName } : {}),
+        ...(repoRef ? { repoRef } : {}),
         ...(branch ? { branch } : {}),
         ...(worktreePath ? { worktreePath } : {}),
         ...(args.kickoffPrompt ? { kickoffPrompt: args.kickoffPrompt } : {}),
@@ -204,6 +207,7 @@ export function makeStartChildThread(input: {
         ...(requestedKickoffMode ? { requested_kickoff_mode: requestedKickoffMode } : {}),
         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         ...(repoFullName ? { repo_full_name: repoFullName } : {}),
+        ...(repoRef ? { repo_ref: repoRef } : {}),
         ...(branch ? { branch } : {}),
         ...(worktreePath ? { worktree_path: worktreePath } : {}),
         ...(setupScriptTerminalId ? { setup_script_terminal_id: setupScriptTerminalId } : {}),

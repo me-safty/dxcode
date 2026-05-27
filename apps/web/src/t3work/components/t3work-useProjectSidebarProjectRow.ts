@@ -11,53 +11,8 @@ import { buildProjectSidebarThreadGroups } from "./t3work-projectSidebarThreadGr
 import { useProjectSidebarProjectRename } from "./t3work-useProjectSidebarProjectRename";
 import { useProjectSidebarNavItemPreferences } from "./t3work-useProjectSidebarNavItemPreferences";
 import { deriveTicketVisibility } from "./t3work-projectSidebarProjectRow.helpers";
+import { buildVisibleTicketIdSet } from "./t3work-projectSidebarVisibleTicketIds";
 import { buildProjectTicketLookup } from "~/t3work/t3work-ticketLookup";
-
-function collectVisibleTicketIds(
-  ticket: ProjectTicket,
-  childrenByParentId: ReadonlyMap<string, readonly ProjectTicket[]>,
-  visibleTicketIds: Set<string>,
-): void {
-  if (visibleTicketIds.has(ticket.id)) {
-    return;
-  }
-
-  visibleTicketIds.add(ticket.id);
-  for (const child of childrenByParentId.get(ticket.id) ?? []) {
-    collectVisibleTicketIds(child, childrenByParentId, visibleTicketIds);
-  }
-}
-
-function buildVisibleTicketIdSet(input: {
-  showJiraItems: boolean;
-  ticketViewMode: ProjectRowProps["ticketViewMode"];
-  visibleFlatTickets: ReadonlyArray<ProjectTicket>;
-  visibleTreeRoots: ReadonlyArray<ProjectTicket>;
-  visibleTreeUnresolvedChildren: ReadonlyArray<ProjectTicket>;
-  childrenByParentId: ReadonlyMap<string, readonly ProjectTicket[]>;
-}): ReadonlySet<string> {
-  const visibleTicketIds = new Set<string>();
-
-  if (!input.showJiraItems) {
-    return visibleTicketIds;
-  }
-
-  if (input.ticketViewMode === "flat") {
-    for (const ticket of input.visibleFlatTickets) {
-      visibleTicketIds.add(ticket.id);
-    }
-    return visibleTicketIds;
-  }
-
-  for (const ticket of input.visibleTreeRoots) {
-    collectVisibleTicketIds(ticket, input.childrenByParentId, visibleTicketIds);
-  }
-  for (const ticket of input.visibleTreeUnresolvedChildren) {
-    collectVisibleTicketIds(ticket, input.childrenByParentId, visibleTicketIds);
-  }
-
-  return visibleTicketIds;
-}
 
 export function useProjectSidebarProjectRow(props: ProjectRowProps) {
   const {
@@ -80,7 +35,10 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
   const [expandedThreadList, setExpandedThreadList] = useState(false);
   const [myWorkExpanded, setMyWorkExpanded] = useState(true);
   const { addToChatFromRequest } = useAddToChat();
-  const linkedRepositoryUrls = useMemo(() => readLinkedRepositoryUrlsFromProject(project), [project]);
+  const linkedRepositoryUrls = useMemo(
+    () => readLinkedRepositoryUrlsFromProject(project),
+    [project],
+  );
   const githubActivity = useProjectGitHubActivity({
     project,
     linkedRepositoryUrls,
@@ -93,7 +51,10 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
   );
   const { hiddenItemIds, orderedItemIds } = useProjectSidebarNavItemPreferences(project.id);
 
-  const ticketHierarchy = useMemo(() => buildProjectTicketHierarchy(projectTickets), [projectTickets]);
+  const ticketHierarchy = useMemo(
+    () => buildProjectTicketHierarchy(projectTickets),
+    [projectTickets],
+  );
   const ticketLookup = useMemo(() => buildProjectTicketLookup(projectTickets), [projectTickets]);
   const { visibleFlatTickets, visibleTreeRoots, visibleTreeUnresolvedChildren, hiddenTicketCount } =
     useMemo(
@@ -191,6 +152,8 @@ export function useProjectSidebarProjectRow(props: ProjectRowProps) {
     myWorkThreads: dashboardThreadsByMode["my-work"],
     visibleThreads,
     visibleTicketIds,
+    hiddenItemIds,
+    orderedItemIds,
     ticketHierarchy,
     ticketThreadsById,
     visibleFlatTickets,

@@ -6,19 +6,25 @@ import {
   selectThreadsAcrossEnvironments,
   useStore,
 } from "~/store";
-import type { ViewState, ProjectThread } from "~/t3work/t3work-types";
+import type { ViewState, ProjectThread, ProjectThreadDisplayMode } from "~/t3work/t3work-types";
 import { useProjectStoreActions } from "./t3work-useProjectStoreActions";
 import { useProjectStoreQueries } from "./t3work-useProjectStoreQueries";
 import { useProjectThreadActions } from "./t3work-useProjectThreadActions";
+import { useHydrateThreadPlacements } from "./t3work-useHydrateThreadPlacements";
 import { useHydrateStoredProjects } from "./t3work-useHydrateStoredProjects";
 import { useHydrateStoredThreads } from "./t3work-useHydrateStoredThreads";
+import { findProjectThreadById } from "./t3work-projectThreadLookup";
 import {
   generateProjectId,
   deriveLooseWorkspaceProjects,
   loadStoredProjects,
 } from "./t3work-projectStoreUtils";
 import { persistStoredThreads } from "./t3work-projectThreadPersistence";
-import { remapProjectThreadToStoredProject, resolveStoredProjectId } from "./t3work-threadBridge";
+import {
+  remapProjectThreadToStoredProject,
+  resolveStoredProjectId,
+  syncLiveThreadMetadataToLocalState,
+} from "./t3work-threadBridge";
 
 export function useProjectStore() {
   const [storedProjects, setStoredProjects] = useState<ProjectShellProject[]>(loadStoredProjects);
@@ -39,6 +45,13 @@ export function useProjectStore() {
     setExpandedProjectIds,
   });
   useHydrateStoredThreads({ setThreads, setThreadsHydrated });
+  useHydrateThreadPlacements({
+    threads,
+    setThreads,
+    storedProjects,
+    liveProjects,
+    liveThreads,
+  });
 
   useEffect(() => {
     if (!threadsHydrated) {
@@ -65,6 +78,21 @@ export function useProjectStore() {
       return changed ? nextThreads : currentThreads;
     });
   }, [liveProjects, storedProjects]);
+
+  useEffect(() => {
+    if (liveThreads.length === 0) {
+      return;
+    }
+
+    setThreads((currentThreads) =>
+      syncLiveThreadMetadataToLocalState({
+        threads: currentThreads,
+        storedProjects,
+        liveProjects,
+        liveThreads,
+      }),
+    );
+  }, [liveProjects, liveThreads, storedProjects]);
 
   const looseWorkspaceProjects = useMemo(
     () => deriveLooseWorkspaceProjects(storedProjects, liveProjects),
@@ -115,7 +143,7 @@ export function useProjectStore() {
     markThreadKickoffConsumed,
     deleteThread,
     renameThread,
-    updateThreadDisplayMode,
+    updateThreadDisplayMode: updateThreadDisplayModeInternal,
   } = useProjectThreadActions({
     threads,
     setThreads,
@@ -125,6 +153,21 @@ export function useProjectStore() {
   });
 
   const selectedProject = allProjects.find((project) => project.id === selectedProjectId) ?? null;
+
+  const updateThreadDisplayMode = useCallback(
+    (threadId: string, displayMode: ProjectThreadDisplayMode) => {
+      const fallbackThread =
+        threads.find((thread) => thread.id === threadId) ??
+        findProjectThreadById(
+          allProjects.map((project) => project.id),
+          getThreadsForProject,
+          threadId,
+        );
+
+      updateThreadDisplayModeInternal(threadId, displayMode, fallbackThread);
+    },
+    [allProjects, getThreadsForProject, threads, updateThreadDisplayModeInternal],
+  );
 
   return {
     projects: storedProjects,

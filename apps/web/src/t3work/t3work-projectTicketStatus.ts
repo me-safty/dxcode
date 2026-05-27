@@ -39,11 +39,7 @@ export function isProjectTicketKanbanStatusVisibleForProfile(
   profileId?: string,
 ): boolean {
   const normalizedStatus = normalizeProjectTicketStatus(status);
-  if (normalizedStatus.length === 0) return true;
-
-  if (!profileId) {
-    return true;
-  }
+  if (normalizedStatus.length === 0 || !profileId) return true;
 
   const resolvedProfileId = resolveT3WorkProjectSetupProfileId(profileId);
   if (resolvedProfileId === "requirements-engineer" || resolvedProfileId === "project-partner") {
@@ -58,24 +54,10 @@ export function getProjectTicketKanbanLane(
 ): "todo" | "inProgress" | "review" | "done" {
   const normalizedStatus = normalizeProjectTicketStatus(status);
   if (normalizedStatus.length === 0) return "todo";
-
-  if (includesStatusKeyword(normalizedStatus, doneStatusKeywords)) {
-    return "done";
-  }
-
-  if (includesStatusKeyword(normalizedStatus, reviewStatusKeywords)) {
-    return "review";
-  }
-
-  if (includesStatusKeyword(normalizedStatus, todoStatusKeywords)) {
-    return "todo";
-  }
-
-  if (includesStatusKeyword(normalizedStatus, inProgressStatusKeywords)) {
-    return "inProgress";
-  }
-
-  return "todo";
+  if (includesStatusKeyword(normalizedStatus, doneStatusKeywords)) return "done";
+  if (includesStatusKeyword(normalizedStatus, reviewStatusKeywords)) return "review";
+  if (includesStatusKeyword(normalizedStatus, todoStatusKeywords)) return "todo";
+  return includesStatusKeyword(normalizedStatus, inProgressStatusKeywords) ? "inProgress" : "todo";
 }
 
 export function matchesProjectTicketStatusCategory(
@@ -83,11 +65,7 @@ export function matchesProjectTicketStatusCategory(
   category: ProjectTicketStatusCategory,
 ): boolean {
   const lane = getProjectTicketKanbanLane(status);
-  if (category === "active") {
-    return lane === "todo" || lane === "inProgress";
-  }
-
-  return lane === category;
+  return category === "active" ? lane === "todo" || lane === "inProgress" : lane === category;
 }
 
 export function getProjectTicketKanbanLaneRank(status: string): number {
@@ -115,24 +93,41 @@ function buildProjectTicketKanbanConfiguredStatusOrder(
       if (normalizedStatus.length === 0 || configuredStatusOrder.has(normalizedStatus)) {
         continue;
       }
-
-      configuredStatusOrder.set(normalizedStatus, nextOrder);
-      nextOrder += 1;
+      configuredStatusOrder.set(normalizedStatus, nextOrder++);
     }
   }
 
   return configuredStatusOrder;
 }
 
+function seedProjectTicketKanbanColumnsFromBoard(input: {
+  columnsById: Map<ProjectTicketKanbanColumnId, ProjectTicketKanbanColumn>;
+  boardColumns?: ReadonlyArray<ProjectTicketKanbanBoardColumn> | undefined;
+  profileId?: T3WorkProjectSetupProfileId | string | undefined;
+}): void {
+  for (const column of input.boardColumns ?? []) {
+    for (const status of column.statuses) {
+      if (!isProjectTicketKanbanStatusVisibleForProfile(status.name, input.profileId)) continue;
+      const id = getProjectTicketKanbanColumnId(status.name);
+      if (input.columnsById.has(id)) continue;
+
+      input.columnsById.set(id, {
+        id,
+        title: formatProjectTicketKanbanStatusTitle(status.name),
+        items: [],
+      });
+    }
+  }
+}
+
 function isProjectTicketKanbanStatusVisibleOnBoard(
   status: string,
   configuredStatusOrder: ReadonlyMap<string, number>,
 ): boolean {
-  if (configuredStatusOrder.size === 0) {
-    return true;
-  }
-
-  return configuredStatusOrder.has(normalizeProjectTicketStatus(status));
+  return (
+    configuredStatusOrder.size === 0 ||
+    configuredStatusOrder.has(normalizeProjectTicketStatus(status))
+  );
 }
 
 function getProjectTicketKanbanColumnOrder(
@@ -143,9 +138,7 @@ function getProjectTicketKanbanColumnOrder(
   const configuredOrder = normalizedStatus
     ? configuredStatusOrder?.get(normalizedStatus)
     : undefined;
-  if (configuredOrder !== undefined) {
-    return configuredOrder;
-  }
+  if (configuredOrder !== undefined) return configuredOrder;
 
   const fallbackBase = (configuredStatusOrder?.size ?? 0) + 100;
   switch (getProjectTicketKanbanLane(status)) {
@@ -160,10 +153,27 @@ function getProjectTicketKanbanColumnOrder(
   }
 }
 
+function compareProjectTicketKanbanColumns(
+  left: ProjectTicketKanbanColumn,
+  right: ProjectTicketKanbanColumn,
+  configuredStatusOrder: ReadonlyMap<string, number>,
+): number {
+  if (configuredStatusOrder.size === 0) {
+    const occupancyDifference = Number(right.items.length > 0) - Number(left.items.length > 0);
+    if (occupancyDifference !== 0) return occupancyDifference;
+  }
+
+  const orderDifference =
+    getProjectTicketKanbanColumnOrder(left.title, configuredStatusOrder) -
+    getProjectTicketKanbanColumnOrder(right.title, configuredStatusOrder);
+  return orderDifference !== 0 ? orderDifference : left.title.localeCompare(right.title);
+}
+
 export function buildProjectTicketKanbanColumns(
   tickets: readonly ProjectTicket[],
   options?: {
     profileId?: T3WorkProjectSetupProfileId | string;
+    availableStatuses?: ReadonlyArray<ProjectTicketKanbanBoardColumn["statuses"][number]>;
     boardColumns?: ReadonlyArray<ProjectTicketKanbanBoardColumn>;
   },
 ): ProjectTicketKanbanColumns {
@@ -172,14 +182,27 @@ export function buildProjectTicketKanbanColumns(
     options?.boardColumns,
   );
 
-  for (const ticket of tickets) {
-    if (!isProjectTicketKanbanStatusVisibleForProfile(ticket.status, options?.profileId)) {
-      continue;
-    }
+  seedProjectTicketKanbanColumnsFromBoard({
+    columnsById,
+    boardColumns: options?.boardColumns,
+    profileId: options?.profileId,
+  });
 
-    if (!isProjectTicketKanbanStatusVisibleOnBoard(ticket.status, configuredStatusOrder)) {
-      continue;
+  for (const status of options?.availableStatuses ?? []) {
+    if (!isProjectTicketKanbanStatusVisibleForProfile(status.name, options?.profileId)) continue;
+    const id = getProjectTicketKanbanColumnId(status.name);
+    if (!columnsById.has(id)) {
+      columnsById.set(id, {
+        id,
+        title: formatProjectTicketKanbanStatusTitle(status.name),
+        items: [],
+      });
     }
+  }
+
+  for (const ticket of tickets) {
+    if (!isProjectTicketKanbanStatusVisibleForProfile(ticket.status, options?.profileId)) continue;
+    if (!isProjectTicketKanbanStatusVisibleOnBoard(ticket.status, configuredStatusOrder)) continue;
 
     const id = getProjectTicketKanbanColumnId(ticket.status);
     const existingColumn = columnsById.get(id);
@@ -195,10 +218,7 @@ export function buildProjectTicketKanbanColumns(
     });
   }
 
-  return [...columnsById.values()].toSorted((left, right) => {
-    const orderDifference =
-      getProjectTicketKanbanColumnOrder(left.title, configuredStatusOrder) -
-      getProjectTicketKanbanColumnOrder(right.title, configuredStatusOrder);
-    return orderDifference !== 0 ? orderDifference : left.title.localeCompare(right.title);
-  });
+  return [...columnsById.values()].toSorted((left, right) =>
+    compareProjectTicketKanbanColumns(left, right, configuredStatusOrder),
+  );
 }

@@ -25,6 +25,7 @@ __screenshots__/
 squashfs-root/
 .vercel
 .gstack/
+apps/server/.t3work/
 worktrees/
 dist-electron/
 .electron-runtime/
