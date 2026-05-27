@@ -140,6 +140,7 @@ export async function runPiRpcCommands(input: {
   readonly waitForAgentEnd?: boolean | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly onEvent?: PiRpcEventHandler | undefined;
+  readonly resetTimeoutOnActivity?: boolean | undefined;
 }): Promise<PiRpcRunResult> {
   return await new Promise((resolve, reject) => {
     const child = spawn(input.binaryPath, ["--mode", "rpc", ...(input.args ?? [])], {
@@ -174,10 +175,20 @@ export async function runPiRpcCommands(input: {
       reject(error);
     };
 
+    const timeoutMs = input.timeoutMs ?? 120_000;
+    let timer: ReturnType<typeof setTimeout>;
+    const resetTimer = () => {
+      clearTimeout(timer);
+      // @effect-diagnostics-next-line globalTimers:off
+      timer = setTimeout(() => {
+        rejectOnce(new Error(`Timed out waiting for Pi RPC. Stderr: ${stderr.trim()}`));
+      }, timeoutMs);
+    };
+
     // @effect-diagnostics-next-line globalTimers:off
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       rejectOnce(new Error(`Timed out waiting for Pi RPC. Stderr: ${stderr.trim()}`));
-    }, input.timeoutMs ?? 120_000);
+    }, timeoutMs);
 
     input.signal?.addEventListener("abort", () => {
       rejectOnce(new Error("Pi RPC request was aborted."));
@@ -185,6 +196,9 @@ export async function runPiRpcCommands(input: {
 
     const handleLine = (line: string) => {
       if (!line.trim()) return;
+      if (input.resetTimeoutOnActivity === true) {
+        resetTimer();
+      }
       let parsed: PiRpcLine;
       try {
         parsed = JSON.parse(line) as PiRpcLine;
@@ -232,6 +246,9 @@ export async function runPiRpcCommands(input: {
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
+      if (input.resetTimeoutOnActivity === true) {
+        resetTimer();
+      }
     });
     child.on("error", (error) => {
       rejectOnce(error);
@@ -271,6 +288,7 @@ export async function runPiRpcPrompt(input: {
   readonly timeoutMs?: number | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly onEvent?: PiRpcEventHandler | undefined;
+  readonly resetTimeoutOnActivity?: boolean | undefined;
 }): Promise<PiPromptResult> {
   const result = await runPiRpcCommands({
     binaryPath: input.binaryPath,
@@ -289,6 +307,7 @@ export async function runPiRpcPrompt(input: {
     waitForAgentEnd: true,
     signal: input.signal,
     onEvent: input.onEvent,
+    resetTimeoutOnActivity: input.resetTimeoutOnActivity,
   });
   return {
     text: extractAssistantText(result.events),

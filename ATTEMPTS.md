@@ -239,3 +239,28 @@ Result:
 Lesson:
 
 - Pi can stream cleanly through T3 as long as the adapter maps only `text_delta` to `assistant_text`; reasoning and tool-call deltas must remain hidden or be mapped to non-assistant surfaces later.
+
+## Loop 9: Long Pi Turn Timeout Diagnosis
+
+Edit:
+
+- Investigated a desktop/userdata failure for thread `a3b619ce-023d-4afd-9bf7-1454aa52af77`.
+- Found Pi ran for the full 180-second adapter timeout, executed multiple tool rounds, wrote output, and was killed before final `agent_end`.
+- Changed Pi prompt turns to reset the RPC timeout on stdout/stderr activity.
+- Kept the 180-second timeout as an idle timeout so genuinely stuck Pi processes still fail.
+
+Checks:
+
+- `bunx vitest run src/provider/Layers/PiRpc.test.ts`
+- `bun typecheck`
+- `bun fmt`
+
+Result:
+
+- Targeted Pi RPC tests passed: 3 tests passed.
+- Typecheck passed: 13 successful tasks.
+- Formatting passed.
+
+Lesson:
+
+- Long-running Pi work should be bounded by inactivity, not total wall-clock time. Multi-tool tasks can exceed three minutes while still making healthy progress.

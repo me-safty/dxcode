@@ -315,6 +315,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
             message: text ?? "",
             images,
             timeoutMs: 180_000,
+            resetTimeoutOnActivity: true,
             signal: abort.signal,
             onEvent: (event) => {
               const delta = readPiAssistantTextDelta(event);
