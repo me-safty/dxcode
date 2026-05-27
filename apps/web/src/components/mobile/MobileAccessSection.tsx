@@ -3,10 +3,9 @@ import { useEffect, useState } from "react";
 import type { AdvertisedEndpoint } from "@t3tools/contracts";
 
 import { createServerPairingCredential } from "~/environments/primary";
-import {
-  isTailscaleHttpsEndpoint,
-  resolveAdvertisedEndpointPairingUrl,
-} from "../settings/ConnectionsSettings";
+import { useIsMobile } from "../../hooks/useMediaQuery";
+import { isTailscaleHttpsEndpoint } from "../settings/ConnectionsSettings";
+import { resolveAdvertisedEndpointMobileBootstrapUrl } from "../settings/pairingUrls";
 import { SettingsRow, SettingsSection } from "../settings/settingsLayout";
 import { QRCodeSvg } from "../ui/qr-code";
 import { Spinner } from "../ui/spinner";
@@ -27,6 +26,7 @@ export function MobileAccessSection({
   onEnable,
   onDisable,
 }: MobileAccessSectionProps) {
+  const isMobile = useIsMobile();
   const tailscaleEndpoint = endpoints.find(isTailscaleHttpsEndpoint) ?? null;
   const isReachable = isTailscaleServeEnabled && tailscaleEndpoint?.status === "available";
 
@@ -48,7 +48,9 @@ export function MobileAccessSection({
     createServerPairingCredential("Mobile")
       .then((link) => {
         if (cancelled) return;
-        setPairingUrl(resolveAdvertisedEndpointPairingUrl(tailscaleEndpoint, link.credential));
+        setPairingUrl(
+          resolveAdvertisedEndpointMobileBootstrapUrl(tailscaleEndpoint, link.credential),
+        );
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -106,7 +108,7 @@ export function MobileAccessSection({
               >
                 <QRCodeSvg
                   value={pairingUrl}
-                  size={132}
+                  size={isMobile ? 220 : 132}
                   level="M"
                   marginSize={2}
                   title="Scan to open T3 Code on your phone"
@@ -117,8 +119,8 @@ export function MobileAccessSection({
                   Scan with your phone&apos;s camera
                 </p>
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  Opens T3 Code over your tailnet and completes pairing. Single-use; expires in 24
-                  hours.
+                  Opens T3 Code on your phone — installs the app if needed and connects to this
+                  session. Single-use; expires in 24 hours.
                 </p>
                 <p className="truncate font-mono text-[10px] text-muted-foreground/60">
                   {tailscaleEndpoint.httpBaseUrl}
