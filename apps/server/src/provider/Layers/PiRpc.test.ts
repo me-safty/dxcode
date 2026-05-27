@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { extractAssistantText, readPiAssistantTextDelta, type PiRpcLine } from "./PiRpc.ts";
+import {
+  extractAssistantText,
+  readPiAssistantTextDelta,
+  readPiToolResultText,
+  type PiRpcLine,
+} from "./PiRpc.ts";
 
 describe("extractAssistantText", () => {
   it("prefers the final assistant message over streamed reasoning and tool-call deltas", () => {
@@ -83,5 +88,25 @@ describe("extractAssistantText", () => {
         assistantMessageEvent: { type: "toolcall_delta", delta: '{"path":"SOUL.md"}' },
       }),
     ).toBe("");
+  });
+});
+
+describe("readPiToolResultText", () => {
+  it("extracts text from Pi tool result content arrays", () => {
+    expect(
+      readPiToolResultText({
+        content: [
+          { type: "text", text: "partial output" },
+          { type: "text", text: " continued" },
+        ],
+        details: { truncation: null },
+      }),
+    ).toBe("partial output continued");
+  });
+
+  it("supports common scalar output fields", () => {
+    expect(readPiToolResultText("raw output")).toBe("raw output");
+    expect(readPiToolResultText({ stdout: "stdout output" })).toBe("stdout output");
+    expect(readPiToolResultText({ output: "generic output" })).toBe("generic output");
   });
 });

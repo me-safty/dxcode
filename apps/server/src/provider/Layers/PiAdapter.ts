@@ -1,5 +1,6 @@
 import {
   EventId,
+  type CanonicalItemType,
   ProviderDriverKind,
   ProviderInstanceId,
   RuntimeItemId,
@@ -34,7 +35,13 @@ import {
   ProviderAdapterValidationError,
 } from "../Errors.ts";
 import type { ProviderAdapterShape, ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
-import { readPiAssistantTextDelta, runPiRpcPrompt, splitPiModelSlug } from "./PiRpc.ts";
+import {
+  readPiAssistantTextDelta,
+  readPiToolResultText,
+  runPiRpcPrompt,
+  splitPiModelSlug,
+  type PiRpcLine,
+} from "./PiRpc.ts";
 
 const PROVIDER = ProviderDriverKind.make("pi");
 
@@ -71,6 +78,105 @@ function makePiArgs(input: {
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function truncateDetail(value: string, maxLength = 1_200): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= maxLength) return trimmed;
+  return `${trimmed.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function piToolItemType(toolName: string | undefined): CanonicalItemType {
+  const normalized = toolName?.toLowerCase();
+  if (
+    normalized === "bash" ||
+    normalized === "shell" ||
+    normalized === "terminal" ||
+    normalized === "execute"
+  ) {
+    return "command_execution";
+  }
+  if (
+    normalized === "write" ||
+    normalized === "edit" ||
+    normalized === "apply_patch" ||
+    normalized === "patch"
+  ) {
+    return "file_change";
+  }
+  if (
+    normalized === "exa_search" ||
+    normalized === "web_search" ||
+    normalized === "search" ||
+    normalized === "grep" ||
+    normalized === "find"
+  ) {
+    return "web_search";
+  }
+  return "dynamic_tool_call";
+}
+
+function piToolTitle(toolName: string | undefined, itemType: CanonicalItemType): string {
+  switch (itemType) {
+    case "command_execution":
+      return "Ran command";
+    case "file_change":
+      return "Changed file";
+    case "web_search":
+      return "Searched";
+    default:
+      return toolName ?? "Pi tool";
+  }
+}
+
+function piToolArgsDetail(args: unknown, itemType: CanonicalItemType): string | undefined {
+  const record = asRecord(args);
+  if (!record) return undefined;
+  if (itemType === "command_execution") {
+    return asString(record.command);
+  }
+  return (
+    asString(record.path) ??
+    asString(record.filePath) ??
+    asString(record.relativePath) ??
+    asString(record.query) ??
+    asString(record.pattern)
+  );
+}
+
+function piToolData(event: PiRpcLine, itemType: CanonicalItemType): Record<string, unknown> {
+  const args = asRecord(event.args);
+  const output =
+    event.type === "tool_execution_update"
+      ? readPiToolResultText(event.partialResult)
+      : event.type === "tool_execution_end"
+        ? readPiToolResultText(event.result)
+        : "";
+  return {
+    tool: event.toolName,
+    kind:
+      itemType === "command_execution"
+        ? "execute"
+        : itemType === "file_change"
+          ? "edit"
+          : itemType === "web_search"
+            ? "search"
+            : "tool",
+    toolCallId: event.toolCallId,
+    ...(args ? { args, rawInput: args } : {}),
+    ...(itemType === "command_execution" && args?.command ? { command: args.command } : {}),
+    ...(output.length > 0 ? { rawOutput: { content: output } } : {}),
+  };
 }
 
 export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
@@ -290,6 +396,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
 
       let assistantItemStarted = false;
       let streamedAssistantText = "";
+      const startedPiToolIds = new Set<string>();
       let streamingEmitQueue: Promise<void> = Promise.resolve();
       const streamingCreatedAtFallback = yield* nowIso;
       const runtimeContext = yield* Effect.context<never>();
@@ -298,6 +405,94 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
         streamingEmitQueue = streamingEmitQueue
           .then(() => runPromise(effect))
           .catch(() => undefined);
+      };
+      const enqueuePiToolEvent = (event: PiRpcLine) => {
+        if (
+          event.type !== "tool_execution_start" &&
+          event.type !== "tool_execution_update" &&
+          event.type !== "tool_execution_end"
+        ) {
+          return;
+        }
+        const toolItemId =
+          event.toolCallId?.trim() || event.id?.trim() || `pi-tool-${randomUUID()}`;
+        const toolName = event.toolName?.trim() || undefined;
+        const itemType = piToolItemType(toolName);
+        const title = piToolTitle(toolName, itemType);
+        const eventTimestamp =
+          typeof event.timestamp === "string" ? event.timestamp : streamingCreatedAtFallback;
+        const outputText =
+          event.type === "tool_execution_update"
+            ? readPiToolResultText(event.partialResult)
+            : event.type === "tool_execution_end"
+              ? readPiToolResultText(event.result)
+              : "";
+        const argsDetail = piToolArgsDetail(event.args, itemType);
+        const detail = truncateDetail(outputText || argsDetail || toolName || title);
+        const data = piToolData(event, itemType);
+
+        enqueueStreamingEmit(
+          Effect.gen(function* () {
+            if (!startedPiToolIds.has(toolItemId)) {
+              startedPiToolIds.add(toolItemId);
+              yield* emit({
+                ...eventBaseSync({
+                  threadId: input.threadId,
+                  createdAt: eventTimestamp,
+                  turnId,
+                  itemId: toolItemId,
+                }),
+                type: "item.started",
+                payload: {
+                  itemType,
+                  status: "inProgress",
+                  title,
+                  detail,
+                  data,
+                },
+              });
+            }
+
+            if (event.type === "tool_execution_update") {
+              yield* emit({
+                ...eventBaseSync({
+                  threadId: input.threadId,
+                  createdAt: eventTimestamp,
+                  turnId,
+                  itemId: toolItemId,
+                }),
+                type: "item.updated",
+                payload: {
+                  itemType,
+                  status: "inProgress",
+                  title,
+                  detail,
+                  data,
+                },
+              });
+              return;
+            }
+
+            if (event.type === "tool_execution_end") {
+              yield* emit({
+                ...eventBaseSync({
+                  threadId: input.threadId,
+                  createdAt: eventTimestamp,
+                  turnId,
+                  itemId: toolItemId,
+                }),
+                type: "item.completed",
+                payload: {
+                  itemType,
+                  status: event.isError === true ? "failed" : "completed",
+                  title,
+                  detail,
+                  data,
+                },
+              });
+            }
+          }),
+        );
       };
 
       const result = yield* Effect.tryPromise({
@@ -318,6 +513,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
             resetTimeoutOnActivity: true,
             signal: abort.signal,
             onEvent: (event) => {
+              enqueuePiToolEvent(event);
               const delta = readPiAssistantTextDelta(event);
               if (delta.length === 0 || abort.signal.aborted) {
                 return;

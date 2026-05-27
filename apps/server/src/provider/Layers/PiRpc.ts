@@ -33,6 +33,12 @@ export interface PiRpcLine {
   readonly timestamp?: string | undefined;
   readonly command?: string | undefined;
   readonly success?: boolean | undefined;
+  readonly toolCallId?: string | undefined;
+  readonly toolName?: string | undefined;
+  readonly args?: unknown;
+  readonly partialResult?: unknown;
+  readonly result?: unknown;
+  readonly isError?: boolean | undefined;
   readonly data?: unknown;
   readonly error?: string | undefined;
   readonly message?: unknown;
@@ -334,6 +340,16 @@ function readAssistantText(message: unknown): string {
   if (!message || typeof message !== "object") return "";
   const record = message as Record<string, unknown>;
   if (record.role !== "assistant") return "";
+  return readTextFromContent(record.content);
+}
+
+export function readPiToolResultText(result: unknown): string {
+  if (typeof result === "string") return result;
+  if (!result || typeof result !== "object") return "";
+  const record = result as Record<string, unknown>;
+  if (typeof record.text === "string") return record.text;
+  if (typeof record.output === "string") return record.output;
+  if (typeof record.stdout === "string") return record.stdout;
   return readTextFromContent(record.content);
 }
 

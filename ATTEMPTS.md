@@ -264,3 +264,31 @@ Result:
 Lesson:
 
 - Long-running Pi work should be bounded by inactivity, not total wall-clock time. Multi-tool tasks can exceed three minutes while still making healthy progress.
+
+## Loop 10: Pi Tool Activity Streaming
+
+Edit:
+
+- Compared current T3 runtime behavior with the prior Pi POC.
+- Confirmed the prior POC used a separate Pi activity bridge and `tool.progress`, while current T3 already projects tool lifecycle `item.started`, `item.updated`, and `item.completed` events into the Work Log.
+- Added Pi RPC fields for `tool_execution_start`, `tool_execution_update`, and `tool_execution_end`.
+- Mapped Pi tool events into T3-native tool lifecycle events with item types for command execution, file changes, web search, and dynamic tools.
+- Added Pi tool result text extraction for partial and final tool output.
+
+Checks:
+
+- `bunx vitest run src/provider/Layers/PiRpc.test.ts`
+- `bun typecheck`
+- `bun fmt`
+- Live Pi RPC smoke against the existing local `~/.pi/agent` config using a harmless bash prompt.
+
+Result:
+
+- Targeted Pi RPC tests passed: 5 tests passed.
+- Typecheck passed before formatting: 13 successful tasks.
+- Formatting passed.
+- Live Pi RPC smoke emitted `tool_execution_start`, two `tool_execution_update` events, and `tool_execution_end` for the `bash` tool before `agent_end`.
+
+Lesson:
+
+- Assistant token streaming and tool activity streaming are separate surfaces. Pi was doing real tool work, but the adapter only forwarded assistant `text_delta`; forwarding Pi tool execution events to T3 tool lifecycle events should make long Pi turns visibly active in the Work Log.
