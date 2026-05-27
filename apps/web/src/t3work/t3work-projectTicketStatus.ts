@@ -1,8 +1,16 @@
 import {
+  listT3WorkProjectSetupProfiles,
   resolveT3WorkProjectSetupProfileId,
   type T3WorkProjectSetupProfileId,
 } from "~/t3work/t3work-projectSetup";
 import type { ProjectTicket } from "~/t3work/t3work-types";
+import type {
+  ProjectTicketKanbanBoardColumn,
+  ProjectTicketKanbanColumn,
+  ProjectTicketKanbanColumnId,
+  ProjectTicketKanbanColumns,
+  ProjectTicketStatusCategory,
+} from "~/t3work/t3work-projectTicketStatusTypes";
 import {
   doneStatusKeywords,
   formatProjectTicketKanbanStatusTitle,
@@ -14,20 +22,7 @@ import {
   todoStatusKeywords,
 } from "~/t3work/t3work-projectTicketStatusKeywords";
 
-export type ProjectTicketStatusCategory = "active" | "review" | "done";
-export type ProjectTicketKanbanColumnId = string;
-export type ProjectTicketKanbanColumn = {
-  id: ProjectTicketKanbanColumnId;
-  title: string;
-  items: ProjectTicket[];
-};
-export type ProjectTicketKanbanColumns = readonly ProjectTicketKanbanColumn[];
-export type ProjectTicketKanbanBoardColumn = {
-  readonly name: string;
-  readonly statuses: ReadonlyArray<{
-    readonly name: string;
-  }>;
-};
+export type * from "~/t3work/t3work-projectTicketStatusTypes";
 
 export function getProjectTicketKanbanColumnId(status: string): ProjectTicketKanbanColumnId {
   const normalizedStatus = normalizeProjectTicketStatus(status);
@@ -42,7 +37,10 @@ export function isProjectTicketKanbanStatusVisibleForProfile(
   if (normalizedStatus.length === 0 || !profileId) return true;
 
   const resolvedProfileId = resolveT3WorkProjectSetupProfileId(profileId);
-  if (resolvedProfileId === "requirements-engineer" || resolvedProfileId === "project-partner") {
+  const profile = listT3WorkProjectSetupProfiles().find(
+    (candidate) => candidate.id === resolvedProfileId,
+  );
+  if ((profile?.defaultActionFamilies ?? []).includes("product")) {
     return true;
   }
 

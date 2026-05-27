@@ -1,4 +1,7 @@
-import type { AtlassianBacklogBoardColumn } from "@t3tools/integrations-atlassian";
+import type {
+  AtlassianBacklogBoardColumn,
+  AtlassianBacklogBoardColumnStatus,
+} from "@t3tools/integrations-atlassian";
 import type { IntegrationAccountRef } from "@t3tools/integrations-core";
 
 import type { T3workAtlassianBacklogPayload } from "./t3work-atlassian-backlog-cache.ts";
@@ -68,6 +71,7 @@ export type T3workAtlassianBacklogResponse = T3workAtlassianBacklogPayload & {
 export type T3workAtlassianBoardColumnsResponse = {
   readonly selectedBoardId?: string;
   readonly boardColumns: ReadonlyArray<AtlassianBacklogBoardColumn>;
+  readonly availableStatuses: ReadonlyArray<AtlassianBacklogBoardColumnStatus>;
 };
 
 export function createCachedBacklogResponse(

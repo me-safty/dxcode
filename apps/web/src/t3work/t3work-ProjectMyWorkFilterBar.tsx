@@ -1,5 +1,4 @@
 import { Input } from "~/t3work/components/ui/t3work-input";
-import { T3SurfacePanel } from "~/t3work/components/ui/t3work-surface";
 import { ProjectMyWorkOptionsMenu } from "~/t3work/t3work-ProjectMyWorkOptionsMenu";
 import type {
   ProjectMyWorkKanbanLaneOption,
@@ -76,48 +75,46 @@ export function ProjectMyWorkFilterBar({
   onReset: () => void;
 }) {
   return (
-    <T3SurfacePanel tone="soft" className="mb-4 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Search your assigned work"
-          className="min-w-[18rem] flex-1 border-border/80 bg-background/95"
-        />
+    <div className="mb-4 flex flex-wrap items-center gap-1">
+      <Input
+        value={query}
+        onChange={(event) => onQueryChange(event.target.value)}
+        placeholder="Search your assigned work"
+        className="h-8 w-full border-border/80 bg-background/95 text-xs sm:w-[15rem] lg:w-[18rem]"
+      />
 
-        <div className="ml-auto">
-          <ProjectMyWorkOptionsMenu
-            activeOptionsCount={activeOptionsCount}
-            viewMode={viewMode}
-            onViewModeChange={onViewModeChange}
-            groupMode={groupMode}
-            onGroupModeChange={onGroupModeChange}
-            statusCategory={statusCategory}
-            onStatusCategoryChange={onStatusCategoryChange}
-            showGitHubActivity={showGitHubActivity}
-            onShowGitHubActivityChange={onShowGitHubActivityChange}
-            hiddenKanbanColumnIds={hiddenKanbanColumnIds}
-            onKanbanLaneVisibilityChange={onKanbanLaneVisibilityChange}
-            epicsHidden={epicsHidden}
-            onEpicsHiddenChange={onEpicsHiddenChange}
-            excludedTypeKeys={excludedTypeKeys}
-            onTypeVisibilityChange={onTypeVisibilityChange}
-            typeOptions={typeOptions}
-            kanbanLaneOptions={kanbanLaneOptions}
-            selectedPriority={selectedPriority}
-            onSelectedPriorityChange={onSelectedPriorityChange}
-            priorityOptions={priorityOptions}
-            selectedStatus={selectedStatus}
-            onSelectedStatusChange={onSelectedStatusChange}
-            statusOptions={statusOptions}
-            tableSortBy={tableSortBy}
-            onTableSortByChange={onTableSortByChange}
-            tableSortDirection={tableSortDirection}
-            onTableSortDirectionChange={onTableSortDirectionChange}
-            onReset={onReset}
-          />
-        </div>
+      <div className="ml-auto flex items-center gap-2">
+        <ProjectMyWorkOptionsMenu
+          activeOptionsCount={activeOptionsCount}
+          viewMode={viewMode}
+          onViewModeChange={onViewModeChange}
+          groupMode={groupMode}
+          onGroupModeChange={onGroupModeChange}
+          statusCategory={statusCategory}
+          onStatusCategoryChange={onStatusCategoryChange}
+          showGitHubActivity={showGitHubActivity}
+          onShowGitHubActivityChange={onShowGitHubActivityChange}
+          hiddenKanbanColumnIds={hiddenKanbanColumnIds}
+          onKanbanLaneVisibilityChange={onKanbanLaneVisibilityChange}
+          epicsHidden={epicsHidden}
+          onEpicsHiddenChange={onEpicsHiddenChange}
+          excludedTypeKeys={excludedTypeKeys}
+          onTypeVisibilityChange={onTypeVisibilityChange}
+          typeOptions={typeOptions}
+          kanbanLaneOptions={kanbanLaneOptions}
+          selectedPriority={selectedPriority}
+          onSelectedPriorityChange={onSelectedPriorityChange}
+          priorityOptions={priorityOptions}
+          selectedStatus={selectedStatus}
+          onSelectedStatusChange={onSelectedStatusChange}
+          statusOptions={statusOptions}
+          tableSortBy={tableSortBy}
+          onTableSortByChange={onTableSortByChange}
+          tableSortDirection={tableSortDirection}
+          onTableSortDirectionChange={onTableSortDirectionChange}
+          onReset={onReset}
+        />
       </div>
-    </T3SurfacePanel>
+    </div>
   );
 }

@@ -18,6 +18,8 @@ export type T3WorkSidebarPinActionState = {
   item: T3WorkSidebarPinnedItem;
   pinned: boolean;
   visibleInSidebar?: boolean;
+  prioritizeItemIds?: readonly string[];
+  cascadeItemIds?: readonly string[];
   pinLabel?: string;
   unpinLabel?: string;
 };

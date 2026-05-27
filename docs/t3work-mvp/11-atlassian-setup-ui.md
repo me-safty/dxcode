@@ -2,10 +2,13 @@
 
 ## Purpose
 
-Design the Atlassian setup and Jira project selection experience using the existing T3
-Code shell and UI primitives as the baseline.
+Design the Atlassian connection, Jira project selection, and project confirmation
+experience using the existing T3 Code shell and UI primitives as the baseline.
 
-This flow should make project creation feel structured and low-effort:
+This document starts after the generic source choice and agent runtime preflight defined
+in [Epic 23: Project Setup Preflight UI](./23-project-setup-preflight-ui.md).
+
+This flow should make Atlassian-backed project creation feel structured and low-effort:
 
 1. Connect Atlassian.
 2. Choose an Atlassian site/account.
@@ -74,11 +77,17 @@ The primary entry point for the MVP is the project browser.
 Prefer an inline setup page for first-time setup and a dialog for smaller follow-up
 actions.
 
+The generic source choice and agent runtime preflight are specified in
+[Epic 23: Project Setup Preflight UI](./23-project-setup-preflight-ui.md). This
+document starts once the user has chosen Atlassian and satisfied preflight.
+
 First-time flow:
 
 ```text
 Project Browser
   -> New Project
+  -> Choose Atlassian
+  -> Agent Runtime Preflight
   -> Connect Atlassian
   -> Select Site
   -> Select Jira Project
@@ -91,42 +100,14 @@ Returning-user flow:
 ```text
 Project Browser
   -> New Project
+  -> Choose Atlassian
+  -> Agent Runtime Preflight
   -> Select Jira Project
   -> Confirm Project
   -> Project Overview
 ```
 
-## Screen 1: Integration Choice
-
-Baseline:
-
-- Existing settings/provider card style.
-- Existing empty state style.
-- Existing button and badge primitives.
-
-Content:
-
-- page title: `Create project`
-- primary option: Atlassian
-- secondary options: local project, empty managed project
-- disabled/future options can be shown only if visually quiet
-
-Atlassian card:
-
-- Atlassian logo
-- title: `Atlassian`
-- description: `Create a project from Jira work you can access.`
-- badges: `Jira`, later `Confluence`
-- action: `Connect` or `Choose project`
-
-States:
-
-- not connected
-- connecting
-- connected
-- connection error
-
-## Screen 2: Connect Atlassian
+## Screen 1: Connect Atlassian
 
 Baseline:
 
@@ -162,7 +143,7 @@ States:
 - expired
 - network error
 
-## Screen 3: Select Atlassian Site
+## Screen 2: Select Atlassian Site
 
 Show this only when the account has multiple accessible sites.
 
@@ -191,7 +172,7 @@ Empty state:
 - title: `No Atlassian sites found`
 - actions: `Retry`, `Use another account`
 
-## Screen 4: Select Jira Project
+## Screen 3: Select Jira Project
 
 This is the core project selection UI.
 
@@ -243,7 +224,7 @@ States:
 - API error
 - permission error
 
-## Screen 5: Confirm Project
+## Screen 4: Confirm Project
 
 Baseline:
 
@@ -255,6 +236,8 @@ Content:
 - project name
 - Jira project key
 - Atlassian site
+- default agent provider
+- default model
 - managed workspace summary
 - default profile
 - initial recipe bundle
@@ -263,7 +246,12 @@ Content:
 Defaults:
 
 - workspace: managed
-- profile: QA Assistant when Jira issue flow is selected
+- agent provider: most recently used compatible provider instance or a recommended ready
+  provider
+- model: sticky last-used model for that provider instance or the provider's recommended
+  default model
+- profile: most recently used profile or a recommended starter profile based on project
+  signals and the user's preferred guidance/detail settings
 - recipes: explain ticket, review acceptance criteria, create QA test plan, draft Jira
   comment, summarize project risk
 - mutation policy: review required
@@ -271,20 +259,27 @@ Defaults:
 Controls:
 
 - project name input
+- provider summary row with change action
+- model select or summary row with change action
 - profile select
+- clone/edit/create profile action
 - advanced disclosure for workspace path
 - create button
 - back button
 
 Important: do not ask the user to choose a local directory by default.
 
-## Screen 6: Created Project Overview
+The confirm step may adjust the preflight selection after Jira project metadata loads,
+but it must preserve the user's explicit choice unless the user changes it.
+
+## Screen 5: Created Project Overview
 
 After creation, land directly in the project overview.
 
 Show:
 
 - project title and source badge
+- active agent provider and model summary
 - Jira issues list
 - suggested recipes
 - recent artifacts area
@@ -300,7 +295,6 @@ Primary first action:
 
 New composition components likely needed:
 
-- `IntegrationProviderCard`
 - `AtlassianConnectionPanel`
 - `AtlassianSiteList`
 - `JiraProjectSearch`
@@ -348,16 +342,25 @@ type JiraProjectOption = {
 ```ts
 type AtlassianProjectCreationDraft = {
   provider: "atlassian";
+  agentProviderInstanceId: string;
+  defaultModelId?: string;
   cloudId: string;
   siteUrl: string;
   jiraProjectId: string;
   jiraProjectKey: string;
   title: string;
   workspaceKind: "managed";
-  profileId: "qa-assistant" | "product-explainer" | "developer-bridge";
+  profileId: string;
   recipeIds: string[];
 };
 ```
+
+`profileId` references a configured profile record. The setup flow may offer bundled
+starter profiles, but the draft model must not assume a closed list of built-in ids.
+
+`agentProviderInstanceId` references a configured provider instance record. The setup
+flow may recommend a provider or model, but the draft model must not assume a closed
+list of built-in provider drivers or model ids.
 
 ## Accessibility Requirements
 
@@ -372,8 +375,6 @@ type AtlassianProjectCreationDraft = {
 
 Stories required before stabilization:
 
-- integration choice, disconnected
-- integration choice, connected
 - Atlassian connect, loading
 - Atlassian connect, error
 - site picker, one site
@@ -389,20 +390,25 @@ Stories required before stabilization:
 
 ## Browser Validation Script
 
-For every implementation change in this flow, the agent must open the app in a browser
-and click through:
+For every implementation change in this flow, the agent must first validate the generic
+source choice and runtime preflight in
+[Epic 23: Project Setup Preflight UI](./23-project-setup-preflight-ui.md), then open
+the app in a browser and click through:
 
 1. Open project browser.
 2. Click `New project`.
 3. Choose Atlassian.
-4. Complete or mock connection.
-5. Select a site if multiple sites exist.
-6. Search Jira projects.
-7. Select a Jira project.
-8. Confirm managed workspace settings.
-9. Create project.
-10. Verify project overview opens.
-11. Verify Jira source badge/logo renders.
-12. Verify relevant recipes render.
+4. Pass agent runtime preflight.
+5. Complete or mock Atlassian connection.
+6. Select a site if multiple sites exist.
+7. Search Jira projects.
+8. Select a Jira project.
+9. Confirm managed workspace settings.
+10. Create project.
+11. Verify project overview opens.
+12. Verify Jira source badge/logo renders.
+13. Verify relevant recipes render.
+14. Verify the chosen provider and model summary render somewhere in the project shell.
 
-The final report must state which path was clicked and which states were inspected.
+The final report must state which runtime preflight path was clicked, which Atlassian
+path was clicked, and which states were inspected.

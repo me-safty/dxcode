@@ -21,7 +21,7 @@ function createProject(): ProjectShellProject {
       externalProjectKey: "PROJ",
       raw: {
         agentSetup: {
-          profileId: "project-partner",
+          profileId: "product-partner",
         },
       },
     },

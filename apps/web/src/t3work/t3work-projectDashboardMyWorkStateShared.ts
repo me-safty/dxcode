@@ -2,6 +2,7 @@ import type { ProjectMyWorkStatusCategory } from "~/t3work/t3work-projectMyWork"
 
 export type ProjectMyWorkViewMode = "table" | "list" | "grid" | "kanban";
 export type ProjectMyWorkGroupMode = "flat" | "hierarchy";
+export type ProjectMyWorkKanbanLaneSelectionMode = "auto" | "custom";
 export type ProjectMyWorkTableSortBy = "updated" | "title" | "status" | "assignee";
 export type ProjectMyWorkTableSortDirection = "asc" | "desc";
 
@@ -12,6 +13,7 @@ export interface ProjectDashboardMyWorkRouteSearch {
   myWorkStatus?: ProjectMyWorkStatusCategory;
   myWorkGitHub?: "show" | "hide";
   myWorkLanes?: string;
+  myWorkLanesMode?: ProjectMyWorkKanbanLaneSelectionMode;
   myWorkPriority?: string;
   myWorkTicketStatus?: string;
   myWorkTypes?: string;
@@ -26,6 +28,7 @@ export interface ProjectDashboardMyWorkState {
   statusCategory: ProjectMyWorkStatusCategory;
   showGitHubActivity: boolean;
   hiddenKanbanColumnIds: ReadonlyArray<string>;
+  hasCustomizedKanbanLanes: boolean;
   excludedTypeKeys: ReadonlyArray<string>;
   selectedPriority: string;
   selectedStatus: string;
@@ -48,6 +51,8 @@ export const projectMyWorkStatusCategoryValues = new Set<ProjectMyWorkStatusCate
   "review",
   "done",
 ]);
+export const projectMyWorkKanbanLaneSelectionModeValues =
+  new Set<ProjectMyWorkKanbanLaneSelectionMode>(["auto", "custom"]);
 export const projectMyWorkGitHubVisibilityValues = new Set(["show", "hide"] as const);
 export const projectMyWorkTableSortByValues = new Set<ProjectMyWorkTableSortBy>([
   "updated",
@@ -67,6 +72,7 @@ export const projectDashboardMyWorkRouteSearchKeys = [
   "myWorkStatus",
   "myWorkGitHub",
   "myWorkLanes",
+  "myWorkLanesMode",
   "myWorkPriority",
   "myWorkTicketStatus",
   "myWorkTypes",
@@ -120,6 +126,7 @@ export function createDefaultProjectDashboardMyWorkState(): ProjectDashboardMyWo
     statusCategory: "all",
     showGitHubActivity: true,
     hiddenKanbanColumnIds: [],
+    hasCustomizedKanbanLanes: false,
     excludedTypeKeys: [],
     selectedPriority: "all",
     selectedStatus: "all",
@@ -164,6 +171,14 @@ export function parseProjectDashboardMyWorkRouteSearch(
   const hiddenKanbanColumnIds = parseRouteStringList(search.myWorkLanes);
   if (hiddenKanbanColumnIds !== undefined) {
     parsed.myWorkLanes = hiddenKanbanColumnIds.join(",");
+  }
+
+  const kanbanLaneSelectionMode = parseRouteEnum(
+    search.myWorkLanesMode,
+    projectMyWorkKanbanLaneSelectionModeValues,
+  );
+  if (kanbanLaneSelectionMode !== undefined) {
+    parsed.myWorkLanesMode = kanbanLaneSelectionMode;
   }
 
   const selectedPriority = parseRouteString(search.myWorkPriority);

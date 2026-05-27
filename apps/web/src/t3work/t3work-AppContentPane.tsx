@@ -10,10 +10,12 @@ export function AppContentPane({
   activeDashboardMode,
   resolvedView,
   store,
+  reopenInitialSetup = false,
   onCreate,
   onOpenTicket,
   onOpenThread,
   onOpenFullThread,
+  onOpenEmbeddedThread,
   onKickoffProjectThread,
   onKickoffTicketThread,
   onThreadKickoffConsumed,
@@ -24,10 +26,12 @@ export function AppContentPane({
   activeDashboardMode: ProjectDashboardMode;
   resolvedView: ViewState | null;
   store: ReturnType<typeof useProjectStore>;
+  reopenInitialSetup?: boolean;
   onCreate: () => void;
   onOpenTicket: (projectId: string, ticketId: string) => void;
   onOpenThread: (projectId: string, threadId: string) => void;
   onOpenFullThread: (projectId: string, threadId: string) => void;
+  onOpenEmbeddedThread: (projectId: string, threadId: string) => void;
   onKickoffProjectThread: Parameters<typeof AppMainContent>[0]["onKickoffProjectThread"];
   onKickoffTicketThread: Parameters<typeof AppMainContent>[0]["onKickoffTicketThread"];
   onThreadKickoffConsumed: (threadId: string) => void;
@@ -44,10 +48,12 @@ export function AppContentPane({
           selectedProjectId={store.selectedProjectId}
           projects={store.projects}
           allProjects={store.allProjects}
+          reopenInitialSetup={reopenInitialSetup}
           getThreadsForProject={store.getThreadsForProject}
           onOpenTicket={onOpenTicket}
           onOpenThread={onOpenThread}
           onOpenFullThread={onOpenFullThread}
+          onOpenEmbeddedThread={onOpenEmbeddedThread}
           onKickoffProjectThread={onKickoffProjectThread}
           onKickoffTicketThread={onKickoffTicketThread}
           onThreadKickoffConsumed={onThreadKickoffConsumed}

@@ -1,15 +1,19 @@
 import { useCallback, useEffect } from "react";
+import { PanelRightOpenIcon } from "lucide-react";
 import { useCanGoBack } from "@tanstack/react-router";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import { ThreadChatView } from "~/t3work/chat/t3work-ThreadChatView";
+import { Button } from "~/t3work/components/ui/t3work-button";
 import type { ProjectThread, ViewState } from "~/t3work/t3work-types";
 import { navigateBackWithFallback } from "~/t3work/t3work-historyBack";
+import { runT3workViewTransition } from "~/t3work/t3work-runViewTransition";
 
 export function AppThreadPane({
   view,
   threadProject,
   resolvedThread,
   onOpenTicket,
+  onOpenEmbeddedThread,
   onThreadKickoffConsumed,
   onRememberFullThread,
   onBackToDashboard,
@@ -18,11 +22,13 @@ export function AppThreadPane({
   threadProject: ProjectShellProject | null;
   resolvedThread: ProjectThread | null;
   onOpenTicket: (projectId: string, ticketId: string) => void;
+  onOpenEmbeddedThread: (projectId: string, threadId: string) => void;
   onThreadKickoffConsumed: (threadId: string) => void;
   onRememberFullThread: (threadId: string) => void;
   onBackToDashboard: (projectId: string) => void;
 }) {
   const canGoBack = useCanGoBack();
+  const canOpenEmbedded = Boolean(resolvedThread?.ticketId || resolvedThread?.dashboardMode);
 
   useEffect(() => {
     if (!resolvedThread) {
@@ -72,6 +78,26 @@ export function AppThreadPane({
         ? { selectedToolIds: resolvedThread.selectedToolIds }
         : {})}
       {...(resolvedThread?.ticketId ? { ticketId: resolvedThread.ticketId } : {})}
+      {...(resolvedThread && canOpenEmbedded
+        ? {
+            headerAccessory: (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="shrink-0 text-muted-foreground/80"
+                onClick={() =>
+                  runT3workViewTransition(() =>
+                    onOpenEmbeddedThread(view.projectId, resolvedThread.id),
+                  )
+                }
+                aria-label="Open side-by-side view"
+                title="Open side-by-side view"
+              >
+                <PanelRightOpenIcon className="size-4" />
+              </Button>
+            ),
+          }
+        : {})}
       onInitialUserMessageSent={() => {
         if (resolvedThread) {
           onThreadKickoffConsumed(resolvedThread.id);

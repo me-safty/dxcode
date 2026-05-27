@@ -48,6 +48,12 @@ function sortGitHubActivityItems(
       return leftIsUnmergedPr ? -1 : 1;
     }
 
+    const leftIsPr = isPullRequestActivity(left);
+    const rightIsPr = isPullRequestActivity(right);
+    if (leftIsPr !== rightIsPr) {
+      return leftIsPr ? -1 : 1;
+    }
+
     const leftReviewRequested = left.reviewRequested === true;
     const rightReviewRequested = right.reviewRequested === true;
     if (leftReviewRequested !== rightReviewRequested) {

@@ -2,10 +2,11 @@ import { useCallback, useDeferredValue, useMemo } from "react";
 import type { ProjectShellProject } from "@t3tools/project-context";
 
 import {
+  buildProjectMyWorkMetrics,
   buildDistinctOptions,
   buildProjectMyWorkStatusOptions,
-  countMatchingStatusCategory,
-  hasProjectMyWorkNameOnlyAssignments,
+  countProjectMyWorkActiveOptions,
+  hasProjectMyWorkDisplayNameDependentAssignments,
   setSortedStringMembership,
   shouldShowProjectMyWorkLoadingState,
 } from "~/t3work/hooks/t3work-projectMyWorkStateHelpers";
@@ -103,7 +104,10 @@ export function useProjectMyWorkState({
     resourcesLoading,
     ticketCount: tickets.length,
     currentUserDisplayNameLoading,
-    hasNameOnlyAssignments: hasProjectMyWorkNameOnlyAssignments(tickets),
+    hasDisplayNameDependentAssignments: hasProjectMyWorkDisplayNameDependentAssignments(
+      tickets,
+      project.source.accountId,
+    ),
     assignedWorkItemsCount: assignedWorkItems.length,
   });
   const statusOptions = useMemo(
@@ -165,13 +169,15 @@ export function useProjectMyWorkState({
     tableSortDirection,
     setTableSortDirection: (value: ProjectMyWorkTableSortDirection) =>
       updateState({ tableSortDirection: value }),
-    activeOptionsCount:
-      Number(!showGitHubActivity) +
-      Number(statusCategory !== "all") +
-      Number(selectedPriority !== "all") +
-      Number(selectedStatus !== "all") +
-      (hasCustomizedKanbanLanes ? normalizedHiddenKanbanColumnIds.length : 0) +
-      normalizedExcludedTypeKeys.length,
+    activeOptionsCount: countProjectMyWorkActiveOptions({
+      showGitHubActivity,
+      statusCategory,
+      selectedPriority,
+      selectedStatus,
+      hasCustomizedKanbanLanes,
+      hiddenKanbanColumnIds: normalizedHiddenKanbanColumnIds,
+      excludedTypeKeys: normalizedExcludedTypeKeys,
+    }),
     resetOptionsFilters: () => {
       updateState({
         showGitHubActivity: true,
@@ -190,12 +196,7 @@ export function useProjectMyWorkState({
       0,
       visibleHierarchy.visibleTickets.length - filteredWorkItems.length,
     ),
-    metrics: {
-      total: assignedWorkItems.length,
-      active: countMatchingStatusCategory(assignedWorkItems, "active"),
-      review: countMatchingStatusCategory(assignedWorkItems, "review"),
-      done: countMatchingStatusCategory(assignedWorkItems, "done"),
-    },
+    metrics: buildProjectMyWorkMetrics(assignedWorkItems),
     kanbanColumns: kanbanDisplayColumns,
     parentChildGroups: kanbanVisibleHierarchy.hierarchy,
   };

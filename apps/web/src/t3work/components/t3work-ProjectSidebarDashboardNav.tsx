@@ -26,6 +26,7 @@ type ProjectSidebarDashboardNavProps = {
   backlogContent?: ReactNode;
   pinnedContent?: ReactNode;
   myWorkContent?: ReactNode;
+  showMyActivityFeed: boolean;
   showJiraItems: boolean;
   currentIssueCount: number;
   currentIssuesContent: ReactNode;
@@ -46,6 +47,7 @@ export function ProjectSidebarDashboardNav({
   backlogContent,
   pinnedContent,
   myWorkContent,
+  showMyActivityFeed,
   showJiraItems,
   currentIssueCount,
   currentIssuesContent,
@@ -54,7 +56,7 @@ export function ProjectSidebarDashboardNav({
   githubActivityLastCheckedAt,
 }: ProjectSidebarDashboardNavProps) {
   const pinItem = useT3WorkPinnedSidebarStore((state) => state.pinItem);
-  const showSidebarItem = useT3WorkSidebarNavPreferencesStore((state) => state.showItem);
+  const showSidebarItemAtTop = useT3WorkSidebarNavPreferencesStore((state) => state.showItemAtTop);
   const { isActive: isPinDropActive, dropProps } = useT3WorkAgentContextDropTarget({
     canDrop: (record) =>
       record.capabilities.actions.some((action) => action.kind === "pin-to-sidebar"),
@@ -67,15 +69,18 @@ export function ProjectSidebarDashboardNav({
       }
 
       pinItem(action.item);
-      showSidebarItem(action.item.projectId, action.item.id);
+      showSidebarItemAtTop(action.item.projectId, action.item.id);
     },
     dropEffect: "move",
     onDropped: () => onMyWorkExpandedChange(true),
   });
+  const showMyWorkThreads = showMyActivityFeed && myWorkThreadCount > 0;
   const showCurrentIssuesSection = showJiraItems && currentIssueCount > 0;
   const showGitHubSection = showGitHubActivity && githubItems.length > 0;
   const hasMyWorkChildren =
-    pinnedItemCount > 0 || myWorkThreadCount > 0 || showCurrentIssuesSection || showGitHubSection;
+    pinnedItemCount > 0 || showMyWorkThreads || showCurrentIssuesSection || showGitHubSection;
+  const showPinnedSectionDivider =
+    pinnedItemCount > 0 && (showMyWorkThreads || showCurrentIssuesSection || showGitHubSection);
   const showMyWorkSection = myWorkExpanded && hasMyWorkChildren;
 
   return (
@@ -96,11 +101,11 @@ export function ProjectSidebarDashboardNav({
 
         {backlogContent}
 
-        <div className="relative w-full" {...dropProps}>
+        <div className="group/my-work-row relative w-full" {...dropProps}>
           <SidebarMenuSubButton
             size="sm"
             isActive={myWorkState.isSelected}
-            className={`h-7 w-full translate-x-0 justify-start px-2 pr-7 text-left text-[11px] ${getSidebarStandaloneButtonClassName(
+            className={`h-7 w-full translate-x-0 justify-start px-2 pr-7 text-left text-[11px] group-hover/my-work-row:bg-accent group-hover/my-work-row:text-foreground group-focus-within/my-work-row:bg-accent group-focus-within/my-work-row:text-foreground ${getSidebarStandaloneButtonClassName(
               myWorkState,
             )}`}
             onClick={onSelectMyWork}
@@ -134,7 +139,9 @@ export function ProjectSidebarDashboardNav({
         <div className="space-y-2">
           {pinnedContent}
 
-          {myWorkContent}
+          {showPinnedSectionDivider ? <div className="mx-3 h-px bg-border/40" /> : null}
+
+          {showMyWorkThreads ? myWorkContent : null}
 
           {showCurrentIssuesSection ? currentIssuesContent : null}
 

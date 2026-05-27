@@ -35,6 +35,11 @@ import * as TestClock from "effect/testing/TestClock";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import {
+  T3WORK_MCP_SERVER_NAME,
+  T3workToolBroker,
+  type T3workToolBrokerShape,
+} from "../../t3work-toolBroker.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
@@ -56,6 +61,7 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
 
   public readonly interruptCalls: Array<void> = [];
   public readonly setModelCalls: Array<string | undefined> = [];
+  public readonly setMcpServersCalls: Array<NonNullable<ClaudeQueryOptions["mcpServers"]>> = [];
   public readonly setPermissionModeCalls: Array<string> = [];
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
   public closeCalls = 0;
@@ -100,6 +106,12 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
 
   readonly setModel = async (model?: string): Promise<void> => {
     this.setModelCalls.push(model);
+  };
+
+  readonly setMcpServers = async (
+    servers: NonNullable<ClaudeQueryOptions["mcpServers"]>,
+  ): Promise<void> => {
+    this.setMcpServersCalls.push(servers);
   };
 
   readonly setPermissionMode = async (mode: PermissionMode): Promise<void> => {
@@ -156,6 +168,7 @@ function makeHarness(config?: {
   readonly baseDir?: string;
   readonly claudeConfig?: Partial<ClaudeSettings>;
   readonly instanceId?: ProviderInstanceId;
+  readonly toolBroker?: T3workToolBrokerShape;
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -184,22 +197,40 @@ function makeHarness(config?: {
   };
 
   return {
-    layer: Layer.effect(
-      ClaudeAdapter,
-      Effect.gen(function* () {
-        const claudeConfig = decodeClaudeSettings(config?.claudeConfig ?? {});
-        return yield* makeClaudeAdapter(claudeConfig, adapterOptions);
-      }),
-    ).pipe(
-      Layer.provideMerge(
-        ServerConfig.layerTest(
-          config?.cwd ?? "/tmp/claude-adapter-test",
-          config?.baseDir ?? "/tmp",
+    layer: config?.toolBroker
+      ? Layer.effect(
+          ClaudeAdapter,
+          Effect.gen(function* () {
+            const claudeConfig = decodeClaudeSettings(config?.claudeConfig ?? {});
+            return yield* makeClaudeAdapter(claudeConfig, adapterOptions);
+          }),
+        ).pipe(
+          Layer.provideMerge(Layer.succeed(T3workToolBroker, config.toolBroker)),
+          Layer.provideMerge(
+            ServerConfig.layerTest(
+              config?.cwd ?? "/tmp/claude-adapter-test",
+              config?.baseDir ?? "/tmp",
+            ),
+          ),
+          Layer.provideMerge(ServerSettingsService.layerTest()),
+          Layer.provideMerge(NodeServices.layer),
+        )
+      : Layer.effect(
+          ClaudeAdapter,
+          Effect.gen(function* () {
+            const claudeConfig = decodeClaudeSettings(config?.claudeConfig ?? {});
+            return yield* makeClaudeAdapter(claudeConfig, adapterOptions);
+          }),
+        ).pipe(
+          Layer.provideMerge(
+            ServerConfig.layerTest(
+              config?.cwd ?? "/tmp/claude-adapter-test",
+              config?.baseDir ?? "/tmp",
+            ),
+          ),
+          Layer.provideMerge(ServerSettingsService.layerTest()),
+          Layer.provideMerge(NodeServices.layer),
         ),
-      ),
-      Layer.provideMerge(ServerSettingsService.layerTest()),
-      Layer.provideMerge(NodeServices.layer),
-    ),
     query,
     getLastCreateQueryInput: () => createInput,
   };
@@ -379,6 +410,81 @@ describe("ClaudeAdapterLive", () => {
       Effect.provide(harness.layer),
     );
   });
+
+  it.effect(
+    "injects t3work broker tools into Claude MCP servers and refreshes them on turn start",
+    () => {
+      const toolBroker: T3workToolBrokerShape = {
+        bindSession: ({ threadId }) =>
+          Effect.succeed({
+            threadId,
+            listServers: () => [
+              {
+                authStatus: "unsupported",
+                name: T3WORK_MCP_SERVER_NAME,
+                resourceTemplates: [],
+                resources: [],
+                tools: {
+                  "t3work.thread.rename": {
+                    name: "t3work.thread.rename",
+                    title: "Rename current thread",
+                    description: "Rename the current thread in t3work.",
+                    inputSchema: {
+                      type: "object",
+                      additionalProperties: false,
+                      properties: {
+                        title: {
+                          type: "string",
+                          description: "New thread title.",
+                          minLength: 1,
+                        },
+                      },
+                      required: ["title"],
+                    },
+                  },
+                },
+              },
+            ],
+            callTool: () =>
+              Effect.succeed({
+                content: [{ type: "text", text: "ok" }],
+                structuredContent: { ok: true },
+              }),
+            readResource: () => Effect.succeed({ contents: [] }),
+          }),
+      };
+      const harness = makeHarness({ toolBroker });
+
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+
+        const createInput = harness.getLastCreateQueryInput();
+        assert.deepEqual(Object.keys(createInput?.options.mcpServers ?? {}), [
+          T3WORK_MCP_SERVER_NAME,
+        ]);
+        assert.equal(createInput?.options.mcpServers?.[T3WORK_MCP_SERVER_NAME]?.type, "sdk");
+
+        yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: "hello",
+          attachments: [],
+        });
+
+        assert.deepEqual(
+          harness.query.setMcpServersCalls.map((servers) => Object.keys(servers)),
+          [[T3WORK_MCP_SERVER_NAME]],
+        );
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
 
   it.effect("runs Claude SDK sessions with the configured Claude HOME", () => {
     const harness = makeHarness({ claudeConfig: { homePath: "~/.claude-work" } });

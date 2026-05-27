@@ -20,6 +20,7 @@ import {
   type JiraIssueCreateResponse,
   type JiraIssueTransition,
   type JiraIssueTransitionsResponse,
+  type JiraProjectIssueTypeStatuses,
   type JiraIssueSearchResponse,
   type JiraMyself,
   type JiraProject,
@@ -247,6 +248,15 @@ export class JiraApiClient {
   async getProject(projectIdOrKey: string): Promise<JiraProject> {
     const encoded = encodeURIComponent(projectIdOrKey);
     return this.fetchJson<JiraProject>(`/rest/api/3/project/${encoded}`);
+  }
+
+  async getProjectStatuses(
+    projectIdOrKey: string,
+  ): Promise<ReadonlyArray<JiraProjectIssueTypeStatuses>> {
+    const encoded = encodeURIComponent(projectIdOrKey);
+    return this.fetchJson<ReadonlyArray<JiraProjectIssueTypeStatuses>>(
+      `/rest/api/3/project/${encoded}/statuses`,
+    );
   }
 
   async listBoards(projectKeyOrId: string): Promise<JiraBoardSearchResponse> {

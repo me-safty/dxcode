@@ -10,11 +10,13 @@ import {
   startBrowserPolling,
 } from "./t3work-integrationPolling";
 
+const ATLASSIAN_RESOURCES_CACHE_KEY_VERSION = "v2";
+
 export function useProjectResources(project: ProjectShellProject) {
   const backend = asT3workPollingBackend(useBackend());
   const cacheKey = useMemo(
     () =>
-      `atlassian:listResources:${project.source.provider}:${project.source.accountId ?? "none"}:${project.source.externalProjectId ?? "none"}`,
+      `atlassian:listResources:${ATLASSIAN_RESOURCES_CACHE_KEY_VERSION}:${project.source.provider}:${project.source.accountId ?? "none"}:${project.source.externalProjectId ?? "none"}`,
     [project.source.accountId, project.source.externalProjectId, project.source.provider],
   );
   const [resources, setResources] = useState<ResourcePage | null>(

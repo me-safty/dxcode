@@ -1,12 +1,12 @@
 import { memo, useCallback, useRef, useState } from "react";
 import { EllipsisIcon, MessageSquareIcon } from "lucide-react";
-import { resolveThreadRowClassName } from "~/components/Sidebar.logic";
 import type { ProjectThread } from "~/t3work/t3work-types";
 import { SidebarMenuSubButton, SidebarMenuSubItem } from "~/t3work/components/ui/t3work-sidebar";
 import { readLocalApi } from "~/localApi";
 import { formatRelativeTime, resolveThreadStatusPill } from "./t3work-projectSidebarShared";
 import {
   getSidebarSurfaceClassName,
+  getSidebarWrappedButtonClassName,
   type SidebarItemState,
 } from "./t3work-projectSidebarItemState";
 import { useAutoScrollIntoView } from "./t3work-useAutoScrollIntoView";
@@ -106,10 +106,9 @@ export const ThreadRow = memo(function ThreadRow(props: ThreadRowProps) {
       ref={rowRef}
       size="sm"
       isActive={state.isSelected}
-      className={resolveThreadRowClassName({
-        isActive: state.isSelected,
-        isSelected: false,
-      })}
+      className={`group/thread-row-button h-7 w-full translate-x-0 cursor-pointer justify-start px-2 text-left select-none focus-visible:ring-1 focus-visible:ring-inset ${getSidebarWrappedButtonClassName(
+        state,
+      )}`}
       onClick={onSelect}
     >
       <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
@@ -147,12 +146,12 @@ export const ThreadRow = memo(function ThreadRow(props: ThreadRowProps) {
           <button
             type="button"
             aria-label={`Thread actions for ${thread.title}`}
-            className="absolute top-1/2 right-0 inline-flex size-4 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-muted-foreground/55 opacity-0 transition-opacity duration-150 hover:bg-accent hover:text-foreground group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:opacity-100"
+            className="absolute top-1/2 right-0 inline-flex size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-opacity duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring group-hover/thread-row-button:opacity-100 group-focus-within/thread-row-button:opacity-100"
             onClick={handleOpenMenu}
           >
-            <EllipsisIcon className="size-3" />
+            <EllipsisIcon className="size-3.5" />
           </button>
-          <span className="pointer-events-none text-[10px] text-muted-foreground/40 transition-opacity duration-150 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0">
+          <span className="pointer-events-none text-[10px] text-muted-foreground/40 transition-opacity duration-150 group-hover/thread-row-button:opacity-0 group-focus-within/thread-row-button:opacity-0">
             {formatRelativeTime(thread.lastMessageAt)}
           </span>
         </div>

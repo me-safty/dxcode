@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import type { ProjectShellProject } from "@t3tools/project-context";
 
 import { buildExistingProjectThreadViewState } from "~/t3work/t3work-projectThreadViewState";
+import { upsertProjectThreadLocalState } from "~/t3work/t3work-threadToolContext";
 import type { ProjectThread, ViewState } from "~/t3work/t3work-types";
 
 import { persistStoredProjects } from "./t3work-projectStorePersistence";
@@ -137,9 +138,10 @@ export function useProjectStoreActions(input: {
         return;
       }
 
+      setThreads((prev) => upsertProjectThreadLocalState(prev, thread));
       setView(buildExistingProjectThreadViewState(projectId, thread));
     },
-    [getThreadsForProject, setSelectedProjectId, setView],
+    [getThreadsForProject, setSelectedProjectId, setThreads, setView],
   );
 
   const selectStandaloneThread = useCallback(

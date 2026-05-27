@@ -3,10 +3,11 @@ import type { Dispatch, SetStateAction } from "react";
 import type { ProjectShellProject } from "@t3tools/project-context";
 
 import type { Project, Thread } from "~/types";
-import { useBackend } from "~/t3work/backend/t3work-index";
+import { useBackend, useBackendState } from "~/t3work/backend/t3work-index";
 import type { T3workThreadPlacement } from "~/t3work/backend/t3work-types";
 import { upsertProjectThreadLocalState } from "~/t3work/t3work-threadToolContext";
 import type { ProjectThread } from "~/t3work/t3work-types";
+import { readT3workThreadPlacementFromActivities } from "~/t3work/hooks/t3work-threadHandoffMetadata";
 
 import { mapLiveThreadToProjectThread, resolveStoredProjectId } from "./t3work-threadBridge";
 
@@ -18,7 +19,13 @@ export function readMissingThreadPlacementIds(input: {
 
   return input.liveThreads.flatMap((thread) => {
     const existingThread = existingThreads.get(thread.id);
-    return existingThread?.parentThreadId || existingThread?.ticketId ? [] : [thread.id];
+    const livePlacement = readT3workThreadPlacementFromActivities(thread);
+    return existingThread?.parentThreadId ||
+      existingThread?.ticketId ||
+      livePlacement.parentThreadId ||
+      livePlacement.ticketId
+      ? []
+      : [thread.id];
   });
 }
 
@@ -65,16 +72,26 @@ export function useHydrateThreadPlacements(input: {
   liveThreads: ReadonlyArray<Thread>;
 }) {
   const backend = useBackend();
+  const backendState = useBackendState();
+  const { liveProjects, liveThreads, setThreads, storedProjects, threads } = input;
   const candidateThreadIds = useMemo(
-    () => readMissingThreadPlacementIds(input),
-    [input.liveThreads, input.threads],
+    () =>
+      readMissingThreadPlacementIds({
+        threads,
+        liveThreads,
+      }),
+    [liveThreads, threads],
   );
   const candidateThreadIdsKey = candidateThreadIds.join("\n");
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!backend || candidateThreadIds.length === 0) {
+    if (
+      !backend ||
+      backendState.connectionStatus !== "connected" ||
+      candidateThreadIds.length === 0
+    ) {
       return () => {
         cancelled = true;
       };
@@ -87,12 +104,12 @@ export function useHydrateThreadPlacements(input: {
           return;
         }
 
-        input.setThreads((currentThreads) =>
+        setThreads((currentThreads) =>
           mergeFetchedThreadPlacements({
             threads: currentThreads,
-            storedProjects: input.storedProjects,
-            liveProjects: input.liveProjects,
-            liveThreads: input.liveThreads,
+            storedProjects,
+            liveProjects,
+            liveThreads,
             placements,
           }),
         );
@@ -104,11 +121,12 @@ export function useHydrateThreadPlacements(input: {
     };
   }, [
     backend,
+    backendState.connectionStatus,
     candidateThreadIds,
     candidateThreadIdsKey,
-    input.liveProjects,
-    input.liveThreads,
-    input.setThreads,
-    input.storedProjects,
+    liveProjects,
+    liveThreads,
+    setThreads,
+    storedProjects,
   ]);
 }

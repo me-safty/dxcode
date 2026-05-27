@@ -1,5 +1,8 @@
+import { useNavigate } from "@tanstack/react-router";
+
 import {
   listT3WorkProjectSetupProfiles,
+  resolveT3WorkProjectSetupProfileId,
   type T3WorkProjectSetupProfileId,
 } from "../../t3work/t3work-projectSetup";
 
@@ -12,9 +15,11 @@ import {
   useT3workProjectSetupProfile,
   writeT3workProjectSetupProfile,
 } from "../../t3work/t3work-projectSetupProfile";
+import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 
 export function T3workWorkModeSetting() {
+  const navigate = useNavigate();
   const workMode = useT3workWorkMode();
   const projectSetupProfile = useT3workProjectSetupProfile();
   const projectSetupProfiles = listT3WorkProjectSetupProfiles();
@@ -96,20 +101,13 @@ export function T3workWorkModeSetting() {
           <Select
             value={projectSetupProfile}
             onValueChange={(value) => {
-              if (
-                value === "project-partner" ||
-                value === "test-engineer" ||
-                value === "requirements-engineer" ||
-                value === "developer"
-              ) {
-                setProjectSetupProfile(value);
-              }
+              setProjectSetupProfile(resolveT3WorkProjectSetupProfileId(value ?? undefined));
             }}
           >
             <SelectTrigger className="w-full sm:w-56" aria-label="Default project setup profile">
               <SelectValue>
                 {projectSetupProfiles.find((profile) => profile.id === projectSetupProfile)
-                  ?.title ?? "Project Partner"}
+                  ?.title ?? "Product Partner"}
               </SelectValue>
             </SelectTrigger>
             <SelectPopup align="start" alignItemWithTrigger={false}>
@@ -123,6 +121,26 @@ export function T3workWorkModeSetting() {
               ))}
             </SelectPopup>
           </Select>
+
+          <div className="space-y-1 border-t pt-4">
+            <h4 className="text-sm font-medium">Initial setup wizard</h4>
+            <p className="text-xs text-muted-foreground">
+              Reopen the first-run welcome flow before stepping through guided Jira setup again.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full justify-center sm:w-fit"
+            onClick={() => {
+              void navigate({
+                to: "/t3work",
+                search: { setup: "welcome" },
+              });
+            }}
+          >
+            Reopen initial setup
+          </Button>
         </div>
       ) : null}
     </div>

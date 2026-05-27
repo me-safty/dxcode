@@ -33,6 +33,7 @@ export interface ThreadChatViewProps {
   projectWorkspaceRoot?: string;
   title: string;
   onBack?: () => void;
+  headerAccessory?: React.ReactNode;
   hideHeader?: boolean;
   embeddedMode?: boolean;
   kickoffMessage?: string;
@@ -51,6 +52,8 @@ export function ThreadChatView({
   projectTitle,
   projectWorkspaceRoot,
   title,
+  onBack,
+  headerAccessory,
   hideHeader = false,
   embeddedMode = false,
   kickoffMessage,
@@ -133,13 +136,9 @@ export function ThreadChatView({
   );
 
   useEffect(() => {
-    if (pendingProjectContextCount === 0) {
-      return;
-    }
+    if (pendingProjectContextCount === 0) return;
     const pending = useT3WorkAddToChatStore.getState().drainProject(projectId);
-    if (pending.length === 0) {
-      return;
-    }
+    if (pending.length === 0) return;
     for (const item of pending) {
       useT3WorkAddToChatStore.getState().enqueueThreadAttachment(threadId, item.attachment);
     }
@@ -192,6 +191,8 @@ export function ThreadChatView({
           environmentId={environmentId}
           threadId={threadId as never}
           routeKind="server"
+          {...(onBack ? { onBack } : {})}
+          {...(headerAccessory ? { headerAccessory } : {})}
           hideHeader={hideHeader || embeddedMode}
           hideBranchToolbar={embeddedMode}
           minimalComposer={embeddedMode}

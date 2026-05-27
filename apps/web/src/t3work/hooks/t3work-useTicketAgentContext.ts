@@ -6,9 +6,11 @@ import { useBackend } from "~/t3work/backend/t3work-index";
 import { useAgentContext } from "~/t3work/hooks/t3work-useAgentContext";
 import { useT3WorkPinnedSidebarStore } from "~/t3work/t3work-pinnedSidebarStore";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
+import { buildProjectTicketHierarchy } from "~/t3work/t3work-ticketHierarchy";
 import {
   buildGitHubActivitySidebarPinnedItem,
   buildTicketSidebarPinnedItem,
+  buildTicketSidebarPinnedItemId,
 } from "~/t3work/t3work-sidebarPinningTypes";
 import {
   buildGitHubActivityAgentContextCapabilities,
@@ -35,6 +37,45 @@ export function useTicketAgentContext(input: {
     () => new Set(pinnedSidebarItems.map((item) => item.id)),
     [pinnedSidebarItems],
   );
+  const ticketHierarchy = useMemo(
+    () => buildProjectTicketHierarchy(projectTickets),
+    [projectTickets],
+  );
+
+  const buildTicketPathSidebarItemIds = useCallback(
+    (ticketId: string) => {
+      const ancestorIds: string[] = [];
+      let parentId = ticketHierarchy.parentByChildId.get(ticketId);
+      while (parentId) {
+        ancestorIds.unshift(
+          buildTicketSidebarPinnedItemId({ projectId: project.id, ticketId: parentId }),
+        );
+        parentId = ticketHierarchy.parentByChildId.get(parentId);
+      }
+
+      return [...ancestorIds, buildTicketSidebarPinnedItemId({ projectId: project.id, ticketId })];
+    },
+    [project.id, ticketHierarchy.parentByChildId],
+  );
+
+  const buildTicketSubtreeSidebarItemIds = useCallback(
+    (ticketId: string) => {
+      const subtreeItemIds: string[] = [];
+
+      const visit = (nextTicketId: string) => {
+        subtreeItemIds.push(
+          buildTicketSidebarPinnedItemId({ projectId: project.id, ticketId: nextTicketId }),
+        );
+        for (const child of ticketHierarchy.childrenByParentId.get(nextTicketId) ?? []) {
+          visit(child.id);
+        }
+      };
+
+      visit(ticketId);
+      return subtreeItemIds;
+    },
+    [project.id, ticketHierarchy.childrenByParentId],
+  );
 
   const getTicketAgentContext = useCallback(
     (ticket: ProjectTicket, options?: { visibleInSidebar?: boolean }) => {
@@ -59,12 +100,22 @@ export function useTicketAgentContext(input: {
           sidebarPin: {
             item: sidebarPinItem,
             pinned: pinnedItemIds.has(sidebarPinItem.id),
+            prioritizeItemIds: buildTicketPathSidebarItemIds(ticket.id),
+            cascadeItemIds: buildTicketSubtreeSidebarItemIds(ticket.id),
             ...(options?.visibleInSidebar ? { visibleInSidebar: true } : {}),
           },
         },
       );
     },
-    [backend, githubActivityByWorkItem, pinnedItemIds, project, projectTickets],
+    [
+      backend,
+      buildTicketPathSidebarItemIds,
+      buildTicketSubtreeSidebarItemIds,
+      githubActivityByWorkItem,
+      pinnedItemIds,
+      project,
+      projectTickets,
+    ],
   );
 
   const getGitHubActivityAgentContext = useCallback(
@@ -96,12 +147,20 @@ export function useTicketAgentContext(input: {
           sidebarPin: {
             item: sidebarPinItem,
             pinned: pinnedItemIds.has(sidebarPinItem.id),
+            ...(ticket ? { prioritizeItemIds: buildTicketPathSidebarItemIds(ticket.id) } : {}),
             ...(options?.visibleInSidebar ? { visibleInSidebar: true } : {}),
           },
         },
       );
     },
-    [backend, githubActivityByWorkItem, pinnedItemIds, project, projectTickets],
+    [
+      backend,
+      buildTicketPathSidebarItemIds,
+      githubActivityByWorkItem,
+      pinnedItemIds,
+      project,
+      projectTickets,
+    ],
   );
 
   const openTicketAgentContextMenu = useCallback(

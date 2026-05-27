@@ -1,4 +1,5 @@
 import { useTicketAgentContext } from "~/t3work/hooks/t3work-useTicketAgentContext";
+import { SidebarMenuSub } from "~/t3work/components/ui/t3work-sidebar";
 import { GitHubActivityInlineList } from "~/t3work/t3work-GitHubActivityViews";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import { sortSidebarItemsByStoredOrder } from "~/t3work/t3work-sidebarNavPreferences";
@@ -64,90 +65,85 @@ export function ProjectSidebarPinnedItems({
     .map((item) => item.pinnedItem.id);
 
   return (
-    <div className="space-y-1">
-      <div className="px-3 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/55">
-        Pinned
-      </div>
-      <div className="space-y-1">
-        {sortedItems.map((item) =>
-          item.kind === "jira-work-item" ? (
-            (() => {
-              const ticketState = getSidebarTicketState({
-                view,
-                ticketId: item.ticket.id,
-                ticketThreads: item.ticketThreads,
-              });
-              const pinnedState = visibleTicketIds.has(item.ticket.id)
-                ? { ...ticketState, isSelected: false }
-                : ticketState;
+    <SidebarMenuSub className="mx-1 w-full translate-x-0 gap-0.5 overflow-hidden px-1.5 pb-0.5">
+      {sortedItems.map((item) =>
+        item.kind === "jira-work-item" ? (
+          (() => {
+            const ticketState = getSidebarTicketState({
+              view,
+              ticketId: item.ticket.id,
+              ticketThreads: item.ticketThreads,
+            });
+            const pinnedState = visibleTicketIds.has(item.ticket.id)
+              ? { ...ticketState, isSelected: false }
+              : ticketState;
 
-              return (
-                <PinnedTicketRow
-                  key={item.pinnedItem.id}
-                  projectId={project.id}
-                  sidebarItemId={item.pinnedItem.id}
-                  sidebarNavOrderScopeIds={pinnedTicketSidebarItemIds}
-                  ticket={item.ticket}
-                  state={pinnedState}
-                  ticketAgentContext={getTicketAgentContext(item.ticket, {
-                    visibleInSidebar: true,
-                  })}
-                  {...(jiraLastCheckedAt !== undefined ? { jiraLastCheckedAt } : {})}
-                  onSelectTicket={onSelectTicket}
-                  onContextMenu={(event) =>
-                    openTicketAgentContextMenu(event, item.ticket, { visibleInSidebar: true })
-                  }
-                  onOpenMenu={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    openTicketAgentContextMenuAt(
-                      item.ticket,
-                      Math.round(rect.left + rect.width / 2),
-                      Math.round(rect.bottom),
-                      { visibleInSidebar: true },
-                    );
-                  }}
-                />
-              );
-            })()
-          ) : item.kind === "jira-work-item-unresolved" ? (
-            <PinnedTicketFallbackRow
-              key={item.pinnedItem.id}
-              state={getSidebarTicketState({
-                view,
-                ticketId: item.ticketId,
-                ticketThreads: item.ticketThreads,
-              })}
-              onSelectTicket={onSelectTicket}
-              projectId={project.id}
-              ticketDisplayId={item.ticketDisplayId}
-              ticketId={item.ticketId}
-              title={item.title}
-            />
-          ) : (
-            <GitHubActivityInlineList
-              key={item.pinnedItem.id}
-              items={[item.item]}
-              limit={1}
-              compact
-              {...(githubActivityLastCheckedAt !== undefined
-                ? { lastCheckedAt: githubActivityLastCheckedAt }
-                : {})}
-              onItemContextMenu={(event, activity) => {
-                openGitHubActivityAgentContextMenu(event, item.linkedWorkItem, activity, {
+            return (
+              <PinnedTicketRow
+                key={item.pinnedItem.id}
+                projectId={project.id}
+                sidebarItemId={item.pinnedItem.id}
+                sidebarNavOrderScopeIds={pinnedTicketSidebarItemIds}
+                ticket={item.ticket}
+                state={pinnedState}
+                ticketAgentContext={getTicketAgentContext(item.ticket, {
                   visibleInSidebar: true,
-                });
-              }}
-              getItemDragCapabilities={(activity) =>
-                getGitHubActivityAgentContext(item.linkedWorkItem, activity, {
-                  visibleInSidebar: true,
-                })
-              }
-            />
-          ),
-        )}
-      </div>
-    </div>
+                })}
+                {...(jiraLastCheckedAt !== undefined ? { jiraLastCheckedAt } : {})}
+                onSelectTicket={onSelectTicket}
+                onContextMenu={(event) =>
+                  openTicketAgentContextMenu(event, item.ticket, { visibleInSidebar: true })
+                }
+                onOpenMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openTicketAgentContextMenuAt(
+                    item.ticket,
+                    Math.round(rect.left + rect.width / 2),
+                    Math.round(rect.bottom),
+                    { visibleInSidebar: true },
+                  );
+                }}
+              />
+            );
+          })()
+        ) : item.kind === "jira-work-item-unresolved" ? (
+          <PinnedTicketFallbackRow
+            key={item.pinnedItem.id}
+            state={getSidebarTicketState({
+              view,
+              ticketId: item.ticketId,
+              ticketThreads: item.ticketThreads,
+            })}
+            onSelectTicket={onSelectTicket}
+            projectId={project.id}
+            ticketDisplayId={item.ticketDisplayId}
+            ticketId={item.ticketId}
+            title={item.title}
+          />
+        ) : (
+          <GitHubActivityInlineList
+            key={item.pinnedItem.id}
+            items={[item.item]}
+            limit={1}
+            compact
+            {...(githubActivityLastCheckedAt !== undefined
+              ? { lastCheckedAt: githubActivityLastCheckedAt }
+              : {})}
+            onItemContextMenu={(event, activity) => {
+              openGitHubActivityAgentContextMenu(event, item.linkedWorkItem, activity, {
+                visibleInSidebar: true,
+              });
+            }}
+            getItemDragCapabilities={(activity) =>
+              getGitHubActivityAgentContext(item.linkedWorkItem, activity, {
+                visibleInSidebar: true,
+              })
+            }
+          />
+        ),
+      )}
+    </SidebarMenuSub>
   );
 }

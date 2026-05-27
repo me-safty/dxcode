@@ -7,13 +7,21 @@ but the product is a project-based agent workspace for many kinds of work.
 
 Profiles and skill packs make that explicit.
 
+Profiles are configuration, not a hardcoded product enum.
+
+`t3work` may ship bundled starter profiles, but users and projects should be able to add,
+clone, edit, and replace profiles freely. Runtime behavior must never depend on checks
+like `profile.id === "engineering-copilot"` or `profile.title === "QA Assistant"`.
+All ranking, visibility, and presentation logic should derive from the profile's lower-
+level preference fields.
+
 ## Concepts
 
 ### Profile
 
 A profile controls how the assistant communicates and what kind of output it prefers.
 
-Examples:
+Bundled starter examples:
 
 - QA Assistant
 - Product Partner
@@ -25,10 +33,13 @@ Profiles affect:
 
 - tone
 - amount of technical detail
+- level of guidance vs self-serve exploration
 - preferred artifact types
 - default recipe ranking
+- default action family ranking
 - mutation safety posture
 - follow-up suggestions
+- surface defaults such as summary-first vs diff-first emphasis
 
 ### Skill Pack
 
@@ -57,6 +68,9 @@ packages/t3work-skill-packs
 
 This package owns bundled definitions, not runtime execution.
 
+It should contain starter presets and starter skill packs, not the only legal profile
+definitions in the system.
+
 Suggested layout:
 
 ```text
@@ -66,6 +80,7 @@ packages/t3work-skill-packs/src/
     productPartner.ts
     supportTriage.ts
     deliveryCoordinator.ts
+    verificationGuide.ts
     engineeringCopilot.ts
   packs/
     qa.ts
@@ -73,6 +88,7 @@ packages/t3work-skill-packs/src/
     support.ts
     delivery.ts
     engineering.ts
+    release.ts
   promptBlocks/
   artifactTemplates/
 ```
@@ -84,16 +100,33 @@ type T3WorkProfile = {
   id: string;
   title: string;
   description: string;
-  audience: "qa" | "product" | "support" | "delivery" | "engineering" | "mixed";
+  tags?: string[];
   communicationStyle: {
     technicalDepth: "low" | "medium" | "high";
     brevity: "short" | "balanced" | "detailed";
+    guidanceStyle: "guided" | "balanced" | "expert";
     defaultLanguage?: string;
   };
+  surfaceDefaults?: {
+    detailDensity: "guided" | "balanced" | "expert";
+    activityOrder?: "newest-first" | "oldest-first";
+    collapseLowSignalEvents?: boolean;
+  };
   preferredArtifactKinds: string[];
+  defaultActionFamilies?: string[];
   defaultRecipeWeights: Record<string, number>;
 };
 ```
+
+Interpretation rules:
+
+- `id` is a stable config identifier, not a behavior category.
+- `title` is presentation only.
+- `tags` are for browsing and admin organization, not primary runtime branching.
+- UI and recipe logic should use `communicationStyle`, `surfaceDefaults`,
+  `preferredArtifactKinds`, `defaultActionFamilies`, and `defaultRecipeWeights`.
+- New preference fields may be added over time; consumers should ignore unknown fields
+  safely.
 
 ## Skill Pack Model
 
@@ -111,7 +144,7 @@ type T3WorkSkillPack = {
 };
 ```
 
-## Initial Profiles
+## Bundled Starter Profiles
 
 ### QA Assistant
 
@@ -161,6 +194,18 @@ Defaults:
 - release checklists
 - standup summaries
 
+### Verification Guide
+
+For test engineers, release engineers, and reliability-focused reviewers.
+
+Defaults:
+
+- low-to-medium technical depth
+- guided summaries before raw implementation detail
+- blockers, checks, and deployment status first
+- verification checklists
+- explicit next steps and ownership
+
 ### Engineering Copilot
 
 For users who want more technical detail.
@@ -168,9 +213,11 @@ For users who want more technical detail.
 Defaults:
 
 - higher technical depth
+- expert guidance style
 - implementation plans
 - codebase references when available
 - testing and verification steps
+- diff-first review defaults
 
 ## Initial Skill Packs
 
@@ -221,14 +268,33 @@ Recipes:
 - Convert ticket to technical checklist
 - Draft verification plan
 
+### Release Pack
+
+Recipes:
+
+- Explain what changed in this PR
+- Draft PR body from team template
+- Show deployment and environment status
+- Summarize rollout blockers
+- Draft release note or handoff
+
 ## Project Creation Defaults
 
 When creating from Jira:
 
 - show recommended skill packs based on project type and issue data
-- default to QA pack if the user chooses a QA-oriented profile
-- allow Product, Support, Delivery, and Engineering packs to be enabled too
+- default packs based on project signals plus profile preference fields, not on profile id
+  or title
+- allow Product, Support, Delivery, Engineering, and Release packs to be enabled too
 - never imply Jira projects are only for QA work
+
+Example recommendation inputs:
+
+- `communicationStyle.guidanceStyle`
+- `communicationStyle.technicalDepth`
+- `preferredArtifactKinds`
+- `defaultActionFamilies`
+- provider/project metadata such as Jira project type and issue patterns
 
 Confirm screen should show:
 
@@ -248,5 +314,15 @@ Use existing T3 primitives:
 - select/menu for compact profile switching
 - settings rows for later edits
 
+Users should also be able to clone a starter profile into a custom profile and edit its
+preferences without leaving the normal setup/settings flow.
+
 Project overview should show enabled skill packs as quiet badges near the project source
 badges.
+
+GitHub PR and review surfaces should also expose the active profile as a lightweight mode
+switch. Switching profiles should immediately rerank actions, adjust explanation density,
+and change guided-vs-expert defaults without forcing the user to reopen chat.
+
+That mode switch should operate on the selected profile configuration's preferences. It
+must not special-case named starter profiles.

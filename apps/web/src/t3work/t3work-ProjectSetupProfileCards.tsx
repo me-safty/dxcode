@@ -1,4 +1,12 @@
-import { Bug, ClipboardList, Code2, Sparkles, type LucideIcon } from "lucide-react";
+import {
+  Bug,
+  ClipboardCheck,
+  Code2,
+  MessageCircleMore,
+  PackageCheck,
+  Sparkles,
+  type LucideIcon,
+} from "lucide-react";
 
 import { cn } from "~/lib/utils";
 import {
@@ -21,7 +29,15 @@ const PROFILE_VISUALS: Record<
   T3WorkProjectSetupProfileId,
   Omit<T3workProjectSetupCardOption, "id" | "title" | "description">
 > = {
-  "project-partner": {
+  "qa-assistant": {
+    eyebrow: "Verify",
+    chips: ["Test matrices", "Repro steps"],
+    icon: Bug,
+    accentClassName:
+      "from-emerald-500/18 via-lime-400/16 to-cyan-400/16 dark:from-emerald-300/18 dark:via-lime-300/14 dark:to-cyan-300/14",
+    iconClassName: "text-emerald-600 dark:text-emerald-300",
+  },
+  "product-partner": {
     eyebrow: "Friendly",
     chips: ["Plain language", "Fast summaries"],
     icon: Sparkles,
@@ -29,23 +45,31 @@ const PROFILE_VISUALS: Record<
       "from-sky-500/18 via-cyan-400/18 to-emerald-400/16 dark:from-sky-400/20 dark:via-cyan-300/16 dark:to-emerald-300/14",
     iconClassName: "text-sky-600 dark:text-sky-300",
   },
-  "requirements-engineer": {
-    eyebrow: "Understanding",
-    chips: ["Clear communication", "Ambiguity checks"],
-    icon: ClipboardList,
+  "support-triage": {
+    eyebrow: "Triage",
+    chips: ["Escalations", "Customer impact"],
+    icon: MessageCircleMore,
     accentClassName:
       "from-amber-500/18 via-orange-400/18 to-rose-400/16 dark:from-amber-300/18 dark:via-orange-300/14 dark:to-rose-300/14",
     iconClassName: "text-amber-600 dark:text-amber-300",
   },
-  "test-engineer": {
-    eyebrow: "Show & Tell",
-    chips: ["Repro steps", "Product flows"],
-    icon: Bug,
+  "delivery-coordinator": {
+    eyebrow: "Coordinate",
+    chips: ["Status", "Dependencies"],
+    icon: PackageCheck,
     accentClassName:
-      "from-emerald-500/18 via-lime-400/16 to-cyan-400/16 dark:from-emerald-300/18 dark:via-lime-300/14 dark:to-cyan-300/14",
-    iconClassName: "text-emerald-600 dark:text-emerald-300",
+      "from-cyan-500/18 via-sky-400/16 to-emerald-300/16 dark:from-cyan-300/18 dark:via-sky-300/14 dark:to-emerald-300/14",
+    iconClassName: "text-cyan-600 dark:text-cyan-300",
   },
-  developer: {
+  "verification-guide": {
+    eyebrow: "Guide",
+    chips: ["Checklists", "Release cues"],
+    icon: ClipboardCheck,
+    accentClassName:
+      "from-violet-500/18 via-indigo-400/16 to-sky-400/16 dark:from-violet-300/18 dark:via-indigo-300/14 dark:to-sky-300/14",
+    iconClassName: "text-violet-600 dark:text-violet-300",
+  },
+  "engineering-copilot": {
     eyebrow: "Build",
     chips: ["Technical depth", "Verification bias"],
     icon: Code2,

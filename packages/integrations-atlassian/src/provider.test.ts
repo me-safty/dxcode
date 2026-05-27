@@ -145,6 +145,62 @@ describe("AtlassianIntegrationProvider", () => {
     expect(page.totalCount).toBe(2);
   });
 
+  it("keeps done issues in assigned my-work results", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+
+      if (url.includes("/rest/api/3/project/search")) {
+        return Response.json({
+          values: [{ id: "project-1", key: "PROJ" }],
+        });
+      }
+
+      if (url.includes("/rest/api/3/search/jql")) {
+        expect(url).toContain(
+          encodeURIComponent('project = "PROJ" AND assignee = currentUser() ORDER BY updated DESC'),
+        );
+        expect(url).not.toContain(encodeURIComponent("statusCategory != Done"));
+        return Response.json({
+          total: 1,
+          issues: [
+            {
+              key: "PROJ-3",
+              fields: {
+                summary: "Recently completed",
+                issuetype: { name: "Task" },
+                status: { name: "Done" },
+                priority: { name: "Medium" },
+                assignee: { displayName: "Me" },
+                project: { id: "project-1" },
+                updated: "2026-05-20T00:00:00.000Z",
+              },
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const provider = new AtlassianIntegrationProvider({
+      siteUrl: "https://test.atlassian.net",
+      email: "user@example.com",
+      apiToken: "token",
+    });
+
+    const page = await provider.listResources({
+      account: {
+        id: "https://test.atlassian.net",
+        provider: "atlassian",
+      },
+      externalProjectId: "project-1",
+    });
+
+    expect(page.items.map((item) => item.displayId)).toEqual(["PROJ-3"]);
+  });
+
   it("loads a project backlog without the current-user filter", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -332,6 +388,63 @@ describe("AtlassianIntegrationProvider", () => {
         name: "Accepted",
         statuses: [{ id: "3", name: "Accepted" }],
       },
+    ]);
+  });
+
+  it("lists distinct Jira project statuses for workflow-backed filters", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+
+      if (url.includes("/rest/api/3/project/search")) {
+        return Response.json({
+          values: [{ id: "project-1", key: "PROJ" }],
+        });
+      }
+
+      if (url.endsWith("/rest/api/3/project/project-1/statuses")) {
+        return Response.json([
+          {
+            id: "10000",
+            name: "Story",
+            statuses: [
+              { id: "1", name: "To Do" },
+              { id: "2", name: "Code Review" },
+            ],
+          },
+          {
+            id: "10001",
+            name: "Task",
+            statuses: [
+              { id: "2", name: "Code Review" },
+              { id: "3", name: "Done" },
+            ],
+          },
+        ]);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const provider = new AtlassianIntegrationProvider({
+      siteUrl: "https://test.atlassian.net",
+      email: "user@example.com",
+      apiToken: "token",
+    });
+
+    const statuses = await provider.listProjectStatuses({
+      account: {
+        id: "https://test.atlassian.net",
+        provider: "atlassian",
+      },
+      externalProjectId: "project-1",
+    });
+
+    expect(statuses).toEqual([
+      { id: "2", name: "Code Review" },
+      { id: "3", name: "Done" },
+      { id: "1", name: "To Do" },
     ]);
   });
 

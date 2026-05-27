@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import type { ProjectShellProject } from "@t3tools/project-context";
 
-import { T3SurfacePanel } from "~/t3work/components/ui/t3work-surface";
 import { ProjectDashboardUnmatchedActivity } from "~/t3work/t3work-ProjectDashboardUnmatchedActivity";
 import { ProjectMyWorkContent } from "~/t3work/t3work-ProjectMyWorkContent";
 import { ProjectMyWorkFilterBar } from "~/t3work/t3work-ProjectMyWorkFilterBar";
@@ -30,11 +29,10 @@ export function ProjectDashboardMyWorkView({
     enabled: true,
   });
   const {
+    loading,
     tickets,
     reloadTickets,
-    currentUserDisplayName,
     jiraLastCheckedAt,
-    metrics,
     query,
     setQuery,
     viewMode,
@@ -78,34 +76,7 @@ export function ProjectDashboardMyWorkView({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-2 border-b border-border/70 pb-4 text-sm sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          { label: "Assigned", value: metrics.total },
-          { label: "Active", value: metrics.active },
-          { label: "In review", value: metrics.review },
-          { label: "Done", value: metrics.done },
-        ].map((metric) => (
-          <T3SurfacePanel key={metric.label} tone="soft" className="px-3 py-2">
-            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              {metric.label}
-            </div>
-            <div className="mt-1 text-lg font-semibold tabular-nums">{metric.value}</div>
-          </T3SurfacePanel>
-        ))}
-      </div>
-
       <section>
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold tracking-tight">My work items</h3>
-            <p className="text-xs text-muted-foreground">
-              {currentUserDisplayName
-                ? `${currentUserDisplayName}'s assigned Jira work and recent GitHub updates.`
-                : "Assigned Jira work and recent GitHub updates."}
-            </p>
-          </div>
-        </div>
-
         <ProjectMyWorkFilterBar
           query={query}
           onQueryChange={setQuery}
@@ -140,6 +111,7 @@ export function ProjectDashboardMyWorkView({
         />
 
         <ProjectMyWorkContent
+          loading={loading}
           project={project}
           tickets={tickets}
           assignedWorkItems={assignedWorkItems}

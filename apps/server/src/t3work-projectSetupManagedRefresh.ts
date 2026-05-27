@@ -42,14 +42,12 @@ export function buildT3WorkProjectSetupProfileManifest(
   profile: ProjectSetupProfileDefinition,
   managedFileHashes?: T3WorkProjectSetupManagedFileHashes,
 ): T3WorkProjectSetupProfileManifest {
+  const { id, ...profileFields } = profile;
+
   return {
     version: T3WORK_PROJECT_SETUP_VERSION,
-    profileId: profile.id,
-    title: profile.title,
-    description: profile.description,
-    audience: profile.audience,
-    communicationStyle: profile.communicationStyle,
-    recommendedSkillPackIds: profile.recommendedSkillPackIds,
+    profileId: id,
+    ...profileFields,
     ...(managedFileHashes && Object.keys(managedFileHashes).length > 0
       ? { managedFileHashes }
       : {}),

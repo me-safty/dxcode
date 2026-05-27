@@ -53,6 +53,7 @@
       "version": "0.0.24",
       "bin": {
         "t3": "./dist/bin.mjs",
+        "t3work": "./dist/t3work-bin.mjs",
       },
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.2.111",
@@ -65,8 +66,10 @@
         "@t3tools/integrations-atlassian": "workspace:*",
         "@t3tools/integrations-core": "workspace:*",
         "@t3tools/project-context": "workspace:*",
+        "@t3tools/t3work-skill-packs": "workspace:*",
         "effect": "catalog:",
         "node-pty": "^1.1.0",
+        "zod": "^4.3.6",
       },
       "devDependencies": {
         "@effect/language-service": "catalog:",
@@ -106,6 +109,7 @@
         "@t3tools/project-context": "workspace:*",
         "@t3tools/project-recipes": "workspace:*",
         "@t3tools/shared": "workspace:*",
+        "@t3tools/t3work-skill-packs": "workspace:*",
         "@tanstack/react-pacer": "^0.19.4",
         "@tanstack/react-query": "^5.90.0",
         "@tanstack/react-router": "^1.160.2",
@@ -301,6 +305,18 @@
         "@effect/platform-node": "catalog:",
         "@effect/vitest": "catalog:",
         "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/t3work-skill-packs": {
+      "name": "@t3tools/t3work-skill-packs",
+      "version": "0.0.1",
+      "dependencies": {
+        "@t3tools/project-recipes": "workspace:*",
+      },
+      "devDependencies": {
+        "@effect/language-service": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
       },
@@ -943,6 +959,8 @@
     "@t3tools/shared": ["@t3tools/shared@workspace:packages/shared"],
 
     "@t3tools/ssh": ["@t3tools/ssh@workspace:packages/ssh"],
+
+    "@t3tools/t3work-skill-packs": ["@t3tools/t3work-skill-packs@workspace:packages/t3work-skill-packs"],
 
     "@t3tools/tailscale": ["@t3tools/tailscale@workspace:packages/tailscale"],
 

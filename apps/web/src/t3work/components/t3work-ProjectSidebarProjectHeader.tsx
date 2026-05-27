@@ -55,7 +55,7 @@ export function ProjectSidebarProjectHeader({
     <div className="group/project-header relative mb-1">
       <SidebarMenuButton
         size="sm"
-        className={`gap-2 px-2 py-1.5 pr-8 text-left group-hover/project-header:text-sidebar-accent-foreground max-sm:pr-14 cursor-pointer ${getSidebarStandaloneButtonClassName(
+        className={`gap-2 px-2 py-1.5 pr-8 text-left group-hover/project-header:bg-accent group-hover/project-header:text-foreground group-focus-within/project-header:bg-accent group-focus-within/project-header:text-foreground max-sm:pr-14 cursor-pointer ${getSidebarStandaloneButtonClassName(
           state,
         )}`}
         onClick={onProjectClick}
@@ -111,14 +111,14 @@ export function ProjectSidebarProjectHeader({
         </span>
       </SidebarMenuButton>
 
-      <div className="pointer-events-none absolute top-1 right-1.5 flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100">
+      <div className="pointer-events-none absolute top-1 right-1.5 flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
         <Tooltip>
           <TooltipTrigger
             render={
               <button
                 type="button"
                 aria-label={`Create new thread in ${project.title}`}
-                className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground"
+                className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 onClick={onNewThread}
               >
                 <SquarePenIcon className="size-3.5" />
@@ -134,7 +134,7 @@ export function ProjectSidebarProjectHeader({
               <button
                 type="button"
                 aria-label={`Project actions for ${project.title}`}
-                className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground"
+                className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 onClick={onOpenMenu}
               >
                 <EllipsisIcon className="size-3.5" />

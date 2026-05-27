@@ -51,8 +51,71 @@ type ActionRecipeInstance = {
   initResultPath?: string;
 };
 
-type ActionRecipeSurface = "project.dashboard" | "workitem.detail.sidepanel" | "thread.context";
+type ActionRecipeSurface =
+  | "project.dashboard"
+  | "workitem.detail.sidepanel"
+  | "thread.context"
+  | "github.pull_request.detail.sidepanel"
+  | "github.pull_request.diff.selection"
+  | "github.review.comment";
 ```
+
+These remain project-scoped surfaces because the GitHub views are still rooted in a
+project-linked repository resource. The next planned expansion is first-class GitHub PR
+recipes on the PR detail page, diff selection menu, and review comment threads.
+
+## Profile-Aware And Convention-Aware Recipes
+
+The render and full context already include `profile`, so recipes should use that
+directly instead of duplicating profile logic elsewhere.
+
+Profile-aware does not mean profile-name-aware.
+
+Recipes and action views must not branch on `profile.id`, `profile.title`, or any assumed
+built-in profile list. They should branch on lower-level preference fields such as:
+
+- `profile.communicationStyle.technicalDepth`
+- `profile.communicationStyle.guidanceStyle`
+- `profile.communicationStyle.brevity`
+- `profile.surfaceDefaults`
+- `profile.preferredArtifactKinds`
+- `profile.defaultActionFamilies`
+- `profile.defaultRecipeWeights`
+
+The same recipe template may change all of these by profile:
+
+- label and short description
+- rank and visibility
+- action view copy and call-to-action tone
+- prompt instructions and expected output shape
+- which sections are expanded first in the action preview
+
+Examples for the same GitHub PR context:
+
+- high technical depth + expert guidance: `Deep review this PR` with diff-heavy wording
+  and technical risk framing
+- guided detail density + release/deployment action preference: `Explain what changed and
+what to test` with change buckets, checks, and deployment cues first
+- low technical depth + short brevity + summary-first defaults: `Explain customer and
+rollout impact` with low-jargon summary
+
+Project-scoped recipes should also be able to rely on project-local conventions for:
+
+- pull request body templates
+- required release-note or rollout sections
+- deployment links and environment names
+- reviewer or approver guidance
+
+The next GitHub action slice should prioritize recipes such as:
+
+- explain what this PR does
+- create a PR from the current branch using the project template
+- show where this PR is deployed
+- prepare a release or QA handoff
+
+Projects may still ship starter profiles that happen to produce these behaviors, but the
+recipe engine should only observe the declared preference fields, not the starter profile
+names.
 
 ## Template Directory
 

@@ -38,9 +38,11 @@ type ProjectSidebarProjectsSectionProps = Pick<
   ticketViewMode: TicketViewMode;
   setTicketViewMode: (mode: TicketViewMode) => void;
   showProjectThreads: boolean;
+  showMyActivityFeed: boolean;
   showJiraItems: boolean;
   showGitHubActivity: boolean;
   onShowProjectThreadsChange: (show: boolean) => void;
+  onShowMyActivityFeedChange: (show: boolean) => void;
   onShowJiraItemsChange: (show: boolean) => void;
   onShowGitHubActivityChange: (show: boolean) => void;
 };
@@ -57,9 +59,11 @@ export function ProjectSidebarProjectsSection({
   threadSortOrder,
   threadPreviewCount,
   showProjectThreads,
+  showMyActivityFeed,
   showJiraItems,
   showGitHubActivity,
   onShowProjectThreadsChange,
+  onShowMyActivityFeedChange,
   onShowJiraItemsChange,
   onShowGitHubActivityChange,
   onSelectProject,
@@ -93,6 +97,7 @@ export function ProjectSidebarProjectsSection({
             threadPreviewCount={threadPreviewCount}
             ticketViewMode={ticketViewMode}
             showProjectThreads={showProjectThreads}
+            showMyActivityFeed={showMyActivityFeed}
             showJiraItems={showJiraItems}
             showGitHubActivity={showGitHubActivity}
             onProjectSortOrderChange={onProjectSortOrderChange}
@@ -100,6 +105,7 @@ export function ProjectSidebarProjectsSection({
             onThreadSortOrderChange={onThreadSortOrderChange}
             onThreadPreviewCountChange={onThreadPreviewCountChange}
             onShowProjectThreadsChange={onShowProjectThreadsChange}
+            onShowMyActivityFeedChange={onShowMyActivityFeedChange}
             onShowJiraItemsChange={onShowJiraItemsChange}
             onShowGitHubActivityChange={onShowGitHubActivityChange}
           />
@@ -139,6 +145,7 @@ export function ProjectSidebarProjectsSection({
                 threadPreviewCount={threadPreviewCount}
                 ticketViewMode={ticketViewMode}
                 showProjectThreads={showProjectThreads}
+                showMyActivityFeed={showMyActivityFeed}
                 showJiraItems={showJiraItems}
                 showGitHubActivity={showGitHubActivity}
                 onSelectProject={onSelectProject}

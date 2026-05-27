@@ -5,8 +5,12 @@ import type { AddToChatPayloadInput } from "~/t3work/t3work-addToChatUtils";
 import { buildJiraWorkItemSummary } from "~/t3work/t3work-jiraContextMetadata";
 import type { TicketKickoffThreadInput } from "~/t3work/t3work-kickoffTypes";
 import { useT3WorkPinnedSidebarStore } from "~/t3work/t3work-pinnedSidebarStore";
+import { useT3WorkSidebarNavPreferencesStore } from "~/t3work/t3work-sidebarNavPreferencesStore";
 import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
-import { buildExistingProjectThreadViewState } from "~/t3work/t3work-projectThreadViewState";
+import {
+  buildExistingProjectThreadViewState,
+  isEmbeddedProjectThread,
+} from "~/t3work/t3work-projectThreadViewState";
 import { buildTicketSidebarPinnedItem } from "~/t3work/t3work-sidebarPinningTypes";
 import { buildTicketContextBundle } from "~/t3work/t3work-ticketContextBundle";
 import type { ViewState } from "~/t3work/t3work-types";
@@ -50,6 +54,13 @@ export async function createTicketKickoffThread(input: {
       ticketId: threadInput.ticketId,
     }),
   );
+  useT3WorkSidebarNavPreferencesStore.getState().showItemAtTop(
+    resolvedProjectId,
+    buildTicketSidebarPinnedItem({
+      projectId: resolvedProjectId,
+      ticketId: threadInput.ticketId,
+    }).id,
+  );
   enqueueThreadKickoffAttachments(thread.id, threadInput.kickoffContextAttachments);
   onOpenTicket?.(resolvedProjectId, threadInput.ticketId, thread.id);
 
@@ -58,9 +69,7 @@ export async function createTicketKickoffThread(input: {
     .getTicketsForProject(resolvedProjectId)
     .find((candidate) => candidate.id === threadInput.ticketId);
 
-  if (!backend || !project || !ticket) {
-    return;
-  }
+  if (!backend || !project || !ticket) return;
 
   const jiraSummary = buildJiraWorkItemSummary(ticket);
   const projectTickets = store.getTicketsForProject(resolvedProjectId);
@@ -106,10 +115,7 @@ export function selectProjectThread(input: {
     .getThreadsForProject(resolvedProjectId)
     .find((candidate) => candidate.id === threadId);
 
-  if (!thread) {
-    onOpenThread?.(resolvedProjectId, threadId);
-    return;
-  }
+  if (!thread) return void onOpenThread?.(resolvedProjectId, threadId);
 
   const nextView = buildExistingProjectThreadViewState(resolvedProjectId, thread);
 
@@ -124,6 +130,44 @@ export function selectProjectThread(input: {
   }
 
   onOpenThread?.(resolvedProjectId, threadId);
+}
+
+export function openEmbeddedProjectThread(input: {
+  onOpenDashboard: OnOpenDashboard;
+  onOpenTicket: OnOpenTicket;
+  projectId: string;
+  store: ProjectStore;
+  threadId: string;
+}) {
+  const { onOpenDashboard, onOpenTicket, projectId, store, threadId } = input;
+  const resolvedProjectId = store.resolveProjectId(projectId);
+  const thread = store
+    .getThreadsForProject(resolvedProjectId)
+    .find((candidate) => candidate.id === threadId);
+
+  if (!thread || !isEmbeddedProjectThread(thread)) return;
+
+  store.updateThreadDisplayMode(threadId, "embedded");
+
+  if (thread.ticketId) {
+    store.selectTicket(resolvedProjectId, thread.ticketId);
+    store.setView({
+      type: "ticket",
+      projectId: resolvedProjectId,
+      ticketId: thread.ticketId,
+      embeddedThreadId: threadId,
+    });
+    onOpenTicket?.(resolvedProjectId, thread.ticketId, threadId);
+    return;
+  }
+
+  store.selectProject(resolvedProjectId);
+  store.setView({
+    type: "dashboard",
+    projectId: resolvedProjectId,
+    embeddedThreadId: threadId,
+  });
+  onOpenDashboard?.(resolvedProjectId, thread.dashboardMode, threadId);
 }
 
 export async function deleteAppThread(input: {

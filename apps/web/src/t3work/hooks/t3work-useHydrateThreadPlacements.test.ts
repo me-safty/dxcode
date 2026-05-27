@@ -101,6 +101,33 @@ describe("t3work-useHydrateThreadPlacements", () => {
     ).toEqual(["thread-missing"]);
   });
 
+  it("does not request placements when live activities already carry handoff metadata", () => {
+    expect(
+      readMissingThreadPlacementIds({
+        threads: [],
+        liveThreads: [
+          makeLiveThread({
+            activities: [
+              {
+                id: "activity-handoff-1",
+                tone: "info",
+                kind: "t3work.handoff.created",
+                summary: "Created from Parent thread",
+                payload: {
+                  parentThreadId: ThreadId.make("thread-parent"),
+                  childThreadId: ThreadId.make("thread-child"),
+                  ticketId: "PROJ-123",
+                },
+                turnId: null,
+                createdAt: "2026-05-22T09:00:00.000Z",
+              },
+            ],
+          }),
+        ],
+      }),
+    ).toEqual([]);
+  });
+
   it("hydrates fetched placements into local shadow threads", () => {
     expect(
       mergeFetchedThreadPlacements({

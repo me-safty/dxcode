@@ -15,6 +15,7 @@ import { enqueueThreadKickoffAttachments } from "~/t3work/t3work-enqueueThreadKi
 import {
   createTicketKickoffThread,
   deleteAppThread,
+  openEmbeddedProjectThread,
   selectProjectThread,
 } from "~/t3work/t3work-appThreadMutations";
 
@@ -97,6 +98,18 @@ export function useAppHandlers({
     [onOpenThread, store],
   );
 
+  const handleOpenEmbeddedThread = useCallback(
+    (projectId: string, threadId: string) =>
+      openEmbeddedProjectThread({
+        onOpenDashboard,
+        onOpenTicket,
+        projectId,
+        store,
+        threadId,
+      }),
+    [onOpenDashboard, onOpenTicket, store],
+  );
+
   const handleCreateThread = useCallback(
     (projectId: string) => {
       const resolvedProjectId = store.resolveProjectId(projectId);
@@ -158,18 +171,11 @@ export function useAppHandlers({
     [onOpenTicket, store],
   );
 
-  const handleThreadKickoffConsumed = useCallback(
-    (threadId: string) => {
-      store.markThreadKickoffConsumed(threadId);
-    },
-    [store],
-  );
-
   const handleDeleteProject = useCallback(
     (projectId: string) => {
       const deletedWasActive = activeView?.projectId === projectId;
       store.deleteProject(projectId);
-      if (deletedWasActive) onOpenHome?.();
+      deletedWasActive && onOpenHome?.();
     },
     [activeView, onOpenHome, store],
   );
@@ -194,11 +200,12 @@ export function useAppHandlers({
     handleSelectTicket,
     handleSelectThread,
     handleOpenFullThread,
+    handleOpenEmbeddedThread,
     handleCreateThread,
     handleCreateProjectKickoffThread,
     handleCreateTicketKickoffThread,
     handleCreateTicketThreadFromSidebar,
-    handleThreadKickoffConsumed,
+    handleThreadKickoffConsumed: store.markThreadKickoffConsumed,
     handleDeleteProject,
     handleDeleteThread,
   };

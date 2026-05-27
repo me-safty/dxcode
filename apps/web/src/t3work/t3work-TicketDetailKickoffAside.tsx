@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ServerProvider } from "@t3tools/contracts";
+import type { ProjectShellProject } from "@t3tools/project-context";
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
+import { readProjectSetupProfileIdFromProject } from "~/t3work/hooks/t3work-createProjectBootstrap";
 import { TicketKickoffComposer } from "~/t3work/t3work-TicketKickoffComposer";
 import { TicketKickoffPanel } from "~/t3work/t3work-TicketKickoffPanel";
 import { useT3WorkAddToChatStore, buildKickoffQueueKey } from "~/t3work/t3work-addToChatStore";
@@ -9,9 +11,11 @@ import { EmbeddedThreadAside } from "~/t3work/t3work-EmbeddedThreadAside";
 import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { TicketKickoffThreadInput } from "~/t3work/t3work-kickoffTypes";
 import { runT3workViewTransition } from "~/t3work/t3work-runViewTransition";
+import { buildT3workSidecarRecipeQuickStarts } from "~/t3work/t3work-sidecarRecipes";
 import type { ProjectThread } from "~/t3work/t3work-types";
 
 export function TicketDetailKickoffAside({
+  project,
   displayId,
   issueThreads,
   projectId,
@@ -27,6 +31,7 @@ export function TicketDetailKickoffAside({
   onThreadKickoffConsumed,
   onKickoffThread,
 }: {
+  project: ProjectShellProject;
   displayId: string;
   issueThreads: ProjectThread[];
   projectId: string;
@@ -48,6 +53,19 @@ export function TicketDetailKickoffAside({
   const kickoffQueueKey = useMemo(
     () => buildKickoffQueueKey(projectId, ticketId),
     [projectId, ticketId],
+  );
+  const quickStartRecipes = useMemo(
+    () =>
+      buildT3workSidecarRecipeQuickStarts({
+        surface: "workitem.detail.sidepanel",
+        project,
+        profileId: readProjectSetupProfileIdFromProject(project),
+        selectedWorkLabel: displayId,
+        resourceKind: "ticket",
+        availableIntegrations: githubActivityItems.length > 0 ? ["github"] : [],
+        availableContextKeys: ["project.summary", "ticket.summary"],
+      }),
+    [displayId, githubActivityItems.length, project],
   );
   const pendingKickoffCount = useT3WorkAddToChatStore(
     (state) => (state.pendingByKickoffKey[kickoffQueueKey] ?? []).length,
@@ -90,6 +108,7 @@ export function TicketDetailKickoffAside({
       <TicketKickoffPanel
         displayId={displayId}
         issueThreads={issueThreads}
+        quickStartRecipes={quickStartRecipes}
         injectedContextAttachments={injectedContextAttachments}
         onOpenThread={(threadId) =>
           runT3workViewTransition(() => onOpenThread(projectId, threadId))

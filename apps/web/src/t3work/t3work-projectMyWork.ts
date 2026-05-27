@@ -20,6 +20,7 @@ export {
 export { buildProjectMyWorkVisibleHierarchy } from "./t3work-projectMyWorkHierarchy";
 export {
   buildProjectMyWorkFlatKanbanColumns,
+  filterProjectMyWorkKanbanColumnsByHiddenColumns,
   buildProjectMyWorkKanbanLaneOptions,
   filterProjectMyWorkKanbanTicketsByHiddenColumns,
 } from "./t3work-projectMyWorkKanban";

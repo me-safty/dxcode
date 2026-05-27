@@ -5,6 +5,7 @@ import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3to
 import type { ProjectDashboardMode } from "~/t3work/t3work-projectDashboardModeState";
 import type { ProjectThreadDisplayMode } from "~/t3work/t3work-projectThreadViewState";
 import { buildProjectThreadViewState } from "~/t3work/t3work-projectThreadViewState";
+import { setProjectThreadDisplayMode } from "~/t3work/t3work-threadToolContext";
 import type { ProjectThread, T3workThreadToolId, ViewState } from "~/t3work/t3work-types";
 import { createTicketThread } from "./t3work-projectThreadFactories";
 import { buildThreadForProject } from "./t3work-projectStoreUtils";
@@ -119,20 +120,10 @@ export function useProjectThreadActions(input: {
   );
 
   const updateThreadDisplayMode = useCallback(
-    (threadId: string, displayMode: ProjectThreadDisplayMode) => {
-      setThreads((prev) => {
-        let changed = false;
-        const next = prev.map((thread) => {
-          if (thread.id !== threadId || thread.displayMode === displayMode) {
-            return thread;
-          }
-
-          changed = true;
-          return { ...thread, displayMode };
-        });
-
-        return changed ? next : prev;
-      });
+    (threadId: string, displayMode: ProjectThreadDisplayMode, fallbackThread?: ProjectThread) => {
+      setThreads((prev) =>
+        setProjectThreadDisplayMode(prev, threadId, displayMode, fallbackThread),
+      );
     },
     [setThreads],
   );

@@ -9,6 +9,12 @@ import {
 } from "./t3work-projectSidebarState";
 
 describe("project sidebar state", () => {
+  it("defaults my activity feed to off", () => {
+    expect(createDefaultProjectSidebarState()).toMatchObject({
+      showMyActivityFeed: false,
+    });
+  });
+
   it("lets query params override persisted sidebar state including explicit false values", () => {
     const persisted = {
       projectSortOrder: "created_at",
@@ -16,6 +22,7 @@ describe("project sidebar state", () => {
       threadPreviewCount: 9,
       ticketViewMode: "flat",
       showProjectThreads: true,
+      showMyActivityFeed: true,
       showJiraItems: true,
       showGitHubActivity: true,
     } as const;
@@ -25,6 +32,7 @@ describe("project sidebar state", () => {
       navThreadCount: "3",
       navTicketView: "tree",
       navThreads: "0",
+      navActivity: "0",
       navJira: "0",
       navGitHub: "1",
     });
@@ -35,6 +43,7 @@ describe("project sidebar state", () => {
       threadPreviewCount: 3,
       ticketViewMode: "tree",
       showProjectThreads: false,
+      showMyActivityFeed: false,
       showJiraItems: false,
       showGitHubActivity: true,
     });
@@ -49,6 +58,7 @@ describe("project sidebar state", () => {
         threadPreviewCount: 7,
         ticketViewMode: "flat",
         showProjectThreads: false,
+        showMyActivityFeed: false,
         showJiraItems: true,
         showGitHubActivity: false,
       }),
@@ -58,6 +68,7 @@ describe("project sidebar state", () => {
       navThreadCount: 7,
       navTicketView: "flat",
       navThreads: false,
+      navActivity: false,
       navJira: true,
       navGitHub: false,
     });
@@ -68,6 +79,7 @@ describe("project sidebar state", () => {
       stripProjectSidebarSearchParams({
         navProjectSort: "updated_at",
         navThreadSort: "created_at",
+        navActivity: true,
         navJira: true,
         unrelated: "keep-me",
       }),

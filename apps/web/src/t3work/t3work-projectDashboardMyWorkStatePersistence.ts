@@ -5,6 +5,7 @@ import {
   parseRouteStringList,
   projectDashboardMyWorkRouteSearchKeys,
   projectMyWorkGroupModeValues,
+  projectMyWorkKanbanLaneSelectionModeValues,
   projectMyWorkStatusCategoryValues,
   projectMyWorkTableSortByValues,
   projectMyWorkTableSortDirectionValues,
@@ -52,6 +53,13 @@ export function readPersistedProjectDashboardMyWorkState(
     const hiddenKanbanColumnIds = parsePersistedStringList(parsed.hiddenKanbanColumnIds);
     if (hiddenKanbanColumnIds !== undefined) {
       persisted.hiddenKanbanColumnIds = hiddenKanbanColumnIds;
+      if (hiddenKanbanColumnIds.length > 0) {
+        persisted.hasCustomizedKanbanLanes = true;
+      }
+    }
+
+    if (typeof parsed.hasCustomizedKanbanLanes === "boolean") {
+      persisted.hasCustomizedKanbanLanes = parsed.hasCustomizedKanbanLanes;
     }
 
     const excludedTypeKeys = parsePersistedStringList(parsed.excludedTypeKeys);
@@ -110,8 +118,24 @@ export function resolveProjectDashboardMyWorkState(input: {
   if (search.myWorkGroup !== undefined) next.groupMode = search.myWorkGroup;
   if (search.myWorkStatus !== undefined) next.statusCategory = search.myWorkStatus;
   if (search.myWorkGitHub !== undefined) next.showGitHubActivity = search.myWorkGitHub === "show";
+  const kanbanLaneSelectionMode = parseRouteEnum(
+    search.myWorkLanesMode,
+    projectMyWorkKanbanLaneSelectionModeValues,
+  );
+  if (kanbanLaneSelectionMode !== undefined) {
+    next.hasCustomizedKanbanLanes = kanbanLaneSelectionMode === "custom";
+  }
   const hiddenKanbanColumnIds = parseRouteStringList(search.myWorkLanes);
-  if (hiddenKanbanColumnIds !== undefined) next.hiddenKanbanColumnIds = hiddenKanbanColumnIds;
+  if (hiddenKanbanColumnIds !== undefined) {
+    next.hiddenKanbanColumnIds = hiddenKanbanColumnIds;
+    if (
+      kanbanLaneSelectionMode === undefined &&
+      typeof search.myWorkLanes === "string" &&
+      search.myWorkLanes.trim().length > 0
+    ) {
+      next.hasCustomizedKanbanLanes = true;
+    }
+  }
   if (search.myWorkPriority !== undefined) next.selectedPriority = search.myWorkPriority;
   if (search.myWorkTicketStatus !== undefined) next.selectedStatus = search.myWorkTicketStatus;
   const routeTypeKeys = parseRouteStringList(search.myWorkTypes);
@@ -131,7 +155,12 @@ export function buildProjectDashboardMyWorkRouteSearch(
     myWorkGroup: state.groupMode,
     myWorkStatus: state.statusCategory,
     myWorkGitHub: state.showGitHubActivity ? "show" : "hide",
-    myWorkLanes: state.hiddenKanbanColumnIds.join(","),
+    ...(state.hasCustomizedKanbanLanes
+      ? {
+          myWorkLanesMode: "custom" as const,
+          myWorkLanes: state.hiddenKanbanColumnIds.join(","),
+        }
+      : {}),
     myWorkPriority: state.selectedPriority,
     myWorkTicketStatus: state.selectedStatus,
     myWorkTypes: state.excludedTypeKeys.join(","),
@@ -160,6 +189,7 @@ export function areProjectDashboardMyWorkStatesEqual(
     left.groupMode === right.groupMode &&
     left.statusCategory === right.statusCategory &&
     left.showGitHubActivity === right.showGitHubActivity &&
+    left.hasCustomizedKanbanLanes === right.hasCustomizedKanbanLanes &&
     left.hiddenKanbanColumnIds.length === right.hiddenKanbanColumnIds.length &&
     left.hiddenKanbanColumnIds.every((key, index) => key === right.hiddenKanbanColumnIds[index]) &&
     left.excludedTypeKeys.length === right.excludedTypeKeys.length &&

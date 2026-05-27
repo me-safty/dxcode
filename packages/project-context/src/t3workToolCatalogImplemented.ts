@@ -40,7 +40,13 @@ const START_CHILD_INPUT_SCHEMA = {
     repo_full_name: {
       type: "string",
       description:
-        "Optional linked repository to open in a fresh worktree, for example 'owner/repo' or 'github.com/owner/repo'.",
+        "Optional linked repository to open in a fresh scoped worktree, for example 'owner/repo' or 'github.com/owner/repo'.",
+      minLength: 1,
+    },
+    repo_ref: {
+      type: "string",
+      description:
+        "Optional branch, tag, or commit to use as the base ref for that scoped worktree. When omitted, the linked repository default branch is used.",
       minLength: 1,
     },
   },
@@ -88,7 +94,7 @@ export const IMPLEMENTED_T3WORK_TOOL_CATALOG = {
     label: "Start child session",
     title: "Start child session",
     description:
-      "Create a child t3work session from the current thread and optionally start it immediately.",
+      "Create a child t3work session from the current thread and optionally start it immediately. When repo_full_name is provided, the runtime prepares a dedicated scoped worktree for that linked repository; use repo_ref to choose the base branch, tag, or commit.",
     capabilities: ["write"],
     kind: "thread",
     surfaces: ["thread"],

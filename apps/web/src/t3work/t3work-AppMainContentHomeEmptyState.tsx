@@ -17,7 +17,7 @@ import { ProjectBrowserEmptyWithChat } from "./t3work-AppMainContentShell";
 export function AppMainContentHomeEmptyState({
   onCreate,
   onInlineProjectCreated,
-  isFirstRunSetup,
+  showInitialSetup,
   showAside,
   homeChatProject,
   homeChatProjectThreads,
@@ -28,7 +28,7 @@ export function AppMainContentHomeEmptyState({
 }: {
   onCreate: () => void;
   onInlineProjectCreated: (project: ProjectShellProject) => void;
-  isFirstRunSetup: boolean;
+  showInitialSetup: boolean;
   showAside: boolean;
   homeChatProject: ProjectShellProject | null;
   homeChatProjectThreads: ProjectThread[];
@@ -47,15 +47,15 @@ export function AppMainContentHomeEmptyState({
   const [showInlineCreateWizard, setShowInlineCreateWizard] = useState(false);
 
   useEffect(() => {
-    if (!isFirstRunSetup) {
+    if (!showInitialSetup) {
       setShowInlineCreateWizard(false);
     }
-  }, [isFirstRunSetup]);
+  }, [showInitialSetup]);
 
   return (
     <ProjectBrowserEmptyWithChat
       onCreate={
-        isFirstRunSetup
+        showInitialSetup
           ? () =>
               runT3workViewTransition(() => setShowInlineCreateWizard(true), {
                 types: ["t3work-wizard-forward"],

@@ -25,6 +25,18 @@ export function filterProjectMyWorkKanbanTicketsByHiddenColumns(
   );
 }
 
+export function filterProjectMyWorkKanbanColumnsByHiddenColumns(
+  columns: ProjectTicketKanbanColumns,
+  hiddenKanbanColumnIds: ReadonlyArray<string>,
+): ProjectTicketKanbanColumns {
+  if (hiddenKanbanColumnIds.length === 0) {
+    return columns;
+  }
+
+  const hiddenKanbanColumnIdSet = new Set(hiddenKanbanColumnIds);
+  return columns.filter((column) => !hiddenKanbanColumnIdSet.has(column.id));
+}
+
 export function buildProjectMyWorkKanbanLaneOptions(
   columns: ProjectTicketKanbanColumns,
 ): ReadonlyArray<ProjectMyWorkKanbanLaneOption> {

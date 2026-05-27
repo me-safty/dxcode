@@ -403,6 +403,60 @@ Commit behavior:
 - GitHub comments, reviews, labels, or PR changes are external mutations and need draft
   UI first
 
+## GitHub Pull Request Workspace Tools
+
+These tools extend GitHub activity from a context attachment surface into a first-class
+PR workspace.
+
+Current UI basis:
+
+- PR detail page with pinned gates and actions
+- diff workspace with file tree, search, and unresolved-thread navigation
+- selection-aware chat and handoff entry points
+- recipe launchers on PR detail, diff selection, and review comment threads
+
+Read tools:
+
+```text
+t3work.github.read_pull_request_overview
+t3work.github.read_pull_request_activity
+t3work.github.read_pull_request_checks
+t3work.github.read_pull_request_file_tree
+t3work.github.read_pull_request_diff_manifest
+t3work.github.read_pull_request_diff_chunk
+t3work.github.read_pull_request_selection_context
+t3work.github.read_review_thread
+t3work.github.read_check_run_details
+```
+
+View-state tools:
+
+```text
+t3work.github.open_pull_request
+t3work.github.select_pull_request_item
+t3work.github.set_pull_request_activity_filters
+t3work.github.set_pull_request_diff_filters
+t3work.github.attach_pull_request_selection_to_chat
+t3work.github.start_child_from_pull_request_selection
+```
+
+Draft mutation tools:
+
+```text
+t3work.github.issue_comment.draft_create
+t3work.github.review_comment.draft_create
+t3work.github.review_reply.draft_create
+t3work.github.review_summary.draft_create
+t3work.github.reviewers.draft_update
+```
+
+Commit behavior:
+
+- reading PR detail, diff, checks, and selection context is safe
+- comment, reply, review-summary, reviewer, and label changes stay draft-first
+- repository file changes stay in session/worktree flows, not direct PR UI mutation
+- multi-comment review submissions should be previewed as a review package before commit
+
 ## Thread And Handoff Tools
 
 Context-bound chat and standalone chat share thread tools.

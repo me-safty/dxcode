@@ -8,7 +8,10 @@ import type { GitHubWorkActivityItem } from "~/t3work/t3work-githubActivity";
 import type { ProjectTicket } from "~/t3work/t3work-types";
 import type { BackendApi } from "~/t3work/backend/t3work-types";
 import type { ProjectShellProject } from "@t3tools/project-context";
-import { buildTicketSidebarPinnedItem } from "~/t3work/t3work-sidebarPinningTypes";
+import {
+  buildTicketSidebarPinnedItem,
+  buildTicketSidebarPinnedItemId,
+} from "~/t3work/t3work-sidebarPinningTypes";
 
 function createProject(): ProjectShellProject {
   return {
@@ -90,7 +93,7 @@ describe("ticket agent context builders", () => {
     expect(addToChatAction?.request.targetLabel).toContain("Stabilize backlog context menus");
   });
 
-  it("includes Unpin when a Jira work item is already visible in the sidebar", () => {
+  it("keeps visible Jira work items pinnable until they are explicitly pinned", () => {
     const ticket = createTicket();
     const capabilities = buildTicketAgentContextCapabilities(
       {
@@ -111,7 +114,54 @@ describe("ticket agent context builders", () => {
 
     expect(capabilities.actions).toEqual([
       expect.objectContaining({ id: "add-to-chat", kind: "add-to-chat" }),
-      expect.objectContaining({ id: "unpin", kind: "unpin-from-sidebar" }),
+      expect.objectContaining({ id: "pin-to-left", kind: "pin-to-sidebar" }),
+    ]);
+  });
+
+  it("adds subtree cascade ids to pinned Jira unpin actions", () => {
+    const ticket = createTicket();
+    const child: ProjectTicket = {
+      ...createTicket(),
+      id: "ticket-2",
+      parentId: ticket.id,
+      ref: {
+        ...createTicket().ref,
+        id: "10010",
+        displayId: "PROJ-10",
+        title: "Prepare release subtask",
+      },
+      issueType: "Sub-task",
+    };
+    const capabilities = buildTicketAgentContextCapabilities(
+      {
+        backend: {} as BackendApi,
+        project: createProject(),
+        ticket,
+        projectTickets: [ticket, child],
+        githubActivityItems: [],
+      },
+      {
+        sidebarPin: {
+          item: buildTicketSidebarPinnedItem({ projectId: "project-1", ticketId: ticket.id }),
+          pinned: true,
+          cascadeItemIds: [
+            buildTicketSidebarPinnedItemId({ projectId: "project-1", ticketId: ticket.id }),
+            buildTicketSidebarPinnedItemId({ projectId: "project-1", ticketId: child.id }),
+          ],
+        },
+      },
+    );
+
+    expect(capabilities.actions).toEqual([
+      expect.objectContaining({ id: "add-to-chat", kind: "add-to-chat" }),
+      expect.objectContaining({
+        id: "unpin",
+        kind: "unpin-from-sidebar",
+        cascadeItemIds: [
+          buildTicketSidebarPinnedItemId({ projectId: "project-1", ticketId: ticket.id }),
+          buildTicketSidebarPinnedItemId({ projectId: "project-1", ticketId: child.id }),
+        ],
+      }),
     ]);
   });
 });

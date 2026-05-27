@@ -125,6 +125,32 @@ export function sortSidebarItemsByStoredOrderById<T>(
   });
 }
 
+export function prioritizeSidebarItemId(
+  orderedItemIds: ReadonlyArray<string>,
+  itemId: string,
+): string[] {
+  if (itemId.length === 0) {
+    return dedupeIds(orderedItemIds);
+  }
+
+  return dedupeIds([itemId, ...orderedItemIds]);
+}
+
+export function prioritizeSidebarItemIds(
+  orderedItemIds: ReadonlyArray<string>,
+  itemIds: ReadonlyArray<string>,
+): string[] {
+  return dedupeIds([...itemIds, ...orderedItemIds]);
+}
+
+export function removeSidebarItemIdsFromOrder(
+  orderedItemIds: ReadonlyArray<string>,
+  itemIds: ReadonlyArray<string>,
+): string[] {
+  const itemIdSet = new Set(itemIds);
+  return dedupeIds(orderedItemIds.filter((itemId) => !itemIdSet.has(itemId)));
+}
+
 export function reorderSidebarItemsInScope(input: {
   orderedItemIds: ReadonlyArray<string>;
   scopeItemIds: ReadonlyArray<string>;

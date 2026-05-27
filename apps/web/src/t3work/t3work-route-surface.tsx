@@ -38,7 +38,7 @@ function buildRouteSearch(
     chatThreadId?: string | null;
   } = {},
 ): T3workRouteSearch {
-  const { chatThreadId: _ignoredChatThreadId, ...rest } = search;
+  const { chatThreadId: _ignoredChatThreadId, setup: _ignoredSetup, ...rest } = search;
   const projectView = input.projectView ?? search.projectView;
 
   return {
@@ -142,6 +142,7 @@ export function T3workRouteSurface() {
         view={view}
         dashboardMode={search.projectView ?? "my-work"}
         showCreate={isCreateRoute}
+        reopenInitialSetup={search.setup === "welcome"}
         onCreateOpenChange={(open) => {
           void navigate({
             to: open ? "/t3work/new" : "/t3work",

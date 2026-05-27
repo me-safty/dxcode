@@ -19,6 +19,7 @@ function renderNav(
       onSelectMyWork={() => {}}
       backlogContent={undefined}
       myWorkContent={undefined}
+      showMyActivityFeed
       showJiraItems={false}
       currentIssueCount={0}
       currentIssuesContent={<div>Current issues</div>}
@@ -56,5 +57,18 @@ describe("ProjectSidebarDashboardNav", () => {
 
     expect(markup).toContain("Collapse my work");
     expect(markup).toContain("Pinned items");
+  });
+
+  it("hides my activity feed content when the feed is disabled", () => {
+    const markup = renderNav({
+      showMyActivityFeed: false,
+      myWorkThreadCount: 1,
+      myWorkContent: <div>My work threads</div>,
+      pinnedItemCount: 1,
+      pinnedContent: <div>Pinned items</div>,
+    });
+
+    expect(markup).toContain("Pinned items");
+    expect(markup).not.toContain("My work threads");
   });
 });

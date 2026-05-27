@@ -9,12 +9,13 @@ import { startBrowserPolling } from "./t3work-integrationPolling";
 
 const ATLASSIAN_BOARD_COLUMNS_POLL_INTERVAL_MS = 5 * 60_000;
 const ATLASSIAN_BOARD_COLUMNS_CACHE_MAX_AGE_MS = 5 * 60_000;
+const ATLASSIAN_BOARD_COLUMNS_CACHE_KEY_VERSION = "v2";
 
 export function useProjectKanbanBoardColumns(project: ProjectShellProject) {
   const backend = useBackend();
   const cacheKey = useMemo(
     () =>
-      `atlassian:boardColumns:${project.source.provider}:${project.source.accountId ?? "none"}:${project.source.externalProjectId ?? "none"}`,
+      `atlassian:boardColumns:${ATLASSIAN_BOARD_COLUMNS_CACHE_KEY_VERSION}:${project.source.provider}:${project.source.accountId ?? "none"}:${project.source.externalProjectId ?? "none"}`,
     [project.source.accountId, project.source.externalProjectId, project.source.provider],
   );
   const [response, setResponse] = useState<AtlassianBoardColumnsResponse | null>(
@@ -103,6 +104,7 @@ export function useProjectKanbanBoardColumns(project: ProjectShellProject) {
   }, [backend, cacheKey, load, project.source.accountId, project.source.externalProjectId]);
 
   return {
+    availableStatuses: response?.availableStatuses ?? [],
     boardColumns: response?.boardColumns ?? [],
     selectedBoardId: response?.selectedBoardId,
     loading,

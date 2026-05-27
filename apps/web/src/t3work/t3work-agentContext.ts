@@ -23,12 +23,14 @@ export type AgentContextActionDefinition =
       label: string;
       kind: "pin-to-sidebar";
       item: T3WorkSidebarPinnedItem;
+      prioritizeItemIds?: readonly string[];
     }
   | {
       id: string;
       label: string;
       kind: "unpin-from-sidebar";
       item: T3WorkSidebarPinnedItem;
+      cascadeItemIds?: readonly string[];
     };
 
 export type AgentContextCapabilities = {
@@ -68,7 +70,7 @@ export function buildAddToChatAgentContextCapabilities(
   ];
 
   if (options?.sidebarPin) {
-    const showUnpinAction = options.sidebarPin.pinned || options.sidebarPin.visibleInSidebar;
+    const showUnpinAction = options.sidebarPin.pinned;
     actions.push(
       showUnpinAction
         ? {
@@ -76,12 +78,18 @@ export function buildAddToChatAgentContextCapabilities(
             label: options.sidebarPin.unpinLabel ?? "Unpin",
             kind: "unpin-from-sidebar",
             item: options.sidebarPin.item,
+            ...(options.sidebarPin.cascadeItemIds
+              ? { cascadeItemIds: options.sidebarPin.cascadeItemIds }
+              : {}),
           }
         : {
             id: "pin-to-left",
             label: options.sidebarPin.pinLabel ?? "Pin to left",
             kind: "pin-to-sidebar",
             item: options.sidebarPin.item,
+            ...(options.sidebarPin.prioritizeItemIds
+              ? { prioritizeItemIds: options.sidebarPin.prioritizeItemIds }
+              : {}),
           },
     );
   }

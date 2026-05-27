@@ -72,6 +72,7 @@ export function ProjectDashboardKanbanLane({
           const children = laneHierarchy?.childrenByParentId.get(ticket.id) ?? [];
           const isContextOnly = !laneTicketIds.has(ticket.id);
           const isPending = optimisticMoves[ticket.id]?.pending === true;
+          const githubActivityItems = githubActivityByWorkItem.get(ticket.ref.displayId) ?? [];
 
           return (
             <T3SurfacePanel
@@ -88,6 +89,7 @@ export function ProjectDashboardKanbanLane({
                   ticket={ticket}
                   compact
                   flat
+                  githubActivityItems={githubActivityItems}
                   {...(jiraLastCheckedAt !== undefined ? { lastCheckedAt: jiraLastCheckedAt } : {})}
                   {...(isHierarchyMode ? { childCount: children.length } : {})}
                   onContextMenu={(event) => onTicketContextMenu(event, ticket)}
@@ -96,7 +98,7 @@ export function ProjectDashboardKanbanLane({
                       renderTicketExtra(ticket, true)
                     ) : (
                       <ProjectDashboardTicketGitHubActivity
-                        items={githubActivityByWorkItem.get(ticket.ref.displayId) ?? []}
+                        items={githubActivityItems}
                         enabled={showGitHubActivity}
                         limit={1}
                         compact

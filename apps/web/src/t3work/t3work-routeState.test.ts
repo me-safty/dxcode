@@ -9,6 +9,13 @@ describe("t3work route state", () => {
     });
   });
 
+  it("parses the initial setup welcome flag from route search", () => {
+    expect(parseT3workRouteSearch({ setup: "welcome" })).toMatchObject({
+      setup: "welcome",
+    });
+    expect(parseT3workRouteSearch({ setup: "later" })).not.toHaveProperty("setup");
+  });
+
   it("keeps dashboard routes on the same parent view while carrying the embedded thread", () => {
     expect(
       parseT3workViewFromPath("/t3work/projects/acme", {

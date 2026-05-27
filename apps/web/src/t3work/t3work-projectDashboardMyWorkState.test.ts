@@ -15,6 +15,7 @@ describe("project dashboard my work state", () => {
       statusCategory: "all",
       showGitHubActivity: true,
       hiddenKanbanColumnIds: [],
+      hasCustomizedKanbanLanes: false,
       excludedTypeKeys: [],
       selectedPriority: "all",
       selectedStatus: "all",
@@ -31,6 +32,7 @@ describe("project dashboard my work state", () => {
       statusCategory: "review",
       showGitHubActivity: false,
       hiddenKanbanColumnIds: ["accepted"],
+      hasCustomizedKanbanLanes: true,
       excludedTypeKeys: ["bug"],
       selectedPriority: "High",
       selectedStatus: "In Review",
@@ -43,6 +45,7 @@ describe("project dashboard my work state", () => {
       myWorkGroup: "hierarchy",
       myWorkStatus: "active",
       myWorkGitHub: "show",
+      myWorkLanesMode: "custom",
       myWorkLanes: "in-test,accepted",
       myWorkPriority: "Critical",
       myWorkTicketStatus: "In Progress",
@@ -58,9 +61,27 @@ describe("project dashboard my work state", () => {
       statusCategory: "active",
       showGitHubActivity: true,
       hiddenKanbanColumnIds: ["accepted", "in-test"],
+      hasCustomizedKanbanLanes: true,
       excludedTypeKeys: ["epic", "story"],
       selectedPriority: "Critical",
       selectedStatus: "In Progress",
+      tableSortBy: "updated",
+      tableSortDirection: "desc",
+    });
+  });
+
+  it("treats legacy lane-only route state as a custom lane selection", () => {
+    expect(resolveProjectDashboardMyWorkState({ search: { myWorkLanes: "done" } })).toEqual({
+      query: "",
+      viewMode: "kanban",
+      groupMode: "hierarchy",
+      statusCategory: "all",
+      showGitHubActivity: true,
+      hiddenKanbanColumnIds: ["done"],
+      hasCustomizedKanbanLanes: true,
+      excludedTypeKeys: [],
+      selectedPriority: "all",
+      selectedStatus: "all",
       tableSortBy: "updated",
       tableSortDirection: "desc",
     });

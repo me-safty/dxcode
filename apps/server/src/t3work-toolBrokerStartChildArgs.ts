@@ -13,6 +13,7 @@ export type T3workStartChildArgs = {
   readonly model?: string;
   readonly reasoningEffort?: T3workStartChildReasoningEffort;
   readonly repoFullName?: string;
+  readonly repoRef?: string;
 };
 
 type T3workStartChildArgsResult =
@@ -47,6 +48,7 @@ export const readStartChildArgs = (value: unknown): T3workStartChildArgsResult =
     readonly model?: unknown;
     readonly reasoning_effort?: unknown;
     readonly repo_full_name?: unknown;
+    readonly repo_ref?: unknown;
   };
 
   const rawName = typeof candidate.name === "string" ? candidate.name : candidate.title;
@@ -117,6 +119,18 @@ export const readStartChildArgs = (value: unknown): T3workStartChildArgsResult =
     typeof candidate.repo_full_name === "string" && candidate.repo_full_name.trim().length > 0
       ? candidate.repo_full_name.trim()
       : undefined;
+  const repoRef =
+    typeof candidate.repo_ref === "string" && candidate.repo_ref.trim().length > 0
+      ? candidate.repo_ref.trim()
+      : undefined;
+
+  if (repoRef && !repoFullName) {
+    return {
+      ok: false,
+      message:
+        "t3work.thread.start_child 'repo_ref' requires 'repo_full_name' so the child can be scoped to a linked repository.",
+    };
+  }
 
   return {
     ok: true,
@@ -128,6 +142,7 @@ export const readStartChildArgs = (value: unknown): T3workStartChildArgsResult =
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(repoFullName ? { repoFullName } : {}),
+      ...(repoRef ? { repoRef } : {}),
     },
   };
 };

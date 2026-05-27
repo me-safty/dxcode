@@ -17,8 +17,8 @@ import {
   buildVisibleMyWorkHierarchy,
   buildProjectKanbanColumnOptions,
   filterAndSortProjectMyWorkItems,
-  normalizeHiddenKanbanColumnIds,
 } from "~/t3work/hooks/t3work-projectKanbanDerivedData";
+import { resolveProjectMyWorkHiddenKanbanColumnIds } from "~/t3work/hooks/t3work-projectMyWorkStateHelpers";
 import type {
   ProjectMyWorkGroupMode,
   ProjectMyWorkTableSortBy,
@@ -38,7 +38,9 @@ export function useProjectMyWorkDerivedData({
   tableSortBy,
   tableSortDirection,
   groupMode,
+  hasCustomizedKanbanLanes,
   boardColumns,
+  availableStatuses,
   kanbanProfileId,
 }: {
   tickets: readonly ProjectTicket[];
@@ -52,7 +54,9 @@ export function useProjectMyWorkDerivedData({
   tableSortBy: ProjectMyWorkTableSortBy;
   tableSortDirection: ProjectMyWorkTableSortDirection;
   groupMode: ProjectMyWorkGroupMode;
+  hasCustomizedKanbanLanes: boolean;
   boardColumns?: ReadonlyArray<ProjectTicketKanbanBoardColumn>;
+  availableStatuses?: ReadonlyArray<ProjectTicketKanbanBoardColumn["statuses"][number]>;
   kanbanProfileId?: string;
 }) {
   const assignedWorkItems = useMemo(
@@ -141,25 +145,22 @@ export function useProjectMyWorkDerivedData({
   );
 
   const kanbanColumnOptions = useMemo(
-    () => buildProjectKanbanColumnOptions(kanbanProfileId, boardColumns),
-    [boardColumns, kanbanProfileId],
+    () => buildProjectKanbanColumnOptions(kanbanProfileId, boardColumns, availableStatuses),
+    [availableStatuses, boardColumns, kanbanProfileId],
   );
 
-  const { allKanbanColumns, kanbanLaneOptions, normalizedHiddenKanbanColumnIds } = useMemo(() => {
-    const allKanbanColumns = buildProjectTicketKanbanColumns(
-      filteredWorkItems,
-      kanbanColumnOptions,
-    );
-    const kanbanLaneOptions = buildProjectMyWorkKanbanLaneOptions(allKanbanColumns);
+  const { kanbanLaneOptions, normalizedHiddenKanbanColumnIds } = useMemo(() => {
+    const laneColumns = buildProjectTicketKanbanColumns(filteredWorkItems, kanbanColumnOptions);
+    const kanbanLaneOptions = buildProjectMyWorkKanbanLaneOptions(laneColumns);
     return {
-      allKanbanColumns,
       kanbanLaneOptions,
-      normalizedHiddenKanbanColumnIds: normalizeHiddenKanbanColumnIds(
+      normalizedHiddenKanbanColumnIds: resolveProjectMyWorkHiddenKanbanColumnIds({
         hiddenKanbanColumnIds,
+        hasCustomizedKanbanLanes,
         kanbanLaneOptions,
-      ),
+      }),
     };
-  }, [filteredWorkItems, hiddenKanbanColumnIds, kanbanColumnOptions]);
+  }, [filteredWorkItems, hasCustomizedKanbanLanes, hiddenKanbanColumnIds, kanbanColumnOptions]);
 
   const kanbanVisibleWorkItems = useMemo(
     () =>

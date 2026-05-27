@@ -16,6 +16,7 @@ type AppProps = {
   view?: ViewState | null;
   dashboardMode?: ProjectDashboardMode;
   showCreate?: boolean;
+  reopenInitialSetup?: boolean;
   onCreateOpenChange?: (open: boolean) => void;
   onOpenHome?: () => void;
   onOpenSettings?: () => void;
@@ -37,6 +38,7 @@ export function App({
   view,
   dashboardMode,
   showCreate: showCreateProp,
+  reopenInitialSetup,
   onCreateOpenChange,
   onOpenHome,
   onOpenSettings,
@@ -78,6 +80,7 @@ export function App({
     handleSelectTicket,
     handleSelectThread,
     handleOpenFullThread,
+    handleOpenEmbeddedThread,
     handleCreateThread,
     handleCreateProjectKickoffThread,
     handleCreateTicketKickoffThread,
@@ -164,10 +167,12 @@ export function App({
         activeDashboardMode={activeDashboardMode}
         resolvedView={resolvedView}
         store={store}
+        reopenInitialSetup={reopenInitialSetup ?? false}
         onCreate={() => setShowCreate(true)}
         onOpenTicket={handleSelectTicket}
         onOpenThread={handleSelectThread}
         onOpenFullThread={handleOpenFullThread}
+        onOpenEmbeddedThread={handleOpenEmbeddedThread}
         onKickoffProjectThread={handleCreateProjectKickoffThread}
         onKickoffTicketThread={handleCreateTicketKickoffThread}
         onThreadKickoffConsumed={handleThreadKickoffConsumed}

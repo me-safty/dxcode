@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { mergeProjectThreads } from "~/t3work/hooks/t3work-threadBridge";
-import { mergeProjectThreadLocalState } from "./t3work-threadToolContext";
+import {
+  mergeProjectThreadLocalState,
+  setProjectThreadDisplayMode,
+  upsertProjectThreadLocalState,
+} from "./t3work-threadToolContext";
 import type { ProjectThread } from "./t3work-types";
 import { createT3workTurnToolContext } from "~/t3work/t3work-threadToolContext";
 
@@ -37,6 +41,57 @@ describe("mergeProjectThreadLocalState", () => {
       displayMode: "thread",
       kickoffMessage: "Plan this work",
     });
+  });
+});
+
+describe("upsertProjectThreadLocalState", () => {
+  it("persists newly observed child-thread metadata into the local shadow state", () => {
+    const liveThread = makeThread({
+      id: "thread-child",
+      ticketId: "ticket-1",
+      parentThreadId: "thread-parent",
+    });
+
+    expect(upsertProjectThreadLocalState([], liveThread)).toEqual([liveThread]);
+  });
+
+  it("merges observed child-thread metadata without dropping remembered display mode", () => {
+    const existingShadow = makeThread({
+      id: "thread-child",
+      ticketId: "ticket-1",
+      displayMode: "thread",
+    });
+    const liveThread = makeThread({
+      id: "thread-child",
+      ticketId: "ticket-1",
+      parentThreadId: "thread-parent",
+      title: "Live child thread",
+      status: "running",
+    });
+
+    expect(upsertProjectThreadLocalState([existingShadow], liveThread)).toEqual([
+      {
+        ...liveThread,
+        displayMode: "thread",
+      },
+    ]);
+  });
+});
+
+describe("setProjectThreadDisplayMode", () => {
+  it("creates a local shadow for live-only threads when remembering a display mode", () => {
+    const liveThread = makeThread({
+      id: "thread-child",
+      ticketId: "ticket-1",
+      parentThreadId: "thread-parent",
+    });
+
+    expect(setProjectThreadDisplayMode([], "thread-child", "thread", liveThread)).toEqual([
+      {
+        ...liveThread,
+        displayMode: "thread",
+      },
+    ]);
   });
 });
 

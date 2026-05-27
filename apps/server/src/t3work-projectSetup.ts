@@ -8,9 +8,10 @@ import {
   renderSkillTemplate,
   renderSkillsReadme,
 } from "./t3work-projectSetupContent.ts";
+import { renderBundledRecipeSetupFiles } from "./t3work-projectSetupRecipes.ts";
 import { renderStatusAndContextSkill } from "./t3work-projectSetupStatusSkill.ts";
 import {
-  DEFAULT_T3WORK_PROJECT_SETUP_PROFILE_ID,
+  T3WORK_PROJECT_CLAUDE_PATH,
   resolveT3WorkProjectSetupProfileId,
   T3WORK_PROJECT_AGENTS_PATH,
   T3WORK_PROJECT_CONTEXT_ENTRYPOINT_PATH,
@@ -31,6 +32,7 @@ import {
 
 export {
   DEFAULT_T3WORK_PROJECT_SETUP_PROFILE_ID,
+  T3WORK_PROJECT_CLAUDE_PATH,
   resolveT3WorkProjectSetupProfileId,
   T3WORK_PROJECT_AGENTS_PATH,
   T3WORK_PROJECT_CONTEXT_ENTRYPOINT_PATH,
@@ -49,10 +51,18 @@ export function renderT3WorkProjectSetupFiles(input?: {
 }): ReadonlyArray<T3WorkProjectSetupFile> {
   const profile =
     T3WORK_PROJECT_SETUP_PROFILES[resolveT3WorkProjectSetupProfileId(input?.profileId)];
+  const instructionContents = renderAgentsMd(profile);
+
   return [
     {
       relativePath: T3WORK_PROJECT_AGENTS_PATH,
-      contents: renderAgentsMd(profile),
+      contents: instructionContents,
+      writeMode: "if-missing",
+      managedRefresh: buildT3WorkProjectAgentsManagedRefresh(profile),
+    },
+    {
+      relativePath: T3WORK_PROJECT_CLAUDE_PATH,
+      contents: instructionContents,
       writeMode: "if-missing",
       managedRefresh: buildT3WorkProjectAgentsManagedRefresh(profile),
     },
@@ -76,6 +86,7 @@ export function renderT3WorkProjectSetupFiles(input?: {
       contents: renderRecipesReadme(),
       writeMode: "if-missing",
     },
+    ...renderBundledRecipeSetupFiles(),
     {
       relativePath: `${T3WORK_PROJECT_SKILLS_ROOT}/README.md`,
       contents: renderSkillsReadme(),

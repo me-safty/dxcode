@@ -55,6 +55,21 @@ describe("getSidebarTicketState", () => {
     ).toEqual({ isSelected: false, isOpen: true });
   });
 
+  it("keeps the ticket open but not selected when an embedded child thread is active", () => {
+    expect(
+      getSidebarTicketState({
+        view: {
+          type: "ticket",
+          projectId: "project-1",
+          ticketId: "ticket-1",
+          embeddedThreadId: "thread-2",
+        },
+        ticketId: "ticket-1",
+        ticketThreads: [{ id: "thread-2" }],
+      }),
+    ).toEqual({ isSelected: false, isOpen: true });
+  });
+
   it("selects the ticket detail route even without an embedded thread", () => {
     expect(
       getSidebarTicketState({
@@ -67,7 +82,7 @@ describe("getSidebarTicketState", () => {
 });
 
 describe("getSidebarThreadState", () => {
-  it("marks embedded threads as open without selecting them", () => {
+  it("selects embedded child threads inside a ticket detail view", () => {
     expect(
       getSidebarThreadState({
         view: {
@@ -78,7 +93,7 @@ describe("getSidebarThreadState", () => {
         },
         threadId: "thread-2",
       }),
-    ).toEqual({ isSelected: false, isOpen: true });
+    ).toEqual({ isSelected: true, isOpen: true });
   });
 
   it("selects standalone thread routes", () => {
@@ -107,8 +122,15 @@ describe("getSidebarProjectSectionState", () => {
 describe("sidebar item styling", () => {
   it("does not apply wrapper styling for open ancestors", () => {
     expect(getSidebarSurfaceClassName({ isSelected: false, isOpen: true })).toBe("");
-    expect(getSidebarWrappedButtonClassName({ isSelected: false, isOpen: true })).toBe("");
-    expect(getSidebarStandaloneButtonClassName({ isSelected: false, isOpen: true })).toBe("");
+  });
+
+  it("uses the original thread hover treatment for unselected rows", () => {
+    expect(getSidebarWrappedButtonClassName({ isSelected: false, isOpen: true })).toContain(
+      "hover:bg-accent",
+    );
+    expect(getSidebarStandaloneButtonClassName({ isSelected: false, isOpen: true })).toContain(
+      "hover:bg-accent",
+    );
   });
 
   it("uses the original t3code active-thread treatment for selected rows", () => {

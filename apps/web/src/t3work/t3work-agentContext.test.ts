@@ -68,7 +68,7 @@ describe("buildAddToChatAgentContextCapabilities", () => {
     ]);
   });
 
-  it("can append an unpin action for sidebar-visible items that are not explicitly pinned", () => {
+  it("keeps sidebar-visible items pinnable until they are explicitly pinned", () => {
     const request = createRequest();
     const pinnedItem = createPinnedTicket();
 
@@ -88,9 +88,9 @@ describe("buildAddToChatAgentContextCapabilities", () => {
         request,
       },
       {
-        id: "unpin",
-        label: "Unpin",
-        kind: "unpin-from-sidebar",
+        id: "pin-to-left",
+        label: "Pin to left",
+        kind: "pin-to-sidebar",
         item: pinnedItem,
       },
     ]);

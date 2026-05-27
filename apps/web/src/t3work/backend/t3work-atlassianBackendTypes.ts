@@ -98,6 +98,7 @@ export type AtlassianBacklogResponse = {
 export type AtlassianBoardColumnsResponse = {
   readonly selectedBoardId?: string;
   readonly boardColumns: ReadonlyArray<AtlassianBacklogBoardColumn>;
+  readonly availableStatuses: ReadonlyArray<AtlassianBacklogBoardColumnStatus>;
 };
 
 export type AtlassianAssignableUser = {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createProjectBacklogTestTicket as createTicket } from "./t3work-projectBacklogTestUtils";
 import {
+  filterProjectMyWorkKanbanColumnsByHiddenColumns,
   buildProjectMyWorkFlatKanbanColumns,
   buildProjectMyWorkKanbanLaneOptions,
   buildProjectMyWorkTypeOptions,
@@ -111,6 +112,41 @@ describe("project my work kanban", () => {
       { key: "story", label: "Story" },
     ]);
     expect(isProjectMyWorkEpic(createTicket({ id: "epic", issueType: "Epic" }))).toBe(true);
+  });
+
+  it("keeps empty configured lanes available in my work lane options", () => {
+    const columns = buildProjectTicketKanbanColumns(
+      [createTicket({ id: "todo", status: "To Do" })],
+      {
+        boardColumns: [
+          { name: "To Do", statuses: [{ name: "To Do" }] },
+          { name: "Review", statuses: [{ name: "Code Review" }] },
+          { name: "Done", statuses: [{ name: "Done" }] },
+        ],
+      },
+    );
+
+    expect(buildProjectMyWorkKanbanLaneOptions(columns)).toEqual([
+      { id: getProjectTicketKanbanColumnId("To Do"), title: "To Do", count: 1 },
+      { id: getProjectTicketKanbanColumnId("Code Review"), title: "Code Review", count: 0 },
+      { id: getProjectTicketKanbanColumnId("Done"), title: "Done", count: 0 },
+    ]);
+  });
+
+  it("removes hidden lanes from rendered kanban columns", () => {
+    const columns = buildProjectTicketKanbanColumns(
+      [createTicket({ id: "todo", status: "To Do" })],
+      {
+        availableStatuses: [{ name: "To Do" }, { name: "Code Review" }, { name: "Done" }],
+      },
+    );
+
+    expect(
+      filterProjectMyWorkKanbanColumnsByHiddenColumns(columns, [
+        getProjectTicketKanbanColumnId("Code Review"),
+        getProjectTicketKanbanColumnId("Done"),
+      ]).map((column) => column.title),
+    ).toEqual(["To Do"]);
   });
 
   it("sorts my-work tickets by last updated descending by default", () => {

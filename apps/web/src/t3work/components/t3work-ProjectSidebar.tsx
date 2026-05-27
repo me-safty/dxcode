@@ -75,6 +75,12 @@ export function ProjectSidebar({
               : "Show project threads",
           },
           {
+            id: "toggle-my-activity-feed",
+            label: sidebarState.showMyActivityFeed
+              ? "Hide My activity feed"
+              : "Show My activity feed",
+          },
+          {
             id: "toggle-jira-items",
             label: sidebarState.showJiraItems ? "Hide Jira items" : "Show Jira items",
           },
@@ -93,6 +99,11 @@ export function ProjectSidebar({
           ...current,
           showProjectThreads: !current.showProjectThreads,
         }));
+      } else if (action === "toggle-my-activity-feed") {
+        onSidebarStateChange((current) => ({
+          ...current,
+          showMyActivityFeed: !current.showMyActivityFeed,
+        }));
       } else if (action === "toggle-jira-items") {
         onSidebarStateChange((current) => ({
           ...current,
@@ -109,6 +120,7 @@ export function ProjectSidebar({
       onSidebarStateChange,
       sidebarState.showGitHubActivity,
       sidebarState.showJiraItems,
+      sidebarState.showMyActivityFeed,
       sidebarState.showProjectThreads,
     ],
   );
@@ -136,10 +148,14 @@ export function ProjectSidebar({
         threadSortOrder={threadSortOrder}
         threadPreviewCount={threadPreviewCount}
         showProjectThreads={sidebarState.showProjectThreads}
+        showMyActivityFeed={sidebarState.showMyActivityFeed}
         showJiraItems={sidebarState.showJiraItems}
         showGitHubActivity={sidebarState.showGitHubActivity}
         onShowProjectThreadsChange={(showProjectThreads) => {
           onSidebarStateChange((current) => ({ ...current, showProjectThreads }));
+        }}
+        onShowMyActivityFeedChange={(showMyActivityFeed) => {
+          onSidebarStateChange((current) => ({ ...current, showMyActivityFeed }));
         }}
         onShowJiraItemsChange={(showJiraItems) => {
           onSidebarStateChange((current) => ({ ...current, showJiraItems }));

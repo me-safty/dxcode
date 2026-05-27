@@ -56,6 +56,7 @@ export function ProjectDashboardKanbanMatrixLaneCard({
 }) {
   const ticket = placement.ticket;
   const isPending = optimisticMoves[ticket.id]?.pending === true;
+  const githubActivityItems = githubActivityByWorkItem.get(ticket.ref.displayId) ?? [];
   const contentRef = useRef<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
@@ -96,6 +97,7 @@ export function ProjectDashboardKanbanMatrixLaneCard({
             ticket={ticket}
             compact
             flat
+            githubActivityItems={githubActivityItems}
             {...(groupParent ? { groupParent: true } : {})}
             {...(inlineParent ? { inlineParent: true } : {})}
             {...(inlineChild ? { inlineChild: true } : {})}
@@ -107,7 +109,7 @@ export function ProjectDashboardKanbanMatrixLaneCard({
                 renderTicketExtra(ticket, true)
               ) : (
                 <ProjectDashboardTicketGitHubActivity
-                  items={githubActivityByWorkItem.get(ticket.ref.displayId) ?? []}
+                  items={githubActivityItems}
                   enabled={showGitHubActivity}
                   limit={1}
                   compact

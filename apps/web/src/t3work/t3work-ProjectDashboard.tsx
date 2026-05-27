@@ -5,7 +5,6 @@ import { SidebarTrigger } from "~/t3work/components/ui/t3work-sidebar";
 import { t3SurfaceBackdrops } from "~/t3work/components/ui/t3work-surface";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/t3work/components/ui/t3work-menu";
 import { AppProjectIcon } from "~/t3work/t3work-AppStatusBits";
-import { ToggleGroup } from "~/t3work/t3work-ToggleGroup";
 import { useProjectDashboardModeState } from "~/t3work/hooks/t3work-useProjectDashboardModeState";
 import { ProjectDashboardBacklogView } from "~/t3work/t3work-ProjectDashboardBacklogView";
 import { ProjectDashboardMyWorkView } from "~/t3work/t3work-ProjectDashboardMyWorkView";
@@ -22,9 +21,7 @@ export function ProjectDashboard({
   onOpenTicket: (projectId: string, ticketId: string) => void;
   onManageRepositories: (projectId: string) => void;
 }) {
-  const { state: dashboardState, setState: setDashboardState } = useProjectDashboardModeState(
-    project.id,
-  );
+  const { state: dashboardState } = useProjectDashboardModeState(project.id);
   const dashboardMode = dashboardState.dashboardMode;
 
   return (
@@ -53,29 +50,6 @@ export function ProjectDashboard({
       <section className={`h-full min-h-0 flex-1 ${t3SurfaceBackdrops.dashboardContent}`}>
         <ScrollArea className="h-full">
           <div className="mx-auto flex h-full min-h-0 w-full max-w-6xl flex-col p-4 sm:p-6">
-            <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold tracking-tight">Project dashboard</h3>
-                <p className="text-xs text-muted-foreground">
-                  Switch between the sprint-planning backlog and the existing assigned-work view.
-                </p>
-              </div>
-              <ToggleGroup
-                value={dashboardMode}
-                onChange={(value) => {
-                  if (value !== "backlog" && value !== "my-work") {
-                    return;
-                  }
-
-                  setDashboardState({ dashboardMode: value });
-                }}
-                options={[
-                  { value: "backlog", label: "Backlog" },
-                  { value: "my-work", label: "My work" },
-                ]}
-              />
-            </div>
-
             {dashboardMode === "backlog" ? (
               <ProjectDashboardBacklogView project={project} onOpenTicket={onOpenTicket} />
             ) : (

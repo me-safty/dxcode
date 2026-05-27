@@ -94,11 +94,12 @@ For a Jira issue:
 
 1. Click "New project."
 2. Choose "Atlassian."
-3. Pick an Atlassian site.
-4. Pick a Jira project from accessible projects.
-5. Shell creates managed workspace.
-6. Shell stores project source metadata.
-7. Shell opens project overview with issues and recipes.
+3. Complete agent runtime preflight by choosing or installing a default provider and model.
+4. Connect Atlassian and pick a site if needed.
+5. Pick a Jira project from accessible projects.
+6. Shell creates managed workspace.
+7. Shell stores project source metadata and runtime defaults.
+8. Shell opens project overview with issues and recipes.
 
 ## Empty State
 

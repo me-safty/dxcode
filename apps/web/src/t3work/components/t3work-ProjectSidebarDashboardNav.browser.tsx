@@ -31,6 +31,7 @@ async function renderNav(
         onSelectMyWork={() => {}}
         backlogContent={undefined}
         myWorkContent={undefined}
+        showMyActivityFeed
         showJiraItems={false}
         currentIssueCount={0}
         currentIssuesContent={<div data-testid="current-issues">Current issues</div>}
@@ -68,6 +69,24 @@ describe("ProjectSidebarDashboardNav browser", () => {
     try {
       expect(host.querySelector('button[aria-label="Collapse my work"]')).toBeTruthy();
       expect(host.querySelector('[data-testid="current-issues"]')).toBeTruthy();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("keeps pinned items visible while hiding feed content when disabled", async () => {
+    const { host, screen } = await renderNav({
+      showMyActivityFeed: false,
+      myWorkThreadCount: 1,
+      myWorkContent: <div data-testid="my-work-threads">My work threads</div>,
+      pinnedItemCount: 1,
+      pinnedContent: <div data-testid="pinned-items">Pinned items</div>,
+    });
+
+    try {
+      expect(host.querySelector('[data-testid="pinned-items"]')).toBeTruthy();
+      expect(host.querySelector('[data-testid="my-work-threads"]')).toBeNull();
     } finally {
       await screen.unmount();
       host.remove();

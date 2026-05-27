@@ -10,7 +10,7 @@ function readNonEmptyString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-export function readHandoffThreadAttachmentMetadata(
+export function readT3workThreadPlacementFromActivities(
   thread: Pick<Thread, "activities">,
 ): Pick<ProjectThread, "parentThreadId" | "ticketId"> {
   const activities = Array.isArray(thread.activities) ? thread.activities : [];

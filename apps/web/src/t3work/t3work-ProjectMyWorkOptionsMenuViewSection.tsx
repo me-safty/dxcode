@@ -165,9 +165,11 @@ export function ProjectMyWorkOptionsMenuViewSection({
                         onKanbanLaneVisibilityChange(option.id, Boolean(checked))
                       }
                     >
-                      {option.title}
-                      <span className="ml-auto text-[11px] text-muted-foreground">
-                        {option.count}
+                      <span className="flex w-full items-center gap-2">
+                        <span>{option.title}</span>
+                        <span className="ml-auto text-[11px] text-muted-foreground">
+                          {option.count}
+                        </span>
                       </span>
                     </MenuCheckboxItem>
                   ))

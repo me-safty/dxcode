@@ -107,3 +107,82 @@ export function mergeProjectThreadLocalState(
       : {}),
   };
 }
+
+function projectThreadArraysEqual(
+  left: ReadonlyArray<T3workThreadToolId> | undefined,
+  right: ReadonlyArray<T3workThreadToolId> | undefined,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right || left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
+}
+
+function projectThreadsEqual(left: ProjectThread, right: ProjectThread): boolean {
+  return (
+    left.id === right.id &&
+    left.projectId === right.projectId &&
+    left.parentThreadId === right.parentThreadId &&
+    left.ticketId === right.ticketId &&
+    left.ticketDisplayId === right.ticketDisplayId &&
+    left.dashboardMode === right.dashboardMode &&
+    left.displayMode === right.displayMode &&
+    left.title === right.title &&
+    left.messageCount === right.messageCount &&
+    left.lastMessageAt === right.lastMessageAt &&
+    left.createdAt === right.createdAt &&
+    left.kickoffMessage === right.kickoffMessage &&
+    left.kickoffPending === right.kickoffPending &&
+    left.kickoffModelSelection?.instanceId === right.kickoffModelSelection?.instanceId &&
+    left.kickoffModelSelection?.model === right.kickoffModelSelection?.model &&
+    left.kickoffRuntimeMode === right.kickoffRuntimeMode &&
+    left.kickoffInteractionMode === right.kickoffInteractionMode &&
+    left.status === right.status &&
+    projectThreadArraysEqual(left.selectedToolIds, right.selectedToolIds)
+  );
+}
+
+export function upsertProjectThreadLocalState(
+  threads: ReadonlyArray<ProjectThread>,
+  next: ProjectThread,
+): ProjectThread[] {
+  const existingIndex = threads.findIndex((thread) => thread.id === next.id);
+  if (existingIndex < 0) {
+    return [...threads, next];
+  }
+
+  const existing = threads[existingIndex]!;
+  const merged = mergeProjectThreadLocalState(existing, next);
+  if (projectThreadsEqual(existing, merged)) {
+    return threads as ProjectThread[];
+  }
+
+  return threads.map((thread, index) => (index === existingIndex ? merged : thread));
+}
+
+export function setProjectThreadDisplayMode(
+  threads: ReadonlyArray<ProjectThread>,
+  threadId: string,
+  displayMode: ProjectThreadDisplayMode,
+  fallbackThread?: ProjectThread,
+): ProjectThread[] {
+  const existing = threads.find((thread) => thread.id === threadId);
+  if (existing) {
+    if (existing.displayMode === displayMode) {
+      return threads as ProjectThread[];
+    }
+
+    return threads.map((thread) => (thread.id === threadId ? { ...thread, displayMode } : thread));
+  }
+
+  if (!fallbackThread) {
+    return threads as ProjectThread[];
+  }
+
+  return upsertProjectThreadLocalState(threads, { ...fallbackThread, displayMode });
+}

@@ -138,7 +138,7 @@ export function TicketSidebarEntry({
 
   return (
     <div
-      className={`group/ticket relative px-1 py-0.5 ${getSidebarSurfaceClassName(ticketState)}`}
+      className={`relative py-0.5 ${getSidebarSurfaceClassName(ticketState)}`}
       onContextMenu={handleContextMenu}
       draggable={dragProps.draggable}
       onDragStart={dragProps.onDragStart}
@@ -154,6 +154,7 @@ export function TicketSidebarEntry({
         ticket={ticket}
         state={ticketState}
         {...(jiraLastCheckedAt !== undefined ? { jiraLastCheckedAt } : {})}
+        githubActivityItems={githubActivityItems}
         rowRef={rowRef}
         onSelectTicket={() => onSelectTicket(projectId, ticket.id)}
         onCreateThread={async (event) => {

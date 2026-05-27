@@ -22,6 +22,7 @@ export interface ProjectRowProps {
   threadPreviewCount: number;
   ticketViewMode: TicketViewMode;
   showProjectThreads: boolean;
+  showMyActivityFeed: boolean;
   showJiraItems: boolean;
   showGitHubActivity: boolean;
   onSelectProject: (id: string) => void;

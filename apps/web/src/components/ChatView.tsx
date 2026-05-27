@@ -104,7 +104,7 @@ import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
+import { ArrowLeftIcon, ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -339,6 +339,8 @@ type ChatViewProps =
   | {
       environmentId: EnvironmentId;
       threadId: ThreadId;
+      onBack?: () => void;
+      headerAccessory?: React.ReactNode;
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       hideHeader?: boolean;
@@ -366,6 +368,8 @@ type ChatViewProps =
   | {
       environmentId: EnvironmentId;
       threadId: ThreadId;
+      onBack?: () => void;
+      headerAccessory?: React.ReactNode;
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       hideHeader?: boolean;
@@ -647,6 +651,8 @@ export default function ChatView(props: ChatViewProps) {
     environmentId,
     threadId,
     routeKind,
+    onBack,
+    headerAccessory,
     onDiffPanelOpen,
     reserveTitleBarControlInset = true,
     hideHeader = false,
@@ -3596,6 +3602,17 @@ export default function ChatView(props: ChatViewProps) {
               : "pb-2 pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-2 sm:pb-3 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-3",
           )}
         >
+          {onBack ? (
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              className="mr-2 shrink-0 text-muted-foreground/80"
+              onClick={onBack}
+              aria-label="Back"
+            >
+              <ArrowLeftIcon className="size-4" />
+            </Button>
+          ) : null}
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
             activeThreadId={activeThread.id}
@@ -3623,6 +3640,9 @@ export default function ChatView(props: ChatViewProps) {
             onToggleTerminal={toggleTerminalVisibility}
             onToggleDiff={onToggleDiff}
           />
+          {headerAccessory ? (
+            <div className="ml-2 flex shrink-0 items-center">{headerAccessory}</div>
+          ) : null}
         </header>
       ) : null}
 

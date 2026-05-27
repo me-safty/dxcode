@@ -43,6 +43,13 @@ async function createMockBacklogResponse(
 async function createMockBoardColumnsResponse(): Promise<AtlassianBoardColumnsResponse> {
   return {
     selectedBoardId: "mock-board-1",
+    availableStatuses: [
+      { name: "Accepted" },
+      { name: "Done" },
+      { name: "In Progress" },
+      { name: "In Test" },
+      { name: "To Do" },
+    ],
     boardColumns: [
       { name: "To Do", statuses: [{ name: "To Do" }] },
       { name: "In Progress", statuses: [{ name: "In Progress" }, { name: "Accepted" }] },

@@ -35,16 +35,18 @@ They need help with:
 ## MVP User Journey
 
 1. User opens `t3work`.
-2. User connects Atlassian.
-3. User chooses one Jira project from a structured list.
-4. Shell creates a managed local workspace.
-5. User sees project overview, recent tickets, and suggested recipes.
-6. User opens a ticket.
-7. Shell shows recipes relevant to that ticket type and project.
-8. User launches a recipe.
-9. Skill reads integration data through tools.
-10. Skill saves a rich artifact.
-11. User reviews the result and optionally posts a drafted Jira comment.
+2. User chooses Atlassian as project source.
+3. User chooses or installs a default agent provider and model if needed.
+4. User connects Atlassian.
+5. User chooses one Jira project from a structured list.
+6. Shell creates a managed local workspace.
+7. User sees project overview, recent tickets, and suggested recipes.
+8. User opens a ticket.
+9. Shell shows recipes relevant to that ticket type and project.
+10. User launches a recipe.
+11. Skill reads integration data through tools.
+12. Skill saves a rich artifact.
+13. User reviews the result and optionally posts a drafted Jira comment.
 
 ## Product Principles
 

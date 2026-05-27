@@ -24,10 +24,12 @@ type MainContentProps = {
   selectedProjectId: string | null;
   projects: ProjectShellProject[];
   allProjects: ProjectShellProject[];
+  reopenInitialSetup?: boolean;
   getThreadsForProject: (projectId: string) => ProjectThread[];
   onOpenTicket: (projectId: string, ticketId: string) => void;
   onOpenThread: (projectId: string, threadId: string) => void;
   onOpenFullThread: (projectId: string, threadId: string) => void;
+  onOpenEmbeddedThread: (projectId: string, threadId: string) => void;
   onKickoffProjectThread: (input: ProjectKickoffThreadInput) => void;
   onKickoffTicketThread: (input: TicketKickoffThreadInput) => void;
   onThreadKickoffConsumed: (threadId: string) => void;
@@ -49,10 +51,12 @@ export function AppMainContent({
   selectedProjectId,
   projects,
   allProjects,
+  reopenInitialSetup = false,
   getThreadsForProject,
   onOpenTicket,
   onOpenThread,
   onOpenFullThread,
+  onOpenEmbeddedThread,
   onKickoffProjectThread,
   onBackToDashboard,
   onCreate,
@@ -67,10 +71,9 @@ export function AppMainContent({
     projects,
     getThreadsForProject,
   });
-  const hasAnyProjects = allProjects.length > 0;
-  const isFirstRunSetup = !view && !hasAnyProjects;
+  const showInitialSetup = !view && (reopenInitialSetup || allProjects.length === 0);
   const homeProject =
-    !view && hasAnyProjects
+    !showInitialSetup && !view
       ? (allProjects.find((candidate) => candidate.id === selectedProjectId) ??
         allProjects[0] ??
         null)
@@ -80,8 +83,8 @@ export function AppMainContent({
     <AppMainContentHomeEmptyState
       onCreate={onCreate}
       onInlineProjectCreated={onInlineProjectCreated}
-      isFirstRunSetup={isFirstRunSetup}
-      showAside={projects.length > 0}
+      showInitialSetup={showInitialSetup}
+      showAside={!reopenInitialSetup && projects.length > 0}
       homeChatProject={homeChatProject}
       homeChatProjectThreads={homeChatProject ? getThreadsForProject(homeChatProject.id) : []}
       providers={backendState.providers}
@@ -171,6 +174,7 @@ export function AppMainContent({
         threadProject={threadProject}
         resolvedThread={resolvedThread}
         onOpenTicket={onOpenTicket}
+        onOpenEmbeddedThread={onOpenEmbeddedThread}
         onThreadKickoffConsumed={onThreadKickoffConsumed}
         onRememberFullThread={(threadId) => onThreadDisplayModeChange(threadId, "thread")}
         onBackToDashboard={onBackToDashboard}
@@ -179,9 +183,7 @@ export function AppMainContent({
   }
 
   const project = allProjects.find((candidate) => candidate.id === view.projectId);
-  if (!project) {
-    return renderHomeBrowserEmpty();
-  }
+  if (!project) return renderHomeBrowserEmpty();
 
   if (view.type === "dashboard") {
     return (
@@ -203,9 +205,8 @@ export function AppMainContent({
     );
   }
 
-  if (view.type === "ticket") {
+  if (view.type === "ticket")
     return <>{renderTicketDetail(project, view.ticketId, view.embeddedThreadId)}</>;
-  }
 
   return renderHomeBrowserEmpty();
 }

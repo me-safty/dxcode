@@ -31,6 +31,7 @@ export function appendStartChildHandoffActivities(input: {
   readonly handoffParentThreadId?: ThreadId;
   readonly ticketId?: string;
   readonly repoFullName?: string | null;
+  readonly repoRef?: string | null;
   readonly branch?: string | null;
   readonly worktreePath?: string | null;
   readonly kickoffPrompt?: string;
@@ -42,6 +43,7 @@ export function appendStartChildHandoffActivities(input: {
     childTitle: input.childTitle,
     ...(input.ticketId ? { ticketId: input.ticketId } : {}),
     ...(input.repoFullName ? { repoFullName: input.repoFullName } : {}),
+    ...(input.repoRef ? { repoRef: input.repoRef } : {}),
     ...(input.branch ? { branch: input.branch } : {}),
     ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
     ...(input.kickoffPrompt ? { kickoffPrompt: input.kickoffPrompt } : {}),

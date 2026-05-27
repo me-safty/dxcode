@@ -84,7 +84,7 @@ export function LocalWorkspaceSidebarRow({
       <div className="group/project-header relative">
         <SidebarMenuButton
           size="sm"
-          className={`gap-2 px-2 py-1.5 pr-8 text-left group-hover/project-header:text-sidebar-accent-foreground max-sm:pr-14 cursor-pointer ${getSidebarStandaloneButtonClassName(
+          className={`gap-2 px-2 py-1.5 pr-8 text-left group-hover/project-header:bg-accent group-hover/project-header:text-foreground group-focus-within/project-header:bg-accent group-focus-within/project-header:text-foreground max-sm:pr-14 cursor-pointer ${getSidebarStandaloneButtonClassName(
             projectState,
           )}`}
           onClick={() => onToggleExpand(project.id)}
@@ -126,7 +126,7 @@ export function LocalWorkspaceSidebarRow({
                 <button
                   type="button"
                   aria-label={`Create new thread in ${project.title}`}
-                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                   onClick={async (event) => {
                     event.stopPropagation();
                     const threadId = onCreateThread(project.id);

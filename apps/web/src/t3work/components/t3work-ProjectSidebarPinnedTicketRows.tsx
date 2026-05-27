@@ -68,7 +68,7 @@ export function PinnedTicketRow({
               ref={rowRef}
               size="sm"
               isActive={state.isSelected}
-              className={`h-auto min-h-8 w-full cursor-grab flex-col items-start px-2 py-1 pr-7 active:cursor-grabbing ${getSidebarWrappedButtonClassName(
+              className={`h-auto min-h-8 w-full cursor-grab flex-col items-start px-2 py-1 pr-7 group-hover/pinned-ticket:bg-accent group-hover/pinned-ticket:text-foreground group-focus-within/pinned-ticket:bg-accent group-focus-within/pinned-ticket:text-foreground active:cursor-grabbing ${getSidebarWrappedButtonClassName(
                 state,
               )}`}
               onClick={() => onSelectTicket(projectId, ticket.id)}
@@ -97,7 +97,7 @@ export function PinnedTicketRow({
       <button
         type="button"
         aria-label={`Issue actions for ${ticket.ref.displayId}`}
-        className="absolute top-1 right-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-opacity duration-150 hover:bg-accent hover:text-foreground group-hover/pinned-ticket:opacity-100 group-focus-within/pinned-ticket:opacity-100"
+        className="absolute top-1 right-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-opacity duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring group-hover/pinned-ticket:opacity-100 group-focus-within/pinned-ticket:opacity-100"
         onClick={onOpenMenu}
       >
         <EllipsisIcon className="size-3.5" />

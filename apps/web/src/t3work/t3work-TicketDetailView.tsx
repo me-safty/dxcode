@@ -174,6 +174,7 @@ export function TicketDetailView({
           ...(githubActivity.account ? { githubAccount: githubActivity.account } : {}),
         }}
         kickoffAsideProps={{
+          project,
           displayId,
           issueThreads,
           projectId: project.id,

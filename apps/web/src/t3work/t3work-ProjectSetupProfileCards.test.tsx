@@ -9,7 +9,10 @@ import {
 describe("T3workProjectSetupProfileCards", () => {
   it("renders all setup profiles and marks the selected card", () => {
     const markup = renderToStaticMarkup(
-      <T3workProjectSetupProfileCards selectedProfileId="developer" onSelectProfile={() => {}} />,
+      <T3workProjectSetupProfileCards
+        selectedProfileId="engineering-copilot"
+        onSelectProfile={() => {}}
+      />,
     );
 
     for (const option of listT3workProjectSetupCardOptions()) {
@@ -18,7 +21,7 @@ describe("T3workProjectSetupProfileCards", () => {
       expect(markup).toContain(`data-profile-id="${option.id}"`);
     }
 
-    expect(markup).toContain('data-profile-id="developer"');
+    expect(markup).toContain('data-profile-id="engineering-copilot"');
     expect(markup).toContain('data-selected="true"');
     expect(markup).toContain('aria-pressed="true"');
   });

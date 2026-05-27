@@ -20,13 +20,14 @@ Atlassian provides structured project discovery and Jira issue context for the f
 ## Project Creation Flow
 
 1. User chooses Atlassian as project source.
-2. Integration lists accessible sites.
-3. User picks a site.
-4. Integration lists Jira projects.
-5. User picks a Jira project.
-6. Shell creates managed workspace.
-7. Shell writes project source metadata.
-8. Shell opens project overview.
+2. User completes agent runtime preflight for the managed project.
+3. Integration lists accessible sites.
+4. User picks a site.
+5. Integration lists Jira projects.
+6. User picks a Jira project.
+7. Shell creates managed workspace.
+8. Shell writes project source metadata and runtime defaults.
+9. Shell opens project overview.
 
 ## Jira Issue Snapshot
 

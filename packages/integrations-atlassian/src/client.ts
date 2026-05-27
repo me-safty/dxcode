@@ -168,6 +168,12 @@ export type JiraStatus = {
   readonly statusCategory?: JiraStatusCategory;
 };
 
+export type JiraProjectIssueTypeStatuses = {
+  readonly id?: string | number;
+  readonly name?: string;
+  readonly statuses?: ReadonlyArray<JiraStatus>;
+};
+
 export type JiraIssueTransition = {
   readonly id: string;
   readonly name: string;

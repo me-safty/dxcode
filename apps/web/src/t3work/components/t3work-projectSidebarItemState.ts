@@ -11,6 +11,8 @@ import {
 const SIDEBAR_SELECTED_CLASS_NAME =
   "bg-accent/85 text-foreground font-medium hover:bg-accent hover:text-foreground dark:bg-accent/55 dark:hover:bg-accent/70";
 
+const SIDEBAR_HOVER_CLASS_NAME = "hover:bg-accent hover:text-foreground";
+
 export type SidebarItemState = {
   isSelected: boolean;
   isOpen: boolean;
@@ -39,13 +41,15 @@ export function getSidebarTicketState(input: {
   ticketThreads: ReadonlyArray<Pick<ProjectThread, "id">>;
 }): SidebarItemState {
   const { ticketId, ticketThreads, view } = input;
-  const isSelected = view?.type === "ticket" && view.ticketId === ticketId;
-
   const activeThreadId = readActiveThreadIdFromView(view);
+  const hasActiveChildThread = Boolean(
+    activeThreadId && ticketThreads.some((thread) => thread.id === activeThreadId),
+  );
+  const isSelected = view?.type === "ticket" && view.ticketId === ticketId && !hasActiveChildThread;
 
   return createSidebarItemState({
     isSelected,
-    isOpen: Boolean(activeThreadId && ticketThreads.some((thread) => thread.id === activeThreadId)),
+    isOpen: hasActiveChildThread,
   });
 }
 
@@ -64,7 +68,7 @@ export function getSidebarThreadState(input: {
   const activeThreadId = readActiveThreadIdFromView(input.view);
 
   return createSidebarItemState({
-    isSelected: input.view?.type === "thread" && input.view.threadId === input.threadId,
+    isSelected: activeThreadId === input.threadId,
     isOpen: activeThreadId === input.threadId,
   });
 }
@@ -110,11 +114,17 @@ export function getSidebarSurfaceClassName(state: SidebarItemState): string {
 }
 
 export function getSidebarWrappedButtonClassName(state: SidebarItemState): string {
-  return cn(state.isSelected && SIDEBAR_SELECTED_CLASS_NAME);
+  return cn(
+    !state.isSelected && SIDEBAR_HOVER_CLASS_NAME,
+    state.isSelected && SIDEBAR_SELECTED_CLASS_NAME,
+  );
 }
 
 export function getSidebarStandaloneButtonClassName(state: SidebarItemState): string {
-  return cn(state.isSelected && SIDEBAR_SELECTED_CLASS_NAME);
+  return cn(
+    !state.isSelected && SIDEBAR_HOVER_CLASS_NAME,
+    state.isSelected && SIDEBAR_SELECTED_CLASS_NAME,
+  );
 }
 
 export function buildPinnedTicketThreadFallbacks(

@@ -8,6 +8,7 @@ type T3WorkPinnedSidebarState = {
   hydrate: (items: ReadonlyArray<T3WorkSidebarPinnedItem>) => void;
   pinItem: (item: T3WorkSidebarPinnedItem) => void;
   unpinItem: (itemId: string) => void;
+  unpinItems: (itemIds: ReadonlyArray<string>) => void;
 };
 
 function sortPinnedItems(items: ReadonlyArray<T3WorkSidebarPinnedItem>) {
@@ -33,6 +34,21 @@ export const useT3WorkPinnedSidebarStore = create<T3WorkPinnedSidebarState>((set
   unpinItem: (itemId) => {
     const current = get().items;
     const next = current.filter((candidate) => candidate.id !== itemId);
+    if (next.length === current.length) {
+      return;
+    }
+
+    set({ items: next });
+    persistStoredSidebarPins(next);
+  },
+  unpinItems: (itemIds) => {
+    const itemIdSet = new Set(itemIds);
+    if (itemIdSet.size === 0) {
+      return;
+    }
+
+    const current = get().items;
+    const next = current.filter((candidate) => !itemIdSet.has(candidate.id));
     if (next.length === current.length) {
       return;
     }

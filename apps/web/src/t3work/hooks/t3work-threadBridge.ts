@@ -6,7 +6,7 @@ import {
   mergeProjectThreadLocalState,
   upsertProjectThreadLocalState,
 } from "~/t3work/t3work-threadToolContext";
-import { readHandoffThreadAttachmentMetadata } from "~/t3work/hooks/t3work-threadHandoffMetadata";
+import { readT3workThreadPlacementFromActivities } from "~/t3work/hooks/t3work-threadHandoffMetadata";
 import { resolveStoredProjectId } from "./t3work-threadProjectResolution";
 
 export {
@@ -23,15 +23,12 @@ export function mapLiveThreadToProjectThread(
   thread: Thread,
   projectIdOverride: string = thread.projectId,
 ): ProjectThread {
-  const attachmentMetadata = readHandoffThreadAttachmentMetadata(thread);
-  const parentThreadId = attachmentMetadata.parentThreadId;
-  const ticketId = attachmentMetadata.ticketId;
+  const placement = readT3workThreadPlacementFromActivities(thread);
 
   return {
     id: thread.id,
     projectId: projectIdOverride,
-    ...(parentThreadId ? { parentThreadId } : {}),
-    ...(ticketId ? { ticketId } : {}),
+    ...placement,
     title: thread.title,
     messageCount: thread.messages.length,
     lastMessageAt: thread.latestTurn?.completedAt ?? thread.updatedAt ?? thread.createdAt,

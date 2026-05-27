@@ -18,6 +18,11 @@ import {
   TICKET_VIEW_LABELS,
   type TicketViewMode,
 } from "./t3work-projectSidebarShared";
+import {
+  buildSidebarContentMenuModel,
+  type SidebarContentToggleId,
+} from "./t3work-projectSortMenuSidebarContent";
+import { SidebarToggleItem } from "./t3work-projectSortMenuSidebarToggleItem";
 
 export function ProjectSortMenu({
   projectSortOrder,
@@ -25,6 +30,7 @@ export function ProjectSortMenu({
   threadPreviewCount,
   ticketViewMode,
   showProjectThreads,
+  showMyActivityFeed,
   showJiraItems,
   showGitHubActivity,
   onProjectSortOrderChange,
@@ -32,6 +38,7 @@ export function ProjectSortMenu({
   onThreadSortOrderChange,
   onThreadPreviewCountChange,
   onShowProjectThreadsChange,
+  onShowMyActivityFeedChange,
   onShowJiraItemsChange,
   onShowGitHubActivityChange,
 }: {
@@ -40,6 +47,7 @@ export function ProjectSortMenu({
   threadPreviewCount: number;
   ticketViewMode: TicketViewMode;
   showProjectThreads: boolean;
+  showMyActivityFeed: boolean;
   showJiraItems: boolean;
   showGitHubActivity: boolean;
   onProjectSortOrderChange: (sortOrder: ProjectSortOrder) => void;
@@ -47,15 +55,33 @@ export function ProjectSortMenu({
   onThreadSortOrderChange: (sortOrder: ThreadSortOrder) => void;
   onThreadPreviewCountChange: (count: number) => void;
   onShowProjectThreadsChange: (show: boolean) => void;
+  onShowMyActivityFeedChange: (show: boolean) => void;
   onShowJiraItemsChange: (show: boolean) => void;
   onShowGitHubActivityChange: (show: boolean) => void;
 }) {
+  const sidebarContentMenu = buildSidebarContentMenuModel({
+    showProjectThreads,
+    showMyActivityFeed,
+    showJiraItems,
+    showGitHubActivity,
+  });
+
+  const sidebarContentToggleHandlers: Record<SidebarContentToggleId, (show: boolean) => void> = {
+    projectThreads: onShowProjectThreadsChange,
+    myActivityFeed: onShowMyActivityFeedChange,
+    jiraItems: onShowJiraItemsChange,
+    gitHubActivity: onShowGitHubActivityChange,
+  };
+
   return (
     <Menu>
       <Tooltip>
         <TooltipTrigger
           render={
-            <MenuTrigger className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground" />
+            <MenuTrigger
+              aria-label="Sidebar options"
+              className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+            />
           }
         >
           <EllipsisIcon className="size-3.5" />
@@ -136,29 +162,34 @@ export function ProjectSortMenu({
         <MenuSeparator />
         <MenuGroup>
           <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
-            Visible items
+            {sidebarContentMenu.title}
           </div>
-          <MenuCheckboxItem
-            checked={showProjectThreads}
-            onCheckedChange={(checked) => onShowProjectThreadsChange(Boolean(checked))}
-            className="min-h-7 py-1 text-xs"
-          >
-            Project threads
-          </MenuCheckboxItem>
-          <MenuCheckboxItem
-            checked={showJiraItems}
-            onCheckedChange={(checked) => onShowJiraItemsChange(Boolean(checked))}
-            className="min-h-7 py-1 text-xs"
-          >
-            Jira items
-          </MenuCheckboxItem>
-          <MenuCheckboxItem
-            checked={showGitHubActivity}
-            onCheckedChange={(checked) => onShowGitHubActivityChange(Boolean(checked))}
-            className="min-h-7 py-1 text-xs"
-          >
-            GitHub activity
-          </MenuCheckboxItem>
+          <div className="px-2 pb-2 text-[10px] leading-4 text-muted-foreground/80">
+            {sidebarContentMenu.description}
+          </div>
+          {sidebarContentMenu.primaryItems.map((item) => (
+            <SidebarToggleItem
+              key={item.id}
+              label={item.label}
+              description={item.description}
+              checked={item.checked}
+              disabled={item.disabled}
+              onCheckedChange={sidebarContentToggleHandlers[item.id]}
+            />
+          ))}
+          <div className="px-2 pt-3 pb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/60">
+            {sidebarContentMenu.feedTitle}
+          </div>
+          {sidebarContentMenu.feedItems.map((item) => (
+            <SidebarToggleItem
+              key={item.id}
+              label={item.label}
+              description={item.description}
+              checked={item.checked}
+              disabled={item.disabled}
+              onCheckedChange={sidebarContentToggleHandlers[item.id]}
+            />
+          ))}
         </MenuGroup>
       </MenuPopup>
     </Menu>

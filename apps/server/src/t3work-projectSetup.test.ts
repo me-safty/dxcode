@@ -8,6 +8,7 @@ import {
   resolveT3WorkProjectSetupProfileId,
   resolveT3WorkProjectSetupWriteDecision,
   T3WORK_PROJECT_AGENTS_PATH,
+  T3WORK_PROJECT_CLAUDE_PATH,
   T3WORK_PROJECT_CONTEXT_ENTRYPOINT_PATH,
   T3WORK_PROJECT_PROFILE_MANIFEST_PATH,
 } from "./t3work-projectSetup.js";
@@ -24,6 +25,7 @@ describe("renderT3WorkProjectSetupFiles", () => {
   it("renders the default setup scaffold", () => {
     const files = renderT3WorkProjectSetupFiles();
     const agents = files.find((file) => file.relativePath === T3WORK_PROJECT_AGENTS_PATH);
+    const claude = files.find((file) => file.relativePath === T3WORK_PROJECT_CLAUDE_PATH);
     const contextReadme = files.find((file) => file.relativePath === ".t3work/context/README.md");
     const manifest = files.find(
       (file) => file.relativePath === T3WORK_PROJECT_PROFILE_MANIFEST_PATH,
@@ -34,6 +36,12 @@ describe("renderT3WorkProjectSetupFiles", () => {
     const statusSkill = files.find(
       (file) => file.relativePath === ".t3work/skills/status-and-context-summary/SKILL.md",
     );
+    const starterRecipeManifest = files.find(
+      (file) => file.relativePath === ".t3work/recipes/explain-selected-work/recipe.json",
+    );
+    const starterRecipePrompt = files.find(
+      (file) => file.relativePath === ".t3work/recipes/explain-selected-work/prompt.md",
+    );
     const skillTemplate = files.find(
       (file) => file.relativePath === ".t3work/templates/skills/repeatable-workflow/SKILL.md",
     );
@@ -43,16 +51,34 @@ describe("renderT3WorkProjectSetupFiles", () => {
     expect(agents?.contents).toContain("Keep the thread title current as the topic changes.");
     expect(agents?.contents).toContain(T3WORK_PROJECT_CONTEXT_ENTRYPOINT_PATH);
     expect(agents?.contents).toContain("prefer a read-only subagent");
+    expect(agents?.contents).toContain(
+      "Default to a child session for work that requires digging through a repository",
+    );
+    expect(agents?.contents).toContain(
+      "passes repo_full_name and repo_ref so the runtime prepares the scoped directory and base ref up front",
+    );
+    expect(agents?.contents).toContain("Parent and child threads must keep each other updated.");
+    expect(agents?.contents).toContain(
+      "Use explicit cross-thread messaging when the runtime supports it",
+    );
     expect(agents?.managedRefresh?.knownContentHashes?.length).toBeGreaterThan(0);
+    expect(claude?.contents).toBe(agents?.contents);
+    expect(claude?.writeMode).toBe("if-missing");
+    expect(claude?.managedRefresh?.knownContentHashes).toEqual(
+      agents?.managedRefresh?.knownContentHashes,
+    );
     expect(contextReadme?.contents).toContain(
       "Use this context bundle to answer project questions",
     );
     expect(contextReadme?.contents).toContain("Do not mention internal cache paths");
     expect(manifest?.writeMode).toBe("overwrite");
     expect(manifest?.contents).toContain(DEFAULT_T3WORK_PROJECT_SETUP_PROFILE_ID);
+    expect(manifest?.contents).toContain("defaultActionFamilies");
     expect(entrypoint?.contents).toContain("pending-sync");
     expect(statusSkill?.contents).toContain("name: t3work-status-and-context-summary");
     expect(statusSkill?.contents).toContain("Do not narrate file exploration");
+    expect(starterRecipeManifest?.contents).toContain('"scope": "project"');
+    expect(starterRecipePrompt?.contents).toContain("Explain this simply");
     expect(skillTemplate?.contents).toContain("use a read-only subagent");
   });
 
@@ -60,6 +86,7 @@ describe("renderT3WorkProjectSetupFiles", () => {
     const files = renderT3WorkProjectSetupFiles({
       managedFileHashes: {
         [T3WORK_PROJECT_AGENTS_PATH]: "sha256:known",
+        [T3WORK_PROJECT_CLAUDE_PATH]: "sha256:known-claude",
       },
     });
     const manifest = files.find(
@@ -68,6 +95,7 @@ describe("renderT3WorkProjectSetupFiles", () => {
 
     expect(manifest?.contents).toContain("managedFileHashes");
     expect(manifest?.contents).toContain("sha256:known");
+    expect(manifest?.contents).toContain("sha256:known-claude");
   });
 });
 
@@ -140,12 +168,13 @@ describe("readPersistedT3WorkProjectSetupState", () => {
   it("reads the stored profile id and managed file hashes", () => {
     expect(
       readPersistedT3WorkProjectSetupState(
-        '{"profileId":"developer","managedFileHashes":{"AGENTS.md":"sha256:known"}}',
+        '{"profileId":"developer","managedFileHashes":{"AGENTS.md":"sha256:known","CLAUDE.md":"sha256:known-claude"}}',
       ),
     ).toEqual({
       profileId: "developer",
       managedFileHashes: {
         "AGENTS.md": "sha256:known",
+        "CLAUDE.md": "sha256:known-claude",
       },
     });
   });

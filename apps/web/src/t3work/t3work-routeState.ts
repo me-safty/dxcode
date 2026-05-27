@@ -14,12 +14,15 @@ const T3WORK_PATH_SEGMENT = "projects";
 const T3WORK_TICKET_SEGMENT = "tickets";
 const T3WORK_THREAD_SEGMENT = "threads";
 const T3WORK_CHAT_THREAD_SEARCH_KEY = "chatThreadId";
+const T3WORK_SETUP_SEARCH_KEY = "setup";
+const T3WORK_SETUP_WELCOME_VALUE = "welcome";
 
 export type T3workRouteSearch = ProjectDashboardBacklogRouteSearch &
   ProjectDashboardMyWorkRouteSearch &
   ProjectDashboardModeRouteSearch &
   ProjectSidebarRouteSearch & {
     chatThreadId?: string;
+    setup?: "welcome";
   };
 
 export type T3workRouteSearchTarget =
@@ -37,8 +40,10 @@ export type T3workRouteSearchTarget =
 
 export function parseT3workRouteSearch(search: Record<string, unknown>): T3workRouteSearch {
   const rawChatThreadId = search[T3WORK_CHAT_THREAD_SEARCH_KEY];
+  const rawSetup = search[T3WORK_SETUP_SEARCH_KEY];
   const chatThreadId =
     typeof rawChatThreadId === "string" && rawChatThreadId.length > 0 ? rawChatThreadId : null;
+  const setup = rawSetup === T3WORK_SETUP_WELCOME_VALUE ? T3WORK_SETUP_WELCOME_VALUE : null;
 
   return {
     ...parseProjectDashboardBacklogRouteSearch(search),
@@ -46,6 +51,7 @@ export function parseT3workRouteSearch(search: Record<string, unknown>): T3workR
     ...parseProjectDashboardModeRouteSearch(search),
     ...parseProjectSidebarRouteSearch(search),
     ...(chatThreadId ? { chatThreadId } : {}),
+    ...(setup ? { setup } : {}),
   };
 }
 

@@ -15,7 +15,7 @@ function resolveConversationStyleLines(profile: ProjectSetupProfileDefinition) {
       : profile.communicationStyle.technicalDepth === "medium"
         ? "Use only enough technical detail to explain tradeoffs, risks, or validation results."
         : "Use plain, non-technical language unless the user explicitly asks for implementation detail.";
-  const complexityLine = profile.communicationStyle.hideImplementationComplexity
+  const complexityLine = profile.hideImplementationComplexity
     ? "Hide low-level implementation complexity unless it changes the outcome or the user asks for it."
     : "Summarize the implementation approach clearly, but keep the final answer compact.";
 

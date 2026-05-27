@@ -701,7 +701,7 @@ export class AtlassianIntegrationProvider implements IntegrationProvider {
     }
 
     const projectKey = project.key.replace(/"/g, '\\"');
-    const assignedJql = `project = "${projectKey}" AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC`;
+    const assignedJql = `project = "${projectKey}" AND assignee = currentUser() ORDER BY updated DESC`;
     const assignedResponse = await entry.client.searchIssues(assignedJql, input.limit ?? 50);
     const assignedItems = normalizeIssueSearch(assignedResponse, entry.siteUrl);
 
@@ -864,6 +864,41 @@ export class AtlassianIntegrationProvider implements IntegrationProvider {
       items,
       totalCount: items.length,
     };
+  }
+
+  async listProjectStatuses(input: {
+    account: IntegrationAccountRef;
+    externalProjectId: string;
+  }): Promise<ReadonlyArray<AtlassianBacklogBoardColumnStatus>> {
+    const entry = this.getClientForAccount(input.account.id) ?? this.getDefaultClient();
+    if (!entry) return [];
+
+    const project = await this.findProjectById(input.externalProjectId, entry.client);
+    if (!project) {
+      return [];
+    }
+
+    const statusesByName = new Map<string, AtlassianBacklogBoardColumnStatus>();
+    for (const issueType of await entry.client.getProjectStatuses(project.id)) {
+      for (const status of issueType.statuses ?? []) {
+        const normalizedStatus = toBacklogBoardColumnStatus(status);
+        if (!normalizedStatus) {
+          continue;
+        }
+
+        const dedupeKey = normalizedStatus.name.toLowerCase();
+        if (!statusesByName.has(dedupeKey)) {
+          statusesByName.set(dedupeKey, normalizedStatus);
+        }
+      }
+    }
+
+    return [...statusesByName.values()].toSorted((left, right) =>
+      left.name.localeCompare(right.name, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }),
+    );
   }
 
   async getBacklogSelection(input: {

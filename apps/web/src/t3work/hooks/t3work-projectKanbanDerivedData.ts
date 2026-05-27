@@ -1,6 +1,7 @@
 import type { ProjectTicketKanbanBoardColumn } from "~/t3work/t3work-projectTicketStatus";
 import {
   buildProjectMyWorkFlatKanbanColumns,
+  filterProjectMyWorkKanbanColumnsByHiddenColumns,
   filterProjectMyWorkTickets,
   sortProjectMyWorkTickets,
   buildProjectMyWorkVisibleHierarchy,
@@ -64,9 +65,11 @@ export function filterAndSortProjectMyWorkItems(input: {
 export function buildProjectKanbanColumnOptions(
   kanbanProfileId?: string,
   boardColumns?: ReadonlyArray<ProjectTicketKanbanBoardColumn>,
+  availableStatuses?: ReadonlyArray<ProjectTicketKanbanBoardColumn["statuses"][number]>,
 ) {
   return {
     ...(kanbanProfileId ? { profileId: kanbanProfileId } : {}),
+    ...(availableStatuses ? { availableStatuses } : {}),
     ...(boardColumns ? { boardColumns } : {}),
   };
 }
@@ -99,11 +102,14 @@ export function buildProjectMyWorkDisplayColumns(
   visibleHierarchy: ProjectMyWorkVisibleHierarchy,
   hiddenKanbanColumnIds: ReadonlyArray<string>,
 ) {
-  return groupMode === "hierarchy"
-    ? kanbanColumns
-    : buildProjectMyWorkFlatKanbanColumns({
-        columns: kanbanColumns,
-        visibleHierarchy,
-        hiddenKanbanColumnIds,
-      });
+  const displayColumns =
+    groupMode === "hierarchy"
+      ? kanbanColumns
+      : buildProjectMyWorkFlatKanbanColumns({
+          columns: kanbanColumns,
+          visibleHierarchy,
+          hiddenKanbanColumnIds,
+        });
+
+  return filterProjectMyWorkKanbanColumnsByHiddenColumns(displayColumns, hiddenKanbanColumnIds);
 }

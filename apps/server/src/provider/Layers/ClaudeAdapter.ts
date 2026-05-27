@@ -8,6 +8,7 @@
  */
 import {
   type CanUseTool,
+  createSdkMcpServer,
   query,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
@@ -64,9 +65,16 @@ import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as Option from "effect/Option";
+import * as z from "zod";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import {
+  NoopT3workToolBroker,
+  T3workToolBroker,
+  type T3workToolBinding,
+} from "../../t3work-toolBroker.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
   getClaudeModelCapabilities,
@@ -94,6 +102,7 @@ type ClaudeToolResultStreamKind = Extract<
   "command_output" | "file_change_output"
 >;
 type ClaudeSdkEffort = NonNullable<ClaudeQueryOptions["effort"]>;
+type ClaudeSdkMcpServers = NonNullable<ClaudeQueryOptions["mcpServers"]>;
 
 function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
   const result = encodeUnknownJsonStringExit(input);
@@ -162,6 +171,7 @@ interface ClaudeSessionContext {
   session: ProviderSession;
   readonly promptQueue: Queue.Queue<PromptQueueItem>;
   readonly query: ClaudeQueryRuntime;
+  readonly refreshToolInjection: () => Effect.Effect<void, ProviderAdapterError>;
   streamFiber: Fiber.Fiber<void, Error> | undefined;
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
@@ -185,6 +195,7 @@ interface ClaudeSessionContext {
 interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly interrupt: () => Promise<void>;
   readonly setModel: (model?: string) => Promise<void>;
+  readonly setMcpServers: (servers: ClaudeSdkMcpServers) => Promise<unknown>;
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
   readonly close: () => void;
@@ -990,6 +1001,127 @@ function sdkNativeItemId(message: SDKMessage): string | undefined {
   return undefined;
 }
 
+function toClaudeMcpToolFieldSchema(input: unknown) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return undefined;
+  }
+
+  const raw = input as {
+    readonly type?: unknown;
+    readonly description?: unknown;
+    readonly enum?: unknown;
+    readonly minLength?: unknown;
+  };
+
+  if (raw.type !== "string") {
+    return undefined;
+  }
+
+  const description = typeof raw.description === "string" ? raw.description : undefined;
+  const enumValues = Array.isArray(raw.enum)
+    ? raw.enum.filter((value): value is string => typeof value === "string")
+    : [];
+
+  if (enumValues.length > 0) {
+    const schema = z.enum(enumValues as [string, ...string[]]);
+    return description ? schema.describe(description) : schema;
+  }
+
+  let schema = z.string();
+  if (typeof raw.minLength === "number" && Number.isFinite(raw.minLength) && raw.minLength > 0) {
+    schema = schema.min(raw.minLength);
+  }
+
+  return description ? schema.describe(description) : schema;
+}
+
+function toClaudeMcpToolInputShape(inputSchema: unknown): Record<string, z.ZodTypeAny> {
+  if (!inputSchema || typeof inputSchema !== "object" || Array.isArray(inputSchema)) {
+    return {};
+  }
+
+  const raw = inputSchema as {
+    readonly type?: unknown;
+    readonly properties?: unknown;
+    readonly required?: unknown;
+  };
+
+  if (raw.type !== "object") {
+    return {};
+  }
+
+  const properties = raw.properties;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) {
+    return {};
+  }
+
+  const required = new Set(
+    Array.isArray(raw.required)
+      ? raw.required.filter((value): value is string => typeof value === "string")
+      : [],
+  );
+  const shape: Record<string, z.ZodTypeAny> = {};
+
+  for (const [name, propertySchema] of Object.entries(properties as Record<string, unknown>)) {
+    const fieldSchema = toClaudeMcpToolFieldSchema(propertySchema);
+    if (!fieldSchema) {
+      continue;
+    }
+    shape[name] = required.has(name) ? fieldSchema : fieldSchema.optional();
+  }
+
+  return shape;
+}
+
+function buildClaudeMcpServers(
+  binding: T3workToolBinding,
+  runPromise: <A>(effect: Effect.Effect<A, never>) => Promise<A>,
+): ClaudeSdkMcpServers {
+  const servers: ClaudeSdkMcpServers = {};
+
+  for (const server of binding.listServers()) {
+    const tools = Object.values(server.tools).map((tool) => ({
+      name: tool.name,
+      description: tool.description ?? tool.title ?? tool.name,
+      inputSchema: toClaudeMcpToolInputShape(tool.inputSchema),
+      handler: async (args: unknown) => {
+        const result = await runPromise(
+          binding.callTool({
+            server: server.name,
+            tool: tool.name,
+            arguments: args,
+            threadId: binding.threadId,
+          }),
+        );
+        const structuredContent =
+          result.structuredContent && typeof result.structuredContent === "object"
+            ? (result.structuredContent as Record<string, unknown>)
+            : undefined;
+
+        return {
+          content: result.content.map((content) => ({
+            type: content.type,
+            text: content.text,
+          })),
+          ...(structuredContent ? { structuredContent } : {}),
+          ...(result.isError !== undefined ? { isError: result.isError } : {}),
+        };
+      },
+    }));
+
+    if (tools.length === 0) {
+      continue;
+    }
+
+    servers[server.name] = createSdkMcpServer({
+      name: server.name,
+      tools,
+    });
+  }
+
+  return servers;
+}
+
 export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   claudeSettings: ClaudeSettings,
   options?: ClaudeAdapterLiveOptions,
@@ -998,6 +1130,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
+  const toolBroker = Option.getOrElse(
+    yield* Effect.serviceOption(T3workToolBroker),
+    () => NoopT3workToolBroker,
+  );
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, options?.environment).pipe(
     Effect.provideService(Path.Path, path),
   );
@@ -2559,6 +2695,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const runtimeContext = yield* Effect.context<never>();
       const runFork = Effect.runForkWith(runtimeContext);
       const runPromise = Effect.runPromiseWith(runtimeContext);
+      const bindClaudeMcpServers = () =>
+        toolBroker
+          .bindSession({ threadId })
+          .pipe(
+            Effect.map((binding) => (binding ? buildClaudeMcpServers(binding, runPromise) : {})),
+          );
 
       const promptQueue = yield* Queue.unbounded<PromptQueueItem>();
       const prompt = Stream.fromQueue(promptQueue).pipe(
@@ -2888,6 +3030,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ? getModelSelectionBooleanOptionValue(modelSelection, "thinking")
         : undefined;
       const effectiveEffort = getEffectiveClaudeAgentEffort(effort);
+      const initialMcpServers = yield* bindClaudeMcpServers();
       const runtimeModeToPermission: Record<string, PermissionMode> = {
         "auto-accept-edits": "acceptEdits",
         "full-access": "bypassPermissions",
@@ -2920,6 +3063,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         includePartialMessages: true,
         canUseTool,
         env: claudeEnvironment,
+        ...(Object.keys(initialMcpServers).length > 0 ? { mcpServers: initialMcpServers } : {}),
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
       };
@@ -2943,6 +3087,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.query.session_id": newSessionId ?? "",
         "claude.query.include_partial_messages": true,
         "claude.query.additional_directories": input.cwd ? [input.cwd] : [],
+        "claude.query.mcp_servers": Object.keys(initialMcpServers),
         "claude.query.setting_sources": [...CLAUDE_SETTING_SOURCES],
         "claude.query.settings_json": encodeJsonStringForDiagnostics(settings) ?? "",
         "claude.query.extra_args_json": encodeJsonStringForDiagnostics(extraArgs) ?? "",
@@ -2983,10 +3128,21 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         updatedAt: startedAt,
       };
 
+      const refreshToolInjection = () =>
+        bindClaudeMcpServers().pipe(
+          Effect.flatMap((mcpServers) =>
+            Effect.tryPromise({
+              try: () => queryRuntime.setMcpServers(mcpServers),
+              catch: (cause) => toRequestError(threadId, "turn/setMcpServers", cause),
+            }),
+          ),
+        );
+
       const context: ClaudeSessionContext = {
         session,
         promptQueue,
         query: queryRuntime,
+        refreshToolInjection,
         streamFiber: undefined,
         startedAt,
         basePermissionMode: permissionMode,
@@ -3088,6 +3244,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       // between user prompts) to prevent blocking the user's next turn.
       yield* completeTurn(context, "completed");
     }
+
+    yield* context.refreshToolInjection();
 
     if (modelSelection?.model) {
       const apiModelId = resolveClaudeApiModelId(modelSelection);

@@ -5,6 +5,9 @@ import {
   getSidebarNavProjectState,
   normalizeSidebarNavPreferences,
   normalizeSidebarNavProjectState,
+  prioritizeSidebarItemIds,
+  prioritizeSidebarItemId,
+  removeSidebarItemIdsFromOrder,
   type T3WorkSidebarNavPreferences,
 } from "~/t3work/t3work-sidebarNavPreferences";
 
@@ -14,6 +17,9 @@ type T3WorkSidebarNavPreferencesState = {
   hydrate: (preferencesByProjectId: T3WorkSidebarNavPreferences) => void;
   hideItem: (projectId: string, itemId: string) => void;
   showItem: (projectId: string, itemId: string) => void;
+  showItemAtTop: (projectId: string, itemId: string) => void;
+  showItemsAtTop: (projectId: string, itemIds: ReadonlyArray<string>) => void;
+  removeItemsFromOrder: (projectId: string, itemIds: ReadonlyArray<string>) => void;
   setOrderedItemIds: (projectId: string, itemIds: ReadonlyArray<string>) => void;
 };
 
@@ -68,6 +74,82 @@ export const useT3WorkSidebarNavPreferencesStore = create<T3WorkSidebarNavPrefer
         normalizeSidebarNavProjectState({
           ...state,
           hiddenItemIds: state.hiddenItemIds.filter((candidate) => candidate !== itemId),
+        }),
+      );
+      set({ preferencesByProjectId: next });
+      persistStoredSidebarNavPreferences(next);
+    },
+    showItemAtTop: (projectId, itemId) => {
+      const current = get().preferencesByProjectId;
+      const projectState = getSidebarNavProjectState(current, projectId);
+      if (
+        !projectState.hiddenItemIds.includes(itemId) &&
+        projectState.orderedItemIds[0] === itemId
+      ) {
+        return;
+      }
+
+      const next = updateProjectState(current, projectId, (state) =>
+        normalizeSidebarNavProjectState({
+          ...state,
+          hiddenItemIds: state.hiddenItemIds.filter((candidate) => candidate !== itemId),
+          orderedItemIds: prioritizeSidebarItemId(state.orderedItemIds, itemId),
+        }),
+      );
+      set({ preferencesByProjectId: next });
+      persistStoredSidebarNavPreferences(next);
+    },
+    showItemsAtTop: (projectId, itemIds) => {
+      const normalizedItemIds = [...new Set(itemIds.filter((itemId) => itemId.length > 0))];
+      if (normalizedItemIds.length === 0) {
+        return;
+      }
+
+      const current = get().preferencesByProjectId;
+      const projectState = getSidebarNavProjectState(current, projectId);
+      const alreadyVisible = normalizedItemIds.every(
+        (itemId) => !projectState.hiddenItemIds.includes(itemId),
+      );
+      const currentTopIds = projectState.orderedItemIds.slice(0, normalizedItemIds.length);
+      const alreadyOrdered = normalizedItemIds.every(
+        (itemId, index) => currentTopIds[index] === itemId,
+      );
+      if (alreadyVisible && alreadyOrdered) {
+        return;
+      }
+
+      const next = updateProjectState(current, projectId, (state) =>
+        normalizeSidebarNavProjectState({
+          ...state,
+          hiddenItemIds: state.hiddenItemIds.filter(
+            (candidate) => !normalizedItemIds.includes(candidate),
+          ),
+          orderedItemIds: prioritizeSidebarItemIds(state.orderedItemIds, normalizedItemIds),
+        }),
+      );
+      set({ preferencesByProjectId: next });
+      persistStoredSidebarNavPreferences(next);
+    },
+    removeItemsFromOrder: (projectId, itemIds) => {
+      const normalizedItemIds = [...new Set(itemIds.filter((itemId) => itemId.length > 0))];
+      if (normalizedItemIds.length === 0) {
+        return;
+      }
+
+      const current = get().preferencesByProjectId;
+      const projectState = getSidebarNavProjectState(current, projectId);
+      const nextOrderedItemIds = removeSidebarItemIdsFromOrder(
+        projectState.orderedItemIds,
+        normalizedItemIds,
+      );
+      if (nextOrderedItemIds.length === projectState.orderedItemIds.length) {
+        return;
+      }
+
+      const next = updateProjectState(current, projectId, (state) =>
+        normalizeSidebarNavProjectState({
+          ...state,
+          orderedItemIds: nextOrderedItemIds,
         }),
       );
       set({ preferencesByProjectId: next });

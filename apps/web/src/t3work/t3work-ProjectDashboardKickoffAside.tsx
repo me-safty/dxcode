@@ -9,9 +9,11 @@ import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment"
 import { formatRelativeTime } from "~/t3work/t3work-AppTicketHelpers";
 import { mergeContextAttachmentsById } from "~/t3work/t3work-contextAttachmentMerge";
 import { EmbeddedThreadAside } from "~/t3work/t3work-EmbeddedThreadAside";
+import { readProjectSetupProfileIdFromProject } from "~/t3work/hooks/t3work-createProjectBootstrap";
+import { T3workKickoffRecipeList } from "~/t3work/t3work-KickoffRecipeList";
 import { ProjectDashboardKickoffComposer } from "~/t3work/t3work-ProjectDashboardKickoffComposer";
-import { PROJECT_DASHBOARD_KICKOFF_QUICK_STARTS } from "~/t3work/t3work-projectDashboardKickoffQuickStarts";
 import { runT3workViewTransition } from "~/t3work/t3work-runViewTransition";
+import { buildT3workSidecarRecipeQuickStarts } from "~/t3work/t3work-sidecarRecipes";
 
 export function ProjectDashboardKickoffAside({
   project,
@@ -75,6 +77,17 @@ export function ProjectDashboardKickoffAside({
   );
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
+  const quickStartRecipes = useMemo(
+    () =>
+      buildT3workSidecarRecipeQuickStarts({
+        surface: "project.dashboard",
+        project,
+        profileId: readProjectSetupProfileIdFromProject(project),
+        selectedWorkLabel: project.title,
+        availableContextKeys: ["project.summary"],
+      }),
+    [project],
+  );
   const filteredThreads = useMemo(() => {
     if (!normalizedQuery) {
       return recentThreads;
@@ -116,18 +129,10 @@ export function ProjectDashboardKickoffAside({
             <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
               Quick starts
             </h4>
-            <div className="space-y-2.5">
-              {PROJECT_DASHBOARD_KICKOFF_QUICK_STARTS.map((quickStart) => (
-                <button
-                  key={quickStart.id}
-                  type="button"
-                  className="w-full rounded-md border border-border/70 bg-transparent px-3 py-2.5 text-left transition-colors hover:border-border hover:bg-accent/30"
-                  onClick={() => setPrefillText(quickStart.prompt)}
-                >
-                  <div className="text-sm font-medium text-foreground/90">{quickStart.title}</div>
-                </button>
-              ))}
-            </div>
+            <T3workKickoffRecipeList
+              recipes={quickStartRecipes}
+              onSelectRecipe={(recipe) => setPrefillText(recipe.prompt)}
+            />
           </section>
 
           <section className="space-y-2.5 pb-1">

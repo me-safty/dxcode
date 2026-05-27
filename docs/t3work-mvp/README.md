@@ -33,14 +33,16 @@ for different kinds of work.
 
 The user should be able to:
 
-1. Connect Atlassian.
-2. Pick a Jira project visible to their account.
-3. Create a T3 project without choosing a local directory.
-4. Browse Jira issues inside `t3work`.
-5. Open a Jira issue and see context-relevant recipes.
-6. Launch a recipe without writing a prompt.
-7. Get a durable rich output, such as a QA test plan or risk board.
-8. Review and optionally post a drafted Jira comment.
+1. Choose a project source.
+2. Complete agent runtime preflight by choosing or installing a default provider and model.
+3. Connect Atlassian.
+4. Pick a Jira project visible to their account.
+5. Create a T3 project without choosing a local directory.
+6. Browse Jira issues inside `t3work`.
+7. Open a Jira issue and see context-relevant recipes.
+8. Launch a recipe without writing a prompt.
+9. Get a durable rich output, such as a QA test plan or risk board.
+10. Review and optionally post a drafted Jira comment.
 
 ## Epic Documents
 
@@ -64,6 +66,8 @@ The user should be able to:
 - [Epic 19: Workspace Miniapps](./19-workspace-miniapps.md)
 - [Epic 20: Embedded Chat And Agent Handoffs](./20-embedded-chat-and-handoffs.md)
 - [Epic 21: Context Tool Catalog](./21-context-tool-catalog.md)
+- [Epic 22: GitHub Pull Request Workspace](./22-github-pull-request-workspace.md)
+- [Epic 23: Project Setup Preflight UI](./23-project-setup-preflight-ui.md)
 
 ## Supporting Docs
 

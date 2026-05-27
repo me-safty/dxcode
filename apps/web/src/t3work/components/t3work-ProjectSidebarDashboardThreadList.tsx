@@ -25,7 +25,7 @@ export function ProjectSidebarDashboardThreadList({
   }
 
   return (
-    <SidebarMenuSub className="mx-1 -mt-0.5 mb-1 w-full translate-x-0 gap-0.5 overflow-hidden px-3.5 py-0.5">
+    <SidebarMenuSub className="mx-1 -mt-0.5 mb-1 w-full translate-x-0 gap-0.5 overflow-hidden px-1.5 py-0.5">
       {threads.map((thread) => (
         <ThreadRow
           key={thread.id}

@@ -19,12 +19,11 @@ export function renderAgentsMd(profile: ProjectSetupProfileDefinition): string {
       : profile.communicationStyle.technicalDepth === "medium"
         ? "Use only enough technical detail to explain tradeoffs, risks, or validation results."
         : "Use plain, non-technical language unless the user explicitly asks for implementation detail.";
-  const complexityLine = profile.communicationStyle.hideImplementationComplexity
+  const complexityLine = profile.hideImplementationComplexity
     ? "Hide low-level implementation complexity unless it changes the outcome or the user asks for it."
     : "Summarize the implementation approach clearly, but keep the final answer compact.";
 
-  return `# t3work Project Agent Guide
-
+  return `
 ## Conversation Style
 
 - Keep replies short and direct.
@@ -48,6 +47,23 @@ Use these project files internally before asking the user to restate context:
 - ${T3WORK_PROJECT_CONTEXT_ROOT}/
 - .t3work/references/reference-repositories.json
 - ${T3WORK_PROJECT_PROFILE_MANIFEST_PATH}
+
+## Child Sessions
+
+- Treat the current thread as the coordination and synthesis thread.
+- Default to a child session for work that requires digging through a repository, checking a specific repository or worktree, making code changes, debugging, validation, or code review.
+- For repository-scoped child sessions, prefer a single task-shaped start_child call that passes repo_full_name and repo_ref so the runtime prepares the scoped directory and base ref up front.
+- When repository-specific work is involved, start the child in the correct linked repository/worktree and keep the child focused on one concrete slice.
+- Do not ask a child session to manually clone, checkout, or cd when the start_child call can scope the repo directory for it.
+- If the work splits by repository, worktree, branch, or concern, start separate child sessions instead of one broad exploratory thread.
+- Keep work in the parent thread only when the answer is direct, planning-only, or small enough that it does not require repository digging or code execution.
+
+## Parent And Child Coordination
+
+- Parent and child threads must keep each other updated.
+- Child sessions should report when work starts, when important findings land, when blockers appear, and when work is finished.
+- Parent threads should acknowledge those updates, decide next steps, and fold the child outcome back into the user-facing thread.
+- Use explicit cross-thread messaging when the runtime supports it; otherwise use the available durable handoff or completion updates and do not let a child finish silently.
 
 ## Status And Context Questions
 

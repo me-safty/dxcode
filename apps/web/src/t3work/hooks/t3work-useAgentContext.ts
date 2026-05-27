@@ -17,9 +17,13 @@ function mapContextMenuActions(capabilities: AgentContextCapabilities) {
 export function useAgentContext() {
   const { addToChatFromRequest } = useAddToChat();
   const pinItem = useT3WorkPinnedSidebarStore((state) => state.pinItem);
-  const unpinItem = useT3WorkPinnedSidebarStore((state) => state.unpinItem);
-  const showSidebarItem = useT3WorkSidebarNavPreferencesStore((state) => state.showItem);
-  const hideSidebarItem = useT3WorkSidebarNavPreferencesStore((state) => state.hideItem);
+  const unpinItems = useT3WorkPinnedSidebarStore((state) => state.unpinItems);
+  const showSidebarItemsAtTop = useT3WorkSidebarNavPreferencesStore(
+    (state) => state.showItemsAtTop,
+  );
+  const removeSidebarItemsFromOrder = useT3WorkSidebarNavPreferencesStore(
+    (state) => state.removeItemsFromOrder,
+  );
 
   const runAgentContextAction = useCallback(
     async (
@@ -39,17 +43,21 @@ export function useAgentContext() {
         }
         case "pin-to-sidebar": {
           pinItem(action.item);
-          showSidebarItem(action.item.projectId, action.item.id);
+          showSidebarItemsAtTop(
+            action.item.projectId,
+            action.prioritizeItemIds ?? [action.item.id],
+          );
           return true;
         }
         case "unpin-from-sidebar": {
-          unpinItem(action.item.id);
-          hideSidebarItem(action.item.projectId, action.item.id);
+          const cascadeItemIds = action.cascadeItemIds ?? [action.item.id];
+          unpinItems(cascadeItemIds);
+          removeSidebarItemsFromOrder(action.item.projectId, cascadeItemIds);
           return true;
         }
       }
     },
-    [addToChatFromRequest, hideSidebarItem, pinItem, showSidebarItem, unpinItem],
+    [addToChatFromRequest, pinItem, removeSidebarItemsFromOrder, showSidebarItemsAtTop, unpinItems],
   );
 
   const showAgentContextMenuAt = useCallback(

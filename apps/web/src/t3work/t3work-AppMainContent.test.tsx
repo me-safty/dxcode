@@ -22,7 +22,9 @@ vi.mock("~/t3work/t3work-AppThreadPane", () => ({
 }));
 
 vi.mock("~/t3work/t3work-AppMainContentHomeEmptyState", () => ({
-  AppMainContentHomeEmptyState: () => <div>home-empty</div>,
+  AppMainContentHomeEmptyState: ({ showAside }: { showAside: boolean }) => (
+    <div>home-empty:{showAside ? "aside" : "no-aside"}</div>
+  ),
 }));
 
 vi.mock("~/t3work/t3work-useThreadResolutionDebug", () => ({
@@ -84,6 +86,7 @@ describe("AppMainContent", () => {
         onOpenTicket={() => {}}
         onOpenThread={() => {}}
         onOpenFullThread={() => {}}
+        onOpenEmbeddedThread={() => {}}
         onKickoffProjectThread={() => {}}
         onKickoffTicketThread={() => {}}
         onThreadKickoffConsumed={() => {}}
@@ -102,5 +105,41 @@ describe("AppMainContent", () => {
 
     expect(markup).toContain("ticket:project-loose:ticket-1:thread-loose");
     expect(markup).not.toContain("home-empty");
+  });
+
+  it("reopens the setup welcome surface without the chat sidecar", () => {
+    const markup = renderToStaticMarkup(
+      <AppMainContent
+        view={null}
+        activeDashboardMode="my-work"
+        selectedProjectId={looseProject.id}
+        projects={[looseProject]}
+        allProjects={[looseProject]}
+        reopenInitialSetup
+        getThreadsForProject={(projectId) =>
+          projectId === looseProject.id ? [looseProjectThread] : []
+        }
+        onOpenTicket={() => {}}
+        onOpenThread={() => {}}
+        onOpenFullThread={() => {}}
+        onOpenEmbeddedThread={() => {}}
+        onKickoffProjectThread={() => {}}
+        onKickoffTicketThread={() => {}}
+        onThreadKickoffConsumed={() => {}}
+        onThreadDisplayModeChange={() => {}}
+        onBackToDashboard={() => {}}
+        onCreate={() => {}}
+        onInlineProjectCreated={() => {}}
+        renderDashboard={(project) => <div>dashboard:{project.title}</div>}
+        renderTicketDetail={(project, ticketId, activeThreadId) => (
+          <div>
+            ticket:{project.id}:{ticketId}:{activeThreadId ?? "none"}
+          </div>
+        )}
+      />,
+    );
+
+    expect(markup).toContain("home-empty:no-aside");
+    expect(markup).not.toContain("dashboard:Loose workspace");
   });
 });

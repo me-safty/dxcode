@@ -25,6 +25,7 @@ export function loadT3workAtlassianBoardColumns(input: T3workAtlassianBoardColum
 
     if (!(provider instanceof AtlassianIntegrationProvider)) {
       return {
+        availableStatuses: [],
         boardColumns: [],
       };
     }
@@ -34,9 +35,18 @@ export function loadT3workAtlassianBoardColumns(input: T3workAtlassianBoardColum
       externalProjectId: input.externalProjectId,
       ...(input.boardId ? { boardId: input.boardId } : {}),
     });
+    const availableStatuses = yield* tryAtlassianPromise(
+      () =>
+        provider.listProjectStatuses({
+          account: input.account,
+          externalProjectId: input.externalProjectId,
+        }),
+      "Failed to load Atlassian project statuses.",
+    ).pipe(Effect.catch(() => Effect.succeed([])));
 
     return {
       ...(selection.selectedBoardId ? { selectedBoardId: selection.selectedBoardId } : {}),
+      availableStatuses,
       boardColumns: selection.selectedBoardColumns ?? [],
     };
   });

@@ -22,9 +22,11 @@ type ProjectSidebarLayoutProps = {
   ticketViewMode: TicketViewMode;
   setTicketViewMode: (mode: TicketViewMode) => void;
   showProjectThreads: boolean;
+  showMyActivityFeed: boolean;
   showJiraItems: boolean;
   showGitHubActivity: boolean;
   onShowProjectThreadsChange: (show: boolean) => void;
+  onShowMyActivityFeedChange: (show: boolean) => void;
   onShowJiraItemsChange: (show: boolean) => void;
   onShowGitHubActivityChange: (show: boolean) => void;
   onOpenSearch: () => void;
@@ -46,9 +48,11 @@ export function ProjectSidebarLayout({
   threadSortOrder,
   threadPreviewCount,
   showProjectThreads,
+  showMyActivityFeed,
   showJiraItems,
   showGitHubActivity,
   onShowProjectThreadsChange,
+  onShowMyActivityFeedChange,
   onShowJiraItemsChange,
   onShowGitHubActivityChange,
   onOpenSearch,
@@ -115,9 +119,11 @@ export function ProjectSidebarLayout({
               threadSortOrder={threadSortOrder}
               threadPreviewCount={threadPreviewCount}
               showProjectThreads={showProjectThreads}
+              showMyActivityFeed={showMyActivityFeed}
               showJiraItems={showJiraItems}
               showGitHubActivity={showGitHubActivity}
               onShowProjectThreadsChange={onShowProjectThreadsChange}
+              onShowMyActivityFeedChange={onShowMyActivityFeedChange}
               onShowJiraItemsChange={onShowJiraItemsChange}
               onShowGitHubActivityChange={onShowGitHubActivityChange}
               onSelectProject={onSelectProject}
