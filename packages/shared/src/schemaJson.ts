@@ -47,31 +47,31 @@ export const formatSchemaError = (cause: Cause.Cause<Schema.SchemaError>) => {
  *
  * Mirrors `SchemaGetter.parseJson()` but strips JSONC syntax before parsing.
  */
-const decodeUnknownJsonString = Schema.decodeUnknownSync(Schema.UnknownFromJsonString);
+const decodeJsonString = Schema.decodeEffect(Schema.UnknownFromJsonString);
 
-const parseLenientJsonGetter = SchemaGetter.onSome((input: string) =>
-  Effect.try({
-    try: () => {
-      // Strip single-line comments — alternation preserves quoted strings.
-      let stripped = input.replace(
-        /("(?:[^"\\]|\\.)*")|\/\/[^\n]*/g,
-        (match, stringLiteral: string | undefined) => (stringLiteral ? match : ""),
-      );
+const parseLenientJsonGetter = SchemaGetter.onSome((input: string) => {
+  // Strip single-line comments - alternation preserves quoted strings.
+  let stripped = input.replace(
+    /("(?:[^"\\]|\\.)*")|\/\/[^\n]*/g,
+    (match, stringLiteral: string | undefined) => (stringLiteral ? match : ""),
+  );
 
-      // Strip multi-line comments.
-      stripped = stripped.replace(
-        /("(?:[^"\\]|\\.)*")|\/\*[\s\S]*?\*\//g,
-        (match, stringLiteral: string | undefined) => (stringLiteral ? match : ""),
-      );
+  // Strip multi-line comments.
+  stripped = stripped.replace(
+    /("(?:[^"\\]|\\.)*")|\/\*[\s\S]*?\*\//g,
+    (match, stringLiteral: string | undefined) => (stringLiteral ? match : ""),
+  );
 
-      // Strip trailing commas before `}` or `]`.
-      stripped = stripped.replace(/,(\s*[}\]])/g, "$1");
+  // Strip trailing commas before `}` or `]`.
+  stripped = stripped.replace(/,(\s*[}\]])/g, "$1");
 
-      return Option.some(decodeUnknownJsonString(stripped));
-    },
-    catch: (e) => new SchemaIssue.InvalidValue(Option.some(input), { message: String(e) }),
-  }),
-);
+  return decodeJsonString(stripped).pipe(
+    Effect.map(Option.some),
+    Effect.mapError(
+      (error) => new SchemaIssue.InvalidValue(Option.some(input), { message: String(error) }),
+    ),
+  );
+});
 
 /**
  * Schema transformation: lenient JSONC string ↔ unknown.

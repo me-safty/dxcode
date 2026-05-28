@@ -44,4 +44,8 @@ Done.`),
       values: [1, 2],
     });
   });
+
+  it("rejects malformed JSON after lenient preprocessing", () => {
+    expect(() => decodeLenientJson('{ "enabled": true,, }')).toThrow();
+  });
 });
