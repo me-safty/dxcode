@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { CheckIcon, SaveIcon, Trash2Icon } from "lucide-react";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type {
@@ -11,6 +12,7 @@ import type {
 
 import { cn } from "../../lib/utils";
 import { DraftInput } from "../ui/draft-input";
+import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
@@ -127,6 +129,12 @@ export function readProviderConfigBoolean(
   return typeof value === "boolean" ? value : defaultValue;
 }
 
+function readProviderConfigRedacted(config: unknown, key: string): boolean {
+  if (config === null || typeof config !== "object") return false;
+  const value = (config as Record<string, unknown>)[`${key}Redacted`];
+  return value === true;
+}
+
 export function nextProviderConfigWithFieldValue(
   config: unknown,
   field: ProviderSettingsFieldModel,
@@ -146,6 +154,25 @@ export function nextProviderConfigWithFieldValue(
   }
 
   const trimmed = value.trim();
+  if (field.control === "password") {
+    const redactedKey = `${field.key}Redacted`;
+    if (trimmed.length > 0) {
+      delete base[redactedKey];
+      base[field.key] = value;
+      return Object.keys(base).length > 0 ? base : undefined;
+    }
+
+    if (base[redactedKey] === true) {
+      base[field.key] = "";
+      base[redactedKey] = false;
+      return base;
+    }
+
+    delete base[field.key];
+    delete base[redactedKey];
+    return Object.keys(base).length > 0 ? base : undefined;
+  }
+
   if (field.clearWhenEmpty === "omit" && trimmed.length === 0) {
     delete base[field.key];
   } else {
@@ -239,6 +266,19 @@ function ProviderSettingsFieldRow({
   }
 
   const type = field.control === "password" ? "password" : undefined;
+  if (variant === "card" && field.control === "password") {
+    return (
+      <ProviderPasswordFieldRow
+        field={field}
+        value={value}
+        inputId={inputId}
+        label={label}
+        description={description}
+        onChange={onChange}
+      />
+    );
+  }
+
   return (
     <FieldFrame variant={variant}>
       <label htmlFor={inputId} className={cn(variant === "card" && "block")}>
@@ -268,6 +308,83 @@ function ProviderSettingsFieldRow({
             spellCheck={false}
           />
         )}
+        {description}
+      </label>
+    </FieldFrame>
+  );
+}
+
+function ProviderPasswordFieldRow(props: {
+  readonly field: ProviderSettingsFieldModel;
+  readonly value: unknown;
+  readonly inputId: string;
+  readonly label: ReactNode;
+  readonly description: ReactNode;
+  readonly onChange: ProviderSettingsFormProps["onChange"];
+}) {
+  const { field, value, inputId, label, description, onChange } = props;
+  const committed = readProviderConfigString(value, field.key);
+  const isRedacted = readProviderConfigRedacted(value, field.key);
+  const [draft, setDraft] = useState(committed);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const isDirty = draft !== committed && draft.trim().length > 0;
+  const canClear = isRedacted && draft.trim().length === 0;
+  const canSubmit = isDirty || canClear;
+
+  useEffect(() => {
+    setDraft(committed);
+  }, [committed, isRedacted]);
+
+  useEffect(() => {
+    if (!savedFlash) return;
+    const timer = window.setTimeout(() => setSavedFlash(false), 1400);
+    return () => window.clearTimeout(timer);
+  }, [savedFlash]);
+
+  const submit = () => {
+    if (!canSubmit) return;
+    onChange(nextProviderConfigWithFieldValue(value, field, isDirty ? draft : ""));
+    setSavedFlash(isDirty);
+  };
+
+  return (
+    <FieldFrame variant="card">
+      <label htmlFor={inputId} className="block">
+        {label}
+        <div className="mt-1.5 flex items-center gap-2">
+          <Input
+            id={inputId}
+            className="min-w-0 flex-1"
+            type="password"
+            autoComplete="off"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                submit();
+              }
+            }}
+            placeholder={isRedacted ? `Saved ${field.label.toLowerCase()}` : field.placeholder}
+            spellCheck={false}
+          />
+          <Button
+            size="xs"
+            variant={canClear && !isDirty ? "outline" : "default"}
+            disabled={!canSubmit}
+            onClick={submit}
+            aria-label={canClear && !isDirty ? `Clear ${field.label}` : `Save ${field.label}`}
+          >
+            {savedFlash ? (
+              <CheckIcon className="size-3" />
+            ) : canClear && !isDirty ? (
+              <Trash2Icon className="size-3" />
+            ) : (
+              <SaveIcon className="size-3" />
+            )}
+            {savedFlash ? "Saved" : canClear && !isDirty ? "Clear" : "Save"}
+          </Button>
+        </div>
         {description}
       </label>
     </FieldFrame>

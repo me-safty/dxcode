@@ -72,6 +72,36 @@ describe("ProviderSettingsForm helpers", () => {
     expect(next).toEqual({ forkOwned: 1 });
   });
 
+  it("submits replacement password values as unredacted secrets", () => {
+    const deepseek = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("deepseek")];
+    expect(deepseek).toBeDefined();
+    const apiKey = deriveProviderSettingsFields(deepseek!).find((field) => field.key === "apiKey");
+    expect(apiKey).toBeDefined();
+
+    const next = nextProviderConfigWithFieldValue(
+      { apiKey: "", apiKeyRedacted: true, binaryPath: "claude" },
+      apiKey!,
+      "sk-new-secret",
+    );
+
+    expect(next).toEqual({ apiKey: "sk-new-secret", binaryPath: "claude" });
+  });
+
+  it("submits empty saved password values as explicit clears", () => {
+    const deepseek = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("deepseek")];
+    expect(deepseek).toBeDefined();
+    const apiKey = deriveProviderSettingsFields(deepseek!).find((field) => field.key === "apiKey");
+    expect(apiKey).toBeDefined();
+
+    const next = nextProviderConfigWithFieldValue(
+      { apiKey: "", apiKeyRedacted: true, binaryPath: "claude" },
+      apiKey!,
+      "",
+    );
+
+    expect(next).toEqual({ apiKey: "", apiKeyRedacted: false, binaryPath: "claude" });
+  });
+
   it("reads non-string config values as blank strings", () => {
     expect(readProviderConfigString({ binaryPath: 123 }, "binaryPath")).toBe("");
   });
