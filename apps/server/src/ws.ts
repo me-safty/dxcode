@@ -162,7 +162,6 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
       const crypto = yield* Crypto.Crypto;
-      const randomUUID = crypto.randomUUIDv4.pipe(Effect.orDie);
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
       const orchestrationEngine = yield* OrchestrationEngineService;
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
@@ -198,6 +197,19 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const sessions = yield* SessionCredentialService;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
+      const toDispatchCommandError = (cause: unknown, fallbackMessage: string) =>
+        isOrchestrationDispatchCommandError(cause)
+          ? cause
+          : new OrchestrationDispatchCommandError({
+              message: cause instanceof Error ? cause.message : fallbackMessage,
+              cause,
+            });
+      const randomUUID = crypto.randomUUIDv4.pipe(
+        Effect.mapError((cause) =>
+          toDispatchCommandError(cause, "Failed to generate orchestration command identifier."),
+        ),
+      );
+      const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
       const serverCommandId = (tag: string) =>
         randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
 
@@ -215,31 +227,28 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         readonly payload: Record<string, unknown>;
         readonly tone: "info" | "error";
       }) =>
-        Effect.gen(function* () {
-          yield* orchestrationEngine.dispatch({
-            type: "thread.activity.append",
-            commandId: yield* serverCommandId("setup-script-activity"),
-            threadId: input.threadId,
-            activity: {
-              id: EventId.make(yield* randomUUID),
-              tone: input.tone,
-              kind: input.kind,
-              summary: input.summary,
-              payload: input.payload,
-              turnId: null,
+        Effect.all({
+          commandId: serverCommandId("setup-script-activity"),
+          activityId: serverEventId,
+        }).pipe(
+          Effect.flatMap(({ commandId, activityId }) =>
+            orchestrationEngine.dispatch({
+              type: "thread.activity.append",
+              commandId,
+              threadId: input.threadId,
+              activity: {
+                id: activityId,
+                tone: input.tone,
+                kind: input.kind,
+                summary: input.summary,
+                payload: input.payload,
+                turnId: null,
+                createdAt: input.createdAt,
+              },
               createdAt: input.createdAt,
-            },
-            createdAt: input.createdAt,
-          });
-        });
-
-      const toDispatchCommandError = (cause: unknown, fallbackMessage: string) =>
-        isOrchestrationDispatchCommandError(cause)
-          ? cause
-          : new OrchestrationDispatchCommandError({
-              message: cause instanceof Error ? cause.message : fallbackMessage,
-              cause,
-            });
+            }),
+          ),
+        );
 
       const toBootstrapDispatchCommandCauseError = (cause: Cause.Cause<unknown>) => {
         const error = Cause.squash(cause);
@@ -375,13 +384,16 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
 
           const cleanupCreatedThread = () =>
             createdThread
-              ? Effect.gen(function* () {
-                  yield* orchestrationEngine.dispatch({
-                    type: "thread.delete",
-                    commandId: yield* serverCommandId("bootstrap-thread-delete"),
-                    threadId: command.threadId,
-                  });
-                }).pipe(Effect.ignoreCause({ log: true }))
+              ? serverCommandId("bootstrap-thread-delete").pipe(
+                  Effect.flatMap((commandId) =>
+                    orchestrationEngine.dispatch({
+                      type: "thread.delete",
+                      commandId,
+                      threadId: command.threadId,
+                    }),
+                  ),
+                  Effect.ignoreCause({ log: true }),
+                )
               : Effect.void;
 
           const recordSetupScriptLaunchFailure = (input: {

@@ -172,7 +172,7 @@ export const resolveWelcomeBase = Effect.gen(function* () {
 
 export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
-  const randomUUID = crypto.randomUUIDv4.pipe(Effect.orDie);
+  const randomUUID = crypto.randomUUIDv4;
   const serverConfig = yield* ServerConfig;
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
   const orchestrationEngine = yield* OrchestrationEngineService;

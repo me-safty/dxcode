@@ -14,6 +14,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import type * as PlatformError from "effect/PlatformError";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -72,7 +73,8 @@ function checkpointStatusFromRuntime(status: string | undefined): "ready" | "mis
 
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
-  const randomUUID = crypto.randomUUIDv4.pipe(Effect.orDie);
+  const randomUUID = crypto.randomUUIDv4;
+  const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
   const serverCommandId = (tag: string) =>
     randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -89,26 +91,31 @@ const make = Effect.gen(function* () {
     readonly detail: string;
     readonly createdAt: string;
   }) =>
-    Effect.gen(function* () {
-      yield* orchestrationEngine.dispatch({
-        type: "thread.activity.append",
-        commandId: yield* serverCommandId("checkpoint-revert-failure"),
-        threadId: input.threadId,
-        activity: {
-          id: EventId.make(yield* randomUUID),
-          tone: "error",
-          kind: "checkpoint.revert.failed",
-          summary: "Checkpoint revert failed",
-          payload: {
-            turnCount: input.turnCount,
-            detail: input.detail,
+    Effect.all({
+      commandId: serverCommandId("checkpoint-revert-failure"),
+      activityId: serverEventId,
+    }).pipe(
+      Effect.flatMap(({ commandId, activityId }) =>
+        orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId,
+          threadId: input.threadId,
+          activity: {
+            id: activityId,
+            tone: "error",
+            kind: "checkpoint.revert.failed",
+            summary: "Checkpoint revert failed",
+            payload: {
+              turnCount: input.turnCount,
+              detail: input.detail,
+            },
+            turnId: null,
+            createdAt: input.createdAt,
           },
-          turnId: null,
           createdAt: input.createdAt,
-        },
-        createdAt: input.createdAt,
-      });
-    });
+        }),
+      ),
+    );
 
   const appendCaptureFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -116,25 +123,30 @@ const make = Effect.gen(function* () {
     readonly detail: string;
     readonly createdAt: string;
   }) =>
-    Effect.gen(function* () {
-      yield* orchestrationEngine.dispatch({
-        type: "thread.activity.append",
-        commandId: yield* serverCommandId("checkpoint-capture-failure"),
-        threadId: input.threadId,
-        activity: {
-          id: EventId.make(yield* randomUUID),
-          tone: "error",
-          kind: "checkpoint.capture.failed",
-          summary: "Checkpoint capture failed",
-          payload: {
-            detail: input.detail,
+    Effect.all({
+      commandId: serverCommandId("checkpoint-capture-failure"),
+      activityId: serverEventId,
+    }).pipe(
+      Effect.flatMap(({ commandId, activityId }) =>
+        orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId,
+          threadId: input.threadId,
+          activity: {
+            id: activityId,
+            tone: "error",
+            kind: "checkpoint.capture.failed",
+            summary: "Checkpoint capture failed",
+            payload: {
+              detail: input.detail,
+            },
+            turnId: input.turnId,
+            createdAt: input.createdAt,
           },
-          turnId: input.turnId,
           createdAt: input.createdAt,
-        },
-        createdAt: input.createdAt,
-      });
-    });
+        }),
+      ),
+    );
 
   const resolveSessionRuntimeForThread = Effect.fn("resolveSessionRuntimeForThread")(function* (
     threadId: ThreadId,
@@ -793,7 +805,11 @@ const make = Effect.gen(function* () {
 
   const processInput = (
     input: ReactorInput,
-  ): Effect.Effect<void, CheckpointStoreError | OrchestrationDispatchError, never> =>
+  ): Effect.Effect<
+    void,
+    CheckpointStoreError | OrchestrationDispatchError | PlatformError.PlatformError,
+    never
+  > =>
     input.source === "domain" ? processDomainEvent(input.event) : processRuntimeEvent(input.event);
 
   const processInputSafely = (input: ReactorInput) =>
