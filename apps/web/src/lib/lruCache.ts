@@ -23,14 +23,14 @@ export class LRUCache<T> {
   }
 
   set(key: string, value: T, approximateSize: number): void {
+    if (approximateSize > this.maxMemoryBytes) {
+      return;
+    }
+
     const existing = this.cache.get(key);
     if (existing) {
       this.totalSize -= existing.approximateSize;
       this.cache.delete(key);
-    }
-
-    if (approximateSize > this.maxMemoryBytes) {
-      return;
     }
 
     this.evictIfNeeded(approximateSize);

@@ -49,4 +49,12 @@ describe("LRUCache", () => {
     expect(cache.get("a")).toBe("A");
     expect(cache.get("oversized")).toBeNull();
   });
+
+  it("preserves an existing entry when an oversized replacement is rejected", () => {
+    const cache = new LRUCache<string>(2, 25);
+    cache.set("a", "A", 10);
+    cache.set("a", "oversized", 30);
+
+    expect(cache.get("a")).toBe("A");
+  });
 });
