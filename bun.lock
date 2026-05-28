@@ -110,7 +110,7 @@
         "@types/react": "~19.2.0",
         "babel-preset-expo": "~56.0.0",
         "tailwindcss": "^4.0.0",
-        "typescript": "~6.0.3",
+        "typescript": "catalog:",
       },
     },
     "apps/server": {
@@ -3059,8 +3059,6 @@
     "@t3tools/mobile/@t3tools/mobile-review-diff-native": ["@t3tools/mobile-review-diff-native@file:apps/mobile/modules/t3-review-diff", {}],
 
     "@t3tools/mobile/@t3tools/mobile-terminal-native": ["@t3tools/mobile-terminal-native@file:apps/mobile/modules/t3-terminal", {}],
-
-    "@t3tools/mobile/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 
     "@t3tools/web/react": ["react@19.2.6", "", {}, "sha512-sfWGGfavi0xr8Pg0sVsyHMAOziVYKgPLNrS7ig+ivMNb3wbCBw3KxtflsGBAwD3gYQlE/AEZsTLgToRrSCjb0Q=="],
 
