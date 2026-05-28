@@ -134,40 +134,14 @@ const toProcessError = (threadId: ThreadId, cause: unknown): ProviderAdapterProc
     cause,
   });
 
-const buildEventBaseUnsafe = (input: {
+type EventBaseInput = {
   readonly threadId: ThreadId;
-  readonly eventId: EventId;
   readonly turnId?: TurnId | undefined;
   readonly itemId?: string | undefined;
   readonly requestId?: string | undefined;
   readonly createdAt?: string | undefined;
   readonly raw?: unknown;
-}): Effect.Effect<
-  Pick<
-    ProviderRuntimeEvent,
-    "eventId" | "provider" | "threadId" | "createdAt" | "turnId" | "itemId" | "requestId" | "raw"
-  >
-> =>
-  Effect.gen(function* () {
-    const createdAt = input.createdAt ?? (yield* nowIso);
-    return {
-      eventId: input.eventId,
-      provider: PROVIDER,
-      threadId: input.threadId,
-      createdAt,
-      ...(input.turnId ? { turnId: input.turnId } : {}),
-      ...(input.itemId ? { itemId: RuntimeItemId.make(input.itemId) } : {}),
-      ...(input.requestId ? { requestId: RuntimeRequestId.make(input.requestId) } : {}),
-      ...(input.raw !== undefined
-        ? {
-            raw: {
-              source: "opencode.sdk.event",
-              payload: input.raw,
-            },
-          }
-        : {}),
-    };
-  });
+};
 
 function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType {
   const normalized = toolName.toLowerCase();
@@ -472,15 +446,38 @@ export function makeOpenCodeAdapter(
     const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, OpenCodeSessionContext>();
     const randomUUIDv4 = crypto.randomUUIDv4.pipe(
-      Effect.tapError((cause) =>
-        Effect.logError("Failed to generate OpenCode runtime identifier.", { cause }),
+      Effect.mapError(
+        (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "crypto/randomUUIDv4",
+            detail: "Failed to generate OpenCode runtime identifier.",
+            cause,
+          }),
       ),
-      Effect.catch(() => Effect.interrupt),
     );
-    const buildEventBase = (input: Omit<Parameters<typeof buildEventBaseUnsafe>[0], "eventId">) =>
-      randomUUIDv4.pipe(
-        Effect.map(EventId.make),
-        Effect.flatMap((eventId) => buildEventBaseUnsafe({ ...input, eventId })),
+    const buildEventBase = (input: EventBaseInput) =>
+      Effect.all({
+        eventId: randomUUIDv4.pipe(Effect.map(EventId.make)),
+        createdAt: input.createdAt === undefined ? nowIso : Effect.succeed(input.createdAt),
+      }).pipe(
+        Effect.map(({ eventId, createdAt }) => ({
+          eventId,
+          provider: PROVIDER,
+          threadId: input.threadId,
+          createdAt,
+          ...(input.turnId ? { turnId: input.turnId } : {}),
+          ...(input.itemId ? { itemId: RuntimeItemId.make(input.itemId) } : {}),
+          ...(input.requestId ? { requestId: RuntimeRequestId.make(input.requestId) } : {}),
+          ...(input.raw !== undefined
+            ? {
+                raw: {
+                  source: "opencode.sdk.event" as const,
+                  payload: input.raw,
+                },
+              }
+            : {}),
+        })),
       );
 
     // Layer-level finalizer: when the adapter layer shuts down, stop every

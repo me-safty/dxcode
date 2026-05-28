@@ -35,18 +35,21 @@ function withEventBase(
   PlatformError.PlatformError,
   Crypto.Crypto
 > {
-  return Effect.map(
-    Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4)),
-    (eventId) => ({
-      eventId: EventId.make(eventId),
-      aggregateKind: input.aggregateKind,
-      aggregateId: input.aggregateId,
-      occurredAt: input.occurredAt,
-      commandId: input.commandId,
-      causationEventId: null,
-      correlationId: input.commandId,
-      metadata: input.metadata ?? {},
-    }),
+  return Crypto.Crypto.pipe(
+    Effect.flatMap((crypto) =>
+      crypto.randomUUIDv4.pipe(
+        Effect.map((eventId) => ({
+          eventId: EventId.make(eventId),
+          aggregateKind: input.aggregateKind,
+          aggregateId: input.aggregateId,
+          occurredAt: input.occurredAt,
+          commandId: input.commandId,
+          causationEventId: null,
+          correlationId: input.commandId,
+          metadata: input.metadata ?? {},
+        })),
+      ),
+    ),
   );
 }
 

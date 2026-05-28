@@ -39,6 +39,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
+  const crypto = yield* Crypto.Crypto;
 
   const readPersistedEnvironmentId = Effect.gen(function* () {
     const exists = yield* fileSystem
@@ -64,7 +65,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       return persisted;
     }
 
-    const generated = yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4));
+    const generated = yield* crypto.randomUUIDv4;
     yield* persistEnvironmentId(generated);
     return generated;
   });

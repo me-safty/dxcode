@@ -67,11 +67,10 @@ const upsertAnonymousId = Effect.gen(function* () {
 
   const anonymousId = yield* fileSystem.readFileString(anonymousIdPath).pipe(
     Effect.catch(() =>
-      Effect.gen(function* () {
-        const randomId = yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4));
-        yield* fileSystem.writeFileString(anonymousIdPath, randomId);
-        return randomId;
-      }),
+      Crypto.Crypto.pipe(
+        Effect.flatMap((crypto) => crypto.randomUUIDv4),
+        Effect.tap((randomId) => fileSystem.writeFileString(anonymousIdPath, randomId)),
+      ),
     ),
   );
 

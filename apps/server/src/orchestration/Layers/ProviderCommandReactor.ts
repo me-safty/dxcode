@@ -82,15 +82,6 @@ function mapProviderSessionStatusToOrchestrationStatus(
 const turnStartKeyForEvent = (event: ProviderIntentEvent): string =>
   event.commandId !== null ? `command:${event.commandId}` : `event:${event.eventId}`;
 
-const serverCommandId = Effect.fn("serverCommandId")(function* (tag: string) {
-  const uuid = yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4));
-  return CommandId.make(`server:${tag}:${uuid}`);
-});
-
-const serverEventId = Effect.fn("serverEventId")(function* () {
-  return EventId.make(yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4)));
-});
-
 const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
@@ -193,6 +184,9 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
+  const serverCommandId = (tag: string) =>
+    crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
+  const serverEventId = () => crypto.randomUUIDv4.pipe(Effect.map(EventId.make));
   const handledTurnStartKeys = yield* Cache.make<string, true>({
     capacity: HANDLED_TURN_START_KEY_MAX,
     timeToLive: HANDLED_TURN_START_KEY_TTL,
@@ -995,7 +989,6 @@ const make = Effect.gen(function* () {
 
   const processDomainEventSafely = (event: ProviderIntentEvent) =>
     processDomainEvent(event).pipe(
-      Effect.provideService(Crypto.Crypto, crypto),
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);

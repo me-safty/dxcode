@@ -40,13 +40,6 @@ import {
 import { ServerSettingsService } from "../../serverSettings.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
-const providerCommandId = Effect.fn("providerCommandId")(function* (
-  event: ProviderRuntimeEvent,
-  tag: string,
-) {
-  const uuid = yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4));
-  return CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`);
-});
 
 interface AssistantSegmentState {
   baseKey: string;
@@ -619,6 +612,10 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
+    crypto.randomUUIDv4.pipe(
+      Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
+    );
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -1166,9 +1163,7 @@ const make = Effect.gen(function* () {
         return;
       }
 
-      const commandUuid = yield* Crypto.Crypto.pipe(
-        Effect.flatMap((crypto) => crypto.randomUUIDv4),
-      );
+      const commandUuid = yield* crypto.randomUUIDv4;
       yield* orchestrationEngine.dispatch({
         type: "thread.proposed-plan.upsert",
         commandId: CommandId.make(
@@ -1644,7 +1639,6 @@ const make = Effect.gen(function* () {
 
   const processInputSafely = (input: RuntimeIngestionInput) =>
     processInput(input).pipe(
-      Effect.provideService(Crypto.Crypto, crypto),
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);

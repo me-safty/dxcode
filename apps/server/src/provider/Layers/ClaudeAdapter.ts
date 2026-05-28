@@ -1026,10 +1026,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   const randomUUIDv4 = crypto.randomUUIDv4.pipe(
-    Effect.tapError((cause) =>
-      Effect.logError("Failed to generate Claude runtime identifier.", { cause }),
+    Effect.mapError(
+      (cause) =>
+        new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "crypto/randomUUIDv4",
+          detail: "Failed to generate Claude runtime identifier.",
+          cause,
+        }),
     ),
-    Effect.catch(() => Effect.interrupt),
   );
   const nextEventId = Effect.map(randomUUIDv4, (id) => EventId.make(id));
   const makeEventStamp = () => Effect.all({ eventId: nextEventId, createdAt: nowIso });
@@ -2385,7 +2390,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       toProcessError(cause, "Claude runtime stream failed.", context.session.threadId),
     ).pipe(
       Stream.takeWhile(() => !context.stopped),
-      Stream.runForEach((message) => handleSdkMessage(context, message)),
+      Stream.runForEach((message) =>
+        handleSdkMessage(context, message).pipe(
+          Effect.mapError((cause) =>
+            toProcessError(
+              cause,
+              "Failed to process Claude runtime event.",
+              context.session.threadId,
+            ),
+          ),
+        ),
+      ),
     );
 
   const handleStreamExit = Effect.fn("handleStreamExit")(function* (
@@ -3065,7 +3080,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             if (context.streamFiber === streamFiber) {
               context.streamFiber = undefined;
             }
-            return handleStreamExit(context, exit);
+            return handleStreamExit(context, exit).pipe(
+              Effect.catch((cause) =>
+                Effect.logError("Failed to close Claude runtime stream.", { cause }),
+              ),
+            );
           }),
         ),
       );
@@ -3275,7 +3294,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           emitExitEvent: false,
         }),
       { discard: true },
-    ).pipe(Effect.tap(() => Queue.shutdown(runtimeEventQueue))),
+    ).pipe(
+      Effect.catch((cause) =>
+        Effect.logError("Failed to emit Claude session shutdown event.", { cause }),
+      ),
+      Effect.tap(() => Queue.shutdown(runtimeEventQueue)),
+    ),
   );
 
   return {

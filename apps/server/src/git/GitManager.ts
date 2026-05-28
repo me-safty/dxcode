@@ -536,34 +536,34 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   const sourceControlProvider = (cwd: string) => sourceControlProviders.resolve({ cwd });
   const serverSettingsService = yield* ServerSettingsService;
   const randomUUIDv4 = crypto.randomUUIDv4.pipe(
-    Effect.tapError((cause) =>
-      Effect.logError("Failed to generate Git operation identifier.", { cause }),
+    Effect.mapError((cause) =>
+      gitManagerError("randomUUIDv4", "Failed to generate Git operation identifier.", cause),
     ),
-    Effect.catch(() => Effect.interrupt),
   );
 
-  const createProgressEmitter = Effect.fn("createProgressEmitter")(function* (
+  const createProgressEmitter = (
     input: { cwd: string; action: GitStackedAction },
     options?: GitRunStackedActionOptions,
-  ) {
-    const actionId = options?.actionId ?? (yield* randomUUIDv4);
-    const reporter = options?.progressReporter;
+  ) =>
+    (options?.actionId === undefined ? randomUUIDv4 : Effect.succeed(options.actionId)).pipe(
+      Effect.map((actionId) => {
+        const reporter = options?.progressReporter;
+        const emit = (event: GitActionProgressPayload) =>
+          reporter
+            ? reporter.publish({
+                actionId,
+                cwd: input.cwd,
+                action: input.action,
+                ...event,
+              } as GitActionProgressEvent)
+            : Effect.void;
 
-    const emit = (event: GitActionProgressPayload) =>
-      reporter
-        ? reporter.publish({
-            actionId,
-            cwd: input.cwd,
-            action: input.action,
-            ...event,
-          } as GitActionProgressEvent)
-        : Effect.void;
-
-    return {
-      actionId,
-      emit,
-    };
-  });
+        return {
+          actionId,
+          emit,
+        };
+      }),
+    );
 
   const configurePullRequestHeadUpstreamBase = Effect.fn("configurePullRequestHeadUpstream")(
     function* (

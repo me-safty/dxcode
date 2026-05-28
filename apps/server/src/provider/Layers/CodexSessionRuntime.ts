@@ -748,10 +748,13 @@ export const makeCodexSessionRuntime = (
     const serverNotifications = yield* Queue.unbounded<CodexServerNotification>();
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
     const randomUUIDv4 = crypto.randomUUIDv4.pipe(
-      Effect.tapError((cause) =>
-        Effect.logError("Failed to generate Codex runtime identifier.", { cause }),
+      Effect.mapError(
+        (cause) =>
+          new CodexErrors.CodexAppServerTransportError({
+            detail: "Failed to generate Codex runtime identifier.",
+            cause,
+          }),
       ),
-      Effect.catch(() => Effect.interrupt),
     );
 
     const sessionCreatedAt = yield* nowIso;
@@ -1236,7 +1239,11 @@ export const makeCodexSessionRuntime = (
         status: "closed",
         activeTurnId: undefined,
       });
-      yield* emitSessionEvent("session/closed", "Session stopped");
+      yield* emitSessionEvent("session/closed", "Session stopped").pipe(
+        Effect.catch((cause) =>
+          Effect.logError("Failed to emit Codex session closed event.", { cause }),
+        ),
+      );
       yield* Scope.close(runtimeScope, Exit.void);
       yield* Queue.shutdown(serverNotifications);
       yield* Queue.shutdown(events);

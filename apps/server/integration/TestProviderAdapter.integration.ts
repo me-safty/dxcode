@@ -244,14 +244,15 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
     const emit = (event: ProviderRuntimeEvent) => Queue.offer(runtimeEvents, event);
     const randomUUIDv4 = (threadId: ThreadId) =>
       crypto.randomUUIDv4.pipe(
-        Effect.tapError((cause) =>
-          Effect.logError("Failed to generate test runtime identifier.", {
-            cause,
-            provider,
-            threadId,
-          }),
+        Effect.mapError(
+          (cause) =>
+            new ProviderAdapterValidationError({
+              provider,
+              operation: "crypto/randomUUIDv4",
+              issue: `Failed to generate test runtime identifier for thread '${threadId}'.`,
+              cause,
+            }),
         ),
-        Effect.catch(() => Effect.interrupt),
       );
 
     const startSession: ProviderAdapterShape<ProviderAdapterError>["startSession"] = (input) =>
