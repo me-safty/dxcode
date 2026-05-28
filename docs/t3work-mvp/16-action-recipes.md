@@ -576,6 +576,16 @@ type RecipeWorkflow = {
 
 type RecipeWorkflowStep =
   | { kind: "agent"; id: string; promptPath?: string; promptText?: string } // bootstrap live
+  | {
+      kind: "agent.task";
+      id: string;
+      promptPath?: string;
+      promptText?: string;
+      outputSchema?: JsonSchema;
+      model?: ModelSelection;
+      timeoutMs?: number;
+      resultBinding?: string;
+    } // planned — see Background agent tasks
   | { kind: "script"; id: string; module: string; input?: Record<string, unknown> } // live
   | { kind: "tool"; id: string; toolName: string; input?: Record<string, unknown> } // planned
   | { kind: "present-message"; id: string; message: SystemMessageSpec } // partial — see Step status
@@ -597,6 +607,127 @@ button" pattern is now `present-message` followed by `collect-input`.
 
 The former `run-interactive-agent` step is just an `agent` step. There is one step union,
 not a separate kickoff union and workflow union.
+
+### Deterministic workflows (no chat)
+
+Not every recipe culminates in a conversation. A workflow that contains **no `agent` step**
+is **deterministic**: it executes its `tool` / `script` / `present-message` /
+`collect-input` steps without involving the LLM, and the launch path skips
+thread/launch-card creation. The user sees the side effect (a filter applied, an artifact
+written, a draft mutation queued), not a chat.
+
+The canonical use case is an **inline filter** — a backlog View that renders chips like
+"Show only unassigned", "Show all assigned to me", "Hide closed". Each chip is a recipe
+whose workflow is a single `tool` step calling a view-state tool
+(`t3work.backlog.set_assignee_filter`, etc.) with the chip's parameters. Clicking the chip
+runs the workflow; the backlog re-filters; no conversation is created.
+
+Authoring rule:
+
+- If `workflow.steps` contains no `agent` step at any position, the launch is deterministic.
+- The host detects this at launch time and selects the no-chat execution path: no thread
+  bootstrap, no launch card, no kickoff prompt material. The workflow runs synchronously
+  (or asynchronously for `script` steps) and reports completion via a transient affordance
+  (toast, focus change, the visible state change itself) rather than an inserted message.
+- `collect-input` and `present-message` steps are still valid in deterministic workflows
+  (e.g., a confirmation dialog before a draft mutation). They render as modal/inline UI,
+  not as conversation messages.
+- A deterministic recipe's `view` placement is typically `action.inline` (see
+  [Epic 19 — Placements](./19-workspace-miniapps.md#placements)) so the chip sits within
+  the page's existing control chrome, not in a sidebar action list.
+
+A recipe with even one `agent` step in its workflow stays on the conversational path —
+the model does not split into two recipe types. It's the same recipe shape, with the
+launch behaviour selected by the workflow's content.
+
+### Launcher UX by workflow shape
+
+The shell does not own a single launcher UX. Recipes surface through **sidecar sections**
+([Epic 19 — Sidecar Sections](./19-workspace-miniapps.md#sidecar-sections)) — most
+commonly the bundled "Quick Starts" section — and that section's View decides per-item
+click behaviour based on the workflow's content:
+
+| Workflow shape                                              | Click behaviour         | Result surface                                                                        |
+| ----------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------- |
+| No `agent` step (deterministic)                             | Execute immediately     | Visible state change + transient toast                                                |
+| Has `agent` step + opening `collect-input` for kickoff text | Select → edit → send    | Chat thread, with the edited kickoff as the first user message                        |
+| Has `agent` step, no kickoff `collect-input`                | Launch chat directly    | Chat thread opens, first agent turn fires                                             |
+| Only `agent.task` (background-only)                         | Execute, capture result | Artifact ([Epic 08](./08-rich-artifacts.md)) or inline toast with the result; no chat |
+
+The launcher detects the shape at click time and selects the row above. The same recipe
+authoring shape (`recipe.ts`) covers all four; nothing on the recipe declares which UX it
+wants.
+
+Inline chips (the `action.inline` placement on the host page itself, e.g. a backlog
+filter chip) use the deterministic row only — they cannot live on the chat path.
+
+These UX rules belong to the Quick Starts section (and any future recipe-launcher
+section). Other sidecar sections — Recent Threads, Open Pull Requests, Status Widgets —
+have entirely different click behaviours owned by their own View.
+
+### Background agent tasks
+
+The interactive `agent` step opens or uses a conversation thread — the LLM's reply is a
+visible message the user sees and (usually) the workflow continues on. Some workflows need
+the opposite: an LLM invocation for **a specific, defined task** whose result feeds the next
+step but never reaches a chat surface. Examples:
+
+- summarize this PR diff into bullet points for a release-notes section
+- classify this ticket as bug / chore / feature for routing
+- generate three candidate test-plan headings from acceptance criteria
+- extract a structured field set from a freeform description
+
+These are the **`agent.task`** step — a background, non-interactive LLM call:
+
+```ts
+type RecipeWorkflowAgentTaskStep = {
+  kind: "agent.task";
+  id: string;
+  promptText?: string;
+  promptPath?: string;
+  // Optional structured-output shape; when set, the host instructs the model to emit
+  // JSON conforming to the schema and parses it as the step result.
+  outputSchema?: JsonSchema;
+  // Optional model override — background tasks can run on cheaper/faster models.
+  model?: { instanceId: string; model: string };
+  timeoutMs?: number;
+  // Name under which subsequent steps reference this step's result.
+  resultBinding?: string;
+};
+```
+
+Contract:
+
+- **No thread involvement.** No `thread.message.upsert`, no streaming to the conversation,
+  no launch card update. The presence of `agent.task` does not turn a deterministic
+  workflow into a conversational one.
+- **Structured result.** The agent's final assistant content is captured as the step
+  result. If `outputSchema` is set, the host parses + validates and the result is the
+  structured value; otherwise it's the raw text.
+- **Step-result binding.** `resultBinding` names the value so later `script` / `tool` /
+  `present-message` steps can reference it (e.g. `{ $ref: "summarize-pr.result" }` in their
+  input). This implies a small step-result data model the engine must persist alongside
+  `workflow-state.json` — design and ship that alongside `agent.task`.
+- **Progress.** Long-running tasks surface progress as step activities (the existing
+  internal-event channel). If the recipe wants user-visible progress, it pairs the
+  `agent.task` with a sibling `present-message` whose body/status it updates.
+- **Cost discipline.** The optional per-step `model` field lets recipes route routine
+  tasks to cheaper models without changing the user's default provider/model selection.
+- **Failure handling.** Timeouts and provider errors fail the step the same way `script`
+  / `tool` steps do — recorded as a failed step activity, the run halts at that step.
+
+`agent.task` shares the provider adapter with interactive `agent` steps but runs in a
+non-streaming, non-thread-bound mode. Per the [Tools](#tools) section it binds the broker
+with the recipe's `allowedToolGroups` if the model needs tools mid-task.
+
+A workflow can mix any combination of `agent.task` (background LLM calls) and `agent`
+(interactive turns) — the deterministic-vs-conversational split is decided by whether _any_
+interactive `agent` step exists, not by `agent.task`.
+
+> **Implementation status.** `agent.task` is not built. It introduces the first need for a
+> formal step-result binding model in the workflow engine; design that explicitly before
+> implementation, because subsequent step kinds (and the `create-recipe` recipe's
+> validation pass) will want to use it too.
 
 ### Stateless, forward-only execution
 
@@ -674,11 +805,12 @@ Binding modes:
   binding (read tools and `readResource` only). This is why `visible` must stay
   side-effect-free.
 
-> **Implementation status.** The broker exists for agents. `script`-step and `tool`-step
-> access to it is planned: today `api.tools.call` throws during visibility evaluation and
-> `tool` steps are unsupported. Wiring scripts/steps to the broker, adding the no-thread
-> binding, and enforcing `allowedToolGroups` is Phase 3 of the delivery plan. Until then
-> `allowedToolGroups` is declarative metadata.
+> **Implementation status.** The broker now backs workflow `script` and `tool` steps and
+> pre-launch `visible.ts` evaluation. Thread-bound recipe execution is filtered by
+> `allowedToolGroups`; pre-launch bindings are further intersected with the read-only
+> default (`integration.read`, `ui.render`). Project-local recipes with no declared
+> `allowedToolGroups` get no tools. Bundled core recipes keep their explicit default grants
+> from the bundled recipe registry for MVP compatibility.
 
 ## Views
 
@@ -793,6 +925,12 @@ from the `ActionRecipeContext` type in `packages/project-context`, not hand-main
 it cannot drift from the type.
 
 ## Conversation-Native Launch UX
+
+This section applies only to recipes whose workflow contains at least one interactive
+`agent` step. Deterministic recipes and background-task-only recipes follow the no-chat
+paths described in [Deterministic workflows](#deterministic-workflows-no-chat) and
+[Background agent tasks](#background-agent-tasks); they do not create a thread or insert
+a launch card.
 
 A recipe click is a first-class workflow launch, not "fill the composer for me." Launch
 switches the kickoff surface into normal conversation mode immediately.
@@ -1019,7 +1157,11 @@ project is created. Project-local recipes are the editable source of truth for t
 | Workflow runtime: bootstrap agent, card, await-card-action, script                                 | Built                                              |
 | Workflow runtime: mid-flow agent, tool, present-message, collect-input                             | Built except tool step                             |
 | Three-author conversation model + `t3workExt` seam (system messages, view-in-message)              | Built                                              |
-| Shared tool surface for scripts/steps via broker; enforce `allowedToolGroups`                      | Planned (Phase 3)                                  |
+| Shared tool surface for scripts/steps via broker; enforce `allowedToolGroups`                      | Built                                              |
+| Deterministic workflows (no-agent workflows skip thread/launch-card) + `action.inline` placement   | Planned (Phase 3 — same broker work)               |
+| `agent.task` step (background non-interactive LLM call) + step-result binding model                | Planned (Phase 4 — design step-result model first) |
+| Sidecar sections + `defineSidecarSection` SDK + composition model + remove hardcoded kickoff aside | Planned (Phase 5 — same Views-on-miniapp work)     |
+| `define*` SDK surface (per-placement helpers, no generic primitive, multi-placement via exports)   | Planned (Phase 5 — ships alongside the placements it covers) |
 | Run-directory materialization, `context.json`/schema/map                                           | Planned (Phase 4)                                  |
 | Setup script (formerly `init.ts`)                                                                  | Deferred until stage-2 sandbox                     |
 | Views unified on miniapp model; typed-event action path                                            | Planned (Phase 5)                                  |

@@ -1,6 +1,7 @@
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { pathToFileURL } from "node:url";
@@ -17,10 +18,15 @@ import { upsertWorkflowCardSystemMessage } from "./t3work-recipeWorkflowRuntimeM
 import { upsertThreadActivity } from "./t3work-recipeWorkflowRuntimeActivities.ts";
 import type { PresentedWorkflowCardState } from "./t3work-recipeWorkflowRuntimeExecutionTypes.ts";
 import {
+  createT3workPromiseToolApi,
+  createUnavailableT3workPromiseToolApi,
+} from "./t3work-toolBrokerPromiseApi.ts";
+import {
   resolveWithinRoot,
   stepActivityId,
   type PersistedRecipeWorkflowRunState,
 } from "./t3work-recipeWorkflowRuntimeShared.ts";
+import { T3workToolBroker } from "./t3work-toolBroker.ts";
 
 const isProjectRecipeConversationCard = Schema.is(ProjectRecipeConversationCard);
 
@@ -35,6 +41,7 @@ export const executeScriptWorkflowStep = Effect.fn("executeScriptWorkflowStep")(
   const pathService = yield* Path.Path;
   const runtimeContext = yield* Effect.context<FileSystem.FileSystem>();
   const runPromise = Effect.runPromiseWith(runtimeContext);
+  const toolBroker = yield* Effect.serviceOption(T3workToolBroker);
 
   yield* upsertThreadActivity({
     orchestration: input.orchestration,
@@ -85,7 +92,16 @@ export const executeScriptWorkflowStep = Effect.fn("executeScriptWorkflowStep")(
   }
 
   let presentedCard: PresentedWorkflowCardState | null = null;
+  const binding = Option.isSome(toolBroker)
+    ? yield* toolBroker.value.bindSession({
+        threadId: input.state.threadId,
+        allowedToolGroups: input.state.launch.allowedToolGroups ?? [],
+      })
+    : undefined;
   const scriptApi = {
+    tools: binding
+      ? createT3workPromiseToolApi({ binding, runPromise })
+      : createUnavailableT3workPromiseToolApi("during workflow execution"),
     workspace: {
       rootPath: input.state.workspaceRoot,
       recipePath: input.recipeBasePath,
@@ -137,8 +153,8 @@ export const executeScriptWorkflowStep = Effect.fn("executeScriptWorkflowStep")(
         );
       },
     },
-    fetch,
     log: { info: () => undefined, warn: () => undefined, error: () => undefined },
+    fetch,
   };
 
   const result = yield* Effect.promise(() =>

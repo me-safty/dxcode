@@ -13,11 +13,6 @@ export type RawProjectRecipeManifest = Omit<ProjectRecipeManifest, "scope" | "ki
   readonly kickoff?: unknown;
 };
 
-const ProjectRecipeVisibilityExpressionSchema = Schema.Struct({
-  kind: Schema.Literal("expr"),
-  expr: Schema.String,
-});
-
 const RawProjectRecipeManifestSchema = Schema.Struct({
   id: Schema.String,
   version: Schema.String,
@@ -27,9 +22,7 @@ const RawProjectRecipeManifestSchema = Schema.Struct({
   icon: Schema.optional(Schema.String),
   surfaces: Schema.Array(RecipeSurface),
   rank: Schema.optional(Schema.Union([Schema.Number, Schema.String])),
-  visibleWhen: Schema.optional(
-    Schema.Union([Schema.String, ProjectRecipeVisibilityExpressionSchema]),
-  ),
+  visibleWhen: Schema.optional(Schema.String),
   actionView: Schema.optional(Schema.String),
   prompt: Schema.String,
   kickoff: Schema.optional(Schema.Unknown),

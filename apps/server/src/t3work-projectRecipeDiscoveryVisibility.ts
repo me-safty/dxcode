@@ -18,7 +18,11 @@ import {
   isRelativePath,
   resolveWithinRoot,
 } from "./t3work-projectRecipeDiscoveryShared.ts";
-import { evaluateExpression } from "./t3work-projectRecipeDiscoveryTemplate.ts";
+import {
+  createT3workPromiseToolApi,
+  createUnavailableT3workPromiseToolApi,
+} from "./t3work-toolBrokerPromiseApi.ts";
+import { NoopT3workToolBroker, T3workToolBroker } from "./t3work-toolBroker.ts";
 
 function buildBundledCompatibilityResult(
   manifest: ProjectRecipeManifest,
@@ -52,11 +56,16 @@ const evaluateVisibleModule = Effect.fn("evaluateVisibleModule")(function* (inpu
   readonly workspaceRoot: string;
   readonly recipePath: string;
   readonly context: ProjectRecipeRenderContext;
+  readonly allowedToolGroups: ReadonlyArray<string>;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
   const runtimeContext = yield* Effect.context<FileSystem.FileSystem>();
   const runPromise = Effect.runPromiseWith(runtimeContext);
+  const toolBroker = Option.getOrElse(
+    yield* Effect.serviceOption(T3workToolBroker),
+    () => NoopT3workToolBroker,
+  );
   const moduleUrl = pathToFileURL(input.modulePath);
   moduleUrl.searchParams.set("v", String(yield* Clock.currentTimeMillis));
   const imported = (yield* Effect.tryPromise(() => import(moduleUrl.toString()))) as {
@@ -89,20 +98,20 @@ const evaluateVisibleModule = Effect.fn("evaluateVisibleModule")(function* (inpu
     throw new Error("visible.ts must export a visible function.");
   }
   const visible = imported.visible;
+  const binding = yield* toolBroker.bindReadOnly({
+    workspaceRoot: input.workspaceRoot,
+    callerKind: "visibility",
+    renderContext: input.context,
+    allowedToolGroups: input.allowedToolGroups,
+  });
+  const tools = binding
+    ? createT3workPromiseToolApi({ binding, runPromise })
+    : createUnavailableT3workPromiseToolApi("during visibility evaluation");
 
   return yield* Effect.promise(() =>
     Promise.resolve(
       visible(input.context, {
-        tools: {
-          call: async (name) => {
-            throw new Error(`Recipe tool '${name}' is not available during visibility evaluation.`);
-          },
-          readResource: async (uri) => {
-            throw new Error(
-              `Recipe resource '${uri}' is not available during visibility evaluation.`,
-            );
-          },
-        },
+        tools,
         workspace: {
           rootPath: input.workspaceRoot,
           recipePath: input.recipePath,
@@ -145,13 +154,6 @@ export const evaluateVisibility = Effect.fn("evaluateVisibility")(function* (inp
   if (!visibleWhen) {
     return buildBundledCompatibilityResult(input.manifest, input.context) ?? { visible: true };
   }
-  if (typeof visibleWhen === "object" && visibleWhen.kind === "expr") {
-    const evaluated = Boolean(evaluateExpression(visibleWhen.expr, input.context));
-    return {
-      visible: evaluated,
-      ...(typeof input.manifest.rank === "number" ? { rank: input.manifest.rank } : {}),
-    };
-  }
   if (typeof visibleWhen === "string" && isRelativePath(visibleWhen)) {
     const modulePath = resolveWithinRoot(pathService, input.recipePath, visibleWhen);
     const result = yield* evaluateVisibleModule({
@@ -159,6 +161,7 @@ export const evaluateVisibility = Effect.fn("evaluateVisibility")(function* (inp
       workspaceRoot: input.workspaceRoot,
       recipePath: input.recipePath,
       context: input.context,
+      allowedToolGroups: input.manifest.allowedToolGroups ?? [],
     }).pipe(Effect.timeoutOption(`${DEFAULT_VISIBILITY_TIMEOUT_MS} millis`));
     if (Option.isNone(result)) {
       return { visible: false };

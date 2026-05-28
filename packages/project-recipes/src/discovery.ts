@@ -149,11 +149,6 @@ export type ProjectRecipeVisibilityResult = {
   readonly reason?: string;
 };
 
-export type ProjectRecipeVisibilityExpression = {
-  readonly kind: "expr";
-  readonly expr: string;
-};
-
 export type ProjectRecipeManifest = {
   readonly id: string;
   readonly version: string;
@@ -163,7 +158,7 @@ export type ProjectRecipeManifest = {
   readonly icon?: string;
   readonly surfaces: ReadonlyArray<RecipeSurface>;
   readonly rank?: number | string;
-  readonly visibleWhen?: string | ProjectRecipeVisibilityExpression;
+  readonly visibleWhen?: string;
   readonly actionView?: string;
   readonly prompt: string;
   readonly kickoff?: ProjectRecipeKickoffProgram;

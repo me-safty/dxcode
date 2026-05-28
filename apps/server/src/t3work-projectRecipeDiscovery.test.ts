@@ -1,11 +1,15 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
 import { describe, expect, it } from "vitest";
 import { createQueryable } from "@t3tools/project-context";
 
+import type { OrchestrationEngineShape } from "./orchestration/Services/OrchestrationEngine.ts";
 import { discoverProjectRecipes } from "./t3work-projectRecipeDiscovery.js";
+import { makeBrokerLayer } from "./t3work-toolBrokerTestUtils.ts";
 
 const makeTempWorkspace = Effect.fn("makeTempWorkspace")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -309,7 +313,13 @@ export function visible(ctx) {
     );
   });
 
-  it("renders expressions against dashboard surfaceState and contextAttachments", async () => {
+  it("binds visible.ts to the no-thread read-only tool surface", async () => {
+    const orchestrationMock: OrchestrationEngineShape = {
+      readEvents: () => Stream.empty,
+      dispatch: () => Effect.succeed({ sequence: 1 }),
+      streamDomainEvents: Stream.empty,
+    };
+
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
@@ -325,13 +335,28 @@ export function visible(ctx) {
   "shortDescription": "Top item: {{ contextAttachments?.[0]?.label ?? 'none' }}",
   "surfaces": ["project.dashboard.backlog"],
   "rank": "{{ surfaceState?.currentView?.bugCount === 1 ? 88 : 40 }}",
-  "visibleWhen": {
-    "kind": "expr",
-    "expr": "surfaceState?.hasContextAttachments === true && surfaceState?.currentView?.itemCount === 1 && contextAttachments?.some((item) => item.jiraIssueType === 'Bug')"
-  },
+  "visibleWhen": "./visible.ts",
+  "allowedToolGroups": ["integration.read"],
   "prompt": "./prompt.md"
 }`,
             prompt: "Focus the current dashboard context.",
+            visibleTs: `
+export async function visible(_ctx, api) {
+  const view = await api.tools.call("t3work.view.read");
+  try {
+    await api.tools.call("t3work.thread.rename", { title: "Nope" });
+    return { visible: false };
+  } catch (error) {
+    return {
+      visible:
+        view.thread === null &&
+        view.project?.workspaceRoot === "${workspaceRoot}" &&
+        String(error instanceof Error ? error.message : error).includes("requires group 'view.state'"),
+      reason: String(error instanceof Error ? error.message : error),
+    };
+  }
+}
+`,
           });
 
           const results = yield* discoverProjectRecipes({
@@ -386,8 +411,11 @@ export function visible(ctx) {
             displayName: "Prioritize backlog: 1 items",
             shortDescription: "Top item: ALPHA-42 Fix import crash",
             rank: 88,
+            reason: expect.stringContaining("requires group 'view.state'"),
           });
-        }).pipe(Effect.provide(NodeServices.layer)),
+        }).pipe(
+          Effect.provide(Layer.mergeAll(makeBrokerLayer(orchestrationMock), NodeServices.layer)),
+        ),
       ),
     );
   });

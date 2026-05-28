@@ -1,4 +1,5 @@
 import type { ThreadId } from "@t3tools/contracts";
+import type { ProjectRecipeRenderContext } from "@t3tools/project-recipes";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
@@ -58,8 +59,7 @@ export interface T3workTurnToolContext {
   readonly state: unknown;
 }
 
-export interface T3workToolBinding {
-  readonly threadId: ThreadId;
+export interface T3workBoundToolSurface {
   readonly listServers: () => ReadonlyArray<T3workBrokerServerStatus>;
   readonly callTool: (input: {
     readonly server: string;
@@ -74,11 +74,28 @@ export interface T3workToolBinding {
   }) => Effect.Effect<T3workResourceReadResult, never>;
 }
 
+export interface T3workToolBinding extends T3workBoundToolSurface {
+  readonly threadId: ThreadId;
+}
+
+export type T3workPrelaunchToolBindingCaller = "visibility" | "view.preRender";
+
+export interface T3workPrelaunchToolBinding extends T3workBoundToolSurface {
+  readonly bindingKey: string;
+}
+
 export interface T3workToolBrokerShape {
   readonly bindSession: (input: {
     readonly threadId: ThreadId;
     readonly toolContext?: T3workTurnToolContext;
+    readonly allowedToolGroups?: ReadonlyArray<string>;
   }) => Effect.Effect<T3workToolBinding | undefined, never>;
+  readonly bindReadOnly: (input: {
+    readonly workspaceRoot: string;
+    readonly callerKind: T3workPrelaunchToolBindingCaller;
+    readonly renderContext: ProjectRecipeRenderContext;
+    readonly allowedToolGroups?: ReadonlyArray<string>;
+  }) => Effect.Effect<T3workPrelaunchToolBinding | undefined, never>;
 }
 
 export class T3workToolBroker extends Context.Service<T3workToolBroker, T3workToolBrokerShape>()(
@@ -87,4 +104,5 @@ export class T3workToolBroker extends Context.Service<T3workToolBroker, T3workTo
 
 export const NoopT3workToolBroker: T3workToolBrokerShape = {
   bindSession: () => Effect.void.pipe(Effect.as(undefined)),
+  bindReadOnly: () => Effect.void.pipe(Effect.as(undefined)),
 };

@@ -57,6 +57,7 @@ function renderCreateRecipeWorkflow(): string {
     "      },",
     "    },",
     "  },",
+    '  { kind: "tool", id: "read-current-view", toolName: "t3work.view.read" },',
     "  {",
     '    kind: "script",',
     '    id: "prepare-authoring-workspace",',

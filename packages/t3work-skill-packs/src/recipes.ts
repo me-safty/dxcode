@@ -80,6 +80,11 @@ const BUNDLED_RECIPES: ReadonlyArray<BundledT3WorkRecipe> = [
           },
         },
         {
+          kind: "tool",
+          id: "read-current-view",
+          toolName: "t3work.view.read",
+        },
+        {
           kind: "script",
           id: "prepare-authoring-workspace",
           module: "./recipe-script.ts#prepareAuthoringWorkspace",

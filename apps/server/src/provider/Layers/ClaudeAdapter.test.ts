@@ -461,6 +461,7 @@ describe("ClaudeAdapterLive", () => {
     "injects t3work broker tools into Claude MCP servers and refreshes them on turn start",
     () => {
       const toolBroker: T3workToolBrokerShape = {
+        bindReadOnly: () => Effect.void.pipe(Effect.as(undefined)),
         bindSession: ({ threadId }) =>
           Effect.succeed({
             threadId,

@@ -5,3 +5,4 @@ export * from "./input.ts";
 export * from "./message.ts";
 export * from "./runtime.ts";
 export * from "./surface.ts";
+export * from "./toolGroups.ts";

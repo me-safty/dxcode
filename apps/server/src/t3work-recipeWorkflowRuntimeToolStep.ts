@@ -18,7 +18,10 @@ export const executeToolWorkflowStep = Effect.fn("executeToolWorkflowStep")(func
   createdAt: string;
   toolBroker: T3workToolBrokerShape;
 }) {
-  const binding = yield* input.toolBroker.bindSession({ threadId: input.state.threadId });
+  const binding = yield* input.toolBroker.bindSession({
+    threadId: input.state.threadId,
+    allowedToolGroups: input.state.launch.allowedToolGroups ?? [],
+  });
   if (!binding) {
     yield* upsertThreadActivity({
       orchestration: input.orchestration,
