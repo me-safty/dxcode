@@ -1,10 +1,12 @@
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Random from "effect/Random";
+import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 
 import serverPackageJson from "../../../server/package.json" with { type: "json" };
@@ -17,7 +19,10 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopWslEnvironment from "../wsl/DesktopWslEnvironment.ts";
 
 export interface DesktopBackendConfigurationShape {
-  readonly resolve: Effect.Effect<DesktopBackendManager.DesktopBackendStartConfig>;
+  readonly resolve: Effect.Effect<
+    DesktopBackendManager.DesktopBackendStartConfig,
+    PlatformError.PlatformError
+  >;
 }
 
 export class DesktopBackendConfiguration extends Context.Service<
@@ -122,23 +127,6 @@ const readPersistedBackendObservabilitySettings: Effect.Effect<
     otlpMetricsUrl: Option.fromNullishOr(parsed.otlpMetricsUrl),
   };
 });
-
-const getOrCreateBootstrapToken = Effect.fn("desktop.backendConfiguration.bootstrapToken")(
-  function* (tokenRef: Ref.Ref<Option.Option<string>>) {
-    const existing = yield* Ref.get(tokenRef);
-    if (Option.isSome(existing)) {
-      return existing.value;
-    }
-
-    let token = "";
-    while (token.length < 48) {
-      token += (yield* Random.nextUUIDv4).replace(/-/g, "");
-    }
-    token = token.slice(0, 48);
-    yield* Ref.set(tokenRef, Option.some(token));
-    return token;
-  },
-);
 
 interface ResolveBackendStartConfigInput {
   readonly bootstrapToken: string;
@@ -356,11 +344,22 @@ export const layer = Layer.effect(
     const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
     const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
     const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment;
+    const crypto = yield* Crypto.Crypto;
     const tokenRef = yield* Ref.make(Option.none<string>());
+    const getOrCreateBootstrapToken = Effect.gen(function* () {
+      const existing = yield* Ref.get(tokenRef);
+      if (Option.isSome(existing)) {
+        return existing.value;
+      }
+
+      const token = Encoding.encodeHex(yield* crypto.randomBytes(24));
+      yield* Ref.set(tokenRef, Option.some(token));
+      return token;
+    });
 
     return DesktopBackendConfiguration.of({
       resolve: Effect.gen(function* () {
-        const bootstrapToken = yield* getOrCreateBootstrapToken(tokenRef);
+        const bootstrapToken = yield* getOrCreateBootstrapToken;
         const observabilitySettings = yield* readPersistedBackendObservabilitySettings.pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
