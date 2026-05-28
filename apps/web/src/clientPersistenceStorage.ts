@@ -176,7 +176,7 @@ export function writeBrowserSavedEnvironmentSecret(
         return record;
       }
       found = true;
-      const nextRecord = {
+      const nextRecord: BrowserSavedEnvironmentRecord = {
         environmentId: record.environmentId,
         label: record.label,
         httpBaseUrl: record.httpBaseUrl,
@@ -185,7 +185,9 @@ export function writeBrowserSavedEnvironmentSecret(
         lastConnectedAt: record.lastConnectedAt,
         bearerToken: secret,
       };
-      return record.desktopSsh ? { ...nextRecord, desktopSsh: record.desktopSsh } : nextRecord;
+      return record.desktopSsh
+        ? Object.assign(nextRecord, { desktopSsh: record.desktopSsh })
+        : nextRecord;
     }),
   });
   return found;
