@@ -57,7 +57,10 @@ describe("isTemporaryWorktreeBranch", () => {
   it("matches the generated temporary worktree refName format", () => {
     expect(
       isTemporaryWorktreeBranch(
-        buildTemporaryWorktreeBranchName(() => "deadbeef-dead-4eef-8ead-deadbeefdead"),
+        buildTemporaryWorktreeBranchName((byteLength) => {
+          expect(byteLength).toBe(4);
+          return "DEADBEEF";
+        }),
       ),
     ).toBe(true);
   });
