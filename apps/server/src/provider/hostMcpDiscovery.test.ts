@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHostMcpAdvertisement, writeHostMcpAdvertisement } from "@t3tools/shared/hostMcp";
 
-import { resolveHostMcpServersForWorkspace } from "./hostMcpDiscovery.ts";
+import {
+  resolveHostMcpServersForProviderStart,
+  resolveHostMcpServersForWorkspace,
+} from "./hostMcpDiscovery.ts";
 
 describe("host MCP discovery", () => {
   let tempDirs: string[] = [];
@@ -122,6 +125,27 @@ describe("host MCP discovery", () => {
         bootstrapServers: [bootstrapServer],
         socketPathExists: (socketPath) => socketPath !== "/tmp/missing.sock",
         probe: async (socketPath) => socketPath !== "/tmp/failed.sock",
+      }),
+    ).resolves.toEqual([bootstrapServer]);
+  });
+
+  it("falls back to bootstrap servers when provider-start discovery fails", async () => {
+    const t3Home = path.join(makeT3Home(), "not-a-directory");
+    fs.writeFileSync(t3Home, "");
+    const bootstrapServer = {
+      name: "bootstrap",
+      socketPath: "/tmp/bootstrap.sock",
+    };
+
+    await expect(
+      resolveHostMcpServersForProviderStart({
+        serverConfig: {
+          baseDir: t3Home,
+          hostMcpServers: [bootstrapServer],
+        },
+        sessionInput: {
+          cwd: "/repo",
+        },
       }),
     ).resolves.toEqual([bootstrapServer]);
   });

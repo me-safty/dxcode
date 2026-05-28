@@ -57,6 +57,9 @@ export function resolveHostMcpServersForProviderStart(input: {
   readonly serverConfig: Pick<ServerConfigShape, "baseDir" | "hostMcpServers">;
   readonly sessionInput: Pick<ProviderSessionStartInput, "cwd" | "projectWorkspaceRoot">;
 }): Promise<readonly DesktopBootstrapMcpServer[]> {
+  // Provider startup treats host MCP discovery as best-effort. Bad or stale host
+  // advertisements must not block the provider process from starting with the
+  // configured bootstrap servers.
   return resolveHostMcpServersForWorkspace({
     t3Home: input.serverConfig.baseDir,
     workspaceRoot: input.sessionInput.projectWorkspaceRoot ?? input.sessionInput.cwd,
@@ -66,6 +69,8 @@ export function resolveHostMcpServersForProviderStart(input: {
 
 export function defaultSocketPathExists(socketPath: string): boolean {
   if (process.platform === "win32" && socketPath.startsWith("\\\\.\\pipe\\")) {
+    // Windows named pipes are not reliably visible through fs.existsSync. Let the
+    // subsequent protocol probe perform the authoritative availability check.
     return true;
   }
   return fs.existsSync(socketPath);
