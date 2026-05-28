@@ -67,6 +67,38 @@ describe("HostPeerFederation", () => {
     );
   });
 
+  it("does not dispatch owner-sensitive commands to later peers after one peer succeeds", async () => {
+    const baseDir = makeTempDir();
+    writePeerAdvertisement(baseDir, {
+      backendId: "vscode-peer-a",
+      httpBaseUrl: "http://127.0.0.1:49111",
+    });
+    writePeerAdvertisement(baseDir, {
+      backendId: "vscode-peer-b",
+      httpBaseUrl: "http://127.0.0.1:49112",
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ sequence: 42 }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const federation = makeHostPeerFederation(makeConfig(baseDir), makeProjection("running"));
+    const result = await Effect.runPromise(federation.dispatchCommand(interruptCommand()));
+
+    expect(Option.getOrNull(result)).toEqual({ sequence: 42 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:49111/api/local-peer/orchestration/dispatch"),
+      expect.objectContaining({
+        body: JSON.stringify(interruptCommand()),
+        method: "POST",
+      }),
+    );
+  });
+
   it("does not route a follow-up prompt after interruption so ownership can transfer locally", async () => {
     const baseDir = makeTempDir();
     writePeerAdvertisement(baseDir);

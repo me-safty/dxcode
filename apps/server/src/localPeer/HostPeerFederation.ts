@@ -107,32 +107,28 @@ export function makeHostPeerFederation(
       if (peers.length === 0) {
         return Option.none();
       }
-      const results = yield* Effect.forEach(
-        peers,
-        (peer) =>
-          requestPeerJson({
-            peer,
-            pathname: "/api/local-peer/orchestration/dispatch",
-            method: "POST",
-            body: command,
-            decode: decodeDispatchResult,
-          }).pipe(
-            Effect.map(Option.some),
-            Effect.catch((cause) =>
-              Effect.logDebug("local peer command route failed", {
-                backendId: peer.backendId,
-                projectId: threadContext.projectId,
-                threadId: routing.threadId,
-                commandType: command.type,
-                cause,
-              }).pipe(Effect.as(Option.none<DispatchResult>())),
-            ),
+      for (const peer of peers) {
+        const result = yield* requestPeerJson({
+          peer,
+          pathname: "/api/local-peer/orchestration/dispatch",
+          method: "POST",
+          body: command,
+          decode: decodeDispatchResult,
+        }).pipe(
+          Effect.map(Option.some),
+          Effect.catch((cause) =>
+            Effect.logDebug("local peer command route failed", {
+              backendId: peer.backendId,
+              projectId: threadContext.projectId,
+              threadId: routing.threadId,
+              commandType: command.type,
+              cause,
+            }).pipe(Effect.as(Option.none<DispatchResult>())),
           ),
-        { concurrency: "unbounded" },
-      );
-      const result = results.find(Option.isSome);
-      if (result) {
-        return result;
+        );
+        if (Option.isSome(result)) {
+          return result;
+        }
       }
 
       return yield* new OrchestrationDispatchCommandError({
