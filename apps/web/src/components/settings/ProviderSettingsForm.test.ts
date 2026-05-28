@@ -36,6 +36,24 @@ describe("ProviderSettingsForm helpers", () => {
     });
   });
 
+  it("derives DeepSeek settings fields including the secret API key", () => {
+    const deepseek = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("deepseek")];
+    expect(deepseek).toBeDefined();
+    expect(deepseek?.label).toBe("DeepSeek");
+
+    expect(deriveProviderSettingsFields(deepseek!).map((field) => field.key)).toEqual([
+      "apiKey",
+      "binaryPath",
+      "homePath",
+      "launchArgs",
+    ]);
+    expect(deriveProviderSettingsFields(deepseek!)[0]).toMatchObject({
+      key: "apiKey",
+      label: "API key",
+      control: "password",
+    });
+  });
+
   it("preserves unknown config keys while omitting empty configurable fields", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
     expect(opencode).toBeDefined();

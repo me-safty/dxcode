@@ -2,6 +2,7 @@ import {
   ClaudeSettings,
   CodexSettings,
   CursorSettings,
+  DeepSeekSettings,
   OpenCodeSettings,
   ProviderDriverKind,
 } from "@t3tools/contracts";
@@ -45,6 +46,12 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     label: "Claude",
     icon: ClaudeAI,
     settingsSchema: ClaudeSettings,
+  },
+  {
+    value: ProviderDriverKind.make("deepseek"),
+    label: "DeepSeek",
+    icon: ClaudeAI,
+    settingsSchema: DeepSeekSettings,
   },
   {
     value: ProviderDriverKind.make("cursor"),

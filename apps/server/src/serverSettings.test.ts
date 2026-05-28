@@ -14,7 +14,11 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { ServerConfig } from "./config.ts";
-import { ServerSettingsLive, ServerSettingsService } from "./serverSettings.ts";
+import {
+  redactServerSettingsForClient,
+  ServerSettingsLive,
+  ServerSettingsService,
+} from "./serverSettings.ts";
 
 const makeServerSettingsLayer = () =>
   ServerSettingsLive.pipe(
@@ -526,6 +530,107 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         roundTripped.providerInstances[instanceId]?.environment?.[0]?.value,
         "sk-or-secret",
       );
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("stores DeepSeek API keys outside settings.json and restores them server-side", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const instanceId = ProviderInstanceId.make("deepseek_work");
+
+      const next = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("deepseek"),
+            config: { apiKey: "sk-deepseek-secret", binaryPath: "claude" },
+          },
+        },
+      });
+
+      assert.deepEqual(next.providerInstances[instanceId]?.config, {
+        apiKey: "sk-deepseek-secret",
+        apiKeyRedacted: true,
+        binaryPath: "claude",
+      });
+
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.notInclude(raw, "sk-deepseek-secret");
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      assert.deepEqual(JSON.parse(raw).providerInstances.deepseek_work.config, {
+        apiKey: "",
+        apiKeyRedacted: true,
+        binaryPath: "claude",
+      });
+
+      const roundTripped = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("deepseek"),
+            config: { apiKey: "", apiKeyRedacted: true, binaryPath: "claude" },
+          },
+        },
+      });
+
+      assert.deepEqual(roundTripped.providerInstances[instanceId]?.config, {
+        apiKey: "sk-deepseek-secret",
+        apiKeyRedacted: true,
+        binaryPath: "claude",
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("removes stale DeepSeek API key secrets when the provider instance is cleared", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const instanceId = ProviderInstanceId.make("deepseek_work");
+
+      yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("deepseek"),
+            config: { apiKey: "sk-deepseek-secret" },
+          },
+        },
+      });
+
+      yield* serverSettings.updateSettings({ providerInstances: {} });
+
+      const next = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("deepseek"),
+            config: { apiKey: "", apiKeyRedacted: true },
+          },
+        },
+      });
+
+      assert.deepEqual(next.providerInstances[instanceId]?.config, {
+        apiKey: "",
+        apiKeyRedacted: true,
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("redacts DeepSeek API keys from client settings payloads", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const instanceId = ProviderInstanceId.make("deepseek_work");
+
+      const next = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("deepseek"),
+            config: { apiKey: "sk-deepseek-secret" },
+          },
+        },
+      });
+
+      assert.deepEqual(redactServerSettingsForClient(next).providerInstances[instanceId]?.config, {
+        apiKey: "",
+        apiKeyRedacted: true,
+      });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 });

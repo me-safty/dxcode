@@ -122,6 +122,14 @@ function createBaseServerConfig(): ServerConfig {
           customModels: [],
           launchArgs: "",
         },
+        deepseek: {
+          enabled: true,
+          apiKey: "",
+          binaryPath: "claude",
+          homePath: "",
+          customModels: [],
+          launchArgs: "",
+        },
         cursor: { enabled: true, binaryPath: "", apiEndpoint: "", customModels: [] },
         opencode: {
           enabled: true,
