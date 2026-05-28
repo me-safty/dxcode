@@ -71,13 +71,13 @@
     "vitest": "catalog:"
   },
   "overrides": {
-    "@effect/atom-react": "4.0.0-beta.73",
-    "@effect/platform-bun": "4.0.0-beta.73",
-    "@effect/platform-node": "4.0.0-beta.73",
-    "@effect/platform-node-shared": "4.0.0-beta.73",
-    "@effect/sql-sqlite-bun": "4.0.0-beta.73",
-    "@effect/vitest": "4.0.0-beta.73",
-    "effect": "4.0.0-beta.73",
+    "@effect/atom-react": "catalog:",
+    "@effect/platform-bun": "catalog:",
+    "@effect/platform-node": "catalog:",
+    "@effect/platform-node-shared": "catalog:",
+    "@effect/sql-sqlite-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "effect": "catalog:",
     "vite": "^8.0.0"
   },
   "engines": {
