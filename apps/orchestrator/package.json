@@ -6,6 +6,8 @@
   "scripts": {
     "convex:disable-ai-files": "bunx convex ai-files disable",
     "dev": "bun run convex:disable-ai-files && bunx convex dev",
+    "dev:local": "node --watch src/localServer/bin.ts",
+    "start:local": "node src/localServer/bin.ts",
     "deploy": "bun run convex:disable-ai-files && bunx convex deploy",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",

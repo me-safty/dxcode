@@ -45,6 +45,8 @@ export interface ConvexChatSdkStateOps {
   readonly queueDepth: (threadId: string) => Promise<number>;
 }
 
+export type TaskIntakeChatSdkStateOps = ConvexChatSdkStateOps;
+
 function stringifyValue(value: unknown) {
   return JSON.stringify(value);
 }
@@ -74,7 +76,7 @@ function deserializeQueueEntry(entryJson: string): QueueEntry {
   };
 }
 
-export function createConvexChatSdkState(ops: ConvexChatSdkStateOps): StateAdapter {
+export function createTaskIntakeChatSdkState(ops: TaskIntakeChatSdkStateOps): StateAdapter {
   return {
     async connect() {},
     async disconnect() {},
@@ -130,3 +132,5 @@ export function createConvexChatSdkState(ops: ConvexChatSdkStateOps): StateAdapt
     queueDepth: ops.queueDepth,
   };
 }
+
+export const createConvexChatSdkState = createTaskIntakeChatSdkState;
