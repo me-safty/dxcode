@@ -3,7 +3,7 @@ import {
   bootstrapRemoteBearerSession,
   fetchRemoteEnvironmentDescriptor,
 } from "@t3tools/client-runtime";
-import { resolveRemotePairingTarget } from "@t3tools/shared/remote";
+import { resolveRemotePairingTarget, stripPairingTokenFromUrl } from "@t3tools/shared/remote";
 import { mobileRemoteHttpRuntime } from "./runtime";
 
 export interface RemoteConnectionInput {
@@ -26,6 +26,15 @@ export type RemoteClientConnectionState =
   | "ready"
   | "reconnecting"
   | "disconnected";
+
+export function redactPairingCredential(pairingUrl: string): string {
+  const trimmed = pairingUrl.trim();
+  try {
+    return stripPairingTokenFromUrl(new URL(trimmed)).toString();
+  } catch {
+    return trimmed;
+  }
+}
 
 export async function bootstrapRemoteConnection(
   input: RemoteConnectionInput,
@@ -50,7 +59,7 @@ export async function bootstrapRemoteConnection(
   return {
     environmentId: descriptor.environmentId,
     environmentLabel: descriptor.label,
-    pairingUrl: input.pairingUrl.trim(),
+    pairingUrl: redactPairingCredential(input.pairingUrl),
     displayUrl: target.httpBaseUrl,
     httpBaseUrl: target.httpBaseUrl,
     wsBaseUrl: target.wsBaseUrl,
