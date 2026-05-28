@@ -10,6 +10,7 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationEvent,
+  type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
@@ -245,6 +246,47 @@ function makeEvent<T extends OrchestrationEvent["type"]>(
     payload,
     ...overrides,
   } as Extract<OrchestrationEvent, { type: T }>;
+}
+
+function makeActivity(
+  overrides: Partial<OrchestrationThreadActivity> = {},
+): OrchestrationThreadActivity {
+  return {
+    id: EventId.make("activity-1"),
+    tone: "info",
+    kind: "step",
+    summary: "Activity",
+    payload: {},
+    turnId: TurnId.make("turn-1"),
+    createdAt: "2026-02-27T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeSubagentOutputActivity(input: {
+  readonly id: string;
+  readonly sequence: number;
+  readonly content: string;
+}): OrchestrationThreadActivity {
+  return makeActivity({
+    id: EventId.make(input.id),
+    tone: "tool",
+    kind: "tool.updated",
+    summary: "Subagent",
+    turnId: TurnId.make("turn-1"),
+    sequence: input.sequence,
+    createdAt: `2026-02-27T00:00:00.${String(input.sequence).padStart(3, "0")}Z`,
+    payload: {
+      itemType: "collab_agent_tool_call",
+      detail: "Create a haiku",
+      data: {
+        toolCallId: "collab-1",
+        rawOutput: {
+          content: input.content,
+        },
+      },
+    },
+  });
 }
 
 describe("environment state removal", () => {
@@ -484,6 +526,62 @@ describe("incremental orchestration updates", () => {
 
     expect(nextAfterProjectDelete).toBe(state);
     expect(nextAfterThreadDelete).toBe(state);
+  });
+
+  it("merges live subagent output chunks before applying the activity retention cap", () => {
+    const firstSubagentChunk = makeSubagentOutputActivity({
+      id: "subagent-output-1",
+      sequence: 1,
+      content: "Rain lifts ",
+    });
+    const fillerActivities = Array.from({ length: 499 }, (_, index) => {
+      const sequence = index + 2;
+      return makeActivity({
+        id: EventId.make(`activity-${sequence}`),
+        sequence,
+        createdAt: `2026-02-27T00:00:00.${String(sequence).padStart(3, "0")}Z`,
+      });
+    });
+    const state = makeState(
+      makeThread({
+        activities: [firstSubagentChunk, ...fillerActivities],
+      }),
+    );
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent(
+        "thread.activity-appended",
+        {
+          threadId: ThreadId.make("thread-1"),
+          activity: makeSubagentOutputActivity({
+            id: "subagent-output-2",
+            sequence: 501,
+            content: "from wires",
+          }),
+        },
+        { sequence: 501, occurredAt: "2026-02-27T00:08:21.000Z" },
+      ),
+      localEnvironmentId,
+    );
+
+    const activities = threadsOf(next)[0]?.activities ?? [];
+    const mergedActivity = activities.find((activity) => activity.id === firstSubagentChunk.id);
+    const mergedPayload = mergedActivity?.payload as
+      | {
+          data?: {
+            rawOutput?: {
+              content?: string;
+            };
+          };
+        }
+      | undefined;
+
+    expect(activities).toHaveLength(500);
+    expect(activities.some((activity) => activity.id === EventId.make("subagent-output-2"))).toBe(
+      false,
+    );
+    expect(mergedPayload?.data?.rawOutput?.content).toBe("Rain lifts from wires");
   });
 
   it("reuses an existing project row when project.created arrives with a new id for the same cwd", () => {

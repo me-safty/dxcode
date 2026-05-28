@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -29,6 +30,8 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
@@ -1112,10 +1115,18 @@ function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
 }
 
 function workEntryPreview(
-  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
+  workEntry: Pick<
+    TimelineWorkEntry,
+    "detail" | "command" | "changedFiles" | "itemType" | "output" | "subagentPrompt"
+  >,
   workspaceRoot: string | undefined,
 ) {
   if (workEntry.command) return workEntry.command;
+  if (workEntry.itemType === "collab_agent_tool_call") {
+    const { prompt, output } = resolveSubagentDisplayParts(workEntry);
+    return prompt ?? output;
+  }
+  if (workEntry.subagentPrompt) return workEntry.subagentPrompt;
   if (workEntry.detail) return workEntry.detail;
   if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
   const [firstPath] = workEntry.changedFiles ?? [];
@@ -1176,11 +1187,96 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
 
+function ToolDetailBlock(props: {
+  title: string;
+  children: ReactNode;
+  mono?: boolean;
+  tone?: "default" | "error";
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="text-[9px] font-medium uppercase tracking-[0.14em] text-muted-foreground/55">
+        {props.title}
+      </p>
+      <div
+        className={cn(
+          "max-h-80 overflow-auto rounded-md border border-border/55 bg-background/80 px-2 py-1.5 text-[11px] leading-5 text-foreground/78",
+          props.mono && "font-mono whitespace-pre-wrap wrap-break-word",
+          props.tone === "error" &&
+            "border-rose-500/20 bg-rose-500/5 text-rose-800 dark:text-rose-200",
+        )}
+      >
+        {props.children}
+      </div>
+    </div>
+  );
+}
+
+function normalizedSubagentText(value: string | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function resolveSubagentDisplayParts(
+  workEntry: Pick<TimelineWorkEntry, "output" | "subagentPrompt">,
+): {
+  prompt: string | null;
+  output: string | null;
+} {
+  const prompt = workEntry.subagentPrompt?.trim() ?? "";
+  const output = workEntry.output?.trim() ?? "";
+  if (!prompt) {
+    return { prompt: null, output: output || null };
+  }
+  if (!output) {
+    return { prompt, output: null };
+  }
+
+  const normalizedPrompt = normalizedSubagentText(prompt).toLowerCase();
+  const normalizedOutput = normalizedSubagentText(output).toLowerCase();
+  const redundantPrompt =
+    normalizedPrompt === normalizedOutput ||
+    normalizedPrompt.startsWith(normalizedOutput) ||
+    normalizedOutput.startsWith(normalizedPrompt);
+
+  return {
+    prompt: redundantPrompt ? null : prompt,
+    output,
+  };
+}
+
+function hasExpandableWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
+  if (workEntry.itemType !== "collab_agent_tool_call") {
+    return false;
+  }
+  const { prompt, output } = resolveSubagentDisplayParts(workEntry);
+  return Boolean(prompt || output);
+}
+
+function ToolEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
+  const { prompt, output } = resolveSubagentDisplayParts(workEntry);
+
+  return (
+    <div className="mt-2 space-y-2 pl-7">
+      {prompt && (
+        <ToolDetailBlock title="Prompt" mono>
+          {prompt}
+        </ToolDetailBlock>
+      )}
+      {output && (
+        <ToolDetailBlock title="Output" mono>
+          {output}
+        </ToolDetailBlock>
+      )}
+    </div>
+  );
+}
+
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
 }) {
   const { workEntry, workspaceRoot } = props;
+  const [expanded, setExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
@@ -1195,10 +1291,45 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
+  const canExpand = hasExpandableWorkEntryDetails(workEntry);
+  const ToggleIcon = expanded ? ChevronDownIcon : ChevronRightIcon;
+  const toggleExpanded = useCallback(() => {
+    if (!canExpand) {
+      return;
+    }
+    setExpanded((value) => !value);
+  }, [canExpand]);
+  const handleSummaryKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!canExpand || (event.key !== "Enter" && event.key !== " ")) {
+        return;
+      }
+      event.preventDefault();
+      toggleExpanded();
+    },
+    [canExpand, toggleExpanded],
+  );
 
   return (
-    <div className="rounded-lg px-1 py-1">
-      <div className="flex items-center gap-2 transition-[opacity,translate] duration-200">
+    <div
+      className={cn(
+        "rounded-lg px-1 py-1 transition-colors duration-150",
+        expanded && "bg-background/45",
+      )}
+      data-tool-entry-expanded={expanded ? "true" : "false"}
+    >
+      <div
+        className={cn(
+          "flex items-center gap-2 rounded-md transition-[opacity,translate] duration-200",
+          canExpand &&
+            "cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        )}
+        role={canExpand ? "button" : undefined}
+        tabIndex={canExpand ? 0 : undefined}
+        aria-expanded={canExpand ? expanded : undefined}
+        onClick={toggleExpanded}
+        onKeyDown={handleSummaryKeyDown}
+      >
         <span
           className={cn("flex size-5 shrink-0 items-center justify-center", iconConfig.className)}
         >
@@ -1271,6 +1402,20 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             </Tooltip>
           )}
         </div>
+        {canExpand && (
+          <button
+            type="button"
+            className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/55 transition-colors hover:bg-muted/70 hover:text-foreground/80 focus-visible:outline-2 focus-visible:outline-ring"
+            aria-expanded={expanded}
+            aria-label={expanded ? `Collapse ${heading}` : `Expand ${heading}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleExpanded();
+            }}
+          >
+            <ToggleIcon className="size-3" />
+          </button>
+        )}
       </div>
       {hasChangedFiles && !previewIsChangedFiles && (
         <div className="mt-1 flex flex-wrap gap-1 pl-6">
@@ -1293,6 +1438,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           )}
         </div>
       )}
+      {canExpand && expanded && <ToolEntryDetails workEntry={workEntry} />}
     </div>
   );
 });

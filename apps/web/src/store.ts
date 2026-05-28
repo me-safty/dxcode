@@ -860,6 +860,147 @@ function compareActivities(
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function extractSubagentToolCallId(activity: OrchestrationThreadActivity): string | null {
+  if (activity.kind !== "tool.updated") {
+    return null;
+  }
+
+  const payload = asRecord(activity.payload);
+  if (payload?.itemType !== "collab_agent_tool_call") {
+    return null;
+  }
+
+  const data = asRecord(payload.data);
+  const parentCollab = asRecord(data?.parentCollab);
+  return asNonEmptyString(data?.toolCallId) ?? asNonEmptyString(parentCollab?.itemId);
+}
+
+function extractSubagentRawOutputContent(activity: OrchestrationThreadActivity): string | null {
+  const payload = asRecord(activity.payload);
+  const data = asRecord(payload?.data);
+  const rawOutput = asRecord(data?.rawOutput);
+  return typeof rawOutput?.content === "string" ? rawOutput.content : null;
+}
+
+function sameNullableTurnId(
+  left: OrchestrationThreadActivity["turnId"],
+  right: OrchestrationThreadActivity["turnId"],
+): boolean {
+  return left === right;
+}
+
+function mergeSubagentOutputActivity(input: {
+  baseActivity: OrchestrationThreadActivity;
+  nextActivity: OrchestrationThreadActivity;
+  content: string;
+}): OrchestrationThreadActivity {
+  const basePayload = asRecord(input.baseActivity.payload) ?? {};
+  const nextPayload = asRecord(input.nextActivity.payload) ?? {};
+  const baseData = asRecord(basePayload.data) ?? {};
+  const nextData = asRecord(nextPayload.data) ?? {};
+  const baseRawOutput = asRecord(baseData.rawOutput) ?? {};
+  const nextRawOutput = asRecord(nextData.rawOutput) ?? {};
+
+  return {
+    ...input.baseActivity,
+    tone: input.nextActivity.tone,
+    kind: input.nextActivity.kind,
+    summary: input.nextActivity.summary,
+    payload: {
+      ...basePayload,
+      ...nextPayload,
+      detail: basePayload.detail ?? nextPayload.detail,
+      data: {
+        ...baseData,
+        ...nextData,
+        rawOutput: {
+          ...baseRawOutput,
+          ...nextRawOutput,
+          content: input.content,
+        },
+      },
+    },
+  };
+}
+
+function mergeLiveSubagentOutputActivity(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  nextActivity: OrchestrationThreadActivity,
+): OrchestrationThreadActivity[] | null {
+  const nextToolCallId = extractSubagentToolCallId(nextActivity);
+  const nextContent = extractSubagentRawOutputContent(nextActivity);
+  if (!nextToolCallId || nextContent === null || nextContent.length === 0) {
+    return null;
+  }
+
+  let baseActivity: OrchestrationThreadActivity | null = null;
+  let insertIndex = -1;
+  let content = "";
+  const retained: OrchestrationThreadActivity[] = [];
+
+  for (const activity of activities) {
+    if (activity.id === nextActivity.id) {
+      return null;
+    }
+
+    const activityToolCallId = extractSubagentToolCallId(activity);
+    if (
+      activityToolCallId === nextToolCallId &&
+      sameNullableTurnId(activity.turnId, nextActivity.turnId)
+    ) {
+      baseActivity ??= activity;
+      if (insertIndex === -1) {
+        insertIndex = retained.length;
+      }
+      content += extractSubagentRawOutputContent(activity) ?? "";
+      continue;
+    }
+
+    retained.push(activity);
+  }
+
+  if (!baseActivity) {
+    return null;
+  }
+
+  const mergedActivity = mergeSubagentOutputActivity({
+    baseActivity,
+    nextActivity,
+    content: `${content}${nextContent}`,
+  });
+
+  return [...retained.slice(0, insertIndex), mergedActivity, ...retained.slice(insertIndex)];
+}
+
+function appendLiveThreadActivity(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  nextActivity: OrchestrationThreadActivity,
+): OrchestrationThreadActivity[] {
+  const mergedActivities = mergeLiveSubagentOutputActivity(activities, nextActivity);
+  if (mergedActivities) {
+    return mergedActivities;
+  }
+
+  return [...activities.filter((activity) => activity.id !== nextActivity.id), { ...nextActivity }];
+}
+
 function buildLatestTurn(params: {
   previous: Thread["latestTurn"];
   turnId: NonNullable<Thread["latestTurn"]>["turnId"];
@@ -1626,10 +1767,7 @@ function applyEnvironmentOrchestrationEvent(
 
     case "thread.activity-appended":
       return updateThreadState(state, event.payload.threadId, (thread) => {
-        const activities = [
-          ...thread.activities.filter((activity) => activity.id !== event.payload.activity.id),
-          { ...event.payload.activity },
-        ]
+        const activities = appendLiveThreadActivity(thread.activities, event.payload.activity)
           .toSorted(compareActivities)
           .slice(-MAX_THREAD_ACTIVITIES);
         return {

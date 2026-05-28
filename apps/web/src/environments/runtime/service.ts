@@ -98,7 +98,13 @@ type ThreadDetailSubscriptionEntry = {
   refCount: number;
   lastAccessedAt: number;
   evictionTimeoutId: ReturnType<typeof setTimeout> | null;
+  pendingEvents: OrchestrationEvent[];
+  pendingFlushHandle: ThreadDetailFlushHandle | null;
 };
+
+type ThreadDetailFlushHandle =
+  | { readonly kind: "animation-frame"; readonly id: number }
+  | { readonly kind: "timeout"; readonly id: ReturnType<typeof setTimeout> };
 
 const environmentConnections = new Map<EnvironmentId, EnvironmentConnection>();
 
@@ -388,13 +394,68 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
     { threadId: entry.threadId },
     (item) => {
       if (item.kind === "snapshot") {
+        flushThreadDetailSubscriptionEvents(entry);
         useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
         return;
       }
-      applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
+      enqueueThreadDetailSubscriptionEvent(entry, item.event);
     },
   );
   return true;
+}
+
+function enqueueThreadDetailSubscriptionEvent(
+  entry: ThreadDetailSubscriptionEntry,
+  event: OrchestrationEvent,
+): void {
+  entry.pendingEvents.push(event);
+  if (entry.pendingFlushHandle !== null) {
+    return;
+  }
+
+  entry.pendingFlushHandle = requestThreadDetailEventFlush(() => {
+    entry.pendingFlushHandle = null;
+    flushThreadDetailSubscriptionEvents(entry);
+  });
+}
+
+function flushThreadDetailSubscriptionEvents(entry: ThreadDetailSubscriptionEntry): void {
+  if (entry.pendingFlushHandle !== null) {
+    cancelThreadDetailEventFlush(entry.pendingFlushHandle);
+    entry.pendingFlushHandle = null;
+  }
+  if (entry.pendingEvents.length === 0) {
+    return;
+  }
+
+  const events = entry.pendingEvents;
+  entry.pendingEvents = [];
+  applyRecoveredEventBatch(events, entry.environmentId);
+}
+
+function requestThreadDetailEventFlush(callback: () => void): ThreadDetailFlushHandle {
+  if (typeof requestAnimationFrame === "function") {
+    return {
+      kind: "animation-frame",
+      id: requestAnimationFrame(callback),
+    };
+  }
+
+  return {
+    kind: "timeout",
+    id: setTimeout(callback, 16),
+  };
+}
+
+function cancelThreadDetailEventFlush(handle: ThreadDetailFlushHandle): void {
+  if (handle.kind === "animation-frame") {
+    if (typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(handle.id);
+    }
+    return;
+  }
+
+  clearTimeout(handle.id);
 }
 
 function watchThreadDetailSubscriptionConnection(entry: ThreadDetailSubscriptionEntry): void {
@@ -420,6 +481,7 @@ function disposeThreadDetailSubscriptionByKey(key: string): boolean {
   entry.unsubscribeConnectionListener?.();
   entry.unsubscribeConnectionListener = null;
   threadDetailSubscriptions.delete(key);
+  flushThreadDetailSubscriptionEvents(entry);
   entry.unsubscribe();
   entry.unsubscribe = NOOP;
   return true;
@@ -438,6 +500,7 @@ function detachThreadDetailSubscriptionsForEnvironment(environmentId: Environmen
     if (entry.environmentId !== environmentId) {
       continue;
     }
+    flushThreadDetailSubscriptionEvents(entry);
     entry.unsubscribe();
     entry.unsubscribe = NOOP;
     watchThreadDetailSubscriptionConnection(entry);
@@ -577,6 +640,8 @@ export function retainThreadDetailSubscription(
     refCount: 1,
     lastAccessedAt: Date.now(),
     evictionTimeoutId: null,
+    pendingEvents: [],
+    pendingFlushHandle: null,
   };
   threadDetailSubscriptions.set(key, entry);
   if (!attachThreadDetailSubscription(entry)) {
@@ -884,7 +949,104 @@ function setRuntimeError(environmentId: EnvironmentId, error: unknown) {
   });
 }
 
-function coalesceOrchestrationUiEvents(
+type SubagentOutputChunk = {
+  readonly toolCallId: string;
+  readonly content: string;
+};
+
+function asObjectRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function extractSubagentOutputChunk(payload: unknown): SubagentOutputChunk | null {
+  const payloadRecord = asObjectRecord(payload);
+  if (payloadRecord?.itemType !== "collab_agent_tool_call") {
+    return null;
+  }
+
+  const data = asObjectRecord(payloadRecord.data);
+  const rawOutput = asObjectRecord(data?.rawOutput);
+  const content = typeof rawOutput?.content === "string" ? rawOutput.content : null;
+  if (content === null || content.length === 0) {
+    return null;
+  }
+
+  const parentCollab = asObjectRecord(data?.parentCollab);
+  const toolCallId = asNonEmptyString(data?.toolCallId) ?? asNonEmptyString(parentCollab?.itemId);
+  if (!toolCallId) {
+    return null;
+  }
+
+  return { toolCallId, content };
+}
+
+function coalesceSubagentOutputEvent(
+  previous: Extract<OrchestrationEvent, { type: "thread.activity-appended" }>,
+  event: Extract<OrchestrationEvent, { type: "thread.activity-appended" }>,
+): OrchestrationEvent | null {
+  const previousActivity = previous.payload.activity;
+  const activity = event.payload.activity;
+  if (
+    previous.payload.threadId !== event.payload.threadId ||
+    previousActivity.kind !== "tool.updated" ||
+    activity.kind !== "tool.updated" ||
+    previousActivity.turnId !== activity.turnId
+  ) {
+    return null;
+  }
+
+  const previousChunk = extractSubagentOutputChunk(previousActivity.payload);
+  const chunk = extractSubagentOutputChunk(activity.payload);
+  if (!previousChunk || !chunk || previousChunk.toolCallId !== chunk.toolCallId) {
+    return null;
+  }
+
+  const activityPayload = asObjectRecord(activity.payload);
+  const previousActivityPayload = asObjectRecord(previousActivity.payload);
+  const data = asObjectRecord(activityPayload?.data);
+  const rawOutput = asObjectRecord(data?.rawOutput);
+  if (!activityPayload || !data || !rawOutput) {
+    return null;
+  }
+
+  return {
+    ...event,
+    payload: {
+      ...event.payload,
+      activity: {
+        ...activity,
+        sequence: previousActivity.sequence ?? activity.sequence,
+        createdAt: previousActivity.createdAt,
+        payload: {
+          ...activityPayload,
+          detail: activityPayload.detail ?? previousActivityPayload?.detail,
+          data: {
+            ...data,
+            rawOutput: {
+              ...rawOutput,
+              content: previousChunk.content + chunk.content,
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+export function coalesceOrchestrationUiEvents(
   events: ReadonlyArray<OrchestrationEvent>,
 ): OrchestrationEvent[] {
   if (events.length < 2) {
@@ -913,6 +1075,17 @@ function coalesceOrchestrationUiEvents(
         },
       };
       continue;
+    }
+
+    if (
+      previous?.type === "thread.activity-appended" &&
+      event.type === "thread.activity-appended"
+    ) {
+      const coalescedSubagentEvent = coalesceSubagentOutputEvent(previous, event);
+      if (coalescedSubagentEvent) {
+        coalesced[coalesced.length - 1] = coalescedSubagentEvent;
+        continue;
+      }
     }
 
     coalesced.push(event);

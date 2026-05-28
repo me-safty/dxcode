@@ -232,6 +232,12 @@ interface PendingUserInput {
   readonly answers: Deferred.Deferred<ProviderUserInputAnswers>;
 }
 
+interface CollabReceiverInfo {
+  readonly parentTurnId: TurnId;
+  readonly parentItemId: ProviderItemId | undefined;
+  readonly detail: string | undefined;
+}
+
 type CodexServerNotification = {
   readonly [M in CodexRpc.ServerNotificationMethod]: {
     readonly method: M;
@@ -615,8 +621,30 @@ function readRouteFields(notification: CodexServerNotification): {
   }
 }
 
+function trimNotificationText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function collabToolCallDetail(
+  item: CodexRpc.ServerNotificationParamsByMethod["item/started"]["item"],
+): string | undefined {
+  const candidates = [
+    "prompt" in item ? item.prompt : undefined,
+    "title" in item ? item.title : undefined,
+    "summary" in item ? item.summary : undefined,
+    "text" in item ? item.text : undefined,
+  ];
+  for (const candidate of candidates) {
+    const detail = trimNotificationText(candidate);
+    if (detail) {
+      return detail;
+    }
+  }
+  return undefined;
+}
+
 function rememberCollabReceiverTurns(
-  collabReceiverTurns: Map<string, TurnId>,
+  collabReceiverTurns: Map<string, CollabReceiverInfo>,
   notification: CodexServerNotification,
   parentTurnId: TurnId | undefined,
 ): void {
@@ -632,14 +660,52 @@ function rememberCollabReceiverTurns(
     return;
   }
 
+  const detail = collabToolCallDetail(notification.params.item);
   for (const receiverThreadId of notification.params.item.receiverThreadIds) {
-    collabReceiverTurns.set(receiverThreadId, parentTurnId);
+    collabReceiverTurns.set(receiverThreadId, {
+      parentTurnId,
+      parentItemId: ProviderItemId.make(notification.params.item.id),
+      detail,
+    });
   }
 }
 
+function resolveChildParentInfo(input: {
+  readonly collabReceiverTurns: Map<string, CollabReceiverInfo>;
+  readonly providerConversationId: string | undefined;
+  readonly currentProviderThreadId: string | undefined;
+}): CollabReceiverInfo | undefined {
+  if (!input.providerConversationId) {
+    return undefined;
+  }
+
+  const direct = input.collabReceiverTurns.get(input.providerConversationId);
+  if (direct) {
+    return direct;
+  }
+
+  if (
+    input.currentProviderThreadId &&
+    input.providerConversationId !== input.currentProviderThreadId &&
+    input.collabReceiverTurns.size === 1
+  ) {
+    return Array.from(input.collabReceiverTurns.values())[0];
+  }
+
+  return undefined;
+}
+
+function isAgentMessageItemNotification(notification: CodexServerNotification): boolean {
+  if (notification.method !== "item/started" && notification.method !== "item/completed") {
+    return false;
+  }
+  return notification.params.item.type === "agentMessage";
+}
+
 function shouldSuppressChildConversationNotification(
-  method: CodexRpc.ServerNotificationMethod,
+  notification: CodexServerNotification,
 ): boolean {
+  const method = notification.method;
   return (
     method === "thread/started" ||
     method === "thread/status/changed" ||
@@ -652,7 +718,8 @@ function shouldSuppressChildConversationNotification(
     method === "turn/started" ||
     method === "turn/completed" ||
     method === "turn/plan/updated" ||
-    method === "item/plan/delta"
+    method === "item/plan/delta" ||
+    isAgentMessageItemNotification(notification)
   );
 }
 
@@ -747,7 +814,7 @@ export const makeCodexSessionRuntime = (
     const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
     const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
     const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
-    const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>());
+    const collabReceiverTurnsRef = yield* Ref.make(new Map<string, CollabReceiverInfo>());
     const closedRef = yield* Ref.make(false);
 
     // `~` is not shell-expanded when env vars are set via
@@ -861,22 +928,23 @@ export const makeCodexSessionRuntime = (
         const payload = notification.params;
         const route = readRouteFields(notification);
         const collabReceiverTurns = yield* Ref.get(collabReceiverTurnsRef);
-        const childParentTurnId = (() => {
-          const providerConversationId = readNotificationThreadId(notification);
-          return providerConversationId
-            ? collabReceiverTurns.get(providerConversationId)
-            : undefined;
-        })();
+        const providerConversationId = readNotificationThreadId(notification);
+        const currentProviderThreadId = yield* currentSessionProviderThreadId;
+        const childParentInfo = resolveChildParentInfo({
+          collabReceiverTurns,
+          providerConversationId,
+          currentProviderThreadId,
+        });
 
         rememberCollabReceiverTurns(collabReceiverTurns, notification, route.turnId);
-        if (childParentTurnId && shouldSuppressChildConversationNotification(notification.method)) {
+        if (childParentInfo && shouldSuppressChildConversationNotification(notification)) {
           yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
           return;
         }
 
         let requestId: ApprovalRequestId | undefined;
         let requestKind: ProviderRequestKind | undefined;
-        let turnId = childParentTurnId ?? route.turnId;
+        let turnId = childParentInfo?.parentTurnId ?? route.turnId;
         let itemId = route.itemId;
 
         if (notification.method === "serverRequest/resolved") {
@@ -901,6 +969,18 @@ export const makeCodexSessionRuntime = (
         }
 
         yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
+        const emittedPayload =
+          childParentInfo && notification.method === "item/agentMessage/delta"
+            ? {
+                ...payload,
+                parentCollab: {
+                  ...(childParentInfo.parentItemId
+                    ? { itemId: String(childParentInfo.parentItemId) }
+                    : {}),
+                  ...(childParentInfo.detail ? { detail: childParentInfo.detail } : {}),
+                },
+              }
+            : payload;
         yield* emitEvent({
           kind: "notification",
           threadId: options.threadId,
@@ -912,7 +992,7 @@ export const makeCodexSessionRuntime = (
           ...(notification.method === "item/agentMessage/delta"
             ? { textDelta: notification.params.delta }
             : {}),
-          ...(payload !== undefined ? { payload } : {}),
+          ...(emittedPayload !== undefined ? { payload: emittedPayload } : {}),
         });
       });
 

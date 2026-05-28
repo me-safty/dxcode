@@ -54,7 +54,9 @@ export interface WorkLogEntry {
   detail?: string;
   command?: string;
   rawCommand?: string;
+  output?: string;
   changedFiles?: ReadonlyArray<string>;
+  subagentPrompt?: string;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
@@ -492,9 +494,9 @@ export function deriveWorkLogEntries(
     if (isPlanBoundaryToolActivity(activity)) continue;
     entries.push(toDerivedWorkLogEntry(activity));
   }
-  return collapseDerivedWorkLogEntries(entries).map(
-    ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
-  );
+  return collapseDerivedWorkLogEntries(
+    entries.filter((entry) => !isEmptySubagentWorkLogEntry(entry)),
+  ).map(({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry);
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {
@@ -553,6 +555,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   };
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
+  const subagentOutput =
+    itemType === "collab_agent_tool_call" ? extractSubagentOutput(payload) : null;
+  const subagentPrompt =
+    itemType === "collab_agent_tool_call" ? extractSubagentPrompt(payload, detail) : null;
   if (detail) {
     entry.detail = detail;
   }
@@ -562,8 +568,14 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (commandPreview.rawCommand) {
     entry.rawCommand = commandPreview.rawCommand;
   }
+  if (subagentOutput) {
+    entry.output = subagentOutput;
+  }
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
+  }
+  if (subagentPrompt) {
+    entry.subagentPrompt = subagentPrompt;
   }
   if (title) {
     entry.toolTitle = title;
@@ -599,6 +611,15 @@ function collapseDerivedWorkLogEntries(
   return collapsed;
 }
 
+function isEmptySubagentWorkLogEntry(entry: DerivedWorkLogEntry): boolean {
+  return (
+    entry.itemType === "collab_agent_tool_call" &&
+    !entry.detail &&
+    !entry.subagentPrompt &&
+    !entry.output
+  );
+}
+
 function shouldCollapseToolLifecycleEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
@@ -609,7 +630,14 @@ function shouldCollapseToolLifecycleEntries(
   if (next.activityKind !== "tool.updated" && next.activityKind !== "tool.completed") {
     return false;
   }
-  if (previous.activityKind === "tool.completed") {
+  if (
+    previous.activityKind === "tool.completed" &&
+    !(
+      next.activityKind === "tool.updated" &&
+      previous.toolCallId !== undefined &&
+      previous.toolCallId === next.toolCallId
+    )
+  ) {
     return false;
   }
   if (previous.collapseKey !== undefined && previous.collapseKey === next.collapseKey) {
@@ -629,27 +657,52 @@ function mergeDerivedWorkLogEntries(
   next: DerivedWorkLogEntry,
 ): DerivedWorkLogEntry {
   const changedFiles = mergeChangedFiles(previous.changedFiles, next.changedFiles);
-  const detail = next.detail ?? previous.detail;
+  const itemType = next.itemType ?? previous.itemType;
+  const detail =
+    itemType === "collab_agent_tool_call"
+      ? (previous.detail ?? next.detail)
+      : (next.detail ?? previous.detail);
   const command = next.command ?? previous.command;
   const rawCommand = next.rawCommand ?? previous.rawCommand;
+  const output = mergeTextOutput(previous.output, next.output);
+  const subagentPrompt =
+    itemType === "collab_agent_tool_call"
+      ? (previous.subagentPrompt ?? next.subagentPrompt)
+      : (next.subagentPrompt ?? previous.subagentPrompt);
   const toolTitle = next.toolTitle ?? previous.toolTitle;
-  const itemType = next.itemType ?? previous.itemType;
   const requestKind = next.requestKind ?? previous.requestKind;
-  const collapseKey = next.collapseKey ?? previous.collapseKey;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
+  const collapseKey = toolCallId
+    ? `tool:${toolCallId}`
+    : (next.collapseKey ?? previous.collapseKey);
   return {
     ...previous,
     ...next,
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
+    ...(output ? { output } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
+    ...(subagentPrompt ? { subagentPrompt } : {}),
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
     ...(requestKind ? { requestKind } : {}),
     ...(collapseKey ? { collapseKey } : {}),
     ...(toolCallId ? { toolCallId } : {}),
   };
+}
+
+function mergeTextOutput(
+  previous: string | undefined,
+  next: string | undefined,
+): string | undefined {
+  if (!previous) {
+    return next;
+  }
+  if (!next) {
+    return previous;
+  }
+  return `${previous}${next}`;
 }
 
 function mergeChangedFiles(
@@ -900,7 +953,14 @@ function extractToolTitle(payload: Record<string, unknown> | null): string | nul
 
 function extractToolCallId(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
-  return asTrimmedString(data?.toolCallId);
+  const item = asRecord(data?.item);
+  const parentCollab = asRecord(data?.parentCollab);
+  return (
+    asTrimmedString(data?.toolCallId) ??
+    asTrimmedString(parentCollab?.itemId) ??
+    asTrimmedString(data?.itemId) ??
+    asTrimmedString(item?.id)
+  );
 }
 
 function normalizeInlinePreview(value: string): string {
@@ -1027,6 +1087,62 @@ function stripTrailingExitCode(value: string): {
   };
 }
 
+function firstStringFromRecord(
+  record: Record<string, unknown> | null,
+  keys: ReadonlyArray<string>,
+): string | null {
+  if (!record) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = asTrimmedString(record[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function firstRawStringFromRecord(
+  record: Record<string, unknown> | null,
+  keys: ReadonlyArray<string>,
+): string | null {
+  if (!record) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function extractSubagentOutput(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  const rawOutput = asRecord(data?.rawOutput);
+  return firstRawStringFromRecord(rawOutput, ["content", "output", "text", "stdout", "result"]);
+}
+
+function extractSubagentPrompt(
+  payload: Record<string, unknown> | null,
+  fallbackDetail: string | null,
+): string | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const itemInput = asRecord(item?.input);
+  const rawInput = asRecord(data?.rawInput);
+  const parentCollab = asRecord(data?.parentCollab);
+  return (
+    asTrimmedString(parentCollab?.detail) ??
+    firstStringFromRecord(itemInput, ["prompt", "message", "description", "task"]) ??
+    firstStringFromRecord(rawInput, ["prompt", "message", "description", "task"]) ??
+    firstStringFromRecord(item, ["prompt", "message", "description", "task"]) ??
+    fallbackDetail
+  );
+}
+
 function extractWorkLogItemType(
   payload: Record<string, unknown> | null,
 ): WorkLogEntry["itemType"] | undefined {
@@ -1138,7 +1254,10 @@ function compareActivitiesByOrder(
     return lifecycleRankComparison;
   }
 
-  return left.id.localeCompare(right.id);
+  // Stable sort preserves arrival order for unsequenced same-timestamp events.
+  // Streaming text chunks can share millisecond timestamps; sorting those by
+  // random event ids can scramble the reconstructed output.
+  return 0;
 }
 
 function compareActivityLifecycleRank(kind: string): number {
