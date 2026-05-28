@@ -250,16 +250,19 @@ export const layer = Layer.effect(
     const crypto = yield* Crypto.Crypto;
 
     const writeDocument = (document: SavedEnvironmentRegistryDocument) =>
-      Effect.gen(function* () {
-        const suffix = (yield* crypto.randomUUIDv4).replace(/-/g, "");
-        yield* writeRegistryDocument({
-          fileSystem,
-          path,
-          registryPath: environment.savedEnvironmentRegistryPath,
-          document,
-          suffix,
-        });
-      }).pipe(Effect.mapError((cause) => new DesktopSavedEnvironmentsWriteError({ cause })));
+      crypto.randomUUIDv4.pipe(
+        Effect.map((uuid) => uuid.replace(/-/g, "")),
+        Effect.flatMap((suffix) =>
+          writeRegistryDocument({
+            fileSystem,
+            path,
+            registryPath: environment.savedEnvironmentRegistryPath,
+            document,
+            suffix,
+          }),
+        ),
+        Effect.mapError((cause) => new DesktopSavedEnvironmentsWriteError({ cause })),
+      );
 
     return DesktopSavedEnvironments.of({
       getRegistry: readRegistryDocument(fileSystem, environment.savedEnvironmentRegistryPath).pipe(

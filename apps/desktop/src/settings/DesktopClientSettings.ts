@@ -97,16 +97,17 @@ export const layer = Layer.effect(
         Effect.withSpan("desktop.clientSettings.get"),
       ),
       set: (settings) =>
-        Effect.gen(function* () {
-          const suffix = (yield* crypto.randomUUIDv4).replace(/-/g, "");
-          yield* writeClientSettings({
-            fileSystem,
-            path,
-            settingsPath: environment.clientSettingsPath,
-            settings,
-            suffix,
-          });
-        }).pipe(
+        crypto.randomUUIDv4.pipe(
+          Effect.map((uuid) => uuid.replace(/-/g, "")),
+          Effect.flatMap((suffix) =>
+            writeClientSettings({
+              fileSystem,
+              path,
+              settingsPath: environment.clientSettingsPath,
+              settings,
+              suffix,
+            }),
+          ),
           Effect.mapError((cause) => new DesktopClientSettingsWriteError({ cause })),
           Effect.withSpan("desktop.clientSettings.set"),
         ),

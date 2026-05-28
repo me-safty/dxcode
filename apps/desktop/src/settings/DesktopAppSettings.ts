@@ -252,18 +252,21 @@ export const layer = Layer.effect(
           return Effect.succeed([settingsChange(settings, false), settings] as const);
         }
 
-        return Effect.gen(function* () {
-          const suffix = (yield* crypto.randomUUIDv4).replace(/-/g, "");
-          yield* writeSettings({
-            fileSystem,
-            path,
-            settingsPath: environment.desktopSettingsPath,
-            settings: nextSettings,
-            defaultSettings: environment.defaultDesktopSettings,
-            suffix,
-          });
-          return [settingsChange(nextSettings, true), nextSettings] as const;
-        }).pipe(Effect.mapError((cause) => new DesktopSettingsWriteError({ cause })));
+        return crypto.randomUUIDv4.pipe(
+          Effect.map((uuid) => uuid.replace(/-/g, "")),
+          Effect.flatMap((suffix) =>
+            writeSettings({
+              fileSystem,
+              path,
+              settingsPath: environment.desktopSettingsPath,
+              settings: nextSettings,
+              defaultSettings: environment.defaultDesktopSettings,
+              suffix,
+            }),
+          ),
+          Effect.mapError((cause) => new DesktopSettingsWriteError({ cause })),
+          Effect.as([settingsChange(nextSettings, true), nextSettings] as const),
+        );
       });
 
     return DesktopAppSettings.of({
