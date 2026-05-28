@@ -1,5 +1,7 @@
 import {
   ClientOrchestrationCommand,
+  DispatchableClientOrchestrationCommand,
+  type OrchestrationCommand,
   type LocalBackendPeerDescriptor,
   OrchestrationDispatchCommandError,
   OrchestrationGetSnapshotError,
@@ -7,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
@@ -18,6 +21,11 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 
 const MAX_PEER_EVENTS = 500;
+const LocalPeerDispatchCommand = Schema.Union([
+  ClientOrchestrationCommand,
+  DispatchableClientOrchestrationCommand,
+]);
+type LocalPeerDispatchCommand = typeof LocalPeerDispatchCommand.Type;
 
 const respondToPeerError = (
   error:
@@ -171,7 +179,7 @@ export const localPeerDispatchRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     yield* authenticateLocalOwnerSession;
     const orchestrationEngine = yield* OrchestrationEngineService;
-    const command = yield* HttpServerRequest.schemaBodyJson(ClientOrchestrationCommand).pipe(
+    const command = yield* HttpServerRequest.schemaBodyJson(LocalPeerDispatchCommand).pipe(
       Effect.mapError(
         (cause) =>
           new OrchestrationDispatchCommandError({
@@ -180,7 +188,7 @@ export const localPeerDispatchRouteLayer = HttpRouter.add(
           }),
       ),
     );
-    const normalizedCommand = yield* normalizeDispatchCommand(command);
+    const normalizedCommand = yield* normalizeLocalPeerDispatchCommand(command);
     const result = yield* orchestrationEngine.dispatch(normalizedCommand).pipe(
       Effect.mapError(
         (cause) =>
@@ -196,6 +204,16 @@ export const localPeerDispatchRouteLayer = HttpRouter.add(
     Effect.catchTag("OrchestrationDispatchCommandError", respondToPeerError),
   ),
 );
+
+function normalizeLocalPeerDispatchCommand(command: LocalPeerDispatchCommand) {
+  if (
+    command.type === "thread.turn.start" &&
+    command.message.attachments.some((attachment) => "id" in attachment)
+  ) {
+    return Effect.succeed(command as OrchestrationCommand);
+  }
+  return normalizeDispatchCommand(command as ClientOrchestrationCommand);
+}
 
 function isLoopbackRequest(request: HttpServerRequest.HttpServerRequest): boolean {
   const source = request.source;
