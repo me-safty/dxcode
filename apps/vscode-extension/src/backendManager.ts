@@ -10,6 +10,14 @@ import {
 } from "node:child_process";
 import { DEFAULT_MCP_TOOL_TIMEOUT_SEC, normalizeMcpToolTimeoutSec } from "@t3tools/shared/mcp";
 import {
+  cleanupLocalBackendAdvertisements,
+  createLocalBackendAdvertisement,
+  LOCAL_BACKEND_ADVERTISEMENT_HEARTBEAT_MS,
+  removeLocalBackendAdvertisement,
+  writeLocalBackendAdvertisement,
+  type CleanupLocalBackendAdvertisementsResult,
+} from "@t3tools/shared/localBackendAdvertisement";
+import {
   cleanupHostMcpAdvertisements,
   createHostMcpAdvertisement,
   HOST_MCP_ADVERTISEMENT_HEARTBEAT_MS,
@@ -132,6 +140,9 @@ export interface BackendManagerDependencies {
   readonly writeHostMcpAdvertisement: typeof writeHostMcpAdvertisement;
   readonly removeHostMcpAdvertisement: typeof removeHostMcpAdvertisement;
   readonly cleanupHostMcpAdvertisements: typeof cleanupHostMcpAdvertisements;
+  readonly writeLocalBackendAdvertisement: typeof writeLocalBackendAdvertisement;
+  readonly removeLocalBackendAdvertisement: typeof removeLocalBackendAdvertisement;
+  readonly cleanupLocalBackendAdvertisements: typeof cleanupLocalBackendAdvertisements;
 }
 
 const defaultBackendManagerDependencies: BackendManagerDependencies = {
@@ -150,6 +161,9 @@ const defaultBackendManagerDependencies: BackendManagerDependencies = {
   writeHostMcpAdvertisement,
   removeHostMcpAdvertisement,
   cleanupHostMcpAdvertisements,
+  writeLocalBackendAdvertisement,
+  removeLocalBackendAdvertisement,
+  cleanupLocalBackendAdvertisements,
 };
 
 export class BackendManager {
@@ -159,6 +173,11 @@ export class BackendManager {
   #hostMcpAdvertisement: {
     readonly t3Home: string;
     readonly hostId: string;
+    readonly interval: NodeJS.Timeout;
+  } | null = null;
+  #localBackendAdvertisement: {
+    readonly t3Home: string;
+    readonly backendId: string;
     readonly interval: NodeJS.Timeout;
   } | null = null;
   #outputChannel: vscode.OutputChannel;
@@ -205,6 +224,7 @@ export class BackendManager {
   }
 
   async stop(): Promise<void> {
+    this.#stopLocalBackendAdvertisement();
     this.#stopHostMcpAdvertisement();
     const child = this.#process;
     this.#starting = null;
@@ -297,6 +317,8 @@ export class BackendManager {
         `[backend] Exited code=${code ?? "null"} signal=${signal ?? "null"}`,
       );
       if (this.#process === child) {
+        this.#stopLocalBackendAdvertisement();
+        this.#stopHostMcpAdvertisement();
         this.#process = null;
         this.#connection = null;
       }
@@ -317,6 +339,13 @@ export class BackendManager {
         bootstrapToken,
         this.#dependencies.fetch,
       );
+      this.#refreshLocalBackendAdvertisement({
+        t3Home,
+        httpBaseUrl,
+        bearerToken,
+        workspaceFolders,
+        activeWorkspaceFolderKey: activeWorkspaceFolder?.key,
+      });
 
       this.#connection = {
         httpBaseUrl,
@@ -355,8 +384,19 @@ export class BackendManager {
           );
         }
       });
+      void Promise.resolve().then(() => {
+        try {
+          const result = this.#dependencies.cleanupLocalBackendAdvertisements({ t3Home });
+          logLocalBackendCleanupResult(this.#outputChannel, result);
+        } catch (error) {
+          this.#outputChannel.appendLine(
+            `[backend] Failed to clean local backend advertisements: ${errorMessage(error)}`,
+          );
+        }
+      });
       return this.#connection;
     } catch (error) {
+      this.#stopLocalBackendAdvertisement();
       this.#stopHostMcpAdvertisement();
       if (this.#process === child) {
         this.#process = null;
@@ -443,6 +483,84 @@ export class BackendManager {
       );
     }
   }
+
+  #refreshLocalBackendAdvertisement(input: {
+    readonly t3Home: string;
+    readonly httpBaseUrl: string;
+    readonly bearerToken: string;
+    readonly workspaceFolders: readonly BootstrapWorkspaceFolder[];
+    readonly activeWorkspaceFolderKey?: string | undefined;
+  }): void {
+    this.#stopLocalBackendAdvertisement();
+    if (input.workspaceFolders.length === 0) {
+      return;
+    }
+
+    const backendId = `vscode-backend-${process.pid}-${this.#dependencies
+      .randomBytes(8)
+      .toString("hex")}`;
+    const writeAdvertisement = () => {
+      this.#dependencies.writeLocalBackendAdvertisement({
+        t3Home: input.t3Home,
+        advertisement: createLocalBackendAdvertisement({
+          backendId,
+          httpBaseUrl: input.httpBaseUrl,
+          bearerToken: input.bearerToken,
+          workspaceFolders: input.workspaceFolders,
+          activeWorkspaceFolderKey: input.activeWorkspaceFolderKey,
+        }),
+      });
+    };
+
+    try {
+      writeAdvertisement();
+    } catch (error) {
+      this.#outputChannel.appendLine(
+        `[backend] Failed to write local backend advertisement: ${errorMessage(error)}`,
+      );
+      return;
+    }
+
+    // @effect-diagnostics-next-line globalTimers:off
+    const interval = setInterval(() => {
+      try {
+        writeAdvertisement();
+        const result = this.#dependencies.cleanupLocalBackendAdvertisements({
+          t3Home: input.t3Home,
+        });
+        logLocalBackendCleanupResult(this.#outputChannel, result);
+      } catch (error) {
+        this.#outputChannel.appendLine(
+          `[backend] Failed to refresh local backend advertisement: ${errorMessage(error)}`,
+        );
+      }
+    }, LOCAL_BACKEND_ADVERTISEMENT_HEARTBEAT_MS);
+    interval.unref?.();
+    this.#localBackendAdvertisement = {
+      t3Home: input.t3Home,
+      backendId,
+      interval,
+    };
+  }
+
+  #stopLocalBackendAdvertisement(): void {
+    const advertisement = this.#localBackendAdvertisement;
+    this.#localBackendAdvertisement = null;
+    if (!advertisement) {
+      return;
+    }
+    clearInterval(advertisement.interval);
+    try {
+      this.#dependencies.removeLocalBackendAdvertisement({
+        t3Home: advertisement.t3Home,
+        backendId: advertisement.backendId,
+      });
+    } catch (error) {
+      this.#outputChannel.appendLine(
+        `[backend] Failed to remove local backend advertisement: ${errorMessage(error)}`,
+      );
+    }
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -456,6 +574,17 @@ function logHostMcpCleanupResult(
   if (result.deleted > 0 || result.errors > 0) {
     outputChannel.appendLine(
       `[mcp] Cleaned ${result.deleted} expired host MCP advertisement(s); errors ${result.errors}.`,
+    );
+  }
+}
+
+function logLocalBackendCleanupResult(
+  outputChannel: vscode.OutputChannel,
+  result: CleanupLocalBackendAdvertisementsResult,
+): void {
+  if (result.deleted > 0 || result.errors > 0) {
+    outputChannel.appendLine(
+      `[backend] Cleaned ${result.deleted} expired local backend advertisement(s); errors ${result.errors}.`,
     );
   }
 }

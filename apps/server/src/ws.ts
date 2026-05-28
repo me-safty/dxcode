@@ -70,6 +70,7 @@ import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptR
 import { RepositoryIdentityResolver } from "./project/Services/RepositoryIdentityResolver.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { makeHostPeerFederation } from "./localPeer/HostPeerFederation.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -188,6 +189,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
       const serverEnvironment = yield* ServerEnvironment;
       const serverAuth = yield* ServerAuth;
+      const hostPeerFederation = makeHostPeerFederation(config, projectionSnapshotQuery);
       const sourceControlDiscovery = yield* SourceControlDiscoveryLayer.SourceControlDiscovery;
       const automaticGitFetchInterval = serverSettings.getSettings.pipe(
         Effect.map((settings) => settings.automaticGitFetchInterval),
@@ -572,16 +574,23 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const dispatchNormalizedCommand = (
         normalizedCommand: OrchestrationCommand,
       ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
-        const dispatchEffect =
-          normalizedCommand.type === "thread.turn.start" && normalizedCommand.bootstrap
-            ? dispatchBootstrapTurnStart(normalizedCommand)
-            : orchestrationEngine
-                .dispatch(normalizedCommand)
-                .pipe(
-                  Effect.mapError((cause) =>
-                    toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
-                  ),
-                );
+        const dispatchEffect = hostPeerFederation.dispatchCommand(normalizedCommand).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                normalizedCommand.type === "thread.turn.start" && normalizedCommand.bootstrap
+                  ? dispatchBootstrapTurnStart(normalizedCommand)
+                  : orchestrationEngine
+                      .dispatch(normalizedCommand)
+                      .pipe(
+                        Effect.mapError((cause) =>
+                          toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
+                        ),
+                      ),
+              onSome: (result) => Effect.succeed(result),
+            }),
+          ),
+        );
 
         return startup
           .enqueueCommand(dispatchEffect)
@@ -762,12 +771,23 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 ),
               );
 
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
+              const localLiveStream = orchestrationEngine.streamDomainEvents.pipe(
                 Stream.mapEffect(toShellStreamEvent),
                 Stream.flatMap((event) =>
                   Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
                 ),
               );
+              const peerLiveStream = hostPeerFederation
+                .streamEvents({
+                  fromSequenceExclusive: snapshot.snapshotSequence,
+                })
+                .pipe(
+                  Stream.mapEffect(toShellStreamEvent),
+                  Stream.flatMap((event) =>
+                    Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
+                  ),
+                );
+              const liveStream = Stream.merge(localLiveStream, peerLiveStream);
 
               return Stream.concat(
                 Stream.make({
@@ -829,7 +849,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 });
               }
 
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
+              const localLiveStream = orchestrationEngine.streamDomainEvents.pipe(
                 Stream.filter(
                   (event) =>
                     event.aggregateKind === "thread" &&
@@ -841,6 +861,21 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   event,
                 })),
               );
+              const peerLiveStream = hostPeerFederation
+                .streamEvents({ fromSequenceExclusive: snapshotSequence })
+                .pipe(
+                  Stream.filter(
+                    (event) =>
+                      event.aggregateKind === "thread" &&
+                      event.aggregateId === input.threadId &&
+                      isThreadDetailEvent(event),
+                  ),
+                  Stream.map((event) => ({
+                    kind: "event" as const,
+                    event,
+                  })),
+                );
+              const liveStream = Stream.merge(localLiveStream, peerLiveStream);
 
               return Stream.concat(
                 Stream.make({

@@ -89,6 +89,13 @@ import {
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
 } from "./orchestration/http.ts";
+import {
+  localPeerDescriptorRouteLayer,
+  localPeerDispatchRouteLayer,
+  localPeerEventsRouteLayer,
+  localPeerHealthRouteLayer,
+  localPeerShellSnapshotRouteLayer,
+} from "./localPeer/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
@@ -314,6 +321,11 @@ export const makeRoutesLayer = Layer.mergeAll(
   attachmentsRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
+  localPeerDescriptorRouteLayer,
+  localPeerDispatchRouteLayer,
+  localPeerEventsRouteLayer,
+  localPeerHealthRouteLayer,
+  localPeerShellSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,

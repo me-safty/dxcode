@@ -86,6 +86,66 @@ Provider behavior:
 - The ideal behavior is that if VS Code is opened for a project while another surface is already managing that project, the next provider session or turn started from desktop/web can use the matching VS Code MCP tools without manually restarting T3 Code.
 - If a provider later supports dynamic MCP registration safely, this discovery layer can be reused to add MCP endpoints to an existing session, but that should be implemented provider by provider.
 
+### Remote Monitoring and Control
+
+Host MCP discovery lets a local backend find VS Code-owned tools, but it does not make remote clients able to monitor and control extension-owned provider sessions by itself. Remote monitoring and control now uses the desktop app backend as the local coordinator for VS Code extension-owned backends on the same workstation.
+
+Supported workflow:
+
+- Multiple VS Code windows can run the T3 extension, usually one per project.
+- The desktop app can run in the background on the same workstation.
+- A remote device on the local network pairs only with the desktop backend through the existing local connection flow.
+- The remote device sees one valid desktop-backed T3 environment. It does not need to know whether VS Code extensions, web app clients, or other local T3 surfaces are open.
+- The remote device can monitor and act on threads started from VS Code or desktop through that single desktop connection, without choosing or understanding the owning local instance.
+
+Relationship to cross-instance live sync:
+
+- Cross-instance live sync is the prerequisite for this model. The desktop backend receives live orchestration events from extension-owned backends instead of only reading their final persisted state later.
+- The shared persistence model is not enough on its own because active provider output, approval prompts, user-input prompts, and stop state are live ownership concerns.
+- Host MCP discovery remains useful as adjacent infrastructure: if desktop starts or resumes a provider session for a project that has a running VS Code extension, it can inject that extension's VS Code MCP tools.
+- MCP advertisements are not enough for remote monitoring because they advertise tool endpoints, not thread ownership, orchestration event streams, or provider-control routes.
+
+Implemented architecture:
+
+- VS Code extension backends write local backend presence advertisements alongside host MCP advertisements. Each advertisement includes a backend id, `hostKind: "vscode"`, loopback HTTP endpoint, bearer credential, bootstrapped workspace folder metadata, heartbeat/expiry timestamps, and capability flags for descriptor, health, shell snapshot, orchestration events, and command routing.
+- Advertisement files live under `<T3 home>/local-backends/advertisements/<backend-id>.json`. Writers update only their own file by atomic replace, heartbeat it every 10 seconds, expire it after 30 seconds, best-effort remove it on explicit stop and backend child exit, and opportunistically clean stale files after a 15 minute grace period.
+- Extension-owned backends remain loopback-only. They are reachable by the desktop backend on the workstation, but are not exposed directly to the LAN.
+- The desktop backend discovers local peer backends from advertisement files and uses the existing desktop LAN/local-connection API as the only remote-client surface.
+- Peer backend ids, endpoints, credentials, and ownership details are internal routing metadata. Remote clients keep seeing one desktop-backed T3 environment.
+- The desktop backend merges local orchestration streams with events fetched from advertised VS Code peer backends for shell and thread subscriptions.
+- Owner-sensitive commands are routed back to the backend that owns the live provider session when the thread's project workspace root matches an advertised peer. The routed command set currently includes turn start, turn interrupt, approval responses, structured user-input responses, and session stop.
+- Settled or stopped threads are not force-routed to a peer. A backend that accepts the next safe follow-up becomes the new live session owner.
+
+Peer transport:
+
+- The implementation uses a narrow local-only peer HTTP API between desktop and extension-owned backends instead of exposing the full public remote API between local peers.
+- Peer routes require loopback request source, an owner bearer session, and `hostIntegration: "vscode"` on the serving backend.
+- Peer routes currently cover descriptor, health, shell snapshot, bounded orchestration event replay, and owner-sensitive command dispatch.
+- Desktop polls peer event replay with a short interval and bounded per-request event count. It polls all reachable advertised peers and de-duplicates by event sequence before merging peer events into normal shell/thread streams.
+- The public LAN/local-connection API remains the only remote-client surface. Remote clients continue to connect to desktop normally and must not call peer APIs directly.
+
+Follow-up prompt semantics:
+
+- If the active session owner is reachable and the thread status is `starting`, `running`, or `ready`, desktop routes a follow-up `thread.turn.start` command to that owner.
+- If the thread is interrupted, stopped, or has no live session, desktop does not route the follow-up to a peer. The desktop backend can start the next turn through the normal project/provider context and becomes the new owner.
+- Interrupt, approval response, user-input response, and session stop commands are routed to the live owner whenever the thread has a non-stopped session and a matching reachable peer.
+- If a matching live owner should handle a command but all matching peer requests fail, desktop returns a dispatch error instead of silently adopting the active session.
+- After interrupt or stop, the backend that accepts the next follow-up becomes the new live session owner.
+
+Security boundaries:
+
+- Remote clients authenticate only to the desktop backend. They should not receive credentials for extension-owned local backends, receive peer topology as normal state, or connect to VS Code extension loopback endpoints directly.
+- Desktop-to-extension trust currently reuses the extension backend's owner bearer session stored in a short-lived 0600 local advertisement file. The advertisement itself expires quickly and is removed on normal shutdown, but the bearer credential lifetime is still governed by the existing session system.
+- The VS Code extension remains the trust boundary for VS Code API access. Remote control must not bypass `t3code.mcp.allowedRunCommands`, `t3code.mcp.allowedActivateExtensions`, command registration checks, or result bounding.
+- Federated peer records must be treated as hints, not authority. Desktop should ignore expired, malformed, unreachable, or scope-mismatched peer advertisements.
+
+Remaining follow-up work:
+
+- Replace advertised owner bearer sessions with narrower short-lived local peer credentials if/when the auth layer grows a dedicated peer-token path.
+- Add desktop-local diagnostics or admin surfaces for peer/source labels if troubleshooting needs it. Remote clients should not require or depend on those labels.
+- Decide how aggressively the desktop backend should recover or adopt extension-owned sessions after a VS Code window closes unexpectedly.
+- Validate which provider runtimes can safely transfer ownership after interruption, restart, or resume without losing provider-native context.
+
 Implemented:
 
 - `HostMcpAdvertisement` is a versioned shared contract in `packages/contracts`, with runtime advertisement helpers in `packages/shared/hostMcp`.
@@ -214,6 +274,10 @@ Implemented so far:
   - prunes inactive virtual workspace clones not used for 15 days after successful backend startup
   - polls `/.well-known/t3/environment` with a per-request timeout
   - marks the backend bootstrap with `hostIntegration: "vscode"` so VS Code-only behavior can remain scoped server-side
+  - advertises the extension-owned backend under `<T3 home>/local-backends/advertisements`
+  - heartbeats the local backend advertisement while the backend is alive
+  - removes the local backend advertisement on explicit stop and backend child exit
+  - cleans expired local backend advertisements opportunistically
   - terminates the backend on extension disposal
 - Added VS Code MCP support:
   - extension-owned temporary socket MCP server
@@ -278,6 +342,14 @@ Implemented so far:
   - passes bridge metadata through the desktop bootstrap envelope
   - injects provider-native MCP config for sessions launched by the VS Code-backed backend
   - leaves browser and desktop app prompt text, services, and runtime waiting paths untouched
+- Added local backend federation for remote monitoring/control:
+  - versioned local backend advertisement contracts in `packages/contracts`
+  - runtime advertisement helpers in `packages/shared/localBackendAdvertisement`
+  - loopback-only local peer routes for descriptor, health, shell snapshot, bounded orchestration event replay, and owner-sensitive command dispatch
+  - desktop-side peer discovery from matching workspace-folder advertisements
+  - shell and thread WebSocket subscriptions that merge local events with peer backend events
+  - HTTP and WebSocket dispatch paths that route live owner-sensitive commands to the owning VS Code backend
+  - ownership transfer semantics where interrupted/stopped/no-session follow-up prompts can be accepted by the desktop backend instead of being force-routed to the previous peer
 - Added extension settings for restoring VS Code-hidden T3 Code controls:
   - `t3code.ui.showOpenInPicker`
   - `t3code.ui.showCheckoutModeIndicator`
@@ -417,6 +489,48 @@ Security boundaries:
 - `t3code.mcp.allowedRunCommands`, `t3code.mcp.allowedActivateExtensions`, registered-command validation, internal-command rejection, result bounding, and command argument hydration remain enforced by the extension-owned MCP server.
 - Desktop/web backends must not use advertisements to broaden VS Code command allowlists or call VS Code APIs directly.
 - Advertisement parsing must be defensive, versioned, bounded, and local-filesystem-only.
+
+### 2026-05-28: Implement Desktop Federation for Remote Monitoring
+
+Decision: use the desktop backend as the local coordinator for remote monitoring and control of threads running in VS Code extension backends, desktop, or other local T3 surfaces. Remote clients should pair only with the desktop backend and see one valid desktop-backed T3 environment. Desktop should discover, subscribe to, and route control commands to trusted local peer backends behind that facade.
+
+Status: implemented for local VS Code extension backends.
+
+Reasoning:
+
+- The existing local connection flow already gives remote devices an authenticated path into the desktop backend.
+- Extension-owned backends should remain loopback-only so VS Code-local services and credentials are not exposed directly to the LAN.
+- Cross-instance live sync is required because shared persistence alone cannot represent live provider output, approval prompts, user-input prompts, interrupts, or current session ownership.
+- Host MCP discovery helps when desktop starts or resumes work for a project with a running VS Code extension, but MCP advertisements do not advertise live thread ownership or event streams.
+- Treating desktop as a federator preserves one remote trust boundary while allowing multiple local T3 processes to keep owning their own provider sessions.
+- Hiding peer topology from normal remote clients keeps the local connection feature conceptually simple: the client connects to desktop, and desktop handles local coordination.
+- A narrow local-only peer API keeps backend-to-backend federation smaller than the public remote API while still allowing reuse of the existing auth/session and WebSocket infrastructure.
+
+Implemented behavior:
+
+- VS Code extension backends advertise backend presence separately from host MCP tool advertisements.
+- Advertisements use one JSON file per backend under `<T3 home>/local-backends/advertisements`, with atomic replace, heartbeat, expiry, deterministic reads, malformed-record filtering, and best-effort stale cleanup.
+- The extension writes a local backend advertisement after backend readiness and bearer-session exchange, refreshes it while alive, removes it on explicit stop and backend child exit, and cleans stale peer advertisements opportunistically.
+- Desktop discovers live peer backends from advertisement files and keeps extension-owned backends loopback-only.
+- Peer backend communication uses local-only HTTP routes limited to descriptor, health/probe, shell snapshot, bounded orchestration event replay, and owner-sensitive command routing.
+- Peer routes require loopback source, owner bearer auth, and `hostIntegration: "vscode"` on the serving backend.
+- Remote clients receive one desktop-scoped state view through the desktop backend's existing authenticated HTTP and WebSocket transport.
+- Desktop shell/thread subscriptions merge local events with peer events fetched from all reachable advertised peers.
+- Owner-sensitive commands are routed back to the backend that owns the active provider session when the peer matches the thread's project workspace root.
+- Follow-up prompts are routed to the live owner while the session is `starting`, `running`, or `ready`. Interrupted, stopped, and no-session threads can be resumed by the desktop backend, making desktop the new live owner.
+- If a matching live owner should handle a command but all matching peer requests fail, desktop returns a dispatch error instead of silently adopting the active session.
+
+Security boundaries:
+
+- Remote clients authenticate only to desktop and never receive credentials, endpoints, or required topology for extension-owned loopback backends.
+- Peer advertisements are hints and must be validated for expiry, reachability, declared scope, and capabilities.
+- VS Code MCP allowlists and command validation remain enforced by the extension-owned MCP bridge.
+
+Remaining work:
+
+- Replace advertised owner bearer sessions with narrower short-lived local peer credentials once a dedicated peer-token path exists.
+- Add desktop-local peer diagnostics if troubleshooting real-world multi-window setups requires it.
+- Extend peer discovery beyond VS Code extension-hosted backends only after another local backend type has a concrete ownership/use case.
 
 ### 2026-05-15: Default VS Code View Into Secondary Side Bar
 

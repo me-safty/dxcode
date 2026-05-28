@@ -118,6 +118,10 @@
     "./hostMcp": {
       "types": "./src/hostMcp.ts",
       "import": "./src/hostMcp.ts"
+    },
+    "./localBackendAdvertisement": {
+      "types": "./src/localBackendAdvertisement.ts",
+      "import": "./src/localBackendAdvertisement.ts"
     }
   },
   "scripts": {

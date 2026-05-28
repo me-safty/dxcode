@@ -107,6 +107,9 @@ function makeDependencies(input: {
   readonly writeHostMcpAdvertisement?: BackendManagerDependencies["writeHostMcpAdvertisement"];
   readonly removeHostMcpAdvertisement?: BackendManagerDependencies["removeHostMcpAdvertisement"];
   readonly cleanupHostMcpAdvertisements?: BackendManagerDependencies["cleanupHostMcpAdvertisements"];
+  readonly writeLocalBackendAdvertisement?: BackendManagerDependencies["writeLocalBackendAdvertisement"];
+  readonly removeLocalBackendAdvertisement?: BackendManagerDependencies["removeLocalBackendAdvertisement"];
+  readonly cleanupLocalBackendAdvertisements?: BackendManagerDependencies["cleanupLocalBackendAdvertisements"];
 }): BackendManagerDependencies {
   return {
     fetch:
@@ -140,6 +143,10 @@ function makeDependencies(input: {
     removeHostMcpAdvertisement: input.removeHostMcpAdvertisement ?? vi.fn(),
     cleanupHostMcpAdvertisements:
       input.cleanupHostMcpAdvertisements ?? vi.fn(() => ({ deleted: 0, errors: 0 })),
+    writeLocalBackendAdvertisement: input.writeLocalBackendAdvertisement ?? vi.fn(),
+    removeLocalBackendAdvertisement: input.removeLocalBackendAdvertisement ?? vi.fn(),
+    cleanupLocalBackendAdvertisements:
+      input.cleanupLocalBackendAdvertisements ?? vi.fn(() => ({ deleted: 0, errors: 0 })),
   };
 }
 
@@ -264,6 +271,54 @@ describe("BackendManager", () => {
         method: "POST",
       },
     );
+  });
+
+  it("advertises the running local backend and removes the advertisement on stop", async () => {
+    const writeLocalBackendAdvertisement = vi.fn();
+    const removeLocalBackendAdvertisement = vi.fn();
+    const spawnMock = vi.fn<BackendSpawn>(() => makeChildProcess(() => {}));
+    const manager = new BackendManager(
+      { extensionPath: extensionRoot } as never,
+      makeOutputChannel() as never,
+      makeDependencies({
+        removeLocalBackendAdvertisement,
+        spawn: spawnMock,
+        writeLocalBackendAdvertisement,
+      }),
+    );
+
+    await manager.ensureStarted();
+
+    expect(writeLocalBackendAdvertisement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        t3Home: path.join(os.homedir(), ".t3"),
+        advertisement: expect.objectContaining({
+          backendId: expect.stringMatching(/^vscode-backend-/),
+          hostKind: "vscode",
+          httpBaseUrl: "http://127.0.0.1:49111",
+          bearerToken: "vscode-bearer-token",
+          workspaceFolders: [
+            {
+              key: "file::/workspace",
+              name: "workspace",
+              cwd: "/workspace",
+              uriScheme: "file",
+              uriAuthority: "",
+            },
+          ],
+          activeWorkspaceFolderKey: "file::/workspace",
+        }),
+      }),
+    );
+
+    const backendId =
+      writeLocalBackendAdvertisement.mock.calls[0]?.[0]?.advertisement.backendId ?? "";
+    await manager.stop();
+
+    expect(removeLocalBackendAdvertisement).toHaveBeenCalledWith({
+      t3Home: path.join(os.homedir(), ".t3"),
+      backendId,
+    });
   });
 
   it("includes VS Code MCP server bootstrap data when the bridge is enabled", async () => {
