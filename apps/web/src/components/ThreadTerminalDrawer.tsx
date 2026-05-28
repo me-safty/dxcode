@@ -881,6 +881,7 @@ function TerminalRenameInput({
 }: TerminalRenameInputProps) {
   const [value, setValue] = useState(initialValue);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -890,6 +891,7 @@ function TerminalRenameInput({
   }, []);
 
   const commit = useCallback(() => {
+    if (cancelledRef.current) return;
     const trimmed = value.trim();
     if (trimmed === initialValue.trim()) {
       onCancel();
@@ -905,6 +907,11 @@ function TerminalRenameInput({
     }
     onCommit(trimmed);
   }, [defaultValue, initialValue, onCancel, onCommit, value]);
+
+  const cancel = useCallback(() => {
+    cancelledRef.current = true;
+    onCancel();
+  }, [onCancel]);
 
   return (
     <input
@@ -923,7 +930,7 @@ function TerminalRenameInput({
           commit();
         } else if (event.key === "Escape") {
           event.preventDefault();
-          onCancel();
+          cancel();
         }
       }}
       onBlur={commit}
@@ -1108,6 +1115,17 @@ export default function ThreadTerminalDrawer({
       setEditingTerminalId(null);
     }
   }, [editingTerminalId, normalizedTerminalIds]);
+
+  const resolvedTerminalGroupIds = useMemo(
+    () => new Set(resolvedTerminalGroups.map((group) => group.id)),
+    [resolvedTerminalGroups],
+  );
+
+  useEffect(() => {
+    if (editingGroupId && !resolvedTerminalGroupIds.has(editingGroupId)) {
+      setEditingGroupId(null);
+    }
+  }, [editingGroupId, resolvedTerminalGroupIds]);
   const splitTerminalActionLabel = hasReachedSplitLimit
     ? `Split Terminal (max ${MAX_TERMINALS_PER_GROUP} per group)`
     : splitShortcutLabel
