@@ -13,11 +13,11 @@ import {
   type UserInputQuestion,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Queue from "effect/Queue";
-import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -134,8 +134,9 @@ const toProcessError = (threadId: ThreadId, cause: unknown): ProviderAdapterProc
     cause,
   });
 
-const buildEventBase = (input: {
+const buildEventBaseUnsafe = (input: {
   readonly threadId: ThreadId;
+  readonly eventId: EventId;
   readonly turnId?: TurnId | undefined;
   readonly itemId?: string | undefined;
   readonly requestId?: string | undefined;
@@ -148,10 +149,9 @@ const buildEventBase = (input: {
   >
 > =>
   Effect.gen(function* () {
-    const uuid = yield* Random.nextUUIDv4;
     const createdAt = input.createdAt ?? (yield* nowIso);
     return {
-      eventId: EventId.make(uuid),
+      eventId: input.eventId,
       provider: PROVIDER,
       threadId: input.threadId,
       createdAt,
@@ -457,6 +457,7 @@ export function makeOpenCodeAdapter(
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("opencode");
     const serverConfig = yield* ServerConfig;
     const openCodeRuntime = yield* OpenCodeRuntime;
+    const crypto = yield* Crypto.Crypto;
     const nativeEventLogger =
       options?.nativeEventLogger ??
       (options?.nativeEventLogPath !== undefined
@@ -470,6 +471,17 @@ export function makeOpenCodeAdapter(
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
     const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, OpenCodeSessionContext>();
+    const randomUUIDv4 = crypto.randomUUIDv4.pipe(
+      Effect.tapError((cause) =>
+        Effect.logError("Failed to generate OpenCode runtime identifier.", { cause }),
+      ),
+      Effect.catch(() => Effect.interrupt),
+    );
+    const buildEventBase = (input: Omit<Parameters<typeof buildEventBaseUnsafe>[0], "eventId">) =>
+      randomUUIDv4.pipe(
+        Effect.map(EventId.make),
+        Effect.flatMap((eventId) => buildEventBaseUnsafe({ ...input, eventId })),
+      );
 
     // Layer-level finalizer: when the adapter layer shuts down, stop every
     // session. Each session's `Scope.close` tears down its spawned OpenCode
@@ -1142,7 +1154,7 @@ export function makeOpenCodeAdapter(
 
     const sendTurn: OpenCodeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
       const context = ensureSessionContext(sessions, input.threadId);
-      const turnId = TurnId.make(`opencode-turn-${yield* Random.nextUUIDv4}`);
+      const turnId = TurnId.make(`opencode-turn-${yield* randomUUIDv4}`);
       const modelSelection =
         input.modelSelection ??
         (context.session.model

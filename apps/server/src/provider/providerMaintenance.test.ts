@@ -5,8 +5,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import os from "node:os";
 import path from "node:path";
 import { ProviderDriverKind } from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
-import * as Random from "effect/Random";
 import {
   clearLatestProviderVersionCacheForTests,
   createProviderVersionAdvisory,
@@ -19,7 +19,10 @@ import {
 
 const driver = (value: string) => ProviderDriverKind.make(value);
 const makeTempDir = Effect.fn("makeTempDir")(function* (name: string) {
-  const id = yield* Random.nextUUIDv4;
+  const id = yield* Crypto.Crypto.pipe(
+    Effect.flatMap((crypto) => crypto.randomUUIDv4),
+    Effect.provide(NodeServices.layer),
+  );
   return path.join(os.tmpdir(), `${name}-${id}`);
 });
 const isNativeTestCommandPath =
