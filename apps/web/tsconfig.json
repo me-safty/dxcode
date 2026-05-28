@@ -34,7 +34,8 @@
           "globalDate": "off",
           "globalConsole": "off",
           "globalRandom": "off",
-          "globalTimers": "off"
+          "globalTimers": "off",
+          "globalFetch": "off"
         }
       }
     ]
