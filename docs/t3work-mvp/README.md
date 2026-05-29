@@ -69,6 +69,7 @@ The user should be able to:
 - [Epic 21: Context Tool Catalog](./21-context-tool-catalog.md)
 - [Epic 22: GitHub Pull Request Workspace](./22-github-pull-request-workspace.md)
 - [Epic 23: Project Setup Preflight UI](./23-project-setup-preflight-ui.md)
+- [Epic 24: Tiered Message Composition (proposal)](./24-tiered-message-composition.md)
 
 ## Supporting Docs
 

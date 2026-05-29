@@ -58,7 +58,7 @@ Prefix policy:
 - `apps/server/src/persistence/Services/ProjectionThreadMessages.ts`
   - Extend the projection-thread message schema with optional `t3workExt` so the persistence layer can carry the namespaced message extension.
 - `packages/contracts/src/settings.ts`
-  - Add optional `t3workStoredProjectsJson` / `t3workStoredSidebarPinsJson` client-setting keys so desktop-stable t3work project and sidebar-pin persistence can reuse the existing local client-settings seam without widening unrelated runtime APIs.
+  - Add optional `t3workStoredProjectsJson` / `t3workStoredSidebarPinsJson` / `t3workStoredSidecarCompositionJson` client-setting keys so desktop-stable t3work project, sidebar-pin, and sidecar-composition persistence can reuse the existing local client-settings seam without widening unrelated runtime APIs.
 - `apps/web/src/store.ts`
   - Thread optional `t3workExt` through the existing chat-message mapper so user-visible timeline filtering/rendering can read the additive message seam.
 - `apps/web/src/types.ts`

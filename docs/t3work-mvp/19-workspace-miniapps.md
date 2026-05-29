@@ -185,6 +185,10 @@ _launchable workflows_, and "render a list / chip group / status widget in the s
 fits better as its own primitive that shares the same four core primitives underneath
 (Context, Tools, Workflows, Views).
 
+Phase 5a ships the stage-1 trusted variant: `title` is a static string and `component`
+is a shell-registered React component key. Function-typed titles and compiled `view`
+module paths are deferred to the miniapp runtime phase.
+
 ```ts
 // @t3work/plugin-sdk
 import { defineSidecarSection } from "@t3work/plugin-sdk";
@@ -192,12 +196,12 @@ import { defineSidecarSection } from "@t3work/plugin-sdk";
 export default defineSidecarSection({
   id: "quick-starts",
   version: "1.0.0",
-  title: (ctx) => "Quick Starts",
+  title: "Quick Starts",
   shortDescription: "Recipes matched to the current view",
   // Surface filter — only mount this section on these surfaces.
   surfaces: ["project.dashboard.backlog", "project.dashboard.myWork", "workitem.detail.sidepanel"],
-  // The View rendered inside the shell-provided section chrome.
-  view: "./quick-starts.view.tsx",
+  // The stage-1 trusted component rendered inside the shell-provided section chrome.
+  component: "quick-starts",
   // Data the View consumes — typed Queryables from the render context.
   // (No section-specific data layer; uses the same Context primitive.)
   // Tool groups this section's items may invoke.
@@ -236,19 +240,22 @@ owns its content. Stage-2 sandboxing applies identically.
 ```ts
 type SidecarComposition = {
   sections: ReadonlyArray<{
-    miniappId: string;
-    props?: Record<string, unknown>;
+    sectionId: string;
     visible?: boolean; // default from defineSidecarSection.defaults.visible
     collapsed?: boolean; // default from defineSidecarSection.defaults.collapsed
   }>;
+};
+
+type SidecarPersonalization = {
+  composition?: SidecarComposition;
 };
 ```
 
 Defaults come from the active profile ([Epic 12](./12-profiles-and-skill-packs.md)) —
 a QA profile composes a different section list than an engineering profile. Per-user
-overrides (reorder, collapse, hide) persist via the existing client-settings seam
-(`t3workStoredSidebarPinsJson` is already on the additive guard allowlist; that key
-extends to the section composition object — no new allowlist entry needed).
+overrides (reorder, collapse, hide) persist via a sibling client-settings key
+(`t3workStoredSidecarCompositionJson`; `packages/contracts/src/settings.ts` is already
+on the additive guard allowlist).
 
 ### Quick Starts is not special
 
@@ -357,18 +364,19 @@ runtime.
 
 #### Persistence
 
-All user-side customizations extend the existing client-settings seam — no new
-allowlist entries needed:
+The 5a persistence seam stores composition overrides in a sibling client-settings key —
+no new allowlist entries beyond the already-allowlisted `packages/contracts/src/settings.ts`
+schema change:
 
 ```ts
-// t3workStoredSidebarPinsJson (already on the additive guard allowlist)
+// t3workStoredSidecarCompositionJson
 type SidecarPersonalization = {
-  composition: SidecarComposition; // section visibility + order + collapse
-  itemHides: Record<string, ReadonlyArray<string>>; // sectionId → hidden itemIds
-  itemPins: Record<string, ReadonlyArray<string>>; // sectionId → pinned itemIds
-  itemOrderOverrides?: Record<string, ReadonlyArray<string>>;
+  composition?: SidecarComposition; // section visibility + order + collapse
 };
 ```
+
+`itemHides`, `itemPins`, and `itemOrderOverrides` are deferred to the later context-menu
+phase; 5a only persists section visibility, order, and collapse state.
 
 Layering: `bundled defaults → profile defaults → project config → user overrides`.
 Higher layers override lower. Hidden items don't render; pinned items render first; the
@@ -439,7 +447,7 @@ exist to prevent.
 
 | Helper                            | Placement                                                                                                           | Typical use                                                                                                                                                   | Status              |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
-| `defineSidecarSection`            | `sidecar.section`                                                                                                   | Labeled group in the right contextual sidecar (Quick Starts, Recent Threads, Inline Filters, Status Widgets)                                                  | Planned (Phase 5)   |
+| `defineSidecarSection`            | `sidecar.section`                                                                                                   | Labeled group in the right contextual sidecar (Quick Starts, Recent Threads, Inline Filters, Status Widgets)                                                  | Built (Phase 5a)    |
 | `defineWorkItemSection`           | `workitem.detail.section`                                                                                           | Section inside a work-item detail page (e.g., "Risk Assessment" between Description and Comments)                                                             | Planned (Phase 5+)  |
 | `defineDashboardWidget`           | `dashboard.widget`                                                                                                  | Widget tile inside a project dashboard (backlog overview, my-work overview)                                                                                   | Planned (Phase 5+)  |
 | `defineNavSection`                | `nav.section`                                                                                                       | Section inside the left navigation tree (e.g., a "Saved Filters" subtree)                                                                                     | Planned (Phase 5+)  |

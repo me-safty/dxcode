@@ -1212,7 +1212,7 @@ project is created. Project-local recipes are the editable source of truth for t
 | Shared tool surface for scripts/steps via broker; enforce `allowedToolGroups`                         | Built                                                        |
 | Deterministic workflows (no-agent workflows skip thread/launch-card) + `action.inline` placement      | Built (tool-step no-chat path; backlog inline chip wired)    |
 | `agent.task` step (background non-interactive LLM call) + step-result binding model                   | Planned (Phase 4 — design step-result model first)           |
-| Sidecar sections + `defineSidecarSection` SDK + composition model + remove hardcoded kickoff aside    | Planned (Phase 5 — same Views-on-miniapp work)               |
+| Sidecar sections + `defineSidecarSection` SDK + composition model + remove hardcoded kickoff aside    | Built (sections + composition; context menus deferred)       |
 | `define*` SDK surface (per-placement helpers, no generic primitive, multi-placement via exports)      | Planned (Phase 5 — ships alongside the placements it covers) |
 | Run-directory materialization, `context.json`/schema/map                                              | Built                                                        |
 | Setup script (formerly `init.ts`)                                                                     | Deferred until stage-2 sandbox                               |
