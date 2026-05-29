@@ -1,6 +1,6 @@
-import { MenuView } from "@expo/ui/community/menu";
+import { MenuView } from "@react-native-menu/menu";
 import type { ComponentProps, ReactNode } from "react";
-import { Pressable, View } from "react-native";
+import { Pressable, useColorScheme, View } from "react-native";
 import { SymbolView } from "expo-symbols";
 import { useThemeColor } from "../lib/useThemeColor";
 
@@ -75,12 +75,14 @@ export function ControlPill(props: {
 }
 
 export function ControlPillMenu(
-  props: Omit<ComponentProps<typeof MenuView>, "children" | "style"> & {
+  props: Omit<ComponentProps<typeof MenuView>, "children" | "style" | "themeVariant"> & {
     readonly children: ReactNode;
   },
 ) {
+  const isDarkMode = useColorScheme() === "dark";
+
   return (
-    <MenuView {...props} style={{ width: 44, height: 44 }}>
+    <MenuView {...props} themeVariant={isDarkMode ? "dark" : "light"}>
       {props.children}
     </MenuView>
   );

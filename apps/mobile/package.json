@@ -41,6 +41,7 @@
     "@expo/ui": "~56.0.8",
     "@legendapp/list": "3.0.0-beta.44",
     "@pierre/diffs": "catalog:",
+    "@react-native-menu/menu": "^2.0.0",
     "@shikijs/core": "3.23.0",
     "@shikijs/engine-javascript": "3.23.0",
     "@shikijs/langs": "3.23.0",
