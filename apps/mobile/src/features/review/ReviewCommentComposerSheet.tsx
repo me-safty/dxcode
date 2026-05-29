@@ -251,7 +251,7 @@ export function ReviewCommentComposerSheet() {
                 <Text className="text-[13px] font-t3-bold text-foreground">Comment</Text>
                 <View className="min-h-[132px] flex-1 overflow-hidden rounded-[20px] border border-border bg-card">
                   <View className="flex-1 px-4 pt-3.5">
-                    <TextInputWrapper onPaste={handleNativePaste}>
+                    <TextInputWrapper onPaste={handleNativePaste} style={{ flex: 1 }}>
                       <TextInput
                         autoFocus
                         multiline
@@ -259,7 +259,8 @@ export function ReviewCommentComposerSheet() {
                         textAlignVertical="top"
                         value={commentText}
                         onChangeText={setCommentText}
-                        className="flex-1 border-0 bg-transparent px-0 py-0 font-sans text-[15px]"
+                        className="h-full flex-1 border-0 bg-transparent px-0 py-0 font-sans text-[15px]"
+                        style={{ flex: 1 }}
                       />
                     </TextInputWrapper>
                   </View>
