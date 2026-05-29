@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/salchi/salchi-logo-transparent.png" alt="Salchi app icon" width="128" height="128" />
+</p>
+
 # Salchi
 
 Salchi is a minimal web GUI for coding agents (currently Codex, Claude, and OpenCode, more coming soon).
@@ -15,12 +19,12 @@ Salchi is a minimal web GUI for coding agents (currently Codex, Claude, and Open
 ### Run without installing
 
 ```bash
-npx t3
+npx salchi
 ```
 
 ### Desktop app
 
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases).
+Install the latest version of the desktop app from [GitHub Releases](https://github.com/JoseRFelix/salchi/releases).
 
 ## Some notes
 
