@@ -1,3 +1,4 @@
+import { MenuView } from "@expo/ui/community/menu";
 import type { ComponentProps, ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import { SymbolView } from "expo-symbols";
@@ -70,5 +71,17 @@ export function ControlPill(props: {
       ) : null}
       {props.label ? <Text className={labelClassName}>{props.label}</Text> : null}
     </Pressable>
+  );
+}
+
+export function ControlPillMenu(
+  props: Omit<ComponentProps<typeof MenuView>, "children" | "style"> & {
+    readonly children: ReactNode;
+  },
+) {
+  return (
+    <MenuView {...props} style={{ width: 44, height: 44 }}>
+      {props.children}
+    </MenuView>
   );
 }

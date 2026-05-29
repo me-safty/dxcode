@@ -1,5 +1,4 @@
 import { isLiquidGlassSupported, LiquidGlassView } from "@callstack/liquid-glass";
-import { MenuView } from "@expo/ui/community/menu";
 import type {
   EnvironmentId,
   ModelSelection,
@@ -31,7 +30,7 @@ import { useThemeColor } from "../../lib/useThemeColor";
 
 import { AppText as Text } from "../../components/AppText";
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
-import { ControlPill } from "../../components/ControlPill";
+import { ControlPill, ControlPillMenu } from "../../components/ControlPill";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { buildModelOptions, groupByProvider } from "../../lib/modelOptions";
@@ -763,18 +762,18 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             }}
           >
             <ControlPill icon="plus" onPress={() => void props.onPickDraftImages()} />
-            <MenuView
+            <ControlPillMenu
               actions={modelMenuActions}
               onPressAction={({ nativeEvent }) => handleModelMenuAction(nativeEvent.event)}
             >
               <ControlPill iconNode={<ProviderIcon provider={modelProvider} size={16} />} />
-            </MenuView>
-            <MenuView
+            </ControlPillMenu>
+            <ControlPillMenu
               actions={optionsMenuActions}
               onPressAction={({ nativeEvent }) => handleOptionsMenuAction(nativeEvent.event)}
             >
               <ControlPill icon="slider.horizontal.3" />
-            </MenuView>
+            </ControlPillMenu>
             <ControlPill icon="arrow.clockwise" onPress={() => void props.onRefresh()} />
             {showStopAction ? (
               <ControlPill

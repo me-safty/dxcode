@@ -1,4 +1,3 @@
-import { MenuView } from "@expo/ui/community/menu";
 import { useRouter } from "expo-router";
 import { TextInputWrapper } from "expo-paste-input";
 import { useCallback, useEffect, useMemo } from "react";
@@ -11,7 +10,7 @@ import { EnvironmentId, type ModelSelection } from "@t3tools/contracts";
 
 import { AppTextInput as TextInput } from "../../components/AppText";
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
-import { ControlPill } from "../../components/ControlPill";
+import { ControlPill, ControlPillMenu } from "../../components/ControlPill";
 import { ProviderIcon } from "../../components/ProviderIcon";
 
 import { convertPastedImagesToAttachments, pickComposerImages } from "../../lib/composerImages";
@@ -446,7 +445,7 @@ export function NewTaskDraftScreen(props: {
           ) : null}
           <View className="flex-row items-center justify-between gap-2 px-4 pt-2">
             <ControlPill icon="plus" onPress={() => void handlePickImages()} />
-            <MenuView
+            <ControlPillMenu
               actions={modelMenuActions}
               onPressAction={({ nativeEvent }) => handleModelMenuAction(nativeEvent.event)}
             >
@@ -455,25 +454,25 @@ export function NewTaskDraftScreen(props: {
                   <ProviderIcon provider={flow.selectedModelOption?.providerDriver} size={16} />
                 }
               />
-            </MenuView>
-            <MenuView
+            </ControlPillMenu>
+            <ControlPillMenu
               actions={optionsMenuActions}
               onPressAction={({ nativeEvent }) => handleOptionsMenuAction(nativeEvent.event)}
             >
               <ControlPill icon="slider.horizontal.3" />
-            </MenuView>
-            <MenuView
+            </ControlPillMenu>
+            <ControlPillMenu
               actions={environmentMenuActions}
               onPressAction={({ nativeEvent }) => handleEnvironmentMenuAction(nativeEvent.event)}
             >
               <ControlPill icon="desktopcomputer" />
-            </MenuView>
-            <MenuView
+            </ControlPillMenu>
+            <ControlPillMenu
               actions={workspaceMenuActions}
               onPressAction={({ nativeEvent }) => handleWorkspaceMenuAction(nativeEvent.event)}
             >
               <ControlPill icon="point.topleft.down.curvedto.point.bottomright.up" />
-            </MenuView>
+            </ControlPillMenu>
             <ControlPill
               icon="arrow.up"
               label={flow.submitting ? "Starting" : "Start"}
