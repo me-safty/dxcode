@@ -37,7 +37,7 @@ Register-ScheduledTask `
   -Action $action `
   -Trigger $trigger `
   -Settings $settings `
-  -Description "Checks local T3, Cloudflare, Convex, and posts Slack ops alerts on failure." `
+  -Description "Checks local/public T3 and external intake health, then posts ops alerts on failure." `
   -Force | Out-Null
 
 Write-Host "Installed scheduled task: $TaskName"

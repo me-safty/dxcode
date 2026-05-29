@@ -119,6 +119,12 @@ import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as Data from "effect/Data";
 import { ExecutionBridgeRunRegistryLive } from "./executionBridge/runStart.ts";
+import { ExternalChat, type ExternalChatShape } from "./externalIntake/ExternalChat.ts";
+import { ExternalIntake, type ExternalIntakeShape } from "./externalIntake/ExternalIntake.ts";
+import {
+  ExternalIntegrationRepository,
+  type ExternalIntegrationRepositoryShape,
+} from "./persistence/Services/ExternalIntegrations.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -338,6 +344,9 @@ const buildAppUnderTest = (options?: {
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
     serverEnvironment?: Partial<ServerEnvironmentShape>;
     repositoryIdentityResolver?: Partial<RepositoryIdentityResolverShape>;
+    externalChat?: Partial<ExternalChatShape>;
+    externalIntake?: Partial<ExternalIntakeShape>;
+    externalIntegrationRepository?: Partial<ExternalIntegrationRepositoryShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -503,7 +512,7 @@ const buildAppUnderTest = (options?: {
         })
       : VcsStatusBroadcaster.layer.pipe(Layer.provide(gitWorkflowLayer));
 
-    const servedRoutesLayer = HttpRouter.serve(makeRoutesLayer, {
+    const servedRoutesBaseLayer = HttpRouter.serve(makeRoutesLayer, {
       disableListenLog: true,
       disableLogger: true,
     }).pipe(
@@ -664,6 +673,50 @@ const buildAppUnderTest = (options?: {
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
           getThreadCheckpointContext: () => Effect.succeed(Option.none()),
           ...options?.layers?.projectionSnapshotQuery,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ExternalChat)({
+          handleSlackWebhook: () =>
+            Effect.succeed(new Response(JSON.stringify({ accepted: true }), { status: 200 })),
+          postToThread: () => Effect.succeed({ externalMessageId: "external-message-test" }),
+          postToChannel: () =>
+            Effect.succeed({
+              externalThreadId: "C_TEST:1710000000.000000",
+              externalMessageId: "1710000000.000000",
+              channelId: "C_TEST",
+              threadTs: "1710000000.000000",
+            }),
+          addReaction: () => Effect.void,
+          ...options?.layers?.externalChat,
+        }),
+      ),
+    );
+
+    const servedRoutesLayer = servedRoutesBaseLayer.pipe(
+      Layer.provide(
+        Layer.mock(ExternalIntake)({
+          handleMessage: () =>
+            Effect.succeed({
+              status: "ignored" as const,
+              reason: "external_intake_test_stub",
+            }),
+          ...options?.layers?.externalIntake,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ExternalIntegrationRepository)({
+          upsertThreadLink: () => Effect.void,
+          getThreadLink: () => Effect.succeed(Option.none()),
+          listThreadLinksByThread: () => Effect.succeed([]),
+          setThreadMuted: () => Effect.void,
+          upsertEventReceipt: () => Effect.void,
+          getEventReceipt: () => Effect.succeed(Option.none()),
+          upsertArtifactLink: () => Effect.void,
+          getArtifactLink: () => Effect.succeed(Option.none()),
+          upsertDeliveryReceipt: () => Effect.void,
+          getDeliveryReceipt: () => Effect.succeed(Option.none()),
+          ...options?.layers?.externalIntegrationRepository,
         }),
       ),
       Layer.provide(

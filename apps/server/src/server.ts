@@ -94,6 +94,16 @@ import {
   taskRuntimeUserInputRespondRouteLayer,
 } from "./executionBridge/http.ts";
 import { ExecutionBridgeRunRegistryLive } from "./executionBridge/runStart.ts";
+import { ExternalChatLive } from "./externalIntake/ExternalChat.ts";
+import { ExternalIntakeLive } from "./externalIntake/ExternalIntake.ts";
+import { ExternalIntakeReactorLive } from "./externalIntake/Reactor.ts";
+import {
+  externalIntakeHealthRouteLayer,
+  githubWebhookRouteLayer,
+  slackWebhookRouteLayer,
+  supportEmailWebhookRouteLayer,
+} from "./externalIntake/http.ts";
+import { ExternalIntegrationRepositoryLive } from "./persistence/Layers/ExternalIntegrations.ts";
 import {
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
@@ -156,6 +166,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointReactorLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
   Layer.provideMerge(RuntimeReceiptBusLive),
+  Layer.provideMerge(ExternalIntakeReactorLive),
 );
 
 const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
@@ -225,6 +236,27 @@ const CheckpointingLayerLive = Layer.empty.pipe(
 
 const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
 
+const ProjectSetupScriptRunnerLayerLive = ProjectSetupScriptRunnerLive.pipe(
+  Layer.provideMerge(OrchestrationLayerLive),
+  Layer.provideMerge(RepositoryIdentityResolverLive),
+  Layer.provideMerge(TerminalLayerLive),
+);
+
+const ExternalIntakeLayerLive = ExternalIntakeLive.pipe(
+  Layer.provideMerge(ExternalIntegrationRepositoryLive),
+  Layer.provideMerge(OrchestrationLayerLive),
+  Layer.provideMerge(RepositoryIdentityResolverLive),
+  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(ProjectSetupScriptRunnerLayerLive),
+  Layer.provideMerge(ServerEnvironmentLive),
+);
+
+const ExternalChatLayerLive = ExternalChatLive.pipe(
+  Layer.provideMerge(ExternalIntakeLayerLive),
+  Layer.provideMerge(ExternalIntegrationRepositoryLive),
+  Layer.provideMerge(ServerEnvironmentLive),
+);
+
 const WorkspaceEntriesLayerLive = WorkspaceEntriesLive.pipe(
   Layer.provide(WorkspacePathsLive),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
@@ -251,7 +283,7 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+const RuntimeCoreBaseDependenciesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
@@ -260,6 +292,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
+  Layer.provideMerge(ExternalIntegrationRepositoryLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
   // The instance registry is the new routing keystone — text generation,
@@ -281,10 +314,15 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // keeps a single Live for all opencode consumers.
   Layer.provideMerge(OpenCodeRuntimeLive),
   Layer.provideMerge(ServerSettingsLive),
+);
+
+const RuntimeCoreDependenciesLive = RuntimeCoreBaseDependenciesLive.pipe(
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLive),
   Layer.provideMerge(RepositoryIdentityResolverLive),
   Layer.provideMerge(ServerEnvironmentLive),
+  Layer.provideMerge(ExternalIntakeLayerLive),
+  Layer.provideMerge(ExternalChatLayerLive),
   Layer.provideMerge(AuthLayerLive),
 );
 
@@ -303,7 +341,7 @@ const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
 );
 
-export const makeRoutesLayer = Layer.mergeAll(
+const authRoutesLayer = Layer.mergeAll(
   authBearerBootstrapRouteLayer,
   authBootstrapRouteLayer,
   authClientsRevokeOthersRouteLayer,
@@ -314,6 +352,16 @@ export const makeRoutesLayer = Layer.mergeAll(
   authPairingCredentialRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
+);
+
+const externalRoutesLayer = Layer.mergeAll(
+  externalIntakeHealthRouteLayer,
+  githubWebhookRouteLayer,
+  slackWebhookRouteLayer,
+  supportEmailWebhookRouteLayer,
+);
+
+const orchestrationRoutesLayer = Layer.mergeAll(
   attachmentsRouteLayer,
   executionBridgeContinueRouteLayer,
   executionBridgeInterruptRouteLayer,
@@ -328,6 +376,12 @@ export const makeRoutesLayer = Layer.mergeAll(
   taskRuntimeUserInputRespondRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
+);
+
+export const makeRoutesLayer = Layer.mergeAll(
+  authRoutesLayer,
+  externalRoutesLayer,
+  orchestrationRoutesLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));
 
 export const makeServerLayer = Layer.unwrap(
