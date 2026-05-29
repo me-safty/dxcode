@@ -1,11 +1,15 @@
 # AGENTS.md
 
-## Convex Deployment
+## Legacy Convex Orchestrator
 
-- The orchestrator is production-backed. Treat the Convex production deployment as the canonical live deployment.
-- Production site URL: `https://<your-convex-site>`.
-- Production deployment commands must include `--prod` when inspecting or mutating live data, for example `bunx convex run --prod ...`, `bunx convex env list --prod`, and `bunx convex logs --prod`.
-- Deploy orchestrator changes to production with `bunx convex deploy` from `apps/orchestrator`.
-- Local production T3 callbacks must use `ORCHESTRATOR_BASE_URL=https://<your-convex-site>`.
-- Slack, Linear, GitHub, and local T3 callbacks should point at the production Convex site URL unless the user explicitly asks to use a dev deployment.
-- The old dev site `https://<your-dev-convex-site>` may still contain historical pilot data, but it is not the live target.
+`apps/orchestrator` is legacy code from the retired Convex-backed intake path.
+Do not treat Convex as the live orchestrator and do not deploy this package for
+the current external-intake flow unless the user explicitly asks to inspect or
+migrate historical Convex code.
+
+The active implementation is in `apps/server/src/externalIntake` and uses the
+server SQLite database. Current deployment and operations docs live in:
+
+- `docs/orchestrator-deployment.md`
+- `docs/orchestrator-operations.md`
+- `docs/adr/0004-server-native-external-intake.md`

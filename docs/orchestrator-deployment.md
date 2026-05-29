@@ -1,412 +1,157 @@
-# Orchestrator Deployment
+# Server-Native External Intake Deployment
 
-This runbook covers the local production topology:
+The active external-intake topology is server-native. Slack, support email, and
+GitHub webhooks call `apps/server` directly through the public T3 URL. Convex is
+not in the live request path.
 
-- the T3 server runs on this Windows PC at `127.0.0.1:3773`
-- Cloudflare Tunnel `t3code-local` exposes it publicly at `https://<your-public-t3-url>`
-- Convex calls the local server bridge through that public URL
-- Slack calls the Convex public HTTP endpoint
-
-## Local Services
-
-The local T3 server and Cloudflare connector are separate local services:
+## Topology
 
 ```text
-t3code-server
-  Windows service wrapping:
-  scripts\start-t3code-server.cmd
-
-cloudflared-t3code
-  Windows service:
-  C:\Program Files (x86)\cloudflared\cloudflared.exe --config <windows-user-profile>\.cloudflared\config.yml tunnel run t3code-local
+Slack Events/Interactivity
+Resend inbound email webhooks
+GitHub repository webhooks
+        |
+        v
+https://<your-public-t3-url>
+        |
+Cloudflare Tunnel
+        |
+127.0.0.1:3773
+        |
+apps/server
+        |
+SQLite state + T3 projects/worktrees/provider sessions
 ```
 
-`t3code-server` should run as a Windows service via NSSM. Install or repair it
-from an elevated PowerShell:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass -Force
-<repo-root>\scripts\install-t3code-server-service.ps1
-```
-
-If another dev/server process already owns port `3773`, stop it first or rerun
-with `-StopExistingPortOwner`.
-
-The service runs under `LocalSystem`, so `scripts\start-t3code-server.cmd`
-hydrates the interactive user profile before launching T3. By default it infers
-the profile from this checkout path (`<repo-root>` ->
-`<windows-user-profile>`) and sets:
+The external-intake routes are:
 
 ```text
-USERPROFILE=<windows-user-profile>
-HOME=<windows-user-profile>
-APPDATA=<windows-user-profile>\AppData\Roaming
-LOCALAPPDATA=<windows-user-profile>\AppData\Local
-CODEX_HOME=<windows-user-profile>\.codex
-GH_CONFIG_DIR=<windows-user-profile>\AppData\Roaming\GitHub CLI
+GET  https://<your-public-t3-url>/api/external-intake/health
+POST https://<your-public-t3-url>/slack/webhook
+POST https://<your-public-t3-url>/support-email/resend
+POST https://<your-public-t3-url>/github/webhook
 ```
 
-This is required so service-launched Codex/GitHub CLI processes can see the same
-auth files as interactive PowerShell. Override `T3CODE_SERVICE_USERPROFILE` in
-`.env.local` if this checkout moves to a different Windows profile.
+## WSL Service
 
-GitHub CLI is a special case: an interactive `gh auth login` stores credentials
-in the user's Windows Credential Manager, which `LocalSystem` cannot read. Set a
-local ignored env var for the service:
-
-```text
-GH_TOKEN=<token from gh auth token>
-```
-
-`gh` uses `GH_TOKEN` automatically, so PR creation works from the service without
-requiring `gh auth login` under `LocalSystem`.
-
-Git also treats repos owned by another Windows account as unsafe by default. The
-service startup sets:
-
-```text
-GIT_CONFIG_COUNT=1
-GIT_CONFIG_KEY_0=safe.directory
-GIT_CONFIG_VALUE_0=*
-```
-
-That lets service-launched T3 detect and checkpoint local target repos owned by
-the interactive user, such as `<target-repo-root>`, instead of
-reporting unsupported VCS operations.
-
-The old `t3code-server` scheduled task should remain disabled after the service
-is healthy. On 2026-05-15 the old scheduled tunnel/server tasks were found with
-a 72-hour execution limit, which caused the Cloudflare tunnel to stop after
-three days and made `https://<your-public-t3-url>` return Cloudflare `530`.
-
-`cloudflared-t3code` replaced the old `t3code-tunnel` scheduled task. It is a
-Windows service configured for automatic startup and restart-on-failure. The old
-`t3code-tunnel` scheduled task should remain disabled so two connectors do not
-run at the same time.
-
-The tunnel ingress should point at the IPv4 loopback address, not `localhost`,
-so Cloudflare cannot accidentally land on a parallel hot-reload server bound to
-IPv6:
-
-```yaml
-ingress:
-  - hostname: <your-public-t3-host>
-    service: http://127.0.0.1:3773
-  - service: http_status:404
-```
-
-Install or repair the Cloudflare service from an elevated PowerShell:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass -Force
-<repo-root>\scripts\install-cloudflared-t3code-service.ps1
-```
-
-Use the operator command from the repo root to start the server, tunnel, and desktop app:
-
-```cmd
-scripts\start-t3code-prod.cmd
-```
-
-For active development, use the hot-reloading local server command instead:
-
-```cmd
-bun run dev:local-cloudflare
-```
-
-This runs the server from source on `127.0.0.1:3773` and runs
-`cloudflared tunnel run t3code-local` in the same terminal. Stop or pause the
-`t3code-server` scheduled task first so the dev server can bind port `3773`.
-Set `T3CODE_SKIP_CLOUDFLARE=1` because the `cloudflared-t3code` Windows service
-normally owns the tunnel.
-
-## Stable Pairing Token
-
-Set `T3CODE_OWNER_PAIRING_TOKEN` in `.env.local` to reuse the same owner pairing
-URL across local server restarts:
-
-```text
-T3CODE_OWNER_PAIRING_TOKEN=<long random local-only token>
-```
-
-Then use:
-
-```text
-https://<your-public-t3-url>/pair#token=<long random local-only token>
-```
-
-`bun run dev:local-cloudflare` keeps the matching local auth row armed while it
-runs, so hot-reload server restarts do not force you to chase the transient
-startup token in the logs. Running `bun run dev:server` directly can serve the
-public URL from the dev auth database without the pairing-token refresh loop.
-The production service also seeds the same token before startup. The startup logs
-may still show a separate short-lived pairing URL because T3 always issues one
-for headless startup, but the stable URL above is the intended operator URL.
-Normal generated pairing links remain one-time; the env-seeded
-`env-owner-bootstrap` pairing link is reusable for this local owner workflow. To
-seed manually, run:
-
-```cmd
-bun run auth:seed-owner-pairing
-```
-
-## Convex Env
-
-Run Convex commands from `apps/orchestrator` with the intended `CONVEX_DEPLOYMENT` selected.
+The current production-like service runs from the WSL checkout and listens on
+`127.0.0.1:3773`:
 
 ```bash
-bunx convex env set --prod T3_EXECUTION_BRIDGE_BASE_URL 'https://<your-public-t3-url>'
-bunx convex env set --prod T3_EXECUTION_BRIDGE_SHARED_SECRET '<same secret used by local T3 server>'
-bunx convex env set --prod LINEAR_DEFAULT_WORKSPACE_ROOT '<repo-root>'
-bunx convex env set --prod GITHUB_WEBHOOK_SECRET '<shared GitHub webhook secret>'
+cd ~/code/t3code
+systemctl --user status t3code-server.service --no-pager
+systemctl --user restart t3code-server.service
+journalctl --user -u t3code-server.service -n 100 --no-pager
 ```
 
-Slack and GitHub webhook URLs stay on Convex:
+Cloudflare Tunnel should forward the public hostname to:
 
 ```text
-https://<your-convex-site>/slack/webhook
-https://<your-convex-site>/github/webhook
+http://127.0.0.1:3773
 ```
 
-Configure the GitHub webhook on each coding target repository that Vevin creates
-PRs against. This is not necessarily this `t3code` repo. For each target repo,
-open:
+## Environment
+
+Set local service environment in the WSL checkout's ignored `.env.local`.
+
+Required public/server settings:
 
 ```text
-https://github.com/<owner>/<repo>/settings/hooks
-```
-
-That webhook should point at:
-
-```text
-https://<your-convex-site>/github/webhook
-```
-
-Use content type `application/json`, set the secret to the same value as
-`GITHUB_WEBHOOK_SECRET`, and enable `deployment_status` and `pull_request`
-events. The orchestrator verifies `X-Hub-Signature-256`, posts public preview
-URLs when deployments become ready, and reacts to the original Slack task with a
-checkmark when the linked PR is merged.
-
-Operational debugging lives in `docs/orchestrator-operations.md`. Start there
-when Slack receives a message but Vevin does not reply, when PR/deployment cards
-are missing, or when a GitHub redelivery needs to be traced.
-
-Lifecycle callbacks from T3 use:
-
-```text
-POST https://<your-convex-site>/t3/task-runtime-events
-```
-
-So the local T3 server must have:
-
-```text
-ORCHESTRATOR_BASE_URL=https://<your-convex-site>
-T3_EXECUTION_BRIDGE_SHARED_SECRET=<same secret configured in Convex>
+T3CODE_PUBLIC_BASE_URL=https://<your-public-t3-url>
 T3_DEFAULT_PROVIDER_INSTANCE_ID=codex
-T3_DEFAULT_MODEL=gpt-5.5
+T3_DEFAULT_MODEL=<model>
 ```
 
-## Bridge Health Checks
+Required for Slack:
 
-Run the combined local/Cloudflare/Convex check:
+```text
+SLACK_SIGNING_SECRET=<Slack app signing secret>
+SLACK_BOT_TOKEN=xoxb-...
+```
 
-```powershell
-cd <repo-root>
-$env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://<your-convex-site>"
+Useful Slack metadata:
+
+```text
+SLACK_BOT_USER_ID=<bot user id>
+SLACK_BOT_USERNAME=<bot display/user name>
+SLACK_WORKSPACE_URL=https://<workspace>.slack.com
+```
+
+Required for Resend support-email intake:
+
+```text
+RESEND_API_KEY=<Resend API key>
+RESEND_WEBHOOK_SECRET=<optional Svix webhook secret>
+```
+
+Required for GitHub merged-PR notifications when a secret is configured on the
+repository webhook:
+
+```text
+GITHUB_WEBHOOK_SECRET=<shared webhook secret>
+```
+
+Do not set Convex deployment URLs for the server-native flow. The retired
+Convex bridge variables such as `ORCHESTRATOR_BASE_URL`, `CONVEX_URL`, and
+`CONVEX_SITE_URL` are not needed.
+
+## Intake Profiles
+
+External intake resolves projects from `T3_INTAKE_PROFILES_JSON` first, then
+from already configured T3 projects by matching aliases in the incoming message.
+
+Example:
+
+```text
+T3_INTAKE_PROFILES_JSON=[{"id":"nextcard","title":"Nextcard","workspaceRoot":"~/code/nextcard","aliases":["nextcard","next card"],"defaultBaseRef":"dev","setupScript":{"command":"scripts/worktree-setup.sh"},"supportEmail":{"productName":"Nextcard"}}]
+```
+
+Profile fields:
+
+- `workspaceRoot`: local repo path used to create worktrees.
+- `aliases`: names users can mention in Slack to select the project.
+- `defaultBaseRef`: branch/ref used as the worktree base.
+- `setupScript.command`: project script to run after worktree creation.
+- `supportEmail`: enables support-email routing for that project.
+
+## Slack App Setup
+
+In the Slack app configuration, point Event Subscriptions and Interactivity at:
+
+```text
+https://<your-public-t3-url>/slack/webhook
+```
+
+Subscribe to app mention and message events needed by the Chat SDK adapter. The
+server creates or continues a T3 thread when the bot is mentioned, subscribes to
+that Slack thread, and relays assistant replies back into Slack unless the
+thread is muted.
+
+## GitHub Setup
+
+Configure a repository webhook on target coding repos:
+
+```text
+https://<your-public-t3-url>/github/webhook
+```
+
+Use content type `application/json`, configure `GITHUB_WEBHOOK_SECRET` if you
+want signature verification, and enable pull request events. When a linked PR is
+merged, the server reacts to the Slack task message and posts a merged-PR note.
+
+## Health Checks
+
+Run:
+
+```bash
+curl -i http://127.0.0.1:3773/
+curl -i https://<your-public-t3-url>/
+curl -sS https://<your-public-t3-url>/api/external-intake/health
 bun run health:orchestrator
 ```
 
-Manual checks:
+Expected bridge auth check:
 
-```powershell
-Get-Service t3code-server
-Get-Service cloudflared-t3code
-curl.exe -i http://127.0.0.1:3773/
-curl.exe -i https://<your-public-t3-url>/
-curl.exe -i -X POST https://<your-public-t3-url>/api/execution/runs/status
-```
-
-Expected bridge result without auth:
-
-- `401` means the route exists and the shared secret is configured
-- `503` means the route exists but the local server is missing `T3_EXECUTION_BRIDGE_SHARED_SECRET`
-- `404` means the route is not in the running server build or the tunnel is not reaching it
-
-## Ops Alerts
-
-The health monitor posts Slack alerts through Convex, not directly from the
-Windows machine to Slack. Configure both the local `.env.local` and Convex dev
-with:
-
-```text
-T3_OPS_ALERT_SECRET=<shared local monitor to Convex secret>
-T3_OPS_SLACK_ALERT_CHANNEL_ID=slack:<alert-channel-id>
-```
-
-`<alert-channel-id>` is `#infrastructure`. The Convex endpoint is
-`POST /ops/health-alert`; it requires `Authorization: Bearer <T3_OPS_ALERT_SECRET>`
-and posts a Chat SDK card into the configured Slack channel.
-
-Run a notifying health check:
-
-```cmd
-scripts\run-orchestrator-health-monitor.cmd
-```
-
-Install the recurring monitor from elevated PowerShell:
-
-```powershell
-<repo-root>\scripts\install-orchestrator-health-monitor-task.ps1
-```
-
-The monitor stores local alert state in
-`logs/orchestrator-health-monitor-state.json`. It posts once when checks first
-fail, stays quiet while they remain failing, and posts once when checks recover.
-
-## Deploy Convex
-
-From `apps/orchestrator`:
-
-```bash
-bun run deploy
-```
-
-If Convex reports schema incompatibilities during local bring-up, clear the affected deployment data only after confirming it is the intended development/test deployment.
-
-## Updating T3 Code Server From Upstream
-
-Detailed update/restart runbook: [t3code-production-update.md](./t3code-production-update.md).
-
-The Windows services run the files in this checkout. The scripted update path is
-the preferred runbook:
-
-```powershell
-cd <repo-root>
-Set-ExecutionPolicy -Scope Process Bypass -Force
-.\scripts\update-t3code-server.ps1
-```
-
-Run PowerShell as Administrator when the script will restart `t3code-server`.
-Without elevation, use `-SkipRestart`, then restart the service manually from an
-elevated shell.
-
-The script:
-
-- refuses to merge over a dirty worktree unless `-AllowDirty` is passed
-- fetches and merges `pingdotgg/main` by default
-- runs `bun install`
-- runs `bun run build`
-- restarts the active `t3code-server` path
-- runs `bun run health:orchestrator`
-
-If the update is initiated from inside T3/Slack, use detached restart mode:
-
-```powershell
-.\scripts\update-t3code-server.ps1 -Remote origin -Branch main -DetachedRestart
-```
-
-Detached mode queues a hidden helper to restart the server after the foreground
-command exits. This prevents the server from killing the agent before it can send
-the final response.
-
-Equivalent manual flow:
-
-```powershell
-cd <repo-root>
-git fetch pingdotgg main
-git merge pingdotgg/main
-bun install
-bun run build
-Restart-Service t3code-server
-curl.exe -i http://127.0.0.1:3773/
-curl.exe -i https://<your-public-t3-url>/
-curl.exe -i -X POST https://<your-public-t3-url>/api/execution/runs/status
-```
-
-The Cloudflare service usually does not need a restart for upstream T3 changes;
-it only forwards traffic to `127.0.0.1:3773`. Restart `cloudflared-t3code` only
-when the tunnel config or service itself changes.
-
-For source-code development with hot reload, stop `t3code-server`, run
-`bun run dev:local-cloudflare` with `T3CODE_SKIP_CLOUDFLARE=1`, then rebuild and
-restart the service when the change is ready to become the production-like
-server.
-
-## End-To-End Smoke
-
-1. Start local infra:
-
-   ```cmd
-   scripts\start-t3code-prod.cmd
-   ```
-
-2. Confirm the bridge returns `401`, not `404`:
-
-   ```powershell
-   curl.exe -i -X POST https://<your-public-t3-url>/api/execution/runs/status
-   ```
-
-3. Post a tiny dated Slack smoke task in `#testing` that mentions `Vevin`.
-
-4. Confirm Convex accepts the webhook, local T3 receives a bridge request, and the originating thread receives a reply.
-
-## Slack E2E Matrix
-
-Use Convex production for the live Slack E2E matrix:
-
-```bash
-cd apps/orchestrator
-bunx convex logs --prod
-```
-
-Watch the local production T3 logs while testing:
-
-```powershell
-Get-Content <repo-root>\logs\t3code-server.log -Wait
-```
-
-Test these Slack behaviors in `#testing`:
-
-- Initial task mention: Vevin reacts to the original message with `eyes`.
-- Initial task card: Vevin posts `Talk to Vevin in this thread` with an `Open T3` button.
-- Message relay: the message sent to T3 is only the user message and attachment links. Slack client attribution such as `Sent using ChatGPT` must be stripped.
-- Aside: a message starting with `aside - ` is ignored and not relayed to T3.
-- Mute: `@Vevin mute` stops non-mention follow-ups in that Slack thread; `@Vevin unmute` resumes them.
-- PR created: Vevin posts a PR status card with `View PR` and Vercel preview buttons. The PR card must not include an `Open T3` button.
-- Deployment ready: Vevin posts a deployment-ready card with the public Vercel preview URL.
-- PR merged: Vevin reacts to the original Slack task message with `white_check_mark` and posts the same style PR status card.
-
-### Current E2E Tracker
-
-Update this checklist during each manual/live validation pass:
-
-- [x] Initial mention received by `/slack/webhook` in Convex dev logs.
-- [x] Original Slack message gets one `eyes` reaction.
-- [x] Initial card posts `Talk to Vevin in this thread` with an `Open T3` button.
-- [x] T3 prompt does not include Slack client attribution such as `Sent using ChatGPT`.
-- [x] Assistant replies relay back into the Slack thread.
-- [x] `aside - ...` follow-up is ignored and does not call T3.
-- [x] `@Vevin mute` mutes non-mention follow-ups in that Slack thread.
-- [x] `@Vevin unmute` resumes non-mention follow-ups.
-- [x] PR-created card posts once with `View PR` and deployment buttons, and no `Open T3` button.
-- [x] Deployment-ready event posts the public preview URL.
-- [x] PR-merged event adds `white_check_mark` to the original message and posts a PR status card.
-
-Latest live run:
-
-- Slack thread: `C0AJ5HR70PR` / `1778700070.090889`
-- Task: `kn76eye74y6t36wczn835ysrs186mgma`
-- Work session: `ks7dfw28hb6wb479waxygcfr0x86nzsh`
-- PR: `https://github.com/<owner>/<repo>/pull/1388`
-- Verified preview buttons: `example-web`, `example-api`, `example-pdp`
-- Merge validation: PR #1388 was merged on 2026-05-13 at 13:03 PDT. Convex dev handled the GitHub `pull_request.closed` webhook, Slack parent message `1778700070.090889` received `white_check_mark`, and Vevin posted a merge PR card in the thread at `1778702583.999829`.
-
-PR merge validation steps:
-
-1. Use a disposable Slack-created PR, or a PR that is safe to merge.
-2. Merge it on GitHub.
-3. Watch Convex dev logs for a `pull_request` webhook handled by `convex/github.ts`.
-4. Confirm Vevin reacts to the original Slack task message with `white_check_mark`.
-5. Confirm Vevin posts a PR status card in the same Slack thread.
-6. Confirm duplicate GitHub deliveries do not post another merge card.
+- `401`: bridge route is live and shared-secret auth is active.
+- `503`: bridge route is live but the shared secret is missing.
+- `404`: stale build or Cloudflare is not reaching T3.
