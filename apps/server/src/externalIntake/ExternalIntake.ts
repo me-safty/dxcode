@@ -214,11 +214,10 @@ function buildInitialPrompt(input: ExternalIntakeMessage) {
     });
   }
 
-  return buildTaskIntakeInitialPrompt(input, {
-    ...(input.initialPromptContext !== undefined
-      ? { agentPrompt: input.initialPromptContext }
-      : {}),
-  });
+  return buildTaskIntakeInitialPrompt(
+    input,
+    input.initialPromptContext !== undefined ? { agentPrompt: input.initialPromptContext } : {},
+  );
 }
 
 function buildTaskIntakeInitialPrompt(
@@ -243,7 +242,11 @@ function buildTaskIntakeInitialPrompt(
 
 function buildTaskIntakeRelayPrompt(input: ExternalIntakeMessage) {
   const text = input.text.trim();
-  return text.length > 0 ? text : "(empty message body)";
+  if (text.length > 0) return text;
+
+  const nativeImageCount =
+    input.attachments?.filter((attachment) => attachment.type === "image").length ?? 0;
+  return nativeImageCount > 0 ? "(image attachment)" : "(empty message body)";
 }
 
 function buildFollowUpPrompt(input: ExternalIntakeMessage) {

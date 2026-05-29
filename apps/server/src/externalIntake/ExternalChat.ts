@@ -1,3 +1,11 @@
+// @effect-diagnostics globalFetch:off
+
+import {
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  type UploadChatAttachment,
+} from "@t3tools/contracts";
+import { Buffer } from "node:buffer";
 import {
   Chat,
   type AdapterPostableMessage,
@@ -105,6 +113,156 @@ function attachmentLines(attachments: readonly Attachment[]) {
     const detail = attachment.mimeType?.trim() ? ` (${attachment.mimeType.trim()})` : "";
     return [`- ${name}${detail}: ${url}`];
   });
+}
+
+function attachmentName(attachment: Attachment, index: number) {
+  return attachment.name?.trim() || `Attachment ${index + 1}`;
+}
+
+function inferImageMimeType(attachment: Attachment): string | null {
+  const mimeType = attachment.mimeType?.trim().toLowerCase();
+  if (mimeType?.startsWith("image/")) return mimeType;
+
+  const nameOrUrl = `${attachment.name ?? ""} ${attachment.url ?? ""}`.toLowerCase();
+  if (/\.(?:png)(?:$|[?#\s])/.test(nameOrUrl)) return "image/png";
+  if (/\.(?:jpe?g)(?:$|[?#\s])/.test(nameOrUrl)) return "image/jpeg";
+  if (/\.(?:webp)(?:$|[?#\s])/.test(nameOrUrl)) return "image/webp";
+  if (/\.(?:gif)(?:$|[?#\s])/.test(nameOrUrl)) return "image/gif";
+  if (/\.(?:avif)(?:$|[?#\s])/.test(nameOrUrl)) return "image/avif";
+  if (/\.(?:heic)(?:$|[?#\s])/.test(nameOrUrl)) return "image/heic";
+  if (/\.(?:heif)(?:$|[?#\s])/.test(nameOrUrl)) return "image/heif";
+
+  return null;
+}
+
+function slackFileIdFromUrl(url: string | undefined) {
+  const match = /(?:^|[-/])(F[0-9A-Z]{8,})(?:[-/]|$)/i.exec(url ?? "");
+  return match?.[1];
+}
+
+async function fetchSlackFileUrl(url: string, token: string): Promise<Buffer> {
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/octet-stream,image/*,*/*",
+      Authorization: `Bearer ${token}`,
+      "User-Agent": "t3code-server/1.0",
+    },
+    redirect: "follow",
+  });
+  if (!response.ok) {
+    throw new Error(`Slack file fetch failed: ${response.status} ${response.statusText}`);
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const prefix = buffer.subarray(0, 128).toString("utf8").toLowerCase();
+  if (contentType.toLowerCase().includes("text/html") || prefix.includes("<html")) {
+    throw new Error(`Slack file fetch returned HTML (${contentType || "unknown content type"}).`);
+  }
+
+  return buffer;
+}
+
+async function fetchSlackFileViaFilesInfo(attachment: Attachment, token: string): Promise<Buffer> {
+  const fileId = slackFileIdFromUrl(attachment.url);
+  if (!fileId) {
+    throw new Error("Could not infer Slack file id from attachment URL.");
+  }
+
+  const infoResponse = await fetch(
+    `https://slack.com/api/files.info?file=${encodeURIComponent(fileId)}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  if (!infoResponse.ok) {
+    throw new Error(`Slack files.info failed: ${infoResponse.status} ${infoResponse.statusText}`);
+  }
+
+  const info = (await infoResponse.json()) as {
+    readonly ok?: boolean;
+    readonly error?: string;
+    readonly file?: {
+      readonly url_private_download?: string;
+      readonly url_private?: string;
+    };
+  };
+  if (info.ok !== true) {
+    throw new Error(`Slack files.info rejected file: ${info.error ?? "unknown_error"}`);
+  }
+
+  const downloadUrl = info.file?.url_private_download ?? info.file?.url_private;
+  if (!downloadUrl) {
+    throw new Error("Slack files.info response did not include a private download URL.");
+  }
+
+  return fetchSlackFileUrl(downloadUrl, token);
+}
+
+async function fetchAttachmentData(attachment: Attachment): Promise<Buffer> {
+  try {
+    if (attachment.fetchData !== undefined) {
+      const data = await attachment.fetchData();
+      const prefix = data.subarray(0, 128).toString("utf8").toLowerCase();
+      if (prefix.includes("<html")) {
+        throw new Error("Chat SDK attachment fetch returned HTML.");
+      }
+      return data;
+    }
+  } catch {
+    // Fall back to Slack API download below when the Chat SDK attachment handle is stale.
+  }
+
+  const url = attachment.url?.trim();
+  const botToken = process.env.SLACK_BOT_TOKEN?.trim();
+  if (!url || !botToken) {
+    throw new Error("Slack attachment data is not fetchable.");
+  }
+
+  try {
+    return await fetchSlackFileViaFilesInfo(attachment, botToken);
+  } catch {
+    // Some Slack URLs are directly fetchable with the bot token even when files.info fails.
+  }
+
+  return fetchSlackFileUrl(url, botToken);
+}
+
+async function nativeImageAttachment(
+  attachment: Attachment,
+  index: number,
+): Promise<UploadChatAttachment | null> {
+  const mimeType = inferImageMimeType(attachment);
+  if (mimeType === null) return null;
+
+  try {
+    const data = await fetchAttachmentData(attachment);
+    if (data.byteLength === 0 || data.byteLength > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+      return null;
+    }
+
+    return {
+      type: "image",
+      name: attachmentName(attachment, index),
+      mimeType,
+      sizeBytes: data.byteLength,
+      dataUrl: `data:${mimeType};base64,${Buffer.from(data).toString("base64")}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function nativeImageAttachments(attachments: readonly Attachment[]) {
+  const uploadAttachments: UploadChatAttachment[] = [];
+
+  for (const [index, attachment] of attachments.entries()) {
+    if (uploadAttachments.length >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) break;
+    const uploadAttachment = await nativeImageAttachment(attachment, index);
+    if (uploadAttachment !== null) uploadAttachments.push(uploadAttachment);
+  }
+
+  return uploadAttachments;
 }
 
 function messageTextWithAttachments(message: Message) {
@@ -258,6 +416,9 @@ const makeExternalChat = Effect.gen(function* () {
         source: "slack",
         externalThreadId: ref.externalThreadId,
       });
+      const uploadAttachments = yield* Effect.promise(() =>
+        nativeImageAttachments(input.message.attachments),
+      );
       const isSlackThreadReply =
         ref.raw.thread_ts !== undefined && ref.raw.thread_ts !== (ref.raw.ts ?? input.message.id);
       const slackThreadContext =
@@ -276,6 +437,7 @@ const makeExternalChat = Effect.gen(function* () {
         externalMessageId: input.message.id,
         text,
         title: titleFromText(text, "Slack request"),
+        ...(uploadAttachments.length > 0 ? { attachments: uploadAttachments } : {}),
         url: ref.url,
         receivedAt: input.message.metadata.dateSent.toISOString(),
         projectHintText: ref.raw.text ?? input.message.text,

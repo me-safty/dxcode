@@ -837,13 +837,6 @@ const appendSessionCookieToWsUrl = (url: string, sessionCookieHeader: string) =>
   return isAbsoluteUrl ? next.toString() : `${next.pathname}${next.search}${next.hash}`;
 };
 
-const getHttpServerUrl = (pathname = "") =>
-  Effect.gen(function* () {
-    const server = yield* HttpServer.HttpServer;
-    const address = server.address as HttpServer.TcpAddress;
-    return `http://127.0.0.1:${address.port}${pathname}`;
-  });
-
 const withExecutionBridgeSecret = <A, E, R>(
   secret: string | null,
   effect: Effect.Effect<A, E, R>,
@@ -1126,20 +1119,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       null,
       Effect.gen(function* () {
         yield* buildAppUnderTest();
-        const url = yield* getHttpServerUrl("/api/execution/runs/status");
 
-        const response = yield* Effect.promise(() =>
-          fetch(url, {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({
-              executionRunId: "run-test",
-              t3ThreadId: String(defaultThreadId),
-            }),
+        const response = yield* HttpClient.post("/api/execution/runs/status", {
+          body: yield* HttpBody.json({
+            executionRunId: "run-test",
+            t3ThreadId: String(defaultThreadId),
           }),
-        );
+        });
 
         assert.equal(response.status, 503);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
@@ -1151,21 +1137,16 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       "correct-secret",
       Effect.gen(function* () {
         yield* buildAppUnderTest();
-        const url = yield* getHttpServerUrl("/api/execution/runs/status");
 
-        const response = yield* Effect.promise(() =>
-          fetch(url, {
-            method: "POST",
-            headers: {
-              authorization: "Bearer wrong-secret",
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({
-              executionRunId: "run-test",
-              t3ThreadId: String(defaultThreadId),
-            }),
+        const response = yield* HttpClient.post("/api/execution/runs/status", {
+          headers: {
+            authorization: "Bearer wrong-secret",
+          },
+          body: yield* HttpBody.json({
+            executionRunId: "run-test",
+            t3ThreadId: String(defaultThreadId),
           }),
-        );
+        });
 
         assert.equal(response.status, 401);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
@@ -1177,22 +1158,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       "correct-secret",
       Effect.gen(function* () {
         yield* buildAppUnderTest();
-        const url = yield* getHttpServerUrl("/api/execution/runs/status");
 
-        const response = yield* Effect.promise(() =>
-          fetch(url, {
-            method: "POST",
-            headers: {
-              authorization: "Bearer correct-secret",
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({
-              executionRunId: "run-test",
-              t3ThreadId: String(defaultThreadId),
-            }),
+        const response = yield* HttpClient.post("/api/execution/runs/status", {
+          headers: {
+            authorization: "Bearer correct-secret",
+          },
+          body: yield* HttpBody.json({
+            executionRunId: "run-test",
+            t3ThreadId: String(defaultThreadId),
           }),
-        );
-        const body = (yield* Effect.promise(() => response.json())) as { readonly found: boolean };
+        });
+        const body = (yield* response.json) as { readonly found: boolean };
 
         assert.equal(response.status, 200);
         assert.equal(body.found, false);

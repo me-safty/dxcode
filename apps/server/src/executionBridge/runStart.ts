@@ -1,3 +1,5 @@
+// @effect-diagnostics cryptoRandomUUIDInEffect:off
+
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -90,7 +92,7 @@ interface ExecutionBridgeRunRegistryShape {
 export class ExecutionBridgeRunRegistry extends Context.Service<
   ExecutionBridgeRunRegistry,
   ExecutionBridgeRunRegistryShape
->()("t3/executionBridge/ExecutionBridgeRunRegistry") {}
+>()("t3/executionBridge/runStart/ExecutionBridgeRunRegistry") {}
 
 function deriveProjectTitle(workspaceRoot: string) {
   const segments = workspaceRoot.split(/[/\\]/).filter(Boolean);

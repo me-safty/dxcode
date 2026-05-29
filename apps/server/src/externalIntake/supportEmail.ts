@@ -1,3 +1,5 @@
+// @effect-diagnostics globalFetch:off
+
 import { Buffer } from "node:buffer";
 
 import {
