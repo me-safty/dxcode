@@ -137,6 +137,7 @@ function createTestClient() {
         });
       }
     },
+    getShellListenerCount: () => shellListeners.size,
   };
 }
 
@@ -294,7 +295,7 @@ describe("createEnvironmentConnection", () => {
     vi.useFakeTimers();
     try {
       const environmentId = EnvironmentId.make("env-1");
-      const { client, emitShellSnapshot } = createTestClient();
+      const { client, emitShellSnapshot, getShellListenerCount } = createTestClient();
       const syncShellSnapshot = vi.fn();
 
       const connection = createEnvironmentConnection({
@@ -325,10 +326,12 @@ describe("createEnvironmentConnection", () => {
       );
       await vi.advanceTimersByTimeAsync(12_000);
       await expectation;
+      expect(getShellListenerCount()).toBe(1);
 
       emitShellSnapshot(2);
       await connection.ensureBootstrapped();
 
+      expect(getShellListenerCount()).toBe(1);
       expect(syncShellSnapshot).toHaveBeenLastCalledWith(
         expect.objectContaining({ snapshotSequence: 2 }),
         environmentId,

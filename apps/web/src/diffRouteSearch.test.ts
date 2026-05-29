@@ -1,6 +1,12 @@
+import { retainSearchParams } from "@tanstack/react-router";
 import { describe, expect, it } from "vitest";
 
-import { buildOpenDiffSearch, parseDiffRouteSearch } from "./diffRouteSearch";
+import {
+  buildClosedDiffSearch,
+  buildOpenDiffSearch,
+  type DiffRouteSearch,
+  parseDiffRouteSearch,
+} from "./diffRouteSearch";
 
 describe("parseDiffRouteSearch", () => {
   it("parses valid diff search values", () => {
@@ -167,6 +173,42 @@ describe("buildOpenDiffSearch", () => {
     ).toEqual({
       diff: "1",
       panel: "activity",
+    });
+  });
+});
+
+describe("buildClosedDiffSearch", () => {
+  it("marks diff params as intentionally closed for search middleware", () => {
+    expect(
+      buildClosedDiffSearch({
+        diff: "1",
+        diffSource: "unstaged",
+        diffTurnId: "turn-1",
+        diffFilePath: "src/app.ts",
+        panel: "activity",
+      }),
+    ).toEqual({
+      diff: undefined,
+      diffSource: undefined,
+      diffTurnId: undefined,
+      diffFilePath: undefined,
+      panel: "activity",
+    });
+  });
+
+  it("prevents retained diff search params from reopening the panel", () => {
+    const retainDiff = retainSearchParams<DiffRouteSearch>(["diff"]);
+
+    expect(
+      retainDiff({
+        search: { diff: "1" },
+        next: (search) => buildClosedDiffSearch(search),
+      }),
+    ).toEqual({
+      diff: undefined,
+      diffSource: undefined,
+      diffTurnId: undefined,
+      diffFilePath: undefined,
     });
   });
 });

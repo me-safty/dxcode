@@ -61,6 +61,7 @@ import {
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { Button } from "./ui/button";
+import { Toggle } from "./ui/toggle";
 
 const FILE_PREVIEW_LINE_HEIGHT = 20;
 const FILE_PREVIEW_VIRTUALIZER_CLASS_NAME = "workspace-file-preview-virtualizer";
@@ -941,7 +942,7 @@ export function WorkspaceFilePreviewPanel(props: {
         {props.returnTarget && props.onReturn ? (
           <Button
             size="icon-xs"
-            variant="ghost"
+            variant="outline"
             aria-label={returnButtonLabel}
             title={returnButtonLabel}
             onClick={() => {
@@ -970,7 +971,7 @@ export function WorkspaceFilePreviewPanel(props: {
         {props.showExplorerButton && props.onShowExplorer ? (
           <Button
             size="icon-xs"
-            variant="ghost"
+            variant="outline"
             aria-label="Show file explorer"
             title="Show file explorer"
             onClick={props.onShowExplorer}
@@ -981,7 +982,7 @@ export function WorkspaceFilePreviewPanel(props: {
         {props.target && props.onAddFileToInput ? (
           <Button
             size="icon-xs"
-            variant="ghost"
+            variant="outline"
             aria-label={`Add ${props.target.relativePath} to chat input`}
             title={`Add ${props.target.relativePath} to chat input`}
             onClick={() => {
@@ -995,18 +996,19 @@ export function WorkspaceFilePreviewPanel(props: {
         ) : null}
         {!isImagePreviewTarget ? (
           <>
-            <Button
-              size="icon-xs"
-              variant="ghost"
+            <Toggle
+              size="xs"
+              variant="outline"
               aria-label={wordWrap ? "Disable word wrap" : "Enable word wrap"}
               title={wordWrap ? "Disable word wrap" : "Enable word wrap"}
-              onClick={() => setWordWrap((value) => !value)}
+              pressed={wordWrap}
+              onPressedChange={(pressed) => setWordWrap(Boolean(pressed))}
             >
-              <TextWrapIcon className="size-3.5" />
-            </Button>
+              <TextWrapIcon className="size-3" />
+            </Toggle>
             <Button
               size="icon-xs"
-              variant="ghost"
+              variant="outline"
               disabled={!query.data}
               aria-label={isCopied ? "Copied file" : "Copy file"}
               title={isCopied ? "Copied" : "Copy file"}
@@ -1018,7 +1020,7 @@ export function WorkspaceFilePreviewPanel(props: {
         ) : null}
         <Button
           size="icon-xs"
-          variant="ghost"
+          variant="outline"
           aria-label="Close file preview"
           title="Close file preview"
           onClick={closeWorkspaceFilePreview}

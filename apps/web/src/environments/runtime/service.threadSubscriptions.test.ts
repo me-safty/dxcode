@@ -847,6 +847,130 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("populates a sidebar summary from a live thread detail event", async () => {
+    const {
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectSidebarThreadSummaryByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-live-detail-sidebar");
+    const projectId = ProjectId.make("project-1");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(
+      {
+        snapshotSequence: 1,
+        projects: [],
+        threads: [],
+        updatedAt: "2026-04-13T00:00:01.000Z",
+      },
+      environmentId,
+    );
+
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    readThreadDetailSubscriptionListener(0)({
+      kind: "event",
+      event: makeThreadCreatedEvent({ sequence: 2, threadId, projectId }),
+    });
+
+    const sidebarThread = selectSidebarThreadSummaryByRef(
+      useStore.getState(),
+      scopeThreadRef(environmentId, threadId),
+    );
+    expect(sidebarThread?.id).toBe(threadId);
+    expect(sidebarThread?.projectId).toBe(projectId);
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("resyncs known threads that were not touched by a completed gap replay", async () => {
+    const { startEnvironmentConnectionService, resetEnvironmentServiceForTests } =
+      await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectEnvironmentState, selectSidebarThreadSummaryByRef, useStore } =
+      await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const knownThreadId = ThreadId.make("thread-known-missing-sidebar");
+    const replayedThreadId = ThreadId.make("thread-replayed-sidebar");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId: knownThreadId,
+        sessionStatus: "ready",
+      }),
+      environmentId,
+    );
+    useStore.setState((state) => {
+      const environmentState = selectEnvironmentState(state, environmentId);
+      const { [knownThreadId]: _removed, ...sidebarThreadSummaryById } =
+        environmentState.sidebarThreadSummaryById;
+      return {
+        ...state,
+        environmentStateById: {
+          ...state.environmentStateById,
+          [environmentId]: {
+            ...environmentState,
+            sidebarThreadSummaryById,
+          },
+        },
+      };
+    });
+    expect(
+      selectSidebarThreadSummaryByRef(
+        useStore.getState(),
+        scopeThreadRef(environmentId, knownThreadId),
+      ),
+    ).toBeUndefined();
+
+    mockReplayEvents.mockResolvedValueOnce([
+      makeThreadCreatedEvent({ sequence: 2, threadId: replayedThreadId }),
+      makeThreadSessionSetEvent({
+        sequence: 3,
+        threadId: replayedThreadId,
+        status: "running",
+      }),
+    ]);
+
+    connectionInput.applyShellEvent(
+      {
+        kind: "thread-upserted",
+        sequence: 3,
+        thread: makeThreadShellSnapshot({
+          threadId: replayedThreadId,
+          sessionStatus: "running",
+        }).threads[0]!,
+      },
+      environmentId,
+    );
+
+    await vi.waitFor(() => {
+      expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
+      expect(
+        selectSidebarThreadSummaryByRef(
+          useStore.getState(),
+          scopeThreadRef(environmentId, knownThreadId),
+        )?.id,
+      ).toBe(knownThreadId);
+    });
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
   it("refreshes retained thread detail when a shell event advances beyond the detail snapshot", async () => {
     const {
       retainThreadDetailSubscription,
@@ -4941,7 +5065,7 @@ describe("retainThreadDetailSubscription", () => {
     release();
     stop();
     await resetEnvironmentServiceForTests();
-  });
+  }, 15_000);
 
   it("hydrates a pending notification target after service restart within TTL", async () => {
     const localStorage = createMemoryStorage();

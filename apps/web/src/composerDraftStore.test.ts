@@ -13,6 +13,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type ModelSelection,
+  type OrchestrationProposedPlanId,
   type ProviderOptionSelection,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -926,6 +927,45 @@ describe("composerDraftStore project draft thread mapping", () => {
       branch: null,
       worktreePath: null,
       envMode: "local",
+    });
+  });
+
+  it("persists and hydrates source proposed plan context on draft threads", () => {
+    const sourceThreadId = ThreadId.make("thread-source-plan");
+    const sourcePlanId = "plan-source-draft" as OrchestrationProposedPlanId;
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    store.setDraftThreadContext(draftId, {
+      sourceProposedPlan: {
+        threadId: sourceThreadId,
+        planId: sourcePlanId,
+      },
+    });
+
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => {
+          draftThreadsByThreadKey?: Record<string, { sourceProposedPlan?: unknown }>;
+        };
+        merge: (
+          persistedState: unknown,
+          currentState: ReturnType<typeof useComposerDraftStore.getState>,
+        ) => ReturnType<typeof useComposerDraftStore.getState>;
+      };
+    };
+    const persistedState = persistApi.getOptions().partialize(useComposerDraftStore.getState());
+
+    expect(persistedState.draftThreadsByThreadKey?.[draftId]?.sourceProposedPlan).toEqual({
+      threadId: sourceThreadId,
+      planId: sourcePlanId,
+    });
+
+    const mergedState = persistApi
+      .getOptions()
+      .merge(persistedState, useComposerDraftStore.getInitialState());
+    expect(mergedState.draftThreadsByThreadKey[draftId]?.sourceProposedPlan).toEqual({
+      threadId: sourceThreadId,
+      planId: sourcePlanId,
     });
   });
 });

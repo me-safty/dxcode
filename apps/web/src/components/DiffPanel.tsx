@@ -27,6 +27,7 @@ import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
 import { cn } from "~/lib/utils";
 import { resolvePathLinkTarget } from "../terminal-links";
 import {
+  buildClosedDiffSearch,
   buildOpenDiffSearch,
   parseDiffRouteSearch,
   stripDiffSearchParams,
@@ -639,14 +640,14 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       void navigate({
         to: "/draft/$draftId",
         params: buildDraftThreadRouteParams(activeDiffContext.routeTarget.draftId),
-        search: (previous) => stripDiffSearchParams(previous),
+        search: (previous) => buildClosedDiffSearch(previous),
       });
       return;
     }
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(activeDiffContext.routeTarget.threadRef),
-      search: (previous) => stripDiffSearchParams(previous),
+      search: (previous) => buildClosedDiffSearch(previous),
     });
   };
   const updateTurnStripScrollState = useCallback(() => {

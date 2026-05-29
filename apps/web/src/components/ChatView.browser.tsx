@@ -7,6 +7,7 @@ import {
   EnvironmentId,
   type EnvironmentApi,
   type MessageId,
+  type OrchestrationProposedPlanId,
   type OrchestrationReadModel,
   type ProjectId,
   ProviderDriverKind,
@@ -56,6 +57,7 @@ import {
   installServiceWorkerNotificationNavigation,
   resetNotificationNavigationStateForTests,
 } from "../push/notificationNavigation";
+import { buildPlanImplementationPrompt } from "../proposedPlan";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { getServerConfig } from "../rpc/serverState";
 import { getRouter } from "../router";
@@ -7067,6 +7069,141 @@ describe("ChatView timeline estimator parity (full app)", () => {
             item.textContent?.includes("Implement in a new thread"),
           ) ?? null,
         "Implementation actions menu did not open on the first tap.",
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("prefills implementation drafts without auto-submitting and carries the source plan on send", async () => {
+    const planMarkdown = "# Follow-up plan\n\n- Keep the composer footer stable on resize.";
+    const sourcePlanId = "plan-follow-up-browser-test" as OrchestrationProposedPlanId;
+    const planModelSelection = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.4",
+    };
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithPlanFollowUpPrompt({
+        planMarkdown,
+        modelSelection: planModelSelection,
+      }),
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const implementActionsButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label="Implementation actions"]'),
+        "Unable to find implementation actions trigger.",
+      );
+      implementActionsButton.click();
+
+      const implementInNewThreadItem = await waitForElement(
+        () =>
+          (Array.from(document.querySelectorAll('[data-slot="menu-item"]')).find((item) =>
+            item.textContent?.includes("Implement in a new thread"),
+          ) ?? null) as HTMLElement | null,
+        'Unable to find "Implement in a new thread" menu item.',
+      );
+      implementInNewThreadItem.click();
+
+      const newThreadPath = await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Implement in a new thread should navigate to a local draft.",
+      );
+      const newDraftId = draftIdFromPath(newThreadPath);
+      const newThreadId = draftThreadIdFor(newDraftId);
+      const implementationPrompt = buildPlanImplementationPrompt(planMarkdown);
+
+      expect(
+        wsRequests.some((request) => request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand),
+      ).toBe(false);
+      expect(useComposerDraftStore.getState().getDraftSession(newDraftId)).toMatchObject({
+        threadId: newThreadId,
+        branch: "main",
+        worktreePath: null,
+        interactionMode: "default",
+        sourceProposedPlan: {
+          threadId: THREAD_ID,
+          planId: sourcePlanId,
+        },
+      });
+      expect(composerDraftFor(newDraftId)).toMatchObject({
+        prompt: implementationPrompt,
+        modelSelectionByProvider: {
+          codex: {
+            instanceId: planModelSelection.instanceId,
+            model: planModelSelection.model,
+          },
+        },
+        activeProvider: planModelSelection.instanceId,
+      });
+
+      await waitForLayout();
+      const sendButton = await waitForSendButton();
+      expect(sendButton.disabled).toBe(false);
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const createThreadRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.create",
+          );
+          const turnStartRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.turn.start",
+          ) as
+            | {
+                threadId?: ThreadId;
+                message?: {
+                  text?: string;
+                };
+                sourceProposedPlan?: {
+                  threadId?: ThreadId;
+                  planId?: OrchestrationProposedPlanId;
+                };
+                bootstrap?: {
+                  createThread?: {
+                    branch?: string | null;
+                    worktreePath?: string | null;
+                    interactionMode?: string;
+                  };
+                };
+              }
+            | undefined;
+
+          expect(createThreadRequest).toBeUndefined();
+          expect(turnStartRequest).toMatchObject({
+            threadId: newThreadId,
+            message: {
+              text: implementationPrompt,
+            },
+            sourceProposedPlan: {
+              threadId: THREAD_ID,
+              planId: sourcePlanId,
+            },
+            bootstrap: {
+              createThread: {
+                branch: "main",
+                worktreePath: null,
+                interactionMode: "default",
+              },
+            },
+          });
+        },
+        { timeout: 8_000, interval: 16 },
       );
     } finally {
       await mounted.cleanup();

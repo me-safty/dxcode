@@ -878,6 +878,7 @@ async function recoverProjectionSequenceGap(
 
     const recoveredSequence = readLastAppliedProjectionVersion(environmentId)?.sequence ?? 0;
     if (recoveredSequence >= recovery.highestObservedSequence) {
+      useStore.getState().syncSidebarThreadSummariesForEnvironment(environmentId);
       return;
     }
   }
@@ -2384,6 +2385,7 @@ export function applyEnvironmentThreadDetailEvent(
 
   applyRecoveredEventBatch([event], environmentId, {
     preserveShellFields: shouldPreserveThreadDetailShellFields(environmentId, event.sequence),
+    syncSidebarSummaries: true,
   });
 
   if (

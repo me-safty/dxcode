@@ -9,6 +9,8 @@ export interface DiffRouteSearch {
   diffFilePath?: string | undefined;
 }
 
+type DiffSearchParamRecord = Partial<Record<keyof DiffRouteSearch, unknown>>;
+
 function isDiffOpenValue(value: unknown): boolean {
   return value === "1" || value === 1 || value === true;
 }
@@ -26,7 +28,7 @@ function normalizeDiffSource(value: unknown): DiffRouteSource | undefined {
   return normalized === "unstaged" || normalized === "staged" ? normalized : undefined;
 }
 
-export function stripDiffSearchParams<T extends Record<string, unknown>>(
+export function stripDiffSearchParams<T extends object>(
   params: T,
 ): Omit<T, "diff" | "diffSource" | "diffTurnId" | "diffFilePath"> {
   const {
@@ -35,11 +37,11 @@ export function stripDiffSearchParams<T extends Record<string, unknown>>(
     diffTurnId: _diffTurnId,
     diffFilePath: _diffFilePath,
     ...rest
-  } = params;
+  } = params as T & DiffSearchParamRecord;
   return rest as Omit<T, "diff" | "diffSource" | "diffTurnId" | "diffFilePath">;
 }
 
-export function buildOpenDiffSearch<T extends Record<string, unknown>>(
+export function buildOpenDiffSearch<T extends object>(
   params: T,
   options?: { source?: DiffRouteSource | undefined },
 ): Omit<T, "diff" | "diffSource" | "diffTurnId" | "diffFilePath"> & DiffRouteSearch {
@@ -48,6 +50,24 @@ export function buildOpenDiffSearch<T extends Record<string, unknown>>(
     ...rest,
     diff: "1",
     ...(options?.source ? { diffSource: options.source } : {}),
+  };
+}
+
+export function buildClosedDiffSearch<T extends object>(
+  params: T,
+): Omit<T, "diff" | "diffSource" | "diffTurnId" | "diffFilePath"> & {
+  diff?: undefined;
+  diffSource?: undefined;
+  diffTurnId?: undefined;
+  diffFilePath?: undefined;
+} {
+  const rest = stripDiffSearchParams(params);
+  return {
+    ...rest,
+    diff: undefined,
+    diffSource: undefined,
+    diffTurnId: undefined,
+    diffFilePath: undefined,
   };
 }
 

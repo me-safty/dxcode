@@ -23,17 +23,25 @@ import {
   removeEnvironmentState,
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
+  selectSidebarThreadSummaryByRef,
+  selectSidebarThreadsForProjectRef,
   selectThreadByRef,
   selectThreadExistsByRef,
   setThreadBranch,
   mergeServerThreadDetailTailSnapshot,
   mergeServerThreadDetailPage,
   selectThreadsAcrossEnvironments,
+  syncSidebarThreadSummariesForEnvironment,
   syncServerThreadDetail,
   type AppState,
   type EnvironmentState,
 } from "./store";
-import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
+import {
+  DEFAULT_INTERACTION_MODE,
+  DEFAULT_RUNTIME_MODE,
+  type SidebarThreadSummary,
+  type Thread,
+} from "./types";
 import {
   resetSavedEnvironmentRegistryStoreForTests,
   useSavedEnvironmentRegistryStore,
@@ -663,6 +671,153 @@ describe("thread selection memoization", () => {
 });
 
 describe("thread detail structural sharing", () => {
+  it("backfills a missing sidebar entry from a full thread detail snapshot", () => {
+    const threadId = ThreadId.make("thread-detail-sidebar-full");
+    const sourceThread = makeThread({
+      id: threadId,
+      messages: [makeMessage(1)],
+    });
+
+    const next = syncServerThreadDetail(
+      makeEmptyState(),
+      makeOrchestrationThread(sourceThread),
+      localEnvironmentId,
+    );
+
+    expect(
+      selectSidebarThreadsForProjectRef(next, {
+        environmentId: localEnvironmentId,
+        projectId: sourceThread.projectId,
+      }).map((thread) => thread.id),
+    ).toEqual([threadId]);
+  });
+
+  it("backfills a missing sidebar entry from a tail thread detail snapshot", () => {
+    const threadId = ThreadId.make("thread-detail-sidebar-tail");
+    const sourceThread = makeThread({
+      id: threadId,
+      messages: [makeMessage(1)],
+    });
+
+    const next = mergeServerThreadDetailTailSnapshot(
+      makeEmptyState(),
+      makeOrchestrationThread(sourceThread),
+      localEnvironmentId,
+    );
+
+    expect(
+      selectSidebarThreadsForProjectRef(next, {
+        environmentId: localEnvironmentId,
+        projectId: sourceThread.projectId,
+      }).map((thread) => thread.id),
+    ).toEqual([threadId]);
+  });
+
+  it("backfills a missing sidebar entry from an older thread detail page", () => {
+    const threadId = ThreadId.make("thread-detail-sidebar-page");
+    const sourceThread = makeThread({
+      id: threadId,
+      messages: [makeMessage(1)],
+    });
+
+    const next = mergeServerThreadDetailPage(
+      makeEmptyState(),
+      {
+        snapshotSequence: 1,
+        thread: makeOrchestrationThread(sourceThread),
+        pageInfo: makeEmptyPageInfo(),
+      },
+      localEnvironmentId,
+    );
+
+    expect(
+      selectSidebarThreadsForProjectRef(next, {
+        environmentId: localEnvironmentId,
+        projectId: sourceThread.projectId,
+      }).map((thread) => thread.id),
+    ).toEqual([threadId]);
+  });
+
+  it("preserves shell-owned sidebar flags when detail events resync a summary", () => {
+    const threadId = ThreadId.make("thread-detail-sidebar-flags");
+    const sourceThread = makeThread({ id: threadId });
+    const base = makeState(sourceThread);
+    const environmentState = localEnvironmentStateOf(base);
+    const existingSummary: SidebarThreadSummary = {
+      id: sourceThread.id,
+      environmentId: localEnvironmentId,
+      projectId: sourceThread.projectId,
+      title: sourceThread.title,
+      interactionMode: sourceThread.interactionMode,
+      session: sourceThread.session,
+      createdAt: sourceThread.createdAt,
+      archivedAt: sourceThread.archivedAt,
+      updatedAt: sourceThread.updatedAt,
+      latestTurn: sourceThread.latestTurn,
+      branch: sourceThread.branch,
+      worktreePath: sourceThread.worktreePath,
+      latestUserMessageAt: "2026-02-13T00:00:00.000Z",
+      hasPendingApprovals: true,
+      hasPendingUserInput: true,
+      hasActionableProposedPlan: true,
+    };
+    const state: AppState = {
+      ...base,
+      environmentStateById: {
+        [localEnvironmentId]: {
+          ...environmentState,
+          sidebarThreadSummaryById: {
+            [threadId]: existingSummary,
+          },
+        },
+      },
+    };
+
+    const next = applyOrchestrationEvents(
+      state,
+      [
+        makeEvent("thread.session-set", {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: sourceThread.runtimeMode,
+            activeTurnId: TurnId.make("turn-running"),
+            lastError: null,
+            updatedAt: "2026-02-13T00:01:00.000Z",
+          },
+        }),
+      ],
+      localEnvironmentId,
+      { syncSidebarSummaries: true },
+    );
+
+    const summary = selectSidebarThreadSummaryByRef(
+      next,
+      scopeThreadRef(localEnvironmentId, threadId),
+    );
+    expect(summary?.session?.orchestrationStatus).toBe("running");
+    expect(summary?.hasPendingApprovals).toBe(true);
+    expect(summary?.hasPendingUserInput).toBe(true);
+    expect(summary?.hasActionableProposedPlan).toBe(true);
+    expect(summary?.latestUserMessageAt).toBe("2026-02-13T00:00:00.000Z");
+  });
+
+  it("can resync sidebar summaries for all known environment threads", () => {
+    const threadId = ThreadId.make("thread-detail-sidebar-all");
+    const sourceThread = makeThread({ id: threadId });
+    const base = makeState(sourceThread);
+    const next = syncSidebarThreadSummariesForEnvironment(base, localEnvironmentId);
+
+    expect(
+      selectSidebarThreadsForProjectRef(next, {
+        environmentId: localEnvironmentId,
+        projectId: sourceThread.projectId,
+      }).map((thread) => thread.id),
+    ).toEqual([threadId]);
+  });
+
   it("treats identical thread detail snapshots as a store no-op", () => {
     const threadId = ThreadId.make("thread-identical-detail");
     const sourceThread = makeThread({

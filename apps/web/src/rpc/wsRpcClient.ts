@@ -53,6 +53,115 @@ interface GitRunStackedActionOptions {
   readonly onProgress?: (event: GitActionProgressEvent) => void;
 }
 
+export const DISPATCH_COMMAND_REQUEST_TIMEOUT_MS = 8_000;
+export const DISPATCH_COMMAND_RECONNECT_TIMEOUT_MS = 8_000;
+
+class DispatchCommandTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`SocketCloseError: orchestration.dispatchCommand timed out after ${timeoutMs}ms.`);
+    this.name = "DispatchCommandTimeoutError";
+  }
+}
+
+function isDispatchCommandTimeoutError(error: unknown): error is DispatchCommandTimeoutError {
+  return error instanceof DispatchCommandTimeoutError;
+}
+
+function formatErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  createError: () => Error,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  return new Promise<T>((resolve, reject) => {
+    const clear = () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
+    timeoutId = setTimeout(() => {
+      timeoutId = null;
+      reject(createError());
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clear();
+        resolve(value);
+      },
+      (error) => {
+        clear();
+        reject(error);
+      },
+    );
+  });
+}
+
+function toDispatchCommandTransportError(context: string, error: unknown): Error {
+  return new Error(`SocketCloseError: ${context}: ${formatErrorMessage(error)}`);
+}
+
+async function reconnectForDispatchCommand(transport: WsTransport, context: string): Promise<void> {
+  try {
+    await withTimeout(
+      transport.reconnect(),
+      DISPATCH_COMMAND_RECONNECT_TIMEOUT_MS,
+      () =>
+        new Error(
+          `SocketCloseError: orchestration.dispatchCommand reconnect timed out after ${DISPATCH_COMMAND_RECONNECT_TIMEOUT_MS}ms.`,
+        ),
+    );
+  } catch (error) {
+    throw toDispatchCommandTransportError(context, error);
+  }
+}
+
+async function dispatchCommandWithConnectionRecovery(
+  transport: WsTransport,
+  input: RpcInput<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>,
+): ReturnType<RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>> {
+  const dispatch = () =>
+    transport.request((client) => client[ORCHESTRATION_WS_METHODS.dispatchCommand](input));
+
+  if (!transport.isHeartbeatFresh()) {
+    await reconnectForDispatchCommand(transport, "dispatchCommand pre-flight reconnect failed");
+  }
+
+  try {
+    return await withTimeout(
+      dispatch(),
+      DISPATCH_COMMAND_REQUEST_TIMEOUT_MS,
+      () => new DispatchCommandTimeoutError(DISPATCH_COMMAND_REQUEST_TIMEOUT_MS),
+    );
+  } catch (error) {
+    if (!isDispatchCommandTimeoutError(error)) {
+      throw error;
+    }
+  }
+
+  await reconnectForDispatchCommand(transport, "dispatchCommand reconnect after timeout failed");
+
+  try {
+    return await withTimeout(
+      dispatch(),
+      DISPATCH_COMMAND_REQUEST_TIMEOUT_MS,
+      () => new DispatchCommandTimeoutError(DISPATCH_COMMAND_REQUEST_TIMEOUT_MS),
+    );
+  } catch (error) {
+    throw toDispatchCommandTransportError("dispatchCommand retry failed", error);
+  }
+}
+
 export interface WsRpcClient {
   readonly dispose: () => Promise<void>;
   readonly reconnect: () => Promise<void>;
@@ -334,8 +443,7 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         }),
     },
     orchestration: {
-      dispatchCommand: (input) =>
-        transport.request((client) => client[ORCHESTRATION_WS_METHODS.dispatchCommand](input)),
+      dispatchCommand: (input) => dispatchCommandWithConnectionRecovery(transport, input),
       getTurnDiff: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getTurnDiff](input)),
       getFullThreadDiff: (input) =>

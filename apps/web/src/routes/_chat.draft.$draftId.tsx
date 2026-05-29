@@ -6,6 +6,7 @@ import { ChatRightPanels } from "../components/chat/ChatRightPanels";
 import { useComposerDraftStore, DraftId } from "../composerDraftStore";
 import { SidebarInset, useSidebar } from "../components/ui/sidebar";
 import {
+  buildClosedDiffSearch,
   buildOpenDiffSearch,
   parseDiffRouteSearch,
   stripDiffSearchParams,
@@ -89,7 +90,7 @@ function DraftChatThreadRouteView() {
     void navigate({
       to: "/draft/$draftId",
       params: { draftId },
-      search: (previous) => stripDiffSearchParams(previous),
+      search: (previous) => buildClosedDiffSearch(previous),
     });
   }, [diffOpen, draftId, navigate]);
   const openDiff = useCallback(() => {

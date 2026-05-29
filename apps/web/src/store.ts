@@ -1427,8 +1427,32 @@ function syncSidebarThreadSummaryFromThreadState(
   };
 }
 
+function syncSidebarThreadSummaryFromThreadStateIfMissing(
+  previousState: EnvironmentState,
+  nextState: EnvironmentState,
+  threadId: ThreadId,
+  environmentId: EnvironmentId,
+): EnvironmentState {
+  if (previousState.sidebarThreadSummaryById[threadId] !== undefined) {
+    return nextState;
+  }
+  return syncSidebarThreadSummaryFromThreadState(nextState, threadId, environmentId);
+}
+
 function getOrchestrationEventThreadId(event: OrchestrationEvent): ThreadId | null {
   return event.aggregateKind === "thread" ? (event.aggregateId as ThreadId) : null;
+}
+
+function syncSidebarThreadSummariesForThreadIds(
+  state: EnvironmentState,
+  threadIds: Iterable<ThreadId>,
+  environmentId: EnvironmentId,
+): EnvironmentState {
+  let nextState = state;
+  for (const threadId of threadIds) {
+    nextState = syncSidebarThreadSummaryFromThreadState(nextState, threadId, environmentId);
+  }
+  return nextState;
 }
 
 function syncRecoveredSidebarThreadSummaries(
@@ -1436,7 +1460,6 @@ function syncRecoveredSidebarThreadSummaries(
   events: ReadonlyArray<OrchestrationEvent>,
   environmentId: EnvironmentId,
 ): EnvironmentState {
-  let nextState = state;
   const threadIds = new Set<ThreadId>();
   for (const event of events) {
     const threadId = getOrchestrationEventThreadId(event);
@@ -1445,11 +1468,7 @@ function syncRecoveredSidebarThreadSummaries(
     }
   }
 
-  for (const threadId of threadIds) {
-    nextState = syncSidebarThreadSummaryFromThreadState(nextState, threadId, environmentId);
-  }
-
-  return nextState;
+  return syncSidebarThreadSummariesForThreadIds(state, threadIds, environmentId);
 }
 
 function retainThreadScopedRecord<T>(
@@ -1845,14 +1864,20 @@ export function syncServerThreadDetail(
 ): AppState {
   const environmentState = getStoredEnvironmentState(state, environmentId);
   const previousThread = getThreadFromEnvironmentState(environmentState, thread.id);
+  const nextEnvironmentState = writeThreadState(
+    environmentState,
+    mapThread(thread, environmentId, options?.pageInfo),
+    previousThread,
+    options,
+  );
   return commitEnvironmentState(
     state,
     environmentId,
-    writeThreadState(
+    syncSidebarThreadSummaryFromThreadStateIfMissing(
       environmentState,
-      mapThread(thread, environmentId, options?.pageInfo),
-      previousThread,
-      options,
+      nextEnvironmentState,
+      thread.id,
+      environmentId,
     ),
   );
 }
@@ -1902,13 +1927,19 @@ export function mergeServerThreadDetailTailSnapshot(
       }
     : incomingThread;
 
+  const nextEnvironmentState = writeThreadState(environmentState, nextThread, previousThread, {
+    ...options,
+    pageInfo: nextPageInfo,
+  });
   return commitEnvironmentState(
     state,
     environmentId,
-    writeThreadState(environmentState, nextThread, previousThread, {
-      ...options,
-      pageInfo: nextPageInfo,
-    }),
+    syncSidebarThreadSummaryFromThreadStateIfMissing(
+      environmentState,
+      nextEnvironmentState,
+      thread.id,
+      environmentId,
+    ),
   );
 }
 
@@ -1957,10 +1988,18 @@ export function mergeServerThreadDetailPage(
       }
     : pageThread;
 
+  const nextEnvironmentState = writeThreadState(environmentState, nextThread, previousThread, {
+    pageInfo: nextPageInfo,
+  });
   return commitEnvironmentState(
     state,
     environmentId,
-    writeThreadState(environmentState, nextThread, previousThread, { pageInfo: nextPageInfo }),
+    syncSidebarThreadSummaryFromThreadStateIfMissing(
+      environmentState,
+      nextEnvironmentState,
+      snapshot.thread.id,
+      environmentId,
+    ),
   );
 }
 
@@ -2651,6 +2690,22 @@ export function applyOrchestrationEvents(
   );
 }
 
+export function syncSidebarThreadSummariesForEnvironment(
+  state: AppState,
+  environmentId: EnvironmentId,
+): AppState {
+  const environmentState = getStoredEnvironmentState(state, environmentId);
+  return commitEnvironmentState(
+    state,
+    environmentId,
+    syncSidebarThreadSummariesForThreadIds(
+      environmentState,
+      environmentState.threadIds,
+      environmentId,
+    ),
+  );
+}
+
 function getEnvironmentEntries(
   state: AppState,
 ): ReadonlyArray<readonly [EnvironmentId, EnvironmentState]> {
@@ -2937,6 +2992,7 @@ interface AppStore extends AppState {
     environmentId: EnvironmentId,
     options?: ThreadDetailWriteOptions,
   ) => void;
+  syncSidebarThreadSummariesForEnvironment: (environmentId: EnvironmentId) => void;
   applyShellEvent: (event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) => void;
   setError: (threadId: ThreadId, error: string | null) => void;
   setThreadBranch: (
@@ -2967,6 +3023,8 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => applyOrchestrationEvent(state, event, environmentId)),
   applyOrchestrationEvents: (events, environmentId, options) =>
     set((state) => applyOrchestrationEvents(state, events, environmentId, options)),
+  syncSidebarThreadSummariesForEnvironment: (environmentId) =>
+    set((state) => syncSidebarThreadSummariesForEnvironment(state, environmentId)),
   applyShellEvent: (event, environmentId) =>
     set((state) => applyShellEvent(state, event, environmentId)),
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),

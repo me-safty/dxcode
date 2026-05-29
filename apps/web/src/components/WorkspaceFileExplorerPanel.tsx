@@ -13,6 +13,7 @@ import {
 import {
   memo,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -471,6 +472,10 @@ export function WorkspaceFileExplorerPanel(props: {
     void refreshGitStatus({ environmentId, cwd: workspaceRoot });
   }, [environmentId, queryClient, workspaceRoot]);
 
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
   useLayoutEffect(() => {
     const element = scrollContainerRef.current;
     if (!element) {
@@ -497,7 +502,7 @@ export function WorkspaceFileExplorerPanel(props: {
           {onBackToPreview ? (
             <Button
               size="icon-xs"
-              variant="ghost"
+              variant="outline"
               aria-label="Back to file viewer"
               title="Back to file viewer"
               onClick={onBackToPreview}
@@ -516,7 +521,7 @@ export function WorkspaceFileExplorerPanel(props: {
         <div className="flex shrink-0 items-center gap-1">
           <Button
             size="icon-xs"
-            variant="ghost"
+            variant="outline"
             aria-label="Refresh file explorer"
             title="Refresh file explorer"
             onClick={refresh}
@@ -525,7 +530,7 @@ export function WorkspaceFileExplorerPanel(props: {
           </Button>
           <Button
             size="icon-xs"
-            variant="ghost"
+            variant="outline"
             aria-label="Close file explorer"
             title="Close file explorer"
             onClick={onClose}

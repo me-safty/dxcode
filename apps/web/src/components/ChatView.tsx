@@ -45,6 +45,7 @@ import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import {
+  buildClosedDiffSearch,
   buildOpenDiffSearch,
   parseDiffRouteSearch,
   stripDiffSearchParams,
@@ -86,11 +87,7 @@ import {
 } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
 import { useUiStateStore } from "../uiStateStore";
-import {
-  buildPlanImplementationThreadTitle,
-  buildPlanImplementationPrompt,
-  resolvePlanFollowUpSubmission,
-} from "../proposedPlan";
+import { buildPlanImplementationPrompt, resolvePlanFollowUpSubmission } from "../proposedPlan";
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -208,7 +205,6 @@ import {
   shouldWriteThreadErrorToCurrentServerThread,
   shouldIgnoreInterruptClick,
   threadHasStarted,
-  waitForStartedServerThread,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useComposerHandleContext } from "../composerHandleContext";
@@ -368,6 +364,26 @@ function formatOutgoingPrompt(params: {
   const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
   return applyClaudePromptEffortPrefix(params.text, promptEffort);
 }
+
+const pendingPlanSidebarAutoOpenThreadKeys = new Set<string>();
+
+function requestPlanSidebarAutoOpen(threadRef: ScopedThreadRef): void {
+  pendingPlanSidebarAutoOpenThreadKeys.add(scopedThreadKey(threadRef));
+}
+
+function clearPlanSidebarAutoOpen(threadRef: ScopedThreadRef): void {
+  pendingPlanSidebarAutoOpenThreadKeys.delete(scopedThreadKey(threadRef));
+}
+
+function consumePlanSidebarAutoOpen(threadRef: ScopedThreadRef): boolean {
+  const threadKey = scopedThreadKey(threadRef);
+  const shouldOpen = pendingPlanSidebarAutoOpenThreadKeys.has(threadKey);
+  if (shouldOpen) {
+    pendingPlanSidebarAutoOpenThreadKeys.delete(threadKey);
+  }
+  return shouldOpen;
+}
+
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
 
@@ -714,6 +730,7 @@ export default function ChatView(props: ChatViewProps) {
     (store) => store.setTerminalContexts,
   );
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
+  const applyComposerDraftStickyState = useComposerDraftStore((store) => store.applyStickyState);
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
@@ -768,9 +785,6 @@ export default function ChatView(props: ChatViewProps) {
   const canAutoOpenPlanSidebar = autoOpenPlanSidebar && !shouldUsePlanSidebarSheet;
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
-  // When set, the thread-change reset effect will open the sidebar instead of closing it.
-  // Used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
-  const planSidebarOpenOnNextThreadRef = useRef(false);
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
@@ -1847,7 +1861,7 @@ export default function ChatView(props: ChatViewProps) {
         : undefined;
     const search = (previous: Record<string, unknown>) =>
       diffOpen
-        ? stripDiffSearchParams(previous)
+        ? buildClosedDiffSearch(previous)
         : buildOpenDiffSearch(previous, { source: openDiffSource });
 
     if (routeKind === "draft" && draftId) {
@@ -2578,15 +2592,15 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     setPullRequestDialogState(null);
     forceStickToBottom();
-    if (planSidebarOpenOnNextThreadRef.current) {
-      planSidebarOpenOnNextThreadRef.current = false;
+    const shouldOpenPlanSidebar =
+      routeKind === "server" && consumePlanSidebarAutoOpen(routeThreadRef);
+    if (shouldOpenPlanSidebar) {
       setPlanSidebarOpen(true);
     } else {
-      planSidebarOpenOnNextThreadRef.current = false;
       setPlanSidebarOpen(false);
     }
     planSidebarDismissedForTurnRef.current = null;
-  }, [activeThread?.id, forceStickToBottom]);
+  }, [activeThread?.id, forceStickToBottom, routeKind, routeThreadRef]);
 
   useEffect(() => {
     const shouldRestoreBottom = () => {
@@ -3132,6 +3146,13 @@ export default function ChatView(props: ChatViewProps) {
     }
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
+    const draftSourceProposedPlan =
+      isLocalDraftThread && interactionMode === "default"
+        ? (draftThread?.sourceProposedPlan ?? null)
+        : null;
+    const draftSourceProposedPlanThreadRef = draftSourceProposedPlan
+      ? scopeThreadRef(activeThread.environmentId, threadIdForSend)
+      : null;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
@@ -3391,6 +3412,9 @@ export default function ChatView(props: ChatViewProps) {
                 : {}),
             }
           : undefined;
+      if (draftSourceProposedPlanThreadRef && canAutoOpenPlanSidebar) {
+        requestPlanSidebarAutoOpen(draftSourceProposedPlanThreadRef);
+      }
       beginLocalDispatch({ preparingWorktree: false });
       await api.orchestration.dispatchCommand({
         type: "thread.turn.start",
@@ -3407,10 +3431,14 @@ export default function ChatView(props: ChatViewProps) {
         runtimeMode,
         interactionMode,
         ...(bootstrap ? { bootstrap } : {}),
+        ...(draftSourceProposedPlan ? { sourceProposedPlan: draftSourceProposedPlan } : {}),
         createdAt: messageCreatedAt,
       });
       turnStartSucceeded = true;
     })().catch(async (err: unknown) => {
+      if (!turnStartSucceeded && draftSourceProposedPlanThreadRef) {
+        clearPlanSidebarAutoOpen(draftSourceProposedPlanThreadRef);
+      }
       if (
         !turnStartSucceeded &&
         promptRef.current.length === 0 &&
@@ -3825,139 +3853,74 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   const onImplementPlanInNewThread = useCallback(async () => {
-    const api = readEnvironmentApi(environmentId);
     if (
-      !api ||
       !activeThread ||
       !activeProject ||
+      !activeProjectRef ||
       !activeProposedPlan ||
-      !isServerThread ||
-      isSendBusy ||
-      isConnecting ||
-      activeEnvironmentUnavailable ||
-      sendInFlightRef.current
+      !isServerThread
     ) {
       return;
     }
 
-    const sendCtx = composerRef.current?.getSendContext();
-    if (!sendCtx) {
-      return;
-    }
-    const {
-      selectedProvider: ctxSelectedProvider,
-      selectedModel: ctxSelectedModel,
-      selectedProviderModels: ctxSelectedProviderModels,
-      selectedPromptEffort: ctxSelectedPromptEffort,
-      selectedModelSelection: ctxSelectedModelSelection,
-    } = sendCtx;
+    const selectedModelSelection =
+      composerRef.current?.getSendContext()?.selectedModelSelection ?? activeThread.modelSelection;
 
     const createdAt = new Date().toISOString();
+    const nextDraftId = newDraftId();
     const nextThreadId = newThreadId();
     const planMarkdown = activeProposedPlan.planMarkdown;
     const implementationPrompt = buildPlanImplementationPrompt(planMarkdown);
-    const outgoingImplementationPrompt = formatOutgoingPrompt({
-      provider: ctxSelectedProvider,
-      model: ctxSelectedModel,
-      models: ctxSelectedProviderModels,
-      effort: ctxSelectedPromptEffort,
-      text: implementationPrompt,
-    });
-    const nextThreadTitle = truncate(buildPlanImplementationThreadTitle(planMarkdown));
-    const nextThreadModelSelection: ModelSelection = ctxSelectedModelSelection;
 
-    sendInFlightRef.current = true;
-    beginLocalDispatch({ preparingWorktree: false });
-    const finish = () => {
-      sendInFlightRef.current = false;
-      resetLocalDispatch();
-    };
-
-    await api.orchestration
-      .dispatchCommand({
-        type: "thread.create",
-        commandId: newCommandId(),
+    setLogicalProjectDraftThreadId(
+      deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings),
+      activeProjectRef,
+      nextDraftId,
+      {
         threadId: nextThreadId,
-        projectId: activeProject.id,
-        title: nextThreadTitle,
-        modelSelection: nextThreadModelSelection,
-        runtimeMode,
-        interactionMode: "default",
+        createdAt,
         branch: activeThreadBranch,
         worktreePath: activeThread.worktreePath,
-        createdAt,
-      })
-      .then(() => {
-        return api.orchestration.dispatchCommand({
-          type: "thread.turn.start",
-          commandId: newCommandId(),
-          threadId: nextThreadId,
-          message: {
-            messageId: newMessageId(),
-            role: "user",
-            text: outgoingImplementationPrompt,
-            attachments: [],
-          },
-          modelSelection: ctxSelectedModelSelection,
-          titleSeed: nextThreadTitle,
-          runtimeMode,
-          interactionMode: "default",
-          sourceProposedPlan: {
-            threadId: activeThread.id,
-            planId: activeProposedPlan.id,
-          },
-          createdAt,
-        });
-      })
-      .then(() => {
-        return waitForStartedServerThread(scopeThreadRef(activeThread.environmentId, nextThreadId));
-      })
-      .then(() => {
-        // Signal that the plan sidebar should open on the new thread when enabled.
-        planSidebarOpenOnNextThreadRef.current = canAutoOpenPlanSidebar;
-        return navigate({
-          to: "/$environmentId/$threadId",
-          params: {
-            environmentId: activeThread.environmentId,
-            threadId: nextThreadId,
-          },
-        });
-      })
-      .catch(async (err: unknown) => {
-        await api.orchestration
-          .dispatchCommand({
-            type: "thread.delete",
-            commandId: newCommandId(),
-            threadId: nextThreadId,
-          })
-          .catch(() => undefined);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not start implementation thread",
-            description:
-              err instanceof Error
-                ? err.message
-                : "An error occurred while creating the new thread.",
-          }),
-        );
-      })
-      .then(finish, finish);
+        envMode,
+        runtimeMode,
+        interactionMode: "default",
+      },
+    );
+    applyComposerDraftStickyState(nextDraftId);
+    setComposerDraftPrompt(nextDraftId, implementationPrompt);
+    setComposerDraftModelSelection(nextDraftId, selectedModelSelection);
+    setDraftThreadContext(nextDraftId, {
+      branch: activeThreadBranch,
+      worktreePath: activeThread.worktreePath,
+      envMode,
+      runtimeMode,
+      interactionMode: "default",
+      sourceProposedPlan: {
+        threadId: activeThread.id,
+        planId: activeProposedPlan.id,
+      },
+    });
+
+    await navigate({
+      to: "/draft/$draftId",
+      params: buildDraftThreadRouteParams(nextDraftId),
+    });
   }, [
     activeProject,
+    activeProjectRef,
     activeProposedPlan,
     activeThreadBranch,
     activeThread,
-    beginLocalDispatch,
-    activeEnvironmentUnavailable,
-    isConnecting,
-    isSendBusy,
+    applyComposerDraftStickyState,
+    envMode,
     isServerThread,
     navigate,
-    resetLocalDispatch,
+    projectGroupingSettings,
     runtimeMode,
-    canAutoOpenPlanSidebar,
-    environmentId,
+    setComposerDraftModelSelection,
+    setComposerDraftPrompt,
+    setDraftThreadContext,
+    setLogicalProjectDraftThreadId,
   ]);
 
   const onProviderModelSelect = useCallback(

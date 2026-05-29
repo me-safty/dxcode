@@ -18,6 +18,7 @@ import {
   openWorkspaceFileExplorer,
   openWorkspaceFilePreview,
 } from "../workspaceFilePreview";
+import { projectQueryKeys } from "../lib/projectReactQuery";
 import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
 
 const { localContextMenuShowMock, refreshGitStatusMock, toastAddMock, useGitStatusMock } =
@@ -90,6 +91,12 @@ vi.mock("@pierre/diffs/react", async () => {
   const React = await import("react");
 
   return {
+    FileDiff: (props: { fileDiff: { cacheKey?: string; name: string } }) =>
+      React.createElement("div", {
+        "data-cache-key": props.fileDiff.cacheKey,
+        "data-file-name": props.fileDiff.name,
+        "data-testid": "workspace-inline-file-diff",
+      }),
     Virtualizer: ({
       children,
       className,
@@ -110,6 +117,7 @@ vi.mock("@pierre/diffs/react", async () => {
       ),
     File: (props: { file: { contents: string } }) =>
       React.createElement("pre", { "data-testid": "workspace-file-render" }, props.file.contents),
+    VirtualizerContext: React.createContext(undefined),
   };
 });
 
@@ -360,6 +368,23 @@ describe("WorkspaceFilesPanel", () => {
           title: "Added to input",
           description: "@src/App.tsx",
         });
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("refreshes git status and invalidates file queries when the explorer opens", async () => {
+    __setEnvironmentApiOverrideForTests(ENVIRONMENT_ID, createMockEnvironmentApi());
+    const invalidateQueriesSpy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    const mounted = await renderFilesPanel();
+    try {
+      await vi.waitFor(() => {
+        expect(refreshGitStatusMock).toHaveBeenCalledWith({
+          environmentId: ENVIRONMENT_ID,
+          cwd: WORKSPACE_ROOT,
+        });
+        expect(invalidateQueriesSpy).toHaveBeenCalledWith({ queryKey: projectQueryKeys.all });
       });
     } finally {
       await mounted.cleanup();

@@ -7,6 +7,7 @@ import { DiffPanelLoadingState } from "../components/DiffPanelShell";
 import { ChatRightPanels } from "../components/chat/ChatRightPanels";
 import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../composerDraftStore";
 import {
+  buildClosedDiffSearch,
   buildOpenDiffSearch,
   type DiffRouteSearch,
   parseDiffRouteSearch,
@@ -96,7 +97,7 @@ function ChatThreadRouteView() {
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(threadRef),
-      search: (previous) => stripDiffSearchParams(previous),
+      search: (previous) => buildClosedDiffSearch(previous),
     });
   }, [diffOpen, navigate, threadRef]);
   const openDiff = useCallback(() => {
