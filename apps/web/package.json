@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "storybook": "node scripts/t3work-storybook.mjs dev",
     "storybook:build": "node scripts/t3work-storybook.mjs build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:browser:install": "playwright install --with-deps chromium"
@@ -54,7 +54,6 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
-    "@effect/language-service": "catalog:",
     "@rolldown/plugin-babel": "^0.2.0",
     "@storybook/addon-a11y": "8.6.14",
     "@storybook/addon-essentials": "8.6.14",
@@ -73,7 +72,6 @@
     "playwright": "^1.58.2",
     "storybook": "8.6.14",
     "tailwindcss": "^4.0.0",
-    "typescript": "catalog:",
     "vite": "^8.0.0",
     "vitest": "catalog:",
     "vitest-browser-react": "^2.0.5"
