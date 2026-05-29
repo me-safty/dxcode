@@ -186,6 +186,7 @@ const makeExternalChat = Effect.gen(function* () {
         projectHintText: ref.raw.text ?? input.message.text,
         slack: {
           rawText: ref.raw.text ?? input.message.text,
+          isMention: input.message.isMention,
           botUserId: process.env.SLACK_BOT_USER_ID,
           botUserName: process.env.SLACK_BOT_USERNAME,
         },

@@ -63,6 +63,7 @@ export interface ExternalIntakeMessage {
   readonly slack?:
     | {
         readonly rawText?: string | undefined;
+        readonly isMention?: boolean | undefined;
         readonly botUserId?: string | undefined;
         readonly botUserName?: string | undefined;
       }
@@ -496,6 +497,7 @@ const makeExternalIntake = Effect.gen(function* () {
           botUserId: input.message.slack?.botUserId ?? envValue("SLACK_BOT_USER_ID"),
           botUserName: input.message.slack?.botUserName ?? envValue("SLACK_BOT_USERNAME"),
         }) ||
+        input.message.slack?.isMention === true ||
         (input.message.slack?.rawText !== undefined &&
           mentionsTeamAppUser({
             body: input.message.slack.rawText,

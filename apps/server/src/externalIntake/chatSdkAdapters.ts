@@ -21,7 +21,22 @@ function slackAdapterConfig(): SlackAdapterConfig {
 }
 
 export function isSlackChatSdkConfigured() {
-  return envValue("SLACK_SIGNING_SECRET") !== undefined;
+  return slackChatSdkConfigStatus().configured;
+}
+
+const REQUIRED_SLACK_ENV_NAMES = ["SLACK_SIGNING_SECRET", "SLACK_BOT_TOKEN"] as const;
+
+export function slackChatSdkConfigStatus() {
+  const missing = REQUIRED_SLACK_ENV_NAMES.filter((name) => envValue(name) === undefined);
+  return {
+    configured: missing.length === 0,
+    missing,
+    optional: {
+      botUserId: envValue("SLACK_BOT_USER_ID") !== undefined,
+      botUserName: envValue("SLACK_BOT_USERNAME") !== undefined,
+      workspaceUrl: envValue("SLACK_WORKSPACE_URL") !== undefined,
+    },
+  };
 }
 
 function createChatCompatibleSlackAdapter(config: SlackAdapterConfig): Adapter {
