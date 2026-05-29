@@ -86,6 +86,7 @@ type HostPlatform = "mac" | "linux" | "windows" | "unknown";
 
 type TerminalToolbarAction =
   | { readonly kind: "send"; readonly key: string; readonly label: string; readonly data: string }
+  | { readonly kind: "clear"; readonly key: string; readonly label: string }
   | {
       readonly kind: "modifier";
       readonly key: string;
@@ -412,6 +413,7 @@ export function ThreadTerminalRouteScreen() {
       { kind: "send", key: "esc", label: "esc", data: "\u001b" },
       ...modifierActions,
       { kind: "send", key: "tab", label: "tab", data: "\t" },
+      { kind: "clear", key: "clear", label: "clear" },
       { kind: "send", key: "up", label: "↑", data: "\u001b[A" },
       { kind: "send", key: "down", label: "↓", data: "\u001b[B" },
       { kind: "send", key: "left", label: "←", data: "\u001b[D" },
@@ -915,6 +917,23 @@ export function ThreadTerminalRouteScreen() {
     adjustFontSize(TERMINAL_FONT_SIZE_STEP);
   }, [adjustFontSize]);
 
+  const handleClearTerminal = useCallback(() => {
+    if (!selectedThread) {
+      return;
+    }
+
+    const client = getEnvironmentClient(selectedThread.environmentId);
+    if (!client) {
+      return;
+    }
+
+    setPendingModifierState({ terminalId, value: null });
+    void client.terminal.clear({
+      threadId: selectedThread.id,
+      terminalId,
+    });
+  }, [selectedThread, terminalId]);
+
   const handleToolbarActionPress = useCallback(
     (action: TerminalToolbarAction) => {
       if (action.kind === "modifier") {
@@ -928,6 +947,11 @@ export function ThreadTerminalRouteScreen() {
         return;
       }
 
+      if (action.kind === "clear") {
+        handleClearTerminal();
+        return;
+      }
+
       setPendingModifierState({ terminalId, value: null });
       if (pendingModifier === "ctrl") {
         writeInput(applyCtrlModifier(action.data));
@@ -937,7 +961,7 @@ export function ThreadTerminalRouteScreen() {
         writeInput(action.data);
       }
     },
-    [pendingModifier, terminalId, writeInput],
+    [handleClearTerminal, pendingModifier, terminalId, writeInput],
   );
 
   const updateToolbarScrollEdges = useCallback(
@@ -980,23 +1004,6 @@ export function ThreadTerminalRouteScreen() {
     },
     [updateToolbarScrollEdges],
   );
-
-  const handleClearTerminal = useCallback(() => {
-    if (!selectedThread) {
-      return;
-    }
-
-    const client = getEnvironmentClient(selectedThread.environmentId);
-    if (!client) {
-      return;
-    }
-
-    setPendingModifierState({ terminalId, value: null });
-    void client.terminal.clear({
-      threadId: selectedThread.id,
-      terminalId,
-    });
-  }, [selectedThread, terminalId]);
 
   const handleDismissKeyboard = useCallback(() => {
     setIsAccessoryDismissed(true);
@@ -1205,10 +1212,10 @@ export function ThreadTerminalRouteScreen() {
                               : terminalTheme.border,
                             borderRadius: 12,
                             borderWidth: 1,
+                            height: 38,
                             justifyContent: "center",
                             minWidth: action.label.length > 1 ? 46 : 38,
                             paddingHorizontal: 11,
-                            paddingVertical: 8,
                           })}
                         >
                           <RNText
@@ -1219,7 +1226,10 @@ export function ThreadTerminalRouteScreen() {
                               fontFamily: "DMSans_700Bold",
                               fontSize: 12,
                               fontWeight: "700",
-                              textTransform: action.kind === "modifier" ? "uppercase" : "none",
+                              textTransform:
+                                action.kind === "modifier" || action.kind === "clear"
+                                  ? "uppercase"
+                                  : "none",
                             }}
                           >
                             {action.label}
@@ -1255,34 +1265,6 @@ export function ThreadTerminalRouteScreen() {
                     />
                   ) : null}
                 </View>
-                <Pressable
-                  accessibilityLabel="Clear terminal output"
-                  accessibilityRole="button"
-                  onPress={handleClearTerminal}
-                  style={({ pressed }) => ({
-                    alignItems: "center",
-                    backgroundColor: pressed
-                      ? withAlpha(terminalTheme.foreground, "1f")
-                      : withAlpha(terminalTheme.foreground, "12"),
-                    borderColor: terminalTheme.border,
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    height: 38,
-                    justifyContent: "center",
-                    paddingHorizontal: 10,
-                  })}
-                >
-                  <RNText
-                    style={{
-                      color: terminalTheme.foreground,
-                      fontFamily: "DMSans_700Bold",
-                      fontSize: 12,
-                      fontWeight: "700",
-                    }}
-                  >
-                    CLEAR
-                  </RNText>
-                </Pressable>
                 <Pressable
                   accessibilityLabel="Dismiss keyboard"
                   accessibilityRole="button"
