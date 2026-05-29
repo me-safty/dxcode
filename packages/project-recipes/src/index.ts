@@ -4,5 +4,7 @@ export * from "./discovery.ts";
 export * from "./input.ts";
 export * from "./message.ts";
 export * from "./runtime.ts";
+export * from "./sidecarComposition.ts";
+export * from "./sidecarSection.ts";
 export * from "./surface.ts";
 export * from "./toolGroups.ts";

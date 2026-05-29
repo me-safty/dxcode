@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import { type OrchestrationCommand, ThreadId } from "@t3tools/contracts";
 import type { ProjectRecipeWorkflowLaunch } from "@t3tools/project-recipes";
@@ -8,6 +9,8 @@ import { describe, expect, it } from "vitest";
 
 import type { OrchestrationEngineShape } from "./orchestration/Services/OrchestrationEngine.ts";
 import { runProjectRecipeWorkflowLaunch } from "./t3work-recipeWorkflowRuntime.js";
+import { workflowRunRecipeRootPath } from "./t3work-recipeWorkflowRunPaths.ts";
+import { workflowRunIdForThread } from "./t3work-recipeWorkflowRuntimeShared.ts";
 import { T3workToolBroker } from "./t3work-toolBroker.ts";
 import { createThreadToolContext, makeBrokerLayer } from "./t3work-toolBrokerTestUtils.ts";
 
@@ -188,8 +191,16 @@ describe("runProjectRecipeWorkflowLaunch tool enforcement", () => {
           });
 
           const fileSystem = yield* FileSystem.FileSystem;
-          const viewJson = yield* fileSystem.readFileString(`${recipeRoot}/artifacts/view.json`);
-          const errorText = yield* fileSystem.readFileString(`${recipeRoot}/artifacts/error.txt`);
+          const pathService = yield* Path.Path;
+          const runRecipeRoot = workflowRunRecipeRootPath(
+            pathService,
+            workspaceRoot,
+            workflowRunIdForThread(threadId),
+          );
+          const viewJson = yield* fileSystem.readFileString(`${runRecipeRoot}/artifacts/view.json`);
+          const errorText = yield* fileSystem.readFileString(
+            `${runRecipeRoot}/artifacts/error.txt`,
+          );
 
           expect(viewJson).toContain('"view"');
           expect(viewJson).toContain('"resource"');

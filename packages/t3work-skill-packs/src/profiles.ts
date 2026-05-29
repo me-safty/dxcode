@@ -1,4 +1,4 @@
-import type { RecipeProfileContext } from "@t3tools/project-recipes";
+import type { RecipeProfileContext, SidecarComposition } from "@t3tools/project-recipes";
 
 export type T3WorkProfileId =
   | "qa-assistant"
@@ -42,6 +42,7 @@ export type T3WorkProfile = {
   readonly preferredArtifactKinds: ReadonlyArray<string>;
   readonly defaultActionFamilies?: ReadonlyArray<string>;
   readonly defaultRecipeWeights: Readonly<Record<string, number>>;
+  readonly sidecarSections?: SidecarComposition | undefined;
   readonly recommendedSkillPackIds: ReadonlyArray<string>;
   readonly hideImplementationComplexity: boolean;
 };
@@ -228,6 +229,9 @@ export const T3WORK_PROFILES: Record<T3WorkProfileId, T3WorkProfile> = {
       "technical-implementation-plan": 40,
       "release-handoff-checklist": 10,
       "next-best-task": 10,
+    },
+    sidecarSections: {
+      sections: [{ sectionId: "recent-conversations" }, { sectionId: "quick-starts" }],
     },
     recommendedSkillPackIds: ["engineering", "release"],
     hideImplementationComplexity: false,

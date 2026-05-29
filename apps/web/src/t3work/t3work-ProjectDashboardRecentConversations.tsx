@@ -21,6 +21,7 @@ type T3workRecentConversationsProps = {
   title?: string;
   emptyMessage?: string;
   searchPlaceholder?: string;
+  showHeader?: boolean;
   showSearch?: boolean;
   showCount?: boolean;
 };
@@ -31,6 +32,7 @@ export function T3workRecentConversations({
   title = "Recent conversations",
   emptyMessage = "No matching conversations.",
   searchPlaceholder = "Search conversations",
+  showHeader = true,
   showSearch = true,
   showCount = true,
 }: T3workRecentConversationsProps) {
@@ -58,14 +60,16 @@ export function T3workRecentConversations({
 
   return (
     <section className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
-          {title}
-        </h4>
-        {showCount ? (
-          <span className="text-xs text-muted-foreground/70">{filteredThreads.length}</span>
-        ) : null}
-      </div>
+      {showHeader ? (
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
+            {title}
+          </h4>
+          {showCount ? (
+            <span className="text-xs text-muted-foreground/70">{filteredThreads.length}</span>
+          ) : null}
+        </div>
+      ) : null}
 
       {showSearch ? (
         <div className="relative">

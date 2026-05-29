@@ -1,11 +1,18 @@
-import { forwardRef, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import type { ProjectShellProject } from "@t3tools/project-context";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TicketKickoffPanel } from "./t3work-TicketKickoffPanel";
 
+const { mockUseSidecarComposition } = vi.hoisted(() => ({
+  mockUseSidecarComposition: vi.fn(),
+}));
+
 vi.mock("lucide-react", () => ({
   SearchIcon: () => <span>search-icon</span>,
+  ChevronDown: () => <span>chevron-down</span>,
+  ChevronRight: () => <span>chevron-right</span>,
 }));
 
 vi.mock("~/t3work/components/ui/t3work-scroll-area", () => ({
@@ -40,6 +47,14 @@ vi.mock("~/t3work/t3work-runViewTransition", () => ({
   runT3workViewTransition: (callback: () => void) => callback(),
 }));
 
+vi.mock("~/t3work/hooks/t3work-useSidecarComposition", () => ({
+  useT3workSidecarComposition: (input: unknown) => mockUseSidecarComposition(input),
+}));
+
+vi.mock("~/t3work/t3work-sidecarRecipes", () => ({
+  useT3workSidecarRecipeQuickStarts: () => [],
+}));
+
 vi.mock("~/t3work/t3work-TicketKickoffComposer", () => ({
   createDefaultT3workKickoffLaunchConfig: () => ({
     selection: { model: "gpt-5.4", instanceId: "provider" },
@@ -49,11 +64,41 @@ vi.mock("~/t3work/t3work-TicketKickoffComposer", () => ({
   }),
 }));
 
+const project: ProjectShellProject = {
+  id: "project-1" as ProjectShellProject["id"],
+  title: "Inbox Export Service",
+  source: {
+    provider: "local",
+    externalProjectId: "project-1",
+    raw: {},
+  },
+  workspace: {
+    rootPath: "/tmp/project-1",
+    createdAt: "2026-05-27T09:00:00.000Z",
+  },
+  createdAt: "2026-05-27T09:00:00.000Z",
+  updatedAt: "2026-05-27T09:00:00.000Z",
+};
+
 describe("TicketKickoffPanel", () => {
+  beforeEach(() => {
+    mockUseSidecarComposition.mockReturnValue({
+      composition: {
+        sections: [
+          { sectionId: "quick-starts", visible: true, collapsed: false },
+          { sectionId: "recent-conversations", visible: true, collapsed: false },
+        ],
+      },
+      setCollapsed: () => undefined,
+      userOverrides: { sections: [] },
+    });
+  });
+
   it("renders conversations as compact list entries without a misleading zero count", () => {
     const markup = renderToStaticMarkup(
       <TicketKickoffPanel
-        displayId="IES-17877"
+        profileId="engineering-copilot"
+        projectId="project-1"
         issueThreads={[
           {
             id: "thread-zero",
@@ -76,17 +121,27 @@ describe("TicketKickoffPanel", () => {
             status: "idle",
           },
         ]}
-        quickStartRecipes={[]}
+        quickStartRecipeInput={{
+          backend: null,
+          surface: "workitem.detail.sidepanel",
+          project,
+          selectedWorkLabel: "IES-17877",
+        }}
         onOpenThread={() => {}}
         onKickoff={(() => {}) as never}
         renderComposer={({ composerRef }) => <div>composer:{String(Boolean(composerRef))}</div>}
       />,
     );
 
-    expect(markup).toContain("Conversations");
     expect(markup).toContain("<ul");
+    expect(markup).toContain("Quick starts");
+    expect(markup).toContain("Recent conversations");
     expect(markup).toContain("IES-17877 thread 2");
     expect(markup).toContain("relative:2026-05-27T10:00:00.000Z");
+    expect(markup).not.toContain("Get Help With IES-17877");
+    expect(markup).not.toContain(
+      "Start a new conversation with all ticket context included automatically.",
+    );
     expect(markup).not.toContain("0 messages");
     expect(markup).toContain("2 messages • relative:2026-05-27T11:00:00.000Z");
     expect(markup).not.toContain("Search conversations");

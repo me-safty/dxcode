@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -17,6 +18,11 @@ import {
   resumeProjectRecipeWorkflowAfterAgentReply,
   submitProjectRecipeCardAction,
 } from "./t3work-recipeWorkflowRuntime.js";
+import {
+  workflowRunRecipeRootPath,
+  workflowStatePathForRun,
+} from "./t3work-recipeWorkflowRunPaths.ts";
+import { workflowRunIdForThread } from "./t3work-recipeWorkflowRuntimeShared.ts";
 
 const CREATED_AT = "2026-05-27T12:00:00.000Z";
 
@@ -171,8 +177,10 @@ describe("runProjectRecipeWorkflowLaunch", () => {
           expect(result.kickoffMessage).toBe("Kick off from workflow");
 
           const fileSystem = yield* FileSystem.FileSystem;
+          const pathService = yield* Path.Path;
+          const workflowRunId = workflowRunIdForThread(threadId);
           const stateJson = yield* fileSystem.readFileString(
-            `${workspaceRoot}/.t3work/recipe-workflows/${threadId}.json`,
+            workflowStatePathForRun(pathService, workspaceRoot, workflowRunId),
           );
           const state = yield* decodePersistedWorkflowStateSnapshot(stateJson);
 
@@ -241,8 +249,10 @@ describe("resumeProjectRecipeWorkflowAfterAgentReply", () => {
 
           expect(launchResult.turnStartMessage).toBe("Draft the recipe");
 
+          const pathService = yield* Path.Path;
+          const workflowRunId = workflowRunIdForThread(threadId);
           const stateJson = yield* fileSystem.readFileString(
-            `${workspaceRoot}/.t3work/recipe-workflows/${threadId}.json`,
+            workflowStatePathForRun(pathService, workspaceRoot, workflowRunId),
           );
           const state = yield* decodePersistedWorkflowStateSnapshot(stateJson);
           expect(state.waitingFor).toMatchObject({
@@ -307,11 +317,13 @@ describe("submitProjectRecipeCardAction", () => {
           });
 
           const fileSystem = yield* FileSystem.FileSystem;
+          const pathService = yield* Path.Path;
+          const workflowRunId = workflowRunIdForThread(threadId);
           const workflowStateExists = yield* fileSystem.exists(
             `${workspaceRoot}/.t3work/recipe-workflows/${threadId}.json`,
           );
           const completedArtifact = yield* fileSystem.readFileString(
-            `${recipeRoot}/artifacts/completed.txt`,
+            `${workflowRunRecipeRootPath(pathService, workspaceRoot, workflowRunId)}/artifacts/completed.txt`,
           );
 
           expect(workflowStateExists).toBe(false);

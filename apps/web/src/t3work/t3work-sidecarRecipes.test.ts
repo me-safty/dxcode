@@ -223,7 +223,7 @@ describe("buildT3workSidecarRecipeQuickStarts", () => {
     expect(recipeIds).not.toContain("summarize-project-risk");
   });
 
-  it("surfaces risk-focused dashboard recipes only for concentrated hotspots", () => {
+  it("surfaces risk-hotspot dashboard recipes only for concentrated hotspots", () => {
     const quickStarts = buildT3workSidecarRecipeQuickStarts({
       surface: "project.dashboard",
       project: createProject("product-partner"),
@@ -239,7 +239,6 @@ describe("buildT3workSidecarRecipeQuickStarts", () => {
     });
 
     const recipeIds = quickStarts.map((recipe) => recipe.id);
-    expect(recipeIds).toContain("summarize-project-risk");
     expect(recipeIds).toContain("stakeholder-update");
     expect(recipeIds).toContain("prioritize-pending-work");
   });

@@ -10,7 +10,6 @@ import type { TicketDetailKickoffAsideProps } from "~/t3work/t3work-TicketDetail
 import { buildTicketRecipeContext } from "~/t3work/t3work-ticketDetailKickoffRecipeContext";
 import { useTicketKickoffInjectedContextAttachments } from "~/t3work/t3work-useTicketKickoffInjectedContextAttachments";
 import { runT3workViewTransition } from "~/t3work/t3work-runViewTransition";
-import { useT3workSidecarRecipeQuickStarts } from "~/t3work/t3work-sidecarRecipes";
 
 export type { TicketDetailKickoffAsideProps } from "~/t3work/t3work-TicketDetailKickoffAside.types";
 
@@ -39,6 +38,7 @@ export function TicketDetailKickoffAside({
   onKickoffThread,
 }: TicketDetailKickoffAsideProps) {
   const backend = useBackend();
+  const profileId = readProjectSetupProfileIdFromProject(project);
   const injectedContextAttachments = useTicketKickoffInjectedContextAttachments({
     projectId,
     ticketId,
@@ -77,7 +77,7 @@ export function TicketDetailKickoffAside({
       backend,
       surface: "workitem.detail.sidepanel" as const,
       project,
-      profileId: readProjectSetupProfileIdFromProject(project),
+      profileId,
       selectedWorkLabel: displayId,
       selectedWorkTitle: ticketTitle,
       resourceKind: "ticket" as const,
@@ -100,7 +100,6 @@ export function TicketDetailKickoffAside({
       ticketTitle,
     ],
   );
-  const quickStartRecipes = useT3workSidecarRecipeQuickStarts(quickStartRecipeInput);
 
   if (activeThread) {
     return (
@@ -121,9 +120,10 @@ export function TicketDetailKickoffAside({
   return (
     <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l border-border/70 bg-background [view-transition-name:t3work-right-sidebar-panel]">
       <TicketKickoffPanel
-        displayId={displayId}
+        profileId={profileId}
         issueThreads={issueThreads}
-        quickStartRecipes={quickStartRecipes}
+        projectId={projectId}
+        quickStartRecipeInput={quickStartRecipeInput}
         injectedContextAttachments={injectedContextAttachments}
         onOpenThread={(threadId) =>
           runT3workViewTransition(() => onOpenThread(projectId, threadId))

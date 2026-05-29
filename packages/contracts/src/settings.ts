@@ -92,6 +92,7 @@ export const ClientSettingsSchema = Schema.Struct({
   t3workStoredSidebarNavPreferencesJson: Schema.optionalKey(TrimmedString),
   t3workStoredProjectsJson: Schema.optionalKey(TrimmedString),
   t3workStoredSidebarPinsJson: Schema.optionalKey(TrimmedString),
+  t3workStoredSidecarCompositionJson: Schema.optionalKey(TrimmedString),
   t3workStoredThreadsJson: Schema.optionalKey(TrimmedString),
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
@@ -384,6 +385,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   t3workStoredSidebarPinsJson: Schema.optionalKey(TrimmedString),
+  t3workStoredSidecarCompositionJson: Schema.optionalKey(TrimmedString),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
@@ -457,6 +459,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   t3workStoredSidebarPinsJson: Schema.optionalKey(TrimmedString),
+  t3workStoredSidecarCompositionJson: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   observability: Schema.optionalKey(
     Schema.Struct({
@@ -515,6 +518,7 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
   t3workStoredProjectsJson: Schema.optionalKey(TrimmedString),
+  t3workStoredSidecarCompositionJson: Schema.optionalKey(TrimmedString),
   t3workStoredThreadsJson: Schema.optionalKey(TrimmedString),
   timestampFormat: Schema.optionalKey(TimestampFormat),
 });

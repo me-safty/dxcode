@@ -11,6 +11,7 @@ const encodeServerSettings = Schema.encodeSync(ServerSettings);
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults sidebar pin persistence to undefined so server config stays sparse", () => {
     expect(DEFAULT_SERVER_SETTINGS.t3workStoredSidebarPinsJson).toBeUndefined();
+    expect(DEFAULT_SERVER_SETTINGS.t3workStoredSidecarCompositionJson).toBeUndefined();
   });
 
   it("defaults to an empty record so legacy configs without the key still decode", () => {
@@ -86,8 +87,13 @@ describe("ServerSettingsPatch.providerInstances", () => {
 
     const pinPatch = decodeServerSettingsPatch({
       t3workStoredSidebarPinsJson: '  [{"id":"pin-1"}]  ',
+      t3workStoredSidecarCompositionJson:
+        '  {"sections":[{"sectionId":"quick-starts","collapsed":true}]}  ',
     });
     expect(pinPatch.t3workStoredSidebarPinsJson).toBe('[{"id":"pin-1"}]');
+    expect(pinPatch.t3workStoredSidecarCompositionJson).toBe(
+      '{"sections":[{"sectionId":"quick-starts","collapsed":true}]}',
+    );
   });
 
   it("preserves a fork-defined driver entry through patch decoding", () => {
