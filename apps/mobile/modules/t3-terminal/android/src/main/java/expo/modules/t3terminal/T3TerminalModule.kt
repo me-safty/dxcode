@@ -20,10 +20,6 @@ class T3TerminalModule : Module() {
         view.fontSize = fontSize.toFloat()
       }
 
-      Prop("keyboardFocusRequest") { view: T3TerminalView, keyboardFocusRequest: Int ->
-        view.keyboardFocusRequest = keyboardFocusRequest
-      }
-
       Prop("appearanceScheme") { view: T3TerminalView, appearanceScheme: String ->
         view.appearanceScheme = appearanceScheme
       }

@@ -178,6 +178,7 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
 
 export const TerminalSurface = memo(function TerminalSurface(props: TerminalSurfaceProps) {
   const fontSize = props.fontSize ?? 12;
+  const keyboardInputRef = useRef<TextInput>(null);
   const appearanceScheme = useColorScheme() === "light" ? "light" : "dark";
   const theme = props.theme ?? getPierreTerminalTheme(appearanceScheme);
   const { onInput, onResize } = props;
@@ -208,22 +209,61 @@ export const TerminalSurface = memo(function TerminalSurface(props: TerminalSurf
     [onResize],
   );
 
+  // Reopen focus through React and forward input normally; this avoids a native focus-command bridge.
+  useEffect(() => {
+    if (!NativeTerminalSurfaceView || (props.keyboardFocusRequest ?? 0) <= 0) {
+      return undefined;
+    }
+
+    keyboardInputRef.current?.blur();
+    const focusFrame = requestAnimationFrame(() => keyboardInputRef.current?.focus());
+    return () => cancelAnimationFrame(focusFrame);
+  }, [NativeTerminalSurfaceView, props.keyboardFocusRequest]);
+
+  const handleKeyboardInput = useCallback(
+    (data: string) => {
+      if (data.length > 0) {
+        onInput(data);
+        keyboardInputRef.current?.clear();
+      }
+    },
+    [onInput],
+  );
+
   if (NativeTerminalSurfaceView) {
     return (
-      <NativeTerminalSurfaceView
-        {...props}
-        appearanceScheme={appearanceScheme}
-        backgroundColor={theme.background}
-        foregroundColor={theme.foreground}
-        mutedForegroundColor={theme.mutedForeground}
-        terminalKey={props.terminalKey}
-        initialBuffer={props.buffer}
-        fontSize={fontSize}
-        keyboardFocusRequest={props.keyboardFocusRequest}
-        themeConfig={buildGhosttyThemeConfig(theme)}
-        onInput={handleNativeInput}
-        onResize={handleNativeResize}
-      />
+      <View style={props.style}>
+        <NativeTerminalSurfaceView
+          appearanceScheme={appearanceScheme}
+          backgroundColor={theme.background}
+          foregroundColor={theme.foreground}
+          mutedForegroundColor={theme.mutedForeground}
+          terminalKey={props.terminalKey}
+          initialBuffer={props.buffer}
+          fontSize={fontSize}
+          style={{ flex: 1 }}
+          themeConfig={buildGhosttyThemeConfig(theme)}
+          onInput={handleNativeInput}
+          onResize={handleNativeResize}
+        />
+        <TextInput
+          ref={keyboardInputRef}
+          autoCapitalize="none"
+          autoCorrect={false}
+          blurOnSubmit={false}
+          caretHidden
+          editable={props.isRunning}
+          keyboardType="ascii-capable"
+          style={{ bottom: 0, height: 1, left: 0, opacity: 0.01, position: "absolute", width: 1 }}
+          onChangeText={handleKeyboardInput}
+          onKeyPress={(event) => {
+            if (event.nativeEvent.key === "Backspace") {
+              onInput("\u007f");
+            }
+          }}
+          onSubmitEditing={() => onInput("\n")}
+        />
+      </View>
     );
   }
 

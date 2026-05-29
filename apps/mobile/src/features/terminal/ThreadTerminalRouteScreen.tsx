@@ -1185,15 +1185,16 @@ export function ThreadTerminalRouteScreen() {
               glassEffectStyle="regular"
               style={{
                 alignItems: "center",
-                borderRadius: 28,
-                height: 56,
+                borderRadius: 24,
+                height: 48,
                 justifyContent: "center",
-                width: 56,
+                width: 48,
               }}
+              pointerEvents="none"
             >
               <SymbolView
                 name={{ ios: "keyboard", android: "keyboard" }}
-                size={22}
+                size={20}
                 tintColor={terminalTheme.foreground}
                 type="monochrome"
               />
