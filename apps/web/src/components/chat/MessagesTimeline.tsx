@@ -17,7 +17,7 @@ import {
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
-import { type TurnDiffSummary } from "../../types";
+import { type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import {
@@ -86,6 +86,7 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onReviewProposedPlan: (proposedPlan: ProposedPlan) => void;
 }
 
 interface TimelineRowActivityState {
@@ -119,6 +120,7 @@ interface MessagesTimelineProps {
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
+  onReviewProposedPlan: (proposedPlan: ProposedPlan) => void;
   activeThreadEnvironmentId: EnvironmentId;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
@@ -148,6 +150,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onRevertUserMessage,
   isRevertingCheckpoint,
   onImageExpand,
+  onReviewProposedPlan,
   activeThreadEnvironmentId,
   markdownCwd,
   resolvedTheme,
@@ -220,6 +223,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onReviewProposedPlan,
     }),
     [
       timestampFormat,
@@ -232,6 +236,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onReviewProposedPlan,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -500,6 +505,7 @@ function ProposedPlanTimelineRow({
         environmentId={ctx.activeThreadEnvironmentId}
         cwd={ctx.markdownCwd}
         workspaceRoot={ctx.workspaceRoot}
+        onReviewPlan={() => ctx.onReviewProposedPlan(row.proposedPlan)}
       />
     </div>
   );

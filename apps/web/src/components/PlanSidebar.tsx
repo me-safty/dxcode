@@ -11,6 +11,7 @@ import {
   ChevronRightIcon,
   EllipsisIcon,
   LoaderIcon,
+  MessageSquarePlusIcon,
   PanelRightCloseIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
@@ -61,6 +62,7 @@ interface PlanSidebarProps {
   timestampFormat: TimestampFormat;
   mode?: "sheet" | "sidebar";
   onClose: () => void;
+  onReviewPlan?: (proposedPlan: LatestProposedPlanState) => void;
 }
 
 const PlanSidebar = memo(function PlanSidebar({
@@ -73,6 +75,7 @@ const PlanSidebar = memo(function PlanSidebar({
   timestampFormat,
   mode = "sidebar",
   onClose,
+  onReviewPlan,
 }: PlanSidebarProps) {
   const [proposedPlanExpanded, setProposedPlanExpanded] = useState(false);
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
@@ -126,6 +129,11 @@ const PlanSidebar = memo(function PlanSidebar({
       );
   }, [environmentId, planMarkdown, workspaceRoot]);
 
+  const handleReviewPlan = useCallback(() => {
+    if (!activeProposedPlan || !onReviewPlan) return;
+    onReviewPlan(activeProposedPlan);
+  }, [activeProposedPlan, onReviewPlan]);
+
   return (
     <div
       className={cn(
@@ -151,6 +159,17 @@ const PlanSidebar = memo(function PlanSidebar({
           ) : null}
         </div>
         <div className="flex items-center gap-1">
+          {activeProposedPlan && onReviewPlan ? (
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              onClick={handleReviewPlan}
+              aria-label="Review plan"
+              className="text-muted-foreground/50 hover:text-foreground/70"
+            >
+              <MessageSquarePlusIcon className="size-3.5" />
+            </Button>
+          ) : null}
           {planMarkdown ? (
             <Menu>
               <MenuTrigger
@@ -166,6 +185,9 @@ const PlanSidebar = memo(function PlanSidebar({
                 <EllipsisIcon className="size-3.5" />
               </MenuTrigger>
               <MenuPopup align="end">
+                {activeProposedPlan && onReviewPlan ? (
+                  <MenuItem onClick={handleReviewPlan}>Review plan</MenuItem>
+                ) : null}
                 <MenuItem onClick={handleCopyPlan}>
                   {isCopied ? "Copied!" : "Copy to clipboard"}
                 </MenuItem>
