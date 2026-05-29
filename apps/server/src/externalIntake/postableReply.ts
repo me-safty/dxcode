@@ -13,6 +13,14 @@ export interface PullRequestMergedMessage {
   readonly title?: string | undefined;
 }
 
+export interface SupportEmailNotificationMessage {
+  readonly kind: ReplyLinkKind;
+  readonly title: string;
+  readonly preview: string;
+  readonly status?: string | undefined;
+  readonly t3ThreadUrl?: string | undefined;
+}
+
 function isMarkdownTableSeparator(line: string): boolean {
   const cells = line
     .trim()
@@ -113,6 +121,40 @@ export function postableTaskStartedStatus(input: TaskStartedStatusMessage): Post
       title: "Talk to Vevin in this thread",
       children: [
         CardText("I will keep replies here and link the T3 session once it is available."),
+        ...(input.t3ThreadUrl !== undefined
+          ? [
+              Actions([
+                LinkButton({
+                  label: "Open T3",
+                  url: input.t3ThreadUrl,
+                  style: "primary",
+                }),
+              ]),
+            ]
+          : []),
+      ],
+    }),
+    fallbackText: body,
+  };
+}
+
+export function postableSupportEmailNotification(
+  input: SupportEmailNotificationMessage,
+): PostableMessage {
+  const body = [
+    input.title,
+    "",
+    input.preview,
+    ...(input.status !== undefined ? ["", input.status] : []),
+    ...(input.t3ThreadUrl !== undefined ? ["", `Open T3: ${input.t3ThreadUrl}`] : []),
+  ].join("\n");
+
+  return {
+    card: Card({
+      title: input.title,
+      children: [
+        CardText(`\`\`\`\n${input.preview}\n\`\`\``),
+        ...(input.status !== undefined ? [CardText(input.status)] : []),
         ...(input.t3ThreadUrl !== undefined
           ? [
               Actions([

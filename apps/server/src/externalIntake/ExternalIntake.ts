@@ -8,16 +8,21 @@ import {
   type OrchestrationProject,
   type OrchestrationProjectShell,
   type ProjectScript,
+  type UploadChatAttachment,
 } from "@t3tools/contracts";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import { randomBytes, randomUUID } from "node:crypto";
 
+import { ServerConfig } from "../config.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
+import { normalizeUploadChatAttachments } from "../orchestration/Normalizer.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ExternalIntegrationRepository } from "../persistence/Services/ExternalIntegrations.ts";
@@ -36,6 +41,10 @@ import {
   shouldIgnoreTeamAppMessage,
   teamAppMuteCommandReaction,
 } from "./teamAppMessages.ts";
+import {
+  buildDefaultSupportEmailTriagePrompt,
+  supportEmailContextFromEnv,
+} from "./supportEmail.ts";
 
 type ResolvedProject = Pick<
   OrchestrationProject | OrchestrationProjectShell,
@@ -56,6 +65,7 @@ export interface ExternalIntakeMessage {
   readonly externalMessageId: string;
   readonly text: string;
   readonly title: string;
+  readonly attachments?: readonly UploadChatAttachment[] | undefined;
   readonly url?: string | undefined;
   readonly receivedAt: string;
   readonly profile?: IntakeProjectProfile | undefined;
@@ -107,6 +117,24 @@ const DEFAULT_MODEL_SELECTION = {
   model: "gpt-5.5",
   options: [{ id: "fastMode", value: true }],
 } as const satisfies ModelSelection;
+
+const TASK_INTAKE_AGENT_PROMPT = [
+  "System context and operating rules:",
+  "You are the coding agent behind an internal task intake agent that lets team members request product and code work from Slack and other intake sources. The requester will only see selected relayed responses, so keep responses clear, concrete, and include important URLs when they become available.",
+  "",
+  "Operational rules:",
+  "- Before making code changes or running project commands in a task worktree, run the worktree setup script from the worktree root when it exists. Prefer `bash scripts/worktree-setup.sh`; if that file is not present, use `bash .t3code/worktree-setup.sh`. If the setup script fails, inspect the script, perform its setup steps manually from the worktree root, report the workaround you used, and continue with the task once the equivalent setup is complete.",
+  "- If you make code changes, commit them and push the branch before finishing.",
+  "- As soon as there are code changes, create or update a GitHub pull request targeting `dev`.",
+  "- When you first create the pull request, include the PR URL and the relevant Vercel preview deployment URL in that response.",
+  "- If you cannot commit, push, create the PR, or find the preview URL, say exactly why in the response where that failure occurs.",
+].join("\n");
+
+const DEFAULT_SUPPORT_EMAIL_AGENT_PROMPT = [
+  "- This task was started from a support email intake.",
+  "- The user request below contains the received email content, including headers, body, and attachment links.",
+  "- Use the received email content as the source message for this task.",
+].join("\n");
 
 function currentIsoTimestamp() {
   return DateTime.formatIso(DateTime.toUtc(DateTime.nowUnsafe()));
@@ -167,15 +195,30 @@ function scriptsEqual(left: readonly ProjectScript[], right: readonly ProjectScr
 
 function buildInitialPrompt(input: ExternalIntakeMessage) {
   const profile = input.profile;
-  const supportPrompt = profile?.supportEmail?.triagePrompt;
+  const supportContext = supportEmailContextFromEnv({
+    ...profile?.supportEmail,
+    ...(profile?.id !== undefined ? { repoName: profile.id } : {}),
+  });
+  const supportPrompt =
+    profile?.supportEmail?.triagePrompt ??
+    envValue("SUPPORT_EMAIL_TRIAGE_PROMPT") ??
+    buildDefaultSupportEmailTriagePrompt(supportContext);
   const supportAgentPrompt =
-    profile?.supportEmail?.agentPrompt ??
-    [
-      "- This task was started from support email intake.",
-      "- Treat the email content as the source message.",
-      "- If the message is not a real user-reported issue, say so clearly and stop.",
-      "- If triage shows a real product bug, create a Linear issue using the available Linear tools and include the issue link.",
+    profile?.supportEmail?.agentPrompt ?? envValue("SUPPORT_EMAIL_AGENT_PROMPT");
+
+  if (input.source === "support_email") {
+    const sourceContext = (supportAgentPrompt ?? DEFAULT_SUPPORT_EMAIL_AGENT_PROMPT).trim();
+    const agentPrompt = [TASK_INTAKE_AGENT_PROMPT, sourceContext]
+      .filter((part) => part.length > 0)
+      .join("\n\n");
+    return [
+      ["<triage_prompt>", supportPrompt, "</triage_prompt>"].join("\n"),
+      ["<agent_prompt>", agentPrompt, "</agent_prompt>"].join("\n"),
+      "",
+      "User request:",
+      input.text,
     ].join("\n");
+  }
 
   const genericAgentPrompt = [
     "- Work in the prepared worktree for this thread.",
@@ -188,8 +231,7 @@ function buildInitialPrompt(input: ExternalIntakeMessage) {
     `Title: ${input.title}`,
     ...(input.url !== undefined ? [`External URL: ${input.url}`] : []),
     "",
-    input.source === "support_email" ? supportAgentPrompt : genericAgentPrompt,
-    ...(supportPrompt !== undefined ? ["", supportPrompt] : []),
+    genericAgentPrompt,
     "",
     "Request:",
     input.text,
@@ -216,8 +258,20 @@ const makeExternalIntake = Effect.gen(function* () {
   const git = yield* GitVcsDriver;
   const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
   const serverEnvironment = yield* ServerEnvironment;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const serverConfig = yield* ServerConfig;
 
   const profiles = loadIntakeProfiles();
+  const normalizeMessageAttachments = (input: {
+    readonly threadId: ThreadId | string;
+    readonly attachments: readonly UploadChatAttachment[];
+  }) =>
+    normalizeUploadChatAttachments(input).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      Effect.provideService(ServerConfig, serverConfig),
+    );
 
   const resolveProject = (input: ExternalIntakeMessage) =>
     Effect.gen(function* () {
@@ -342,6 +396,10 @@ const makeExternalIntake = Effect.gen(function* () {
   }) =>
     Effect.gen(function* () {
       const messageNonce = randomUUID();
+      const attachments = yield* normalizeMessageAttachments({
+        threadId: input.threadId,
+        attachments: [...(input.message.attachments ?? [])],
+      });
       yield* orchestrationEngine.dispatch({
         type: "thread.turn.start",
         commandId: CommandId.make(
@@ -352,7 +410,7 @@ const makeExternalIntake = Effect.gen(function* () {
           messageId: MessageId.make(`external:${input.message.externalMessageId}:${messageNonce}`),
           role: "user",
           text: buildFollowUpPrompt(input.message),
-          attachments: [],
+          attachments,
         },
         runtimeMode: "full-access",
         interactionMode: "default",
@@ -384,6 +442,10 @@ const makeExternalIntake = Effect.gen(function* () {
         refreshBaseFromOrigin: true,
       });
       const threadId = ThreadId.make(randomUUID());
+      const attachments = yield* normalizeMessageAttachments({
+        threadId,
+        attachments: [...(message.attachments ?? [])],
+      });
 
       yield* orchestrationEngine.dispatch({
         type: "thread.create",
@@ -426,7 +488,7 @@ const makeExternalIntake = Effect.gen(function* () {
           messageId: MessageId.make(`external:${message.externalMessageId}`),
           role: "user",
           text: buildInitialPrompt(message),
-          attachments: [],
+          attachments,
         },
         modelSelection,
         titleSeed: message.title,

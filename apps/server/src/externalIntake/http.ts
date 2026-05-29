@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Data from "effect/Data";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { ExternalIntake, type ExternalSlackNotificationLink } from "./ExternalIntake.ts";
@@ -10,38 +11,31 @@ import { slackChatSdkConfigStatus } from "./chatSdkAdapters.ts";
 import { parseGitHubPullRequestMergedEvent } from "./github.ts";
 import {
   postablePullRequestMerged,
-  postableReplyBody,
+  postableSupportEmailNotification,
   postableTaskStartedStatus,
 } from "./postableReply.ts";
 import { loadIntakeProfiles, type IntakeProjectProfile } from "./profiles.ts";
 import { slackThreadUrl, t3ThreadUrl } from "./slack.ts";
+import {
+  decodeResendWebhook,
+  fetchResendReceivedEmail,
+  formatSupportEmailForAgent,
+  processSupportEmailAttachments,
+  supportEmailContextFromEnv,
+  supportEmailLookupExternalIds,
+  supportEmailPrimaryExternalId,
+  supportEmailSlackPreview,
+  supportEmailSlackTitle,
+  supportEmailStoredExternalIds,
+  supportEmailTitle,
+  supportEmailUploadAttachments,
+  type ResendReceivedEmailWebhook,
+  type ResendReceivedEmail,
+} from "./supportEmail.ts";
+import { ServerConfig } from "../config.ts";
 import { ExternalIntegrationRepository } from "../persistence/Services/ExternalIntegrations.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-
-interface ResendReceivedEmailWebhook {
-  readonly type?: unknown;
-  readonly data?: {
-    readonly email_id?: unknown;
-  };
-}
-
-interface ResendReceivedEmail {
-  readonly id: string;
-  readonly to?: readonly string[];
-  readonly from?: string;
-  readonly created_at?: string;
-  readonly subject?: string | null;
-  readonly html?: string | null;
-  readonly text?: string | null;
-  readonly headers?: Record<string, string>;
-  readonly message_id?: string | null;
-  readonly attachments?: ReadonlyArray<{
-    readonly id?: string;
-    readonly filename?: string | null;
-    readonly content_type?: string | null;
-  }>;
-}
 
 class ExternalIntakeHttpError extends Data.TaggedError("ExternalIntakeHttpError")<{
   readonly message: string;
@@ -189,61 +183,34 @@ function parseJsonEffect<T>(raw: string) {
   return trySync(() => parseJson<T>(raw));
 }
 
-function supportEmailExternalIds(email: ResendReceivedEmail) {
-  const ids = new Set<string>();
-  ids.add(`resend:${email.id}`);
-  if (email.message_id !== undefined && email.message_id !== null) {
-    ids.add(`message-id:${email.message_id}`);
-  }
-  const inReplyTo = email.headers?.["In-Reply-To"] ?? email.headers?.["in-reply-to"];
-  if (inReplyTo !== undefined && inReplyTo.trim().length > 0) {
-    ids.add(`message-id:${inReplyTo.trim()}`);
-  }
-  const references = email.headers?.References ?? email.headers?.references;
-  for (const reference of references?.matchAll(/<[^>]+>/g) ?? []) {
-    ids.add(`message-id:${reference[0]}`);
-  }
-  return [...ids];
+function splitCsv(value: string | undefined) {
+  return (
+    value
+      ?.split(",")
+      .map((part) => part.trim())
+      .filter(Boolean) ?? []
+  );
 }
 
-function formattedEmail(email: ResendReceivedEmail) {
-  const attachmentLines =
-    email.attachments?.flatMap((attachment) =>
-      attachment.filename
-        ? [
-            `- ${attachment.filename}${attachment.content_type ? ` (${attachment.content_type})` : ""}`,
-          ]
-        : [],
-    ) ?? [];
-  return [
-    `From: ${email.from ?? "unknown"}`,
-    `To: ${email.to?.join(", ") ?? "unknown"}`,
-    `Subject: ${email.subject ?? "(no subject)"}`,
-    "",
-    email.text ?? email.html ?? "",
-    ...(attachmentLines.length > 0 ? ["", "Attachments:", ...attachmentLines] : []),
-  ].join("\n");
+function configuredSupportRecipients(profile: IntakeProjectProfile) {
+  const profileRecipients = profile.supportEmail?.to ?? [];
+  if (profileRecipients.length > 0) return [...profileRecipients];
+  const envRecipients = splitCsv(envValue("SUPPORT_EMAIL_TO"));
+  if (envRecipients.length > 0) return envRecipients;
+  const groupAddress =
+    profile.supportEmail?.groupAddress ?? envValue("SUPPORT_EMAIL_GROUP_ADDRESS");
+  return groupAddress === undefined ? [] : [groupAddress];
 }
 
 function profileMatchesEmail(profile: IntakeProjectProfile, email: ResendReceivedEmail) {
-  const configured = profile.supportEmail?.to ?? [];
+  const configured = configuredSupportRecipients(profile);
   if (configured.length === 0) return profile.supportEmail !== undefined;
-  const recipients = new Set((email.to ?? []).map((value) => value.toLowerCase()));
+  const recipients = new Set(
+    [...(email.to ?? []), ...(email.cc ?? []), ...(email.bcc ?? [])].map((value) =>
+      value.toLowerCase(),
+    ),
+  );
   return configured.some((address) => recipients.has(address.toLowerCase()));
-}
-
-async function fetchResendEmail(emailId: string): Promise<ResendReceivedEmail> {
-  const response = await fetch(`https://api.resend.com/emails/${encodeURIComponent(emailId)}`, {
-    headers: { authorization: `Bearer ${requiredEnv("RESEND_API_KEY")}` },
-  });
-  if (!response.ok) {
-    throw new Error(`Resend email fetch failed: ${response.status} ${response.statusText}`);
-  }
-  const parsed = (await response.json()) as ResendReceivedEmail;
-  if (typeof parsed.id !== "string") {
-    throw new Error("Resend email response was missing id.");
-  }
-  return parsed;
 }
 
 export const slackWebhookRouteLayer = HttpRouter.add(
@@ -272,14 +239,17 @@ export const supportEmailWebhookRouteLayer = HttpRouter.add(
     const rawBody = yield* request.text;
     yield* trySync(() => verifyResendWebhookSignature({ body: rawBody, headers: request.headers }));
     const payload = yield* parseJsonEffect<ResendReceivedEmailWebhook>(rawBody);
-    const emailId = payload.data?.email_id;
-    if (typeof emailId !== "string" || emailId.trim().length === 0) {
-      return json({ accepted: true, ignored: true, reason: "missing_email_id" });
+    const decoded = decodeResendWebhook(payload);
+    if (decoded.type === "ignored") {
+      return json({ accepted: true, ignored: true, reason: decoded.reason });
     }
+    const emailId = decoded.emailId;
 
     const repository = yield* ExternalIntegrationRepository;
     const intake = yield* ExternalIntake;
     const externalChat = yield* ExternalChat;
+    const serverConfig = yield* ServerConfig;
+    const path = yield* Path.Path;
     const existingReceipt = yield* repository.getEventReceipt({
       source: "support_email",
       eventId: emailId,
@@ -298,7 +268,18 @@ export const supportEmailWebhookRouteLayer = HttpRouter.add(
       updatedAt: now,
     });
 
-    const email = yield* Effect.promise(() => fetchResendEmail(emailId));
+    const completeReceipt = (metadata: unknown) =>
+      repository.upsertEventReceipt({
+        source: "support_email",
+        eventId: emailId,
+        status: "completed",
+        metadata,
+        createdAt: optionCreatedAt(existingReceipt, now),
+        updatedAt: DateTime.formatIso(DateTime.toUtc(DateTime.nowUnsafe())),
+      });
+
+    const apiKey = requiredEnv("RESEND_API_KEY");
+    const email = yield* Effect.promise(() => fetchResendReceivedEmail({ emailId, apiKey }));
     const profiles = loadIntakeProfiles();
     const profile = profiles.find((candidate) => profileMatchesEmail(candidate, email));
     if (profile === undefined) {
@@ -308,27 +289,65 @@ export const supportEmailWebhookRouteLayer = HttpRouter.add(
         cause: null,
       });
     }
+    const supportContext = supportEmailContextFromEnv({
+      ...profile.supportEmail,
+      repoName: profile.id,
+    });
 
-    const supportExternalIds = supportEmailExternalIds(email);
-    for (const supportExternalId of supportExternalIds) {
+    const lookupExternalIds = supportEmailLookupExternalIds(email, supportContext);
+    for (const supportExternalId of lookupExternalIds) {
       const existingLink = yield* repository.getThreadLink({
         source: "support_email",
         externalThreadId: supportExternalId,
       });
       if (Option.isSome(existingLink)) {
+        for (const storedExternalId of supportEmailStoredExternalIds(email, supportContext)) {
+          yield* repository.upsertThreadLink({
+            source: "support_email",
+            externalThreadId: storedExternalId,
+            t3ThreadId: existingLink.value.t3ThreadId,
+            projectId: existingLink.value.projectId,
+            primaryExternalMessageId: `support-email:${email.id}`,
+            url: existingLink.value.url,
+            muted: true,
+            metadata: { emailId: email.id },
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+        yield* completeReceipt({
+          status: "duplicate",
+          emailId: email.id,
+          t3ThreadId: String(existingLink.value.t3ThreadId),
+          matchedExternalId: supportExternalId,
+        });
         return json({ accepted: true, duplicate: true, t3ThreadId: existingLink.value.t3ThreadId });
       }
     }
 
+    const attachments = yield* processSupportEmailAttachments({
+      email,
+      apiKey,
+      storageDir: path.join(serverConfig.stateDir, "support-email-attachments"),
+    });
+    const slackTitle = supportEmailSlackTitle(email);
+    const slackPreview = supportEmailSlackPreview({
+      email,
+      attachments,
+      context: supportContext,
+    });
     let notificationSlackLink: ExternalSlackNotificationLink | undefined;
-    const slackChannelId = profile.supportEmail?.slackChannelId;
+    const slackChannelId =
+      profile.supportEmail?.slackChannelId ?? envValue("SUPPORT_EMAIL_SLACK_CHANNEL_ID");
     if (slackChannelId !== undefined) {
       const posted = yield* externalChat.postToChannel({
         source: "slack",
         channelId: slackChannelId,
-        message: postableReplyBody({
+        message: postableSupportEmailNotification({
           kind: "slack_thread",
-          body: `Support email received: ${email.subject ?? "(no subject)"}\nFrom: ${email.from ?? "unknown"}`,
+          title: slackTitle,
+          preview: slackPreview,
+          status: "Starting T3 triage...",
         }),
       });
       notificationSlackLink = {
@@ -340,13 +359,14 @@ export const supportEmailWebhookRouteLayer = HttpRouter.add(
       };
     }
 
-    const primaryExternalId = supportExternalIds[0] ?? `resend:${email.id}`;
+    const primaryExternalId = supportEmailPrimaryExternalId(email, supportContext);
     const result = yield* intake.handleMessage({
       source: "support_email",
       externalThreadId: primaryExternalId,
       externalMessageId: `support-email:${email.id}`,
-      text: formattedEmail(email),
-      title: email.subject?.trim() || "Support email",
+      text: formatSupportEmailForAgent(email, attachments, supportContext),
+      title: supportEmailTitle(email),
+      attachments: supportEmailUploadAttachments(attachments),
       receivedAt: email.created_at ?? now,
       profile,
       url: notificationSlackLink?.url,
@@ -354,7 +374,8 @@ export const supportEmailWebhookRouteLayer = HttpRouter.add(
     });
 
     if (result.status === "created") {
-      for (const supportExternalId of supportExternalIds.slice(1)) {
+      const storedExternalIds = supportEmailStoredExternalIds(email, supportContext);
+      for (const supportExternalId of storedExternalIds.filter((id) => id !== primaryExternalId)) {
         yield* repository.upsertThreadLink({
           source: "support_email",
           externalThreadId: supportExternalId,
@@ -374,30 +395,56 @@ export const supportEmailWebhookRouteLayer = HttpRouter.add(
           environmentId: result.environmentId,
           t3ThreadId: String(result.t3ThreadId),
         });
-        if (threadUrl !== undefined) {
-          yield* externalChat
-            .postToThread({
-              source: "slack",
-              externalThreadId: notificationSlackLink.externalThreadId,
-              message: postableTaskStartedStatus({
-                kind: "slack_thread",
-                t3ThreadUrl: threadUrl,
-              }),
-            })
-            .pipe(Effect.ignoreCause({ log: true }));
-        }
+        const updatedMessage = postableSupportEmailNotification({
+          kind: "slack_thread",
+          title: slackTitle,
+          preview: slackPreview,
+          ...(threadUrl !== undefined
+            ? { t3ThreadUrl: threadUrl }
+            : { status: "T3 triage started." }),
+        });
+        yield* externalChat
+          .updateThreadMessage({
+            source: "slack",
+            externalThreadId: notificationSlackLink.externalThreadId,
+            externalMessageId: notificationSlackLink.primaryExternalMessageId,
+            message: updatedMessage,
+          })
+          .pipe(
+            Effect.catch(() =>
+              threadUrl === undefined
+                ? Effect.void
+                : externalChat
+                    .postToThread({
+                      source: "slack",
+                      externalThreadId: notificationSlackLink.externalThreadId,
+                      message: postableTaskStartedStatus({
+                        kind: "slack_thread",
+                        t3ThreadUrl: threadUrl,
+                      }),
+                    })
+                    .pipe(Effect.asVoid),
+            ),
+            Effect.ignoreCause({ log: true }),
+          );
       }
+    } else if (result.status === "ignored" && notificationSlackLink !== undefined) {
+      yield* externalChat
+        .updateThreadMessage({
+          source: "slack",
+          externalThreadId: notificationSlackLink.externalThreadId,
+          externalMessageId: notificationSlackLink.primaryExternalMessageId,
+          message: postableSupportEmailNotification({
+            kind: "slack_thread",
+            title: slackTitle,
+            preview: slackPreview,
+            status: `No T3 triage started: ${result.reason}`,
+          }),
+        })
+        .pipe(Effect.ignoreCause({ log: true }));
     }
 
-    const doneAt = DateTime.formatIso(DateTime.toUtc(DateTime.nowUnsafe()));
-    yield* repository.upsertEventReceipt({
-      source: "support_email",
-      eventId: emailId,
-      status: "completed",
-      metadata: result,
-      createdAt: optionCreatedAt(existingReceipt, now),
-      updatedAt: doneAt,
-    });
+    yield* completeReceipt(result);
     return json({ accepted: true, result });
   }).pipe(
     Effect.catch((error: unknown) =>

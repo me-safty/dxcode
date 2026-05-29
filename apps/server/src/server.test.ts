@@ -687,6 +687,7 @@ const buildAppUnderTest = (options?: {
               channelId: "C_TEST",
               threadTs: "1710000000.000000",
             }),
+          updateThreadMessage: () => Effect.void,
           addReaction: () => Effect.void,
           ...options?.layers?.externalChat,
         }),

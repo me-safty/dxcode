@@ -4,6 +4,7 @@ import {
   flattenMarkdownTablesForSlack,
   postablePullRequestMerged,
   postableReplyBody,
+  postableSupportEmailNotification,
   postableTaskStartedStatus,
   protectSlackPackageScopes,
 } from "./postableReply.ts";
@@ -58,6 +59,28 @@ describe("postableTaskStartedStatus", () => {
         title: "Talk to Vevin in this thread",
       },
     });
+    expect(JSON.stringify(message)).toContain(
+      "https://t3.example.com/environment-local/thread-123",
+    );
+  });
+});
+
+describe("postableSupportEmailNotification", () => {
+  it("builds a support email card with an Open T3 button", () => {
+    const message = postableSupportEmailNotification({
+      kind: "slack_thread",
+      title: "New support email from user@example.com: Retry failed",
+      preview: "From: user@example.com\n\nThe retry button still fails.",
+      t3ThreadUrl: "https://t3.example.com/environment-local/thread-123",
+    });
+
+    expect(message).toMatchObject({
+      fallbackText: expect.stringContaining("Open T3"),
+      card: {
+        title: "New support email from user@example.com: Retry failed",
+      },
+    });
+    expect(JSON.stringify(message)).toContain("Open T3");
     expect(JSON.stringify(message)).toContain(
       "https://t3.example.com/environment-local/thread-123",
     );

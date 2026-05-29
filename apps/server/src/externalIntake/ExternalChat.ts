@@ -1,5 +1,6 @@
 import {
   Chat,
+  type AdapterPostableMessage,
   type Attachment,
   type Message,
   type MessageContext,
@@ -54,6 +55,12 @@ export interface ExternalChatShape {
     },
     ExternalChatError
   >;
+  readonly updateThreadMessage: (input: {
+    readonly source: "slack";
+    readonly externalThreadId: string;
+    readonly externalMessageId: string;
+    readonly message: PostableMessage;
+  }) => Effect.Effect<void, ExternalChatError>;
   readonly addReaction: (input: {
     readonly source: "slack";
     readonly externalThreadId: string;
@@ -312,6 +319,22 @@ const makeExternalChat = Effect.gen(function* () {
       catch: toExternalChatError,
     });
 
+  const updateThreadMessage: ExternalChatShape["updateThreadMessage"] = (input) =>
+    Effect.tryPromise({
+      try: async () => {
+        await bot.initialize();
+        const threadId = slackChatThreadId(input.externalThreadId);
+        await bot
+          .thread(threadId)
+          .adapter.editMessage(
+            threadId,
+            input.externalMessageId,
+            input.message as AdapterPostableMessage,
+          );
+      },
+      catch: toExternalChatError,
+    });
+
   const addReaction: ExternalChatShape["addReaction"] = (input) =>
     Effect.tryPromise({
       try: async () => {
@@ -331,6 +354,7 @@ const makeExternalChat = Effect.gen(function* () {
     handleSlackWebhook,
     postToThread,
     postToChannel,
+    updateThreadMessage,
     addReaction,
   } satisfies ExternalChatShape;
 });
