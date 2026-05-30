@@ -1,8 +1,9 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import type { GitStackedAction } from "@t3tools/contracts";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import {
+  ArrowDownIcon,
+  ArrowUpIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -75,6 +76,7 @@ import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   gitGenerateCommitMessageMutationOptions,
+  gitMutationKeys,
   vcsStageFilesMutationOptions,
   vcsUnstageFilesMutationOptions,
 } from "~/lib/gitReactQuery";
@@ -185,6 +187,11 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
     () => new Set(),
   );
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
+  const [isCommitting, setIsCommitting] = useState(false);
+  const [pendingStagePaths, setPendingStagePaths] = useState<ReadonlySet<string>>(() => new Set());
+  const [pendingUnstagePaths, setPendingUnstagePaths] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   const routeTarget = useParams({
     strict: false,
@@ -245,6 +252,12 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
   const generateCommitMessageMutation = useMutation(
     gitGenerateCommitMessageMutationOptions({ environmentId, cwd }),
   );
+  // Drive the spinner from the global mutation cache so the generating state
+  // survives the panel being closed/reopened (e.g. the mobile sheet).
+  const isGeneratingCommitMessage =
+    useIsMutating({
+      mutationKey: gitMutationKeys.generateCommitMessage(environmentId, cwd),
+    }) > 0;
   const stageFilesMutation = useMutation(
     vcsStageFilesMutationOptions({ environmentId, cwd, queryClient }),
   );
@@ -350,13 +363,28 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
   const stageFiles = useCallback(
     (filePaths: ReadonlyArray<string>) => {
       if (filePaths.length === 0) return;
-      void stageFilesMutation.mutateAsync({ filePaths: [...filePaths] }).catch((error: unknown) => {
-        toastManager.add({
-          type: "error",
-          title: "Unable to stage files",
-          description: error instanceof Error ? error.message : "An error occurred.",
-        });
+      const paths = [...filePaths];
+      setPendingStagePaths((previous) => {
+        const next = new Set(previous);
+        for (const path of paths) next.add(path);
+        return next;
       });
+      void stageFilesMutation
+        .mutateAsync({ filePaths: paths })
+        .catch((error: unknown) => {
+          toastManager.add({
+            type: "error",
+            title: "Unable to stage files",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          });
+        })
+        .finally(() => {
+          setPendingStagePaths((previous) => {
+            const next = new Set(previous);
+            for (const path of paths) next.delete(path);
+            return next;
+          });
+        });
     },
     [stageFilesMutation],
   );
@@ -364,13 +392,26 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
   const unstageFiles = useCallback(
     (filePaths: ReadonlyArray<string>) => {
       if (filePaths.length === 0) return;
+      const paths = [...filePaths];
+      setPendingUnstagePaths((previous) => {
+        const next = new Set(previous);
+        for (const path of paths) next.add(path);
+        return next;
+      });
       void unstageFilesMutation
-        .mutateAsync({ filePaths: [...filePaths] })
+        .mutateAsync({ filePaths: paths })
         .catch((error: unknown) => {
           toastManager.add({
             type: "error",
             title: "Unable to unstage files",
             description: error instanceof Error ? error.message : "An error occurred.",
+          });
+        })
+        .finally(() => {
+          setPendingUnstagePaths((previous) => {
+            const next = new Set(previous);
+            for (const path of paths) next.delete(path);
+            return next;
           });
         });
     },
@@ -382,24 +423,28 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
     void refreshGitStatus({ environmentId, cwd }).catch(() => undefined);
   }, [environmentId, cwd]);
 
-  const runCommitAction = useCallback(
-    (action: Extract<GitStackedAction, "commit" | "commit_push">) => {
-      void runGitActionWithToast({
-        action,
+  const handleCommit = useCallback(async () => {
+    // Surface progress as an inline button spinner rather than a toast.
+    setIsCommitting(true);
+    try {
+      await runGitActionWithToast({
+        action: "commit",
         ...commitMessageProps(commitMessage),
+        suppressProgressToast: true,
         onSuccess: () => setCommitMessage(""),
       });
-    },
-    [commitMessage, runGitActionWithToast, setCommitMessage],
-  );
-
-  const handleCommit = useCallback(() => {
-    runCommitAction("commit");
-  }, [runCommitAction]);
+    } finally {
+      setIsCommitting(false);
+    }
+  }, [commitMessage, runGitActionWithToast, setCommitMessage]);
 
   const handleCommitAndPush = useCallback(() => {
-    runCommitAction("commit_push");
-  }, [runCommitAction]);
+    void runGitActionWithToast({
+      action: "commit_push",
+      ...commitMessageProps(commitMessage),
+      onSuccess: () => setCommitMessage(""),
+    });
+  }, [commitMessage, runGitActionWithToast, setCommitMessage]);
 
   const handlePush = useCallback(() => {
     void runGitActionWithToast({ action: "push" });
@@ -452,15 +497,19 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
-        if (hasChanges && !isStageOperationRunning) {
-          handleCommit();
+        if (hasChanges && !isGitActionRunning && !isStageOperationRunning && !isCommitting) {
+          void handleCommit();
         }
       }
     },
-    [handleCommit, hasChanges, isStageOperationRunning],
+    [handleCommit, hasChanges, isCommitting, isGitActionRunning, isStageOperationRunning],
   );
 
-  const commitDisabled = !isRepo || !hasChanges || isGitActionRunning || isStageOperationRunning;
+  const commitDisabled =
+    !isRepo || !hasChanges || isGitActionRunning || isStageOperationRunning || isCommitting;
+  const aheadCount = gitStatus?.aheadCount ?? 0;
+  const behindCount = gitStatus?.behindCount ?? 0;
+  const isInitialStatusLoading = gitStatus === null && gitStatusError === null;
   const canPublishRepository = isRepo && gitStatus !== null && !hasPrimaryRemote;
   const pendingDefaultBranchActionCopy = pendingDefaultBranchAction
     ? resolveDefaultBranchActionDialogCopy({
@@ -480,6 +529,21 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
     hasPrimaryRemote,
   });
   const pullReason = pullDisabledReason({ gitStatus, isGitActionRunning });
+  // Once there are local commits to push, promote Push to the primary button
+  // (showing ahead/behind counts like VS Code) and demote Commit into the menu.
+  const pushMenuItem = gitActionMenuItems.find((item) => item.id === "push") ?? null;
+  // Only promote Push once the working tree is clean, otherwise committing the
+  // pending changes stays the primary action.
+  const showPushPrimary = aheadCount > 0 && !hasChanges && pushMenuItem !== null;
+  const pushReason = pushMenuItem
+    ? getMenuActionDisabledReason({
+        item: pushMenuItem,
+        gitStatus,
+        isBusy: isGitActionRunning || isStageOperationRunning,
+        hasPrimaryRemote,
+      })
+    : null;
+  const pushDisabled = pushMenuItem ? pushMenuItem.disabled || isStageOperationRunning : true;
   return (
     <>
       <div
@@ -590,7 +654,7 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
                       aria-label="Generate commit message"
                       className="absolute right-1.5 top-1.5 text-muted-foreground/70 hover:text-foreground"
                       disabled={
-                        generateCommitMessageMutation.isPending ||
+                        isGeneratingCommitMessage ||
                         !hasChanges ||
                         isGitActionRunning ||
                         isStageOperationRunning
@@ -599,7 +663,7 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
                     />
                   }
                 >
-                  {generateCommitMessageMutation.isPending ? (
+                  {isGeneratingCommitMessage ? (
                     <Spinner className="size-3.5" />
                   ) : (
                     <SparklesIcon className="size-3.5" />
@@ -609,15 +673,44 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
               </Tooltip>
             </div>
             <div className="flex items-stretch">
-              <Button
-                size="sm"
-                className="flex-1 rounded-e-none"
-                disabled={commitDisabled}
-                onClick={handleCommit}
-              >
-                <CheckIcon className="size-3.5" />
-                Commit
-              </Button>
+              {showPushPrimary ? (
+                <Button
+                  size="sm"
+                  className="flex-1 rounded-e-none"
+                  disabled={pushDisabled}
+                  title={pushReason ?? undefined}
+                  onClick={handlePush}
+                >
+                  <CloudUploadIcon className="size-3.5" />
+                  Push
+                  <span className="ml-auto flex items-center gap-2 text-[11px] tabular-nums">
+                    <span className="flex items-center gap-0.5">
+                      <ArrowUpIcon className="size-3" />
+                      {aheadCount}
+                    </span>
+                    {behindCount > 0 ? (
+                      <span className="flex items-center gap-0.5">
+                        <ArrowDownIcon className="size-3" />
+                        {behindCount}
+                      </span>
+                    ) : null}
+                  </span>
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  className="flex-1 rounded-e-none"
+                  disabled={commitDisabled}
+                  onClick={() => void handleCommit()}
+                >
+                  {isCommitting ? (
+                    <Spinner className="size-3.5" />
+                  ) : (
+                    <CheckIcon className="size-3.5" />
+                  )}
+                  Commit
+                </Button>
+              )}
               <Menu>
                 <MenuTrigger
                   render={
@@ -644,7 +737,7 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
                       })}
                       onSelect={() => {
                         if (item.id === "commit") {
-                          handleCommit();
+                          void handleCommit();
                         } else if (item.id === "push") {
                           handlePush();
                         } else {
@@ -691,6 +784,11 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
                   <GitBranchIcon className="size-3" />
                   <span className="truncate">{branchName}</span>
                   {isDefaultRef ? <span className="text-warning">default refName</span> : null}
+                </div>
+              ) : isInitialStatusLoading ? (
+                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+                  <Spinner className="size-3" />
+                  <span>Loading source control…</span>
                 </div>
               ) : (
                 <p className="text-[11px] text-warning">
@@ -739,6 +837,7 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
                     collapsedDirs={collapsedDirs}
                     resolvedTheme={resolvedTheme}
                     actionDisabled={isGitActionRunning || isStageOperationRunning}
+                    pendingPaths={pendingUnstagePaths}
                     onToggleSection={toggleSection}
                     onToggleDir={toggleDir}
                     onSectionAction={unstageFiles}
@@ -756,6 +855,7 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
                     collapsedDirs={collapsedDirs}
                     resolvedTheme={resolvedTheme}
                     actionDisabled={isGitActionRunning || isStageOperationRunning}
+                    pendingPaths={pendingStagePaths}
                     onToggleSection={toggleSection}
                     onToggleDir={toggleDir}
                     onSectionAction={stageFiles}
@@ -879,6 +979,7 @@ function SourceControlSectionTree({
   collapsedDirs,
   resolvedTheme,
   actionDisabled,
+  pendingPaths,
   onToggleSection,
   onToggleDir,
   onSectionAction,
@@ -895,6 +996,7 @@ function SourceControlSectionTree({
   collapsedDirs: ReadonlySet<string>;
   resolvedTheme: "light" | "dark";
   actionDisabled: boolean;
+  pendingPaths: ReadonlySet<string>;
   onToggleSection: (section: SourceControlSection) => void;
   onToggleDir: (path: string) => void;
   onSectionAction: (paths: ReadonlyArray<string>) => void;
@@ -903,6 +1005,7 @@ function SourceControlSectionTree({
 }) {
   const ActionIcon = section === "staged" ? MinusIcon : PlusIcon;
   const actionLabel = section === "staged" ? "Unstage all" : "Stage all";
+  const sectionActionPending = filePaths.some((path) => pendingPaths.has(path));
 
   return (
     <section>
@@ -936,7 +1039,11 @@ function SourceControlSectionTree({
               />
             }
           >
-            <ActionIcon className="size-3.5" />
+            {sectionActionPending ? (
+              <Spinner className="size-3.5" />
+            ) : (
+              <ActionIcon className="size-3.5" />
+            )}
           </TooltipTrigger>
           <TooltipPopup side="left">{actionLabel}</TooltipPopup>
         </Tooltip>
@@ -953,6 +1060,7 @@ function SourceControlSectionTree({
               collapsedDirs={collapsedDirs}
               resolvedTheme={resolvedTheme}
               actionDisabled={actionDisabled}
+              pendingPaths={pendingPaths}
               onToggleDir={onToggleDir}
               onFileAction={onFileAction}
               onOpenFilePreview={onOpenFilePreview}
@@ -972,6 +1080,7 @@ function SourceControlTreeRow({
   collapsedDirs,
   resolvedTheme,
   actionDisabled,
+  pendingPaths,
   onToggleDir,
   onFileAction,
   onOpenFilePreview,
@@ -983,6 +1092,7 @@ function SourceControlTreeRow({
   collapsedDirs: ReadonlySet<string>;
   resolvedTheme: "light" | "dark";
   actionDisabled: boolean;
+  pendingPaths: ReadonlySet<string>;
   onToggleDir: (path: string) => void;
   onFileAction: (path: string) => void;
   onOpenFilePreview: (path: string) => void;
@@ -1029,6 +1139,7 @@ function SourceControlTreeRow({
                 collapsedDirs={collapsedDirs}
                 resolvedTheme={resolvedTheme}
                 actionDisabled={actionDisabled}
+                pendingPaths={pendingPaths}
                 onToggleDir={onToggleDir}
                 onFileAction={onFileAction}
                 onOpenFilePreview={onOpenFilePreview}
@@ -1041,6 +1152,7 @@ function SourceControlTreeRow({
   const badge = statusBadge(node.file.status);
   const ActionIcon = section === "staged" ? MinusIcon : PlusIcon;
   const actionLabel = section === "staged" ? `Unstage ${node.path}` : `Stage ${node.path}`;
+  const filePending = pendingPaths.has(node.path);
   return (
     <div
       style={indentStyle}
@@ -1086,7 +1198,7 @@ function SourceControlTreeRow({
             />
           }
         >
-          <ActionIcon className="size-3.5" />
+          {filePending ? <Spinner className="size-3.5" /> : <ActionIcon className="size-3.5" />}
         </TooltipTrigger>
         <TooltipPopup side="left">
           {section === "staged" ? "Unstage file" : "Stage file"}

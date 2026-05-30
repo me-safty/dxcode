@@ -1,6 +1,8 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 
+import { createMemoryStorage } from "./lib/storage";
 import { markRightPanelUsed } from "./rightPanelGesture";
 import {
   closeWorkspaceSourceControlPanel,
@@ -31,8 +33,19 @@ interface SourceControlPanelState {
 
 const DEFAULT_WORKSPACE_VIEW_STATE: SourceControlPanelWorkspaceViewState = {
   collapsedDirs: new Set(),
-  viewMode: "tree",
+  viewMode: "list",
 };
+
+const SOURCE_CONTROL_PANEL_PERSIST_KEY = "t3code:source-control-panel:v1";
+
+/**
+ * Only the per-workspace view mode is persisted across launches. The commit
+ * draft, scroll positions, and (non-serializable) collapsed-dir sets stay
+ * in-memory for the session.
+ */
+interface PersistedSourceControlPanelState {
+  viewModeByWorkspaceKey: Record<string, SourceControlPanelViewMode>;
+}
 
 function getWorkspaceViewState(
   state: SourceControlPanelState,
@@ -53,57 +66,85 @@ function sameSetValues(left: ReadonlySet<string>, right: ReadonlySet<string>): b
   return true;
 }
 
-const useSourceControlPanelStore = create<SourceControlPanelState>((set) => ({
-  commitMessage: "",
-  scrollTopByWorkspaceKey: {},
-  viewStateByWorkspaceKey: {},
-  setCommitMessage: (commitMessage) => set({ commitMessage }),
-  setCollapsedDirs: (workspaceKey, collapsedDirs) =>
-    set((state) => {
-      const current = getWorkspaceViewState(state, workspaceKey);
-      if (sameSetValues(current.collapsedDirs, collapsedDirs)) {
-        return state;
-      }
-      return {
-        viewStateByWorkspaceKey: {
-          ...state.viewStateByWorkspaceKey,
-          [workspaceKey]: {
-            ...current,
-            collapsedDirs: new Set(collapsedDirs),
-          },
-        },
-      };
+const useSourceControlPanelStore = create<SourceControlPanelState>()(
+  persist(
+    (set) => ({
+      commitMessage: "",
+      scrollTopByWorkspaceKey: {},
+      viewStateByWorkspaceKey: {},
+      setCommitMessage: (commitMessage) => set({ commitMessage }),
+      setCollapsedDirs: (workspaceKey, collapsedDirs) =>
+        set((state) => {
+          const current = getWorkspaceViewState(state, workspaceKey);
+          if (sameSetValues(current.collapsedDirs, collapsedDirs)) {
+            return state;
+          }
+          return {
+            viewStateByWorkspaceKey: {
+              ...state.viewStateByWorkspaceKey,
+              [workspaceKey]: {
+                ...current,
+                collapsedDirs: new Set(collapsedDirs),
+              },
+            },
+          };
+        }),
+      setScrollTop: (workspaceKey, scrollTop) =>
+        set((state) => {
+          const nextScrollTop = Math.max(0, Math.round(scrollTop));
+          if (state.scrollTopByWorkspaceKey[workspaceKey] === nextScrollTop) {
+            return state;
+          }
+          return {
+            scrollTopByWorkspaceKey: {
+              ...state.scrollTopByWorkspaceKey,
+              [workspaceKey]: nextScrollTop,
+            },
+          };
+        }),
+      setViewMode: (workspaceKey, viewMode) =>
+        set((state) => {
+          const current = getWorkspaceViewState(state, workspaceKey);
+          if (current.viewMode === viewMode) {
+            return state;
+          }
+          return {
+            viewStateByWorkspaceKey: {
+              ...state.viewStateByWorkspaceKey,
+              [workspaceKey]: {
+                ...current,
+                viewMode,
+              },
+            },
+          };
+        }),
     }),
-  setScrollTop: (workspaceKey, scrollTop) =>
-    set((state) => {
-      const nextScrollTop = Math.max(0, Math.round(scrollTop));
-      if (state.scrollTopByWorkspaceKey[workspaceKey] === nextScrollTop) {
-        return state;
-      }
-      return {
-        scrollTopByWorkspaceKey: {
-          ...state.scrollTopByWorkspaceKey,
-          [workspaceKey]: nextScrollTop,
-        },
-      };
-    }),
-  setViewMode: (workspaceKey, viewMode) =>
-    set((state) => {
-      const current = getWorkspaceViewState(state, workspaceKey);
-      if (current.viewMode === viewMode) {
-        return state;
-      }
-      return {
-        viewStateByWorkspaceKey: {
-          ...state.viewStateByWorkspaceKey,
-          [workspaceKey]: {
-            ...current,
-            viewMode,
-          },
-        },
-      };
-    }),
-}));
+    {
+      name: SOURCE_CONTROL_PANEL_PERSIST_KEY,
+      storage: createJSONStorage(() =>
+        typeof localStorage !== "undefined" ? localStorage : createMemoryStorage(),
+      ),
+      partialize: (state): PersistedSourceControlPanelState => ({
+        viewModeByWorkspaceKey: Object.fromEntries(
+          Object.entries(state.viewStateByWorkspaceKey).map(([key, value]) => [
+            key,
+            value.viewMode,
+          ]),
+        ),
+      }),
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<PersistedSourceControlPanelState> | null;
+        const viewStateByWorkspaceKey: Record<string, SourceControlPanelWorkspaceViewState> = {};
+        for (const [key, viewMode] of Object.entries(persisted?.viewModeByWorkspaceKey ?? {})) {
+          if (viewMode === "tree" || viewMode === "list") {
+            viewStateByWorkspaceKey[key] = { collapsedDirs: new Set(), viewMode };
+          }
+        }
+        return { ...currentState, viewStateByWorkspaceKey };
+      },
+    },
+  ),
+);
 
 export function sourceControlPanelScrollKey(input: {
   environmentId: EnvironmentId | null | undefined;
@@ -180,6 +221,7 @@ export function useSourceControlPanelWorkspaceViewState(workspaceKey: string | n
 }
 
 export function __resetSourceControlPanelStateForTests(): void {
+  void useSourceControlPanelStore.persist.clearStorage();
   useSourceControlPanelStore.setState({
     commitMessage: "",
     scrollTopByWorkspaceKey: {},

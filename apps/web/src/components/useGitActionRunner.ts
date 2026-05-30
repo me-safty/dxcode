@@ -66,6 +66,12 @@ export interface RunGitActionWithToastInput {
   featureBranch?: boolean;
   progressToastId?: GitActionToastId;
   filePaths?: string[];
+  /**
+   * When true, no loading/success progress toast is shown. The caller is
+   * expected to surface progress inline (e.g. a button spinner). Failures are
+   * still reported with an error toast.
+   */
+  suppressProgressToast?: boolean;
 }
 
 function formatElapsedDescription(startedAtMs: number | null): string | undefined {
@@ -326,6 +332,7 @@ export function useGitActionRunner({
       featureBranch = false,
       progressToastId,
       filePaths,
+      suppressProgressToast = false,
     }: RunGitActionWithToastInput) => {
       const actionStatus = statusOverride ?? gitStatus;
       const actionBranch = actionStatus?.refName ?? null;
@@ -373,27 +380,32 @@ export function useGitActionRunner({
       });
       const scopedToastData = threadToastData ? { ...threadToastData } : undefined;
       const actionId = randomUUID();
-      const resolvedProgressToastId =
+      const resolvedProgressToastId: GitActionToastId | null =
         progressToastId ??
-        toastManager.add({
-          type: "loading",
-          title: progressStages[0] ?? "Running git action...",
-          description: "Waiting for Git...",
-          timeout: 0,
-          data: scopedToastData,
-        });
+        (suppressProgressToast
+          ? null
+          : toastManager.add({
+              type: "loading",
+              title: progressStages[0] ?? "Running git action...",
+              description: "Waiting for Git...",
+              timeout: 0,
+              data: scopedToastData,
+            }));
 
-      activeGitActionProgressRef.current = {
-        toastId: resolvedProgressToastId,
-        toastData: scopedToastData,
-        actionId,
-        title: progressStages[0] ?? "Running git action...",
-        phaseStartedAtMs: null,
-        hookStartedAtMs: null,
-        hookName: null,
-        lastOutputLine: null,
-        currentPhaseLabel: progressStages[0] ?? "Running git action...",
-      };
+      activeGitActionProgressRef.current =
+        resolvedProgressToastId === null
+          ? null
+          : {
+              toastId: resolvedProgressToastId,
+              toastData: scopedToastData,
+              actionId,
+              title: progressStages[0] ?? "Running git action...",
+              phaseStartedAtMs: null,
+              hookStartedAtMs: null,
+              hookName: null,
+              lastOutputLine: null,
+              currentPhaseLabel: progressStages[0] ?? "Running git action...",
+            };
 
       if (progressToastId) {
         toastManager.update(progressToastId, {
@@ -470,7 +482,15 @@ export function useGitActionRunner({
         const result = await promise;
         activeGitActionProgressRef.current = null;
         syncThreadBranchAfterGitAction(result);
+        if (gitCwd) {
+          void refreshGitStatus({ environmentId: activeEnvironmentId, cwd: gitCwd }).catch(
+            () => undefined,
+          );
+        }
         onSuccess?.();
+        if (resolvedProgressToastId === null) {
+          return true;
+        }
         const closeResultToast = () => {
           toastManager.close(resolvedProgressToastId);
         };
@@ -531,15 +551,17 @@ export function useGitActionRunner({
         return true;
       } catch (err) {
         activeGitActionProgressRef.current = null;
-        toastManager.update(
-          resolvedProgressToastId,
-          stackedThreadToast({
-            type: "error",
-            title: "Action failed",
-            description: err instanceof Error ? err.message : "An error occurred.",
-            ...(scopedToastData !== undefined ? { data: scopedToastData } : {}),
-          }),
-        );
+        const errorToast = stackedThreadToast({
+          type: "error",
+          title: "Action failed",
+          description: err instanceof Error ? err.message : "An error occurred.",
+          ...(scopedToastData !== undefined ? { data: scopedToastData } : {}),
+        });
+        if (resolvedProgressToastId === null) {
+          toastManager.add(errorToast);
+        } else {
+          toastManager.update(resolvedProgressToastId, errorToast);
+        }
         return false;
       }
     },

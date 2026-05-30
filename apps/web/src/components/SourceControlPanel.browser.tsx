@@ -165,6 +165,7 @@ vi.mock("~/lib/gitReactQuery", () => ({
   gitGenerateCommitMessageMutationOptions: vi.fn(() => ({ __kind: "generate-commit-message" })),
   gitInitMutationOptions: vi.fn(() => ({ __kind: "init" })),
   gitMutationKeys: {
+    generateCommitMessage: vi.fn(() => ["generate-commit-message"]),
     publishRepository: vi.fn(() => ["publish-repository"]),
     pull: vi.fn(() => ["pull"]),
     runStackedAction: vi.fn(() => ["run-stacked-action"]),
@@ -514,7 +515,27 @@ describe("SourceControlPanel git action runner", () => {
     }
   });
 
-  it("restores source control view mode and collapsed folders after returning from a file preview", async () => {
+  it("defaults to the list view", async () => {
+    currentGitStatusRef.current = createPanelStatus({
+      unstagedFiles: [{ path: "src/app.ts", status: "modified", insertions: 1, deletions: 0 }],
+    });
+    const { host, screen } = await renderPanel();
+
+    try {
+      await vi.waitFor(() => {
+        expect(findButtonByText("src/app.ts")).not.toBeNull();
+      });
+      // List view renders full paths and no collapsible folder rows, and offers
+      // the toggle to switch to tree.
+      expect(findButtonByExactText("src")).toBeNull();
+      expect(document.querySelector('button[aria-label="View as tree"]')).not.toBeNull();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("persists the chosen view mode and restores collapsed folders after a remount", async () => {
     currentGitStatusRef.current = createPanelStatus({
       unstagedFiles: [
         { path: "docs/keep.ts", status: "modified", insertions: 1, deletions: 0 },
@@ -524,6 +545,8 @@ describe("SourceControlPanel git action runner", () => {
     const firstRender = await renderPanel();
 
     try {
+      // Switch from the default list view into the tree view.
+      document.querySelector<HTMLButtonElement>('button[aria-label="View as tree"]')?.click();
       await vi.waitFor(() => {
         expect(findButtonByExactText("src")).not.toBeNull();
       });
@@ -532,12 +555,7 @@ describe("SourceControlPanel git action runner", () => {
         expect(findButtonByText("app.ts")).toBeNull();
       });
 
-      document.querySelector<HTMLButtonElement>('button[aria-label="View as list"]')?.click();
-      await vi.waitFor(() => {
-        expect(document.querySelector('button[aria-label="View as tree"]')).not.toBeNull();
-      });
-
-      findButtonByText("docs/keep.ts")?.click();
+      findButtonByText("keep.ts")?.click();
       expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
         open: true,
         view: "preview",
@@ -550,14 +568,11 @@ describe("SourceControlPanel git action runner", () => {
 
     const secondRender = await renderPanel();
     try {
-      await vi.waitFor(() => {
-        expect(document.querySelector('button[aria-label="View as tree"]')).not.toBeNull();
-      });
-
-      document.querySelector<HTMLButtonElement>('button[aria-label="View as tree"]')?.click();
+      // The tree view (and the collapsed "src" folder) are restored.
       await vi.waitFor(() => {
         expect(findButtonByExactText("src")).not.toBeNull();
       });
+      expect(document.querySelector('button[aria-label="View as list"]')).not.toBeNull();
       expect(findButtonByText("app.ts")).toBeNull();
     } finally {
       await secondRender.screen.unmount();
@@ -584,6 +599,80 @@ describe("SourceControlPanel git action runner", () => {
       expect(input).not.toHaveProperty("filePaths");
     } finally {
       activeRunStackedActionDeferredRef.current.reject(new Error("test cleanup"));
+      await Promise.resolve();
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("shows a button spinner instead of a toast while committing", async () => {
+    currentGitStatusRef.current = createPanelStatus({
+      unstagedFiles: [{ path: "src/app.ts", status: "modified", insertions: 2, deletions: 1 }],
+    });
+    const { host, screen } = await renderPanel();
+
+    try {
+      findButtonByText("Commit")?.click();
+
+      await vi.waitFor(() => {
+        expect(runStackedActionMutateAsyncSpy).toHaveBeenCalled();
+      });
+      // The commit button should not raise a "Committing..." loading toast.
+      expect(toastAddSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "loading" }));
+      // The inline button shows a spinner while the commit is in flight.
+      const commitButton = findButtonByText("Commit");
+      expect(commitButton?.querySelector('[role="status"]')).not.toBeNull();
+      expect(commitButton?.disabled).toBe(true);
+    } finally {
+      activeRunStackedActionDeferredRef.current.reject(new Error("test cleanup"));
+      await Promise.resolve();
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("promotes Push to the primary button with ahead/behind counts when the tree is clean", async () => {
+    currentGitStatusRef.current = {
+      ...createPanelStatus(),
+      aheadCount: 3,
+      behindCount: 2,
+    };
+    const { host, screen } = await renderPanel();
+
+    try {
+      const pushButton = findButtonByText("Push");
+      expect(pushButton).not.toBeNull();
+      expect(pushButton?.textContent).toContain("3");
+      expect(pushButton?.textContent).toContain("2");
+      // Commit is no longer the primary button while there are commits to push.
+      expect(findButtonByExactText("Commit")).toBeNull();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("shows a spinner on the staged row while unstaging", async () => {
+    const unstageDeferred = createDeferredPromise<null>();
+    unstageFilesMutateAsyncSpy.mockImplementationOnce(() => unstageDeferred.promise);
+    currentGitStatusRef.current = createPanelStatus({
+      stagedFiles: [{ path: "staged.ts", status: "modified", insertions: 1, deletions: 0 }],
+    });
+    const { host, screen } = await renderPanel();
+
+    try {
+      (
+        document.querySelector('button[aria-label="Unstage staged.ts"]') as HTMLButtonElement
+      ).click();
+
+      await vi.waitFor(() => {
+        const button = document.querySelector(
+          'button[aria-label="Unstage staged.ts"]',
+        ) as HTMLButtonElement | null;
+        expect(button?.querySelector('[role="status"]')).not.toBeNull();
+      });
+    } finally {
+      unstageDeferred.resolve(null);
       await Promise.resolve();
       await screen.unmount();
       host.remove();
