@@ -130,6 +130,15 @@ function createBaseServerConfig(): ServerConfig {
           serverPassword: "",
           customModels: [],
         },
+        antigravity: {
+          enabled: true,
+          binaryPath: "",
+          brainPath: "",
+          settingsPath: "",
+          languageServerAddress: "",
+          csrfToken: "",
+          customModels: [],
+        },
       },
     },
   };

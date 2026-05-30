@@ -1,0 +1,1123 @@
+// @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics globalTimers:off
+// @effect-diagnostics runEffectInsideEffect:off
+// @effect-diagnostics catchUnfailableEffect:off
+import {
+  type AntigravitySettings,
+  EventId,
+  type ProviderApprovalDecision,
+  ProviderDriverKind,
+  type ProviderInstanceId,
+  type ProviderRuntimeEvent,
+  type ProviderSession,
+  type ProviderTurnStartResult,
+  type ProviderUserInputAnswers,
+  RuntimeItemId,
+  RuntimeRequestId,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Queue from "effect/Queue";
+import * as Random from "effect/Random";
+import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import { execFile } from "node:child_process";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { clearInterval, setInterval } from "node:timers";
+
+import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { ServerConfig } from "../../config.ts";
+import {
+  ProviderAdapterRequestError,
+  ProviderAdapterSessionNotFoundError,
+  ProviderAdapterValidationError,
+} from "../Errors.ts";
+import type { AntigravityAdapterShape } from "../Services/AntigravityAdapter.ts";
+import {
+  type AntigravityDaemonEndpoint,
+  antigravityLanguageServerRpc,
+  makeAntigravityEnvironment,
+  resolveAntigravityDaemonEndpoint,
+  resolveAntigravityModelLabel,
+  resolveAntigravityAgentApiPath,
+  resolveAntigravitySettingsPath,
+  transcriptPathForConversation,
+} from "./AntigravityProvider.ts";
+
+const PROVIDER = ProviderDriverKind.make("antigravity");
+const AGENTAPI_TIMEOUT_MS = 30_000;
+const TRANSCRIPT_POLL_MS = 500;
+const GATE_POLL_MS = 750;
+const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
+let nextEventSequence = 0;
+
+const AgentApiNewConversationResponse = Schema.Struct({
+  response: Schema.Struct({
+    newConversation: Schema.Struct({
+      conversationId: Schema.String,
+      prompt: Schema.optional(Schema.String),
+    }),
+  }),
+});
+const decodeNewConversationResponse = Schema.decodeUnknownSync(AgentApiNewConversationResponse);
+
+export interface AntigravityAdapterLiveOptions {
+  readonly instanceId?: ProviderInstanceId;
+  readonly environment?: NodeJS.ProcessEnv;
+  readonly runAgentApi?: (
+    binaryPath: string,
+    args: ReadonlyArray<string>,
+    options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
+  ) => Promise<string>;
+}
+
+export interface AntigravityTranscriptRecord {
+  readonly step_index?: number;
+  readonly source?: string;
+  readonly type?: string;
+  readonly status?: string;
+  readonly content?: string;
+  readonly error?: string;
+  readonly tool_calls?: ReadonlyArray<{
+    readonly name?: string;
+    readonly args?: Record<string, unknown>;
+  }>;
+}
+
+type AntigravityToolCall = NonNullable<AntigravityTranscriptRecord["tool_calls"]>[number];
+
+interface SessionContext {
+  session: ProviderSession;
+  conversationId: string | undefined;
+  readonly turns: Array<{ readonly id: TurnId; readonly items: Array<unknown> }>;
+  activeTurnId: TurnId | undefined;
+  readonly pendingGates: Map<string, PendingAntigravityGate>;
+  poller: NodeJS.Timeout | undefined;
+  gatePoller: NodeJS.Timeout | undefined;
+  daemonEndpoint: AntigravityDaemonEndpoint | undefined;
+  daemonEndpointResolved: boolean;
+  pollOffset: number;
+  pollCarry: string;
+  readonly seenLines: Set<string>;
+  stopped: boolean;
+}
+
+interface PendingAntigravityGate {
+  readonly requestId: RuntimeRequestId;
+  readonly trajectoryId: string;
+  readonly stepIndex: number;
+  readonly kind: "permission" | "filePermission";
+  readonly requestType: "command_execution_approval" | "file_read_approval";
+  readonly detail: string;
+  readonly absolutePathUri: string | undefined;
+}
+
+interface CascadeTrajectoryStep {
+  readonly status?: string;
+  readonly metadata?: {
+    readonly sourceTrajectoryStepInfo?: {
+      readonly trajectoryId?: string;
+      readonly stepIndex?: number;
+    };
+  };
+  readonly requestedInteraction?: {
+    readonly permission?: {
+      readonly resource?: { readonly action?: string; readonly target?: string };
+    };
+    readonly filePermission?: { readonly absolutePathUri?: string };
+  };
+}
+
+interface CascadeTrajectory {
+  readonly trajectoryId?: string;
+  readonly steps?: ReadonlyArray<CascadeTrajectoryStep>;
+}
+
+interface CascadeTrajectoryResponse {
+  readonly trajectory?: CascadeTrajectory;
+}
+
+function eventId(prefix: string): EventId {
+  nextEventSequence += 1;
+  return EventId.make(`${prefix}-${process.pid}-${nextEventSequence}`);
+}
+
+function runtimeEventBase(input: {
+  readonly threadId: ThreadId;
+  readonly instanceId?: ProviderInstanceId | undefined;
+  readonly turnId?: TurnId | undefined;
+  readonly itemId?: RuntimeItemId | undefined;
+  readonly requestId?: RuntimeRequestId | undefined;
+  readonly createdAt?: string | undefined;
+  readonly method?: string | undefined;
+  readonly payload?: unknown;
+  readonly rawSource?: "antigravity.transcript" | "antigravity.agentapi" | undefined;
+}): Omit<ProviderRuntimeEvent, "type" | "payload"> {
+  return {
+    eventId: eventId("antigravity"),
+    provider: PROVIDER,
+    ...(input.instanceId ? { providerInstanceId: input.instanceId } : {}),
+    threadId: input.threadId,
+    createdAt: input.createdAt ?? "1970-01-01T00:00:00.000Z",
+    ...(input.turnId ? { turnId: input.turnId } : {}),
+    ...(input.itemId ? { itemId: input.itemId } : {}),
+    ...(input.requestId ? { requestId: input.requestId } : {}),
+    raw: {
+      source: input.rawSource ?? "antigravity.transcript",
+      ...(input.method ? { method: input.method } : {}),
+      payload: input.payload ?? {},
+    },
+  };
+}
+
+const currentTimestamp = Effect.map(DateTime.now, DateTime.formatIso);
+
+function trimText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeTranscriptType(value: string | undefined): string {
+  return (value ?? "").trim().toUpperCase();
+}
+
+function toolDetail(tool: AntigravityToolCall): string | undefined {
+  const args = tool.args ?? {};
+  const command =
+    trimText(args.command) ??
+    trimText(args.Command) ??
+    trimText(args.command_line) ??
+    trimText(args.CommandLine);
+  const target =
+    trimText(args.TargetFile) ??
+    trimText(args.target_file) ??
+    trimText(args.file_path) ??
+    trimText(args.path);
+  return command ?? target ?? tool.name;
+}
+
+function itemTypeForTranscript(record: AntigravityTranscriptRecord) {
+  const type = normalizeTranscriptType(record.type);
+  if (type.includes("RUN_COMMAND")) return "command_execution" as const;
+  if (type.includes("CODE_ACTION") || type.includes("FILE")) return "file_change" as const;
+  if (type.includes("LIST_DIRECTORY") || type.includes("LIST_DIR"))
+    return "dynamic_tool_call" as const;
+  if (record.tool_calls && record.tool_calls.length > 0) return "dynamic_tool_call" as const;
+  if (type.includes("PLANNER") || type.includes("PLAN")) return "plan" as const;
+  return "assistant_message" as const;
+}
+
+function isTerminalResponseRecord(input: {
+  readonly method: string;
+  readonly status: string;
+  readonly record: AntigravityTranscriptRecord;
+}): boolean {
+  return (
+    input.status === "DONE" &&
+    (input.method.includes("FINAL") || input.method.includes("RESPONSE")) &&
+    !(input.record.tool_calls && input.record.tool_calls.length > 0)
+  );
+}
+
+function agentApiTimeoutMessage(): string {
+  return [
+    `Antigravity agentapi did not finish within ${AGENTAPI_TIMEOUT_MS / 1_000}s.`,
+    "It may be waiting for an external permission prompt in Antigravity.",
+    "Open Antigravity to approve or deny the request, then retry this turn.",
+  ].join(" ");
+}
+
+function agentApiFailureMessage(cause: unknown): string {
+  const detail = isProviderAdapterRequestError(cause)
+    ? cause.detail
+    : cause instanceof Error
+      ? cause.message
+      : String(cause);
+  const message = detail.trim();
+  return message.includes("agentapi timed out") ? agentApiTimeoutMessage() : message;
+}
+
+export function parseAntigravityTranscriptLine(
+  line: string,
+): AntigravityTranscriptRecord | undefined {
+  const trimmed = line.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== "object") return undefined;
+    return parsed as AntigravityTranscriptRecord;
+  } catch {
+    return undefined;
+  }
+}
+
+export function mapAntigravityTranscriptRecordToRuntimeEvents(input: {
+  readonly record: AntigravityTranscriptRecord;
+  readonly threadId: ThreadId;
+  readonly instanceId?: ProviderInstanceId;
+  readonly turnId?: TurnId;
+  readonly createdAt?: string;
+}): ReadonlyArray<ProviderRuntimeEvent> {
+  const { record, threadId, instanceId, turnId, createdAt } = input;
+  const method = normalizeTranscriptType(record.type) || "TRANSCRIPT";
+  const itemType = itemTypeForTranscript(record);
+  const status = normalizeTranscriptType(record.status);
+  const content = trimText(record.content);
+  const error = trimText(record.error);
+  const completesTurn = isTerminalResponseRecord({ method, status, record });
+  const events: ProviderRuntimeEvent[] = [];
+
+  if (method.includes("ERROR") && error) {
+    events.push({
+      ...runtimeEventBase({ threadId, instanceId, turnId, createdAt, method, payload: record }),
+      type: "runtime.error",
+      payload: {
+        message: error,
+        class: "provider_error",
+        detail: record,
+      },
+    });
+    events.push({
+      ...runtimeEventBase({ threadId, instanceId, turnId, createdAt, method, payload: record }),
+      type: "turn.completed",
+      payload: {
+        state: "failed",
+        errorMessage: error,
+      },
+    });
+    return events;
+  }
+
+  if (record.source && normalizeTranscriptType(record.source) !== "MODEL") {
+    return events;
+  }
+
+  if (record.tool_calls && record.tool_calls.length > 0) {
+    for (const [index, tool] of record.tool_calls.entries()) {
+      const itemId = RuntimeItemId.make(
+        `antigravity-tool-${record.step_index ?? "x"}-${index}-${tool.name ?? "tool"}`,
+      );
+      events.push({
+        ...runtimeEventBase({
+          threadId,
+          instanceId,
+          turnId,
+          itemId,
+          createdAt,
+          method,
+          payload: record,
+        }),
+        type: "item.completed",
+        payload: {
+          itemType: "dynamic_tool_call",
+          status: "completed",
+          title: tool.name ?? "Tool call",
+          ...(toolDetail(tool) ? { detail: toolDetail(tool) } : {}),
+          data: tool,
+        },
+      });
+    }
+  }
+
+  if (itemType === "dynamic_tool_call") {
+    const itemId = RuntimeItemId.make(`antigravity-step-${record.step_index ?? eventId("step")}`);
+    if (!record.tool_calls || record.tool_calls.length === 0) {
+      events.push({
+        ...runtimeEventBase({
+          threadId,
+          instanceId,
+          turnId,
+          itemId,
+          createdAt,
+          method,
+          payload: record,
+        }),
+        type: "item.completed",
+        payload: {
+          itemType,
+          status: status === "ERROR" ? "failed" : "completed",
+          title: method.includes("LIST") ? "Listed directory" : "Tool call",
+          ...(content ? { detail: content } : {}),
+          data: record,
+        },
+      });
+    }
+    return events;
+  }
+
+  if (itemType === "command_execution" || itemType === "file_change") {
+    const itemId = RuntimeItemId.make(`antigravity-step-${record.step_index ?? eventId("step")}`);
+    events.push({
+      ...runtimeEventBase({
+        threadId,
+        instanceId,
+        turnId,
+        itemId,
+        createdAt,
+        method,
+        payload: record,
+      }),
+      type: "item.completed",
+      payload: {
+        itemType,
+        status: status === "ERROR" ? "failed" : "completed",
+        title: itemType === "command_execution" ? "Ran command" : "File change",
+        ...(content ? { detail: content } : {}),
+        data: record,
+      },
+    });
+    if (content) {
+      events.push({
+        ...runtimeEventBase({
+          threadId,
+          instanceId,
+          turnId,
+          itemId,
+          createdAt,
+          method,
+          payload: record,
+        }),
+        type: "content.delta",
+        payload: {
+          streamKind: itemType === "command_execution" ? "command_output" : "file_change_output",
+          delta: content,
+        },
+      });
+    }
+    return events;
+  }
+
+  if (content) {
+    events.push({
+      ...runtimeEventBase({ threadId, instanceId, turnId, createdAt, method, payload: record }),
+      type: "content.delta",
+      payload: {
+        streamKind: completesTurn
+          ? "assistant_text"
+          : itemType === "plan"
+            ? "plan_text"
+            : "assistant_text",
+        delta: content,
+      },
+    });
+  }
+
+  if (completesTurn) {
+    events.push({
+      ...runtimeEventBase({ threadId, instanceId, turnId, createdAt, method, payload: record }),
+      type: "turn.completed",
+      payload: {
+        state: "completed",
+      },
+    });
+  }
+
+  return events;
+}
+
+function runAgentApiDefault(
+  binaryPath: string,
+  args: ReadonlyArray<string>,
+  options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(binaryPath, [...args], {
+      cwd: options.cwd,
+      env: options.env,
+      timeout: AGENTAPI_TIMEOUT_MS,
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        resolve(stdout);
+        return;
+      }
+      if (signal === "SIGTERM" || signal === "SIGKILL") {
+        reject(new Error(`agentapi timed out after ${AGENTAPI_TIMEOUT_MS}ms`));
+        return;
+      }
+      reject(new Error(stderr.trim() || stdout.trim() || `agentapi exited with code ${code}`));
+    });
+  });
+}
+
+async function ensureAntigravityCliSettings(input: {
+  readonly settings: AntigravitySettings;
+  readonly cwd: string;
+  readonly modelLabel?: string;
+}): Promise<void> {
+  const { settings, cwd, modelLabel } = input;
+  const settingsPath = resolveAntigravitySettingsPath(settings);
+  await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(await fs.readFile(settingsPath, "utf8")) as Record<string, unknown>;
+  } catch {
+    parsed = {};
+  }
+  const existing = Array.isArray(parsed.trustedWorkspaces) ? parsed.trustedWorkspaces : [];
+  let changed = false;
+  if (!existing.includes(cwd)) {
+    parsed.trustedWorkspaces = [...existing.filter((entry) => typeof entry === "string"), cwd];
+    changed = true;
+  }
+  if (modelLabel && parsed.model !== modelLabel) {
+    parsed.model = modelLabel;
+    changed = true;
+  }
+  if (changed) {
+    await fs.writeFile(settingsPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+  }
+}
+
+export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(function* (
+  settings: AntigravitySettings,
+  options: AntigravityAdapterLiveOptions = {},
+): Effect.fn.Return<AntigravityAdapterShape, never, ServerConfig> {
+  const serverConfig = yield* Effect.service(ServerConfig);
+  const sessionsRef = yield* Ref.make(new Map<ThreadId, SessionContext>());
+  const eventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+  const binaryPath = resolveAntigravityAgentApiPath(settings);
+  const runAgentApi = options.runAgentApi ?? runAgentApiDefault;
+  const baseEnv = options.environment ?? process.env;
+
+  const emit = (event: ProviderRuntimeEvent): void => {
+    Effect.runFork(Queue.offer(eventQueue, event));
+  };
+
+  const emitGateOpened = (context: SessionContext, gate: PendingAntigravityGate): void => {
+    emit({
+      ...runtimeEventBase({
+        threadId: context.session.threadId,
+        ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+        ...(context.activeTurnId ? { turnId: context.activeTurnId } : {}),
+        requestId: gate.requestId,
+        createdAt: context.session.updatedAt,
+        method: "antigravity/cascade-permission-opened",
+        payload: { trajectoryId: gate.trajectoryId, stepIndex: gate.stepIndex },
+      }),
+      type: "request.opened",
+      payload: { requestType: gate.requestType, detail: gate.detail },
+    });
+  };
+
+  const emitGateResolved = (
+    context: SessionContext,
+    gate: PendingAntigravityGate,
+    decision: string,
+  ): void => {
+    emit({
+      ...runtimeEventBase({
+        threadId: context.session.threadId,
+        ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+        ...(context.activeTurnId ? { turnId: context.activeTurnId } : {}),
+        requestId: gate.requestId,
+        createdAt: context.session.updatedAt,
+        method: "antigravity/cascade-permission-resolved",
+        payload: { trajectoryId: gate.trajectoryId, stepIndex: gate.stepIndex },
+      }),
+      type: "request.resolved",
+      payload: { requestType: gate.requestType, decision },
+    });
+  };
+
+  const endpointFor = (context: SessionContext): AntigravityDaemonEndpoint | undefined => {
+    if (!context.daemonEndpointResolved) {
+      context.daemonEndpointResolved = true;
+      context.daemonEndpoint = resolveAntigravityDaemonEndpoint(
+        settings,
+        baseEnv,
+        context.session.cwd ?? serverConfig.cwd,
+      );
+    }
+    return context.daemonEndpoint;
+  };
+
+  const pollGates = async (context: SessionContext): Promise<void> => {
+    // Permission gates only occur while a turn is executing; skipping otherwise avoids
+    // continuously fetching the (large) trajectory and re-running daemon detection.
+    if (context.stopped || !context.conversationId || !context.activeTurnId) return;
+    const endpoint = endpointFor(context);
+    if (!endpoint) return;
+    let trajectory: CascadeTrajectory | undefined;
+    try {
+      const response = (await antigravityLanguageServerRpc({
+        endpoint,
+        method: "GetCascadeTrajectory",
+        body: { cascadeId: context.conversationId },
+      })) as CascadeTrajectoryResponse;
+      trajectory = response.trajectory;
+    } catch {
+      // Transient RPC failure; keep the cached endpoint (re-resolving here blocks the event loop).
+      return;
+    }
+    const steps = trajectory?.steps ?? [];
+    const seen = new Set<string>();
+    steps.forEach((step, index) => {
+      const interaction = step.requestedInteraction;
+      if (step.status !== "CORTEX_STEP_STATUS_WAITING" || !interaction) return;
+      const info = step.metadata?.sourceTrajectoryStepInfo;
+      const trajectoryId = trimText(info?.trajectoryId) ?? trimText(trajectory?.trajectoryId);
+      const stepIndex = typeof info?.stepIndex === "number" ? info.stepIndex : index;
+      if (!trajectoryId) return;
+      const id = `antigravity-approval:${trajectoryId}:${stepIndex}`;
+      seen.add(id);
+      if (context.pendingGates.has(id)) return;
+      const isFile = interaction.filePermission !== undefined;
+      const gate: PendingAntigravityGate = {
+        requestId: RuntimeRequestId.make(id),
+        trajectoryId,
+        stepIndex,
+        kind: isFile ? "filePermission" : "permission",
+        requestType: isFile ? "file_read_approval" : "command_execution_approval",
+        detail:
+          trimText(interaction.permission?.resource?.target) ??
+          trimText(interaction.filePermission?.absolutePathUri) ??
+          (isFile ? "Antigravity file access request" : "Antigravity command request"),
+        absolutePathUri: isFile ? trimText(interaction.filePermission?.absolutePathUri) : undefined,
+      };
+      context.pendingGates.set(id, gate);
+      emitGateOpened(context, gate);
+    });
+    for (const [id, gate] of context.pendingGates) {
+      if (!seen.has(id)) {
+        context.pendingGates.delete(id);
+        emitGateResolved(context, gate, "external");
+      }
+    }
+  };
+
+  const startGatePoller = (context: SessionContext): void => {
+    if (!context.conversationId || context.gatePoller) return;
+    context.gatePoller = setInterval(() => {
+      void pollGates(context);
+    }, GATE_POLL_MS);
+    void pollGates(context);
+  };
+
+  const getContext = (threadId: ThreadId, _method: string) =>
+    Ref.get(sessionsRef).pipe(
+      Effect.flatMap((sessions) => {
+        const context = sessions.get(threadId);
+        if (!context || context.stopped) {
+          return Effect.fail(
+            new ProviderAdapterSessionNotFoundError({ provider: PROVIDER, threadId }),
+          );
+        }
+        return Effect.succeed(context);
+      }),
+    );
+
+  const startTranscriptPoller = (context: SessionContext): void => {
+    if (!context.conversationId || context.poller) return;
+    const transcriptPath = transcriptPathForConversation({
+      settings,
+      conversationId: context.conversationId,
+    });
+
+    const poll = async () => {
+      if (context.stopped) return;
+      try {
+        const stat = await fs.stat(transcriptPath);
+        if (stat.size < context.pollOffset) {
+          context.pollOffset = 0;
+          context.pollCarry = "";
+          context.seenLines.clear();
+        }
+        if (stat.size === context.pollOffset) return;
+        const handle = await fs.open(transcriptPath, "r");
+        try {
+          const length = stat.size - context.pollOffset;
+          const buffer = Buffer.alloc(length);
+          await handle.read(buffer, 0, length, context.pollOffset);
+          context.pollOffset = stat.size;
+          const text = context.pollCarry + buffer.toString("utf8");
+          const lines = text.split(/\r?\n/g);
+          context.pollCarry = lines.pop() ?? "";
+          for (const line of lines) {
+            const key = line.trim();
+            if (!key || context.seenLines.has(key)) continue;
+            context.seenLines.add(key);
+            const record = parseAntigravityTranscriptLine(line);
+            if (!record) continue;
+            for (const event of mapAntigravityTranscriptRecordToRuntimeEvents({
+              record,
+              threadId: context.session.threadId,
+              ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+              ...(context.activeTurnId ? { turnId: context.activeTurnId } : {}),
+              createdAt: context.session.updatedAt,
+            })) {
+              emit(event);
+              if (event.type === "turn.completed") {
+                context.activeTurnId = undefined;
+                context.session = {
+                  ...context.session,
+                  status: "ready",
+                  activeTurnId: undefined,
+                  updatedAt: context.session.updatedAt,
+                };
+              }
+            }
+          }
+        } finally {
+          await handle.close();
+        }
+      } catch (cause) {
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        emit({
+          ...runtimeEventBase({
+            threadId: context.session.threadId,
+            ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+            createdAt: context.session.updatedAt,
+            method: "transcript.poll",
+            payload: { transcriptPath },
+          }),
+          type: "runtime.warning",
+          payload: {
+            message: `Failed to read Antigravity transcript: ${error.message}`,
+          },
+        });
+      }
+    };
+    context.poller = setInterval(() => {
+      void poll();
+    }, TRANSCRIPT_POLL_MS);
+    void poll();
+  };
+
+  const startSession: AntigravityAdapterShape["startSession"] = Effect.fn(
+    "AntigravityAdapter.startSession",
+  )(function* (input) {
+    const createdAt = yield* currentTimestamp;
+    const session: ProviderSession = {
+      provider: PROVIDER,
+      ...(options.instanceId ? { providerInstanceId: options.instanceId } : {}),
+      status: "ready",
+      runtimeMode: input.runtimeMode,
+      cwd: input.cwd ?? serverConfig.cwd,
+      ...(input.modelSelection?.model ? { model: input.modelSelection.model } : {}),
+      threadId: input.threadId,
+      ...(input.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+      createdAt,
+      updatedAt: createdAt,
+    };
+    const context: SessionContext = {
+      session,
+      conversationId:
+        input.resumeCursor &&
+        typeof input.resumeCursor === "object" &&
+        "conversationId" in input.resumeCursor &&
+        typeof input.resumeCursor.conversationId === "string"
+          ? input.resumeCursor.conversationId
+          : undefined,
+      turns: [],
+      activeTurnId: undefined,
+      pendingGates: new Map(),
+      poller: undefined,
+      gatePoller: undefined,
+      daemonEndpoint: undefined,
+      daemonEndpointResolved: false,
+      pollOffset: 0,
+      pollCarry: "",
+      seenLines: new Set(),
+      stopped: false,
+    };
+    yield* Ref.update(sessionsRef, (sessions) => new Map(sessions).set(input.threadId, context));
+    if (context.conversationId) {
+      startTranscriptPoller(context);
+      startGatePoller(context);
+    }
+    emit({
+      ...runtimeEventBase({
+        threadId: input.threadId,
+        ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+        createdAt,
+        method: "session.start",
+      }),
+      type: "session.started",
+      payload: context.conversationId ? { resume: { conversationId: context.conversationId } } : {},
+    });
+    return session;
+  });
+
+  const sendTurn: AntigravityAdapterShape["sendTurn"] = Effect.fn("AntigravityAdapter.sendTurn")(
+    function* (input) {
+      const context = yield* getContext(input.threadId, "sendTurn");
+      const prompt = input.input?.trim();
+      if (!prompt) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "sendTurn",
+          issue: "Antigravity requires a non-empty text prompt.",
+        });
+      }
+
+      const cwd = context.session.cwd ?? serverConfig.cwd;
+      const env = makeAntigravityEnvironment(settings, baseEnv, cwd);
+      const modelLabel = resolveAntigravityModelLabel(input.modelSelection);
+      yield* Effect.tryPromise({
+        try: () =>
+          ensureAntigravityCliSettings({
+            settings,
+            cwd,
+            ...(modelLabel ? { modelLabel } : {}),
+          }),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "settings.write",
+            detail:
+              cause instanceof Error
+                ? cause.message
+                : "Failed to prepare Antigravity CLI settings.",
+            cause,
+          }),
+      }).pipe(Effect.catch(() => Effect.void));
+      const attachmentText = (input.attachments ?? [])
+        .map((attachment) =>
+          resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
+        )
+        .filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+        .map((entry) => `\nAttachment: ${entry}`)
+        .join("");
+      const fullPrompt = [
+        `<T3_WORKSPACE_CONTEXT>\nCurrent working directory: ${cwd}\nWhen the user refers to "this folder", "here", or the current folder, use this directory.\n</T3_WORKSPACE_CONTEXT>`,
+        `${prompt}${attachmentText}`,
+      ].join("\n\n");
+      const turnId = TurnId.make(`antigravity-turn-${yield* Random.nextUUIDv4}`);
+      const updatedAt = yield* currentTimestamp;
+
+      context.activeTurnId = turnId;
+      context.session = {
+        ...context.session,
+        status: "running",
+        activeTurnId: turnId,
+        ...(input.modelSelection?.model ? { model: input.modelSelection.model } : {}),
+        updatedAt,
+      };
+      context.turns.push({ id: turnId, items: [] });
+      emit({
+        ...runtimeEventBase({
+          threadId: input.threadId,
+          ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+          turnId,
+          createdAt: updatedAt,
+          method: "turn.start",
+        }),
+        type: "turn.started",
+        payload: input.modelSelection?.model ? { model: input.modelSelection.model } : {},
+      });
+
+      const args = context.conversationId
+        ? ["send-message", context.conversationId, fullPrompt]
+        : ["new-conversation", fullPrompt];
+      const stdout = yield* Effect.tryPromise({
+        try: () => runAgentApi(binaryPath, args, { cwd, env }),
+        catch: (cause) => {
+          const detail = cause instanceof Error ? cause.message : String(cause);
+          return new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: args[0] ?? "agentapi",
+            detail,
+            cause,
+          });
+        },
+      }).pipe(
+        Effect.catch((error: ProviderAdapterRequestError) =>
+          Effect.gen(function* () {
+            // If the turn was interrupted, the cancellation already settled the turn
+            // (turn.completed/cancelled); don't override it with a failure.
+            if (context.activeTurnId !== turnId) {
+              return yield* error;
+            }
+            const message = agentApiFailureMessage(error);
+            const failedAt = yield* currentTimestamp;
+            yield* Queue.offer(eventQueue, {
+              ...runtimeEventBase({
+                threadId: input.threadId,
+                ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+                turnId,
+                createdAt: failedAt,
+                method: "agentapi.error",
+                rawSource: "antigravity.agentapi",
+                payload: {
+                  method: args[0] ?? "agentapi",
+                  detail: error.detail,
+                },
+              }),
+              type: "runtime.error",
+              payload: {
+                message,
+                class: "provider_error",
+                detail: error.detail,
+              },
+            });
+            yield* Queue.offer(eventQueue, {
+              ...runtimeEventBase({
+                threadId: input.threadId,
+                ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+                turnId,
+                createdAt: failedAt,
+                method: "agentapi.error",
+                rawSource: "antigravity.agentapi",
+                payload: {
+                  method: args[0] ?? "agentapi",
+                  detail: error.detail,
+                },
+              }),
+              type: "turn.completed",
+              payload: {
+                state: "failed",
+                errorMessage: message,
+              },
+            });
+            context.activeTurnId = undefined;
+            context.session = {
+              ...context.session,
+              status: "error",
+              activeTurnId: undefined,
+              lastError: message,
+              updatedAt: failedAt,
+            };
+            return yield* error;
+          }),
+        ),
+      );
+
+      if (!context.conversationId) {
+        const parsedJson = yield* Effect.try({
+          try: () => JSON.parse(stdout) as unknown,
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "new-conversation",
+              detail: "Antigravity agentapi returned invalid JSON.",
+              cause,
+            }),
+        });
+        const decoded = yield* Effect.try({
+          try: () => decodeNewConversationResponse(parsedJson),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "new-conversation",
+              detail: "Antigravity agentapi response did not include a conversation id.",
+              cause,
+            }),
+        });
+        context.conversationId = decoded.response.newConversation.conversationId;
+        const updatedAt = yield* currentTimestamp;
+        context.session = {
+          ...context.session,
+          resumeCursor: { conversationId: context.conversationId },
+          updatedAt,
+        };
+        startTranscriptPoller(context);
+        startGatePoller(context);
+      }
+
+      return {
+        threadId: input.threadId,
+        turnId,
+        ...(context.conversationId
+          ? { resumeCursor: { conversationId: context.conversationId } }
+          : {}),
+      } satisfies ProviderTurnStartResult;
+    },
+  );
+
+  const interruptTurn: AntigravityAdapterShape["interruptTurn"] = Effect.fn(
+    "AntigravityAdapter.interruptTurn",
+  )(function* (threadId) {
+    const context = yield* getContext(threadId, "interruptTurn");
+    const turnId = context.activeTurnId;
+    const endpoint = endpointFor(context);
+    if (context.conversationId && endpoint) {
+      yield* Effect.tryPromise(() =>
+        antigravityLanguageServerRpc({
+          endpoint,
+          method: "CancelCascadeInvocation",
+          body: {
+            cascadeId: context.conversationId,
+            killBackgroundTasks: true,
+            notifyParent: false,
+          },
+        }),
+      ).pipe(Effect.catch(() => Effect.void));
+    }
+    const updatedAt = yield* currentTimestamp;
+    context.activeTurnId = undefined;
+    context.pendingGates.clear();
+    context.session = { ...context.session, status: "ready", activeTurnId: undefined, updatedAt };
+    emit({
+      ...runtimeEventBase({
+        threadId,
+        ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+        ...(turnId ? { turnId } : {}),
+        createdAt: updatedAt,
+        method: "interrupt",
+      }),
+      type: "turn.completed",
+      payload: { state: "cancelled" },
+    });
+  });
+
+  const respondToRequest: AntigravityAdapterShape["respondToRequest"] = (
+    threadId,
+    requestId,
+    decision: ProviderApprovalDecision,
+  ) =>
+    getContext(threadId, "respondToRequest").pipe(
+      Effect.flatMap((context) => {
+        const gate = context.pendingGates.get(requestId);
+        const endpoint = gate ? endpointFor(context) : undefined;
+        if (!gate || !context.conversationId || !endpoint) {
+          return Effect.fail(
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "respondToRequest",
+              detail: `Antigravity has no pending approval ${requestId}.`,
+            }),
+          );
+        }
+        const allow = decision === "accept" || decision === "acceptForSession";
+        const scope =
+          decision === "acceptForSession"
+            ? "PERMISSION_SCOPE_CONVERSATION"
+            : "PERMISSION_SCOPE_ONCE";
+        const decisionPayload =
+          gate.kind === "filePermission"
+            ? {
+                filePermission: {
+                  allow,
+                  scope,
+                  ...(gate.absolutePathUri ? { absolutePathUri: gate.absolutePathUri } : {}),
+                },
+              }
+            : { permission: { allow, scope } };
+        return Effect.tryPromise({
+          try: () =>
+            antigravityLanguageServerRpc({
+              endpoint,
+              method: "HandleCascadeUserInteraction",
+              body: {
+                cascadeId: context.conversationId,
+                interaction: {
+                  trajectoryId: gate.trajectoryId,
+                  stepIndex: gate.stepIndex,
+                  ...decisionPayload,
+                },
+              },
+            }),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "HandleCascadeUserInteraction",
+              detail: cause instanceof Error ? cause.message : String(cause),
+              cause,
+            }),
+        }).pipe(
+          Effect.map(() => {
+            context.pendingGates.delete(requestId);
+            emitGateResolved(context, gate, decision);
+          }),
+        );
+      }),
+      Effect.asVoid,
+    );
+
+  const respondToUserInput: AntigravityAdapterShape["respondToUserInput"] = (
+    threadId,
+    requestId,
+    _answers: ProviderUserInputAnswers,
+  ) =>
+    getContext(threadId, "respondToUserInput").pipe(
+      Effect.flatMap(() =>
+        Effect.fail(
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "respondToUserInput",
+            detail: `Antigravity daemon mode did not expose pending user input ${requestId}.`,
+          }),
+        ),
+      ),
+      Effect.asVoid,
+    );
+
+  const stopSession: AntigravityAdapterShape["stopSession"] = Effect.fn(
+    "AntigravityAdapter.stopSession",
+  )(function* (threadId) {
+    const context = yield* getContext(threadId, "stopSession");
+    const updatedAt = yield* currentTimestamp;
+    context.stopped = true;
+    if (context.poller) clearInterval(context.poller);
+    if (context.gatePoller) clearInterval(context.gatePoller);
+    context.session = { ...context.session, status: "closed", updatedAt };
+    yield* Ref.update(sessionsRef, (sessions) => {
+      const next = new Map(sessions);
+      next.delete(threadId);
+      return next;
+    });
+  });
+
+  const listSessions = () =>
+    Ref.get(sessionsRef).pipe(
+      Effect.map((sessions) => Array.from(sessions.values(), (entry) => entry.session)),
+    );
+  const hasSession = (threadId: ThreadId) =>
+    Ref.get(sessionsRef).pipe(Effect.map((sessions) => sessions.has(threadId)));
+
+  const stopAll = () =>
+    Ref.get(sessionsRef).pipe(
+      Effect.flatMap((sessions) =>
+        Effect.forEach(Array.from(sessions.keys()), (threadId) => stopSession(threadId), {
+          concurrency: "unbounded",
+          discard: true,
+        }),
+      ),
+    );
+
+  return {
+    provider: PROVIDER,
+    capabilities: { sessionModelSwitch: "unsupported" },
+    startSession,
+    sendTurn,
+    interruptTurn,
+    respondToRequest,
+    respondToUserInput,
+    stopSession,
+    listSessions,
+    hasSession,
+    readThread: (threadId) =>
+      getContext(threadId, "readThread").pipe(
+        Effect.map((context) => ({
+          threadId,
+          turns: context.turns,
+        })),
+      ),
+    rollbackThread: (threadId) =>
+      getContext(threadId, "rollbackThread").pipe(
+        Effect.map((context) => ({
+          threadId,
+          turns: context.turns,
+        })),
+      ),
+    stopAll,
+    streamEvents: Stream.fromQueue(eventQueue),
+  } satisfies AntigravityAdapterShape;
+});

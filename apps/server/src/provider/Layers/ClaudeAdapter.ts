@@ -14,6 +14,7 @@ import {
   type PermissionResult,
   type PermissionUpdate,
   type SDKMessage,
+  type SDKRateLimitInfo,
   type SDKResultMessage,
   type SettingSource,
   type SDKUserMessage,
@@ -228,6 +229,28 @@ function toMessage(cause: unknown, fallback: string): string {
   return fallback;
 }
 
+function isClaudeUsageLimitMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  if (
+    normalized.includes("usage limit") ||
+    normalized.includes("quota") ||
+    normalized.includes("credit balance") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("too many requests") ||
+    normalized.includes("429")
+  ) {
+    return (
+      normalized.includes("exhaust") ||
+      normalized.includes("exceed") ||
+      normalized.includes("reached") ||
+      normalized.includes("limit") ||
+      normalized.includes("too many requests") ||
+      normalized.includes("429")
+    );
+  }
+  return false;
+}
+
 function toProcessError(
   cause: unknown,
   fallback: string,
@@ -280,7 +303,8 @@ function messageFromClaudeStreamCause(
   cause: Cause.Cause<{ readonly message: string }>,
   fallback: string,
 ): string {
-  return normalizeClaudeStreamMessages(cause)[0] ?? fallback;
+  const messages = normalizeClaudeStreamMessages(cause);
+  return messages.find(isClaudeUsageLimitMessage) ?? messages[0] ?? fallback;
 }
 
 function interruptionMessageFromClaudeCause(
@@ -288,6 +312,27 @@ function interruptionMessageFromClaudeCause(
 ): string {
   const message = messageFromClaudeStreamCause(cause, "Claude runtime interrupted.");
   return isClaudeInterruptedMessage(message) ? "Claude runtime interrupted." : message;
+}
+
+function formatClaudeRateLimitReset(epochSeconds: number | undefined): string | undefined {
+  if (typeof epochSeconds !== "number" || !Number.isFinite(epochSeconds) || epochSeconds <= 0) {
+    return undefined;
+  }
+  return DateTime.formatIso(DateTime.makeUnsafe(epochSeconds * 1_000));
+}
+
+function claudeRateLimitExhaustedMessage(info: SDKRateLimitInfo): string | undefined {
+  if (info.status !== "rejected" && info.overageStatus !== "rejected") {
+    return undefined;
+  }
+
+  const resetAt = formatClaudeRateLimitReset(info.resetsAt ?? info.overageResetsAt);
+  const limitType = info.rateLimitType ? info.rateLimitType.replaceAll("_", " ") : "Claude usage";
+  const reason = info.overageDisabledReason
+    ? ` Overage is unavailable because ${info.overageDisabledReason.replaceAll("_", " ")}.`
+    : "";
+  const reset = resetAt ? ` The limit resets at ${resetAt}.` : "";
+  return `${limitType} limit has been exhausted.${reset}${reason}`;
 }
 
 function resultErrorsText(result: SDKResultMessage): string {
@@ -2321,6 +2366,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     if (message.type === "rate_limit_event") {
+      const exhaustedMessage = claudeRateLimitExhaustedMessage(message.rate_limit_info);
       yield* offerRuntimeEvent({
         ...base,
         type: "account.rate-limits.updated",
@@ -2328,6 +2374,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           rateLimits: message,
         },
       });
+      if (exhaustedMessage) {
+        yield* emitRuntimeError(context, exhaustedMessage, message.rate_limit_info);
+        if (context.turnState) {
+          yield* completeTurn(context, "failed", exhaustedMessage);
+        }
+      }
       return;
     }
   });
