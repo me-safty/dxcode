@@ -409,6 +409,20 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+export const SpeechToTextModel = Schema.Literals(["whisper-large-v3", "whisper-large-v3-turbo"]);
+export type SpeechToTextModel = typeof SpeechToTextModel.Type;
+
+export const DEFAULT_SPEECH_TO_TEXT_MODEL: SpeechToTextModel = "whisper-large-v3";
+
+export const SpeechToTextSettings = Schema.Struct({
+  groqApiKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  groqApiKeyRedacted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  groqModel: SpeechToTextModel.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SPEECH_TO_TEXT_MODEL)),
+  ),
+});
+export type SpeechToTextSettings = typeof SpeechToTextSettings.Type;
+
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 
 export const ServerSettings = Schema.Struct({
@@ -453,6 +467,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  speechToText: SpeechToTextSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -539,6 +554,13 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
+    }),
+  ),
+  speechToText: Schema.optionalKey(
+    Schema.Struct({
+      groqApiKey: Schema.optionalKey(TrimmedString),
+      groqApiKeyRedacted: Schema.optionalKey(Schema.Boolean),
+      groqModel: Schema.optionalKey(SpeechToTextModel),
     }),
   ),
   providers: Schema.optionalKey(

@@ -164,6 +164,12 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
           ? rpcClient.server.signalProcess(input)
           : Promise.reject(unavailableLocalBackendError()),
     },
+    speechToText: {
+      transcribe: (input) =>
+        rpcClient
+          ? rpcClient.speechToText.transcribe(input)
+          : Promise.reject(unavailableLocalBackendError()),
+    },
   };
 }
 

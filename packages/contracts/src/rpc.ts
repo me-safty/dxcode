@@ -88,6 +88,11 @@ import {
 } from "./server.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
+  SpeechToTextError,
+  SpeechToTextTranscribeInput,
+  SpeechToTextTranscribeResult,
+} from "./speech.ts";
+import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -149,6 +154,7 @@ export const WS_METHODS = {
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
+  speechToTextTranscribe: "speechToText.transcribe",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -238,6 +244,12 @@ export const WsServerGetProcessResourceHistoryRpc = Rpc.make(
 export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
+});
+
+export const WsSpeechToTextTranscribeRpc = Rpc.make(WS_METHODS.speechToTextTranscribe, {
+  payload: SpeechToTextTranscribeInput,
+  success: SpeechToTextTranscribeResult,
+  error: SpeechToTextError,
 });
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(
@@ -485,6 +497,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetProcessDiagnosticsRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
+  WsSpeechToTextTranscribeRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,

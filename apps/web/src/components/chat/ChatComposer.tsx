@@ -83,7 +83,7 @@ import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { toastManager } from "../ui/toast";
+import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
   BotIcon,
   CircleAlertIcon,
@@ -111,6 +111,7 @@ import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { ensureLocalApi } from "../../localApi";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -145,6 +146,30 @@ const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-slot="combobox-popup"]',
   '[data-slot="autocomplete-popup"]',
 ].join(",");
+const VOICE_INPUT_MIME_TYPE_CANDIDATES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/ogg;codecs=opus",
+  "audio/mp4",
+] as const;
+
+function resolveVoiceInputMimeType(): string {
+  if (typeof MediaRecorder === "undefined") return "audio/webm";
+  return (
+    VOICE_INPUT_MIME_TYPE_CANDIDATES.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ??
+    "audio/webm"
+  );
+}
+
+function dataUrlToBase64(dataUrl: string): string {
+  const commaIndex = dataUrl.indexOf(",");
+  return commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl;
+}
+
+function appendTranscriptToPrompt(prompt: string, transcript: string): string {
+  if (prompt.trim().length === 0) return transcript;
+  return /\s$/.test(prompt) ? `${prompt}${transcript}` : `${prompt} ${transcript}`;
+}
 
 const extendReplacementRangeForTrailingSpace = (
   text: string,
@@ -306,6 +331,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
+  voiceInputState: "idle" | "recording" | "transcribing";
+  onToggleVoiceInput: () => void;
 }) {
   return (
     <>
@@ -324,7 +351,9 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
+        voiceInputState={props.voiceInputState}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
+        onToggleVoiceInput={props.onToggleVoiceInput}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
@@ -801,6 +830,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const [voiceInputState, setVoiceInputState] = useState<"idle" | "recording" | "transcribing">(
+    "idle",
+  );
   const isMobileViewport = useMediaQuery("max-sm");
   const isComposerCollapsedMobile = isMobileViewport && !isComposerFocused;
 
@@ -820,6 +852,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
   const mobileComposerExpandInFlightRef = useRef(false);
   const dragDepthRef = useRef(0);
+  const voiceRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
 
   // ------------------------------------------------------------------
   // Derived: composer send state
@@ -1074,6 +1108,141 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [composerDraftTarget, setComposerDraftPrompt],
   );
 
+  const stopVoiceStream = useCallback(() => {
+    voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+    voiceStreamRef.current = null;
+  }, []);
+
+  const transcribeVoiceBlob = useCallback(
+    async (blob: Blob, mimeType: string) => {
+      setVoiceInputState("transcribing");
+      try {
+        if (blob.size === 0) {
+          throw new Error("Recorded audio was empty.");
+        }
+
+        const file = new File([blob], "voice-input.webm", { type: mimeType });
+        const dataUrl = await readFileAsDataUrl(file);
+        const result = await ensureLocalApi().speechToText.transcribe({
+          audioBase64: dataUrlToBase64(dataUrl),
+          mimeType,
+          fileName: file.name,
+        });
+        const transcript = result.text.trim();
+        if (!transcript) {
+          toastManager.add({
+            type: "info",
+            title: "No speech detected",
+            description: "Try recording again closer to the microphone.",
+          });
+          return;
+        }
+
+        const nextPrompt = appendTranscriptToPrompt(promptRef.current, transcript);
+        promptRef.current = nextPrompt;
+        setPrompt(nextPrompt);
+        const nextCursor = collapseExpandedComposerCursor(nextPrompt, nextPrompt.length);
+        setComposerCursor(nextCursor);
+        setComposerTrigger(detectComposerTrigger(nextPrompt, nextPrompt.length));
+        scheduleComposerFocus();
+      } catch (error) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Voice transcription failed",
+            description: error instanceof Error ? error.message : "Could not transcribe audio.",
+          }),
+        );
+      } finally {
+        stopVoiceStream();
+        voiceRecorderRef.current = null;
+        setVoiceInputState("idle");
+      }
+    },
+    [promptRef, scheduleComposerFocus, setPrompt, stopVoiceStream],
+  );
+
+  const startVoiceInput = useCallback(async () => {
+    const hasGroqApiKey =
+      settings.speechToText.groqApiKeyRedacted ||
+      settings.speechToText.groqApiKey.trim().length > 0;
+    if (!hasGroqApiKey) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Groq API key required",
+          description: "Add a Groq API key in Settings > General to use voice input.",
+        }),
+      );
+      return;
+    }
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Voice input unavailable",
+          description: "This browser does not support microphone recording.",
+        }),
+      );
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = resolveVoiceInputMimeType();
+      const recorder = new MediaRecorder(stream, { mimeType });
+      const chunks: Blob[] = [];
+      voiceStreamRef.current = stream;
+      voiceRecorderRef.current = recorder;
+
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      });
+      recorder.onstop = () => {
+        void transcribeVoiceBlob(new Blob(chunks, { type: mimeType }), mimeType);
+      };
+
+      recorder.start();
+      setVoiceInputState("recording");
+    } catch (error) {
+      stopVoiceStream();
+      voiceRecorderRef.current = null;
+      setVoiceInputState("idle");
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not start voice input",
+          description:
+            error instanceof Error ? error.message : "Microphone permission was not granted.",
+        }),
+      );
+    }
+  }, [
+    settings.speechToText.groqApiKey,
+    settings.speechToText.groqApiKeyRedacted,
+    stopVoiceStream,
+    transcribeVoiceBlob,
+  ]);
+
+  const toggleVoiceInput = useCallback(() => {
+    if (voiceInputState === "recording") {
+      const recorder = voiceRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.stop();
+      }
+      return;
+    }
+    if (voiceInputState === "idle") {
+      void startVoiceInput();
+    }
+  }, [startVoiceInput, voiceInputState]);
+
   const addComposerImage = useCallback(
     (image: ComposerImageAttachment) => {
       addComposerDraftImage(composerDraftTarget, image);
@@ -1218,6 +1387,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
   }, [draftId, activeThreadId, promptRef]);
+
+  useEffect(() => {
+    return () => {
+      const recorder = voiceRecorderRef.current;
+      if (recorder) {
+        recorder.onstop = null;
+        if (recorder.state !== "inactive") {
+          recorder.stop();
+        }
+      }
+      stopVoiceStream();
+    };
+  }, [stopVoiceStream]);
 
   // ------------------------------------------------------------------
   // Footer compact layout observation
@@ -2086,7 +2268,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       isEnvironmentUnavailable={environmentUnavailable !== null}
                       isPreparingWorktree={false}
                       hasSendableContent={false}
+                      voiceInputState="idle"
                       preserveComposerFocusOnPointerDown
+                      onToggleVoiceInput={() => {}}
                       onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                       onInterrupt={handleInterruptPrimaryAction}
                       onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
@@ -2295,7 +2479,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isEnvironmentUnavailable={environmentUnavailable !== null}
                     isPreparingWorktree={false}
                     hasSendableContent={false}
+                    voiceInputState="idle"
                     preserveComposerFocusOnPointerDown
+                    onToggleVoiceInput={() => {}}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryAction}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
@@ -2404,7 +2590,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   isEnvironmentUnavailable={environmentUnavailable !== null}
                   isPreparingWorktree={isPreparingWorktree}
                   hasSendableContent={composerSendState.hasSendableContent}
+                  voiceInputState={voiceInputState}
                   preserveComposerFocusOnPointerDown={isMobileViewport}
+                  onToggleVoiceInput={toggleVoiceInput}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                   onInterrupt={handleInterruptPrimaryAction}
                   onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}

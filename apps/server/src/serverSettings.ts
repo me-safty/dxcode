@@ -56,6 +56,7 @@ const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const SPEECH_TO_TEXT_GROQ_API_KEY_SECRET = "speech-to-text-groq-api-key";
 
 const normalizeServerSettings = (
   settings: ServerSettings,
@@ -105,7 +106,16 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
         : instance,
     ]),
   );
-  return { ...settings, providerInstances };
+  return {
+    ...settings,
+    providerInstances,
+    speechToText: {
+      ...settings.speechToText,
+      groqApiKey: "",
+      groqApiKeyRedacted:
+        settings.speechToText.groqApiKey.length > 0 || settings.speechToText.groqApiKeyRedacted,
+    },
+  };
 }
 
 export interface ServerSettingsShape {
@@ -363,6 +373,25 @@ const makeServerSettings = Effect.gen(function* () {
       };
     });
 
+  const materializeSpeechToTextSecrets = (
+    settings: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    Effect.gen(function* () {
+      if (!settings.speechToText.groqApiKeyRedacted) {
+        return settings;
+      }
+      const secret = yield* secretStore
+        .get(SPEECH_TO_TEXT_GROQ_API_KEY_SECRET)
+        .pipe(Effect.mapError((cause) => toSettingsError("failed to read Groq API key", cause)));
+      return {
+        ...settings,
+        speechToText: {
+          ...settings.speechToText,
+          groqApiKey: secret ? textDecoder.decode(secret) : "",
+        },
+      };
+    });
+
   const persistProviderEnvironmentSecrets = (
     current: ServerSettings,
     next: ServerSettings,
@@ -444,6 +473,44 @@ const makeServerSettings = Effect.gen(function* () {
       return {
         ...next,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
+      };
+    });
+
+  const persistSpeechToTextSecrets = (
+    next: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    Effect.gen(function* () {
+      if (next.speechToText.groqApiKeyRedacted) {
+        return next;
+      }
+
+      const groqApiKey = next.speechToText.groqApiKey.trim();
+      if (groqApiKey.length > 0) {
+        yield* secretStore
+          .set(SPEECH_TO_TEXT_GROQ_API_KEY_SECRET, textEncoder.encode(groqApiKey))
+          .pipe(
+            Effect.mapError((cause) => toSettingsError("failed to persist Groq API key", cause)),
+          );
+        return {
+          ...next,
+          speechToText: {
+            ...next.speechToText,
+            groqApiKey: "",
+            groqApiKeyRedacted: true,
+          },
+        };
+      }
+
+      yield* secretStore
+        .remove(SPEECH_TO_TEXT_GROQ_API_KEY_SECRET)
+        .pipe(Effect.mapError((cause) => toSettingsError("failed to remove Groq API key", cause)));
+      return {
+        ...next,
+        speechToText: {
+          ...next.speechToText,
+          groqApiKey: "",
+          groqApiKeyRedacted: false,
+        },
       };
     });
 
@@ -544,21 +611,25 @@ const makeServerSettings = Effect.gen(function* () {
     ready: Deferred.await(startedDeferred),
     getSettings: getSettingsFromCache.pipe(
       Effect.flatMap(materializeProviderEnvironmentSecrets),
+      Effect.flatMap(materializeSpeechToTextSecrets),
       Effect.map(resolveTextGenerationProvider),
     ),
     updateSettings: (patch) =>
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* getSettingsFromCache;
-          const nextPersisted = yield* persistProviderEnvironmentSecrets(
+          const nextProviderSecretsPersisted = yield* persistProviderEnvironmentSecrets(
             current,
             applyServerSettingsPatch(current, patch),
           );
+          const nextPersisted = yield* persistSpeechToTextSecrets(nextProviderSecretsPersisted);
           const next = yield* normalizeServerSettings(nextPersisted);
           yield* writeSettingsAtomically(next);
           yield* Cache.set(settingsCache, cacheKey, next);
           yield* emitChange(next);
-          const materialized = yield* materializeProviderEnvironmentSecrets(next);
+          const materialized = yield* materializeProviderEnvironmentSecrets(next).pipe(
+            Effect.flatMap(materializeSpeechToTextSecrets),
+          );
           return resolveTextGenerationProvider(materialized);
         }),
       ),
@@ -566,6 +637,7 @@ const makeServerSettings = Effect.gen(function* () {
       return Stream.fromPubSub(changesPubSub).pipe(
         Stream.mapEffect((settings) =>
           materializeProviderEnvironmentSecrets(settings).pipe(
+            Effect.flatMap(materializeSpeechToTextSecrets),
             Effect.catch((error: ServerSettingsError) =>
               Effect.logWarning("failed to materialize provider environment secrets", {
                 detail: error.detail,
