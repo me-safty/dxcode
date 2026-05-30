@@ -80,6 +80,7 @@ const rpcClientMock = {
     removeWorktree: vi.fn(),
     createRef: vi.fn(),
     switchRef: vi.fn(),
+    deleteBranch: vi.fn(),
     init: vi.fn(),
   },
   git: {
@@ -632,6 +633,7 @@ describe("wsApi", () => {
       autoOpenPlanSidebar: false,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
+      deleteRemoteBranchOnDelete: true,
       dismissedProviderUpdateNotificationKeys: [],
       diffIgnoreWhitespace: true,
       diffWordWrap: true,
@@ -695,6 +697,7 @@ describe("wsApi", () => {
       autoOpenPlanSidebar: false,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
+      deleteRemoteBranchOnDelete: true,
       dismissedProviderUpdateNotificationKeys: [],
       diffIgnoreWhitespace: true,
       diffWordWrap: true,

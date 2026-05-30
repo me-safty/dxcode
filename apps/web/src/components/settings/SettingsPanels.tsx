@@ -426,6 +426,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
         ? ["Delete confirmation"]
         : []),
+      ...(settings.deleteRemoteBranchOnDelete !==
+      DEFAULT_UNIFIED_SETTINGS.deleteRemoteBranchOnDelete
+        ? ["Delete remote branch"]
+        : []),
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
     ],
     [
@@ -433,6 +437,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.autoOpenPlanSidebar,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
+      settings.deleteRemoteBranchOnDelete,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.diffIgnoreWhitespace,
@@ -468,6 +473,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
+      deleteRemoteBranchOnDelete: DEFAULT_UNIFIED_SETTINGS.deleteRemoteBranchOnDelete,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
     });
     onRestored?.();
@@ -814,6 +820,33 @@ export function GeneralSettingsPanel() {
                 updateSettings({ confirmThreadDelete: Boolean(checked) })
               }
               aria-label="Confirm thread deletion"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Delete remote branch"
+          description="When deleting a branch, also delete its remote counterpart."
+          resetAction={
+            settings.deleteRemoteBranchOnDelete !==
+            DEFAULT_UNIFIED_SETTINGS.deleteRemoteBranchOnDelete ? (
+              <SettingResetButton
+                label="delete remote branch"
+                onClick={() =>
+                  updateSettings({
+                    deleteRemoteBranchOnDelete: DEFAULT_UNIFIED_SETTINGS.deleteRemoteBranchOnDelete,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.deleteRemoteBranchOnDelete}
+              onCheckedChange={(checked) =>
+                updateSettings({ deleteRemoteBranchOnDelete: Boolean(checked) })
+              }
+              aria-label="Delete remote branch on delete"
             />
           }
         />
