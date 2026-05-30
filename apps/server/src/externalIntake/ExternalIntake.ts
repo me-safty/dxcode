@@ -30,6 +30,7 @@ import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScript
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import {
   defaultBaseRefForProfile,
+  defaultIntakeProfile,
   type IntakeProjectProfile,
   loadIntakeProfiles,
   setupScriptToProjectScript,
@@ -178,6 +179,28 @@ function textMentionsAlias(text: string, alias: string) {
   const normalized = alias.trim().toLowerCase();
   if (!normalized) return false;
   return new RegExp(`(^|[^a-z0-9])${escapeRegExp(normalized)}([^a-z0-9]|$)`, "i").test(text);
+}
+
+function projectChoiceLabel(profile: IntakeProjectProfile) {
+  return profile.title ?? profile.id;
+}
+
+function projectResolutionErrorMessage(input: {
+  readonly profiles: readonly IntakeProjectProfile[];
+  readonly projects: readonly OrchestrationProjectShell[];
+}) {
+  if (input.projects.length === 0 && input.profiles.length === 0) {
+    return "No T3 projects are configured yet.";
+  }
+
+  const choices = [
+    ...input.profiles.map(projectChoiceLabel),
+    ...input.projects.map((project) => project.title),
+  ];
+  const uniqueChoices = [...new Set(choices)].filter(Boolean);
+  const suffix =
+    uniqueChoices.length > 0 ? ` Available projects: ${uniqueChoices.slice(0, 8).join(", ")}.` : "";
+  return `Could not resolve a project from the request. Mention a configured project name or set T3_INTAKE_DEFAULT_PROFILE_ID.${suffix}`;
 }
 
 function scriptListWithProfileScript(
@@ -330,6 +353,14 @@ const makeExternalIntake = Effect.gen(function* () {
         };
       }
 
+      const fallbackProfile = defaultIntakeProfile(profiles);
+      if (fallbackProfile !== undefined) {
+        const existing = yield* projectionSnapshotQuery.getActiveProjectByWorkspaceRoot(
+          fallbackProfile.workspaceRoot,
+        );
+        return resolvedProfileProject(fallbackProfile, existing);
+      }
+
       if (snapshot.projects.length === 1) {
         const onlyProject = snapshot.projects[0]!;
         return {
@@ -340,19 +371,7 @@ const makeExternalIntake = Effect.gen(function* () {
         };
       }
 
-      if (profiles.length === 1) {
-        const fallbackProfile = profiles[0]!;
-        const existing = yield* projectionSnapshotQuery.getActiveProjectByWorkspaceRoot(
-          fallbackProfile.workspaceRoot,
-        );
-        return resolvedProfileProject(fallbackProfile, existing);
-      }
-
-      throw new Error(
-        snapshot.projects.length === 0
-          ? "No T3 projects are configured yet."
-          : "Could not resolve a project from the request. Mention a configured project name.",
-      );
+      throw new Error(projectResolutionErrorMessage({ profiles, projects: snapshot.projects }));
     });
 
   const ensureProject = (input: {

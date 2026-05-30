@@ -23,6 +23,7 @@ export interface IntakeProjectProfile {
   readonly title?: string;
   readonly workspaceRoot: string;
   readonly aliases: readonly string[];
+  readonly primary?: boolean;
   readonly defaultBaseRef?: string;
   readonly setupScript?: IntakeSetupScriptProfile;
   readonly modelSelection?: ModelSelection;
@@ -63,6 +64,11 @@ function normalizeStringRecord(value: unknown): Record<string, unknown> {
 function stringField(record: Record<string, unknown>, field: string): string | undefined {
   const value = record[field];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function booleanField(record: Record<string, unknown>, field: string): boolean | undefined {
+  const value = record[field];
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function stringArrayField(record: Record<string, unknown>, field: string): string[] {
@@ -122,6 +128,7 @@ function normalizeProfile(value: unknown, fallbackId: string): IntakeProjectProf
   }
   const id = stringField(record, "id") ?? fallbackId;
   const title = stringField(record, "title");
+  const primary = booleanField(record, "primary");
   const defaultBaseRef = stringField(record, "defaultBaseRef");
   const setupScript = setupScriptField(record);
   const supportEmail = supportEmailField(record);
@@ -131,6 +138,7 @@ function normalizeProfile(value: unknown, fallbackId: string): IntakeProjectProf
     ...(title !== undefined ? { title } : {}),
     workspaceRoot: expandHomePath(workspaceRoot),
     aliases: aliases.length > 0 ? aliases : [id],
+    ...(primary !== undefined ? { primary } : {}),
     ...(defaultBaseRef !== undefined ? { defaultBaseRef } : {}),
     ...(setupScript !== undefined ? { setupScript } : {}),
     ...(supportEmail !== undefined ? { supportEmail } : {}),
@@ -204,6 +212,27 @@ export function loadIntakeProfiles(): IntakeProjectProfile[] {
   const profiles = parseProfilesJson();
   const legacySupport = legacySupportEmailProfile();
   return legacySupport === null ? profiles : [...profiles, legacySupport];
+}
+
+export function defaultIntakeProfile(
+  profiles: readonly IntakeProjectProfile[],
+): IntakeProjectProfile | undefined {
+  const defaultProfileId = envValue("T3_INTAKE_DEFAULT_PROFILE_ID");
+  if (defaultProfileId !== undefined) {
+    const profile = profiles.find((candidate) => candidate.id === defaultProfileId);
+    if (profile === undefined) {
+      throw new Error(
+        `T3_INTAKE_DEFAULT_PROFILE_ID="${defaultProfileId}" does not match a configured intake profile.`,
+      );
+    }
+    return profile;
+  }
+
+  const primaryProfiles = profiles.filter((profile) => profile.primary === true);
+  if (primaryProfiles.length > 1) {
+    throw new Error("Only one intake profile can set primary: true.");
+  }
+  return primaryProfiles[0];
 }
 
 export function setupScriptToProjectScript(profile: IntakeProjectProfile): ProjectScript | null {
