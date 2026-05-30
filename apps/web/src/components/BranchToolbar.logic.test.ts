@@ -326,7 +326,7 @@ describe("resolveBranchSelectionTarget", () => {
     });
   });
 
-  it("checks out the default ref in the main repo when leaving a secondary worktree", () => {
+  it("keeps checkout in the current worktree when the default ref has no existing worktree", () => {
     expect(
       resolveBranchSelectionTarget({
         activeProjectCwd: "/repo",
@@ -337,8 +337,8 @@ describe("resolveBranchSelectionTarget", () => {
         },
       }),
     ).toEqual({
-      checkoutCwd: "/repo",
-      nextWorktreePath: null,
+      checkoutCwd: "/repo/.t3/worktrees/feature-a",
+      nextWorktreePath: "/repo/.t3/worktrees/feature-a",
       reuseExistingWorktree: false,
     });
   });
