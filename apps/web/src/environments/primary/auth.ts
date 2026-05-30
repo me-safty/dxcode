@@ -8,7 +8,6 @@ import type {
 } from "@t3tools/contracts";
 import { EnvironmentHttpCommonError } from "@t3tools/contracts";
 import type { EnvironmentHttpCommonError as EnvironmentHttpCommonErrorType } from "@t3tools/contracts";
-import { makeEnvironmentHttpApiClient } from "@t3tools/client-runtime";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -19,8 +18,8 @@ import {
   stripPairingTokenFromUrl as stripPairingTokenUrl,
 } from "../../pairingUrl";
 
-import { resolvePrimaryEnvironmentHttpUrl } from "./target";
-import { primaryHttpRuntime } from "../../lib/runtime";
+import { PrimaryEnvironmentHttpClient } from "./httpClient";
+import { runPrimaryHttp } from "../../lib/runtime";
 import * as Data from "effect/Data";
 import * as Predicate from "effect/Predicate";
 
@@ -100,8 +99,8 @@ function getDesktopBootstrapCredential(): string | null {
 export async function fetchSessionState(): Promise<AuthSessionState> {
   return retryTransientBootstrap(async () => {
     try {
-      return await primaryHttpRuntime.runPromise(
-        makeEnvironmentHttpApiClient(resolvePrimaryEnvironmentHttpUrl("/")).pipe(
+      return await runPrimaryHttp(
+        PrimaryEnvironmentHttpClient.pipe(
           Effect.flatMap((client) => client.auth.session({ headers: {} })),
         ),
       );
@@ -177,8 +176,8 @@ function toFriendlyBootstrapErrorMessage(status: number, message: string): strin
 async function exchangeBootstrapCredential(credential: string): Promise<AuthBrowserSessionResult> {
   return retryTransientBootstrap(async () => {
     try {
-      return await primaryHttpRuntime.runPromise(
-        makeEnvironmentHttpApiClient(resolvePrimaryEnvironmentHttpUrl("/")).pipe(
+      return await runPrimaryHttp(
+        PrimaryEnvironmentHttpClient.pipe(
           Effect.flatMap((client) => client.auth.browserSession({ payload: { credential } })),
         ),
       );
@@ -295,8 +294,8 @@ export async function createServerPairingCredential(
 ): Promise<AuthPairingCredentialResult> {
   const trimmedLabel = label?.trim();
   try {
-    return await primaryHttpRuntime.runPromise(
-      makeEnvironmentHttpApiClient(resolvePrimaryEnvironmentHttpUrl("/")).pipe(
+    return await runPrimaryHttp(
+      PrimaryEnvironmentHttpClient.pipe(
         Effect.flatMap((client) =>
           client.auth.pairingCredential({
             headers: {},
@@ -318,8 +317,8 @@ export async function createServerPairingCredential(
 
 export async function listServerPairingLinks(): Promise<ReadonlyArray<ServerPairingLinkRecord>> {
   try {
-    const pairingLinks = await primaryHttpRuntime.runPromise(
-      makeEnvironmentHttpApiClient(resolvePrimaryEnvironmentHttpUrl("/")).pipe(
+    const pairingLinks = await runPrimaryHttp(
+      PrimaryEnvironmentHttpClient.pipe(
         Effect.flatMap((client) => client.auth.pairingLinks({ headers: {} })),
       ),
     );
@@ -361,8 +360,8 @@ export async function listServerPairingLinks(): Promise<ReadonlyArray<ServerPair
 
 export async function revokeServerPairingLink(id: string): Promise<void> {
   try {
-    await primaryHttpRuntime.runPromise(
-      makeEnvironmentHttpApiClient(resolvePrimaryEnvironmentHttpUrl("/")).pipe(
+    await runPrimaryHttp(
+      PrimaryEnvironmentHttpClient.pipe(
         Effect.flatMap((client) => client.auth.revokePairingLink({ headers: {}, payload: { id } })),
       ),
     );
@@ -381,8 +380,8 @@ export async function listServerClientSessions(): Promise<
   ReadonlyArray<ServerClientSessionRecord>
 > {
   try {
-    const clientSessions = await primaryHttpRuntime.runPromise(
-      makeEnvironmentHttpApiClient(resolvePrimaryEnvironmentHttpUrl("/")).pipe(
+    const clientSessions = await runPrimaryHttp(
+      PrimaryEnvironmentHttpClient.pipe(
         Effect.flatMap((client) => client.auth.clients({ headers: {} })),
       ),
     );
@@ -414,8 +413,8 @@ export async function listServerClientSessions(): Promise<
 
 export async function revokeServerClientSession(sessionId: AuthSessionId): Promise<void> {
   try {
-    await primaryHttpRuntime.runPromise(
-      makeEnvironmentHttpApiClient(resolvePrimaryEnvironmentHttpUrl("/")).pipe(
+    await runPrimaryHttp(
+      PrimaryEnvironmentHttpClient.pipe(
         Effect.flatMap((client) =>
           client.auth.revokeClient({ headers: {}, payload: { sessionId } }),
         ),
@@ -434,8 +433,8 @@ export async function revokeServerClientSession(sessionId: AuthSessionId): Promi
 
 export async function revokeOtherServerClientSessions(): Promise<number> {
   try {
-    const result = await primaryHttpRuntime.runPromise(
-      makeEnvironmentHttpApiClient(resolvePrimaryEnvironmentHttpUrl("/")).pipe(
+    const result = await runPrimaryHttp(
+      PrimaryEnvironmentHttpClient.pipe(
         Effect.flatMap((client) => client.auth.revokeOtherClients({ headers: {} })),
       ),
     );

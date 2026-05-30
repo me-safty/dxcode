@@ -1,16 +1,16 @@
-import type { DesktopBridge } from "@t3tools/contracts";
+import {
+  AuthSessionState as AuthSessionStateSchema,
+  EnvironmentAuthInvalidError,
+  type AuthBrowserSessionResult,
+  type AuthSessionState,
+  type DesktopBridge,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-function jsonResponse(body: unknown, init?: ResponseInit) {
-  return new Response(JSON.stringify(body), {
-    headers: {
-      "content-type": "application/json",
-    },
-    status: 200,
-    ...init,
-  });
-}
+import { installEnvironmentHttpTest } from "../test/environmentHttpTest";
 
 type TestWindow = {
   location: URL;
@@ -19,6 +19,42 @@ type TestWindow = {
   };
   desktopBridge?: DesktopBridge;
 };
+
+const LOOPBACK_AUTH = {
+  policy: "loopback-browser",
+  bootstrapMethods: ["one-time-token"],
+  sessionMethods: ["browser-session-cookie"],
+  sessionCookieName: "t3_session",
+} as const;
+
+const DESKTOP_AUTH = {
+  policy: "desktop-managed-local",
+  bootstrapMethods: ["desktop-bootstrap"],
+  sessionMethods: ["browser-session-cookie"],
+  sessionCookieName: "t3_session",
+} as const;
+
+const SESSION_EXPIRES_AT = DateTime.makeUnsafe("2026-04-05T00:00:00.000Z");
+const encodeAuthSessionState = Schema.encodeSync(AuthSessionStateSchema);
+
+const unauthenticatedSession = (auth: AuthSessionState["auth"]): AuthSessionState => ({
+  authenticated: false,
+  auth,
+});
+
+const authenticatedSession = (auth: AuthSessionState["auth"]): AuthSessionState => ({
+  authenticated: true,
+  auth,
+  sessionMethod: "browser-session-cookie",
+  expiresAt: SESSION_EXPIRES_AT,
+});
+
+const browserSession = (scopes: AuthBrowserSessionResult["scopes"]): AuthBrowserSessionResult => ({
+  authenticated: true,
+  scopes,
+  sessionMethod: "browser-session-cookie",
+  expiresAt: SESSION_EXPIRES_AT,
+});
 
 function installTestBrowser(url: string) {
   const testWindow: TestWindow = {
@@ -36,59 +72,48 @@ function installTestBrowser(url: string) {
   return testWindow;
 }
 
-function sessionResponse(body: unknown, init?: ResponseInit) {
-  return jsonResponse(body, init);
+function sequence<A>(...values: ReadonlyArray<A>) {
+  let index = 0;
+  return () => values[Math.min(index++, values.length - 1)]!;
 }
 
-function expectFetchRequest(
-  fetchMock: ReturnType<typeof vi.fn<typeof fetch>>,
-  index: number,
-  expected: {
-    readonly url: string;
-    readonly credentials?: RequestCredentials;
-    readonly method?: string;
-    readonly body?: string;
-    readonly headers?: Record<string, string>;
-  },
-) {
-  const call = fetchMock.mock.calls[index];
-  expect(call).toBeDefined();
-  if (!call) {
-    return;
-  }
+let disposeHttpTest: (() => Promise<void>) | undefined;
 
-  const [input, init] = call;
-  expect(String(input)).toBe(expected.url);
-  expect(init).toEqual(
-    expect.objectContaining({
-      ...(expected.credentials === undefined ? {} : { credentials: expected.credentials }),
-      ...(expected.method === undefined ? {} : { method: expected.method }),
-    }),
-  );
-  if (expected.headers !== undefined) {
-    expect(init?.headers).toEqual(expect.objectContaining(expected.headers));
-  }
-  if (expected.body !== undefined) {
-    const body = init?.body;
-    expect(
-      typeof body === "string"
-        ? body
-        : body instanceof Uint8Array
-          ? new TextDecoder().decode(body)
-          : body,
-    ).toBe(expected.body);
-  }
+async function installAuthApi(input: {
+  readonly session?: () => AuthSessionState;
+  readonly browserSession?: (
+    credential: string,
+  ) => Effect.Effect<AuthBrowserSessionResult, EnvironmentAuthInvalidError>;
+  readonly pairingCredential?: (label?: string) => Effect.Effect<{
+    readonly id: string;
+    readonly credential: string;
+    readonly label?: string;
+    readonly expiresAt: DateTime.Utc;
+  }>;
+}) {
+  const testApi = await installEnvironmentHttpTest({
+    ...(input.session ? { session: () => Effect.succeed(input.session!()) } : {}),
+    ...(input.browserSession
+      ? { browserSession: (payload) => input.browserSession!(payload.credential) }
+      : {}),
+    ...(input.pairingCredential
+      ? { pairingCredential: (payload) => input.pairingCredential!(payload.label) }
+      : {}),
+  });
+  disposeHttpTest = testApi.dispose;
+  return testApi;
 }
 
 describe("resolveInitialServerAuthGateState", () => {
   beforeEach(() => {
-    vi.resetModules();
     vi.restoreAllMocks();
     vi.useRealTimers();
     installTestBrowser("http://localhost/");
   });
 
   afterEach(async () => {
+    await disposeHttpTest?.();
+    disposeHttpTest = undefined;
     const { __resetServerAuthBootstrapForTests } = await import("./environments/primary");
     __resetServerAuthBootstrapForTests();
     vi.unstubAllEnvs();
@@ -97,41 +122,14 @@ describe("resolveInitialServerAuthGateState", () => {
   });
 
   it("reuses an in-flight silent bootstrap attempt", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        sessionResponse({
-          authenticated: false,
-          auth: {
-            policy: "desktop-managed-local",
-            bootstrapMethods: ["desktop-bootstrap"],
-            sessionMethods: ["browser-session-cookie"],
-            sessionCookieName: "t3_session",
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          authenticated: true,
-          scopes: ["orchestration:read", "access:manage"],
-          sessionMethod: "browser-session-cookie",
-          expiresAt: "2026-04-05T00:00:00.000Z",
-        }),
-      )
-      .mockResolvedValueOnce(
-        sessionResponse({
-          authenticated: true,
-          auth: {
-            policy: "loopback-browser",
-            bootstrapMethods: ["one-time-token"],
-            sessionMethods: ["browser-session-cookie"],
-            sessionCookieName: "t3_session",
-          },
-          sessionMethod: "browser-session-cookie",
-          expiresAt: "2026-04-05T00:00:00.000Z",
-        }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
+    const nextSession = sequence(
+      unauthenticatedSession(DESKTOP_AUTH),
+      authenticatedSession(DESKTOP_AUTH),
+    );
+    const testApi = await installAuthApi({
+      session: nextSession,
+      browserSession: () => Effect.succeed(browserSession(["orchestration:read", "access:manage"])),
+    });
 
     const testWindow = installTestBrowser("http://localhost/");
     testWindow.desktopBridge = {
@@ -147,103 +145,45 @@ describe("resolveInitialServerAuthGateState", () => {
 
     await Promise.all([resolveInitialServerAuthGateState(), resolveInitialServerAuthGateState()]);
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expectFetchRequest(fetchMock, 0, {
-      url: "http://localhost:3773/api/auth/session",
-      credentials: "include",
-    });
-    expectFetchRequest(fetchMock, 1, {
-      url: "http://localhost:3773/api/auth/browser-session",
-      credentials: "include",
-      method: "POST",
-      body: JSON.stringify({ credential: "desktop-bootstrap-token" }),
-    });
-    expectFetchRequest(fetchMock, 2, {
-      url: "http://localhost:3773/api/auth/session",
-      credentials: "include",
-    });
+    expect(testApi.calls.session).toBe(2);
+    expect(testApi.calls.browserSession).toEqual([{ credential: "desktop-bootstrap-token" }]);
   });
 
-  it("uses https fetch urls when the primary environment uses wss", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      sessionResponse({
-        authenticated: false,
-        auth: {
-          policy: "loopback-browser",
-          bootstrapMethods: ["one-time-token"],
-          sessionMethods: ["browser-session-cookie"],
-          sessionCookieName: "t3_session",
-        },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+  it("uses https urls when the primary environment uses wss", async () => {
+    await installAuthApi({ session: () => unauthenticatedSession(LOOPBACK_AUTH) });
     vi.stubEnv("VITE_HTTP_URL", "https://remote.example.com");
     vi.stubEnv("VITE_WS_URL", "wss://remote.example.com");
 
-    const { resolveInitialServerAuthGateState } = await import("./environments/primary");
+    const { resolveInitialServerAuthGateState, resolvePrimaryEnvironmentHttpUrl } =
+      await import("./environments/primary");
 
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "requires-auth",
-      auth: {
-        policy: "loopback-browser",
-        bootstrapMethods: ["one-time-token"],
-        sessionMethods: ["browser-session-cookie"],
-        sessionCookieName: "t3_session",
-      },
+      auth: LOOPBACK_AUTH,
     });
-
-    expectFetchRequest(fetchMock, 0, {
-      url: "https://remote.example.com/api/auth/session",
-      credentials: "include",
-    });
+    expect(resolvePrimaryEnvironmentHttpUrl("/api/auth/session")).toBe(
+      "https://remote.example.com/api/auth/session",
+    );
   });
 
   it("uses the current origin as an auth proxy base for local dev environments", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      sessionResponse({
-        authenticated: false,
-        auth: {
-          policy: "loopback-browser",
-          bootstrapMethods: ["one-time-token"],
-          sessionMethods: ["browser-session-cookie"],
-          sessionCookieName: "t3_session",
-        },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    await installAuthApi({ session: () => unauthenticatedSession(LOOPBACK_AUTH) });
     installTestBrowser("http://localhost:5735/");
 
-    const { resolveInitialServerAuthGateState } = await import("./environments/primary");
+    const { resolveInitialServerAuthGateState, resolvePrimaryEnvironmentHttpUrl } =
+      await import("./environments/primary");
 
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "requires-auth",
-      auth: {
-        policy: "loopback-browser",
-        bootstrapMethods: ["one-time-token"],
-        sessionMethods: ["browser-session-cookie"],
-        sessionCookieName: "t3_session",
-      },
+      auth: LOOPBACK_AUTH,
     });
-
-    expectFetchRequest(fetchMock, 0, {
-      url: "http://localhost:5735/api/auth/session",
-      credentials: "include",
-    });
+    expect(resolvePrimaryEnvironmentHttpUrl("/api/auth/session")).toBe(
+      "http://localhost:5735/api/auth/session",
+    );
   });
 
   it("uses the vite proxy for desktop-managed loopback auth requests during local dev", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      sessionResponse({
-        authenticated: false,
-        auth: {
-          policy: "desktop-managed-local",
-          bootstrapMethods: ["desktop-bootstrap"],
-          sessionMethods: ["browser-session-cookie"],
-          sessionCookieName: "t3_session",
-        },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    await installAuthApi({ session: () => unauthenticatedSession(DESKTOP_AUTH) });
     vi.stubEnv("VITE_DEV_SERVER_URL", "http://127.0.0.1:5733");
 
     const testWindow = installTestBrowser("http://127.0.0.1:5733/");
@@ -255,48 +195,25 @@ describe("resolveInitialServerAuthGateState", () => {
       }),
     } as DesktopBridge;
 
-    const { resolveInitialServerAuthGateState } = await import("./environments/primary");
+    const { resolveInitialServerAuthGateState, resolvePrimaryEnvironmentHttpUrl } =
+      await import("./environments/primary");
 
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "requires-auth",
-      auth: {
-        policy: "desktop-managed-local",
-        bootstrapMethods: ["desktop-bootstrap"],
-        sessionMethods: ["browser-session-cookie"],
-        sessionCookieName: "t3_session",
-      },
+      auth: DESKTOP_AUTH,
     });
-
-    expectFetchRequest(fetchMock, 0, {
-      url: "http://127.0.0.1:5733/api/auth/session",
-      credentials: "include",
-    });
+    expect(resolvePrimaryEnvironmentHttpUrl("/api/auth/session")).toBe(
+      "http://127.0.0.1:5733/api/auth/session",
+    );
   });
 
   it("returns a requires-auth state instead of throwing when no bootstrap credential exists", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      sessionResponse({
-        authenticated: false,
-        auth: {
-          policy: "loopback-browser",
-          bootstrapMethods: ["one-time-token"],
-          sessionMethods: ["browser-session-cookie"],
-          sessionCookieName: "t3_session",
-        },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
+    await installAuthApi({ session: () => unauthenticatedSession(LOOPBACK_AUTH) });
     const { resolveInitialServerAuthGateState } = await import("./environments/primary");
 
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "requires-auth",
-      auth: {
-        policy: "loopback-browser",
-        bootstrapMethods: ["one-time-token"],
-        sessionMethods: ["browser-session-cookie"],
-        sessionCookieName: "t3_session",
-      },
+      auth: LOOPBACK_AUTH,
     });
   });
 
@@ -308,15 +225,10 @@ describe("resolveInitialServerAuthGateState", () => {
       .mockResolvedValueOnce(new Response("Bad Gateway", { status: 502 }))
       .mockResolvedValueOnce(new Response("Bad Gateway", { status: 502 }))
       .mockResolvedValueOnce(
-        sessionResponse({
-          authenticated: false,
-          auth: {
-            policy: "loopback-browser",
-            bootstrapMethods: ["one-time-token"],
-            sessionMethods: ["browser-session-cookie"],
-            sessionCookieName: "t3_session",
-          },
-        }),
+        new Response(
+          JSON.stringify(encodeAuthSessionState(unauthenticatedSession(LOOPBACK_AUTH))),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -327,12 +239,7 @@ describe("resolveInitialServerAuthGateState", () => {
 
     await expect(gateStatePromise).resolves.toEqual({
       status: "requires-auth",
-      auth: {
-        policy: "loopback-browser",
-        bootstrapMethods: ["one-time-token"],
-        sessionMethods: ["browser-session-cookie"],
-        sessionCookieName: "t3_session",
-      },
+      auth: LOOPBACK_AUTH,
     });
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
@@ -355,142 +262,60 @@ describe("resolveInitialServerAuthGateState", () => {
   });
 
   it("allows manual token submission after the initial auth check requires pairing", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        sessionResponse({
-          authenticated: false,
-          auth: {
-            policy: "loopback-browser",
-            bootstrapMethods: ["one-time-token"],
-            sessionMethods: ["browser-session-cookie"],
-            sessionCookieName: "t3_session",
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          authenticated: true,
-          scopes: ["orchestration:read"],
-          sessionMethod: "browser-session-cookie",
-          expiresAt: "2026-04-05T00:00:00.000Z",
-        }),
-      )
-      .mockResolvedValueOnce(
-        sessionResponse({
-          authenticated: true,
-          auth: {
-            policy: "loopback-browser",
-            bootstrapMethods: ["one-time-token"],
-            sessionMethods: ["browser-session-cookie"],
-            sessionCookieName: "t3_session",
-          },
-          sessionMethod: "browser-session-cookie",
-          expiresAt: "2026-04-05T00:00:00.000Z",
-        }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-    installTestBrowser("http://localhost/");
-
+    const nextSession = sequence(
+      unauthenticatedSession(LOOPBACK_AUTH),
+      authenticatedSession(LOOPBACK_AUTH),
+    );
+    const testApi = await installAuthApi({
+      session: nextSession,
+      browserSession: () => Effect.succeed(browserSession(["orchestration:read"])),
+    });
     const { resolveInitialServerAuthGateState, submitServerAuthCredential } =
       await import("./environments/primary");
 
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "requires-auth",
-      auth: {
-        policy: "loopback-browser",
-        bootstrapMethods: ["one-time-token"],
-        sessionMethods: ["browser-session-cookie"],
-        sessionCookieName: "t3_session",
-      },
+      auth: LOOPBACK_AUTH,
     });
     await expect(submitServerAuthCredential("retry-token")).resolves.toBeUndefined();
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "authenticated",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(testApi.calls.browserSession).toEqual([{ credential: "retry-token" }]);
+    expect(testApi.calls.session).toBe(2);
   });
 
   it("surfaces a friendly error message when an invalid pairing token is submitted", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      jsonResponse(
-        {
-          _tag: "EnvironmentAuthInvalidError",
-          code: "auth_invalid",
-          reason: "invalid_credential",
-          traceId: "trace-invalid-credential",
-        },
-        {
-          status: 401,
-        },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    const testApi = await installAuthApi({
+      browserSession: () =>
+        Effect.fail(
+          new EnvironmentAuthInvalidError({
+            code: "auth_invalid",
+            reason: "invalid_credential",
+            traceId: "trace-invalid-credential",
+          }),
+        ),
+    });
 
     const { submitServerAuthCredential } = await import("./environments/primary");
 
     await expect(submitServerAuthCredential("bad-token")).rejects.toThrow(
       "Invalid pairing token. Check the token and try again.",
     );
-    expectFetchRequest(fetchMock, 0, {
-      url: "http://localhost/api/auth/browser-session",
-      credentials: "include",
-      body: JSON.stringify({ credential: "bad-token" }),
-      headers: {
-        "content-type": "application/json",
-      },
-      method: "POST",
-    });
+    expect(testApi.calls.browserSession).toEqual([{ credential: "bad-token" }]);
   });
 
   it("waits for the authenticated session to become observable after silent desktop bootstrap", async () => {
     vi.useFakeTimers();
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        sessionResponse({
-          authenticated: false,
-          auth: {
-            policy: "desktop-managed-local",
-            bootstrapMethods: ["desktop-bootstrap"],
-            sessionMethods: ["browser-session-cookie"],
-            sessionCookieName: "t3_session",
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          authenticated: true,
-          scopes: ["orchestration:read", "access:manage"],
-          sessionMethod: "browser-session-cookie",
-          expiresAt: "2026-04-05T00:00:00.000Z",
-        }),
-      )
-      .mockResolvedValueOnce(
-        sessionResponse({
-          authenticated: false,
-          auth: {
-            policy: "desktop-managed-local",
-            bootstrapMethods: ["desktop-bootstrap"],
-            sessionMethods: ["browser-session-cookie"],
-            sessionCookieName: "t3_session",
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        sessionResponse({
-          authenticated: true,
-          auth: {
-            policy: "desktop-managed-local",
-            bootstrapMethods: ["desktop-bootstrap"],
-            sessionMethods: ["browser-session-cookie"],
-            sessionCookieName: "t3_session",
-          },
-          sessionMethod: "browser-session-cookie",
-          expiresAt: "2026-04-05T00:00:00.000Z",
-        }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
+    const nextSession = sequence(
+      unauthenticatedSession(DESKTOP_AUTH),
+      unauthenticatedSession(DESKTOP_AUTH),
+      authenticatedSession(DESKTOP_AUTH),
+    );
+    const testApi = await installAuthApi({
+      session: nextSession,
+      browserSession: () => Effect.succeed(browserSession(["orchestration:read", "access:manage"])),
+    });
 
     const testWindow = installTestBrowser("http://localhost/");
     testWindow.desktopBridge = {
@@ -507,49 +332,14 @@ describe("resolveInitialServerAuthGateState", () => {
     const gateStatePromise = resolveInitialServerAuthGateState();
     await vi.advanceTimersByTimeAsync(100);
 
-    await expect(gateStatePromise).resolves.toEqual({
-      status: "authenticated",
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    expectFetchRequest(fetchMock, 2, {
-      url: "http://localhost:3773/api/auth/session",
-      credentials: "include",
-    });
-    expectFetchRequest(fetchMock, 3, {
-      url: "http://localhost:3773/api/auth/session",
-      credentials: "include",
-    });
+    await expect(gateStatePromise).resolves.toEqual({ status: "authenticated" });
+    expect(testApi.calls.session).toBe(3);
   });
 
   it("memoizes the authenticated gate state after the first successful read", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        sessionResponse({
-          authenticated: true,
-          auth: {
-            policy: "loopback-browser",
-            bootstrapMethods: ["one-time-token"],
-            sessionMethods: ["browser-session-cookie"],
-            sessionCookieName: "t3_session",
-          },
-          sessionMethod: "browser-session-cookie",
-          expiresAt: "2026-04-05T00:00:00.000Z",
-        }),
-      )
-      .mockResolvedValueOnce(
-        sessionResponse({
-          authenticated: false,
-          auth: {
-            policy: "loopback-browser",
-            bootstrapMethods: ["one-time-token"],
-            sessionMethods: ["browser-session-cookie"],
-            sessionCookieName: "t3_session",
-          },
-        }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-
+    const testApi = await installAuthApi({
+      session: sequence(authenticatedSession(LOOPBACK_AUTH), unauthenticatedSession(LOOPBACK_AUTH)),
+    });
     const { resolveInitialServerAuthGateState } = await import("./environments/primary");
 
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
@@ -558,20 +348,19 @@ describe("resolveInitialServerAuthGateState", () => {
     await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
       status: "authenticated",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(testApi.calls.session).toBe(1);
   });
 
   it("creates a pairing credential from the authenticated auth endpoint", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      jsonResponse({
-        id: "pairing-link-1",
-        credential: "pairing-token",
-        label: "Julius iPhone",
-        expiresAt: "2026-04-05T00:00:00.000Z",
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
+    const testApi = await installAuthApi({
+      pairingCredential: (label) =>
+        Effect.succeed({
+          id: "pairing-link-1",
+          credential: "pairing-token",
+          ...(label === undefined ? {} : { label }),
+          expiresAt: SESSION_EXPIRES_AT,
+        }),
+    });
     const { createServerPairingCredential } = await import("./environments/primary");
 
     const credential = await createServerPairingCredential("Julius iPhone");
@@ -581,14 +370,6 @@ describe("resolveInitialServerAuthGateState", () => {
       label: "Julius iPhone",
     });
     expect(DateTime.formatIso(credential.expiresAt)).toBe("2026-04-05T00:00:00.000Z");
-    expectFetchRequest(fetchMock, 0, {
-      url: "http://localhost/api/auth/pairing-token",
-      credentials: "include",
-      body: JSON.stringify({ label: "Julius iPhone" }),
-      headers: {
-        "content-type": "application/json",
-      },
-      method: "POST",
-    });
+    expect(testApi.calls.pairingCredential).toEqual([{ label: "Julius iPhone" }]);
   });
 });
