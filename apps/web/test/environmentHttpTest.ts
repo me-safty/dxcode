@@ -47,6 +47,19 @@ export interface EnvironmentHttpTestCalls {
 const unexpectedEndpoint = (endpoint: string) =>
   Effect.die(new Error(`Unexpected environment HTTP endpoint: ${endpoint}`));
 
+const authenticatedAuth: Context.Service.Shape<typeof EnvironmentAuthenticatedAuth> = (
+  httpEffect,
+) =>
+  httpEffect.pipe(
+    Effect.provideService(EnvironmentAuthenticatedPrincipal, {
+      sessionId: AuthSessionId.make("test-session"),
+      subject: "test-client",
+      method: "browser-session-cookie",
+      scopes: new Set<AuthEnvironmentScope>(),
+      expiresAt: DateTime.makeUnsafe("2026-05-01T12:00:00.000Z"),
+    }),
+  );
+
 export async function installEnvironmentHttpTest(scenario: EnvironmentHttpTestScenario) {
   const calls: EnvironmentHttpTestCalls = {
     descriptor: 0,
@@ -54,19 +67,6 @@ export async function installEnvironmentHttpTest(scenario: EnvironmentHttpTestSc
     browserSession: [],
     pairingCredential: [],
   };
-
-  const authenticatedAuth: Context.Service.Shape<typeof EnvironmentAuthenticatedAuth> = (
-    httpEffect,
-  ) =>
-    httpEffect.pipe(
-      Effect.provideService(EnvironmentAuthenticatedPrincipal, {
-        sessionId: AuthSessionId.make("test-session"),
-        subject: "test-client",
-        method: "browser-session-cookie",
-        scopes: new Set<AuthEnvironmentScope>(),
-        expiresAt: DateTime.makeUnsafe("2026-05-01T12:00:00.000Z"),
-      }),
-    );
 
   const client = await Effect.runPromise(
     HttpApiTest.groups(EnvironmentHttpApi, ["metadata", "auth"]).pipe(
