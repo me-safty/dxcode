@@ -3368,7 +3368,6 @@ export default function ChatView(props: ChatViewProps) {
 
   const onProviderModelSelect = useCallback(
     (instanceId: ProviderInstanceId, model: string) => {
-      if (!activeThread) return;
       // Look up the configured instance so model normalization and custom
       // model lookup stay scoped to that exact instance. Unknown instance ids
       // are rejected by returning early; the server remains authoritative too.
@@ -3382,9 +3381,10 @@ export default function ChatView(props: ChatViewProps) {
         scheduleComposerFocus();
         return;
       }
-      if (lockedProvider !== null && activeThread.session?.providerInstanceId) {
+      const activeThreadInstanceId = activeThread?.session?.providerInstanceId;
+      if (lockedProvider !== null && activeThreadInstanceId) {
         const currentEntry = providerStatuses.find(
-          (snapshot) => snapshot.instanceId === activeThread.session?.providerInstanceId,
+          (snapshot) => snapshot.instanceId === activeThreadInstanceId,
         );
         if (
           currentEntry?.continuation?.groupKey &&
@@ -3409,15 +3409,13 @@ export default function ChatView(props: ChatViewProps) {
         instanceId,
         model: resolvedModel,
       };
-      setComposerDraftModelSelection(
-        scopeThreadRef(activeThread.environmentId, activeThread.id),
-        nextModelSelection,
-      );
+      setComposerDraftModelSelection(composerDraftTarget, nextModelSelection);
       setStickyComposerModelSelection(nextModelSelection);
       scheduleComposerFocus();
     },
     [
       activeThread,
+      composerDraftTarget,
       lockedProvider,
       scheduleComposerFocus,
       setComposerDraftModelSelection,

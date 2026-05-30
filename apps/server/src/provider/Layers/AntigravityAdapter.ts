@@ -27,7 +27,7 @@ import * as Stream from "effect/Stream";
 import { execFile } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { clearInterval, setInterval } from "node:timers";
+import { clearInterval, setInterval, setTimeout } from "node:timers";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -52,6 +52,7 @@ const PROVIDER = ProviderDriverKind.make("antigravity");
 const AGENTAPI_TIMEOUT_MS = 30_000;
 const TRANSCRIPT_POLL_MS = 500;
 const GATE_POLL_MS = 750;
+const INTERRUPTED_AGENTAPI_RESULT = "__t3_antigravity_agentapi_interrupted__";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 let nextEventSequence = 0;
 
@@ -100,6 +101,7 @@ interface SessionContext {
   gatePoller: NodeJS.Timeout | undefined;
   daemonEndpoint: AntigravityDaemonEndpoint | undefined;
   daemonEndpointResolved: boolean;
+  agentApiCancel: (() => void) | undefined;
   pollOffset: number;
   pollCarry: string;
   readonly seenLines: Set<string>;
@@ -424,6 +426,7 @@ function runAgentApiDefault(
   binaryPath: string,
   args: ReadonlyArray<string>,
   options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
+  onChild?: (child: ReturnType<typeof execFile>) => void,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(binaryPath, [...args], {
@@ -432,6 +435,7 @@ function runAgentApiDefault(
       timeout: AGENTAPI_TIMEOUT_MS,
       windowsHide: true,
     });
+    onChild?.(child);
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk) => {
@@ -492,7 +496,6 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
   const sessionsRef = yield* Ref.make(new Map<ThreadId, SessionContext>());
   const eventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const binaryPath = resolveAntigravityAgentApiPath(settings);
-  const runAgentApi = options.runAgentApi ?? runAgentApiDefault;
   const baseEnv = options.environment ?? process.env;
 
   const emit = (event: ProviderRuntimeEvent): void => {
@@ -704,13 +707,14 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
     "AntigravityAdapter.startSession",
   )(function* (input) {
     const createdAt = yield* currentTimestamp;
+    const modelLabel = resolveAntigravityModelLabel(input.modelSelection);
     const session: ProviderSession = {
       provider: PROVIDER,
       ...(options.instanceId ? { providerInstanceId: options.instanceId } : {}),
       status: "ready",
       runtimeMode: input.runtimeMode,
       cwd: input.cwd ?? serverConfig.cwd,
-      ...(input.modelSelection?.model ? { model: input.modelSelection.model } : {}),
+      ...(modelLabel ? { model: modelLabel } : {}),
       threadId: input.threadId,
       ...(input.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
       createdAt,
@@ -732,6 +736,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       gatePoller: undefined,
       daemonEndpoint: undefined,
       daemonEndpointResolved: false,
+      agentApiCancel: undefined,
       pollOffset: 0,
       pollCarry: "",
       seenLines: new Set(),
@@ -769,7 +774,6 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
 
       const cwd = context.session.cwd ?? serverConfig.cwd;
       const env = makeAntigravityEnvironment(settings, baseEnv, cwd);
-      const modelLabel = resolveAntigravityModelLabel(input.modelSelection);
       yield* Effect.tryPromise({
         try: () =>
           ensureAntigravityCliSettings({
@@ -801,13 +805,14 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       ].join("\n\n");
       const turnId = TurnId.make(`antigravity-turn-${yield* Random.nextUUIDv4}`);
       const updatedAt = yield* currentTimestamp;
+      const modelLabel = resolveAntigravityModelLabel(input.modelSelection);
 
       context.activeTurnId = turnId;
       context.session = {
         ...context.session,
         status: "running",
         activeTurnId: turnId,
-        ...(input.modelSelection?.model ? { model: input.modelSelection.model } : {}),
+        ...(modelLabel ? { model: modelLabel } : {}),
         updatedAt,
       };
       context.turns.push({ id: turnId, items: [] });
@@ -820,14 +825,30 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
           method: "turn.start",
         }),
         type: "turn.started",
-        payload: input.modelSelection?.model ? { model: input.modelSelection.model } : {},
+        payload: modelLabel ? { model: modelLabel } : {},
       });
 
       const args = context.conversationId
         ? ["send-message", context.conversationId, fullPrompt]
         : ["new-conversation", fullPrompt];
+      let agentApiCancel: (() => void) | undefined;
       const stdout = yield* Effect.tryPromise({
-        try: () => runAgentApi(binaryPath, args, { cwd, env }),
+        try: () =>
+          options.runAgentApi
+            ? options.runAgentApi(binaryPath, args, { cwd, env })
+            : runAgentApiDefault(binaryPath, args, { cwd, env }, (child) => {
+                agentApiCancel = () => {
+                  if (child.exitCode !== null || child.killed) {
+                    return;
+                  }
+                  child.kill("SIGTERM");
+                  setTimeout(() => {
+                    if (child.exitCode === null && !child.killed) {
+                      child.kill("SIGKILL");
+                    }
+                  }, 2_000).unref?.();
+                };
+              }),
         catch: (cause) => {
           const detail = cause instanceof Error ? cause.message : String(cause);
           return new ProviderAdapterRequestError({
@@ -840,10 +861,10 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       }).pipe(
         Effect.catch((error: ProviderAdapterRequestError) =>
           Effect.gen(function* () {
-            // If the turn was interrupted, the cancellation already settled the turn
-            // (turn.completed/cancelled); don't override it with a failure.
-            if (context.activeTurnId !== turnId) {
-              return yield* error;
+            const wasInterrupted = context.activeTurnId !== turnId;
+            if (wasInterrupted) {
+              context.agentApiCancel = undefined;
+              return INTERRUPTED_AGENTAPI_RESULT;
             }
             const message = agentApiFailureMessage(error);
             const failedAt = yield* currentTimestamp;
@@ -887,6 +908,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
               },
             });
             context.activeTurnId = undefined;
+            context.agentApiCancel = undefined;
             context.session = {
               ...context.session,
               status: "error",
@@ -898,6 +920,17 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
           }),
         ),
       );
+      context.agentApiCancel = agentApiCancel;
+      if (stdout === INTERRUPTED_AGENTAPI_RESULT) {
+        return {
+          threadId: input.threadId,
+          turnId,
+          ...(context.conversationId
+            ? { resumeCursor: { conversationId: context.conversationId } }
+            : {}),
+        } satisfies ProviderTurnStartResult;
+      }
+      context.agentApiCancel = undefined;
 
       if (!context.conversationId) {
         const parsedJson = yield* Effect.try({
@@ -946,6 +979,8 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
   )(function* (threadId) {
     const context = yield* getContext(threadId, "interruptTurn");
     const turnId = context.activeTurnId;
+    context.agentApiCancel?.();
+    context.agentApiCancel = undefined;
     const endpoint = endpointFor(context);
     if (context.conversationId && endpoint) {
       yield* Effect.tryPromise(() =>
@@ -963,6 +998,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
     const updatedAt = yield* currentTimestamp;
     context.activeTurnId = undefined;
     context.pendingGates.clear();
+    context.agentApiCancel = undefined;
     context.session = { ...context.session, status: "ready", activeTurnId: undefined, updatedAt };
     emit({
       ...runtimeEventBase({
@@ -1065,6 +1101,8 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
     const context = yield* getContext(threadId, "stopSession");
     const updatedAt = yield* currentTimestamp;
     context.stopped = true;
+    context.agentApiCancel?.();
+    context.agentApiCancel = undefined;
     if (context.poller) clearInterval(context.poller);
     if (context.gatePoller) clearInterval(context.gatePoller);
     context.session = { ...context.session, status: "closed", updatedAt };
@@ -1094,7 +1132,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
 
   return {
     provider: PROVIDER,
-    capabilities: { sessionModelSwitch: "unsupported" },
+    capabilities: { sessionModelSwitch: "in-session" },
     startSession,
     sendTurn,
     interruptTurn,
