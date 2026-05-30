@@ -195,7 +195,9 @@ function goalUpdatedActivitySummary(
   }
   switch (goal.status) {
     case "active":
-      return previousGoal.status === "paused" ? "Goal resumed" : null;
+      return previousGoal.status === "paused" || previousGoal.status === "budgetLimited"
+        ? "Goal resumed"
+        : null;
     case "paused":
       return "Goal paused";
     case "budgetLimited":
