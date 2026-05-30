@@ -847,6 +847,50 @@ describe("ProviderRuntimeIngestion", () => {
 
     expect(activity?.summary).toBe("Ran command");
     expect(payload?.detail).toBe("bun run lint");
+    expect(payload?.status).toBe("completed");
+  });
+
+  it("derives persisted command summaries without provider titles", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-command-started-no-title"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-command-no-title"),
+      itemId: asItemId("item-command-no-title"),
+      payload: {
+        itemType: "command_execution",
+        status: "inProgress",
+        detail: "bun run lint",
+        data: {
+          item: {
+            type: "commandExecution",
+            command: "bun run lint",
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-command-started-no-title",
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-command-started-no-title",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.summary).toBe("Running command");
+    expect(payload?.detail).toBe("bun run lint");
+    expect(payload?.status).toBe("inProgress");
   });
 
   it("uses structured read-file paths when available", async () => {
@@ -2078,6 +2122,61 @@ describe("ProviderRuntimeIngestion", () => {
     expect(finalMessage?.streaming).toBe(false);
   });
 
+  it("finalizes visible streaming assistant messages on turn completion even if runtime segment state is gone", async () => {
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
+    const now = "2026-01-01T00:00:00.000Z";
+    const turnId = asTurnId("turn-orphan-streaming-message");
+    const messageId = asMessageId("assistant:orphan-streaming-message");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.message.assistant.delta",
+        commandId: CommandId.make("cmd-orphan-streaming-message-delta"),
+        threadId: ThreadId.make("thread-1"),
+        messageId,
+        turnId,
+        delta: "already visible",
+        createdAt: now,
+      }),
+    );
+
+    await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === messageId &&
+          message.turnId === turnId &&
+          message.streaming &&
+          message.text === "already visible",
+      ),
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-complete-orphan-streaming-message"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId,
+      payload: {
+        state: "completed",
+      },
+    });
+
+    const finalThread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === messageId &&
+          message.turnId === turnId &&
+          !message.streaming &&
+          message.text === "already visible",
+      ),
+    );
+    const finalMessage = finalThread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === messageId,
+    );
+    expect(finalMessage?.streaming).toBe(false);
+  });
+
   it("spills oversized buffered deltas and still finalizes full assistant text", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
@@ -2421,9 +2520,12 @@ describe("ProviderRuntimeIngestion", () => {
       turnId: asTurnId("turn-9"),
       payload: {
         itemType: "command_execution",
-        status: "in_progress",
+        status: "inProgress",
         title: "Read file",
         detail: "/tmp/file.ts",
+        data: {
+          command: "cat /tmp/file.ts",
+        },
       },
     });
 
@@ -2443,6 +2545,19 @@ describe("ProviderRuntimeIngestion", () => {
         (activity: ProviderRuntimeTestActivity) => activity.kind === "tool.started",
       ),
     ).toBe(true);
+    const startedActivity = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "tool.started",
+    );
+    const payload =
+      startedActivity?.payload && typeof startedActivity.payload === "object"
+        ? (startedActivity.payload as Record<string, unknown>)
+        : undefined;
+    const data =
+      payload?.data && typeof payload.data === "object"
+        ? (payload.data as Record<string, unknown>)
+        : undefined;
+    expect(payload?.status).toBe("inProgress");
+    expect(data?.command).toBe("cat /tmp/file.ts");
   });
 
   it("consumes P1 runtime events into thread metadata, diff checkpoints, and activities", async () => {

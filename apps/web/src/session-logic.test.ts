@@ -573,24 +573,65 @@ describe("findSidebarProposedPlan", () => {
 });
 
 describe("deriveWorkLogEntries", () => {
-  it("omits tool started entries and keeps completed entries", () => {
+  it("shows started tool entries immediately and collapses completed lifecycle updates", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "tool-complete",
         createdAt: "2026-02-23T00:00:03.000Z",
         summary: "Tool call complete",
         kind: "tool.completed",
+        payload: {
+          itemId: "tool-item-1",
+          itemType: "dynamic_tool_call",
+          status: "completed",
+        },
       }),
       makeActivity({
         id: "tool-start",
         createdAt: "2026-02-23T00:00:02.000Z",
         summary: "Tool call",
         kind: "tool.started",
+        payload: {
+          itemId: "tool-item-1",
+          itemType: "dynamic_tool_call",
+          status: "inProgress",
+        },
       }),
     ];
 
     const entries = deriveWorkLogEntries(activities, undefined);
-    expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "tool-start",
+      createdAt: "2026-02-23T00:00:02.000Z",
+      label: "Tool call complete",
+      itemId: "tool-item-1",
+      itemType: "dynamic_tool_call",
+      toolStatus: "completed",
+    });
+  });
+
+  it("uses runtime warning messages as work log detail", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "runtime-warning",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "runtime.warning",
+        summary: "Runtime warning",
+        tone: "info",
+        payload: {
+          message: "Retrying after provider transport interruption",
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "runtime-warning",
+      label: "Runtime warning",
+      detail: "Retrying after provider transport interruption",
+    });
   });
 
   it("omits task.started but shows task.progress and task.completed", () => {
@@ -771,6 +812,34 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.command).toBe("bun run lint");
   });
 
+  it("extracts command text from raw tool input", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-tool-raw-input",
+        kind: "tool.started",
+        summary: "Bash",
+        payload: {
+          itemType: "command_execution",
+          status: "inProgress",
+          data: {
+            rawInput: {
+              executable: "bash",
+              args: ["-lc", "bun lint"],
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry).toMatchObject({
+      id: "command-tool-raw-input",
+      command: "bun lint",
+      rawCommand: 'bash -lc "bun lint"',
+      toolStatus: "inProgress",
+    });
+  });
+
   it("unwraps PowerShell command wrappers for displayed command text", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -922,6 +991,34 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
+  it("does not treat image view paths as changed files", () => {
+    const imagePath = "C:\\Users\\Jens\\Pictures\\afterimage crimson dash.png";
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "image-view-tool",
+        kind: "tool.completed",
+        summary: "Image view",
+        payload: {
+          itemType: "image_view",
+          detail: imagePath,
+          data: {
+            item: {
+              type: "image",
+              path: imagePath,
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry).toMatchObject({
+      detail: imagePath,
+      itemType: "image_view",
+    });
+    expect(entry?.changedFiles).toBeUndefined();
+  });
+
   it("drops duplicated tool detail when it only repeats the title", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -983,10 +1080,167 @@ describe("deriveWorkLogEntries", () => {
     const entries = deriveWorkLogEntries(activities, undefined);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
-      id: "grep-complete",
+      id: "grep-update",
       toolTitle: "grep",
       detail: "19 files",
       itemType: "web_search",
+      toolStatus: "completed",
+    });
+  });
+
+  it("uses completed web search URL metadata as the tool detail", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "web-search-start",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Web search",
+        payload: {
+          itemId: "web-search-item-1",
+          itemType: "web_search",
+          title: "Web search",
+          status: "inProgress",
+          data: {
+            item: {
+              type: "webSearch",
+              query: "",
+              action: {
+                type: "other",
+              },
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "web-search-complete",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Web search",
+        payload: {
+          itemId: "web-search-item-1",
+          itemType: "web_search",
+          title: "Web search",
+          status: "completed",
+          data: {
+            item: {
+              type: "webSearch",
+              query: "fallback query",
+              action: {
+                type: "openPage",
+                url: "https://developers.openai.com/codex/sdk/",
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "web-search-start",
+      detail: "https://developers.openai.com/codex/sdk/",
+      itemType: "web_search",
+      toolStatus: "completed",
+    });
+  });
+
+  it("does not invent started Codex web search metadata before the query arrives", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "web-search-start-only",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Web search",
+        payload: {
+          itemType: "web_search",
+          title: "Web search",
+          status: "inProgress",
+          data: {
+            item: {
+              type: "webSearch",
+              query: "",
+              action: {
+                type: "other",
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "web-search-start-only",
+      itemType: "web_search",
+      toolStatus: "inProgress",
+    });
+    expect(entries[0]?.detail).toBeUndefined();
+  });
+
+  it("uses started web search metadata when the provider sends it", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "web-search-start-with-query",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Web search",
+        payload: {
+          itemType: "web_search",
+          title: "Web search",
+          status: "inProgress",
+          data: {
+            item: {
+              type: "webSearch",
+              action: {
+                type: "search",
+                query: "codex app server docs",
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "web-search-start-with-query",
+      detail: "codex app server docs",
+      itemType: "web_search",
+      toolStatus: "inProgress",
+    });
+  });
+
+  it("uses early raw input metadata for generic tool calls", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "read-start-only",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Read File",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Read File",
+          detail: "Read File",
+          status: "inProgress",
+          data: {
+            rawInput: {
+              file_path: "apps/web/src/session-logic.ts",
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "read-start-only",
+      detail: "apps/web/src/session-logic.ts",
+      changedFiles: ["apps/web/src/session-logic.ts"],
+      toolStatus: "inProgress",
     });
   });
 
@@ -1032,10 +1286,11 @@ describe("deriveWorkLogEntries", () => {
     const entries = deriveWorkLogEntries(activities, undefined);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
-      id: "read-complete",
+      id: "read-update",
       toolTitle: "Read File",
       detail: 'import * as Effect from "effect/Effect"',
       itemType: "dynamic_tool_call",
+      toolStatus: "completed",
     });
   });
 
@@ -1108,9 +1363,10 @@ describe("deriveWorkLogEntries", () => {
     const entries = deriveWorkLogEntries(activities, undefined);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
-      id: "legacy-read-complete",
+      id: "legacy-read-update",
       toolTitle: "Read File",
       itemType: "dynamic_tool_call",
+      toolStatus: "completed",
     });
     expect(entries[0]?.detail).toBeUndefined();
   });
@@ -1161,13 +1417,14 @@ describe("deriveWorkLogEntries", () => {
 
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
-      id: "tool-complete",
-      createdAt: "2026-02-23T00:00:03.000Z",
+      id: "tool-update-1",
+      createdAt: "2026-02-23T00:00:01.000Z",
       label: "Tool call completed",
       detail: 'Read: {"file_path":"/tmp/app.ts"}',
       command: "sed -n 1,40p /tmp/app.ts",
       itemType: "dynamic_tool_call",
       toolTitle: "Tool call",
+      toolStatus: "completed",
     });
   });
 
@@ -1221,7 +1478,7 @@ describe("deriveWorkLogEntries", () => {
 
     const entries = deriveWorkLogEntries(activities, undefined);
 
-    expect(entries.map((entry) => entry.id)).toEqual(["tool-1-complete", "tool-2-complete"]);
+    expect(entries.map((entry) => entry.id)).toEqual(["tool-1-update", "tool-2-update"]);
   });
 
   it("collapses same-timestamp lifecycle rows even when completed sorts before updated by id", () => {
@@ -1264,7 +1521,8 @@ describe("deriveWorkLogEntries", () => {
     const entries = deriveWorkLogEntries(activities, undefined);
 
     expect(entries).toHaveLength(1);
-    expect(entries[0]?.id).toBe("a-complete-same-timestamp");
+    expect(entries[0]?.id).toBe("z-update-earlier");
+    expect(entries[0]?.toolStatus).toBe("completed");
   });
 });
 

@@ -236,35 +236,6 @@ function toCanonicalItemType(raw: string | undefined | null): CanonicalItemType 
   return "unknown";
 }
 
-function itemTitle(itemType: CanonicalItemType): string | undefined {
-  switch (itemType) {
-    case "assistant_message":
-      return "Assistant message";
-    case "user_message":
-      return "User message";
-    case "reasoning":
-      return "Reasoning";
-    case "plan":
-      return "Plan";
-    case "command_execution":
-      return "Ran command";
-    case "file_change":
-      return "File change";
-    case "mcp_tool_call":
-      return "MCP tool call";
-    case "dynamic_tool_call":
-      return "Tool call";
-    case "web_search":
-      return "Web search";
-    case "image_view":
-      return "Image view";
-    case "error":
-      return "Error";
-    default:
-      return undefined;
-  }
-}
-
 function itemDetail(item: CodexLifecycleItem): string | undefined {
   const candidates = [
     "command" in item ? item.command : undefined,
@@ -470,14 +441,12 @@ function mapItemLifecycle(
       : lifecycle === "item.completed"
         ? "completed"
         : undefined;
-
   return {
     ...runtimeEventBase(event, canonicalThreadId),
     type: lifecycle,
     payload: {
       itemType,
       ...(status ? { status } : {}),
-      ...(itemTitle(itemType) ? { title: itemTitle(itemType) } : {}),
       ...(detail ? { detail } : {}),
       ...(event.payload !== undefined ? { data: event.payload } : {}),
     },

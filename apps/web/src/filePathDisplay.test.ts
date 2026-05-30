@@ -38,4 +38,10 @@ describe("formatWorkspaceRelativePath", () => {
       ),
     ).toBe("t3code/apps/web/src/session-logic.ts:501:9");
   });
+
+  it("keeps absolute Windows paths outside the workspace absolute", () => {
+    expect(
+      formatWorkspaceRelativePath("C:/Users/Jens/Pictures/test.png", "D:/Programme/t3code"),
+    ).toBe("C:/Users/Jens/Pictures/test.png");
+  });
 });

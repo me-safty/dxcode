@@ -1157,6 +1157,123 @@ function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
   return workToneIcon(workEntry.tone).icon;
 }
 
+type WorkEntryAction =
+  | "command"
+  | "read"
+  | "file-change"
+  | "web-search"
+  | "image-view"
+  | "mcp-tool"
+  | "collab-agent"
+  | "tool";
+
+function classifyWorkEntryAction(workEntry: TimelineWorkEntry): WorkEntryAction {
+  if (workEntry.requestKind === "command") return "command";
+  if (workEntry.requestKind === "file-read") return "read";
+  if (workEntry.requestKind === "file-change") return "file-change";
+  if (workEntry.itemType === "command_execution" || workEntry.command) return "command";
+  if (workEntry.itemType === "file_change") return "file-change";
+  if (workEntry.itemType === "web_search") return "web-search";
+  if (workEntry.itemType === "image_view") return "image-view";
+  if (workEntry.itemType === "mcp_tool_call") return "mcp-tool";
+  if (workEntry.itemType === "collab_agent_tool_call") return "collab-agent";
+
+  const label = normalizeCompactToolLabel(workEntry.toolTitle ?? workEntry.label).toLowerCase();
+  if (label.includes("command") || label.includes("bash") || label.includes("terminal")) {
+    return "command";
+  }
+  if (label.includes("read") || label.includes("view file")) {
+    return "read";
+  }
+  if (
+    label.includes("edit") ||
+    label.includes("write") ||
+    label.includes("patch") ||
+    label.includes("file change")
+  ) {
+    return "file-change";
+  }
+  if (
+    label.includes("web search") ||
+    label === "search" ||
+    label === "grep" ||
+    label.includes("search web")
+  ) {
+    return "web-search";
+  }
+  return "tool";
+}
+
+function isGenericToolHeading(value: string): boolean {
+  const normalized = normalizeCompactToolLabel(value).toLowerCase();
+  return (
+    normalized === "tool" ||
+    normalized === "tool call" ||
+    normalized === "dynamic tool call" ||
+    normalized === "mcp tool call" ||
+    normalized === "command run" ||
+    normalized === "bash" ||
+    normalized === "terminal" ||
+    normalized === "file change" ||
+    normalized === "web search" ||
+    normalized === "image view"
+  );
+}
+
+function lifecycleHeadingForAction(
+  action: WorkEntryAction,
+  status: NonNullable<TimelineWorkEntry["toolStatus"]>,
+  fallback: string,
+): string {
+  if (status === "failed") {
+    switch (action) {
+      case "command":
+        return "Command failed";
+      case "read":
+        return "Read failed";
+      case "file-change":
+        return "File change failed";
+      case "web-search":
+        return "Web search failed";
+      case "image-view":
+        return "Image view failed";
+      case "mcp-tool":
+        return "MCP tool failed";
+      case "collab-agent":
+        return "Subagent failed";
+      case "tool":
+        return isGenericToolHeading(fallback) ? "Tool failed" : `${fallback} failed`;
+    }
+  }
+
+  if (status === "declined") {
+    return isGenericToolHeading(fallback) ? "Tool declined" : `${fallback} declined`;
+  }
+
+  const completed = status === "completed";
+  switch (action) {
+    case "command":
+      return completed ? "Ran command" : "Running command";
+    case "read":
+      return completed ? "Read file" : "Reading file";
+    case "file-change":
+      return completed ? "Changed files" : "Editing files";
+    case "web-search":
+      return completed ? "Searched web" : "Searching web";
+    case "image-view":
+      return completed ? "Viewed image" : "Viewing image";
+    case "mcp-tool":
+      return completed ? "Used MCP tool" : "Using MCP tool";
+    case "collab-agent":
+      return completed ? "Subagent completed" : "Running subagent";
+    case "tool":
+      if (isGenericToolHeading(fallback)) {
+        return completed ? "Used tool" : "Using tool";
+      }
+      return completed ? `Used ${fallback}` : `Using ${fallback}`;
+  }
+}
+
 function capitalizePhrase(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length === 0) {
@@ -1166,10 +1283,17 @@ function capitalizePhrase(value: string): string {
 }
 
 function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
-  if (!workEntry.toolTitle) {
-    return capitalizePhrase(normalizeCompactToolLabel(workEntry.label));
+  const fallback = capitalizePhrase(
+    normalizeCompactToolLabel(workEntry.toolTitle ?? workEntry.label),
+  );
+  if (!workEntry.toolStatus) {
+    return fallback;
   }
-  return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
+  return lifecycleHeadingForAction(
+    classifyWorkEntryAction(workEntry),
+    workEntry.toolStatus,
+    fallback,
+  );
 }
 
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
@@ -1180,17 +1304,18 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
+  const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const rawPreview = workEntryPreview(workEntry, workspaceRoot);
   const preview =
-    rawPreview &&
-    normalizeCompactToolLabel(rawPreview).toLowerCase() ===
-      normalizeCompactToolLabel(heading).toLowerCase()
+    hasChangedFiles && !workEntry.command && !workEntry.detail
       ? null
-      : rawPreview;
+      : rawPreview &&
+          normalizeCompactToolLabel(rawPreview).toLowerCase() ===
+            normalizeCompactToolLabel(heading).toLowerCase()
+        ? null
+        : rawPreview;
   const rawCommand = workEntryRawCommand(workEntry);
   const displayText = preview ? `${heading} - ${preview}` : heading;
-  const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
-  const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
 
   return (
     <div className="rounded-lg px-1 py-1">
@@ -1268,7 +1393,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           )}
         </div>
       </div>
-      {hasChangedFiles && !previewIsChangedFiles && (
+      {hasChangedFiles && (
         <div className="mt-1 flex flex-wrap gap-1 pl-6">
           {workEntry.changedFiles?.slice(0, 4).map((filePath) => {
             const displayPath = formatWorkspaceRelativePath(filePath, workspaceRoot);

@@ -231,6 +231,57 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Work log");
   });
 
+  it("renders lifecycle-specific tool call labels with useful metadata", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const startedMarkup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-started",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-started",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Bash",
+              tone: "tool",
+              itemType: "command_execution",
+              command: "bun lint",
+              toolStatus: "inProgress",
+            },
+          },
+        ]}
+      />,
+    );
+    const completedMarkup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-completed",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:29.000Z",
+            entry: {
+              id: "work-completed",
+              createdAt: "2026-03-17T19:12:29.000Z",
+              label: "Bash",
+              tone: "tool",
+              itemType: "command_execution",
+              command: "bun lint",
+              toolStatus: "completed",
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(startedMarkup).toContain("Running command");
+    expect(startedMarkup).toContain("bun lint");
+    expect(completedMarkup).toContain("Ran command");
+    expect(completedMarkup).toContain("bun lint");
+  });
+
   it("formats changed file paths from the workspace root", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
@@ -256,6 +307,37 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("t3code/apps/web/src/session-logic.ts");
     expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
+  });
+
+  it("does not repeat changed file paths in the row heading", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "File change",
+              tone: "tool",
+              itemType: "file_change",
+              detail: "D:/Programme/t3code/apps/web/src/session-logic.ts",
+              changedFiles: ["D:/Programme/t3code/apps/web/src/session-logic.ts"],
+              toolStatus: "completed",
+            },
+          },
+        ]}
+        workspaceRoot="D:/Programme/t3code"
+      />,
+    );
+
+    expect(markup).toContain("Changed files");
+    expect(markup).toContain("t3code/apps/web/src/session-logic.ts");
+    expect(markup).not.toContain("Changed files -");
   });
 
   it("renders review comment contexts as structured cards instead of raw tags", async () => {

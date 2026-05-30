@@ -16,7 +16,9 @@ import {
   type OrchestrationThread,
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
+  type ToolLifecycleItemType,
 } from "@t3tools/contracts";
+import { deriveToolActivityPresentation } from "@t3tools/shared/toolActivity";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -107,6 +109,28 @@ function hasAssistantMessageForTurn(
   return false;
 }
 
+function assistantMessageIdsForTurn(
+  messages: ReadonlyArray<OrchestrationMessage>,
+  turnId: TurnId,
+  options?: { readonly streamingOnly?: boolean },
+): MessageId[] {
+  const result: MessageId[] = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message) {
+      continue;
+    }
+    if (message.role !== "assistant" || message.turnId !== turnId) {
+      continue;
+    }
+    if (options?.streamingOnly === true && !message.streaming) {
+      continue;
+    }
+    result.push(message.id);
+  }
+  return result;
+}
+
 function findMessageById(
   messages: ReadonlyArray<OrchestrationMessage>,
   messageId: MessageId,
@@ -164,6 +188,29 @@ function maxCheckpointTurnCount(
 
 function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+}
+
+function toolLifecyclePresentation(
+  event: Extract<
+    ProviderRuntimeEvent,
+    { type: "item.started" | "item.updated" | "item.completed" }
+  >,
+  fallbackSummary: string,
+) {
+  return deriveToolActivityPresentation({
+    itemType: event.payload.itemType as ToolLifecycleItemType,
+    status: event.payload.status,
+    lifecycle:
+      event.type === "item.started"
+        ? "started"
+        : event.type === "item.updated"
+          ? "updated"
+          : "completed",
+    title: event.payload.title,
+    detail: event.payload.detail,
+    data: event.payload.data,
+    fallbackSummary,
+  });
 }
 
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
@@ -536,17 +583,21 @@ function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
+      const presentation = toolLifecyclePresentation(event, "Tool updated");
       return [
         {
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "tool",
           kind: "tool.updated",
-          summary: event.payload.title ?? "Tool updated",
+          summary: presentation.summary,
           payload: {
+            ...(event.itemId ? { itemId: event.itemId } : {}),
             itemType: event.payload.itemType,
             ...(event.payload.status ? { status: event.payload.status } : {}),
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...((presentation.detail ?? event.payload.detail)
+              ? { detail: presentation.detail ?? event.payload.detail }
+              : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
@@ -559,16 +610,21 @@ function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
+      const presentation = toolLifecyclePresentation(event, "Tool");
       return [
         {
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "tool",
           kind: "tool.completed",
-          summary: event.payload.title ?? "Tool",
+          summary: presentation.summary,
           payload: {
+            ...(event.itemId ? { itemId: event.itemId } : {}),
             itemType: event.payload.itemType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...(event.payload.status ? { status: event.payload.status } : {}),
+            ...((presentation.detail ?? event.payload.detail)
+              ? { detail: presentation.detail ?? event.payload.detail }
+              : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
@@ -581,16 +637,22 @@ function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
+      const presentation = toolLifecyclePresentation(event, "Tool started");
       return [
         {
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "tool",
           kind: "tool.started",
-          summary: `${event.payload.title ?? "Tool"} started`,
+          summary: presentation.summary,
           payload: {
+            ...(event.itemId ? { itemId: event.itemId } : {}),
             itemType: event.payload.itemType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...(event.payload.status ? { status: event.payload.status } : {}),
+            ...((presentation.detail ?? event.payload.detail)
+              ? { detail: presentation.detail ?? event.payload.detail }
+              : {}),
+            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -905,6 +967,7 @@ const make = Effect.gen(function* () {
     finalDeltaCommandTag: string;
     fallbackText?: string;
     hasProjectedMessage?: boolean;
+    forceComplete?: boolean;
   }) =>
     Effect.gen(function* () {
       const bufferedText = yield* takeBufferedAssistantText(input.messageId);
@@ -928,7 +991,7 @@ const make = Effect.gen(function* () {
         });
       }
 
-      if (input.hasProjectedMessage || hasRenderableText) {
+      if (input.forceComplete || input.hasProjectedMessage || hasRenderableText) {
         yield* orchestrationEngine.dispatch({
           type: "thread.message.assistant.complete",
           commandId: yield* providerCommandId(input.event, input.commandTag),
@@ -1450,6 +1513,10 @@ const make = Effect.gen(function* () {
           () => assistantCompletion.messageId,
         );
         const existingAssistantMessage = findMessageById(messages, assistantMessageId);
+        const hasStreamingAssistantMessagesForTurn =
+          turnId !== undefined
+            ? hasAssistantMessageForTurn(messages, turnId, { streamingOnly: true })
+            : false;
         const shouldApplyFallbackCompletionText =
           !existingAssistantMessage || existingAssistantMessage.text.length === 0;
 
@@ -1457,6 +1524,7 @@ const make = Effect.gen(function* () {
           Option.isNone(activeAssistantMessageId) &&
           turnId !== undefined &&
           hasAssistantMessagesForTurn &&
+          !hasStreamingAssistantMessagesForTurn &&
           (assistantCompletion.fallbackText?.trim().length ?? 0) === 0;
 
         if (!shouldSkipRedundantCompletion) {
@@ -1508,8 +1576,16 @@ const make = Effect.gen(function* () {
         const turnId = toTurnId(event.turnId);
         if (turnId) {
           const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
+          const streamingAssistantMessageIds = assistantMessageIdsForTurn(messages, turnId, {
+            streamingOnly: true,
+          });
+          const streamingAssistantMessageIdSet = new Set(streamingAssistantMessageIds);
+          const messageIdsToFinalize = new Set([
+            ...assistantMessageIds,
+            ...streamingAssistantMessageIds,
+          ]);
           yield* Effect.forEach(
-            assistantMessageIds,
+            messageIdsToFinalize,
             (assistantMessageId) =>
               finalizeAssistantMessage({
                 event,
@@ -1520,6 +1596,7 @@ const make = Effect.gen(function* () {
                 commandTag: "assistant-complete-finalize",
                 finalDeltaCommandTag: "assistant-delta-finalize-fallback",
                 hasProjectedMessage: findMessageById(messages, assistantMessageId) !== undefined,
+                forceComplete: streamingAssistantMessageIdSet.has(assistantMessageId),
               }),
             { concurrency: 1 },
           ).pipe(Effect.asVoid);
