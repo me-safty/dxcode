@@ -28,6 +28,7 @@ import {
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
   FilesystemBrowseError,
+  SpeechToTextError,
   ThreadId,
   type TerminalEvent,
   WS_METHODS,
@@ -928,6 +929,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(
             WS_METHODS.speechToTextTranscribe,
             serverSettings.getSettings.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new SpeechToTextError({ detail: "Failed to load server settings.", cause }),
+              ),
               Effect.flatMap((settings) => transcribeSpeechWithGroq({ request: input, settings })),
             ),
             { "rpc.aggregate": "speech-to-text" },

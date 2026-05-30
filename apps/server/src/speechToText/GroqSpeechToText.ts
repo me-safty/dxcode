@@ -11,7 +11,7 @@ const GROQ_MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 const GroqTranscriptionResponse = Schema.Struct({
   text: Schema.String,
 });
-const decodeGroqTranscriptionResponse = Schema.decodeUnknown(GroqTranscriptionResponse);
+const decodeGroqTranscriptionResponse = Schema.decodeUnknownEffect(GroqTranscriptionResponse);
 
 function makeSpeechToTextError(detail: string, options?: { status?: number; cause?: unknown }) {
   return new SpeechToTextError({
@@ -47,8 +47,8 @@ export function transcribeSpeechWithGroq(input: {
   return Effect.gen(function* () {
     const groqApiKey = input.settings.speechToText.groqApiKey.trim();
     if (!groqApiKey) {
-      return yield* Effect.fail(
-        makeSpeechToTextError("Configure a Groq API key in Settings before using voice input."),
+      return yield* makeSpeechToTextError(
+        "Configure a Groq API key in Settings before using voice input.",
       );
     }
 
@@ -58,11 +58,11 @@ export function transcribeSpeechWithGroq(input: {
     });
 
     if (audioBytes.byteLength === 0) {
-      return yield* Effect.fail(makeSpeechToTextError("Recorded audio was empty."));
+      return yield* makeSpeechToTextError("Recorded audio was empty.");
     }
     if (audioBytes.byteLength > GROQ_MAX_AUDIO_BYTES) {
-      return yield* Effect.fail(
-        makeSpeechToTextError("Recorded audio is larger than Groq's 100 MB upload limit."),
+      return yield* makeSpeechToTextError(
+        "Recorded audio is larger than Groq's 100 MB upload limit.",
       );
     }
 
@@ -91,11 +91,9 @@ export function transcribeSpeechWithGroq(input: {
     if (!response.ok) {
       const responseBody = yield* Effect.promise(() => readResponseBodySafely(response));
       const suffix = responseBody.trim().length > 0 ? ` ${responseBody.trim()}` : "";
-      return yield* Effect.fail(
-        makeSpeechToTextError(`Groq transcription failed.${suffix}`, {
-          status: response.status,
-        }),
-      );
+      return yield* makeSpeechToTextError(`Groq transcription failed.${suffix}`, {
+        status: response.status,
+      });
     }
 
     const json = yield* Effect.tryPromise({

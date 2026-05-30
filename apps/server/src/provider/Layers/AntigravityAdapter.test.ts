@@ -1,10 +1,72 @@
+// @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics globalDate:off
+// @effect-diagnostics globalTimers:off
 import { describe, expect, it } from "vitest";
 import { ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
+import { AntigravitySettings, type ProviderRuntimeEvent } from "@t3tools/contracts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
+import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "../../config.ts";
 import {
+  makeAntigravityAdapter,
   mapAntigravityTranscriptRecordToRuntimeEvents,
   parseAntigravityTranscriptLine,
 } from "./AntigravityAdapter.ts";
+
+const decodeAntigravitySettings = Schema.decodeSync(AntigravitySettings);
+
+const makeTestServerConfig = (baseDir: string) =>
+  Effect.gen(function* () {
+    const derivedPaths = yield* deriveServerPaths(baseDir, undefined);
+    return {
+      logLevel: "Info",
+      traceMinLevel: "Info",
+      traceTimingEnabled: true,
+      traceBatchWindowMs: 200,
+      traceMaxBytes: 10 * 1024 * 1024,
+      traceMaxFiles: 10,
+      otlpTracesUrl: undefined,
+      otlpMetricsUrl: undefined,
+      otlpExportIntervalMs: 10_000,
+      otlpServiceName: "t3-server",
+      mode: "web",
+      port: 0,
+      host: "127.0.0.1",
+      cwd: baseDir,
+      baseDir,
+      ...derivedPaths,
+      staticDir: undefined,
+      devUrl: undefined,
+      noBrowser: true,
+      startupPresentation: "browser",
+      desktopBootstrapToken: undefined,
+      autoBootstrapProjectFromCwd: false,
+      logWebSocketEvents: false,
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+    } satisfies ServerConfigShape;
+  });
+
+async function waitFor(
+  predicate: () => boolean,
+  events: ReadonlyArray<ProviderRuntimeEvent>,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`timeout waiting; events=${events.map((event) => event.type).join(",")}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
 
 describe("AntigravityAdapter transcript helpers", () => {
   it("parses valid transcript lines and ignores malformed lines", () => {
@@ -187,5 +249,101 @@ describe("AntigravityAdapter transcript helpers", () => {
       streamKind: "assistant_text",
       delta: "Adapter launch probe only.",
     });
+  });
+});
+
+describe("AntigravityAdapter resumed-output turn reopen", () => {
+  it("reopens a turn when transcript output resumes after a completed turn", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "antig-reopen-"));
+    try {
+      const brainPath = join(baseDir, "brain");
+      const conversationId = "conv-resume";
+      const transcriptPath = join(
+        brainPath,
+        conversationId,
+        ".system_generated",
+        "logs",
+        "transcript.jsonl",
+      );
+      await mkdir(dirname(transcriptPath), { recursive: true });
+      await writeFile(transcriptPath, "");
+
+      const settings = decodeAntigravitySettings({
+        brainPath,
+        settingsPath: join(baseDir, "settings.json"),
+      });
+
+      const config = await Effect.runPromise(
+        makeTestServerConfig(baseDir).pipe(Effect.provide(NodeServices.layer)),
+      );
+      const adapter = await Effect.runPromise(
+        makeAntigravityAdapter(settings, {
+          instanceId: ProviderInstanceId.make("antigravity"),
+          environment: {},
+        }).pipe(Effect.provideService(ServerConfig, config)),
+      );
+
+      const events: ProviderRuntimeEvent[] = [];
+      const collector = Effect.runFork(
+        Stream.runForEach(adapter.streamEvents, (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        ),
+      );
+      const threadId = ThreadId.make("thread-resume");
+      try {
+        await Effect.runPromise(
+          adapter.startSession({
+            threadId,
+            runtimeMode: "full-access",
+            cwd: baseDir,
+            resumeCursor: { conversationId },
+          }),
+        );
+
+        // A terminal response completes the turn (the "stop phase").
+        await appendFile(
+          transcriptPath,
+          `${JSON.stringify({ step_index: 1, source: "MODEL", type: "FINAL_RESPONSE", status: "DONE", content: "Started in background." })}\n`,
+        );
+        await waitFor(() => events.some((event) => event.type === "turn.completed"), events);
+
+        // Output that resumes afterwards must reopen the turn.
+        await appendFile(
+          transcriptPath,
+          `${JSON.stringify({ step_index: 2, source: "MODEL", type: "RUN_COMMAND", status: "DONE", content: "HELLO_AFTER_WAIT" })}\n`,
+        );
+        await waitFor(
+          () => events.filter((event) => event.type === "turn.started").length >= 2,
+          events,
+        );
+
+        const turnStarts = events.filter((event) => event.type === "turn.started");
+        expect(turnStarts.length).toBeGreaterThanOrEqual(2);
+        expect(turnStarts[1]?.turnId).toBeDefined();
+        expect(turnStarts[1]?.turnId).not.toBe(turnStarts[0]?.turnId);
+
+        const firstCompletedIdx = events.findIndex((event) => event.type === "turn.completed");
+        const reopenIdx = events.findIndex(
+          (event, index) => index > firstCompletedIdx && event.type === "turn.started",
+        );
+        const commandIdx = events.findIndex(
+          (event) =>
+            event.type === "item.completed" &&
+            (event.payload as { itemType?: string }).itemType === "command_execution",
+        );
+        expect(reopenIdx).toBeGreaterThan(firstCompletedIdx);
+        expect(commandIdx).toBeGreaterThan(reopenIdx);
+        // Resumed output is attributed to the reopened turn.
+        expect(events[reopenIdx]?.turnId).toBeDefined();
+        expect(events[commandIdx]?.turnId).toBe(events[reopenIdx]?.turnId);
+      } finally {
+        await Effect.runPromise(adapter.stopSession(threadId)).catch(() => undefined);
+        await Effect.runPromise(Fiber.interrupt(collector)).catch(() => undefined);
+      }
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
   });
 });

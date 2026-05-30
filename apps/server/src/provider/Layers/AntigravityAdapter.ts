@@ -25,6 +25,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { clearInterval, setInterval, setTimeout } from "node:timers";
@@ -625,6 +626,33 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       }),
     );
 
+  // Antigravity backgrounds work and resumes after the transcript already
+  // looked "completed" (e.g. it launched a command, waited, then kept going).
+  // Reopen a turn so resumed output is framed and the session reflects that
+  // the agent is running again instead of staying stuck in the stopped state.
+  const reopenTurn = (context: SessionContext): void => {
+    const turnId = TurnId.make(`antigravity-turn-${randomUUID()}`);
+    const updatedAt = context.session.updatedAt;
+    context.activeTurnId = turnId;
+    context.session = {
+      ...context.session,
+      status: "running",
+      activeTurnId: turnId,
+      updatedAt,
+    };
+    emit({
+      ...runtimeEventBase({
+        threadId: context.session.threadId,
+        ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+        turnId,
+        createdAt: updatedAt,
+        method: "turn.resume",
+      }),
+      type: "turn.started",
+      payload: {},
+    });
+  };
+
   const startTranscriptPoller = (context: SessionContext): void => {
     if (!context.conversationId || context.poller) return;
     const transcriptPath = transcriptPathForConversation({
@@ -657,13 +685,24 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
             context.seenLines.add(key);
             const record = parseAntigravityTranscriptLine(line);
             if (!record) continue;
-            for (const event of mapAntigravityTranscriptRecordToRuntimeEvents({
-              record,
-              threadId: context.session.threadId,
-              ...(options.instanceId ? { instanceId: options.instanceId } : {}),
-              ...(context.activeTurnId ? { turnId: context.activeTurnId } : {}),
-              createdAt: context.session.updatedAt,
-            })) {
+            const mapRecord = () =>
+              mapAntigravityTranscriptRecordToRuntimeEvents({
+                record,
+                threadId: context.session.threadId,
+                ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+                ...(context.activeTurnId ? { turnId: context.activeTurnId } : {}),
+                createdAt: context.session.updatedAt,
+              });
+            let mapped = mapRecord();
+            if (mapped.length === 0) continue;
+            // Resumed output after a prior turn.completed: reopen the turn so it
+            // is shown and the session flips back to running, then re-map so the
+            // events carry the reopened turn id.
+            if (context.activeTurnId === undefined && !context.stopped) {
+              reopenTurn(context);
+              mapped = mapRecord();
+            }
+            for (const event of mapped) {
               emit(event);
               if (event.type === "turn.completed") {
                 context.activeTurnId = undefined;
