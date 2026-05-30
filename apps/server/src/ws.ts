@@ -1362,6 +1362,26 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               "rpc.aggregate": "vcs",
             },
           ),
+        [WS_METHODS.vcsStageFiles]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsStageFiles,
+            gitWorkflow
+              .stageFiles(input)
+              .pipe(Effect.andThen(vcsStatusBroadcaster.refreshLocalStatus(input.cwd))),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
+        [WS_METHODS.vcsUnstageFiles]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsUnstageFiles,
+            gitWorkflow
+              .unstageFiles(input)
+              .pipe(Effect.andThen(vcsStatusBroadcaster.refreshLocalStatus(input.cwd))),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
         [WS_METHODS.vcsGetWorkingTreeDiff]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsGetWorkingTreeDiff,
@@ -1404,6 +1424,12 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 ),
             ),
             { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.gitGenerateCommitMessage]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitGenerateCommitMessage,
+            gitWorkflow.generateCommitMessage(input),
+            { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.gitResolvePullRequest]: (input) =>
           observeRpcEffect(

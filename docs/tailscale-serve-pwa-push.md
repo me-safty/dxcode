@@ -26,22 +26,16 @@ https://your-vps.your-tailnet.ts.net
 
 ## Run Salchi privately over HTTPS
 
-Use the local Tailnet command. It binds the app server to loopback, enables Tailscale Serve, and prints a pairing URL that uses the MagicDNS HTTPS name when it is available:
+Use the Tailscale Serve flag. It binds the app server to loopback by default, enables Tailscale Serve, and prints a pairing URL that uses the MagicDNS HTTPS name when it is available:
 
 ```bash
-t3local
-```
-
-The same behavior is also available as a `t3` subcommand:
-
-```bash
-t3 local
+salchi serve --tailscale-serve
 ```
 
 Equivalent explicit `serve` command:
 
 ```bash
-t3 serve --host 127.0.0.1 --port 3773 --tailscale-serve --tailscale-serve-port 443
+salchi serve --host 127.0.0.1 --port 3773 --tailscale-serve --tailscale-serve-port 443
 ```
 
 Equivalent environment variables:
@@ -51,7 +45,7 @@ T3CODE_HOST=127.0.0.1
 T3CODE_PORT=3773
 T3CODE_TAILSCALE_SERVE=true
 T3CODE_TAILSCALE_SERVE_PORT=443
-t3 serve
+salchi serve
 ```
 
 Then open the app from a tailnet device at:

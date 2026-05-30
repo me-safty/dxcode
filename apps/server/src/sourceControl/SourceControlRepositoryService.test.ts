@@ -19,6 +19,16 @@ const CLONE_URLS = {
   sshUrl: "git@github.com:octocat/t3code.git",
 };
 
+function emptyWorkingTree() {
+  return {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  };
+}
+
 function makeProvider(
   overrides: Partial<SourceControlProvider.SourceControlProviderShape> = {},
 ): SourceControlProvider.SourceControlProviderShape {
@@ -297,7 +307,7 @@ it.effect("publish succeeds with status remote_added when the local repo has no 
               branch: "main",
               upstreamRef: null,
               hasWorkingTreeChanges: false,
-              workingTree: { files: [], insertions: 0, deletions: 0 },
+              workingTree: emptyWorkingTree(),
               hasUpstream: false,
               aheadCount: 0,
               behindCount: 0,

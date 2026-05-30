@@ -7,6 +7,7 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import { resolveTailscaleHttpsBaseUrl } from "@t3tools/tailscale";
 import * as Data from "effect/Data";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -247,7 +248,16 @@ const resolveStartupBrowserTarget = Effect.gen(function* () {
     serverConfig.host && !isWildcardHost(serverConfig.host)
       ? `http://${formatHostForUrl(serverConfig.host)}:${serverConfig.port}`
       : localUrl;
-  const baseTarget = serverConfig.devUrl?.toString() ?? bindUrl;
+  const tailscaleUrl = serverConfig.tailscaleServeEnabled
+    ? yield* resolveTailscaleHttpsBaseUrl({ servePort: serverConfig.tailscaleServePort }).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("failed to resolve Tailscale startup URL", { cause }).pipe(
+            Effect.as(null),
+          ),
+        ),
+      )
+    : null;
+  const baseTarget = serverConfig.devUrl?.toString() ?? tailscaleUrl ?? bindUrl;
   return yield* Effect.succeed(serverConfig.mode === "desktop" ? baseTarget : undefined).pipe(
     Effect.flatMap((target) =>
       target ? Effect.succeed(target) : serverAuth.issueStartupPairingUrl(baseTarget),

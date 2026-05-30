@@ -528,6 +528,44 @@ function makeThreadArchivedEvent(params: {
   };
 }
 
+async function exhaustNotificationReconnectTimeout(input: {
+  readonly browser: ReturnType<typeof stubBrowserVisibility>;
+  readonly reconcileAfterNotificationClick: (target: {
+    readonly kind: "thread";
+    readonly environmentId: EnvironmentId;
+    readonly threadId: ThreadId;
+  }) => void;
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+}): Promise<void> {
+  mockConnectionReconnects[0]
+    ?.mockRejectedValueOnce(
+      new MockEnvironmentShellBootstrapTimeoutError(input.environmentId, 12_000),
+    )
+    .mockRejectedValueOnce(
+      new MockEnvironmentShellBootstrapTimeoutError(input.environmentId, 12_000),
+    );
+
+  input.browser.setVisibilityState("hidden");
+  input.browser.documentTarget.dispatchEvent(new Event("visibilitychange"));
+  vi.setSystemTime(Date.now() + 6_000);
+  input.reconcileAfterNotificationClick({
+    kind: "thread",
+    environmentId: input.environmentId,
+    threadId: input.threadId,
+  });
+
+  await vi.waitFor(() => {
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(500);
+  await vi.waitFor(() => {
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(2);
+  });
+  await vi.advanceTimersByTimeAsync(0);
+}
+
 describe("retainThreadDetailSubscription", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -5063,6 +5101,617 @@ describe("retainThreadDetailSubscription", () => {
     expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
 
     release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  }, 15_000);
+
+  it("redrives a blocked notification target on the next healthy heartbeat tick", async () => {
+    const localStorage = createMemoryStorage();
+    const browser = stubBrowserVisibility("visible", { localStorage });
+    const resumeDiagnostics = await import("./resumeDiagnostics");
+    const recordSpy = vi.spyOn(resumeDiagnostics, "recordResumeDiagnostic");
+
+    const {
+      reconcileAfterNotificationClick,
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-heartbeat-healthy-redrive");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({ threadId, sessionStatus: "idle" }),
+      environmentId,
+    );
+
+    await vi.advanceTimersByTimeAsync(14_000);
+    mockConnectionReconnects[0]?.mockRejectedValueOnce(new Error("forced reconnect failed"));
+
+    browser.setVisibilityState("hidden");
+    browser.documentTarget.dispatchEvent(new Event("visibilitychange"));
+    vi.setSystemTime(Date.now() + 6_000);
+    reconcileAfterNotificationClick({
+      kind: "thread",
+      environmentId,
+      threadId,
+    });
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
+    expect(localStorage.getItem("t3.pending-notification-thread-reconciles")).not.toBeNull();
+
+    browser.setVisibilityState("visible");
+    await vi.advanceTimersByTimeAsync(700);
+    await vi.advanceTimersByTimeAsync(300);
+
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(expect.objectContaining({ threadId }));
+    expect(localStorage.getItem("t3.pending-notification-thread-reconciles")).toBeNull();
+    expect(
+      recordSpy.mock.calls.some(
+        ([kind, payload]) =>
+          kind === "notification-thread-reconcile-healthy-redrive" &&
+          payload?.env === environmentId &&
+          payload.reason === "heartbeat-tick:healthy" &&
+          payload.data?.pendingCount === 1,
+      ),
+    ).toBe(true);
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("keeps notification target pending after a failed thread detail reconcile and retries it", async () => {
+    const localStorage = createMemoryStorage();
+    const browser = stubBrowserVisibility("visible", { localStorage });
+    const resumeDiagnostics = await import("./resumeDiagnostics");
+    const recordSpy = vi.spyOn(resumeDiagnostics, "recordResumeDiagnostic");
+
+    const {
+      reconcileAfterNotificationClick,
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-reconcile-failure-retry");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({ threadId, sessionStatus: "idle" }),
+      environmentId,
+    );
+
+    const resolveReconnectRef: { current: (() => void) | null } = { current: null };
+    mockConnectionReconnects[0]?.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveReconnectRef.current = resolve;
+        }),
+    );
+    mockReconcileThreadDetail.mockRejectedValueOnce(new Error("first reconcile failed"));
+
+    browser.setVisibilityState("hidden");
+    browser.documentTarget.dispatchEvent(new Event("visibilitychange"));
+    vi.setSystemTime(Date.now() + 6_000);
+    reconcileAfterNotificationClick({
+      kind: "thread",
+      environmentId,
+      threadId,
+    });
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
+    expect(localStorage.getItem("t3.pending-notification-thread-reconciles")).not.toBeNull();
+
+    expect(resolveReconnectRef.current).toBeDefined();
+    resolveReconnectRef.current?.();
+    await vi.advanceTimersByTimeAsync(300);
+
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(expect.objectContaining({ threadId }));
+    expect(localStorage.getItem("t3.pending-notification-thread-reconciles")).not.toBeNull();
+    expect(
+      recordSpy.mock.calls.some(
+        ([kind, payload]) =>
+          kind === "thread-detail-reconcile-failed" &&
+          payload?.env === environmentId &&
+          payload.reason === "notification-click:post-reconnect" &&
+          payload.data?.threadId === threadId &&
+          payload.data?.pendingNotificationTarget === true,
+      ),
+    ).toBe(true);
+
+    browser.setVisibilityState("visible");
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(300);
+
+    await expectThreadDetailReconcileCallCount(2);
+    expect(mockReconcileThreadDetail).toHaveBeenLastCalledWith(
+      expect.objectContaining({ threadId }),
+    );
+    expect(localStorage.getItem("t3.pending-notification-thread-reconciles")).toBeNull();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("self-heals pending notification target before heartbeat probe after timeout retry exhaustion", async () => {
+    const localStorage = createMemoryStorage();
+    const browser = stubBrowserVisibility("visible", { localStorage });
+    const resumeDiagnostics = await import("./resumeDiagnostics");
+    const recordSpy = vi.spyOn(resumeDiagnostics, "recordResumeDiagnostic");
+
+    const {
+      reconcileAfterNotificationClick,
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-timeout-probe-current");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({ threadId, sessionStatus: "idle" }),
+      environmentId,
+    );
+
+    await exhaustNotificationReconnectTimeout({
+      browser,
+      reconcileAfterNotificationClick,
+      environmentId,
+      threadId,
+    });
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
+
+    browser.setVisibilityState("visible");
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.waitFor(() => {
+      expect(mockProbeSync).toHaveBeenCalledWith({ clientSequence: 1 });
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(expect.objectContaining({ threadId }));
+
+    expect(
+      recordSpy.mock.calls.some(
+        ([kind, payload]) =>
+          kind === "browser-resume-shell-bootstrap-timeout-cleared" &&
+          payload?.env === environmentId &&
+          payload.reason === "thread-detail-reconcile",
+      ),
+    ).toBe(true);
+    expect(localStorage.getItem("t3.pending-notification-thread-reconciles")).toBeNull();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  }, 15_000);
+
+  it("self-heals pending notification target before heartbeat replay after timeout retry exhaustion", async () => {
+    const localStorage = createMemoryStorage();
+    const browser = stubBrowserVisibility("visible", { localStorage });
+    const resumeDiagnostics = await import("./resumeDiagnostics");
+    const recordSpy = vi.spyOn(resumeDiagnostics, "recordResumeDiagnostic");
+    const replayedThreadId = ThreadId.make("thread-notification-timeout-replay-other");
+    mockProbeSync.mockResolvedValueOnce({
+      clientSequence: 1,
+      serverSequence: 2,
+      behind: true,
+    });
+    mockReplayEvents.mockResolvedValueOnce([
+      makeThreadSessionSetEvent({
+        sequence: 2,
+        threadId: replayedThreadId,
+        status: "ready",
+      }),
+    ]);
+
+    const {
+      reconcileAfterNotificationClick,
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-timeout-replay-recovered");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({ threadId, sessionStatus: "idle" }),
+      environmentId,
+    );
+
+    await exhaustNotificationReconnectTimeout({
+      browser,
+      reconcileAfterNotificationClick,
+      environmentId,
+      threadId,
+    });
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
+
+    browser.setVisibilityState("visible");
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.waitFor(() => {
+      expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(expect.objectContaining({ threadId }));
+
+    expect(
+      recordSpy.mock.calls.some(
+        ([kind, payload]) =>
+          kind === "browser-resume-shell-bootstrap-timeout-cleared" &&
+          payload?.env === environmentId &&
+          payload.reason === "thread-detail-reconcile",
+      ),
+    ).toBe(true);
+    expect(localStorage.getItem("t3.pending-notification-thread-reconciles")).toBeNull();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  }, 15_000);
+
+  it("self-heals pending notification target when heartbeat replay and fallback reconnect fail", async () => {
+    const browser = stubBrowserVisibility();
+    const resumeDiagnostics = await import("./resumeDiagnostics");
+    const recordSpy = vi.spyOn(resumeDiagnostics, "recordResumeDiagnostic");
+    mockProbeSync.mockResolvedValueOnce({
+      clientSequence: 1,
+      serverSequence: 2,
+      behind: true,
+    });
+    mockReplayEvents.mockRejectedValueOnce(new Error("replay failed"));
+
+    const {
+      reconcileAfterNotificationClick,
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-timeout-replay-failed");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({ threadId, sessionStatus: "idle" }),
+      environmentId,
+    );
+
+    await exhaustNotificationReconnectTimeout({
+      browser,
+      reconcileAfterNotificationClick,
+      environmentId,
+      threadId,
+    });
+    mockConnectionReconnects[0]?.mockRejectedValueOnce(
+      new MockEnvironmentShellBootstrapTimeoutError(environmentId, 12_000),
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
+
+    browser.setVisibilityState("visible");
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.waitFor(() => {
+      expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(expect.objectContaining({ threadId }));
+
+    expect(
+      recordSpy.mock.calls.some(
+        ([kind, payload]) =>
+          kind === "browser-resume-shell-bootstrap-timeout-cleared" &&
+          payload?.env === environmentId &&
+          payload.reason === "thread-detail-reconcile",
+      ),
+    ).toBe(true);
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  }, 15_000);
+
+  it("redrives pending notification target after health recovery reconnect succeeds", async () => {
+    const browser = stubBrowserVisibility();
+    const resumeDiagnostics = await import("./resumeDiagnostics");
+    const recordSpy = vi.spyOn(resumeDiagnostics, "recordResumeDiagnostic");
+
+    const {
+      reconcileAfterNotificationClick,
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const client = mockCreateWsRpcClient.mock.results[0]?.value as
+      | { readonly isHeartbeatFresh: ReturnType<typeof vi.fn> }
+      | undefined;
+    expect(client).toBeDefined();
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-health-recovery-redrive");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({ threadId, sessionStatus: "idle" }),
+      environmentId,
+    );
+
+    await exhaustNotificationReconnectTimeout({
+      browser,
+      reconcileAfterNotificationClick,
+      environmentId,
+      threadId,
+    });
+
+    client?.isHeartbeatFresh.mockReturnValue(false);
+    mockConnectionReconnects[0]?.mockImplementationOnce(async () => {
+      client?.isHeartbeatFresh.mockReturnValue(true);
+    });
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(3);
+    });
+    await vi.advanceTimersByTimeAsync(300);
+
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(expect.objectContaining({ threadId }));
+    expect(
+      recordSpy.mock.calls.some(
+        ([kind, payload]) =>
+          kind === "notification-thread-reconcile-healthy-redrive" &&
+          payload?.env === environmentId &&
+          payload.reason === "health-recovery:reconnected" &&
+          payload.data?.pendingCount === 1,
+      ),
+    ).toBe(true);
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  }, 15_000);
+
+  it("does not reconcile idle active threads from the active timer when no notification is pending", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-idle-no-pending-active-timer");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({ threadId, sessionStatus: "idle" }),
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "idle",
+      }),
+    });
+
+    await vi.advanceTimersByTimeAsync(45_000);
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("cooldowns repeated healthy heartbeat thread refreshes", async () => {
+    stubBrowserVisibility("visible");
+
+    const {
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-heartbeat-healthy-redrive-cooldown");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({ threadId, sessionStatus: "idle" }),
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    readThreadDetailSubscriptionListener(0)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        sessionStatus: "idle",
+      }),
+    });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(1);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(2);
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("queues health recovery instead of reconciling a pending idle thread on a stale heartbeat", async () => {
+    const browser = stubBrowserVisibility();
+
+    const {
+      reconcileAfterNotificationClick,
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const client = mockCreateWsRpcClient.mock.results[0]?.value as
+      | { readonly isHeartbeatFresh: ReturnType<typeof vi.fn> }
+      | undefined;
+    expect(client).toBeDefined();
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-stale-heartbeat-idle-self-heal");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({ threadId, sessionStatus: "idle" }),
+      environmentId,
+    );
+
+    await exhaustNotificationReconnectTimeout({
+      browser,
+      reconcileAfterNotificationClick,
+      environmentId,
+      threadId,
+    });
+
+    client?.isHeartbeatFresh.mockReturnValue(false);
+    mockConnectionReconnects[0]?.mockImplementationOnce(() => new Promise(() => undefined));
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(3);
+    });
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  }, 15_000);
+
+  it("refreshes pending notification target when thread detail reconcile succeeds after timeout retry exhaustion", async () => {
+    const browser = stubBrowserVisibility();
+    const resumeDiagnostics = await import("./resumeDiagnostics");
+    const recordSpy = vi.spyOn(resumeDiagnostics, "recordResumeDiagnostic");
+
+    const {
+      reconcileAfterNotificationClick,
+      retainActiveThreadDetailSubscription,
+      retainThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-timeout-detail-reconcile");
+    const otherThreadId = ThreadId.make("thread-notification-timeout-detail-other");
+
+    await exhaustNotificationReconnectTimeout({
+      browser,
+      reconcileAfterNotificationClick,
+      environmentId,
+      threadId,
+    });
+
+    const notificationRelease = retainActiveThreadDetailSubscription(environmentId, threadId);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
+
+    const passiveOtherRelease = retainThreadDetailSubscription(environmentId, otherThreadId);
+    readThreadDetailSubscriptionListener(1)({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId: otherThreadId,
+      }),
+    });
+    passiveOtherRelease();
+
+    const activeOtherRelease = retainActiveThreadDetailSubscription(environmentId, otherThreadId);
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: otherThreadId }),
+    );
+
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(2);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(expect.objectContaining({ threadId }));
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledTimes(2);
+    expect(
+      recordSpy.mock.calls.filter(
+        ([kind, payload]) =>
+          kind === "browser-resume-shell-bootstrap-timeout-cleared" &&
+          payload?.env === environmentId &&
+          payload.reason === "thread-detail-reconcile",
+      ),
+    ).toHaveLength(1);
+    expect(
+      recordSpy.mock.calls.some(
+        ([kind, payload]) =>
+          kind === "notification-thread-reconcile-post-reconnect-entry" &&
+          payload?.env === environmentId &&
+          payload.reason === "notification-click:post-thread-detail-reconcile" &&
+          payload.data?.threadId === threadId &&
+          payload.data?.reconciled === true,
+      ),
+    ).toBe(true);
+
+    activeOtherRelease();
+    notificationRelease();
     stop();
     await resetEnvironmentServiceForTests();
   }, 15_000);

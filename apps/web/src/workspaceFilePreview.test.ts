@@ -5,8 +5,10 @@ import {
   __readWorkspaceFilePanelStateForTests,
   __resetWorkspaceFilePanelStateForTests,
   closeWorkspaceFilePreview,
+  closeWorkspaceSourceControlPanel,
   openWorkspaceFileExplorer,
   openWorkspaceFilePreview,
+  openWorkspaceSourceControlPanel,
   reopenWorkspaceFilePanel,
   resolveWorkspaceFilePreviewTarget,
   returnWorkspaceFileExplorerToPreview,
@@ -100,6 +102,30 @@ describe("workspace file panel state", () => {
       },
       explorerReturnPreview: null,
       returnTarget: null,
+    });
+  });
+
+  it("opens and closes source control as a file panel view", () => {
+    openWorkspaceFilePreview(createPreviewTarget());
+    openWorkspaceSourceControlPanel();
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "source-control",
+      explorerReturnPreview: null,
+      returnTarget: null,
+      target: {
+        environmentId,
+        cwd: "/repo/project",
+        relativePath: "src/index.ts",
+      },
+    });
+
+    closeWorkspaceSourceControlPanel();
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: false,
+      view: "source-control",
     });
   });
 

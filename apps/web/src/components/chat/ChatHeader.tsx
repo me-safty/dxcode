@@ -5,15 +5,14 @@ import {
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
-import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
 import {
   DiffIcon,
   DownloadIcon,
   EllipsisIcon,
   FolderTreeIcon,
+  GitBranchIcon,
   RefreshCwIcon,
   TerminalSquareIcon,
 } from "lucide-react";
@@ -50,8 +49,10 @@ interface ChatHeaderProps {
   terminalOpen: boolean;
   terminalToggleShortcutLabel: string | null;
   diffToggleShortcutLabel: string | null;
+  sourceControlToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
+  sourceControlOpen: boolean;
   fileExplorerAvailable: boolean;
   fileExplorerOpen: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
@@ -61,6 +62,7 @@ interface ChatHeaderProps {
   onToggleFileExplorer: () => void;
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
+  onToggleSourceControl: () => void;
 }
 
 export function shouldShowOpenInPicker(input: {
@@ -121,8 +123,6 @@ function handleExportTimelineDiagnostics(): void {
 
 export const ChatHeader = memo(function ChatHeader({
   activeThreadEnvironmentId,
-  activeThreadId,
-  draftId,
   activeThreadTitle,
   activeProjectName,
   isGitRepo,
@@ -135,8 +135,10 @@ export const ChatHeader = memo(function ChatHeader({
   terminalOpen,
   terminalToggleShortcutLabel,
   diffToggleShortcutLabel,
+  sourceControlToggleShortcutLabel,
   gitCwd,
   diffOpen,
+  sourceControlOpen,
   fileExplorerAvailable,
   fileExplorerOpen,
   onRunProjectScript,
@@ -146,6 +148,7 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleFileExplorer,
   onToggleTerminal,
   onToggleDiff,
+  onToggleSourceControl,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isCompactHeader = useMediaQuery("(max-width: 760px)");
@@ -154,7 +157,6 @@ export const ChatHeader = memo(function ChatHeader({
     activeThreadEnvironmentId,
     primaryEnvironmentId,
   });
-  const activeThreadRef = scopeThreadRef(activeThreadEnvironmentId, activeThreadId);
   const isRemoteThread =
     primaryEnvironmentId !== null && activeThreadEnvironmentId !== primaryEnvironmentId;
   const remoteEnvRuntimeLabel = useSavedEnvironmentRuntimeStore(
@@ -179,19 +181,9 @@ export const ChatHeader = memo(function ChatHeader({
         onDeleteScript={onDeleteProjectScript}
       />
     ) : null;
-  const renderGitActionsControl = (inMenu = false) =>
-    activeProjectName && gitCwd ? (
-      <GitActionsControl
-        gitCwd={gitCwd}
-        activeThreadRef={activeThreadRef}
-        inMenu={inMenu}
-        {...(draftId ? { draftId } : {})}
-      />
-    ) : null;
   const hasProjectScriptsControl = activeProjectScripts !== undefined;
-  const hasGitActionsControl = Boolean(activeProjectName && gitCwd);
-  const showCompactOverflowActions =
-    isCompactHeader && (hasProjectScriptsControl || hasGitActionsControl);
+  const hasSourceControl = Boolean(activeProjectName && gitCwd);
+  const showCompactOverflowActions = isCompactHeader && hasProjectScriptsControl;
 
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
@@ -244,7 +236,30 @@ export const ChatHeader = memo(function ChatHeader({
             />
           </>
         )}
-        {!isCompactHeader && renderGitActionsControl()}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                className="shrink-0"
+                pressed={sourceControlOpen}
+                onPressedChange={onToggleSourceControl}
+                aria-label="Toggle source control"
+                variant="outline"
+                size="xs"
+                disabled={!hasSourceControl}
+              >
+                <GitBranchIcon className="size-3" />
+              </Toggle>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {hasSourceControl
+              ? sourceControlToggleShortcutLabel
+                ? `Toggle source control (${sourceControlToggleShortcutLabel})`
+                : "Toggle source control"
+              : "Source control is unavailable until this thread has an active project."}
+          </TooltipPopup>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -325,12 +340,7 @@ export const ChatHeader = memo(function ChatHeader({
             {showCompactOverflowActions && hasProjectScriptsControl
               ? renderProjectScriptsControl(true)
               : null}
-            {showCompactOverflowActions && hasGitActionsControl
-              ? renderGitActionsControl(true)
-              : null}
-            {showCompactOverflowActions && (hasProjectScriptsControl || hasGitActionsControl) ? (
-              <MenuSeparator />
-            ) : null}
+            {showCompactOverflowActions && hasProjectScriptsControl ? <MenuSeparator /> : null}
             <MenuItem onClick={forceRefreshApp}>
               <RefreshCwIcon aria-hidden="true" className="size-4" />
               Force refresh

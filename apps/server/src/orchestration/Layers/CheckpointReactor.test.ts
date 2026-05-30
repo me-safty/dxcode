@@ -62,6 +62,16 @@ import { WorkspacePathsLive } from "../../workspace/Layers/WorkspacePaths.ts";
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
 
+function emptyWorkingTree() {
+  return {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  };
+}
+
 type LegacyProviderRuntimeEvent = {
   readonly type: string;
   readonly eventId: EventId;
@@ -316,7 +326,7 @@ describe("CheckpointReactor", () => {
             isDefaultRef: true,
             refName: "main",
             hasWorkingTreeChanges: false,
-            workingTree: { files: [], insertions: 0, deletions: 0 },
+            workingTree: emptyWorkingTree(),
           }),
         ),
       refreshStatus: () => Effect.die("refreshStatus should not be called in this test"),

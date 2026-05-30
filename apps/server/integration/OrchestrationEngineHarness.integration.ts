@@ -81,6 +81,16 @@ import * as VcsProcess from "../src/vcs/VcsProcess.ts";
 
 const decodeCodexSettings = Schema.decodeEffect(CodexSettings);
 
+function emptyWorkingTree() {
+  return {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  };
+}
+
 function runGit(cwd: string, args: ReadonlyArray<string>) {
   return execFileSync("git", args, {
     cwd,
@@ -339,7 +349,7 @@ export const makeOrchestrationIntegrationHarness = (
               isDefaultRef: true,
               refName: "main",
               hasWorkingTreeChanges: false,
-              workingTree: { files: [], insertions: 0, deletions: 0 },
+              workingTree: emptyWorkingTree(),
             }),
           refreshStatus: () => Effect.die("refreshStatus should not be called in this test"),
           streamStatus: () => Stream.empty,

@@ -38,6 +38,13 @@ const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const OTHER_ENVIRONMENT_ID = EnvironmentId.make("environment-remote");
 const TARGET = { environmentId: ENVIRONMENT_ID, cwd: "/repo" } as const;
 const FRESH_TARGET = { environmentId: ENVIRONMENT_ID, cwd: "/fresh" } as const;
+const emptyWorkingTree: VcsStatusResult["workingTree"] = {
+  files: [],
+  insertions: 0,
+  deletions: 0,
+  staged: { files: [], insertions: 0, deletions: 0 },
+  unstaged: { files: [], insertions: 0, deletions: 0 },
+};
 
 const BASE_STATUS: VcsStatusResult = {
   isRepo: true,
@@ -45,7 +52,7 @@ const BASE_STATUS: VcsStatusResult = {
   isDefaultRef: false,
   refName: "feature/push-status",
   hasWorkingTreeChanges: false,
-  workingTree: { files: [], insertions: 0, deletions: 0 },
+  workingTree: emptyWorkingTree,
   hasUpstream: true,
   aheadCount: 0,
   behindCount: 0,
@@ -114,6 +121,7 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
     },
     git: {
       runStackedAction: vi.fn(async () => ({}) as any),
+      generateCommitMessage: vi.fn(async () => ({}) as any),
       resolvePullRequest: vi.fn(async () => undefined),
       preparePullRequestThread: vi.fn(async () => undefined),
     },

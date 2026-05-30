@@ -19,6 +19,7 @@ import serverPackageJson from "../package.json" with { type: "json" };
 
 interface PackageJson {
   name: string;
+  description: string;
   repository: {
     type: string;
     url: string;
@@ -199,7 +200,7 @@ const publishCmd = Command.make(
       const backupPath = `${packageJsonPath}.bak`;
 
       // Assert build assets exist
-      for (const relPath of ["dist/bin.mjs", "dist/bin-local.mjs", "dist/client/index.html"]) {
+      for (const relPath of ["dist/bin.mjs", "dist/client/index.html"]) {
         const abs = path.join(serverDir, relPath);
         if (!(yield* fs.exists(abs))) {
           return yield* new CliError({
@@ -214,6 +215,7 @@ const publishCmd = Command.make(
           const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
           const pkg: PackageJson = {
             name: serverPackageJson.name,
+            description: serverPackageJson.description,
             repository: serverPackageJson.repository,
             bin: serverPackageJson.bin,
             type: serverPackageJson.type,

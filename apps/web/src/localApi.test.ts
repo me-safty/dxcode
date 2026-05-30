@@ -82,6 +82,7 @@ const rpcClientMock = {
   },
   git: {
     runStackedAction: vi.fn(),
+    generateCommitMessage: vi.fn(),
     resolvePullRequest: vi.fn(),
     preparePullRequestThread: vi.fn(),
   },
@@ -308,7 +309,13 @@ const baseGitStatus: VcsStatusResult = {
   isDefaultRef: false,
   refName: "feature/streamed",
   hasWorkingTreeChanges: false,
-  workingTree: { files: [], insertions: 0, deletions: 0 },
+  workingTree: {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  },
   hasUpstream: true,
   aheadCount: 0,
   behindCount: 0,

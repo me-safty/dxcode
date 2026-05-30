@@ -5,6 +5,8 @@ import * as Layer from "effect/Layer";
 import {
   GitManagerError,
   GitCommandError,
+  type GenerateCommitMessageInput,
+  type GenerateCommitMessageResult,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
   type VcsCreateRefInput,
@@ -19,6 +21,7 @@ import {
   type GitPullRequestRefInput,
   type VcsPullResult,
   type VcsRemoveWorktreeInput,
+  type VcsStageFilesInput,
   type GitResolvePullRequestResult,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
@@ -26,6 +29,7 @@ import {
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
   type VcsStatusResult,
+  type VcsUnstageFilesInput,
   type VcsWorkingTreeDiffInput,
   type VcsWorkingTreeDiffResult,
 } from "@t3tools/contracts";
@@ -48,6 +52,8 @@ export interface GitWorkflowServiceShape {
   readonly invalidateRemoteStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly invalidateStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
+  readonly stageFiles: (input: VcsStageFilesInput) => Effect.Effect<void, GitCommandError>;
+  readonly unstageFiles: (input: VcsUnstageFilesInput) => Effect.Effect<void, GitCommandError>;
   readonly readWorkingTreeDiff: (
     input: VcsWorkingTreeDiffInput,
   ) => Effect.Effect<VcsWorkingTreeDiffResult, GitCommandError>;
@@ -55,6 +61,9 @@ export interface GitWorkflowServiceShape {
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
   ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>;
+  readonly generateCommitMessage: (
+    input: GenerateCommitMessageInput,
+  ) => Effect.Effect<GenerateCommitMessageResult, GitManagerServiceError>;
   readonly resolvePullRequest: (
     input: GitPullRequestRefInput,
   ) => Effect.Effect<GitResolvePullRequestResult, GitManagerServiceError>;
@@ -109,6 +118,8 @@ function nonRepositoryLocalStatus(): VcsStatusLocalResult {
       files: [],
       insertions: 0,
       deletions: 0,
+      staged: { files: [], insertions: 0, deletions: 0 },
+      unstaged: { files: [], insertions: 0, deletions: 0 },
     },
   };
 }
@@ -277,6 +288,14 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
       ensureGitCommand("GitWorkflowService.pullCurrentBranch", cwd).pipe(
         Effect.andThen(git.pullCurrentBranch(cwd)),
       ),
+    stageFiles: (input) =>
+      ensureGitCommand("GitWorkflowService.stageFiles", input.cwd).pipe(
+        Effect.andThen(git.stageFiles(input)),
+      ),
+    unstageFiles: (input) =>
+      ensureGitCommand("GitWorkflowService.unstageFiles", input.cwd).pipe(
+        Effect.andThen(git.unstageFiles(input)),
+      ),
     readWorkingTreeDiff: (input) =>
       ensureGitCommand("GitWorkflowService.readWorkingTreeDiff", input.cwd).pipe(
         Effect.andThen(git.readWorkingTreeDiff(input)),
@@ -284,6 +303,10 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
     runStackedAction: (input, options) =>
       ensureGit("GitWorkflowService.runStackedAction", input.cwd).pipe(
         Effect.andThen(gitManager.runStackedAction(input, options)),
+      ),
+    generateCommitMessage: (input) =>
+      ensureGit("GitWorkflowService.generateCommitMessage", input.cwd).pipe(
+        Effect.andThen(gitManager.generateCommitMessage(input)),
       ),
     resolvePullRequest: routeGitManager(
       "GitWorkflowService.resolvePullRequest",

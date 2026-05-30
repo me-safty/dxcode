@@ -38,7 +38,13 @@ const baseLocalStatus: VcsStatusLocalResult = {
   isDefaultRef: false,
   refName: "feature/demo",
   hasWorkingTreeChanges: false,
-  workingTree: { files: [], insertions: 0, deletions: 0 },
+  workingTree: {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  },
 };
 
 const baseRemoteStatus: VcsStatusRemoteResult = {
@@ -386,5 +392,44 @@ describe("wsRpcClient", () => {
 
     expect(request).toHaveBeenCalledTimes(1);
     expect(protocolGetWorkingTreeDiff).toHaveBeenCalledWith(input);
+  });
+
+  it("forwards commit message generation through the websocket transport", async () => {
+    const result = {
+      subject: "Update project files",
+      body: "",
+      commitMessage: "Update project files",
+    };
+    const protocolGenerateCommitMessage = vi.fn(() => Effect.succeed(result));
+    const protocolClient = {
+      [WS_METHODS.gitGenerateCommitMessage]: protocolGenerateCommitMessage,
+    } as unknown as WsRpcProtocolClient;
+    const request = vi.fn(
+      async <TSuccess>(
+        execute: (client: WsRpcProtocolClient) => Effect.Effect<TSuccess, Error, never>,
+      ) => Effect.runPromise(execute(protocolClient)),
+    );
+    const transport = {
+      dispose: vi.fn(async () => undefined),
+      reconnect: vi.fn(async () => undefined),
+      isHeartbeatFresh: vi.fn(() => true),
+      request: request as WsTransport["request"],
+      requestStream: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
+    } satisfies Pick<
+      WsTransport,
+      "dispose" | "reconnect" | "isHeartbeatFresh" | "request" | "requestStream" | "subscribe"
+    >;
+
+    const client = createWsRpcClient(transport as unknown as WsTransport);
+    const input = {
+      cwd: "/repo",
+      filePaths: ["src/app.ts"],
+    };
+
+    await expect(client.git.generateCommitMessage(input)).resolves.toEqual(result);
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(protocolGenerateCommitMessage).toHaveBeenCalledWith(input);
   });
 });

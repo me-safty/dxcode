@@ -341,6 +341,7 @@ export const resolveServerConfig = (
         normalizedFlags.host,
         Option.fromUndefinedOr(env.host),
         Option.fromUndefinedOr(options?.defaultHost),
+        Option.fromUndefinedOr(tailscaleServeEnabled ? "127.0.0.1" : undefined),
         Option.fromUndefinedOr(bootstrap?.host),
       ),
       () => (mode === "desktop" ? "127.0.0.1" : undefined),

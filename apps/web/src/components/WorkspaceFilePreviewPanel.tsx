@@ -574,6 +574,17 @@ function WorkspaceImagePreview(props: { src: string; alt: string }) {
   );
 }
 
+function returnButtonLabelForTarget(target: WorkspaceFilePreviewReturnTarget): string {
+  switch (target.kind) {
+    case "diff":
+      return "Back to diff";
+    case "explorer":
+      return "Back to explorer";
+    case "source-control":
+      return "Back to source control";
+  }
+}
+
 export function WorkspaceFilePreviewPanel(props: {
   mode: DiffPanelMode;
   panelOpen?: boolean;
@@ -744,8 +755,9 @@ export function WorkspaceFilePreviewPanel(props: {
     : "No file selected";
   const title = props.target ? basenameOfPath(props.target.relativePath) : "File preview";
   const subtitle = props.target?.displayPath ?? displayPath;
-  const returnButtonLabel =
-    props.returnTarget?.kind === "explorer" ? "Back to explorer" : "Back to diff";
+  const returnButtonLabel = props.returnTarget
+    ? returnButtonLabelForTarget(props.returnTarget)
+    : "Back";
 
   useEffect(() => {
     if (!targetLine || !props.target || !query.data) {

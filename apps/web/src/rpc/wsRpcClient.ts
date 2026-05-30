@@ -1,5 +1,7 @@
 import {
   type GitActionProgressEvent,
+  type GenerateCommitMessageInput,
+  type GenerateCommitMessageResult,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
   type VcsStatusResult,
@@ -198,6 +200,8 @@ export interface WsRpcClient {
   readonly vcs: {
     readonly pull: RpcUnaryMethod<typeof WS_METHODS.vcsPull>;
     readonly refreshStatus: RpcUnaryMethod<typeof WS_METHODS.vcsRefreshStatus>;
+    readonly stageFiles: RpcUnaryMethod<typeof WS_METHODS.vcsStageFiles>;
+    readonly unstageFiles: RpcUnaryMethod<typeof WS_METHODS.vcsUnstageFiles>;
     readonly getWorkingTreeDiff: RpcUnaryMethod<typeof WS_METHODS.vcsGetWorkingTreeDiff>;
     readonly onStatus: (
       input: RpcInput<typeof WS_METHODS.subscribeVcsStatus>,
@@ -219,6 +223,9 @@ export interface WsRpcClient {
       input: GitRunStackedActionInput,
       options?: GitRunStackedActionOptions,
     ) => Promise<GitRunStackedActionResult>;
+    readonly generateCommitMessage: (
+      input: GenerateCommitMessageInput,
+    ) => Promise<GenerateCommitMessageResult>;
     readonly resolvePullRequest: RpcUnaryMethod<typeof WS_METHODS.gitResolvePullRequest>;
     readonly preparePullRequestThread: RpcUnaryMethod<
       typeof WS_METHODS.gitPreparePullRequestThread
@@ -336,6 +343,9 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       pull: (input) => transport.request((client) => client[WS_METHODS.vcsPull](input)),
       refreshStatus: (input) =>
         transport.request((client) => client[WS_METHODS.vcsRefreshStatus](input)),
+      stageFiles: (input) => transport.request((client) => client[WS_METHODS.vcsStageFiles](input)),
+      unstageFiles: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsUnstageFiles](input)),
       getWorkingTreeDiff: (input) =>
         transport.request((client) => client[WS_METHODS.vcsGetWorkingTreeDiff](input)),
       onStatus: (input, listener, options) => {
@@ -378,6 +388,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
 
         throw new Error("Git action stream completed without a final result.");
       },
+      generateCommitMessage: (input) =>
+        transport.request((client) => client[WS_METHODS.gitGenerateCommitMessage](input)),
       resolvePullRequest: (input) =>
         transport.request((client) => client[WS_METHODS.gitResolvePullRequest](input)),
       preparePullRequestThread: (input) =>

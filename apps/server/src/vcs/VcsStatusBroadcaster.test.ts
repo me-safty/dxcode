@@ -20,6 +20,14 @@ import type {
 import * as VcsStatusBroadcaster from "./VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 
+const emptyWorkingTree: VcsStatusLocalResult["workingTree"] = {
+  files: [],
+  insertions: 0,
+  deletions: 0,
+  staged: { files: [], insertions: 0, deletions: 0 },
+  unstaged: { files: [], insertions: 0, deletions: 0 },
+};
+
 const baseLocalStatus: VcsStatusLocalResult = {
   isRepo: true,
   sourceControlProvider: {
@@ -31,7 +39,7 @@ const baseLocalStatus: VcsStatusLocalResult = {
   isDefaultRef: false,
   refName: "feature/status-broadcast",
   hasWorkingTreeChanges: false,
-  workingTree: { files: [], insertions: 0, deletions: 0 },
+  workingTree: emptyWorkingTree,
 };
 
 const baseRemoteStatus: VcsStatusRemoteResult = {

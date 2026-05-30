@@ -1031,6 +1031,24 @@ describe("WorkspaceFilePreviewPanel", () => {
     }
   });
 
+  it("calls the return handler when a source control return target is present", async () => {
+    const onReturn = vi.fn();
+    const returnTarget = {
+      kind: "source-control",
+    } satisfies WorkspaceFilePreviewReturnTarget;
+    const mounted = await renderPreview({
+      contents: DEFAULT_CONTENTS,
+      onReturn,
+      returnTarget,
+    });
+    try {
+      await page.getByRole("button", { name: "Back to source control" }).click();
+      expect(onReturn).toHaveBeenCalledWith(returnTarget);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("places the return button before the file icon", async () => {
     const onReturn = vi.fn();
     const returnTarget = {

@@ -23,8 +23,10 @@ import {
   type VcsListRefsResult,
   type VcsPullResult,
   type VcsRemoveWorktreeInput,
+  type VcsStageFilesInput,
   type VcsStatusInput,
   type VcsStatusResult,
+  type VcsUnstageFilesInput,
   type VcsWorkingTreeDiffInput,
   type VcsWorkingTreeDiffResult,
 } from "@t3tools/contracts";
@@ -165,6 +167,14 @@ export interface GitVcsDriverShape {
   readonly readWorkingTreeDiff: (
     input: VcsWorkingTreeDiffInput,
   ) => Effect.Effect<VcsWorkingTreeDiffResult, GitCommandError>;
+  readonly stageFiles: (input: VcsStageFilesInput) => Effect.Effect<void, GitCommandError>;
+  readonly unstageFiles: (input: VcsUnstageFilesInput) => Effect.Effect<void, GitCommandError>;
+  readonly readStagedCommitContext: (
+    cwd: string,
+  ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
+  readonly readCommitPreviewContext: (
+    cwd: string,
+  ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
   readonly prepareCommitContext: (
     cwd: string,
     filePaths?: readonly string[],

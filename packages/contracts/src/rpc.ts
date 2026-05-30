@@ -11,6 +11,8 @@ import {
 } from "./filesystem.ts";
 import {
   GitActionProgressEvent,
+  GenerateCommitMessageInput,
+  GenerateCommitMessageResult,
   VcsSwitchRefInput,
   VcsSwitchRefResult,
   GitCommandError,
@@ -33,8 +35,11 @@ import {
   VcsWorkingTreeDiffInput,
   VcsWorkingTreeDiffResult,
   VcsStatusInput,
+  VcsStatusLocalResult,
   VcsStatusResult,
   VcsStatusStreamEvent,
+  VcsStageFilesInput,
+  VcsUnstageFilesInput,
 } from "./git.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
@@ -135,6 +140,8 @@ export const WS_METHODS = {
   // VCS methods
   vcsPull: "vcs.pull",
   vcsRefreshStatus: "vcs.refreshStatus",
+  vcsStageFiles: "vcs.stageFiles",
+  vcsUnstageFiles: "vcs.unstageFiles",
   vcsGetWorkingTreeDiff: "vcs.getWorkingTreeDiff",
   vcsListRefs: "vcs.listRefs",
   vcsCreateWorktree: "vcs.createWorktree",
@@ -145,6 +152,7 @@ export const WS_METHODS = {
 
   // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
+  gitGenerateCommitMessage: "git.generateCommitMessage",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
@@ -389,6 +397,18 @@ export const WsVcsRefreshStatusRpc = Rpc.make(WS_METHODS.vcsRefreshStatus, {
   error: GitManagerServiceError,
 });
 
+export const WsVcsStageFilesRpc = Rpc.make(WS_METHODS.vcsStageFiles, {
+  payload: VcsStageFilesInput,
+  success: VcsStatusLocalResult,
+  error: GitManagerServiceError,
+});
+
+export const WsVcsUnstageFilesRpc = Rpc.make(WS_METHODS.vcsUnstageFiles, {
+  payload: VcsUnstageFilesInput,
+  success: VcsStatusLocalResult,
+  error: GitManagerServiceError,
+});
+
 export const WsVcsGetWorkingTreeDiffRpc = Rpc.make(WS_METHODS.vcsGetWorkingTreeDiff, {
   payload: VcsWorkingTreeDiffInput,
   success: VcsWorkingTreeDiffResult,
@@ -400,6 +420,12 @@ export const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction,
   success: GitActionProgressEvent,
   error: GitManagerServiceError,
   stream: true,
+});
+
+export const WsGitGenerateCommitMessageRpc = Rpc.make(WS_METHODS.gitGenerateCommitMessage, {
+  payload: GenerateCommitMessageInput,
+  success: GenerateCommitMessageResult,
+  error: GitManagerServiceError,
 });
 
 export const WsGitResolvePullRequestRpc = Rpc.make(WS_METHODS.gitResolvePullRequest, {
@@ -615,8 +641,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeVcsStatusRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
+  WsVcsStageFilesRpc,
+  WsVcsUnstageFilesRpc,
   WsVcsGetWorkingTreeDiffRpc,
   WsGitRunStackedActionRpc,
+  WsGitGenerateCommitMessageRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsVcsListRefsRpc,

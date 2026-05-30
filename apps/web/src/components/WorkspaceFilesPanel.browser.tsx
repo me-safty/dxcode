@@ -14,6 +14,7 @@ import {
   __setEnvironmentApiOverrideForTests,
 } from "../environmentApi";
 import {
+  __readWorkspaceFilePanelStateForTests,
   __resetWorkspaceFilePanelStateForTests,
   openWorkspaceFileExplorer,
   openWorkspaceFilePreview,
@@ -86,6 +87,13 @@ vi.mock("./ui/toast", () => ({
     add: toastAddMock,
   },
 }));
+
+vi.mock("./SourceControlPanel", async () => {
+  const React = await import("react");
+  return {
+    default: () => React.createElement("div", null, "Source control panel"),
+  };
+});
 
 vi.mock("@pierre/diffs/react", async () => {
   const React = await import("react");
@@ -291,6 +299,15 @@ describe("WorkspaceFilesPanel", () => {
             { path: "README.md", status: "untracked", insertions: 0, deletions: 0 },
           ],
           insertions: 5,
+          staged: { files: [], insertions: 0, deletions: 0 },
+          unstaged: {
+            deletions: 1,
+            files: [
+              { path: "src/App.tsx", status: "modified", insertions: 5, deletions: 1 },
+              { path: "README.md", status: "untracked", insertions: 0, deletions: 0 },
+            ],
+            insertions: 5,
+          },
         },
       },
       error: null,
@@ -426,6 +443,34 @@ describe("WorkspaceFilesPanel", () => {
       await page.getByPlaceholder("Search files").fill("");
       await expect.element(page.getByRole("button", { name: /^src$/ })).toBeVisible();
       await expect.element(page.getByRole("button", { name: /^App\.tsx$/ })).toBeVisible();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("returns source control file previews to the source control panel", async () => {
+    __setEnvironmentApiOverrideForTests(ENVIRONMENT_ID, createMockEnvironmentApi());
+    const mounted = await renderFilesPanel({
+      initialize: () =>
+        openWorkspaceFilePreview(
+          {
+            environmentId: ENVIRONMENT_ID,
+            cwd: WORKSPACE_ROOT,
+            relativePath: "src/App.tsx",
+            displayPath: "src/App.tsx",
+          },
+          { returnTarget: { kind: "source-control" } },
+        ),
+    });
+    try {
+      await expect.element(page.getByText("export const component = true;")).toBeInTheDocument();
+      await page.getByRole("button", { name: "Back to source control" }).click();
+
+      await expect.element(page.getByText("Source control panel")).toBeVisible();
+      expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+        open: true,
+        view: "source-control",
+      });
     } finally {
       await mounted.cleanup();
     }

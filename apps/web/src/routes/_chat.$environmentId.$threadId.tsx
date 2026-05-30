@@ -32,6 +32,11 @@ import {
   type WorkspaceFilePreviewDiffReturnTarget,
   useWorkspaceFilePanelState,
 } from "../workspaceFilePreview";
+import {
+  closeSourceControlPanel,
+  openSourceControlPanel,
+  useSourceControlPanelState,
+} from "../sourceControlPanelState";
 
 const MISSING_THREAD_ROUTE_RECOVERY_GRACE_MS = 3_000;
 
@@ -68,6 +73,7 @@ function ChatThreadRouteView() {
   const diffOpen = search.diff === "1";
   const filePanel = useWorkspaceFilePanelState();
   const filePanelOpen = filePanel.open;
+  const sourceControlOpen = useSourceControlPanelState().open;
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
   const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
@@ -184,10 +190,10 @@ function ChatThreadRouteView() {
   ]);
 
   useEffect(() => {
-    if (filePanelOpen) {
+    if (filePanelOpen && !sourceControlOpen) {
       markRightPanelUsed("file");
     }
-  }, [filePanelOpen]);
+  }, [filePanelOpen, sourceControlOpen]);
 
   useRegisterRightPanel({
     close: closeDiff,
@@ -201,6 +207,12 @@ function ChatThreadRouteView() {
     kind: "file",
     open: openFilePreview,
   });
+  useRegisterRightPanel({
+    close: closeSourceControlPanel,
+    enabled: threadRef !== null,
+    kind: "source-control",
+    open: openSourceControlPanel,
+  });
 
   useMobileEdgeSwipe({
     blockedByOpenPanelSide: "left",
@@ -209,6 +221,15 @@ function ChatThreadRouteView() {
     side: "right",
     startArea: "screen",
     startSurface: "outside-panels",
+  });
+
+  useMobileEdgeSwipe({
+    action: "close",
+    enabled: shouldUseDiffSheet && sourceControlOpen,
+    onSwipe: closeSourceControlPanel,
+    side: "right",
+    startArea: "screen",
+    startSurface: "panel",
   });
 
   useMobileEdgeSwipe({
@@ -222,7 +243,7 @@ function ChatThreadRouteView() {
 
   useMobileEdgeSwipe({
     action: "close",
-    enabled: shouldUseDiffSheet && filePanelOpen,
+    enabled: shouldUseDiffSheet && filePanelOpen && !sourceControlOpen,
     onSwipe: closeWorkspaceFilePreview,
     side: "right",
     startArea: "screen",

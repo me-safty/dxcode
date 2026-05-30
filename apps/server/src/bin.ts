@@ -9,25 +9,14 @@ import packageJson from "../package.json" with { type: "json" };
 import { authCommand } from "./cli/auth.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
-import {
-  localCommand,
-  runLocalServerCommand,
-  runServerCommand,
-  serveCommand,
-  startCommand,
-} from "./cli/server.ts";
+import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 
 export const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
-export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
+export const cli = Command.make("salchi", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the Salchi server."),
   Command.withHandler((flags) => runServerCommand(flags)),
-  Command.withSubcommands([startCommand, serveCommand, localCommand, authCommand, projectCommand]),
-);
-
-export const t3localCli = Command.make("t3local", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run Salchi privately over HTTPS with Tailscale Serve."),
-  Command.withHandler((flags) => runLocalServerCommand(flags)),
+  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),
 );
 
 if (import.meta.main) {

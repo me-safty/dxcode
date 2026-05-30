@@ -588,10 +588,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
-  it.effect("applies t3local Tailscale Serve defaults after env values", () =>
+  it.effect("binds to loopback by default when Tailscale Serve is enabled", () =>
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
-      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-local-defaults");
+      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-tailscale-loopback-default");
       const derivedPaths = yield* deriveServerPaths(baseDir, undefined);
 
       const resolved = yield* resolveServerConfig(
@@ -606,16 +606,12 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           bootstrapFd: Option.none(),
           autoBootstrapProjectFromCwd: Option.none(),
           logWebSocketEvents: Option.none(),
-          tailscaleServeEnabled: Option.none(),
+          tailscaleServeEnabled: Option.some(true),
           tailscaleServePort: Option.none(),
         },
         Option.none(),
         {
-          startupPresentation: "headless",
-          forceAutoBootstrapProjectFromCwd: false,
-          defaultHost: "127.0.0.1",
-          defaultTailscaleServeEnabled: true,
-          defaultTailscaleServePort: 443,
+          startupPresentation: "browser",
         },
       ).pipe(
         Effect.provide(
@@ -637,13 +633,66 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         host: "127.0.0.1",
         staticDir: resolved.staticDir,
         devUrl: undefined,
-        noBrowser: true,
-        startupPresentation: "headless",
+        noBrowser: false,
+        startupPresentation: "browser",
         desktopBootstrapToken: undefined,
-        autoBootstrapProjectFromCwd: false,
+        autoBootstrapProjectFromCwd: true,
         logWebSocketEvents: false,
         tailscaleServeEnabled: true,
         tailscaleServePort: 443,
+      });
+    }),
+  );
+
+  it.effect("preserves explicit hosts when Tailscale Serve is enabled", () =>
+    Effect.gen(function* () {
+      const { join } = yield* Path.Path;
+      const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-tailscale-explicit-host");
+      const derivedPaths = yield* deriveServerPaths(baseDir, undefined);
+
+      const resolved = yield* resolveServerConfig(
+        {
+          mode: Option.some("web"),
+          port: Option.some(3773),
+          host: Option.some("0.0.0.0"),
+          baseDir: Option.some(baseDir),
+          cwd: Option.none(),
+          devUrl: Option.none(),
+          noBrowser: Option.none(),
+          bootstrapFd: Option.none(),
+          autoBootstrapProjectFromCwd: Option.none(),
+          logWebSocketEvents: Option.none(),
+          tailscaleServeEnabled: Option.some(true),
+          tailscaleServePort: Option.some(8443),
+        },
+        Option.none(),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+            NetService.layer,
+          ),
+        ),
+      );
+
+      expect(resolved).toEqual({
+        logLevel: "Info",
+        ...defaultObservabilityConfig,
+        mode: "web",
+        port: 3773,
+        cwd: process.cwd(),
+        baseDir,
+        ...derivedPaths,
+        host: "0.0.0.0",
+        staticDir: resolved.staticDir,
+        devUrl: undefined,
+        noBrowser: false,
+        startupPresentation: "browser",
+        desktopBootstrapToken: undefined,
+        autoBootstrapProjectFromCwd: true,
+        logWebSocketEvents: false,
+        tailscaleServeEnabled: true,
+        tailscaleServePort: 8443,
       });
     }),
   );

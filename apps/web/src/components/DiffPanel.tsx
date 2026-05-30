@@ -8,6 +8,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   Columns2Icon,
+  GitBranchIcon,
   PanelRightCloseIcon,
   PilcrowIcon,
   Rows3Icon,
@@ -47,6 +48,7 @@ import {
 } from "../threadRoutes";
 import { useSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
+import { openRightPanel } from "../rightPanelGesture";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { Button } from "./ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
@@ -942,6 +944,15 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         >
           <PilcrowIcon className="size-3" />
         </Toggle>
+        <Button
+          size="icon-xs"
+          variant="outline"
+          aria-label="Open source control"
+          title="Source control"
+          onClick={() => openRightPanel("source-control")}
+        >
+          <GitBranchIcon className="size-3" />
+        </Button>
         {mode === "sheet" ? (
           <Button
             size="icon-xs"

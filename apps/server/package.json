@@ -1,6 +1,7 @@
 {
-  "name": "t3",
+  "name": "salchi",
   "version": "0.0.24",
+  "description": "Minimal web GUI for coding agents.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -8,8 +9,7 @@
     "directory": "apps/server"
   },
   "bin": {
-    "t3": "./dist/bin.mjs",
-    "t3local": "./dist/bin-local.mjs"
+    "salchi": "./dist/bin.mjs"
   },
   "files": [
     "dist"

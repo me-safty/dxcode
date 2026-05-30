@@ -35,11 +35,13 @@ import {
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
+import { useIsMutating } from "@tanstack/react-query";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
+import { gitMutationKeys } from "~/lib/gitReactQuery";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
@@ -105,7 +107,8 @@ import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useMobileEdgeSwipe } from "../hooks/useMobileEdgeSwipe";
-import { markRightPanelUsed, useRegisterRightPanel } from "../rightPanelGesture";
+import { markRightPanelUsed, openRightPanel, useRegisterRightPanel } from "../rightPanelGesture";
+import { closeSourceControlPanel, useSourceControlPanelState } from "../sourceControlPanelState";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
   closeWorkspaceFilePreview,
@@ -114,6 +117,7 @@ import {
   useWorkspaceFilePanelState,
 } from "../workspaceFilePreview";
 import { BranchToolbar } from "./BranchToolbar";
+import { resolveLiveThreadBranchUpdate } from "./GitActionsControl.logic";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
@@ -701,6 +705,7 @@ export default function ChatView(props: ChatViewProps) {
     ),
   );
   const setStoreThreadError = useStore((store) => store.setError);
+  const setThreadBranch = useStore((store) => store.setThreadBranch);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const settings = useSettings();
   const setStickyComposerModelSelection = useComposerDraftStore(
@@ -906,6 +911,7 @@ export default function ChatView(props: ChatViewProps) {
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const diffOpen = rawSearch.diff === "1";
+  const sourceControlOpen = useSourceControlPanelState().open;
   const activeThreadId = activeThread?.id ?? null;
   const activeThreadRef = useMemo(
     () => (activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null),
@@ -1749,6 +1755,18 @@ export default function ChatView(props: ChatViewProps) {
       })
     : null;
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
+  const isRunStackedGitActionRunning =
+    useIsMutating({
+      mutationKey: gitMutationKeys.runStackedAction(environmentId, gitCwd),
+    }) > 0;
+  const isPullGitActionRunning =
+    useIsMutating({ mutationKey: gitMutationKeys.pull(environmentId, gitCwd) }) > 0;
+  const isPublishGitActionRunning =
+    useIsMutating({
+      mutationKey: gitMutationKeys.publishRepository(environmentId, gitCwd),
+    }) > 0;
+  const isGitActionRunning =
+    isRunStackedGitActionRunning || isPullGitActionRunning || isPublishGitActionRunning;
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
   // Prefer an instance-id match so a custom Codex instance (e.g.
@@ -1789,6 +1807,63 @@ export default function ChatView(props: ChatViewProps) {
       : (storeServerTerminalLaunchContext ?? null);
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const isSelectingWorktreeBase =
+    !serverThread && draftThread?.envMode === "worktree" && draftThread.worktreePath === null;
+  useEffect(() => {
+    if (isGitActionRunning || isSelectingWorktreeBase || !activeThreadRef) {
+      return;
+    }
+
+    const branchUpdate = resolveLiveThreadBranchUpdate({
+      threadBranch: serverThread?.branch ?? draftThread?.branch ?? null,
+      gitStatus: gitStatusQuery.data ?? null,
+    });
+    if (!branchUpdate) {
+      return;
+    }
+
+    if (serverThread) {
+      if (serverThread.branch === branchUpdate.branch) {
+        return;
+      }
+
+      const worktreePath = serverThread.worktreePath;
+      const api = readEnvironmentApi(activeThreadRef.environmentId);
+      if (api) {
+        void api.orchestration
+          .dispatchCommand({
+            type: "thread.meta.update",
+            commandId: newCommandId(),
+            threadId: activeThreadRef.threadId,
+            branch: branchUpdate.branch,
+            worktreePath,
+          })
+          .catch(() => undefined);
+      }
+
+      setThreadBranch(activeThreadRef, branchUpdate.branch, worktreePath);
+      return;
+    }
+
+    if (!draftThread || draftThread.branch === branchUpdate.branch) {
+      return;
+    }
+
+    setDraftThreadContext(draftId ?? activeThreadRef, {
+      branch: branchUpdate.branch,
+      worktreePath: draftThread.worktreePath,
+    });
+  }, [
+    activeThreadRef,
+    draftId,
+    draftThread,
+    gitStatusQuery.data,
+    isGitActionRunning,
+    isSelectingWorktreeBase,
+    serverThread,
+    setDraftThreadContext,
+    setThreadBranch,
+  ]);
   const fileExplorerAvailable = activeWorkspaceRoot !== undefined;
   const fileExplorerOpen = filePanelState.open && filePanelState.view === "explorer";
   const toggleFileExplorerSidebar = useCallback(() => {
@@ -1846,12 +1921,18 @@ export default function ChatView(props: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
+  const sourceControlShortcutLabel = useMemo(
+    () =>
+      shortcutLabelForCommand(keybindings, "sourceControl.toggle", nonTerminalShortcutLabelOptions),
+    [keybindings, nonTerminalShortcutLabelOptions],
+  );
   const onToggleDiff = useCallback(() => {
     if (routeKind === "server" && !isServerThread) {
       return;
     }
     if (!diffOpen) {
       closeWorkspaceFilePreview();
+      closeSourceControlPanel();
       onDiffPanelOpen?.();
     }
 
@@ -1894,6 +1975,16 @@ export default function ChatView(props: ChatViewProps) {
     routeKind,
     threadId,
   ]);
+
+  const onToggleSourceControl = useCallback(() => {
+    if (sourceControlOpen) {
+      closeSourceControlPanel();
+      return;
+    }
+    setPlanSidebarOpen(false);
+    // Opens the source control panel and closes any other registered right panel.
+    openRightPanel("source-control");
+  }, [sourceControlOpen]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -2385,6 +2476,7 @@ export default function ChatView(props: ChatViewProps) {
   const openPlanSidebar = useCallback(() => {
     planSidebarDismissedForTurnRef.current = null;
     closeWorkspaceFilePreview();
+    closeSourceControlPanel();
     markRightPanelUsed("plan");
     setPlanSidebarOpen(true);
   }, []);
@@ -2396,6 +2488,7 @@ export default function ChatView(props: ChatViewProps) {
       } else {
         planSidebarDismissedForTurnRef.current = null;
         closeWorkspaceFilePreview();
+        closeSourceControlPanel();
         markRightPanelUsed("plan");
       }
       return !open;
@@ -2974,6 +3067,13 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "sourceControl.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleSourceControl();
+        return;
+      }
+
       if (command === "modelPicker.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -3003,6 +3103,7 @@ export default function ChatView(props: ChatViewProps) {
     splitTerminal,
     keybindings,
     onToggleDiff,
+    onToggleSourceControl,
     toggleTerminalVisibility,
   ]);
 
@@ -4086,8 +4187,10 @@ export default function ChatView(props: ChatViewProps) {
           terminalOpen={terminalState.terminalOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
+          sourceControlToggleShortcutLabel={sourceControlShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
+          sourceControlOpen={sourceControlOpen}
           fileExplorerAvailable={fileExplorerAvailable}
           fileExplorerOpen={fileExplorerOpen}
           onRunProjectScript={runProjectScript}
@@ -4097,6 +4200,7 @@ export default function ChatView(props: ChatViewProps) {
           onToggleFileExplorer={toggleFileExplorerSidebar}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
+          onToggleSourceControl={onToggleSourceControl}
         />
       </header>
 

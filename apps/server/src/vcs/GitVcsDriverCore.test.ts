@@ -137,6 +137,37 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("splits staged and unstaged working tree status", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "partial.txt", "base\n");
+        yield* writeTextFile(cwd, "rename-source.txt", "rename me\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "add split fixtures"]);
+
+        yield* writeTextFile(cwd, "partial.txt", "base\nstaged\n");
+        yield* git(cwd, ["add", "partial.txt"]);
+        yield* writeTextFile(cwd, "partial.txt", "base\nstaged\nunstaged\n");
+        yield* writeTextFile(cwd, "untracked.txt", "untracked\n");
+        yield* git(cwd, ["mv", "rename-source.txt", "rename-target.txt"]);
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+        const stagedStatusesByPath = new Map(
+          status.workingTree.staged.files.map((file) => [file.path, file.status]),
+        );
+        const unstagedStatusesByPath = new Map(
+          status.workingTree.unstaged.files.map((file) => [file.path, file.status]),
+        );
+
+        assert.equal(stagedStatusesByPath.get("partial.txt"), "modified");
+        assert.equal(unstagedStatusesByPath.get("partial.txt"), "modified");
+        assert.equal(stagedStatusesByPath.get("rename-target.txt"), "renamed");
+        assert.equal(unstagedStatusesByPath.get("untracked.txt"), "untracked");
+        assert.equal(stagedStatusesByPath.has("untracked.txt"), false);
+      }),
+    );
+
     it.effect("reports default-branch delta separately from upstream delta", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -238,6 +269,73 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(status.aheadCount, 1);
         assert.equal(status.behindCount, 0);
         assert.equal(status.aheadOfDefaultCount, 1);
+      }),
+    );
+  });
+
+  describe("staging operations", () => {
+    it.effect("stages requested files", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "stage-me.txt", "stage me\n");
+        yield* driver.stageFiles({ cwd, filePaths: ["stage-me.txt"] });
+
+        const status = yield* driver.statusDetails(cwd);
+        assert.include(
+          status.workingTree.staged.files.map((file) => file.path),
+          "stage-me.txt",
+        );
+        assert.notInclude(
+          status.workingTree.unstaged.files.map((file) => file.path),
+          "stage-me.txt",
+        );
+      }),
+    );
+
+    it.effect("unstages requested files with an existing HEAD", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "unstage-me.txt", "unstage me\n");
+        yield* git(cwd, ["add", "unstage-me.txt"]);
+        yield* driver.unstageFiles({ cwd, filePaths: ["unstage-me.txt"] });
+
+        const status = yield* driver.statusDetails(cwd);
+        assert.notInclude(
+          status.workingTree.staged.files.map((file) => file.path),
+          "unstage-me.txt",
+        );
+        assert.include(
+          status.workingTree.unstaged.files.map((file) => file.path),
+          "unstage-me.txt",
+        );
+      }),
+    );
+
+    it.effect("unstages requested files before the first commit", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* driver.initRepo({ cwd });
+        yield* writeTextFile(cwd, "first.txt", "first\n");
+        yield* git(cwd, ["add", "first.txt"]);
+        yield* driver.unstageFiles({ cwd, filePaths: ["first.txt"] });
+
+        const status = yield* driver.statusDetails(cwd);
+        assert.notInclude(
+          status.workingTree.staged.files.map((file) => file.path),
+          "first.txt",
+        );
+        assert.include(
+          status.workingTree.unstaged.files.map((file) => file.path),
+          "first.txt",
+        );
       }),
     );
   });

@@ -1,9 +1,10 @@
 import type { ProjectEntry } from "@t3tools/contracts";
 import { FileIcon, PanelRightCloseIcon } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useMemo, useRef, useState } from "react";
 
 import { useComposerHandleContext } from "../composerHandleContext";
 import { formatWorkspaceRelativePath } from "../filePathDisplay";
+import { closeSourceControlPanel, openSourceControlPanel } from "../sourceControlPanelState";
 import type { WorkspaceFilePreviewDiffReturnTarget } from "../workspaceFilePreview";
 import {
   closeWorkspaceFilePreview,
@@ -14,11 +15,18 @@ import {
   useWorkspaceFilePanelState,
   type WorkspaceFileExplorerContext,
 } from "../workspaceFilePreview";
-import { DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
+import {
+  DiffPanelHeaderSkeleton,
+  DiffPanelLoadingState,
+  DiffPanelShell,
+  type DiffPanelMode,
+} from "./DiffPanelShell";
 import { WorkspaceFileExplorerPanel } from "./WorkspaceFileExplorerPanel";
 import { WorkspaceFilePreviewPanel } from "./WorkspaceFilePreviewPanel";
 import { Button } from "./ui/button";
 import { toastManager } from "./ui/toast";
+
+const SourceControlPanel = lazy(() => import("./SourceControlPanel"));
 
 interface ExplorerViewState {
   readonly contextKey: string | null;
@@ -81,6 +89,23 @@ function WorkspaceFilesUnavailablePanel(props: { mode: DiffPanelMode }) {
         No workspace is available for file browsing.
       </div>
     </DiffPanelShell>
+  );
+}
+
+function SourceControlLoadingFallback(props: { mode: DiffPanelMode }) {
+  return (
+    <DiffPanelShell mode={props.mode} header={<DiffPanelHeaderSkeleton />}>
+      <DiffPanelLoadingState label="Loading source control..." />
+    </DiffPanelShell>
+  );
+}
+
+function LazySourceControlPanel(props: { mode: DiffPanelMode }) {
+  const sourceControlMode = props.mode === "sheet" ? "sheet" : "sidebar";
+  return (
+    <Suspense fallback={<SourceControlLoadingFallback mode={props.mode} />}>
+      <SourceControlPanel mode={sourceControlMode} onClose={closeSourceControlPanel} />
+    </Suspense>
   );
 }
 
@@ -210,10 +235,18 @@ export function WorkspaceFilesPanel(props: {
         }
         return;
       }
+      if (returnTarget.kind === "source-control") {
+        openSourceControlPanel();
+        return;
+      }
       onReturnToDiff(returnTarget);
     },
     [explorerContext, onReturnToDiff],
   );
+
+  if (filePanel.view === "source-control") {
+    return <LazySourceControlPanel mode={mode} />;
+  }
 
   if (filePanel.view === "explorer") {
     if (!explorerContext) {

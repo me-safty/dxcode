@@ -16,6 +16,7 @@ import * as environmentApi from "../environmentApi";
 
 import {
   gitBranchSearchInfiniteQueryOptions,
+  gitGenerateCommitMessageMutationOptions,
   gitMutationKeys,
   gitPreparePullRequestThreadMutationOptions,
   gitPullMutationOptions,
@@ -23,6 +24,8 @@ import {
   gitRunStackedActionMutationOptions,
   gitWorkingTreeDiffQueryOptions,
   invalidateGitQueries,
+  vcsStageFilesMutationOptions,
+  vcsUnstageFilesMutationOptions,
 } from "./gitReactQuery";
 
 const BRANCH_QUERY_RESULT: VcsListRefsResult = {
@@ -57,9 +60,24 @@ describe("gitMutationKeys", () => {
     );
   });
 
+  it("scopes generated commit message keys by cwd", () => {
+    expect(gitMutationKeys.generateCommitMessage(ENVIRONMENT_A, "/repo/a")).not.toEqual(
+      gitMutationKeys.generateCommitMessage(ENVIRONMENT_A, "/repo/b"),
+    );
+  });
+
   it("scopes pull request thread preparation keys by cwd", () => {
     expect(gitMutationKeys.preparePullRequestThread(ENVIRONMENT_A, "/repo/a")).not.toEqual(
       gitMutationKeys.preparePullRequestThread(ENVIRONMENT_A, "/repo/b"),
+    );
+  });
+
+  it("scopes stage and unstage keys by cwd", () => {
+    expect(gitMutationKeys.stageFiles(ENVIRONMENT_A, "/repo/a")).not.toEqual(
+      gitMutationKeys.stageFiles(ENVIRONMENT_A, "/repo/b"),
+    );
+    expect(gitMutationKeys.unstageFiles(ENVIRONMENT_A, "/repo/a")).not.toEqual(
+      gitMutationKeys.unstageFiles(ENVIRONMENT_A, "/repo/b"),
     );
   });
 });
@@ -126,6 +144,16 @@ describe("git mutation options", () => {
     expect(options.mutationKey).toEqual(gitMutationKeys.pull(ENVIRONMENT_A, "/repo/a"));
   });
 
+  it("attaches cwd-scoped mutation key for generated commit messages", () => {
+    const options = gitGenerateCommitMessageMutationOptions({
+      environmentId: ENVIRONMENT_A,
+      cwd: "/repo/a",
+    });
+    expect(options.mutationKey).toEqual(
+      gitMutationKeys.generateCommitMessage(ENVIRONMENT_A, "/repo/a"),
+    );
+  });
+
   it("attaches cwd-scoped mutation key for preparePullRequestThread", () => {
     const options = gitPreparePullRequestThreadMutationOptions({
       environmentId: ENVIRONMENT_A,
@@ -135,6 +163,48 @@ describe("git mutation options", () => {
     expect(options.mutationKey).toEqual(
       gitMutationKeys.preparePullRequestThread(ENVIRONMENT_A, "/repo/a"),
     );
+  });
+
+  it("attaches cwd-scoped mutation keys for stage operations", () => {
+    expect(
+      vcsStageFilesMutationOptions({
+        environmentId: ENVIRONMENT_A,
+        cwd: "/repo/a",
+        queryClient,
+      }).mutationKey,
+    ).toEqual(gitMutationKeys.stageFiles(ENVIRONMENT_A, "/repo/a"));
+    expect(
+      vcsUnstageFilesMutationOptions({
+        environmentId: ENVIRONMENT_A,
+        cwd: "/repo/a",
+        queryClient,
+      }).mutationKey,
+    ).toEqual(gitMutationKeys.unstageFiles(ENVIRONMENT_A, "/repo/a"));
+  });
+
+  it("forwards stage operations to the environment API", async () => {
+    const stageFiles = vi.fn().mockResolvedValue(null);
+    const unstageFiles = vi.fn().mockResolvedValue(null);
+    vi.mocked(environmentApi.ensureEnvironmentApi).mockReturnValue({
+      vcs: {
+        stageFiles,
+        unstageFiles,
+      },
+    } as unknown as EnvironmentApi);
+
+    await vcsStageFilesMutationOptions({
+      environmentId: ENVIRONMENT_A,
+      cwd: "/repo/a",
+      queryClient,
+    }).mutationFn?.({ filePaths: ["src/app.ts"] }, undefined as never);
+    await vcsUnstageFilesMutationOptions({
+      environmentId: ENVIRONMENT_A,
+      cwd: "/repo/a",
+      queryClient,
+    }).mutationFn?.({ filePaths: ["src/app.ts"] }, undefined as never);
+
+    expect(stageFiles).toHaveBeenCalledWith({ cwd: "/repo/a", filePaths: ["src/app.ts"] });
+    expect(unstageFiles).toHaveBeenCalledWith({ cwd: "/repo/a", filePaths: ["src/app.ts"] });
   });
 });
 

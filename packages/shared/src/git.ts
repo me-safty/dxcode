@@ -205,6 +205,13 @@ const EMPTY_GIT_STATUS_REMOTE: VcsStatusRemoteResult = {
   aheadOfDefaultCount: 0,
   pr: null,
 };
+const EMPTY_WORKING_TREE: VcsStatusLocalResult["workingTree"] = {
+  files: [],
+  insertions: 0,
+  deletions: 0,
+  staged: { files: [], insertions: 0, deletions: 0 },
+  unstaged: { files: [], insertions: 0, deletions: 0 },
+};
 
 export function mergeGitStatusParts(
   local: VcsStatusLocalResult,
@@ -260,7 +267,7 @@ export function applyGitStatusStreamEvent(
             isDefaultRef: false,
             refName: null,
             hasWorkingTreeChanges: false,
-            workingTree: { files: [], insertions: 0, deletions: 0 },
+            workingTree: EMPTY_WORKING_TREE,
           },
           event.remote,
         );

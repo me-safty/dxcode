@@ -55,6 +55,16 @@ import { vi } from "vitest";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
+function emptyWorkingTree() {
+  return {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  };
+}
+
 import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
@@ -2718,7 +2728,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 isDefaultRef: true,
                 refName: "main",
                 hasWorkingTreeChanges: false,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
+                workingTree: emptyWorkingTree(),
               }),
             remoteStatus: () =>
               Effect.succeed({
@@ -2734,7 +2744,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 isDefaultRef: true,
                 refName: "main",
                 hasWorkingTreeChanges: false,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
+                workingTree: emptyWorkingTree(),
                 hasUpstream: true,
                 aheadCount: 0,
                 behindCount: 0,
@@ -2787,6 +2797,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 );
 
                 return result;
+              }),
+            generateCommitMessage: () =>
+              Effect.succeed({
+                subject: "feat: demo",
+                body: "",
+                commitMessage: "feat: demo",
               }),
             resolvePullRequest: () =>
               Effect.succeed({
@@ -2990,7 +3006,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 isDefaultRef: true,
                 refName: "main",
                 hasWorkingTreeChanges: true,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
+                workingTree: emptyWorkingTree(),
               }),
             remoteStatus: () =>
               Effect.sync(() => {
@@ -3011,7 +3027,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   isDefaultRef: true,
                   refName: "main",
                   hasWorkingTreeChanges: true,
-                  workingTree: { files: [], insertions: 0, deletions: 0 },
+                  workingTree: emptyWorkingTree(),
                   hasUpstream: true,
                   aheadCount: 0,
                   behindCount: 0,
@@ -3067,7 +3083,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 isDefaultRef: false,
                 refName: "feature/demo",
                 hasWorkingTreeChanges: true,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
+                workingTree: emptyWorkingTree(),
               }),
             remoteStatus: () =>
               Effect.sync(() => {
@@ -3088,7 +3104,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   isDefaultRef: false,
                   refName: "feature/demo",
                   hasWorkingTreeChanges: true,
-                  workingTree: { files: [], insertions: 0, deletions: 0 },
+                  workingTree: emptyWorkingTree(),
                   hasUpstream: true,
                   aheadCount: 0,
                   behindCount: 0,
@@ -3139,7 +3155,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 isDefaultRef: true,
                 refName: "main",
                 hasWorkingTreeChanges: false,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
+                workingTree: emptyWorkingTree(),
               }),
             remoteStatus: () =>
               Effect.sleep(Duration.seconds(2)).pipe(
@@ -3185,7 +3201,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   isDefaultRef: false,
                   refName: "feature/demo",
                   hasWorkingTreeChanges: false,
-                  workingTree: { files: [], insertions: 0, deletions: 0 },
+                  workingTree: emptyWorkingTree(),
                 }),
               remoteStatus: () =>
                 Effect.sleep(Duration.seconds(2)).pipe(
@@ -3264,7 +3280,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                       isDefaultRef: false,
                       refName: "feature/demo",
                       hasWorkingTreeChanges: false,
-                      workingTree: { files: [], insertions: 0, deletions: 0 },
+                      workingTree: emptyWorkingTree(),
                     }),
                   ),
                 ),
@@ -3996,11 +4012,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             isDefaultRef: false,
             refName: "t3code/bootstrap-refName",
             hasWorkingTreeChanges: false,
-            workingTree: {
-              files: [],
-              insertions: 0,
-              deletions: 0,
-            },
+            workingTree: emptyWorkingTree(),
             hasUpstream: true,
             aheadCount: 0,
             behindCount: 0,

@@ -11,6 +11,14 @@ import {
   resolveThreadBranchUpdate,
 } from "./GitActionsControl.logic";
 
+const emptyWorkingTree: VcsStatusResult["workingTree"] = {
+  files: [],
+  insertions: 0,
+  deletions: 0,
+  staged: { files: [], insertions: 0, deletions: 0 },
+  unstaged: { files: [], insertions: 0, deletions: 0 },
+};
+
 function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
   return {
     isRepo: true,
@@ -18,11 +26,7 @@ function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
     isDefaultRef: false,
     refName: "feature/test",
     hasWorkingTreeChanges: false,
-    workingTree: {
-      files: [],
-      insertions: 0,
-      deletions: 0,
-    },
+    workingTree: emptyWorkingTree,
     hasUpstream: true,
     aheadCount: 0,
     behindCount: 0,
@@ -477,6 +481,14 @@ describe("when: working tree has local changes", () => {
           ],
           insertions: 1,
           deletions: 0,
+          staged: { files: [], insertions: 0, deletions: 0 },
+          unstaged: {
+            files: [
+              { path: ".vercel/project.json", status: "modified", insertions: 1, deletions: 0 },
+            ],
+            insertions: 1,
+            deletions: 0,
+          },
         },
       }),
       false,

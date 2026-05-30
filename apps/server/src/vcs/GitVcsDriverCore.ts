@@ -61,7 +61,13 @@ const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitVcsDriver.GitStatusDetail
   branch: null,
   upstreamRef: null,
   hasWorkingTreeChanges: false,
-  workingTree: { files: [], insertions: 0, deletions: 0 },
+  workingTree: {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  },
   hasUpstream: false,
   aheadCount: 0,
   behindCount: 0,
@@ -165,6 +171,11 @@ interface ParsedPorcelainFileStatus {
   readonly status: VcsWorkingTreeFileStatus;
 }
 
+interface ParsedPorcelainFileStatuses {
+  readonly staged?: ParsedPorcelainFileStatus;
+  readonly unstaged?: ParsedPorcelainFileStatus;
+}
+
 function sliceAfterSpaceCount(value: string, spaceCount: number): string {
   let cursor = -1;
   for (let index = 0; index < spaceCount; index += 1) {
@@ -189,39 +200,128 @@ function parsePorcelainPathAfterFieldCount(
   return filePath.length > 0 ? filePath : null;
 }
 
-function statusFromPorcelainXY(xy: string): VcsWorkingTreeFileStatus {
-  if (xy.includes("D")) return "deleted";
-  if (xy.includes("A")) return "added";
-  return "modified";
+function statusFromPorcelainCode(code: string): VcsWorkingTreeFileStatus | null {
+  switch (code) {
+    case ".":
+    case " ":
+      return null;
+    case "D":
+      return "deleted";
+    case "A":
+      return "added";
+    case "R":
+      return "renamed";
+    case "C":
+      return "copied";
+    default:
+      return "modified";
+  }
 }
 
-function parsePorcelainFileStatus(line: string): ParsedPorcelainFileStatus | null {
+function statusToNameStatus(status: VcsWorkingTreeFileStatus): string {
+  switch (status) {
+    case "added":
+    case "untracked":
+      return "A";
+    case "deleted":
+      return "D";
+    case "renamed":
+      return "R";
+    case "copied":
+      return "C";
+    case "conflicted":
+      return "U";
+    case "modified":
+      return "M";
+  }
+}
+
+function parsePorcelainFileStatuses(line: string): ParsedPorcelainFileStatuses | null {
   if (line.startsWith("? ")) {
     const path = line.slice(2).trim();
-    return path.length > 0 ? { path, status: "untracked" } : null;
+    return path.length > 0 ? { unstaged: { path, status: "untracked" } } : null;
   }
 
   if (line.startsWith("u ")) {
     const path = parsePorcelainPathAfterFieldCount(line, 10);
-    return path ? { path, status: "conflicted" } : null;
+    return path ? { unstaged: { path, status: "conflicted" } } : null;
   }
 
   if (line.startsWith("1 ")) {
-    const xy = line.slice(2, 4);
+    const x = line.slice(2, 3);
+    const y = line.slice(3, 4);
     const path = parsePorcelainPathAfterFieldCount(line, 8);
-    return path ? { path, status: statusFromPorcelainXY(xy) } : null;
+    if (!path) return null;
+    const stagedStatus = statusFromPorcelainCode(x);
+    const unstagedStatus = statusFromPorcelainCode(y);
+    return {
+      ...(stagedStatus ? { staged: { path, status: stagedStatus } } : {}),
+      ...(unstagedStatus ? { unstaged: { path, status: unstagedStatus } } : {}),
+    };
   }
 
   if (line.startsWith("2 ")) {
-    const xy = line.slice(2, 4);
+    const x = line.slice(2, 3);
+    const y = line.slice(3, 4);
     const path = parsePorcelainPathAfterFieldCount(line, 9);
     if (!path) return null;
-    if (xy.includes("R")) return { path, status: "renamed" };
-    if (xy.includes("C")) return { path, status: "copied" };
-    return { path, status: statusFromPorcelainXY(xy) };
+    const stagedStatus = statusFromPorcelainCode(x);
+    const unstagedStatus = statusFromPorcelainCode(y);
+    return {
+      ...(stagedStatus ? { staged: { path, status: stagedStatus } } : {}),
+      ...(unstagedStatus ? { unstaged: { path, status: unstagedStatus } } : {}),
+    };
   }
 
   return null;
+}
+
+type WorkingTreeFile = GitVcsDriver.GitStatusDetails["workingTree"]["files"][number];
+type WorkingTreeChangeSet = GitVcsDriver.GitStatusDetails["workingTree"]["staged"];
+
+function buildWorkingTreeChangeSet(
+  statusesByPath: ReadonlyMap<string, VcsWorkingTreeFileStatus>,
+  stats: ReadonlyArray<{ path: string; insertions: number; deletions: number }>,
+): WorkingTreeChangeSet {
+  const statByPath = new Map<string, { insertions: number; deletions: number }>();
+  for (const entry of stats) {
+    const existing = statByPath.get(entry.path) ?? { insertions: 0, deletions: 0 };
+    existing.insertions += entry.insertions;
+    existing.deletions += entry.deletions;
+    statByPath.set(entry.path, existing);
+  }
+
+  let insertions = 0;
+  let deletions = 0;
+  const files: WorkingTreeFile[] = [];
+  const allPaths = new Set<string>([...statusesByPath.keys(), ...statByPath.keys()]);
+  for (const filePath of allPaths) {
+    const stat = statByPath.get(filePath) ?? { insertions: 0, deletions: 0 };
+    insertions += stat.insertions;
+    deletions += stat.deletions;
+    files.push({
+      path: filePath,
+      status: statusesByPath.get(filePath) ?? "modified",
+      insertions: stat.insertions,
+      deletions: stat.deletions,
+    });
+  }
+
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  return { files, insertions, deletions };
+}
+
+function mergeWorkingTreeChangeSets(
+  stagedStatusesByPath: ReadonlyMap<string, VcsWorkingTreeFileStatus>,
+  unstagedStatusesByPath: ReadonlyMap<string, VcsWorkingTreeFileStatus>,
+  stagedEntries: ReadonlyArray<{ path: string; insertions: number; deletions: number }>,
+  unstagedEntries: ReadonlyArray<{ path: string; insertions: number; deletions: number }>,
+): WorkingTreeChangeSet {
+  const statusesByPath = new Map<string, VcsWorkingTreeFileStatus>(unstagedStatusesByPath);
+  for (const [filePath, status] of stagedStatusesByPath) {
+    statusesByPath.set(filePath, status);
+  }
+  return buildWorkingTreeChangeSet(statusesByPath, [...stagedEntries, ...unstagedEntries]);
 }
 
 function parseBranchLine(line: string): { name: string; current: boolean } | null {
@@ -1305,7 +1405,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     let behindCount = 0;
     let aheadOfDefaultCount = 0;
     let hasWorkingTreeChanges = false;
-    const fileStatusByPath = new Map<string, VcsWorkingTreeFileStatus>();
+    const stagedStatusByPath = new Map<string, VcsWorkingTreeFileStatus>();
+    const unstagedStatusByPath = new Map<string, VcsWorkingTreeFileStatus>();
 
     for (const line of statusStdout.split(/\r?\n/g)) {
       if (line.startsWith("# branch.head ")) {
@@ -1327,9 +1428,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
       if (line.trim().length > 0 && !line.startsWith("#")) {
         hasWorkingTreeChanges = true;
-        const parsedStatus = parsePorcelainFileStatus(line);
-        if (parsedStatus) {
-          fileStatusByPath.set(parsedStatus.path, parsedStatus.status);
+        const parsedStatuses = parsePorcelainFileStatuses(line);
+        if (parsedStatuses?.staged) {
+          stagedStatusByPath.set(parsedStatuses.staged.path, parsedStatuses.staged.status);
+        }
+        if (parsedStatuses?.unstaged) {
+          unstagedStatusByPath.set(parsedStatuses.unstaged.path, parsedStatuses.unstaged.status);
         }
       }
     }
@@ -1361,34 +1465,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
     const stagedEntries = parseNumstatEntries(stagedNumstatStdout);
     const unstagedEntries = parseNumstatEntries(unstagedNumstatStdout);
-    const fileStatMap = new Map<string, { insertions: number; deletions: number }>();
-    for (const entry of [...stagedEntries, ...unstagedEntries]) {
-      const existing = fileStatMap.get(entry.path) ?? { insertions: 0, deletions: 0 };
-      existing.insertions += entry.insertions;
-      existing.deletions += entry.deletions;
-      fileStatMap.set(entry.path, existing);
-    }
-
-    let insertions = 0;
-    let deletions = 0;
-    const files = Array.from(fileStatMap.entries())
-      .map(([filePath, stat]) => {
-        insertions += stat.insertions;
-        deletions += stat.deletions;
-        return {
-          path: filePath,
-          status: fileStatusByPath.get(filePath) ?? "modified",
-          insertions: stat.insertions,
-          deletions: stat.deletions,
-        };
-      })
-      .toSorted((a, b) => a.path.localeCompare(b.path));
-
-    for (const [filePath, status] of fileStatusByPath) {
-      if (fileStatMap.has(filePath)) continue;
-      files.push({ path: filePath, status, insertions: 0, deletions: 0 });
-    }
-    files.sort((a, b) => a.path.localeCompare(b.path));
+    const staged = buildWorkingTreeChangeSet(stagedStatusByPath, stagedEntries);
+    const unstaged = buildWorkingTreeChangeSet(unstagedStatusByPath, unstagedEntries);
+    const combined = mergeWorkingTreeChangeSets(
+      stagedStatusByPath,
+      unstagedStatusByPath,
+      stagedEntries,
+      unstagedEntries,
+    );
 
     return {
       isRepo: true,
@@ -1398,9 +1482,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       upstreamRef,
       hasWorkingTreeChanges,
       workingTree: {
-        files,
-        insertions,
-        deletions,
+        files: combined.files,
+        insertions: combined.insertions,
+        deletions: combined.deletions,
+        staged,
+        unstaged,
       },
       hasUpstream: upstreamRef !== null,
       aheadCount,
@@ -1596,6 +1682,101 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return yield* program.pipe(Effect.ensuring(cleanupTempIndex));
   });
 
+  const stageFiles: GitVcsDriver.GitVcsDriverShape["stageFiles"] = Effect.fn("stageFiles")(
+    function* (input) {
+      yield* Effect.forEach(
+        chunkPathsForGitArgs(input.filePaths),
+        (chunk) => runGit("GitVcsDriver.stageFiles.add", input.cwd, ["add", "-A", "--", ...chunk]),
+        { discard: true },
+      );
+    },
+  );
+
+  const hasHeadCommit = Effect.fn("GitVcsDriver.hasHeadCommit")(function* (cwd: string) {
+    const result = yield* executeGit(
+      "GitVcsDriver.hasHeadCommit",
+      cwd,
+      ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+      { allowNonZeroExit: true, maxOutputBytes: 4_096 },
+    );
+    return result.exitCode === 0 && result.stdout.trim().length > 0;
+  });
+
+  const unstageFiles: GitVcsDriver.GitVcsDriverShape["unstageFiles"] = Effect.fn("unstageFiles")(
+    function* (input) {
+      const headExists = yield* hasHeadCommit(input.cwd);
+      yield* Effect.forEach(
+        chunkPathsForGitArgs(input.filePaths),
+        (chunk) =>
+          headExists
+            ? runGit("GitVcsDriver.unstageFiles.reset", input.cwd, ["reset", "-q", "--", ...chunk])
+            : runGit("GitVcsDriver.unstageFiles.rmCached", input.cwd, [
+                "rm",
+                "--cached",
+                "-r",
+                "--ignore-unmatch",
+                "--",
+                ...chunk,
+              ]),
+        { discard: true },
+      );
+    },
+  );
+
+  const readStagedCommitContext: GitVcsDriver.GitVcsDriverShape["readStagedCommitContext"] =
+    Effect.fn("readStagedCommitContext")(function* (cwd) {
+      const stagedSummary = yield* runGitStdout(
+        "GitVcsDriver.readStagedCommitContext.stagedSummary",
+        cwd,
+        ["diff", "--cached", "--name-status"],
+      ).pipe(Effect.map((stdout) => stdout.trim()));
+      if (stagedSummary.length === 0) {
+        return null;
+      }
+
+      const stagedPatch = yield* runGitStdoutWithOptions(
+        "GitVcsDriver.readStagedCommitContext.stagedPatch",
+        cwd,
+        ["diff", "--cached", "--patch", "--minimal"],
+        {
+          maxOutputBytes: PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES,
+          appendTruncationMarker: true,
+        },
+      );
+
+      return {
+        stagedSummary,
+        stagedPatch,
+      };
+    });
+
+  const readCommitPreviewContext: GitVcsDriver.GitVcsDriverShape["readCommitPreviewContext"] =
+    Effect.fn("readCommitPreviewContext")(function* (cwd) {
+      const stagedContext = yield* readStagedCommitContext(cwd);
+      if (stagedContext) {
+        return stagedContext;
+      }
+
+      const details = yield* readStatusDetailsLocal(cwd);
+      if (!details.hasWorkingTreeChanges || details.workingTree.files.length === 0) {
+        return null;
+      }
+
+      const stagedSummary = details.workingTree.files
+        .map((file) => `${statusToNameStatus(file.status)}\t${file.path}`)
+        .join("\n");
+      const { diff: stagedPatch } = yield* readWorkingTreeDiff({
+        cwd,
+        target: "all",
+        ignoreWhitespace: false,
+      });
+
+      return {
+        stagedSummary,
+        stagedPatch,
+      };
+    });
+
   const prepareCommitContext: GitVcsDriver.GitVcsDriverShape["prepareCommitContext"] = Effect.fn(
     "prepareCommitContext",
   )(function* (cwd, filePaths) {
@@ -1610,32 +1791,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ...filePaths,
       ]);
     } else {
+      const stagedContext = yield* readStagedCommitContext(cwd);
+      if (stagedContext) {
+        return stagedContext;
+      }
       yield* runGit("GitVcsDriver.prepareCommitContext.addAll", cwd, ["add", "-A"]);
     }
 
-    const stagedSummary = yield* runGitStdout(
-      "GitVcsDriver.prepareCommitContext.stagedSummary",
-      cwd,
-      ["diff", "--cached", "--name-status"],
-    ).pipe(Effect.map((stdout) => stdout.trim()));
-    if (stagedSummary.length === 0) {
-      return null;
-    }
-
-    const stagedPatch = yield* runGitStdoutWithOptions(
-      "GitVcsDriver.prepareCommitContext.stagedPatch",
-      cwd,
-      ["diff", "--cached", "--patch", "--minimal"],
-      {
-        maxOutputBytes: PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES,
-        appendTruncationMarker: true,
-      },
-    );
-
-    return {
-      stagedSummary,
-      stagedPatch,
-    };
+    return yield* readStagedCommitContext(cwd);
   });
 
   const commit: GitVcsDriver.GitVcsDriverShape["commit"] = Effect.fn("commit")(function* (
@@ -2375,6 +2538,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     statusDetails,
     statusDetailsLocal,
     readWorkingTreeDiff,
+    stageFiles,
+    unstageFiles,
+    readStagedCommitContext,
+    readCommitPreviewContext,
     prepareCommitContext,
     commit,
     pushCurrentBranch,

@@ -28,6 +28,11 @@ import {
   type WorkspaceFilePreviewDiffReturnTarget,
   useWorkspaceFilePanelState,
 } from "../workspaceFilePreview";
+import {
+  closeSourceControlPanel,
+  openSourceControlPanel,
+  useSourceControlPanelState,
+} from "../sourceControlPanelState";
 
 function DraftChatThreadRouteView() {
   const navigate = useNavigate();
@@ -47,6 +52,7 @@ function DraftChatThreadRouteView() {
   const diffOpen = search.diff === "1";
   const filePanel = useWorkspaceFilePanelState();
   const filePanelOpen = filePanel.open;
+  const sourceControlOpen = useSourceControlPanelState().open;
   const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
     draftId,
@@ -197,10 +203,10 @@ function DraftChatThreadRouteView() {
   }, [diffOpen]);
 
   useEffect(() => {
-    if (filePanelOpen) {
+    if (filePanelOpen && !sourceControlOpen) {
       markRightPanelUsed("file");
     }
-  }, [filePanelOpen]);
+  }, [filePanelOpen, sourceControlOpen]);
 
   useRegisterRightPanel({
     close: closeDiff,
@@ -214,14 +220,34 @@ function DraftChatThreadRouteView() {
     kind: "file",
     open: openFilePanel,
   });
+  useRegisterRightPanel({
+    close: closeSourceControlPanel,
+    enabled: draftSession !== null,
+    kind: "source-control",
+    open: openSourceControlPanel,
+  });
 
   useMobileEdgeSwipe({
     blockedByOpenPanelSide: "left",
-    enabled: shouldUseRightPanelSheet && !diffOpen && !filePanelOpen && !leftSidebarOpenMobile,
+    enabled:
+      shouldUseRightPanelSheet &&
+      !diffOpen &&
+      !filePanelOpen &&
+      !sourceControlOpen &&
+      !leftSidebarOpenMobile,
     onSwipe: openLastUsedRightPanel,
     side: "right",
     startArea: "screen",
     startSurface: "outside-panels",
+  });
+
+  useMobileEdgeSwipe({
+    action: "close",
+    enabled: shouldUseRightPanelSheet && sourceControlOpen,
+    onSwipe: closeSourceControlPanel,
+    side: "right",
+    startArea: "screen",
+    startSurface: "panel",
   });
 
   useMobileEdgeSwipe({
@@ -235,7 +261,7 @@ function DraftChatThreadRouteView() {
 
   useMobileEdgeSwipe({
     action: "close",
-    enabled: shouldUseRightPanelSheet && filePanelOpen,
+    enabled: shouldUseRightPanelSheet && filePanelOpen && !sourceControlOpen,
     onSwipe: closeWorkspaceFilePreview,
     side: "right",
     startArea: "screen",

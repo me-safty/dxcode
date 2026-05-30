@@ -17,6 +17,8 @@ import {
   GitActionProgressEvent,
   GitActionProgressPhase,
   GitCommandError,
+  GenerateCommitMessageInput,
+  GenerateCommitMessageResult,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
   GitPullRequestRefInput,
@@ -84,6 +86,9 @@ export interface GitManagerShape {
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
   ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>;
+  readonly generateCommitMessage: (
+    input: GenerateCommitMessageInput,
+  ) => Effect.Effect<GenerateCommitMessageResult, GitManagerServiceError>;
 }
 
 export class GitManager extends Context.Service<GitManager, GitManagerShape>()(
@@ -705,7 +710,13 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     branch: null,
     upstreamRef: null,
     hasWorkingTreeChanges: false,
-    workingTree: { files: [], insertions: 0, deletions: 0 },
+    workingTree: {
+      files: [],
+      insertions: 0,
+      deletions: 0,
+      staged: { files: [], insertions: 0, deletions: 0 },
+      unstaged: { files: [], insertions: 0, deletions: 0 },
+    },
     hasUpstream: false,
     aheadCount: 0,
     behindCount: 0,
@@ -1091,9 +1102,17 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       /** When true, also produce a semantic feature branch name. */
       includeBranch?: boolean;
       filePaths?: readonly string[];
+      contextMode?: "prepare" | "preview" | "staged";
       modelSelection: ModelSelection;
     }) {
-      const context = yield* gitCore.prepareCommitContext(input.cwd, input.filePaths);
+      const context =
+        input.filePaths && input.filePaths.length > 0
+          ? yield* gitCore.prepareCommitContext(input.cwd, input.filePaths)
+          : input.contextMode === "preview"
+            ? yield* gitCore.readCommitPreviewContext(input.cwd)
+            : input.contextMode === "staged"
+              ? yield* gitCore.readStagedCommitContext(input.cwd)
+              : yield* gitCore.prepareCommitContext(input.cwd);
       if (!context) {
         return null;
       }
@@ -1589,6 +1608,40 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     };
   });
 
+  const generateCommitMessage: GitManagerShape["generateCommitMessage"] = Effect.fn(
+    "generateCommitMessage",
+  )(function* (input) {
+    const [initialStatus, modelSelection] = yield* Effect.all([
+      gitCore.statusDetails(input.cwd),
+      serverSettingsService.getSettings.pipe(
+        Effect.map((settings) => settings.textGenerationModelSelection),
+        Effect.mapError((cause) =>
+          gitManagerError("generateCommitMessage", "Failed to get server settings.", cause),
+        ),
+      ),
+    ]);
+
+    const suggestion = yield* resolveCommitAndBranchSuggestion({
+      cwd: input.cwd,
+      branch: initialStatus.branch,
+      ...(input.filePaths ? { filePaths: input.filePaths } : {}),
+      contextMode: input.target === "staged" ? "staged" : "preview",
+      modelSelection,
+    });
+    if (!suggestion) {
+      return yield* gitManagerError(
+        "generateCommitMessage",
+        "Cannot generate a commit message because there are no changes to commit.",
+      );
+    }
+
+    return {
+      subject: suggestion.subject,
+      body: suggestion.body,
+      commitMessage: suggestion.commitMessage,
+    };
+  });
+
   const runStackedAction: GitManagerShape["runStackedAction"] = Effect.fn("runStackedAction")(
     function* (input, options) {
       const progress = createProgressEmitter(input, options);
@@ -1778,6 +1831,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     resolvePullRequest,
     preparePullRequestThread,
     runStackedAction,
+    generateCommitMessage,
   } satisfies GitManagerShape;
 });
 

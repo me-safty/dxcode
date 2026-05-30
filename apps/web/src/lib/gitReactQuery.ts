@@ -1,9 +1,12 @@
 import {
   type EnvironmentId,
+  type GenerateCommitMessageInput,
   type GitActionProgressEvent,
   type GitStackedAction,
   type SourceControlPublishRepositoryInput,
   type ThreadId,
+  type VcsStageFilesInput,
+  type VcsUnstageFilesInput,
   type VcsWorkingTreeDiffTarget,
 } from "@t3tools/contracts";
 import {
@@ -50,8 +53,14 @@ export const gitMutationKeys = {
     ["git", "mutation", "switchRef", environmentId ?? null, cwd] as const,
   runStackedAction: (environmentId: EnvironmentId | null, cwd: string | null) =>
     ["git", "mutation", "run-stacked-action", environmentId ?? null, cwd] as const,
+  generateCommitMessage: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "generate-commit-message", environmentId ?? null, cwd] as const,
   pull: (environmentId: EnvironmentId | null, cwd: string | null) =>
     ["git", "mutation", "pull", environmentId ?? null, cwd] as const,
+  stageFiles: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "stage-files", environmentId ?? null, cwd] as const,
+  unstageFiles: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "unstage-files", environmentId ?? null, cwd] as const,
   preparePullRequestThread: (environmentId: EnvironmentId | null, cwd: string | null) =>
     ["git", "mutation", "prepare-pull-request-thread", environmentId ?? null, cwd] as const,
   publishRepository: (environmentId: EnvironmentId | null, cwd: string | null) =>
@@ -264,6 +273,60 @@ export function gitRunStackedActionMutationOptions(input: {
     },
     onSuccess: async () => {
       await invalidateGitBranchQueries(input.queryClient, input.environmentId, input.cwd);
+    },
+  });
+}
+
+export function gitGenerateCommitMessageMutationOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+}) {
+  return mutationOptions({
+    mutationKey: gitMutationKeys.generateCommitMessage(input.environmentId, input.cwd),
+    mutationFn: async (args?: Omit<GenerateCommitMessageInput, "cwd">) => {
+      if (!input.cwd || !input.environmentId) {
+        throw new Error("Commit message generation is unavailable.");
+      }
+      return requireEnvironmentConnection(input.environmentId).client.git.generateCommitMessage({
+        cwd: input.cwd,
+        ...(args?.filePaths && args.filePaths.length > 0 ? { filePaths: args.filePaths } : {}),
+      });
+    },
+  });
+}
+
+export function vcsStageFilesMutationOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  queryClient: QueryClient;
+}) {
+  return mutationOptions({
+    mutationKey: gitMutationKeys.stageFiles(input.environmentId, input.cwd),
+    mutationFn: async (args: Omit<VcsStageFilesInput, "cwd">) => {
+      if (!input.cwd || !input.environmentId) throw new Error("Git staging is unavailable.");
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.vcs.stageFiles({ cwd: input.cwd, filePaths: args.filePaths });
+    },
+    onSuccess: async () => {
+      await input.queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
+    },
+  });
+}
+
+export function vcsUnstageFilesMutationOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  queryClient: QueryClient;
+}) {
+  return mutationOptions({
+    mutationKey: gitMutationKeys.unstageFiles(input.environmentId, input.cwd),
+    mutationFn: async (args: Omit<VcsUnstageFilesInput, "cwd">) => {
+      if (!input.cwd || !input.environmentId) throw new Error("Git unstaging is unavailable.");
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.vcs.unstageFiles({ cwd: input.cwd, filePaths: args.filePaths });
+    },
+    onSuccess: async () => {
+      await input.queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
     },
   });
 }
