@@ -2,8 +2,8 @@ import {
   AuthAccessTokenType,
   type AuthClientPresentationMetadata,
   AuthEnvironmentBootstrapTokenType,
-  AuthStandardClientScopes,
   AuthTokenExchangeGrantType,
+  type AuthEnvironmentScope,
   EnvironmentHttpApi,
   EnvironmentHttpCommonError,
 } from "@t3tools/contracts";
@@ -175,6 +175,7 @@ export const bootstrapRemoteBearerSession = Effect.fn(
 )(function* (input: {
   readonly httpBaseUrl: string;
   readonly credential: string;
+  readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
   readonly clientMetadata?: AuthClientPresentationMetadata;
   readonly timeoutMs?: number;
 }) {
@@ -188,7 +189,7 @@ export const bootstrapRemoteBearerSession = Effect.fn(
         subject_token: input.credential,
         subject_token_type: AuthEnvironmentBootstrapTokenType,
         requested_token_type: AuthAccessTokenType,
-        scope: encodeOAuthScope(AuthStandardClientScopes),
+        ...(input.scopes ? { scope: encodeOAuthScope(input.scopes) } : {}),
         ...(input.clientMetadata?.label ? { client_label: input.clientMetadata.label } : {}),
         ...(input.clientMetadata?.deviceType
           ? { client_device_type: input.clientMetadata.deviceType }

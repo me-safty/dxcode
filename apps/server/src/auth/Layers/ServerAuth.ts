@@ -177,7 +177,8 @@ export const makeServerAuth = Effect.gen(function* () {
         Effect.mapError(toBootstrapExchangeError),
         Effect.flatMap((grant) =>
           Effect.gen(function* () {
-            if (!requestedScopes.every((scope) => grant.scopes.includes(scope))) {
+            const grantedScopes = requestedScopes ?? grant.scopes;
+            if (!grantedScopes.every((scope) => grant.scopes.includes(scope))) {
               return yield* new ServerAuthInvalidRequestError({
                 reason: "scope_not_granted",
               });
@@ -186,7 +187,7 @@ export const makeServerAuth = Effect.gen(function* () {
               .issue({
                 method: "bearer-access-token",
                 subject: grant.subject,
-                scopes: requestedScopes,
+                scopes: grantedScopes,
                 client: {
                   ...requestMetadata,
                   ...(grant.label ? { label: grant.label } : {}),

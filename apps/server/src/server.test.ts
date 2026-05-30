@@ -1202,11 +1202,20 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(tokenBody.scope, "access:manage");
       assert.isDefined(tokenBody.access_token);
 
-      const pairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
+      const overbroadPairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
         headers: {
           authorization: `Bearer ${tokenBody.access_token ?? ""}`,
         },
         body: yield* HttpBody.json({}),
+      });
+      const overbroadPairingBody = (yield* overbroadPairingResponse.json) as {
+        readonly requiredScope: string;
+      };
+      const pairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
+        headers: {
+          authorization: `Bearer ${tokenBody.access_token ?? ""}`,
+        },
+        body: yield* HttpBody.json({ scopes: ["access:manage"] }),
       });
       const wsTicketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
         headers: {
@@ -1226,6 +1235,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         readonly traceId: string;
       };
 
+      assert.equal(overbroadPairingResponse.status, 403);
+      assert.equal(overbroadPairingBody.requiredScope, "orchestration:read");
       assert.equal(pairingResponse.status, 200);
       assert.equal(wsTicketResponse.status, 200);
       assert.equal(faviconResponse.status, 403);
@@ -1446,6 +1457,27 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.status, 200);
       assert.isTrue(body.credential.length > 0);
       assert.equal(body.label, "Hosted web");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects pairing credentials with an empty scope grant", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const response = yield* HttpClient.post("/api/auth/pairing-token", {
+        headers: {
+          cookie: yield* getAuthenticatedSessionCookieHeader(),
+        },
+        body: yield* HttpBody.json({ scopes: [] }),
+      });
+      const body = (yield* response.json) as {
+        readonly code: string;
+        readonly reason: string;
+      };
+
+      assert.equal(response.status, 400);
+      assert.equal(body.code, "invalid_request");
+      assert.equal(body.reason, "invalid_scope");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

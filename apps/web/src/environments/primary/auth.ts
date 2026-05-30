@@ -289,17 +289,21 @@ export async function submitServerAuthCredential(credential: string): Promise<vo
   stripPairingTokenFromUrl();
 }
 
-export async function createServerPairingCredential(
-  label?: string,
-): Promise<AuthPairingCredentialResult> {
-  const trimmedLabel = label?.trim();
+export async function createServerPairingCredential(input?: {
+  readonly label?: string;
+  readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
+}): Promise<AuthPairingCredentialResult> {
+  const trimmedLabel = input?.label?.trim();
   try {
     return await runPrimaryHttp(
       PrimaryEnvironmentHttpClient.pipe(
         Effect.flatMap((client) =>
           client.auth.pairingCredential({
             headers: {},
-            payload: trimmedLabel ? { label: trimmedLabel } : {},
+            payload: {
+              ...(trimmedLabel ? { label: trimmedLabel } : {}),
+              ...(input?.scopes ? { scopes: input.scopes } : {}),
+            },
           }),
         ),
       ),

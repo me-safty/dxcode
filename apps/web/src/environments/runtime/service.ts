@@ -1,5 +1,5 @@
 import {
-  type AuthEnvironmentScope,
+  AuthEnvironmentScope,
   AuthStandardClientScopes,
   type DesktopSshEnvironmentBootstrap,
   type DesktopSshEnvironmentTarget,
@@ -78,6 +78,8 @@ import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
 } from "../../logicalProject";
+
+const decodeIssuedBearerScopes = Schema.decodeUnknownSync(Schema.Array(AuthEnvironmentScope));
 import { getClientSettings } from "~/hooks/useSettings";
 import { subscribeTerminalMetadata, terminalSessionManager } from "../../terminalSessionState";
 import { resetWsReconnectBackoff } from "~/rpc/wsConnectionState";
@@ -741,6 +743,10 @@ async function bootstrapDesktopSshBearerSession(httpBaseUrl: string, credential:
   return await getDesktopSshBridge().bootstrapSshBearerSession(httpBaseUrl, credential);
 }
 
+function readIssuedBearerScopes(scope: string): ReadonlyArray<AuthEnvironmentScope> {
+  return decodeIssuedBearerScopes(scope.split(" "));
+}
+
 async function fetchDesktopSshSessionState(httpBaseUrl: string, bearerToken: string) {
   return await getDesktopSshBridge().fetchSshSessionState(httpBaseUrl, bearerToken);
 }
@@ -840,7 +846,7 @@ async function issueDesktopSshBearerSession(record: SavedEnvironmentRecord): Pro
   return {
     record: prepared.record,
     bearerToken: bearerSession.access_token,
-    scopes: [...AuthStandardClientScopes],
+    scopes: readIssuedBearerScopes(bearerSession.scope),
   };
 }
 
@@ -1730,7 +1736,7 @@ export async function addSavedEnvironment(input: {
   await removeConnection(environmentId).catch(() => false);
   await ensureSavedEnvironmentConnection(record, {
     bearerToken: bearerSession.access_token,
-    scopes: [...AuthStandardClientScopes],
+    scopes: readIssuedBearerScopes(bearerSession.scope),
   });
   return record;
 }

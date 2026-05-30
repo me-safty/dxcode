@@ -868,6 +868,11 @@ describe("GeneralSettingsPanel observability", () => {
     await expect.element(page.getByText("This Mac")).toBeInTheDocument();
     await page.getByRole("button", { name: "Create link", exact: true }).click();
     await expect.element(page.getByText("Create pairing link")).toBeInTheDocument();
+    await expect.element(page.getByRole("checkbox", { name: /View environment/ })).toBeChecked();
+    await expect.element(page.getByRole("checkbox", { name: /Operate tasks/ })).toBeChecked();
+    await page.getByRole("button", { name: "Read only", exact: true }).click();
+    await expect.element(page.getByRole("checkbox", { name: /View environment/ })).toBeChecked();
+    await expect.element(page.getByRole("checkbox", { name: /Operate tasks/ })).not.toBeChecked();
     await page.getByRole("button", { name: "Create link", exact: true }).click();
     authAccessHarness.emitPairingLinkUpserted(pairingLinks[0]!);
     authAccessHarness.emitClientUpserted(clientSessions[1]!);

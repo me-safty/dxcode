@@ -68,16 +68,14 @@ export interface ServerAuthShape {
   >;
   readonly exchangeBootstrapCredentialForAccessToken: (
     credential: string,
-    requestedScopes: ReadonlyArray<AuthEnvironmentScope>,
+    requestedScopes: ReadonlyArray<AuthEnvironmentScope> | undefined,
     requestMetadata: AuthClientMetadata,
   ) => Effect.Effect<
     AuthAccessTokenResult,
     ServerAuthInvalidCredentialError | ServerAuthInvalidRequestError | ServerAuthInternalError
   >;
   readonly issuePairingCredential: (
-    input?: AuthCreatePairingCredentialInput & {
-      readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
-    },
+    input?: AuthCreatePairingCredentialInput,
   ) => Effect.Effect<AuthPairingCredentialResult, ServerAuthInternalError>;
   readonly listPairingLinks: () => Effect.Effect<
     ReadonlyArray<AuthPairingLink>,

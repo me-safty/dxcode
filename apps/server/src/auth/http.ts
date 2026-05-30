@@ -1,5 +1,6 @@
 import {
   AuthAccessManageScope,
+  AuthStandardClientScopes,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthRelayManageScope,
@@ -205,20 +206,22 @@ export const authHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("environment.auth.token")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           const request = yield* HttpServerRequest.HttpServerRequest;
-          const requestedScopes = parseAllowedOAuthScope({
-            value: args.payload.scope,
-            allowedScopes: new Set<AuthEnvironmentScope>([
-              AuthOrchestrationReadScope,
-              AuthOrchestrationOperateScope,
-              AuthTerminalOperateScope,
-              AuthReviewWriteScope,
-              AuthAccessManageScope,
-              AuthRelayManageScope,
-            ]),
-          });
-          if (requestedScopes === null) {
+          const requestedScopes =
+            args.payload.scope === undefined
+              ? undefined
+              : parseAllowedOAuthScope({
+                  value: args.payload.scope,
+                  allowedScopes: new Set<AuthEnvironmentScope>([
+                    AuthOrchestrationReadScope,
+                    AuthOrchestrationOperateScope,
+                    AuthTerminalOperateScope,
+                    AuthReviewWriteScope,
+                    AuthAccessManageScope,
+                    AuthRelayManageScope,
+                  ]),
+                });
+          if (requestedScopes === null)
             return yield* failEnvironmentInvalidRequest("invalid_scope");
-          }
           return yield* serverAuth
             .exchangeBootstrapCredentialForAccessToken(
               args.payload.subject_token,
@@ -265,7 +268,19 @@ export const authHttpApiLayer = HttpApiBuilder.group(
         "pairingCredential",
         Effect.fn("environment.auth.pairingCredential")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
-          yield* requireEnvironmentScope(AuthAccessManageScope);
+          const session = yield* requireEnvironmentScope(AuthAccessManageScope);
+          const delegatedScopes = args.payload.scopes ?? AuthStandardClientScopes;
+          if (
+            delegatedScopes.length === 0 ||
+            new Set<AuthEnvironmentScope>(delegatedScopes).size !== delegatedScopes.length
+          ) {
+            return yield* failEnvironmentInvalidRequest("invalid_scope");
+          }
+          for (const delegatedScope of delegatedScopes) {
+            if (!session.scopes.has(delegatedScope)) {
+              return yield* failEnvironmentScopeRequired(delegatedScope);
+            }
+          }
           return yield* serverAuth
             .issuePairingCredential(args.payload)
             .pipe(

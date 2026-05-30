@@ -167,6 +167,10 @@ const EnvironmentScopedOperationErrors = [
   EnvironmentScopeRequiredError,
   EnvironmentInternalError,
 ] as const;
+const EnvironmentPairingCredentialErrors = [
+  EnvironmentRequestInvalidError,
+  ...EnvironmentScopedOperationErrors,
+] as const;
 const EnvironmentSessionRevokeErrors = [
   EnvironmentScopeRequiredError,
   EnvironmentOperationForbiddenError,
@@ -256,7 +260,7 @@ export class EnvironmentAuthHttpApi extends HttpApiGroup.make("auth")
       headers: OptionalBearerHeaders,
       payload: AuthCreatePairingCredentialInput,
       success: AuthPairingCredentialResult,
-      error: EnvironmentScopedOperationErrors,
+      error: EnvironmentPairingCredentialErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(

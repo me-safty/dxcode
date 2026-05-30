@@ -123,6 +123,23 @@ it.layer(NodeServices.layer)("ServerAuthLive", (it) => {
     }).pipe(Effect.provide(makeServerAuthLayer())),
   );
 
+  it.effect("inherits a constrained pairing grant when token exchange omits scope", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* ServerAuth;
+      const pairingCredential = yield* serverAuth.issuePairingCredential({
+        scopes: ["orchestration:read"],
+      });
+
+      const token = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+        pairingCredential.credential,
+        undefined,
+        requestMetadata,
+      );
+
+      expect(token.scope).toBe("orchestration:read");
+    }).pipe(Effect.provide(makeServerAuthLayer())),
+  );
+
   it.effect("issues startup pairing URLs that bootstrap administrative sessions", () =>
     Effect.gen(function* () {
       const serverAuth = yield* ServerAuth;
