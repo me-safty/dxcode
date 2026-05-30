@@ -124,14 +124,6 @@ function formatAccessTimestamp(value: string): string {
   return accessTimestampFormatter.format(parsed);
 }
 
-function formatAccessScopeLabel(scopes: ReadonlyArray<AuthEnvironmentScope>): string {
-  return scopes.includes(AuthAccessManageScope)
-    ? "Administrator"
-    : scopes.length === 1 && scopes[0] === AuthOrchestrationReadScope
-      ? "Read-only client"
-      : "Client";
-}
-
 const PAIRING_SCOPE_OPTIONS: ReadonlyArray<{
   readonly scope: AuthEnvironmentScope;
   readonly title: string;
@@ -168,6 +160,31 @@ const PAIRING_SCOPE_OPTIONS: ReadonlyArray<{
     description: "Change managed tunnel connectivity.",
   },
 ];
+
+function AccessScopeList({
+  scopes,
+  label,
+}: {
+  readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
+  readonly label: string;
+}) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground"
+      aria-label={`${label}: ${scopes.join(", ")}`}
+    >
+      <span className="font-medium">Scopes</span>
+      {scopes.map((scope) => (
+        <code
+          key={scope}
+          className="rounded-md border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-foreground/80"
+        >
+          {scope}
+        </code>
+      ))}
+    </div>
+  );
+}
 
 type ConnectionStatusDotProps = {
   tooltipText?: string | null;
@@ -684,8 +701,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
 
   const expiresAbsolute = formatAccessTimestamp(pairingLink.expiresAt);
 
-  const accessLabel = formatAccessScopeLabel(pairingLink.scopes);
-  const primaryLabel = pairingLink.label ?? `${accessLabel} link`;
+  const primaryLabel = pairingLink.label ?? "Pairing link";
   const defaultEndpointCopyOption =
     endpointCopyOptions.find((option) => option.key === defaultEndpointKey) ??
     endpointCopyOptions[0] ??
@@ -814,8 +830,9 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
             </Popover>
           </div>
           <p className="text-xs text-muted-foreground" title={expiresAbsolute}>
-            {[accessLabel, formatExpiresInLabel(pairingLink.expiresAt, nowMs)].join(" · ")}
+            {formatExpiresInLabel(pairingLink.expiresAt, nowMs)}
           </p>
+          <AccessScopeList scopes={pairingLink.scopes} label="Pairing link scopes" />
           {shareablePairingUrl === null ? (
             <p className="text-[11px] text-muted-foreground/70">
               Copy the token and pair from another client using this backend&apos;s reachable host.
@@ -955,7 +972,6 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
     : lastConnectedAt
       ? `Last connected at ${formatAccessTimestamp(lastConnectedAt)}`
       : "Not connected yet.";
-  const accessLabel = formatAccessScopeLabel(clientSession.scopes);
   const deviceInfoBits = [
     clientSession.client.deviceType !== "unknown"
       ? clientSession.client.deviceType[0]?.toUpperCase() + clientSession.client.deviceType.slice(1)
@@ -986,9 +1002,10 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
               </span>
             ) : null}
           </div>
-          <p className="text-xs text-muted-foreground">
-            {[accessLabel, ...deviceInfoBits].join(" · ")}
-          </p>
+          {deviceInfoBits.length > 0 ? (
+            <p className="text-xs text-muted-foreground">{deviceInfoBits.join(" · ")}</p>
+          ) : null}
+          <AccessScopeList scopes={clientSession.scopes} label="Client scopes" />
         </div>
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
           {!clientSession.current ? (
@@ -1415,14 +1432,12 @@ function SavedBackendListRow({
         : connectionState === "error"
           ? "bg-destructive"
           : "bg-muted-foreground/40";
-  const accessLabel = runtime?.scopes ? formatAccessScopeLabel(runtime.scopes) : null;
   const descriptorLabel = runtime?.descriptor?.label ?? null;
   const displayLabel = descriptorLabel ?? record.label;
   const statusTooltip = getSavedBackendStatusTooltip(runtime, record, nowMs);
   const versionMismatch = resolveServerConfigVersionMismatch(runtime?.serverConfig);
   const metadataBits = [
     record.desktopSsh ? `SSH ${formatDesktopSshTarget(record.desktopSsh)}` : null,
-    accessLabel,
     record.lastConnectedAt
       ? `Last connected ${formatAccessTimestamp(record.lastConnectedAt)}`
       : null,
@@ -1444,6 +1459,9 @@ function SavedBackendListRow({
           </div>
           {metadataBits.length > 0 ? (
             <p className="text-xs text-muted-foreground">{metadataBits.join(" · ")}</p>
+          ) : null}
+          {runtime?.scopes ? (
+            <AccessScopeList scopes={runtime.scopes} label="Granted scopes" />
           ) : null}
           {versionMismatch ? (
             <p className="flex items-center gap-1 text-warning text-xs">

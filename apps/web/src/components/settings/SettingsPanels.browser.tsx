@@ -877,7 +877,13 @@ describe("GeneralSettingsPanel observability", () => {
     authAccessHarness.emitPairingLinkUpserted(pairingLinks[0]!);
     authAccessHarness.emitClientUpserted(clientSessions[1]!);
     await expect
-      .element(page.getByText("Client · Mobile · iOS · Safari · 192.168.1.88"))
+      .element(page.getByLabelText("Pairing link scopes: orchestration:read"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Mobile · iOS · Safari · 192.168.1.88"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByLabelText("Client scopes: orchestration:read", { exact: true }))
       .toBeInTheDocument();
     await expect
       .element(page.getByRole("button", { name: /^Copy pairing URL for:/ }))
