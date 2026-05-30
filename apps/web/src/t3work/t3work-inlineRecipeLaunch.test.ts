@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createDefaultProjectDashboardBacklogState } from "~/t3work/t3work-projectDashboardBacklogStateShared";
+import { launchProjectDashboardBacklogDeterministicWorkflow } from "~/t3work/t3work-deterministicWorkflowLaunch";
 import { launchProjectDashboardBacklogInlineRecipe } from "~/t3work/t3work-inlineRecipeLaunch";
 
 describe("launchProjectDashboardBacklogInlineRecipe", () => {
@@ -81,5 +82,72 @@ describe("launchProjectDashboardBacklogInlineRecipe", () => {
       applied: true,
       promptText: "The dashboard is now filtered to work assigned to Pat Jones.",
     });
+  });
+
+  it("launches an explicit deterministic workflow payload through the same runtime path", async () => {
+    const launchRecipeWorkflow = vi.fn(async () => ({
+      ok: true,
+      mode: "deterministic" as const,
+      workflowRunId: "t3work:recipe-workflow:deterministic:test-run",
+      effects: [],
+      completionActivity: {
+        title: "Apply filter now",
+        description: "The dashboard is now filtered to work assigned to Pat Jones.",
+        tone: "success" as const,
+      },
+    }));
+    const setState = vi.fn();
+
+    await launchProjectDashboardBacklogDeterministicWorkflow({
+      backend: { launchRecipeWorkflow } as never,
+      launchId: "quick-starts.item.show-only-assigned-to-me.apply-now",
+      title: "Apply filter now",
+      description: "Apply the visible assignee filter without opening chat.",
+      surface: "project.dashboard.backlog",
+      workflow: {
+        steps: [
+          {
+            kind: "tool",
+            id: "apply-now",
+            toolName: "t3work.backlog.set_assignee_filter",
+            input: {
+              mode: "current-user",
+              itemId: "show-only-assigned-to-me",
+            },
+          },
+        ],
+      },
+      workspaceRoot: "/workspace/project-1",
+      projectId: "project-1",
+      projectTitle: "Project One",
+      state: createDefaultProjectDashboardBacklogState(),
+      currentUserDisplayName: "Pat Jones",
+      setState,
+      allowedToolGroups: ["view.state"],
+      source: "bundled",
+    });
+
+    expect(launchRecipeWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceRoot: "/workspace/project-1",
+        launch: expect.objectContaining({
+          recipeId: "quick-starts.item.show-only-assigned-to-me.apply-now",
+          kickoff: {
+            steps: [
+              expect.objectContaining({
+                kind: "tool",
+                toolName: "t3work.backlog.set_assignee_filter",
+                input: {
+                  mode: "current-user",
+                  itemId: "show-only-assigned-to-me",
+                },
+              }),
+            ],
+          },
+          allowedToolGroups: ["view.state"],
+        }),
+      }),
+    );
+    expect(setState).not.toHaveBeenCalled();
   });
 });

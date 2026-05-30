@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveSidecarComposition } from "./sidecarComposition.js";
+import {
+  isSidecarItemHidden,
+  isSidecarItemPinned,
+  resolveSidecarComposition,
+  resolveSidecarSectionItemOrder,
+  resolveSidecarSectionItemPersonalization,
+} from "./sidecarComposition.js";
 
 const BUNDLED_DEFAULT = {
   sections: [
@@ -46,5 +52,58 @@ describe("resolveSidecarComposition", () => {
         },
       }).sections,
     ).toEqual([{ sectionId: "recent-conversations", visible: true, collapsed: true }]);
+  });
+
+  it("reads section item personalization from the shared per-user payload", () => {
+    expect(
+      resolveSidecarSectionItemPersonalization({
+        sectionId: "quick-starts",
+        personalization: {
+          composition: { sections: [] },
+          itemHides: {
+            "quick-starts": ["recipe-2"],
+          },
+          itemPins: {
+            "quick-starts": ["recipe-3", "recipe-1"],
+          },
+          itemOrderOverrides: {
+            "quick-starts": ["recipe-3", "recipe-2", "recipe-3"],
+          },
+        },
+      }),
+    ).toEqual({
+      hiddenItemIds: ["recipe-2"],
+      pinnedItemIds: ["recipe-3", "recipe-1"],
+      orderOverrideItemIds: ["recipe-2", "recipe-3"],
+    });
+  });
+
+  it("resolves hidden items out of the order and moves pinned items to the top", () => {
+    const personalization = resolveSidecarSectionItemPersonalization({
+      sectionId: "quick-starts",
+      personalization: {
+        composition: { sections: [] },
+        itemHides: {
+          "quick-starts": ["recipe-2"],
+        },
+        itemPins: {
+          "quick-starts": ["recipe-3"],
+        },
+        itemOrderOverrides: {
+          "quick-starts": ["recipe-4", "recipe-2"],
+        },
+      },
+    });
+
+    expect(
+      resolveSidecarSectionItemOrder({
+        itemIds: ["recipe-1", "recipe-2", "recipe-3", "recipe-4"],
+        personalization,
+      }),
+    ).toEqual(["recipe-3", "recipe-4", "recipe-1"]);
+    expect(isSidecarItemHidden({ itemId: "recipe-2", personalization })).toBe(true);
+    expect(isSidecarItemHidden({ itemId: "recipe-1", personalization })).toBe(false);
+    expect(isSidecarItemPinned({ itemId: "recipe-3", personalization })).toBe(true);
+    expect(isSidecarItemPinned({ itemId: "recipe-4", personalization })).toBe(false);
   });
 });

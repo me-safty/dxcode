@@ -3,17 +3,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createLucideReactMock } from "./t3work-createLucideReactMock";
 import { ProjectDashboardKickoffAside } from "./t3work-ProjectDashboardKickoffAside";
 
 const { mockUseSidecarComposition } = vi.hoisted(() => ({
   mockUseSidecarComposition: vi.fn(),
 }));
 
-vi.mock("lucide-react", () => ({
-  SearchIcon: () => <span>search-icon</span>,
-  ChevronDown: () => <span>chevron-down</span>,
-  ChevronRight: () => <span>chevron-right</span>,
-}));
+vi.mock("lucide-react", (importOriginal) => createLucideReactMock(importOriginal));
 
 vi.mock("~/t3work/backend/t3work-index", () => ({
   useBackend: () => null,

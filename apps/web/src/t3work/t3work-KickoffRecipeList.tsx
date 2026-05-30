@@ -1,5 +1,5 @@
 import { autoAnimate } from "@formkit/auto-animate";
-import { useCallback, useRef } from "react";
+import { Fragment, useCallback, useRef, type ReactNode } from "react";
 
 import {
   areT3workRecipeQuickStartLaunchCustomizationsEqual,
@@ -86,6 +86,7 @@ export function T3workKickoffRecipeList({
   recipes,
   onSelectRecipe,
   selectedRecipeId,
+  renderRecipe,
 }: {
   recipes: ReadonlyArray<T3workSidecarRecipeQuickStart>;
   onSelectRecipe: (
@@ -93,6 +94,9 @@ export function T3workKickoffRecipeList({
     customization?: T3workRecipeQuickStartLaunchCustomization,
   ) => void;
   selectedRecipeId?: string;
+  renderRecipe?:
+    | ((recipe: T3workSidecarRecipeQuickStart, content: ReactNode) => ReactNode)
+    | undefined;
 }) {
   const animatedRecipeListsRef = useRef(new WeakSet<HTMLElement>());
   const attachRecipeListAutoAnimateRef = useCallback((node: HTMLElement | null) => {
@@ -108,16 +112,10 @@ export function T3workKickoffRecipeList({
     <div ref={attachRecipeListAutoAnimateRef} className="space-y-2.5">
       {recipes.map((recipe) => {
         const isSelected = recipe.id === selectedRecipeId;
-        return recipe.actionView ? (
-          <RichRecipeCard
-            key={recipe.id}
-            recipe={recipe}
-            isSelected={isSelected}
-            onSelectRecipe={onSelectRecipe}
-          />
+        const content = recipe.actionView ? (
+          <RichRecipeCard recipe={recipe} isSelected={isSelected} onSelectRecipe={onSelectRecipe} />
         ) : (
           <button
-            key={recipe.id}
             type="button"
             className={cn(
               "w-full rounded-md border px-3 py-2.5 text-left transition-colors",
@@ -130,6 +128,12 @@ export function T3workKickoffRecipeList({
           >
             <T3workRecipeQuickStartBody recipe={recipe} />
           </button>
+        );
+
+        return (
+          <Fragment key={recipe.id}>
+            {renderRecipe ? renderRecipe(recipe, content) : content}
+          </Fragment>
         );
       })}
     </div>

@@ -1,4 +1,4 @@
-import { definePlannedTools, type T3workToolCatalogEntry } from "./t3workToolCatalogCore.js";
+import { definePlannedTools, type T3workToolCatalogEntry } from "./t3workToolCatalogCore.ts";
 
 const PLANNED_WORK_ITEM_GITHUB_THREAD_TOOL_ENTRIES = [
   ...definePlannedTools({

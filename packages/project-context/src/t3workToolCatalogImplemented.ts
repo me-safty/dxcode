@@ -1,4 +1,4 @@
-import { EMPTY_OBJECT_INPUT_SCHEMA, type T3workToolCatalogEntry } from "./t3workToolCatalogCore.js";
+import { EMPTY_OBJECT_INPUT_SCHEMA, type T3workToolCatalogEntry } from "./t3workToolCatalogCore.ts";
 
 const START_CHILD_INPUT_SCHEMA = {
   type: "object",

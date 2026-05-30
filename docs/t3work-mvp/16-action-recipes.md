@@ -101,6 +101,10 @@ export default defineRecipe({
 
   // Capability scope for everything this recipe runs — agent, scripts, and views.
   allowedToolGroups: ["integration.read", "artifact.rw"],
+
+  // Optional shorthand for keyboard-driven selection from the composer's `/` typeahead.
+  // Defaults to `id` when omitted. See "Composer slash-command launchers".
+  slashAlias: "qa-plan",
 });
 ```
 
@@ -662,9 +666,176 @@ wants.
 Inline chips (the `action.inline` placement on the host page itself, e.g. a backlog
 filter chip) use the deterministic row only — they cannot live on the chat path.
 
+The same deterministic launcher path also backs sidecar context-menu actions declared by
+`defineSidecarSection.itemActions` / `sectionActions`. A section action is just a small
+single-step workflow launched through the existing `launchRecipeWorkflow` runtime; there
+is no parallel sidecar-action executor.
+
 These UX rules belong to the Quick Starts section (and any future recipe-launcher
 section). Other sidecar sections — Recent Threads, Open Pull Requests, Status Widgets —
 have entirely different click behaviours owned by their own View.
+
+### Composer slash-command launchers
+
+A recipe can also be selected from the composer by typing `/<slashAlias>`. The slash
+typeahead is the keyboard-driven equivalent of clicking a Quick Starts card: the recipe
+becomes the composer's pre-submit selection chip, the user keeps typing free-form
+kickoff text, and submission funnels through the normal [Launcher UX by workflow shape](#launcher-ux-by-workflow-shape)
+table — there is no second launch path.
+
+#### Composer typeahead is a host primitive, not a recipe concern
+
+The composer (today: `apps/web/src/components/chat/ChatComposer.tsx`) owns the typeahead
+surface and the menu. Recipes are one of several contributor sources. The host's existing
+discriminated union of menu item kinds is the extension point:
+
+| Item kind                | Source                                          | Selection effect                                                                            |
+| ------------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `path`                   | `@` + workspace entries                         | Inserts a mention token                                                                     |
+| `slash-command`          | `/` + hardcoded built-ins (`/model`, `/plan`, …) | Mode/model side-effects, typed range cleared                                                |
+| `provider-slash-command` | `/` + `ServerProvider.slashCommands`            | Inserts the literal `/<name> ` so the provider runtime sees it                              |
+| `skill`                  | `$` + `ServerProvider.skills`                   | Inserts a `$skill` chip                                                                     |
+| **`recipe-slash-command`** | **`/` + recipe catalog filtered by surface**  | **Clears the typed range; calls `setSelectedRecipe(recipe)` so the chip renders above the editor.** |
+
+The recipe variant is the only one that **selects host state** rather than mutating the
+editor's text. Everything else — token rendering, menu visuals, keyboard nav, fuzzy
+ranking via `composerSlashCommandSearch.ts` — is reused as-is.
+
+#### Discovery and filtering
+
+Recipe slash items are sourced from the same `matchRecipes()` discovery the surrounding
+sidecar uses (see [Discovery and Pre-Launch Rendering](#discovery-and-pre-launch-rendering)).
+The composer hands the recipe catalog plus the current surface context (kickoff surface =
+`project.dashboard.backlog` or `project.dashboard.myWork` depending on the dashboard tab;
+in-thread = `thread.context`) and gets back the surface-applicable recipes in rank order.
+Recipes whose `visible(ctx)` returns false are filtered out. This means the slash menu
+shows exactly the same recipes the user would see as Quick Starts cards — no parallel
+catalog, no separate visibility predicate.
+
+The empty-query view (cursor immediately after `/`) shows all applicable recipes; typed
+query narrows by `slashAlias` first, then `id`, then `title` — same scoring shape as
+provider slash commands.
+
+#### Menu grouping
+
+`ComposerCommandMenu` already groups built-in vs. provider slash commands when both are
+present. Recipe items add a third group, ordered last:
+
+```
+/  →  Built-in     /model, /plan, /default
+      Provider     /commit, /init, …   (from selectedProvider.slashCommands)
+      Recipes      /qa-plan, /risk-assessment, …   (applicable to current surface)
+```
+
+Group order is fixed; recipes do not interleave with built-ins so a project recipe cannot
+shadow a host command in the visual list. (See "Namespace and collision rules" below for
+how name collisions are blocked at registration time.)
+
+#### `slashAlias` semantics
+
+```ts
+defineRecipe({
+  id: "qa-test-plan",
+  // ...
+  slashAlias: "qa-plan",  // optional; defaults to `id`
+});
+```
+
+- Format: `[a-z0-9][a-z0-9-]*`. The leading `/` is implied by the trigger; aliases are
+  stored without it.
+- Default: when omitted, the recipe is reachable as `/<id>`. Recipes whose `id` is not a
+  valid alias (uppercase, dots, etc.) get no implicit alias — they remain reachable only
+  through the Quick Starts card.
+- Per-surface scope: the alias is global within a project. Two recipes may share an alias
+  only if their `surfaces` are disjoint; otherwise the merge step rejects the later one
+  (see [Bundled vs. project-local recipes](#bundled-vs-project-local-recipes) for the
+  precedence rule that decides which wins).
+
+#### Namespace and collision rules
+
+Aliases compete with host-owned commands. The catalog merge enforces precedence in this
+order, refusing to register any later contributor that collides:
+
+1. **Built-in slash commands** (`/model`, `/plan`, `/default`). Reserved; recipes cannot
+   override.
+2. **Provider slash commands** (`ServerProvider.slashCommands`). Reserved per-provider;
+   recipes cannot override on a surface where that provider is currently selected.
+3. **Bundled recipes** ([Bundled vs. project-local](#bundled-vs-project-local-recipes)).
+4. **Project-local recipes**. A project recipe whose `id` matches a bundled recipe inherits
+   the bundled `slashAlias` unless it declares its own (consistent with the existing
+   visibility/rank inheritance rule).
+
+Collisions surface in the same diagnostic channel as other recipe-load failures — the
+recipe loads but its slash alias is suppressed; the Quick Starts card remains available.
+
+#### Selection semantics — "select" not "launch on accept"
+
+The slash menu's recipe row is **a selector**, not a launcher. On accept (Enter, Tab, or
+click):
+
+1. The host calls `applyPromptReplacement(rangeStart, rangeEnd, "")` to remove the typed
+   `/<alias>` prefix from the editor — same pattern as the existing `/model` selection.
+2. The host calls `setSelectedRecipe(recipe)` on the surrounding composer (the kickoff
+   composer already owns this state for Quick Starts; the in-thread composer uses the
+   equivalent seam).
+3. The composer renders `TicketKickoffComposerSelectedRecipe` (or its in-thread
+   equivalent) above the editor with the recipe's icon, title, and remove (`×`) affordance.
+4. The user continues typing free-form text. On submit, the normal kickoff path runs:
+   `text` becomes [`RecipeKickoffSubmission.text`](#kickoff-submission), the workflow
+   launches per the shape table in [Launcher UX by workflow shape](#launcher-ux-by-workflow-shape).
+
+This deliberately rebinds to the **existing pre-submit chip mechanism** rather than
+introducing a new "launch-on-accept" branch. Consequences:
+
+- One launch path. Click vs. slash both flow through `setSelectedRecipe → submit`. The
+  workflow runtime does not need to know which entry point fired.
+- Deterministic recipes still execute on submit (consistent with the shape table). A
+  deterministic recipe selected via slash + an empty body simply submits to the synchronous
+  execute path; no chat surface, same as clicking.
+- Replacing the selection: typing another `/<alias>` while a chip is already mounted
+  swaps the selection (drops the old chip, mounts the new one). The behaviour is
+  intentional — the chip is composer state, not message attachment state.
+
+#### In-thread composer
+
+The slash menu is available wherever the composer is mounted. In-thread (post-launch)
+slash-recipe selection is **scoped to the `thread.context` surface** — most recipes won't
+match. When they do, submission spawns a new thread with the recipe as the kickoff (the
+parent thread is unchanged). The runtime does not support "mid-thread recipe switch" —
+one thread, one recipe (see [Conversation-Native Launch UX](#conversation-native-launch-ux)).
+
+#### Implementation status
+
+The composer-typeahead infrastructure (trigger detection, menu, item ranking, four-kind
+discriminated union) is built. The kickoff composer
+(`apps/web/src/t3work/t3work-TicketKickoffComposer.tsx`) currently **renders
+`ComposerPromptEditor` without wiring `detectComposerTrigger` or
+`ComposerCommandMenu`** — its placeholder advertises `/`, `@`, and `$` triggers that do
+nothing. This is a bug independent of recipe slash commands: `$skill` and `@file` are
+also broken in kickoff. The fix is to extract a shared `useComposerCommandMenu` hook from
+`ChatComposer` and consume it from both composers. Recipe slash items can then be added
+as a fifth item kind in one place.
+
+Shipping order:
+
+1. **Extract shared composer-menu hook**, restore `/`, `@`, `$` triggers in the kickoff
+   composer. No recipe work involved.
+2. **Add the `recipe-slash-command` item kind** and the `setSelectedRecipe` selection
+   branch. Recipe items wired through `matchRecipes()`, no schema change yet — alias
+   defaults to `id`.
+3. **Add `slashAlias?: string` to `defineRecipe`**. Bundled recipes get explicit aliases;
+   collision validation lands at this step.
+4. **Surface filtering polish** — empty-query menu only shows applicable recipes; query
+   matching prefers `slashAlias` over `id`.
+
+#### Future: unifying with the command palette
+
+[Epic 19 plans `defineCommandPaletteContributor`](./19-workspace-miniapps.md#sdk-surface)
+for the Cmd+K command palette (`commandPalette.result` placement). The composer slash and
+the command palette are both "type a name → invoke" surfaces; long-term they may share a
+single contributor model. For MVP, `slashAlias` is a recipe-local field rather than a new
+helper — the contributor unification is a Phase 5+ concern and orthogonal to shipping
+recipe slash now.
 
 ### Background agent tasks
 
@@ -1200,29 +1371,30 @@ project is created. Project-local recipes are the editable source of truth for t
 
 ## Implementation Status Summary
 
-| Area                                                                                                  | Status                                                       |
-| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Project-local discovery + bundled matching                                                            | Built                                                        |
-| Visibility (predicate + script, timeout, isolation)                                                   | Built (via `recipe.json` + expression engine)                |
-| TS-module authoring (`recipe.ts`), retire expression engine                                           | Planned (Phase 1 target; current engine still active)        |
-| Unified workflow step union; kickoff absorbed                                                         | Built                                                        |
-| Workflow runtime: bootstrap agent, card, await-card-action, script                                    | Built                                                        |
-| Workflow runtime: mid-flow agent, tool, present-message, collect-input                                | Built                                                        |
-| Three-author conversation model + `t3workExt` seam (system messages, view-in-message)                 | Built                                                        |
-| Shared tool surface for scripts/steps via broker; enforce `allowedToolGroups`                         | Built                                                        |
-| Deterministic workflows (no-agent workflows skip thread/launch-card) + `action.inline` placement      | Built (tool-step no-chat path; backlog inline chip wired)    |
-| `agent.task` step (background non-interactive LLM call) + step-result binding model                   | Planned (Phase 4 — design step-result model first)           |
-| Sidecar sections + `defineSidecarSection` SDK + composition model + remove hardcoded kickoff aside    | Built (sections + composition; context menus deferred)       |
-| `define*` SDK surface (per-placement helpers, no generic primitive, multi-placement via exports)      | Planned (Phase 5 — ships alongside the placements it covers) |
-| Run-directory materialization, `context.json`/schema/map                                              | Built                                                        |
-| Setup script (formerly `init.ts`)                                                                     | Deferred until stage-2 sandbox                               |
-| Views unified on miniapp model; typed-event action path                                               | Planned (Phase 5)                                            |
-| `Queryable<T>` contract (Array-backed at MVP)                                                         | Planned (Phase 2 — needed by unified steps)                  |
-| `Queryable<T>` runtime: SQL-backed + signals (Signia / equivalent); projection-driven invalidation    | Planned (Phase 6 — scale tier)                               |
-| Agent-discovery types pipeline: generated `.d.ts` + `context.schema.json` + `context-map.md`          | Built                                                        |
-| `create-recipe` recipe (canonical end-to-end workflow proof)                                          | Built                                                        |
-| `edit-plugin-module` recipe (single canonical AI-edit entry point; backs "Edit this…" + "Customize…") | Planned (Phase 5 — after context-menu chrome lands)          |
-| Stage-2 sandboxing                                                                                    | Planned, parallel track                                      |
+| Area                                                                                                  | Status                                                                        |
+| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Project-local discovery + bundled matching                                                            | Built                                                                         |
+| Visibility (predicate + script, timeout, isolation)                                                   | Built (via `recipe.json` + expression engine)                                 |
+| TS-module authoring (`recipe.ts`), retire expression engine                                           | Planned (Phase 1 target; current engine still active)                         |
+| Unified workflow step union; kickoff absorbed                                                         | Built                                                                         |
+| Workflow runtime: bootstrap agent, card, await-card-action, script                                    | Built                                                                         |
+| Workflow runtime: mid-flow agent, tool, present-message, collect-input                                | Built                                                                         |
+| Three-author conversation model + `t3workExt` seam (system messages, view-in-message)                 | Built                                                                         |
+| Shared tool surface for scripts/steps via broker; enforce `allowedToolGroups`                         | Built                                                                         |
+| Deterministic workflows (no-agent workflows skip thread/launch-card) + `action.inline` placement      | Built (tool-step no-chat path; backlog inline chip wired)                     |
+| `agent.task` step (background non-interactive LLM call) + step-result binding model                   | Planned (Phase 4 — design step-result model first)                            |
+| Sidecar sections + `defineSidecarSection` SDK + composition model + remove hardcoded kickoff aside    | Built (sections + composition + shell menus + declared deterministic actions) |
+| Composer slash-command launchers for recipes (`slashAlias` + `recipe-slash-command` item kind)        | Planned (precondition: extract shared composer-menu hook so kickoff wires `/`, `@`, `$` at all) |
+| `define*` SDK surface (per-placement helpers, no generic primitive, multi-placement via exports)      | Planned (Phase 5 — ships alongside the placements it covers)                  |
+| Run-directory materialization, `context.json`/schema/map                                              | Built                                                                         |
+| Setup script (formerly `init.ts`)                                                                     | Deferred until stage-2 sandbox                                                |
+| Views unified on miniapp model; typed-event action path                                               | Planned (Phase 5)                                                             |
+| `Queryable<T>` contract (Array-backed at MVP)                                                         | Planned (Phase 2 — needed by unified steps)                                   |
+| `Queryable<T>` runtime: SQL-backed + signals (Signia / equivalent); projection-driven invalidation    | Planned (Phase 6 — scale tier)                                                |
+| Agent-discovery types pipeline: generated `.d.ts` + `context.schema.json` + `context-map.md`          | Built                                                                         |
+| `create-recipe` recipe (canonical end-to-end workflow proof)                                          | Built                                                                         |
+| `edit-plugin-module` recipe (single canonical AI-edit entry point; backs "Edit this…" + "Customize…") | Planned (Phase 5 — after context-menu chrome lands)                           |
+| Stage-2 sandboxing                                                                                    | Planned, parallel track                                                       |
 
 ## Implementation Notes
 

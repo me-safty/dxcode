@@ -1,4 +1,8 @@
 import { T3workRecentConversations } from "~/t3work/t3work-ProjectDashboardRecentConversations";
+import {
+  orderT3workSidecarSectionItems,
+  type T3workSidecarSectionShellProps,
+} from "~/t3work/t3work-sidecarSectionShellProps";
 import type { SidecarSectionHost } from "~/t3work/t3work-sidecarSectionHost";
 import type { ProjectThread } from "~/t3work/t3work-types";
 
@@ -8,6 +12,7 @@ export type RecentConversationsSectionProps = {
   readonly searchPlaceholder?: string | undefined;
   readonly showSearch?: boolean | undefined;
   readonly showCount?: boolean | undefined;
+  readonly shell?: T3workSidecarSectionShellProps<ProjectThread> | undefined;
 };
 
 export function T3workRecentConversationsSection({
@@ -18,10 +23,15 @@ export function T3workRecentConversationsSection({
   props?: unknown;
 }) {
   const sectionProps = props as RecentConversationsSectionProps | undefined;
+  const orderedThreads = orderT3workSidecarSectionItems({
+    items: [...(sectionProps?.threads ?? [])],
+    getItemId: (thread) => thread.id,
+    shell: sectionProps?.shell,
+  });
 
   return (
     <T3workRecentConversations
-      threads={[...(sectionProps?.threads ?? [])]}
+      threads={orderedThreads}
       onOpenThread={host.openThread}
       showHeader={false}
       {...(sectionProps?.emptyMessage ? { emptyMessage: sectionProps.emptyMessage } : {})}
@@ -30,6 +40,11 @@ export function T3workRecentConversationsSection({
         : {})}
       {...(sectionProps?.showSearch !== undefined ? { showSearch: sectionProps.showSearch } : {})}
       {...(sectionProps?.showCount !== undefined ? { showCount: sectionProps.showCount } : {})}
+      renderThread={
+        sectionProps?.shell?.wrapItem
+          ? (thread, content) => sectionProps.shell?.wrapItem?.(thread, content) ?? content
+          : undefined
+      }
     />
   );
 }

@@ -3,10 +3,10 @@ import {
   type T3workToolCatalogEntry,
   type T3workToolStatus,
   type T3workToolSurface,
-} from "./t3workToolCatalogCore.js";
-import { IMPLEMENTED_T3WORK_TOOL_CATALOG } from "./t3workToolCatalogImplemented.js";
-import { PLANNED_WORK_ITEM_GITHUB_THREAD_T3WORK_TOOL_CATALOG } from "./t3workToolCatalogItemTools.js";
-import { PLANNED_PROJECT_BACKLOG_MY_WORK_T3WORK_TOOL_CATALOG } from "./t3workToolCatalogProjectTools.js";
+} from "./t3workToolCatalogCore.ts";
+import { IMPLEMENTED_T3WORK_TOOL_CATALOG } from "./t3workToolCatalogImplemented.ts";
+import { PLANNED_WORK_ITEM_GITHUB_THREAD_T3WORK_TOOL_CATALOG } from "./t3workToolCatalogItemTools.ts";
+import { PLANNED_PROJECT_BACKLOG_MY_WORK_T3WORK_TOOL_CATALOG } from "./t3workToolCatalogProjectTools.ts";
 
 const IMPLEMENTED_T3WORK_TOOL_IDS = new Set(Object.keys(IMPLEMENTED_T3WORK_TOOL_CATALOG));
 
@@ -28,7 +28,7 @@ export type {
   T3workToolKind,
   T3workToolStatus,
   T3workToolSurface,
-} from "./t3workToolCatalogCore.js";
+} from "./t3workToolCatalogCore.ts";
 
 export const T3WORK_TOOL_CATALOG = {
   ...PLANNED_PROJECT_BACKLOG_MY_WORK_TOOL_CATALOG,

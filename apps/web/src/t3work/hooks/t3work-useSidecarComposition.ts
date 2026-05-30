@@ -1,14 +1,23 @@
 import { useCallback, useMemo } from "react";
 
-import { resolveSidecarComposition, type SidecarComposition } from "@t3tools/project-recipes";
+import {
+  resolveSidecarComposition,
+  type SidecarComposition,
+  type SidecarPersonalization,
+} from "@t3tools/project-recipes";
 
 import { useServerConfig } from "~/rpc/serverState";
 import {
-  persistStoredSidecarComposition,
-  readStoredSidecarCompositionFromServerSettings,
+  persistStoredSidecarPersonalization,
+  readStoredSidecarPersonalizationFromServerSettings,
 } from "~/t3work/hooks/t3work-sidecarCompositionPersistence";
-
-const EMPTY_SIDECAR_COMPOSITION: SidecarComposition = { sections: [] };
+import {
+  appendUniqueItem,
+  removeItem,
+  resolveStoredComposition,
+  updateSectionItemMap,
+  updateSectionState,
+} from "~/t3work/hooks/t3work-sidecarCompositionState";
 
 export function useT3workSidecarComposition(input: {
   bundledDefault: SidecarComposition;
@@ -16,8 +25,8 @@ export function useT3workSidecarComposition(input: {
   projectDefault?: SidecarComposition | undefined;
 }) {
   const serverConfig = useServerConfig();
-  const userOverrides = useMemo(
-    () => readStoredSidecarCompositionFromServerSettings(serverConfig?.settings),
+  const personalization = useMemo(
+    () => readStoredSidecarPersonalizationFromServerSettings(serverConfig?.settings),
     [serverConfig?.settings.t3workStoredSidecarCompositionJson],
   );
   const composition = useMemo(
@@ -26,31 +35,142 @@ export function useT3workSidecarComposition(input: {
         bundledDefault: input.bundledDefault,
         profileDefault: input.profileDefault,
         projectDefault: input.projectDefault,
-        userOverrides,
+        userOverrides: personalization.composition,
       }),
-    [input.bundledDefault, input.profileDefault, input.projectDefault, userOverrides],
+    [input.bundledDefault, input.profileDefault, input.projectDefault, personalization],
+  );
+
+  const persistPersonalization = useCallback(
+    (
+      update: (
+        current: SidecarPersonalization,
+        baseComposition: SidecarComposition,
+      ) => SidecarPersonalization,
+    ) => {
+      persistStoredSidecarPersonalization(
+        update(personalization, resolveStoredComposition(personalization, composition)),
+      );
+    },
+    [composition, personalization],
   );
 
   const setCollapsed = useCallback(
     (sectionId: string, collapsed: boolean) => {
-      const baseComposition =
-        userOverrides.sections.length > 0
-          ? userOverrides
-          : composition.sections.length > 0
-            ? composition
-            : EMPTY_SIDECAR_COMPOSITION;
-      const nextSections = baseComposition.sections.some(
-        (section) => section.sectionId === sectionId,
-      )
-        ? baseComposition.sections.map((section) =>
-            section.sectionId === sectionId ? { ...section, collapsed } : section,
-          )
-        : [...baseComposition.sections, { sectionId, collapsed }];
-
-      persistStoredSidecarComposition({ sections: nextSections });
+      persistPersonalization((current, baseComposition) => ({
+        ...current,
+        composition: {
+          sections: updateSectionState(baseComposition.sections, sectionId, { collapsed }),
+        },
+      }));
     },
-    [composition, userOverrides],
+    [persistPersonalization],
   );
 
-  return { composition, setCollapsed, userOverrides };
+  const hideSection = useCallback(
+    (sectionId: string) => {
+      persistPersonalization((current, baseComposition) => ({
+        ...current,
+        composition: {
+          sections: updateSectionState(baseComposition.sections, sectionId, { visible: false }),
+        },
+      }));
+    },
+    [persistPersonalization],
+  );
+
+  const moveSection = useCallback(
+    (sectionId: string, direction: "up" | "down") => {
+      persistPersonalization((current, baseComposition) => {
+        const currentIndex = baseComposition.sections.findIndex(
+          (section) => section.sectionId === sectionId,
+        );
+
+        if (currentIndex < 0) {
+          return current;
+        }
+
+        const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+        if (targetIndex < 0 || targetIndex >= baseComposition.sections.length) {
+          return current;
+        }
+
+        const nextSections = [...baseComposition.sections];
+        const [movedSection] = nextSections.splice(currentIndex, 1);
+        if (!movedSection) {
+          return current;
+        }
+        nextSections.splice(targetIndex, 0, movedSection);
+
+        return {
+          ...current,
+          composition: { sections: nextSections },
+        };
+      });
+    },
+    [persistPersonalization],
+  );
+
+  const hideItem = useCallback(
+    (sectionId: string, itemId: string) => {
+      persistPersonalization((current) => ({
+        ...current,
+        itemHides: updateSectionItemMap(
+          current.itemHides,
+          sectionId,
+          appendUniqueItem(current.itemHides?.[sectionId], itemId),
+        ),
+        itemPins: updateSectionItemMap(
+          current.itemPins,
+          sectionId,
+          removeItem(current.itemPins?.[sectionId], itemId),
+        ),
+      }));
+    },
+    [persistPersonalization],
+  );
+
+  const pinItem = useCallback(
+    (sectionId: string, itemId: string) => {
+      persistPersonalization((current) => ({
+        ...current,
+        itemPins: updateSectionItemMap(
+          current.itemPins,
+          sectionId,
+          appendUniqueItem(current.itemPins?.[sectionId], itemId),
+        ),
+        itemHides: updateSectionItemMap(
+          current.itemHides,
+          sectionId,
+          removeItem(current.itemHides?.[sectionId], itemId),
+        ),
+      }));
+    },
+    [persistPersonalization],
+  );
+
+  const unpinItem = useCallback(
+    (sectionId: string, itemId: string) => {
+      persistPersonalization((current) => ({
+        ...current,
+        itemPins: updateSectionItemMap(
+          current.itemPins,
+          sectionId,
+          removeItem(current.itemPins?.[sectionId], itemId),
+        ),
+      }));
+    },
+    [persistPersonalization],
+  );
+
+  return {
+    composition,
+    setCollapsed,
+    hideSection,
+    moveSection,
+    hideItem,
+    pinItem,
+    unpinItem,
+    personalization,
+    userOverrides: personalization,
+  };
 }

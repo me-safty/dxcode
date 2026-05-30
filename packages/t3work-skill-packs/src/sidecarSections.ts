@@ -4,6 +4,23 @@ import {
   type SidecarSectionDefinition,
 } from "@t3tools/project-recipes";
 
+function isBacklogAssigneeQuickStart(
+  item: unknown,
+): item is { readonly id: string; readonly workflow: { readonly surface: string } } {
+  if (typeof item !== "object" || item === null) {
+    return false;
+  }
+
+  const quickStart = item as {
+    readonly id?: unknown;
+    readonly workflow?: { readonly surface?: unknown } | undefined;
+  };
+  return (
+    quickStart.id === "show-only-assigned-to-me" &&
+    quickStart.workflow?.surface === "project.dashboard.backlog"
+  );
+}
+
 const BUNDLED_SIDECAR_SECTIONS: ReadonlyArray<SidecarSectionDefinition> = [
   defineSidecarSection({
     id: "quick-starts",
@@ -17,6 +34,20 @@ const BUNDLED_SIDECAR_SECTIONS: ReadonlyArray<SidecarSectionDefinition> = [
     ],
     component: "quick-starts",
     allowedToolGroups: ["view.state", "thread.handoff"],
+    itemActions: (item) =>
+      isBacklogAssigneeQuickStart(item)
+        ? [
+            {
+              id: "apply-now",
+              label: "Apply filter now",
+              run: {
+                kind: "tool",
+                toolName: "t3work.backlog.set_assignee_filter",
+                input: { mode: "current-user" },
+              },
+            },
+          ]
+        : [],
     defaults: { collapsed: false, visible: true },
   }),
   defineSidecarSection({

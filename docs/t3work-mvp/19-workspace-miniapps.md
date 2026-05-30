@@ -248,6 +248,9 @@ type SidecarComposition = {
 
 type SidecarPersonalization = {
   composition?: SidecarComposition;
+  itemHides?: Record<string, ReadonlyArray<string>>;
+  itemPins?: Record<string, ReadonlyArray<string>>;
+  itemOrderOverrides?: Record<string, ReadonlyArray<string>>;
 };
 ```
 
@@ -255,7 +258,8 @@ Defaults come from the active profile ([Epic 12](./12-profiles-and-skill-packs.m
 a QA profile composes a different section list than an engineering profile. Per-user
 overrides (reorder, collapse, hide) persist via a sibling client-settings key
 (`t3workStoredSidecarCompositionJson`; `packages/contracts/src/settings.ts` is already
-on the additive guard allowlist).
+on the additive guard allowlist). The same payload now carries per-section hidden item
+ids, pinned item ids, and explicit item-order overrides.
 
 ### Quick Starts is not special
 
@@ -301,28 +305,25 @@ section-declared actions into one menu.
 
 Right-click / kebab on an individual item (Quick Start card, inline chip, PR row, etc.):
 
-| Action                 | Source    | Scope           | Notes                                                                                                                                                                                                                                            |
-| ---------------------- | --------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Hide this**          | Universal | per-user        | Item never shows for this user. Persisted in the existing `t3workStoredSidebarPinsJson` client-settings seam. Per-project hide is **deferred** until the shared-meta-repo story stabilizes.                                                      |
-| **Pin to top / Unpin** | Universal | per-user        | Boosts the item above its natural rank within its section. Same persistence.                                                                                                                                                                     |
-| **Edit this…**         | Universal | starts workflow | Launches the bundled `edit-plugin-module` recipe with the item's source path as input. Single canonical AI-edit entry point — see [Epic 16](./16-action-recipes.md#agent-created-recipes).                                                       |
-| **Customize…**         | Universal | starts workflow | The route for _structured / destructive_ changes (e.g., "Revert to bundled", "Reset overrides", "Change tool grants"). No ad-hoc confirmation dialogs in the UI — destructive ops go through a guided workflow with explicit preview + approval. |
-| **Show recent runs**   | Universal | introspection   | The last N invocations of this item + their resulting artifacts. Only applies to launchable items (recipes with workflows).                                                                                                                      |
-| _section-specific_     | Section   | varies          | E.g., "Open in PR workspace" on a PR row, "Apply filter" on a chip, "Open thread" on a Recent Threads row. Declared via `defineSidecarSection.itemActions`.                                                                                      |
+| Action                 | Source    | Scope    | Notes                                                                                                                                                   |
+| ---------------------- | --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Hide item**          | Universal | per-user | Item never shows for this user. Persisted in `t3workStoredSidecarCompositionJson` under `itemHides`. Per-project hide remains **deferred**.             |
+| **Pin to top / Unpin** | Universal | per-user | Boosts the item above its natural rank within its section. Persisted in the same settings payload under `itemPins` / `itemOrderOverrides`.              |
+| _section-specific_     | Section   | varies   | E.g., "Apply filter now" on a backlog Quick Start item. Declared via `defineSidecarSection.itemActions` and launched through the no-chat workflow path. |
 
 #### Section-level actions
 
 Right-click / kebab on a section header:
 
-| Action                | Source    | Scope    | Notes                                                                                              |
-| --------------------- | --------- | -------- | -------------------------------------------------------------------------------------------------- |
-| **Hide section**      | Universal | per-user | Same persistence seam.                                                                             |
-| **Collapse / expand** | Universal | per-user | Also reachable via the section header chevron.                                                     |
-| **Move up / down**    | Universal | per-user | Keyboard-friendly alternative to drag-to-reorder.                                                  |
-| **Edit section…**     | Universal | workflow | Launches `edit-plugin-module` with the section's source path.                                      |
-| **Settings…**         | Optional  | per-user | Only appears if the section exposes a `settingsView` in its `defineSidecarSection`.                |
-| **Reset section**     | Universal | workflow | Routes through `Customize` to undo per-user customizations for this section with explicit preview. |
-| _section-specific_    | Section   | varies   | Declared via `defineSidecarSection.sectionActions`.                                                |
+| Action                | Source    | Scope    | Notes                                                                       |
+| --------------------- | --------- | -------- | --------------------------------------------------------------------------- |
+| **Hide section**      | Universal | per-user | Persisted in `t3workStoredSidecarCompositionJson`.                          |
+| **Collapse / expand** | Universal | per-user | Also reachable via the section header chevron.                              |
+| **Move up / down**    | Universal | per-user | Keyboard-friendly alternative to drag-to-reorder.                           |
+| _section-specific_    | Section   | varies   | Declared via `defineSidecarSection.sectionActions` when a section has them. |
+
+Phase 5a.2 intentionally stops there. Edit/customize/reset/settings/recent-runs menu
+entries remain deferred until their backing workflows and settings surfaces exist.
 
 #### SDK hooks on `defineSidecarSection`
 
@@ -332,7 +333,7 @@ Sections opt into the merged menu by declaring action contributors:
 defineSidecarSection({
   id: "open-pull-requests",
   // ...
-  itemActions: (item, ctx) => [
+  itemActions: (item) => [
     {
       id: "open-pr",
       label: "Open in PR workspace",
@@ -346,7 +347,7 @@ defineSidecarSection({
       run: { kind: "tool", toolName: "t3work.github.mark_reviewed", input: { id: item.id } },
     },
   ],
-  sectionActions: (ctx) => [
+  sectionActions: () => [
     {
       id: "refresh",
       label: "Refresh now",
@@ -372,11 +373,11 @@ schema change:
 // t3workStoredSidecarCompositionJson
 type SidecarPersonalization = {
   composition?: SidecarComposition; // section visibility + order + collapse
+  itemHides?: Record<string, ReadonlyArray<string>>;
+  itemPins?: Record<string, ReadonlyArray<string>>;
+  itemOrderOverrides?: Record<string, ReadonlyArray<string>>;
 };
 ```
-
-`itemHides`, `itemPins`, and `itemOrderOverrides` are deferred to the later context-menu
-phase; 5a only persists section visibility, order, and collapse state.
 
 Layering: `bundled defaults → profile defaults → project config → user overrides`.
 Higher layers override lower. Hidden items don't render; pinned items render first; the
@@ -452,7 +453,7 @@ exist to prevent.
 | `defineDashboardWidget`           | `dashboard.widget`                                                                                                  | Widget tile inside a project dashboard (backlog overview, my-work overview)                                                                                   | Planned (Phase 5+)  |
 | `defineNavSection`                | `nav.section`                                                                                                       | Section inside the left navigation tree (e.g., a "Saved Filters" subtree)                                                                                     | Planned (Phase 5+)  |
 | `defineHomeBlock`                 | `home.block`                                                                                                        | Block on the home workspace                                                                                                                                   | Planned (Phase 5+)  |
-| `defineCommandPaletteContributor` | `commandPalette.result`                                                                                             | Adds entries / categories to the command palette                                                                                                              | Planned             |
+| `defineCommandPaletteContributor` | `commandPalette.result`                                                                                             | Adds entries / categories to the command palette. (Sibling surface: composer `/` typeahead — for MVP that uses the recipe-local `slashAlias` field instead of this helper. See [Epic 16 — Composer slash-command launchers](./16-action-recipes.md#composer-slash-command-launchers).) | Planned             |
 | `defineArtifactRenderer`          | `artifact.detail`                                                                                                   | Custom viewer for a specific `artifact.kind`                                                                                                                  | Planned             |
 | `defineConversationCard`          | (embedded as view attachment on a system message — see [Epic 16 — Attachments](./16-action-recipes.md#attachments)) | Declarative card spec (checklist / form / approval / etc.); replaces inline card literals                                                                     | Planned (Phase 5)   |
 | `defineConversationSidecar`       | `conversation.sidecar`                                                                                              | Interactive side panel beside a conversation                                                                                                                  | Planned (Phase 5+)  |

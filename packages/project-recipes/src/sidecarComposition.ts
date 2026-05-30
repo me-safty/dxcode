@@ -12,10 +12,23 @@ export const SidecarComposition = Schema.Struct({
 });
 export type SidecarComposition = typeof SidecarComposition.Type;
 
+const SidecarItemIdsBySection = Schema.Record(Schema.String, Schema.Array(Schema.String));
+
 export const SidecarPersonalization = Schema.Struct({
   composition: Schema.optional(SidecarComposition),
+  itemHides: Schema.optional(SidecarItemIdsBySection),
+  itemPins: Schema.optional(SidecarItemIdsBySection),
+  itemOrderOverrides: Schema.optional(SidecarItemIdsBySection),
 });
 export type SidecarPersonalization = typeof SidecarPersonalization.Type;
+
+export type SidecarSectionItemPersonalization = {
+  readonly hiddenItemIds: ReadonlyArray<string>;
+  readonly pinnedItemIds: ReadonlyArray<string>;
+  readonly orderOverrideItemIds: ReadonlyArray<string>;
+};
+
+const EMPTY_ITEM_IDS: ReadonlyArray<string> = [];
 
 function normalizeSections(
   sections: ReadonlyArray<SidecarCompositionSection>,
@@ -30,6 +43,26 @@ function normalizeSections(
   }
 
   return [...normalized.values()];
+}
+
+function normalizeItemIds(itemIds: ReadonlyArray<string>): ReadonlyArray<string> {
+  const normalized = new Map<string, string>();
+
+  for (const itemId of itemIds) {
+    if (normalized.has(itemId)) {
+      normalized.delete(itemId);
+    }
+    normalized.set(itemId, itemId);
+  }
+
+  return [...normalized.keys()];
+}
+
+function readSectionItemIds(
+  idsBySection: Readonly<Record<string, ReadonlyArray<string>>> | undefined,
+  sectionId: string,
+): ReadonlyArray<string> {
+  return normalizeItemIds(idsBySection?.[sectionId] ?? EMPTY_ITEM_IDS);
 }
 
 function applyCompositionLayer(
@@ -90,4 +123,53 @@ export function resolveSidecarComposition(input: {
   return {
     sections: layeredComposition.sections.filter((section) => section.visible !== false),
   };
+}
+
+export function resolveSidecarSectionItemPersonalization(input: {
+  readonly sectionId: string;
+  readonly personalization?: SidecarPersonalization | undefined;
+}): SidecarSectionItemPersonalization {
+  return {
+    hiddenItemIds: readSectionItemIds(input.personalization?.itemHides, input.sectionId),
+    pinnedItemIds: readSectionItemIds(input.personalization?.itemPins, input.sectionId),
+    orderOverrideItemIds: readSectionItemIds(
+      input.personalization?.itemOrderOverrides,
+      input.sectionId,
+    ),
+  };
+}
+
+export function isSidecarItemHidden(input: {
+  readonly itemId: string;
+  readonly personalization?: SidecarSectionItemPersonalization | undefined;
+}): boolean {
+  return (input.personalization?.hiddenItemIds ?? EMPTY_ITEM_IDS).includes(input.itemId);
+}
+
+export function isSidecarItemPinned(input: {
+  readonly itemId: string;
+  readonly personalization?: SidecarSectionItemPersonalization | undefined;
+}): boolean {
+  return (input.personalization?.pinnedItemIds ?? EMPTY_ITEM_IDS).includes(input.itemId);
+}
+
+export function resolveSidecarSectionItemOrder(input: {
+  readonly itemIds: ReadonlyArray<string>;
+  readonly personalization?: SidecarSectionItemPersonalization | undefined;
+}): ReadonlyArray<string> {
+  const naturalOrder = normalizeItemIds(input.itemIds);
+  const visibleItemIds = new Set(naturalOrder);
+  const orderOverrideItemIds = (
+    input.personalization?.orderOverrideItemIds ?? EMPTY_ITEM_IDS
+  ).filter((itemId) => visibleItemIds.has(itemId));
+  const orderedItemIds = [
+    ...orderOverrideItemIds,
+    ...naturalOrder.filter((itemId) => !orderOverrideItemIds.includes(itemId)),
+  ].filter((itemId) => !isSidecarItemHidden({ itemId, personalization: input.personalization }));
+
+  const pinnedItemIds = orderedItemIds.filter((itemId) =>
+    isSidecarItemPinned({ itemId, personalization: input.personalization }),
+  );
+
+  return [...pinnedItemIds, ...orderedItemIds.filter((itemId) => !pinnedItemIds.includes(itemId))];
 }

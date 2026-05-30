@@ -18,6 +18,9 @@ vi.mock("~/rpc/serverState", () => ({
 }));
 
 import {
+  persistStoredSidecarPersonalization,
+  readStoredSidecarPersonalizationFromClientSettings,
+  readStoredSidecarPersonalizationFromServerSettings,
   persistStoredSidecarComposition,
   readStoredSidecarCompositionFromClientSettings,
   readStoredSidecarCompositionFromServerSettings,
@@ -35,10 +38,12 @@ describe("sidecar composition persistence", () => {
       readStoredSidecarCompositionFromServerSettings({
         ...DEFAULT_SERVER_SETTINGS,
         t3workStoredSidecarCompositionJson: JSON.stringify({
-          sections: [
-            { sectionId: "quick-starts", collapsed: false },
-            { sectionId: "recent-conversations", collapsed: true },
-          ],
+          composition: {
+            sections: [
+              { sectionId: "quick-starts", collapsed: false },
+              { sectionId: "recent-conversations", collapsed: true },
+            ],
+          },
         }),
       }),
     ).toEqual({
@@ -54,7 +59,9 @@ describe("sidecar composition persistence", () => {
       readStoredSidecarCompositionFromClientSettings({
         ...DEFAULT_CLIENT_SETTINGS,
         t3workStoredSidecarCompositionJson: JSON.stringify({
-          sections: [{ sectionId: "quick-starts", visible: true, collapsed: true }],
+          composition: {
+            sections: [{ sectionId: "quick-starts", visible: true, collapsed: true }],
+          },
         }),
       }),
     ).toEqual({
@@ -67,14 +74,86 @@ describe("sidecar composition persistence", () => {
       readStoredSidecarCompositionFromServerSettings({
         ...DEFAULT_SERVER_SETTINGS,
         t3workStoredSidecarCompositionJson: JSON.stringify({
-          sections: [
-            { sectionId: "quick-starts", collapsed: false },
-            { sectionId: "quick-starts", collapsed: true },
-          ],
+          composition: {
+            sections: [
+              { sectionId: "quick-starts", collapsed: false },
+              { sectionId: "quick-starts", collapsed: true },
+            ],
+          },
         }),
       }),
     ).toEqual({
       sections: [{ sectionId: "quick-starts", collapsed: true }],
+    });
+  });
+
+  it("falls back to the legacy direct-composition payload", () => {
+    expect(
+      readStoredSidecarPersonalizationFromServerSettings({
+        ...DEFAULT_SERVER_SETTINGS,
+        t3workStoredSidecarCompositionJson: JSON.stringify({
+          sections: [{ sectionId: "quick-starts", collapsed: true }],
+        }),
+      }),
+    ).toEqual({
+      composition: {
+        sections: [{ sectionId: "quick-starts", collapsed: true }],
+      },
+    });
+  });
+
+  it("round-trips item personalization fields through the shared settings key", async () => {
+    const updateSettings = vi.fn().mockResolvedValue(undefined);
+
+    mockReadLocalApi.mockReturnValue({
+      persistence: {},
+      server: {
+        updateSettings,
+      },
+    });
+    mockGetServerConfig.mockReturnValue({ settings: DEFAULT_SERVER_SETTINGS });
+
+    persistStoredSidecarPersonalization({
+      composition: {
+        sections: [{ sectionId: "quick-starts", collapsed: true }],
+      },
+      itemHides: {
+        "quick-starts": ["recipe-2"],
+      },
+      itemPins: {
+        "quick-starts": ["recipe-3"],
+      },
+      itemOrderOverrides: {
+        "quick-starts": ["recipe-4", "recipe-3"],
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(updateSettings).toHaveBeenCalledWith({
+        t3workStoredSidecarCompositionJson:
+          '{"composition":{"sections":[{"sectionId":"quick-starts","collapsed":true}]},"itemHides":{"quick-starts":["recipe-2"]},"itemPins":{"quick-starts":["recipe-3"]},"itemOrderOverrides":{"quick-starts":["recipe-4","recipe-3"]}}',
+      });
+    });
+
+    expect(
+      readStoredSidecarPersonalizationFromServerSettings({
+        ...DEFAULT_SERVER_SETTINGS,
+        t3workStoredSidecarCompositionJson:
+          updateSettings.mock.calls[0]?.[0]?.t3workStoredSidecarCompositionJson,
+      }),
+    ).toEqual({
+      composition: {
+        sections: [{ sectionId: "quick-starts", collapsed: true }],
+      },
+      itemHides: {
+        "quick-starts": ["recipe-2"],
+      },
+      itemPins: {
+        "quick-starts": ["recipe-3"],
+      },
+      itemOrderOverrides: {
+        "quick-starts": ["recipe-4", "recipe-3"],
+      },
     });
   });
 
@@ -99,7 +178,7 @@ describe("sidecar composition persistence", () => {
     await vi.waitFor(() => {
       expect(updateSettings).toHaveBeenCalledWith({
         t3workStoredSidecarCompositionJson:
-          '{"sections":[{"sectionId":"quick-starts","collapsed":true},{"sectionId":"recent-conversations","visible":false}]}',
+          '{"composition":{"sections":[{"sectionId":"quick-starts","collapsed":true},{"sectionId":"recent-conversations","visible":false}]}}',
       });
     });
 
@@ -118,7 +197,7 @@ describe("sidecar composition persistence", () => {
     expect(mockApplySettingsUpdated).toHaveBeenCalledWith({
       ...DEFAULT_SERVER_SETTINGS,
       t3workStoredSidecarCompositionJson:
-        '{"sections":[{"sectionId":"quick-starts","collapsed":true},{"sectionId":"recent-conversations","visible":false}]}',
+        '{"composition":{"sections":[{"sectionId":"quick-starts","collapsed":true},{"sectionId":"recent-conversations","visible":false}]}}',
     });
   });
 });

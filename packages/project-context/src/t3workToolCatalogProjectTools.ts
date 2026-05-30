@@ -1,4 +1,4 @@
-import { definePlannedTools, type T3workToolCatalogEntry } from "./t3workToolCatalogCore.js";
+import { definePlannedTools, type T3workToolCatalogEntry } from "./t3workToolCatalogCore.ts";
 
 const PLANNED_PROJECT_BACKLOG_MY_WORK_TOOL_ENTRIES = [
   ...definePlannedTools({

@@ -6,9 +6,11 @@ import {
   useRegisterT3workDashboardRecipeActionHandler,
 } from "~/t3work/t3work-dashboardRecipeActions";
 import {
+  type T3workDeterministicWorkflowLaunch,
   launchProjectDashboardBacklogInlineRecipe,
   useRegisterT3workInlineRecipeLaunchHandler,
 } from "~/t3work/t3work-inlineRecipeLaunch";
+import { launchProjectDashboardBacklogDeterministicWorkflow } from "~/t3work/t3work-deterministicWorkflowLaunch";
 import type { ProjectDashboardBacklogState } from "~/t3work/t3work-projectDashboardBacklogState";
 import type { ProjectTicket } from "~/t3work/t3work-types";
 import type { ProjectShellProject } from "@t3tools/project-context";
@@ -51,19 +53,49 @@ export function useProjectDashboardBacklogRecipeSupport(input: {
     useMemo(
       () =>
         backend
-          ? async (recipeId) =>
-              launchProjectDashboardBacklogInlineRecipe({
+          ? async (launch) => {
+              if (typeof launch === "string") {
+                return launchProjectDashboardBacklogInlineRecipe({
+                  backend,
+                  recipeId: launch,
+                  projectId: input.project.id,
+                  projectTitle: input.project.title,
+                  state: input.state,
+                  currentUserDisplayName: input.currentUserDisplayName,
+                  setState: input.setState,
+                  ...(input.project.workspace?.rootPath
+                    ? { workspaceRoot: input.project.workspace.rootPath }
+                    : {}),
+                });
+              }
+
+              const workflowLaunch = launch as T3workDeterministicWorkflowLaunch;
+              if (workflowLaunch.surface !== "project.dashboard.backlog") {
+                return null;
+              }
+
+              return launchProjectDashboardBacklogDeterministicWorkflow({
                 backend,
-                recipeId,
+                launchId: workflowLaunch.launchId,
+                title: workflowLaunch.title,
+                description: workflowLaunch.description,
+                surface: workflowLaunch.surface,
+                workflow: workflowLaunch.workflow,
                 projectId: input.project.id,
                 projectTitle: input.project.title,
                 state: input.state,
                 currentUserDisplayName: input.currentUserDisplayName,
                 setState: input.setState,
+                ...(workflowLaunch.parameters ? { parameters: workflowLaunch.parameters } : {}),
+                ...(workflowLaunch.allowedToolGroups
+                  ? { allowedToolGroups: workflowLaunch.allowedToolGroups }
+                  : {}),
+                ...(workflowLaunch.source ? { source: workflowLaunch.source } : {}),
                 ...(input.project.workspace?.rootPath
                   ? { workspaceRoot: input.project.workspace.rootPath }
                   : {}),
-              })
+              });
+            }
           : null,
       [backend, input],
     ),

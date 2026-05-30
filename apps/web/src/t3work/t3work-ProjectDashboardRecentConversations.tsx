@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { SearchIcon } from "lucide-react";
 import { Input } from "~/t3work/components/ui/t3work-input";
 import { formatRelativeTime } from "~/t3work/t3work-AppTicketHelpers";
@@ -16,7 +16,7 @@ function formatRecentConversationMetadata(thread: { messageCount: number; lastMe
 }
 
 type T3workRecentConversationsProps = {
-  threads: ProjectThread[];
+  threads: ReadonlyArray<ProjectThread>;
   onOpenThread: (threadId: string) => void;
   title?: string;
   emptyMessage?: string;
@@ -24,6 +24,7 @@ type T3workRecentConversationsProps = {
   showHeader?: boolean;
   showSearch?: boolean;
   showCount?: boolean;
+  renderThread?: ((thread: ProjectThread, content: ReactNode) => ReactNode) | undefined;
 };
 
 export function T3workRecentConversations({
@@ -35,6 +36,7 @@ export function T3workRecentConversations({
   showHeader = true,
   showSearch = true,
   showCount = true,
+  renderThread,
 }: T3workRecentConversationsProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const recentThreads = useMemo(
@@ -87,8 +89,8 @@ export function T3workRecentConversations({
         <p className="px-1 py-1 text-xs text-muted-foreground/70">{emptyMessage}</p>
       ) : (
         <ul className="overflow-hidden rounded-md border border-border/60 bg-background/40">
-          {filteredThreads.map((thread) => (
-            <li key={thread.id} className="border-b border-border/50 last:border-b-0">
+          {filteredThreads.map((thread) => {
+            const content = (
               <button
                 type="button"
                 className="group flex w-full min-w-0 items-start px-3 py-2.5 text-left transition-colors hover:bg-accent/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
@@ -101,8 +103,14 @@ export function T3workRecentConversations({
                   </div>
                 </div>
               </button>
-            </li>
-          ))}
+            );
+
+            return (
+              <li key={thread.id} className="border-b border-border/50 last:border-b-0">
+                {renderThread ? renderThread(thread, content) : content}
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>
