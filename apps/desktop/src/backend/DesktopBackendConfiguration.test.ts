@@ -262,4 +262,40 @@ describe("DesktopBackendConfiguration", () => {
       }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
+
+  it.effect("falls back to the Windows backend when wsl mode is set but WSL is unavailable", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-backend-config-test-",
+      });
+
+      yield* Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+        const config = yield* configuration.resolve;
+
+        // Persisted wsl mode + WSL unavailable must not strand the user on the
+        // WSL spawn path (which loops on preflight failures while the WSL
+        // settings row is hidden). Resolve to the Windows backend instead.
+        assert.equal(config.executablePath, process.execPath);
+        assert.equal(config.bootstrap.t3Home, environment.baseDir);
+        assert.isTrue(Option.isNone(config.preflightFailure));
+      }).pipe(
+        Effect.provide(
+          DesktopBackendConfiguration.layer.pipe(
+            Layer.provideMerge(serverExposureLayer),
+            Layer.provideMerge(
+              DesktopAppSettings.layerTest({
+                ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+                wslMode: "wsl",
+              }),
+            ),
+            Layer.provideMerge(DesktopWslEnvironment.layerTest({ isAvailable: false })),
+            Layer.provideMerge(makeEnvironmentLayer(baseDir, { platform: "win32" })),
+          ),
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 });

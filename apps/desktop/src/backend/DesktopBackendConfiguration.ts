@@ -210,7 +210,21 @@ const resolveBackendStartConfig = Effect.fn("desktop.backendConfiguration.resolv
     const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
     const backendExposure = yield* serverExposure.backendConfig;
 
-    const useWsl = input.wslMode === "wsl" && environment.platform === "win32";
+    // Only take the WSL spawn path when WSL is actually usable. If the user
+    // persisted wsl mode but WSL has since become unavailable (e.g. wsl.exe
+    // removed or no distro installed), fall back to the Windows backend
+    // instead of looping forever on preflight failures: the Connections
+    // "Backend runtime" row is hidden while WSL is unavailable, so a stuck
+    // WSL primary would otherwise leave no in-app way back to Windows.
+    const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment;
+    const wslRequested = input.wslMode === "wsl" && environment.platform === "win32";
+    const wslAvailable = wslRequested ? yield* wslEnvironment.isAvailable : false;
+    if (wslRequested && !wslAvailable) {
+      yield* Effect.logWarning(
+        "WSL backend requested but WSL is unavailable; starting the Windows backend instead.",
+      );
+    }
+    const useWsl = wslRequested && wslAvailable;
 
     const bootstrap = {
       mode: "desktop" as const,

@@ -2442,13 +2442,19 @@ export function ConnectionsSettings() {
       }, 360_000);
     });
 
-    // Whether the new backend's welcome event synced before the 45s ceiling.
-    // Stays false if the wait timed out, which softens the success copy below.
+    // `welcomeSynced`: whether the new backend's welcome arrived before the
+    // 45s ceiling — softens the success copy below if it timed out.
+    // `swapCommitted`: whether setWslBackend already switched the backend.
+    // Once true, the global timeout firing means a slow post-switch sync, not
+    // a failed swap, so we must not report "swap took too long" and contradict
+    // the now-current backend state.
     let welcomeSynced = false;
+    let swapCommitted = false;
     const runSwap = async () => {
       const updated = await desktopBridge.setWslBackend(target);
       if (aborted) return;
       setDesktopWslState(updated);
+      swapCommitted = true;
 
       if (previousPrimaryEnvId) {
         useStore.getState().removeEnvironmentState(previousPrimaryEnvId);
@@ -2501,6 +2507,30 @@ export function ConnectionsSettings() {
               : `The local backend is now running ${backendLocation}. It's taking a moment to finish syncing — your threads will refresh automatically.`,
           });
         } catch (error) {
+          // The global ceiling fired after the backend had already switched:
+          // the slow part was post-switch reauth/thread sync, not the swap
+          // itself. Report the switch as done — with the still-syncing caveat —
+          // instead of a hard failure that contradicts the now-current
+          // getWslState. (A genuine thrown error, where `aborted` is false,
+          // still falls through to the failure path below.)
+          if (aborted && swapCommitted) {
+            setPendingDesktopWslSelection(null);
+            const backendLocation =
+              target.mode === "wsl"
+                ? `inside ${target.distro ?? "the default WSL distro"}`
+                : "on Windows";
+            toastManager.add({
+              type: "success",
+              title: "Backend restarted",
+              description: `The local backend is now running ${backendLocation}. It's taking a moment to finish syncing — your threads will refresh automatically.`,
+            });
+            await reauthenticatePrimaryEnvironment().catch(() => undefined);
+            await desktopBridge
+              .getWslState()
+              .then((state) => setDesktopWslState(state))
+              .catch(() => undefined);
+            return;
+          }
           const message = error instanceof Error ? error.message : "Failed to update WSL backend.";
           setDesktopWslError(message);
           toastManager.add(
