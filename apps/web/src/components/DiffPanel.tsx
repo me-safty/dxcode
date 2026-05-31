@@ -1,6 +1,6 @@
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type FileDiffMetadata } from "@pierre/diffs/react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import type { TurnId } from "@t3tools/contracts";
 import {
@@ -11,6 +11,7 @@ import {
   GitBranchIcon,
   PanelRightCloseIcon,
   PilcrowIcon,
+  RotateCcwIcon,
   Rows3Icon,
   TextWrapIcon,
 } from "lucide-react";
@@ -23,7 +24,10 @@ import {
   useState,
 } from "react";
 import { useGitStatus } from "~/lib/gitStatusState";
-import { gitWorkingTreeDiffQueryOptions } from "~/lib/gitReactQuery";
+import {
+  gitWorkingTreeDiffQueryOptions,
+  vcsRevertUnstagedFilesMutationOptions,
+} from "~/lib/gitReactQuery";
 import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
 import { cn } from "~/lib/utils";
 import { resolvePathLinkTarget } from "../terminal-links";
@@ -51,8 +55,18 @@ import { formatShortTimestamp } from "../timestampFormat";
 import { openRightPanel } from "../rightPanelGesture";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { Button } from "./ui/button";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
+import { toastManager } from "./ui/toast";
 import { openPathInPreferredEditorOrFilePreview } from "../workspaceFilePreview";
 import {
   isWorkspaceImagePreviewPath,
@@ -268,11 +282,14 @@ export { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 
 export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { resolvedTheme } = useTheme();
   const settings = useSettings();
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
   const [diffWordWrap, setDiffWordWrap] = useState(settings.diffWordWrap);
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
+  const [pendingBulkRevertPaths, setPendingBulkRevertPaths] =
+    useState<ReadonlyArray<string> | null>(null);
   const [collapsedDiffFileKeys, setCollapsedDiffFileKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -458,8 +475,19 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       enabled: isGitRepo,
     }),
   );
+  const revertUnstagedFilesMutation = useMutation(
+    vcsRevertUnstagedFilesMutationOptions({
+      environmentId: activeDiffContext?.environmentId ?? null,
+      cwd: activeCwd ?? null,
+      queryClient,
+    }),
+  );
   const refetchWorkingTreeDiff = workingTreeDiffQuery.refetch;
   const workingTreeDiffFetched = workingTreeDiffQuery.isFetched;
+  const unstagedDiffFilePaths = useMemo(
+    () => gitStatusQuery.data?.workingTree.unstaged?.files.map((file) => file.path) ?? [],
+    [gitStatusQuery.data?.workingTree.unstaged?.files],
+  );
   const selectedTurnCheckpointDiff = selectedTurn
     ? activeCheckpointDiffQuery.data?.diff
     : undefined;
@@ -730,6 +758,31 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId];
     return `Turn ${count ?? "?"}`;
   })();
+  const confirmBulkRevert = useCallback(() => {
+    const filePaths = pendingBulkRevertPaths;
+    if (!filePaths || filePaths.length === 0) {
+      setPendingBulkRevertPaths(null);
+      return;
+    }
+
+    setPendingBulkRevertPaths(null);
+    void revertUnstagedFilesMutation
+      .mutateAsync({ filePaths: [...filePaths] })
+      .catch((error: unknown) => {
+        toastManager.add({
+          type: "error",
+          title: "Unable to revert changes",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+      });
+  }, [pendingBulkRevertPaths, revertUnstagedFilesMutation]);
+  const isRevertUnstagedChangesVisible = selectedDiffSource === "unstaged";
+  const isRevertUnstagedChangesDisabled =
+    unstagedDiffFilePaths.length === 0 || revertUnstagedFilesMutation.isPending;
+  const revertUnstagedChangesTitle =
+    unstagedDiffFilePaths.length === 0
+      ? "No unstaged changes to revert"
+      : "Revert all unstaged changes";
   const headerRow = (
     <>
       <div className="hidden min-w-0 flex-1 [-webkit-app-region:no-drag] max-[760px]:block">
@@ -946,6 +999,18 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         >
           <PilcrowIcon className="size-3" />
         </Toggle>
+        {isRevertUnstagedChangesVisible ? (
+          <Button
+            size="icon-xs"
+            variant="outline"
+            aria-label="Revert all unstaged changes"
+            title={revertUnstagedChangesTitle}
+            disabled={isRevertUnstagedChangesDisabled}
+            onClick={() => setPendingBulkRevertPaths(unstagedDiffFilePaths)}
+          >
+            <RotateCcwIcon className="size-3" />
+          </Button>
+        ) : null}
         <Button
           size="icon-xs"
           variant="outline"
@@ -971,157 +1036,184 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   );
 
   return (
-    <DiffPanelShell mode={mode} header={headerRow}>
-      {!activeDiffContext ? (
-        <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          Select a thread to inspect turn diffs.
-        </div>
-      ) : !isGitRepo ? (
-        <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          Turn diffs are unavailable because this project is not a git repository.
-        </div>
-      ) : orderedTurnDiffSummaries.length === 0 && !isWorkingTreeSelection ? (
-        <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          No completed turns yet.
-        </div>
-      ) : (
-        <>
-          <div
-            ref={patchViewportRef}
-            className="diff-panel-viewport min-h-0 min-w-0 flex-1 overflow-hidden"
-          >
-            {selectedDiffError && !renderablePatch && (
-              <div className="px-3">
-                <p className="mb-2 text-[11px] text-red-500/80">{selectedDiffError}</p>
-              </div>
-            )}
-            {!renderablePatch ? (
-              isLoadingSelectedDiff ? (
-                <DiffPanelLoadingState
-                  label={
-                    isWorkingTreeSelection
-                      ? "Loading working tree diff..."
-                      : "Loading checkpoint diff..."
-                  }
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
-                  <p>
-                    {hasNoNetChanges
-                      ? "No net changes in this selection."
-                      : "No patch available for this selection."}
-                  </p>
-                </div>
-              )
-            ) : renderablePatch.kind === "files" ? (
-              <div className="diff-render-surface h-full min-h-0 overflow-auto px-2 pb-2">
-                {renderableFiles.map((fileDiff) => {
-                  const filePath = resolveFileDiffPath(fileDiff);
-                  const fileKey = buildFileDiffRenderKey(fileDiff);
-                  const themedFileKey = `${fileKey}:${resolvedTheme}`;
-                  const collapsed = collapsedDiffFileKeys.has(fileKey);
-                  const imagePreviewObjectId = resolveFileDiffPreviewObjectId(fileDiff);
-                  const imagePreviewUrl =
-                    activeDiffContext?.environmentId &&
-                    activeCwd &&
-                    isWorkspaceImagePreviewPath(filePath)
-                      ? (resolveWorkspaceGitImagePreviewUrl({
-                          environmentId: activeDiffContext.environmentId,
-                          cwd: activeCwd,
-                          relativePath: filePath,
-                          objectId: imagePreviewObjectId,
-                        }) ??
-                        (fileDiff.type !== "deleted"
-                          ? resolveWorkspaceImagePreviewUrl({
-                              environmentId: activeDiffContext.environmentId,
-                              cwd: activeCwd,
-                              relativePath: filePath,
-                            })
-                          : null))
-                      : null;
-                  const shouldRenderImagePreview =
-                    isWorkspaceImagePreviewPath(filePath) && imagePreviewUrl !== null;
-                  return (
-                    <div
-                      key={themedFileKey}
-                      data-diff-file-path={filePath}
-                      className="diff-render-file group/diff-file mb-2 rounded-md first:mt-2 last:mb-0"
-                      onClickCapture={(event) => {
-                        const nativeEvent = event.nativeEvent as MouseEvent;
-                        const composedPath = nativeEvent.composedPath?.() ?? [];
-                        const clickedHeader = composedPath.some((node) => {
-                          if (!(node instanceof Element)) return false;
-                          return node.hasAttribute("data-title");
-                        });
-                        if (!clickedHeader) return;
-                        openDiffFileInEditor(filePath);
-                      }}
-                    >
-                      <FileDiff
-                        fileDiff={fileDiff}
-                        renderHeaderPrefix={() => (
-                          <button
-                            type="button"
-                            className={cn(
-                              "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
-                              getDiffCollapseIconClassName(fileDiff),
-                            )}
-                            aria-label={collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
-                            aria-expanded={!collapsed}
-                            title={collapsed ? "Expand diff" : "Collapse diff"}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              toggleDiffFileCollapsed(fileKey);
-                            }}
-                          >
-                            {collapsed ? (
-                              <ChevronRightIcon className="size-4" />
-                            ) : (
-                              <ChevronDownIcon className="size-4" />
-                            )}
-                          </button>
-                        )}
-                        options={{
-                          collapsed: collapsed || shouldRenderImagePreview,
-                          diffStyle: diffRenderMode === "split" ? "split" : "unified",
-                          lineDiffType: "none",
-                          overflow: diffWordWrap ? "wrap" : "scroll",
-                          theme: resolveDiffThemeName(resolvedTheme),
-                          themeType: resolvedTheme as DiffThemeType,
-                          unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
-                        }}
-                      />
-                      {!collapsed && shouldRenderImagePreview ? (
-                        <DiffImagePreview
-                          filePath={filePath}
-                          imageUrl={imagePreviewUrl}
-                          type={fileDiff.type}
-                        />
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="h-full overflow-auto p-2">
-                <div className="space-y-2">
-                  <p className="text-[11px] text-muted-foreground/75">{renderablePatch.reason}</p>
-                  <pre
-                    className={cn(
-                      "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90",
-                      diffWordWrap
-                        ? "overflow-auto whitespace-pre-wrap wrap-break-word"
-                        : "overflow-auto",
-                    )}
-                  >
-                    {renderablePatch.text}
-                  </pre>
-                </div>
-              </div>
-            )}
+    <>
+      <DiffPanelShell mode={mode} header={headerRow}>
+        {!activeDiffContext ? (
+          <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+            Select a thread to inspect turn diffs.
           </div>
-        </>
-      )}
-    </DiffPanelShell>
+        ) : !isGitRepo ? (
+          <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+            Turn diffs are unavailable because this project is not a git repository.
+          </div>
+        ) : orderedTurnDiffSummaries.length === 0 && !isWorkingTreeSelection ? (
+          <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+            No completed turns yet.
+          </div>
+        ) : (
+          <>
+            <div
+              ref={patchViewportRef}
+              className="diff-panel-viewport min-h-0 min-w-0 flex-1 overflow-hidden"
+            >
+              {selectedDiffError && !renderablePatch && (
+                <div className="px-3">
+                  <p className="mb-2 text-[11px] text-red-500/80">{selectedDiffError}</p>
+                </div>
+              )}
+              {!renderablePatch ? (
+                isLoadingSelectedDiff ? (
+                  <DiffPanelLoadingState
+                    label={
+                      isWorkingTreeSelection
+                        ? "Loading working tree diff..."
+                        : "Loading checkpoint diff..."
+                    }
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
+                    <p>
+                      {hasNoNetChanges
+                        ? "No net changes in this selection."
+                        : "No patch available for this selection."}
+                    </p>
+                  </div>
+                )
+              ) : renderablePatch.kind === "files" ? (
+                <div className="diff-render-surface h-full min-h-0 overflow-auto px-2 pb-2">
+                  {renderableFiles.map((fileDiff) => {
+                    const filePath = resolveFileDiffPath(fileDiff);
+                    const fileKey = buildFileDiffRenderKey(fileDiff);
+                    const themedFileKey = `${fileKey}:${resolvedTheme}`;
+                    const collapsed = collapsedDiffFileKeys.has(fileKey);
+                    const imagePreviewObjectId = resolveFileDiffPreviewObjectId(fileDiff);
+                    const imagePreviewUrl =
+                      activeDiffContext?.environmentId &&
+                      activeCwd &&
+                      isWorkspaceImagePreviewPath(filePath)
+                        ? (resolveWorkspaceGitImagePreviewUrl({
+                            environmentId: activeDiffContext.environmentId,
+                            cwd: activeCwd,
+                            relativePath: filePath,
+                            objectId: imagePreviewObjectId,
+                          }) ??
+                          (fileDiff.type !== "deleted"
+                            ? resolveWorkspaceImagePreviewUrl({
+                                environmentId: activeDiffContext.environmentId,
+                                cwd: activeCwd,
+                                relativePath: filePath,
+                              })
+                            : null))
+                        : null;
+                    const shouldRenderImagePreview =
+                      isWorkspaceImagePreviewPath(filePath) && imagePreviewUrl !== null;
+                    return (
+                      <div
+                        key={themedFileKey}
+                        data-diff-file-path={filePath}
+                        className="diff-render-file group/diff-file mb-2 rounded-md first:mt-2 last:mb-0"
+                        onClickCapture={(event) => {
+                          const nativeEvent = event.nativeEvent as MouseEvent;
+                          const composedPath = nativeEvent.composedPath?.() ?? [];
+                          const clickedHeader = composedPath.some((node) => {
+                            if (!(node instanceof Element)) return false;
+                            return node.hasAttribute("data-title");
+                          });
+                          if (!clickedHeader) return;
+                          openDiffFileInEditor(filePath);
+                        }}
+                      >
+                        <FileDiff
+                          fileDiff={fileDiff}
+                          renderHeaderPrefix={() => (
+                            <button
+                              type="button"
+                              className={cn(
+                                "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
+                                getDiffCollapseIconClassName(fileDiff),
+                              )}
+                              aria-label={collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
+                              aria-expanded={!collapsed}
+                              title={collapsed ? "Expand diff" : "Collapse diff"}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleDiffFileCollapsed(fileKey);
+                              }}
+                            >
+                              {collapsed ? (
+                                <ChevronRightIcon className="size-4" />
+                              ) : (
+                                <ChevronDownIcon className="size-4" />
+                              )}
+                            </button>
+                          )}
+                          options={{
+                            collapsed: collapsed || shouldRenderImagePreview,
+                            diffStyle: diffRenderMode === "split" ? "split" : "unified",
+                            lineDiffType: "none",
+                            overflow: diffWordWrap ? "wrap" : "scroll",
+                            theme: resolveDiffThemeName(resolvedTheme),
+                            themeType: resolvedTheme as DiffThemeType,
+                            unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
+                          }}
+                        />
+                        {!collapsed && shouldRenderImagePreview ? (
+                          <DiffImagePreview
+                            filePath={filePath}
+                            imageUrl={imagePreviewUrl}
+                            type={fileDiff.type}
+                          />
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="h-full overflow-auto p-2">
+                  <div className="space-y-2">
+                    <p className="text-[11px] text-muted-foreground/75">{renderablePatch.reason}</p>
+                    <pre
+                      className={cn(
+                        "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90",
+                        diffWordWrap
+                          ? "overflow-auto whitespace-pre-wrap wrap-break-word"
+                          : "overflow-auto",
+                      )}
+                    >
+                      {renderablePatch.text}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </DiffPanelShell>
+      <AlertDialog
+        open={pendingBulkRevertPaths !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingBulkRevertPaths(null);
+          }
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revert all unstaged changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will discard changes in {pendingBulkRevertPaths?.length ?? 0} file
+              {(pendingBulkRevertPaths?.length ?? 0) === 1 ? "" : "s"}. Staged changes are
+              preserved.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button variant="destructive" onClick={confirmBulkRevert}>
+              Revert changes
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    </>
   );
 }

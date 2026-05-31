@@ -5,6 +5,7 @@ import {
   type GitStackedAction,
   type SourceControlPublishRepositoryInput,
   type ThreadId,
+  type VcsRevertUnstagedFilesInput,
   type VcsStageFilesInput,
   type VcsUnstageFilesInput,
   type VcsWorkingTreeDiffTarget,
@@ -61,6 +62,8 @@ export const gitMutationKeys = {
     ["git", "mutation", "stage-files", environmentId ?? null, cwd] as const,
   unstageFiles: (environmentId: EnvironmentId | null, cwd: string | null) =>
     ["git", "mutation", "unstage-files", environmentId ?? null, cwd] as const,
+  revertUnstagedFiles: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "revert-unstaged-files", environmentId ?? null, cwd] as const,
   preparePullRequestThread: (environmentId: EnvironmentId | null, cwd: string | null) =>
     ["git", "mutation", "prepare-pull-request-thread", environmentId ?? null, cwd] as const,
   publishRepository: (environmentId: EnvironmentId | null, cwd: string | null) =>
@@ -324,6 +327,26 @@ export function vcsUnstageFilesMutationOptions(input: {
       if (!input.cwd || !input.environmentId) throw new Error("Git unstaging is unavailable.");
       const api = ensureEnvironmentApi(input.environmentId);
       return api.vcs.unstageFiles({ cwd: input.cwd, filePaths: args.filePaths });
+    },
+    onSuccess: async () => {
+      await input.queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
+    },
+  });
+}
+
+export function vcsRevertUnstagedFilesMutationOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  queryClient: QueryClient;
+}) {
+  return mutationOptions({
+    mutationKey: gitMutationKeys.revertUnstagedFiles(input.environmentId, input.cwd),
+    mutationFn: async (args: Omit<VcsRevertUnstagedFilesInput, "cwd">) => {
+      if (!input.cwd || !input.environmentId) {
+        throw new Error("Git revert is unavailable.");
+      }
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.vcs.revertUnstagedFiles({ cwd: input.cwd, filePaths: args.filePaths });
     },
     onSuccess: async () => {
       await input.queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });

@@ -8,6 +8,7 @@ import {
   GitRunStackedActionInput,
   GitResolvePullRequestResult,
   GenerateCommitMessageInput,
+  VcsRevertUnstagedFilesInput,
   VcsStageFilesInput,
   VcsStatusResult,
   VcsUnstageFilesInput,
@@ -22,6 +23,7 @@ const decodeRunStackedActionInput = Schema.decodeUnknownSync(GitRunStackedAction
 const decodeRunStackedActionResult = Schema.decodeUnknownSync(GitRunStackedActionResult);
 const decodeResolvePullRequestResult = Schema.decodeUnknownSync(GitResolvePullRequestResult);
 const decodeGenerateCommitMessageInput = Schema.decodeUnknownSync(GenerateCommitMessageInput);
+const decodeRevertUnstagedFilesInput = Schema.decodeUnknownSync(VcsRevertUnstagedFilesInput);
 const decodeStageFilesInput = Schema.decodeUnknownSync(VcsStageFilesInput);
 const decodeStatusResult = Schema.decodeUnknownSync(VcsStatusResult);
 const decodeUnstageFilesInput = Schema.decodeUnknownSync(VcsUnstageFilesInput);
@@ -166,7 +168,7 @@ describe("VcsStatusResult", () => {
 });
 
 describe("VcsStageFilesInput", () => {
-  it("accepts non-empty file paths for stage and unstage operations", () => {
+  it("accepts non-empty file paths for file mutation operations", () => {
     expect(decodeStageFilesInput({ cwd: "/repo", filePaths: ["src/app.ts"] })).toEqual({
       cwd: "/repo",
       filePaths: ["src/app.ts"],
@@ -175,11 +177,16 @@ describe("VcsStageFilesInput", () => {
       cwd: "/repo",
       filePaths: ["src/app.ts"],
     });
+    expect(decodeRevertUnstagedFilesInput({ cwd: "/repo", filePaths: ["src/app.ts"] })).toEqual({
+      cwd: "/repo",
+      filePaths: ["src/app.ts"],
+    });
   });
 
   it("rejects empty file path lists", () => {
     expect(() => decodeStageFilesInput({ cwd: "/repo", filePaths: [] })).toThrow();
     expect(() => decodeUnstageFilesInput({ cwd: "/repo", filePaths: [] })).toThrow();
+    expect(() => decodeRevertUnstagedFilesInput({ cwd: "/repo", filePaths: [] })).toThrow();
   });
 });
 

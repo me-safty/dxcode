@@ -1399,6 +1399,16 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               "rpc.aggregate": "vcs",
             },
           ),
+        [WS_METHODS.vcsRevertUnstagedFiles]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsRevertUnstagedFiles,
+            gitWorkflow
+              .revertUnstagedFiles(input)
+              .pipe(Effect.andThen(vcsStatusBroadcaster.refreshLocalStatus(input.cwd))),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
         [WS_METHODS.vcsGetWorkingTreeDiff]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsGetWorkingTreeDiff,

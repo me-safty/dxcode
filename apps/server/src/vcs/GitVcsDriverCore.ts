@@ -167,6 +167,19 @@ function chunkPathsForGitArgs(relativePaths: ReadonlyArray<string>): string[][] 
   return chunks;
 }
 
+function normalizeGitStatusPath(pathValue: string): string {
+  return pathValue.replace(/\\/g, "/").replace(/\/+$/g, "");
+}
+
+function gitStatusPathMatchesRequest(statusPath: string, requestedPath: string): boolean {
+  const normalizedStatusPath = normalizeGitStatusPath(statusPath);
+  const normalizedRequestedPath = normalizeGitStatusPath(requestedPath);
+  return (
+    normalizedStatusPath === normalizedRequestedPath ||
+    normalizedStatusPath.startsWith(`${normalizedRequestedPath}/`)
+  );
+}
+
 interface ParsedPorcelainFileStatus {
   readonly path: string;
   readonly status: VcsWorkingTreeFileStatus;
@@ -1724,6 +1737,66 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
+  const resolveRequestedUnstagedFiles = Effect.fn("resolveRequestedUnstagedFiles")(function* (
+    cwd: string,
+    requestedPaths: ReadonlyArray<string>,
+  ) {
+    const status = yield* statusDetailsLocal(cwd);
+    const seenPaths = new Set<string>();
+    const matchedFiles: WorkingTreeFile[] = [];
+    for (const file of status.workingTree.unstaged.files) {
+      if (
+        !requestedPaths.some((requestedPath) =>
+          gitStatusPathMatchesRequest(file.path, requestedPath),
+        )
+      ) {
+        continue;
+      }
+      const normalizedPath = normalizeGitStatusPath(file.path);
+      if (seenPaths.has(normalizedPath)) {
+        continue;
+      }
+      seenPaths.add(normalizedPath);
+      matchedFiles.push(file);
+    }
+    return matchedFiles;
+  });
+
+  const revertUnstagedFiles: GitVcsDriver.GitVcsDriverShape["revertUnstagedFiles"] = Effect.fn(
+    "revertUnstagedFiles",
+  )(function* (input) {
+    const files = yield* resolveRequestedUnstagedFiles(input.cwd, input.filePaths);
+    const trackedPaths = files
+      .filter((file) => file.status !== "untracked")
+      .map((file) => file.path);
+    const untrackedPaths = files
+      .filter((file) => file.status === "untracked")
+      .map((file) => file.path);
+
+    yield* Effect.forEach(
+      chunkPathsForGitArgs(trackedPaths),
+      (chunk) =>
+        runGit("GitVcsDriver.revertUnstagedFiles.restore", input.cwd, [
+          "restore",
+          "--worktree",
+          "--",
+          ...chunk,
+        ]),
+      { discard: true },
+    );
+    yield* Effect.forEach(
+      chunkPathsForGitArgs(untrackedPaths),
+      (chunk) =>
+        runGit("GitVcsDriver.revertUnstagedFiles.clean", input.cwd, [
+          "clean",
+          "-fd",
+          "--",
+          ...chunk,
+        ]),
+      { discard: true },
+    );
+  });
+
   const readStagedCommitContext: GitVcsDriver.GitVcsDriverShape["readStagedCommitContext"] =
     Effect.fn("readStagedCommitContext")(function* (cwd) {
       const stagedSummary = yield* runGitStdout(
@@ -2544,6 +2617,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     readWorkingTreeDiff,
     stageFiles,
     unstageFiles,
+    revertUnstagedFiles,
     readStagedCommitContext,
     readCommitPreviewContext,
     prepareCommitContext,

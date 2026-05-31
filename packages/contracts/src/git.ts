@@ -167,6 +167,12 @@ export const VcsUnstageFilesInput = Schema.Struct({
 });
 export type VcsUnstageFilesInput = typeof VcsUnstageFilesInput.Type;
 
+export const VcsRevertUnstagedFilesInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  filePaths: Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
+});
+export type VcsRevertUnstagedFilesInput = typeof VcsRevertUnstagedFilesInput.Type;
+
 export const VcsListRefsInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   query: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(256))),

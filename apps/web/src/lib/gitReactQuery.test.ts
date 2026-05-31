@@ -24,6 +24,7 @@ import {
   gitRunStackedActionMutationOptions,
   gitWorkingTreeDiffQueryOptions,
   invalidateGitQueries,
+  vcsRevertUnstagedFilesMutationOptions,
   vcsStageFilesMutationOptions,
   vcsUnstageFilesMutationOptions,
 } from "./gitReactQuery";
@@ -78,6 +79,9 @@ describe("gitMutationKeys", () => {
     );
     expect(gitMutationKeys.unstageFiles(ENVIRONMENT_A, "/repo/a")).not.toEqual(
       gitMutationKeys.unstageFiles(ENVIRONMENT_A, "/repo/b"),
+    );
+    expect(gitMutationKeys.revertUnstagedFiles(ENVIRONMENT_A, "/repo/a")).not.toEqual(
+      gitMutationKeys.revertUnstagedFiles(ENVIRONMENT_A, "/repo/b"),
     );
   });
 });
@@ -180,15 +184,24 @@ describe("git mutation options", () => {
         queryClient,
       }).mutationKey,
     ).toEqual(gitMutationKeys.unstageFiles(ENVIRONMENT_A, "/repo/a"));
+    expect(
+      vcsRevertUnstagedFilesMutationOptions({
+        environmentId: ENVIRONMENT_A,
+        cwd: "/repo/a",
+        queryClient,
+      }).mutationKey,
+    ).toEqual(gitMutationKeys.revertUnstagedFiles(ENVIRONMENT_A, "/repo/a"));
   });
 
-  it("forwards stage operations to the environment API", async () => {
+  it("forwards file mutations to the environment API", async () => {
     const stageFiles = vi.fn().mockResolvedValue(null);
     const unstageFiles = vi.fn().mockResolvedValue(null);
+    const revertUnstagedFiles = vi.fn().mockResolvedValue(null);
     vi.mocked(environmentApi.ensureEnvironmentApi).mockReturnValue({
       vcs: {
         stageFiles,
         unstageFiles,
+        revertUnstagedFiles,
       },
     } as unknown as EnvironmentApi);
 
@@ -202,9 +215,18 @@ describe("git mutation options", () => {
       cwd: "/repo/a",
       queryClient,
     }).mutationFn?.({ filePaths: ["src/app.ts"] }, undefined as never);
+    await vcsRevertUnstagedFilesMutationOptions({
+      environmentId: ENVIRONMENT_A,
+      cwd: "/repo/a",
+      queryClient,
+    }).mutationFn?.({ filePaths: ["src/app.ts"] }, undefined as never);
 
     expect(stageFiles).toHaveBeenCalledWith({ cwd: "/repo/a", filePaths: ["src/app.ts"] });
     expect(unstageFiles).toHaveBeenCalledWith({ cwd: "/repo/a", filePaths: ["src/app.ts"] });
+    expect(revertUnstagedFiles).toHaveBeenCalledWith({
+      cwd: "/repo/a",
+      filePaths: ["src/app.ts"],
+    });
   });
 });
 

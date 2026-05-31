@@ -12,6 +12,7 @@ import type {
   VcsListRefsResult,
   VcsPullInput,
   VcsPullResult,
+  VcsRevertUnstagedFilesInput,
   VcsRemoveWorktreeInput,
   VcsStageFilesInput,
   VcsWorkingTreeDiffInput,
@@ -574,6 +575,7 @@ export interface EnvironmentApi {
     pull: (input: VcsPullInput) => Promise<VcsPullResult>;
     stageFiles: (input: VcsStageFilesInput) => Promise<VcsStatusLocalResult>;
     unstageFiles: (input: VcsUnstageFilesInput) => Promise<VcsStatusLocalResult>;
+    revertUnstagedFiles: (input: VcsRevertUnstagedFilesInput) => Promise<VcsStatusLocalResult>;
     getWorkingTreeDiff: (input: VcsWorkingTreeDiffInput) => Promise<VcsWorkingTreeDiffResult>;
     refreshStatus: (input: VcsStatusInput) => Promise<VcsStatusResult>;
     onStatus: (

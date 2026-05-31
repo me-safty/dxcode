@@ -22,6 +22,7 @@ import {
   type VcsListRefsInput,
   type VcsListRefsResult,
   type VcsPullResult,
+  type VcsRevertUnstagedFilesInput,
   type VcsRemoveWorktreeInput,
   type VcsStageFilesInput,
   type VcsStatusInput,
@@ -169,6 +170,9 @@ export interface GitVcsDriverShape {
   ) => Effect.Effect<VcsWorkingTreeDiffResult, GitCommandError>;
   readonly stageFiles: (input: VcsStageFilesInput) => Effect.Effect<void, GitCommandError>;
   readonly unstageFiles: (input: VcsUnstageFilesInput) => Effect.Effect<void, GitCommandError>;
+  readonly revertUnstagedFiles: (
+    input: VcsRevertUnstagedFilesInput,
+  ) => Effect.Effect<void, GitCommandError>;
   readonly readStagedCommitContext: (
     cwd: string,
   ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;

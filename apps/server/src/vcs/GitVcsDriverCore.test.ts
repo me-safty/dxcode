@@ -338,6 +338,68 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         );
       }),
     );
+
+    it.effect("reverts requested unstaged tracked and untracked files", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+
+        yield* writeTextFile(cwd, "README.md", "# changed\n");
+        yield* writeTextFile(cwd, "scratch.txt", "scratch\n");
+        yield* writeTextFile(cwd, "staged-only.txt", "staged\n");
+        yield* git(cwd, ["add", "staged-only.txt"]);
+        yield* driver.revertUnstagedFiles({
+          cwd,
+          filePaths: ["README.md", "scratch.txt", "staged-only.txt"],
+        });
+
+        const readme = yield* fileSystem.readFileString(pathService.join(cwd, "README.md"));
+        const scratchExists = yield* fileSystem.exists(pathService.join(cwd, "scratch.txt"));
+        const status = yield* driver.statusDetails(cwd);
+
+        assert.equal(readme, "# test\n");
+        assert.equal(scratchExists, false);
+        assert.include(
+          status.workingTree.staged.files.map((file) => file.path),
+          "staged-only.txt",
+        );
+        assert.notInclude(
+          status.workingTree.unstaged.files.map((file) => file.path),
+          "README.md",
+        );
+      }),
+    );
+
+    it.effect("preserves staged content when reverting unstaged edits to the same file", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+
+        yield* writeTextFile(cwd, "mixed.txt", "staged\n");
+        yield* git(cwd, ["add", "mixed.txt"]);
+        yield* writeTextFile(cwd, "mixed.txt", "unstaged\n");
+        yield* driver.revertUnstagedFiles({ cwd, filePaths: ["mixed.txt"] });
+
+        const mixed = yield* fileSystem.readFileString(pathService.join(cwd, "mixed.txt"));
+        const status = yield* driver.statusDetails(cwd);
+
+        assert.equal(mixed, "staged\n");
+        assert.include(
+          status.workingTree.staged.files.map((file) => file.path),
+          "mixed.txt",
+        );
+        assert.notInclude(
+          status.workingTree.unstaged.files.map((file) => file.path),
+          "mixed.txt",
+        );
+      }),
+    );
   });
 
   describe("working tree diffs", () => {

@@ -202,6 +202,7 @@ export interface WsRpcClient {
     readonly refreshStatus: RpcUnaryMethod<typeof WS_METHODS.vcsRefreshStatus>;
     readonly stageFiles: RpcUnaryMethod<typeof WS_METHODS.vcsStageFiles>;
     readonly unstageFiles: RpcUnaryMethod<typeof WS_METHODS.vcsUnstageFiles>;
+    readonly revertUnstagedFiles: RpcUnaryMethod<typeof WS_METHODS.vcsRevertUnstagedFiles>;
     readonly getWorkingTreeDiff: RpcUnaryMethod<typeof WS_METHODS.vcsGetWorkingTreeDiff>;
     readonly onStatus: (
       input: RpcInput<typeof WS_METHODS.subscribeVcsStatus>,
@@ -346,6 +347,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       stageFiles: (input) => transport.request((client) => client[WS_METHODS.vcsStageFiles](input)),
       unstageFiles: (input) =>
         transport.request((client) => client[WS_METHODS.vcsUnstageFiles](input)),
+      revertUnstagedFiles: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsRevertUnstagedFiles](input)),
       getWorkingTreeDiff: (input) =>
         transport.request((client) => client[WS_METHODS.vcsGetWorkingTreeDiff](input)),
       onStatus: (input, listener, options) => {

@@ -38,6 +38,7 @@ import {
   VcsStatusLocalResult,
   VcsStatusResult,
   VcsStatusStreamEvent,
+  VcsRevertUnstagedFilesInput,
   VcsStageFilesInput,
   VcsUnstageFilesInput,
 } from "./git.ts";
@@ -142,6 +143,7 @@ export const WS_METHODS = {
   vcsRefreshStatus: "vcs.refreshStatus",
   vcsStageFiles: "vcs.stageFiles",
   vcsUnstageFiles: "vcs.unstageFiles",
+  vcsRevertUnstagedFiles: "vcs.revertUnstagedFiles",
   vcsGetWorkingTreeDiff: "vcs.getWorkingTreeDiff",
   vcsListRefs: "vcs.listRefs",
   vcsCreateWorktree: "vcs.createWorktree",
@@ -409,6 +411,12 @@ export const WsVcsUnstageFilesRpc = Rpc.make(WS_METHODS.vcsUnstageFiles, {
   error: GitManagerServiceError,
 });
 
+export const WsVcsRevertUnstagedFilesRpc = Rpc.make(WS_METHODS.vcsRevertUnstagedFiles, {
+  payload: VcsRevertUnstagedFilesInput,
+  success: VcsStatusLocalResult,
+  error: GitManagerServiceError,
+});
+
 export const WsVcsGetWorkingTreeDiffRpc = Rpc.make(WS_METHODS.vcsGetWorkingTreeDiff, {
   payload: VcsWorkingTreeDiffInput,
   success: VcsWorkingTreeDiffResult,
@@ -643,6 +651,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsRefreshStatusRpc,
   WsVcsStageFilesRpc,
   WsVcsUnstageFilesRpc,
+  WsVcsRevertUnstagedFilesRpc,
   WsVcsGetWorkingTreeDiffRpc,
   WsGitRunStackedActionRpc,
   WsGitGenerateCommitMessageRpc,

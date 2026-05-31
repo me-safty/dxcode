@@ -20,6 +20,7 @@ import {
   type GitPreparePullRequestThreadResult,
   type GitPullRequestRefInput,
   type VcsPullResult,
+  type VcsRevertUnstagedFilesInput,
   type VcsRemoveWorktreeInput,
   type VcsStageFilesInput,
   type GitResolvePullRequestResult,
@@ -54,6 +55,9 @@ export interface GitWorkflowServiceShape {
   readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
   readonly stageFiles: (input: VcsStageFilesInput) => Effect.Effect<void, GitCommandError>;
   readonly unstageFiles: (input: VcsUnstageFilesInput) => Effect.Effect<void, GitCommandError>;
+  readonly revertUnstagedFiles: (
+    input: VcsRevertUnstagedFilesInput,
+  ) => Effect.Effect<void, GitCommandError>;
   readonly readWorkingTreeDiff: (
     input: VcsWorkingTreeDiffInput,
   ) => Effect.Effect<VcsWorkingTreeDiffResult, GitCommandError>;
@@ -295,6 +299,10 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
     unstageFiles: (input) =>
       ensureGitCommand("GitWorkflowService.unstageFiles", input.cwd).pipe(
         Effect.andThen(git.unstageFiles(input)),
+      ),
+    revertUnstagedFiles: (input) =>
+      ensureGitCommand("GitWorkflowService.revertUnstagedFiles", input.cwd).pipe(
+        Effect.andThen(git.revertUnstagedFiles(input)),
       ),
     readWorkingTreeDiff: (input) =>
       ensureGitCommand("GitWorkflowService.readWorkingTreeDiff", input.cwd).pipe(

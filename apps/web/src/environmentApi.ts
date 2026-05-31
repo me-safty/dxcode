@@ -42,6 +42,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       init: rpcClient.vcs.init,
       stageFiles: rpcClient.vcs.stageFiles,
       unstageFiles: rpcClient.vcs.unstageFiles,
+      revertUnstagedFiles: rpcClient.vcs.revertUnstagedFiles,
       getWorkingTreeDiff: rpcClient.vcs.getWorkingTreeDiff,
     },
     git: {
