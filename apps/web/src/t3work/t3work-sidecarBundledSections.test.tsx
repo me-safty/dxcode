@@ -48,6 +48,7 @@ const host: SidecarSectionHost = {
   surface: "project.dashboard.backlog",
   projectId: "project-1",
   stageKickoff: vi.fn(),
+  launchRecipe: vi.fn(),
   openThread: vi.fn(),
 };
 

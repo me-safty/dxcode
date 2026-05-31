@@ -100,6 +100,7 @@ export const discoverProjectRecipeAtPath = Effect.fn("discoverProjectRecipeAtPat
       ...(visibility.reason ? { reason: visibility.reason } : {}),
       prompt,
       ...(manifest.kickoff ? { kickoff: manifest.kickoff } : {}),
+      sourcePath: manifestPath,
       promptPath,
       recipePath: input.recipePath,
       ...(actionViewPath ? { actionViewPath } : {}),

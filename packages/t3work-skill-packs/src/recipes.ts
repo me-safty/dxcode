@@ -114,6 +114,90 @@ const BUNDLED_RECIPES: ReadonlyArray<BundledT3WorkRecipe> = [
     rankHint: 19,
   }),
   createBundledRecipe({
+    id: "edit-plugin-module",
+    title: "Edit this item",
+    manifestDisplayName: "Edit this item",
+    shortDescription:
+      "Draft and apply a surgical update to an existing project-local recipe or plugin module.",
+    surfaces: DASHBOARD_AND_WORKITEM_SURFACES,
+    promptTemplate:
+      "Edit an existing t3work recipe or plugin module. Describe the change you want, and keep the current module shape unless the request explicitly changes it.",
+    kickoff: {
+      version: 1,
+      steps: [
+        {
+          kind: "collect-input",
+          id: "collect-edit-brief",
+          request: {
+            kind: "text",
+            when: "missing-prompt",
+            promptRequest: {
+              title: "Describe the edit you want",
+              body: "Explain the change you want to make. If you did not launch this from Edit this..., include the source file path in the request.",
+              sections: ["context-summary", "available-context-keys", "capabilities"],
+              capabilities: [
+                "Open an existing project-local recipe or plugin module and keep the current shape intact.",
+                "Draft the change without touching the source file until you approve it.",
+                "Show a diff preview before saving the change back to the workspace.",
+              ],
+              responseInstructions:
+                "Describe the change you want, any constraints to preserve, and any identifiers or structure that must stay stable.",
+            },
+          },
+        },
+        {
+          kind: "tool",
+          id: "read-current-view",
+          toolName: "t3work.view.read",
+        },
+        {
+          kind: "script",
+          id: "prepare-edit-workspace",
+          module: "./recipe-script.ts#prepareEditWorkspace",
+        },
+        {
+          kind: "agent",
+          id: "draft-edit",
+          promptPath: "./draft-prompt.md",
+        },
+        {
+          kind: "present-message",
+          id: "review-edit",
+          message: {
+            body: "Review the proposed diff below. Approve it to write the change back to the source file.",
+            visibleToAgent: false,
+          },
+        },
+        {
+          kind: "script",
+          id: "present-edit-preview",
+          module: "./recipe-script.ts#presentEditPreview",
+        },
+        {
+          kind: "collect-input",
+          id: "approve-edit",
+          request: {
+            kind: "card-action",
+            actionId: "approve",
+          },
+        },
+        {
+          kind: "script",
+          id: "save-edit",
+          module: "./recipe-script.ts#saveApprovedEdit",
+        },
+      ],
+    },
+    icon: "pencil",
+    appliesTo: {},
+    requiredContext: [{ key: "project.summary", description: "Project overview" }],
+    skillRef: { id: "recipe.edit" },
+    outputPreference: "markdown",
+    artifactKinds: ["decision-notes"],
+    actionFamilies: ["delivery", "engineering"],
+    rankHint: 17,
+  }),
+  createBundledRecipe({
     id: "create-contextual-recipe",
     title: "Create a recipe for this view",
     manifestDisplayName: "Create a recipe for {{surfaceAuthoringLabel}}",

@@ -56,4 +56,43 @@ describe("sidecar section menu entries", () => {
       "Apply filter now",
     ]);
   });
+
+  it("shows Edit this… only for items with a project-local source path and invokes it", () => {
+    const onEditItem = vi.fn();
+    const entries = buildT3workSidecarItemMenuEntries({
+      pinned: false,
+      onPinItem: vi.fn(),
+      onUnpinItem: vi.fn(),
+      editSourcePath: "/workspace/.t3work/recipes/local/recipe.json",
+      onEditItem,
+      onHideItem: vi.fn(),
+      onRunDeclaredAction: vi.fn(),
+    });
+
+    expect(entries.map((entry) => (entry.kind === "action" ? entry.label : "separator"))).toEqual([
+      "Pin item",
+      "Edit this…",
+      "Hide item",
+    ]);
+    const editEntry = entries.find((entry) => entry.kind === "action" && entry.id === "edit-item");
+    expect(editEntry?.kind).toBe("action");
+    if (editEntry?.kind === "action") {
+      editEntry.onSelect();
+    }
+    expect(onEditItem).toHaveBeenCalledWith("/workspace/.t3work/recipes/local/recipe.json");
+  });
+
+  it("omits Edit this… for items that do not expose a source path", () => {
+    const entries = buildT3workSidecarItemMenuEntries({
+      pinned: false,
+      onPinItem: vi.fn(),
+      onUnpinItem: vi.fn(),
+      onHideItem: vi.fn(),
+      onRunDeclaredAction: vi.fn(),
+    });
+
+    expect(entries.some((entry) => entry.kind === "action" && entry.id === "edit-item")).toBe(
+      false,
+    );
+  });
 });

@@ -79,6 +79,7 @@ describe("sidecar section registry", () => {
               surface: "project.dashboard.myWork",
               projectId: "project-1",
               stageKickoff,
+              launchRecipe: () => undefined,
               openThread: () => undefined,
             }),
             props: {

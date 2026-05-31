@@ -51,6 +51,18 @@ describe("renderT3WorkProjectSetupFiles", () => {
     const createRecipeScript = files.find(
       (file) => file.relativePath === ".t3work/recipes/create-recipe/recipe-script.ts",
     );
+    const editRecipeManifest = files.find(
+      (file) => file.relativePath === ".t3work/recipes/edit-plugin-module/recipe.json",
+    );
+    const editRecipePrompt = files.find(
+      (file) => file.relativePath === ".t3work/recipes/edit-plugin-module/prompt.md",
+    );
+    const editRecipeWorkflow = files.find(
+      (file) => file.relativePath === ".t3work/recipes/edit-plugin-module/workflow.ts",
+    );
+    const editRecipeScript = files.find(
+      (file) => file.relativePath === ".t3work/recipes/edit-plugin-module/recipe-script.ts",
+    );
     const skillTemplate = files.find(
       (file) => file.relativePath === ".t3work/templates/skills/repeatable-workflow/SKILL.md",
     );
@@ -93,6 +105,13 @@ describe("renderT3WorkProjectSetupFiles", () => {
     expect(createRecipeWorkflow?.contents).toContain('kind: "agent"');
     expect(createRecipeScript?.contents).toContain("prepareAuthoringWorkspace");
     expect(createRecipeScript?.contents).toContain("starter/recipe.json");
+    expect(editRecipeManifest?.contents).toContain('"workflow": "./workflow.ts"');
+    expect(editRecipePrompt?.contents).toContain("## bundled-recipe");
+    expect(editRecipePrompt?.contents).toContain("./prompts/edit-recipe.md");
+    expect(editRecipeWorkflow?.contents).toContain('promptPath: "./draft-prompt.md"');
+    expect(editRecipeWorkflow?.contents).toContain('actionId: "approve"');
+    expect(editRecipeScript?.contents).toContain("prepareEditWorkspace");
+    expect(editRecipeScript?.contents).toContain("artifacts/proposed-source.txt");
     expect(skillTemplate?.contents).toContain("use a read-only subagent");
   });
 

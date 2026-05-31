@@ -4,6 +4,12 @@ import {
   T3WORK_PROJECT_RECIPES_ROOT,
   type T3WorkProjectSetupFile,
 } from "./t3work-projectSetupShared.ts";
+import {
+  EDIT_PLUGIN_MODULE_RECIPE_ID,
+  renderEditPluginModulePrompt,
+  renderEditPluginModuleScript,
+  renderEditPluginModuleWorkflow,
+} from "./t3work-projectSetupEditPluginRecipe.ts";
 
 function jsonFile(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -21,7 +27,9 @@ function renderBundledRecipeManifest(
     ...(recipe.icon ? { icon: recipe.icon } : {}),
     surfaces: recipe.surfaces,
     prompt: "./prompt.md",
-    ...(recipe.id === "create-recipe" ? { workflow: "./workflow.ts" } : {}),
+    ...(recipe.id === "create-recipe" || recipe.id === EDIT_PLUGIN_MODULE_RECIPE_ID
+      ? { workflow: "./workflow.ts" }
+      : {}),
     allowedToolGroups: recipe.allowedToolGroups,
     outputPreference: recipe.outputPreference,
   });
@@ -30,6 +38,10 @@ function renderBundledRecipeManifest(
 function renderBundledRecipePrompt(
   recipe: ReturnType<typeof listBundledT3WorkRecipes>[number],
 ): string {
+  if (recipe.id === EDIT_PLUGIN_MODULE_RECIPE_ID) {
+    return renderEditPluginModulePrompt();
+  }
+
   return recipe.promptTemplate
     ? `# ${recipe.title}\n\n${recipe.shortDescription}\n\n## Prompt\n\n${recipe.promptTemplate}\n`
     : `# ${recipe.title}\n\n${recipe.shortDescription}\n\n## Prompt\n\nThis recipe runs as a deterministic workflow and does not require an agent prompt.\n`;
@@ -142,6 +154,21 @@ export function renderBundledRecipeSetupFiles(): ReadonlyArray<T3WorkProjectSetu
         {
           relativePath: `${T3WORK_PROJECT_RECIPES_ROOT}/${recipe.id}/recipe-script.ts`,
           contents: renderCreateRecipeScript(),
+          writeMode: "if-missing",
+        },
+      );
+    }
+
+    if (recipe.id === EDIT_PLUGIN_MODULE_RECIPE_ID) {
+      files.push(
+        {
+          relativePath: `${T3WORK_PROJECT_RECIPES_ROOT}/${recipe.id}/workflow.ts`,
+          contents: renderEditPluginModuleWorkflow(),
+          writeMode: "if-missing",
+        },
+        {
+          relativePath: `${T3WORK_PROJECT_RECIPES_ROOT}/${recipe.id}/recipe-script.ts`,
+          contents: renderEditPluginModuleScript(),
           writeMode: "if-missing",
         },
       );

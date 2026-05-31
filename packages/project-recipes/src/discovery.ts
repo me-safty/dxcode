@@ -180,6 +180,7 @@ export type ProjectRecipeDiscovered = {
   readonly reason?: string;
   readonly prompt: string;
   readonly kickoff?: ProjectRecipeKickoffProgram;
+  readonly sourcePath?: string;
   readonly promptPath: string;
   readonly recipePath: string;
   readonly actionViewPath?: string;

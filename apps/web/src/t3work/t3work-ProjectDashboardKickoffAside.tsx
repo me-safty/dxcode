@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
+import { usePrimaryEnvironmentId } from "~/environments/primary";
 import { useBackend } from "~/t3work/backend/t3work-index";
 import { ScrollArea } from "~/t3work/components/ui/t3work-scroll-area";
 import { useProjectDashboardInjectedContextAttachments } from "~/t3work/hooks/t3work-useProjectDashboardInjectedContextAttachments";
@@ -9,15 +10,10 @@ import { ProjectDashboardKickoffComposer } from "~/t3work/t3work-ProjectDashboar
 import { T3workSidecarComposition } from "~/t3work/t3work-SidecarComposition";
 import { useRunT3workDashboardRecipeAction } from "~/t3work/t3work-dashboardRecipeActions";
 import { buildProjectDashboardSelectedRecipe } from "~/t3work/t3work-dashboardRecipeSelection";
-import {
-  areT3workRecipeQuickStartLaunchCustomizationsEqual,
-  buildT3workSelectedRecipeKickoffLaunch,
-  type T3workSelectedRecipeQuickStart,
-} from "~/t3work/t3work-recipeQuickStartLaunch";
+import { buildT3workSelectedRecipeKickoffLaunch } from "~/t3work/t3work-recipeQuickStartLaunch";
 import { useT3workDashboardRecipeViewSummary } from "~/t3work/t3work-dashboardRecipeViewContext";
 import { runT3workViewTransition } from "~/t3work/t3work-runViewTransition";
-import { type T3workKickoffComposerHandle } from "~/t3work/t3work-TicketKickoffComposer";
-import { buildSidecarSectionHost } from "~/t3work/t3work-sidecarSectionHost";
+import { useBundledSidecarRecipeLaunch } from "~/t3work/t3work-useBundledSidecarRecipeLaunch";
 
 export function ProjectDashboardKickoffAside({
   project,
@@ -32,12 +28,11 @@ export function ProjectDashboardKickoffAside({
   onKickoffThread,
 }: ProjectDashboardKickoffAsideProps) {
   const backend = useBackend();
+  const environmentId = usePrimaryEnvironmentId();
   const runDashboardRecipeAction = useRunT3workDashboardRecipeAction();
-  const composerRef = useRef<T3workKickoffComposerHandle | null>(null);
   const profileId = readProjectSetupProfileIdFromProject(project);
   const { clearInjectedContextAttachments, injectedContextAttachments, removeContextAttachment } =
     useProjectDashboardInjectedContextAttachments(project.id);
-  const [selectedRecipe, setSelectedRecipe] = useState<T3workSelectedRecipeQuickStart | null>(null);
   const currentViewSummary = useT3workDashboardRecipeViewSummary();
   const sidecarSurface =
     dashboardMode === "my-work" ? "project.dashboard.myWork" : "project.dashboard.backlog";
@@ -85,40 +80,38 @@ export function ProjectDashboardKickoffAside({
       quickStartContextKeys,
     ],
   );
-  const sidecarHost = useMemo(
-    () =>
-      buildSidecarSectionHost({
-        placement: "sidecar.section",
-        surface: sidecarSurface,
-        projectId: project.id,
-        stageKickoff: (recipe, customization) => {
-          const nextSelectedRecipe = buildProjectDashboardSelectedRecipe({
-            recipe,
-            ...(customization ? { customization } : {}),
-            runDashboardRecipeAction,
-          });
-          if (!nextSelectedRecipe) {
-            return;
-          }
+  const { clearSelectedRecipe, composerRef, selectedRecipe, sidecarHost } =
+    useBundledSidecarRecipeLaunch({
+      backend,
+      environmentId,
+      projectId: project.id,
+      surface: sidecarSurface,
+      projectWorkspaceRoot: project.workspace?.rootPath,
+      openThread: onOpenThread,
+      buildSelectedRecipe: (recipe, customization) =>
+        buildProjectDashboardSelectedRecipe({
+          recipe,
+          ...(customization ? { customization } : {}),
+          runDashboardRecipeAction,
+        }),
+      createThread: ({ kickoffMessage, kickoffWorkflow, launchConfig }) =>
+        onKickoffThread(
+          kickoffMessage,
+          false,
+          launchConfig.selection,
+          launchConfig.runtimeMode,
+          launchConfig.interactionMode,
+          launchConfig.selectedToolIds,
+          injectedContextAttachments,
+          kickoffWorkflow,
+        ) as string | undefined,
+      onLaunched: clearInjectedContextAttachments,
+    });
 
-          setSelectedRecipe((current) => {
-            if (
-              current?.recipe.id === nextSelectedRecipe.recipe.id &&
-              areT3workRecipeQuickStartLaunchCustomizationsEqual(
-                current.customization,
-                nextSelectedRecipe.customization,
-              )
-            ) {
-              return current;
-            }
-
-            return nextSelectedRecipe;
-          });
-        },
-        openThread: onOpenThread,
-      }),
-    [onOpenThread, project.id, runDashboardRecipeAction, sidecarSurface],
-  );
+  const resetKickoffState = () => {
+    clearInjectedContextAttachments();
+    clearSelectedRecipe();
+  };
 
   if (activeThread) {
     return (
@@ -164,7 +157,7 @@ export function ProjectDashboardKickoffAside({
       <ProjectDashboardKickoffComposer
         ref={composerRef}
         {...(selectedRecipe ? { selectedRecipe } : {})}
-        onClearSelectedRecipe={() => setSelectedRecipe(null)}
+        onClearSelectedRecipe={clearSelectedRecipe}
         providers={providers}
         isConnected={isConnected}
         injectedContextAttachments={injectedContextAttachments}
@@ -190,8 +183,7 @@ export function ProjectDashboardKickoffAside({
               injectedContextAttachments,
               selectedRecipe?.recipe.workflow,
             );
-            clearInjectedContextAttachments();
-            setSelectedRecipe(null);
+            resetKickoffState();
           });
         }}
       />

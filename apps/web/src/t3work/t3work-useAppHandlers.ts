@@ -148,6 +148,7 @@ export function useAppHandlers({
       });
       enqueueThreadKickoffAttachments(thread.id, input.kickoffContextAttachments);
       onOpenDashboard?.(resolvedProjectId, input.dashboardMode, thread.id);
+      return thread.id;
     },
     [onOpenDashboard, store],
   );

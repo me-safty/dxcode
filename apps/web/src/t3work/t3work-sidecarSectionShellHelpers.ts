@@ -22,6 +22,14 @@ export function getT3workSidecarItemId(item: unknown): string | null {
   return typeof item.id === "string" ? item.id : null;
 }
 
+export function getT3workSidecarItemSourcePath(item: unknown): string | null {
+  if (typeof item !== "object" || item === null || !("sourcePath" in item)) {
+    return null;
+  }
+
+  return typeof item.sourcePath === "string" ? item.sourcePath : null;
+}
+
 export function getT3workSidecarItemLabel(item: unknown): string {
   if (
     typeof item === "object" &&

@@ -21,6 +21,7 @@ import {
 import {
   getT3workSidecarItemId,
   getT3workSidecarItemLabel,
+  getT3workSidecarItemSourcePath,
   mergeT3workSidecarSectionProps,
   runT3workSidecarDeclaredAction,
 } from "~/t3work/t3work-sidecarSectionShellHelpers";
@@ -119,6 +120,7 @@ export function T3workSidecarSectionInstance({
                 }),
               wrapItem: (item, content) => {
                 const itemId = getT3workSidecarItemId(item);
+                const sourcePath = getT3workSidecarItemSourcePath(item);
                 if (!itemId) {
                   return content;
                 }
@@ -132,6 +134,10 @@ export function T3workSidecarSectionInstance({
                       }),
                       onPinItem: () => pinItem(definition.id, itemId),
                       onUnpinItem: () => unpinItem(definition.id, itemId),
+                      ...(sourcePath ? { editSourcePath: sourcePath } : {}),
+                      onEditItem: (targetPath) => {
+                        void host.launchRecipe("edit-plugin-module", { targetPath });
+                      },
                       onHideItem: () => hideItem(definition.id, itemId),
                       declaredActions: definition.itemActions?.(item),
                       onRunDeclaredAction: (action) => runDeclaredAction(action, itemId),

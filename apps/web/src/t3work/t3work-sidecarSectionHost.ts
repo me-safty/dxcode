@@ -13,6 +13,7 @@ export type SidecarSectionHost = {
     recipe: T3workSidecarRecipeQuickStart,
     customization?: T3workRecipeQuickStartLaunchCustomization,
   ) => void;
+  readonly launchRecipe: (recipeId: string, parameters?: Record<string, unknown>) => void;
   readonly openThread: (threadId: string) => void;
 };
 

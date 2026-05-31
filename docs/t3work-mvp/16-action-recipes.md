@@ -21,7 +21,7 @@ in code, and reused everywhere. Avoid inventing recipe-specific parallels to any
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- |
 | **Context**  | A read-only snapshot of the world the agent and workflows read. Two depths: a light _render context_ used before launch, and a rich _full context_ available after launch.                                                                       | `packages/project-context` |
 | **Tools**    | The single capability surface — the verbs that read or mutate `t3work` and external state. The _same_ surface is consumed by agent turns, workflow steps, and views, scoped by `allowedToolGroups`. See [Epic 21](./21-context-tool-catalog.md). | `T3workToolBroker`         |
-| **Workflow** | The core engine: a serializable, persisted, forward-only sequence of typed steps the host interprets. The foundation for all configurable automation and agent interaction.                                                                      | `packages/project-recipes` |
+| **Workflow** | The core engine. Target: a TS-native, replay-based durable-execution engine (Epic 25) where workflows are plain async TypeScript functions and primitive calls are journaled. Legacy: a serializable, persisted, forward-only sequence of typed steps the host interprets. Both run side by side during the migration.                                                                                                                                                       | `packages/project-recipes` |
 | **View**     | A code-based, interactive UI unit that mounts on any surface — the action list, a conversation message, a dashboard slot, a side panel. Action launchers and conversation cards are both Views. See [Epic 19](./19-workspace-miniapps.md).       | `@t3work/miniapp-sdk`      |
 
 How they interact, in one line:
@@ -568,10 +568,18 @@ Pattern](./02-additive-architecture.md#additive-extension-pattern).
 
 ## Workflows
 
-The workflow is the heart of the system. It is a **serializable, persisted, forward-only**
-sequence of typed steps. The kickoff program was the first proof-of-concept slice of this
-engine; it is being absorbed into the unified step model below rather than kept as a
-separate mechanism.
+The workflow is the heart of the system. The original step-union JSON model below is
+being replaced by a **TS-native, replay-based durable-execution engine** — workflows are
+plain async TypeScript functions whose primitive calls are journaled and replayable. The
+full engine specification lives in [Epic 25: Workflow Engine](./25-workflow-engine.md);
+this section retains the recipe-facing parts (how recipes reference workflows, launcher
+UX by workflow shape) and the legacy step-union types until phase 25.7 retires them.
+
+The kickoff program was the first proof-of-concept slice of the legacy engine; it has
+been absorbed into the unified step model below rather than kept as a separate mechanism.
+The new engine continues that consolidation: a workflow body is one thing, called the
+same way whether it powers a launcher card, a background task, or a sub-step of another
+workflow.
 
 ```ts
 type RecipeWorkflow = {
@@ -581,20 +589,12 @@ type RecipeWorkflow = {
 
 type RecipeWorkflowStep =
   | { kind: "agent"; id: string; promptPath?: string; promptText?: string } // bootstrap live
-  | {
-      kind: "agent.task";
-      id: string;
-      promptPath?: string;
-      promptText?: string;
-      outputSchema?: JsonSchema;
-      model?: ModelSelection;
-      timeoutMs?: number;
-      resultBinding?: string;
-    } // planned — see Background agent tasks
   | { kind: "script"; id: string; module: string; input?: Record<string, unknown> } // live
   | { kind: "tool"; id: string; toolName: string; input?: Record<string, unknown> } // planned
   | { kind: "present-message"; id: string; message: SystemMessageSpec } // partial — see Step status
   | { kind: "collect-input"; id: string; request: InputRequest }; // partial — see Step status
+// `agent.task` was previously catalogued as a legacy step kind but was never built;
+// it lives only as the Epic 25 `agent.task` global. See §Background agent tasks.
 ```
 
 `present-message` emits a system message (text, typed attachments, and/or one or more
@@ -663,6 +663,13 @@ The launcher detects the shape at click time and selects the row above. The same
 authoring shape (`recipe.ts`) covers all four; nothing on the recipe declares which UX it
 wants.
 
+In the legacy runtime, the launcher inspects the recipe's step list. In the Epic 25
+engine, the same shape detection is performed by static analysis of the workflow body —
+the loader checks whether the body contains any `agent()` calls (conversational), any
+`agent.task()` calls (background), and whether the first primitive is a user-facing
+prompt (`ui.show` / `user.ask`). The conceptual mapping (deterministic ↔ conversational ↔
+background-only) is unchanged; only the detection mechanism differs.
+
 Inline chips (the `action.inline` placement on the host page itself, e.g. a backlog
 filter chip) use the deterministic row only — they cannot live on the chat path.
 
@@ -689,13 +696,13 @@ The composer (today: `apps/web/src/components/chat/ChatComposer.tsx`) owns the t
 surface and the menu. Recipes are one of several contributor sources. The host's existing
 discriminated union of menu item kinds is the extension point:
 
-| Item kind                | Source                                          | Selection effect                                                                            |
-| ------------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `path`                   | `@` + workspace entries                         | Inserts a mention token                                                                     |
-| `slash-command`          | `/` + hardcoded built-ins (`/model`, `/plan`, …) | Mode/model side-effects, typed range cleared                                                |
-| `provider-slash-command` | `/` + `ServerProvider.slashCommands`            | Inserts the literal `/<name> ` so the provider runtime sees it                              |
-| `skill`                  | `$` + `ServerProvider.skills`                   | Inserts a `$skill` chip                                                                     |
-| **`recipe-slash-command`** | **`/` + recipe catalog filtered by surface**  | **Clears the typed range; calls `setSelectedRecipe(recipe)` so the chip renders above the editor.** |
+| Item kind                  | Source                                           | Selection effect                                                                                    |
+| -------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `path`                     | `@` + workspace entries                          | Inserts a mention token                                                                             |
+| `slash-command`            | `/` + hardcoded built-ins (`/model`, `/plan`, …) | Mode/model side-effects, typed range cleared                                                        |
+| `provider-slash-command`   | `/` + `ServerProvider.slashCommands`             | Inserts the literal `/<name> ` so the provider runtime sees it                                      |
+| `skill`                    | `$` + `ServerProvider.skills`                    | Inserts a `$skill` chip                                                                             |
+| **`recipe-slash-command`** | **`/` + recipe catalog filtered by surface**     | **Clears the typed range; calls `setSelectedRecipe(recipe)` so the chip renders above the editor.** |
 
 The recipe variant is the only one that **selects host state** rather than mutating the
 editor's text. Everything else — token rendering, menu visuals, keyboard nav, fuzzy
@@ -737,7 +744,7 @@ how name collisions are blocked at registration time.)
 defineRecipe({
   id: "qa-test-plan",
   // ...
-  slashAlias: "qa-plan",  // optional; defaults to `id`
+  slashAlias: "qa-plan", // optional; defaults to `id`
 });
 ```
 
@@ -849,77 +856,67 @@ step but never reaches a chat surface. Examples:
 - generate three candidate test-plan headings from acceptance criteria
 - extract a structured field set from a freeform description
 
-These are the **`agent.task`** step — a background, non-interactive LLM call:
+In the **target engine (Epic 25)** these are the `agent.task` global — a background,
+non-interactive LLM call whose typed result lives as a normal variable in the workflow
+body:
 
 ```ts
-type RecipeWorkflowAgentTaskStep = {
-  kind: "agent.task";
-  id: string;
-  promptText?: string;
-  promptPath?: string;
-  // Optional structured-output shape; when set, the host instructs the model to emit
-  // JSON conforming to the schema and parses it as the step result.
-  outputSchema?: JsonSchema;
-  // Optional model override — background tasks can run on cheaper/faster models.
-  model?: { instanceId: string; model: string };
-  timeoutMs?: number;
-  // Name under which subsequent steps reference this step's result.
-  resultBinding?: string;
-};
+const summary = await agent.task({
+  prompt: `Summarize this diff:\n\n${pr.diff}`,
+  schema: SummarySchema,                                       // Effect Schema; typed return
+  model: { provider: "anthropic-primary", model: "claude-haiku-4-5" },
+});
+// summary is Schema.Schema.Type<typeof SummarySchema>
 ```
 
-Contract:
+Contract (carried over from the legacy step model and formalized in Epic 25):
 
 - **No thread involvement.** No `thread.message.upsert`, no streaming to the conversation,
   no launch card update. The presence of `agent.task` does not turn a deterministic
   workflow into a conversational one.
-- **Structured result.** The agent's final assistant content is captured as the step
-  result. If `outputSchema` is set, the host parses + validates and the result is the
-  structured value; otherwise it's the raw text.
-- **Step-result binding.** `resultBinding` names the value so later `script` / `tool` /
-  `present-message` steps can reference it (e.g. `{ $ref: "summarize-pr.result" }` in their
-  input). This implies a small step-result data model the engine must persist alongside
-  `workflow-state.json` — design and ship that alongside `agent.task`.
-- **Progress.** Long-running tasks surface progress as step activities (the existing
-  internal-event channel). If the recipe wants user-visible progress, it pairs the
-  `agent.task` with a sibling `present-message` whose body/status it updates.
-- **Cost discipline.** The optional per-step `model` field lets recipes route routine
-  tasks to cheaper models without changing the user's default provider/model selection.
-- **Failure handling.** Timeouts and provider errors fail the step the same way `script`
-  / `tool` steps do — recorded as a failed step activity, the run halts at that step.
+- **Structured result.** The model is instructed to emit JSON conforming to `schema`;
+  the engine parses + validates with Effect's decoder and returns the typed value.
+  Schema-mismatch responses trigger a bounded retry with a corrective system message
+  before failing as `SchemaExhaustedError`.
+- **No step-result binding model needed.** In the replay-based engine, results are just
+  variables in scope — no `resultBinding` / `$ref` indirection.
+- **Cost discipline.** The optional per-call `model` override lets workflows route
+  routine tasks to cheaper models without changing the user's default selection.
+- **Failure handling.** Timeouts, provider errors, and schema-exhaustion surface as
+  typed `WorkflowError` subclasses that `try`/`catch` can branch on.
 
-`agent.task` shares the provider adapter with interactive `agent` steps but runs in a
-non-streaming, non-thread-bound mode. Per the [Tools](#tools) section it binds the broker
-with the recipe's `allowedToolGroups` if the model needs tools mid-task.
+In the **legacy step-union runtime** `agent.task` is unbuilt; recipes that need
+background LLM work today fold the call into a `script` step that calls the provider
+directly. New recipes should be authored against the Epic 25 surface.
 
-A workflow can mix any combination of `agent.task` (background LLM calls) and `agent`
-(interactive turns) — the deterministic-vs-conversational split is decided by whether _any_
-interactive `agent` step exists, not by `agent.task`.
+### Execution model
 
-> **Implementation status.** `agent.task` is not built. It introduces the first need for a
-> formal step-result binding model in the workflow engine; design that explicitly before
-> implementation, because subsequent step kinds (and the `create-recipe` recipe's
-> validation pass) will want to use it too.
+**Legacy step-union runtime (current code):** the engine is stateless — a run is a
+forward-only cursor over the persisted step list, with one suspension point at
+`collect-input`. Resume continues forward from `nextStepIndex`; steps are never replayed.
+This is what's running today in `apps/server/src/t3work-recipeWorkflowRuntime*.ts`.
 
-### Stateless, forward-only execution
+> Be precise about what "stateless" buys in the legacy runtime: it enables _resume_, not
+> _replay_. Stateful IO (filesystem, git, fetch, deriving artifacts) belongs in explicit
+> `script` or `tool` steps that take serializable input and return serializable output,
+> never in hidden engine state.
 
-The engine is stateless: it holds no in-memory coroutine state across turns. A run is a
-**forward-only cursor** over the persisted step list. The interpreter resumes purely from
-serialized state on disk — launch metadata, the step list, `nextStepIndex`, prior step
-results, and any pending user submission.
+**Replay-based durable engine (target — Epic 25):** workflows are plain async TS
+functions; every primitive call is journaled with a content hash of its arguments.
+Resume replays the body from the top, returning recorded results until reaching the
+next un-journaled call. This unlocks `try`/`catch`, branching, structured
+request/response across threads, multi-hour suspension on user escalation, and typed
+composition of workflows by typed reference. The full contract — including the
+determinism rules authors must follow, the banned-global enforcement matrix, and
+replay-drift error semantics — lives in
+[Epic 25 §The determinism contract](./25-workflow-engine.md#the-determinism-contract--replay-safety).
 
-The single suspension point is `collect-input`: it persists `nextStepIndex` and the awaited
-request, then returns. Resume reads that state and continues forward from `nextStepIndex`.
-Steps are never re-derived or rewound — agent/script/present-message side effects that
-ran before a checkpoint are not replayed.
+The two engines run side by side during the migration: legacy `recipe.json` recipes use
+the step-union runtime; new `recipe.ts` recipes whose workflows live in `.workflow.ts`
+files use the replay-based engine. Phase 25.7 retires the legacy runtime once all
+project-local recipes have migrated.
 
-> Be precise about what "stateless" buys: it enables _resume_, not _replay_. Do not plan
-> features that require re-running an earlier step; the architecture only moves forward
-> from the last checkpoint. Stateful IO (filesystem, git, fetch, deriving artifacts,
-> loading provider context) belongs in explicit `script` or `tool` steps that take serializable
-> input and return serializable output, never in hidden engine state.
-
-### Step status
+### Step status (legacy runtime)
 
 - **Live:** the bootstrap `agent` step (the first kickoff turn); `script`; `present-message`
   in its "card" form (writes an activity payload today) and the matching `collect-input`
@@ -928,8 +925,12 @@ ran before a checkpoint are not replayed.
   tools for now); `present-message` for non-card messages (text-only and View-bearing system
   messages persisted as first-class messages via `t3workExt`); `collect-input` for text
   replies and structured form submissions (absorbing the former `wait-for-kickoff-input`).
+- **Superseded by Epic 25:** every step kind above maps onto a global in the new engine
+  (`agent`, `agent.task`, `script`, `tool`, `ui.show` for present-message, `Handle.response`
+  for collect-input). Authors of new recipes should target the Epic 25 surface; the
+  step-union shape stays documented here only until phase 25.7 retires it.
 
-Per-step failures are isolated and recorded as a failed step activity in the timeline;
+Per-step / per-call failures are isolated and recorded as activity in the run's timeline;
 they do not crash the run or the page.
 
 ## Tools
@@ -939,7 +940,8 @@ agent-scoped tools (`T3workToolBroker` binds a per-thread set of `callTool`/`rea
 capabilities for an agent turn). The same surface is consumed by:
 
 - agent turns (today),
-- workflow `script` and `tool` steps,
+- workflow bodies — `script` / `tool` steps in the legacy runtime; `script()` and
+  `tool()` primitive calls in the Epic 25 engine,
 - Views (via the miniapp tool bridge).
 
 A script receives the broker binding as `api.tools`; it does not get a second, parallel
@@ -1001,7 +1003,8 @@ provides conversation cards during a run. Relevant placements:
 
 In-conversation Views are not a separate "card protocol": they are carried by the `view`
 field of a system message (see [Conversation Participants](#conversation-participants)).
-A workflow's `present-message` step emits the system message; the host renders the
+A workflow emits the system message — via a `present-message` step in the legacy runtime,
+or via the `ui.show(view)` primitive in the Epic 25 engine — and the host renders the
 referenced View at the message's placement.
 
 Views receive context as props and use shell-provided components and the tool bridge. They
@@ -1036,7 +1039,9 @@ runs/
       context-map.md
       prompt.md          # rendered
       files/             # rendered payload files
-      workflow-state.json # persisted forward-only cursor + step results
+      workflow-state.json # legacy runtime: persisted forward-only cursor + step results
+      journal.jsonl      # Epic 25 engine: append-only journal of primitive calls
+                         # (per phase 25.2 — see Epic 25 §Open question 2)
 ```
 
 The run directory is the **workflow runtime's** persistent record of a launch — a
@@ -1044,6 +1049,11 @@ durable working directory the runtime uses for audit, replay, and to give `scrip
 `tool` steps a place to write outputs. **It is not an API surface the agent navigates.**
 `recipe.ts` and `workflow.ts` are runtime-internal artifacts; the agent never sees them
 and is never told to "follow" them.
+
+The two engines share the run directory layout (`context.*`, `prompt.md`, `files/`) but
+differ in their state file: `workflow-state.json` for the legacy step-cursor runtime,
+`journal.jsonl` for the Epic 25 replay-based engine. A run uses one or the other based
+on which engine the recipe targets.
 
 Launch sequence (thread-first, so the user sees state immediately):
 
@@ -1310,14 +1320,16 @@ future Edit-this surface ([Epic 19 — Context menus](./19-workspace-miniapps.md
 
 Shape:
 
-1. **Input**: a target file path (the source of an existing `define*` call) plus the
-   kickoff customization (what change the user wants).
+1. **Input**: a target source path plus the kickoff customization (what change the
+   user wants).
 2. **Script step**: reads the target file, inspects which `define*` helper it exports,
-   and selects the appropriate authoring guidance to inject into the agent's prompt.
-3. **Agent step**: drafts the change with the targeted guidance.
+   and selects the appropriate authoring guidance to inject into the agent's prompt
+   (falling back to manifest guidance for legacy project-local `recipe.json` items).
+3. **Agent step**: writes the full updated source into a run-local draft artifact using
+   the targeted guidance.
 4. **Present-message + collect-input**: shows the proposed diff as a `view` attachment,
    awaits explicit approval.
-5. **Script step**: writes the change to disk.
+5. **Script step**: writes the approved draft back to disk.
 
 One recipe handles every `define*` kind. Splitting prompt material into multiple
 referenced files (`./prompts/edit-recipe.md`, `./prompts/edit-section.md`, etc.) is the
@@ -1371,30 +1383,37 @@ project is created. Project-local recipes are the editable source of truth for t
 
 ## Implementation Status Summary
 
-| Area                                                                                                  | Status                                                                        |
-| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Project-local discovery + bundled matching                                                            | Built                                                                         |
-| Visibility (predicate + script, timeout, isolation)                                                   | Built (via `recipe.json` + expression engine)                                 |
-| TS-module authoring (`recipe.ts`), retire expression engine                                           | Planned (Phase 1 target; current engine still active)                         |
-| Unified workflow step union; kickoff absorbed                                                         | Built                                                                         |
-| Workflow runtime: bootstrap agent, card, await-card-action, script                                    | Built                                                                         |
-| Workflow runtime: mid-flow agent, tool, present-message, collect-input                                | Built                                                                         |
-| Three-author conversation model + `t3workExt` seam (system messages, view-in-message)                 | Built                                                                         |
-| Shared tool surface for scripts/steps via broker; enforce `allowedToolGroups`                         | Built                                                                         |
-| Deterministic workflows (no-agent workflows skip thread/launch-card) + `action.inline` placement      | Built (tool-step no-chat path; backlog inline chip wired)                     |
-| `agent.task` step (background non-interactive LLM call) + step-result binding model                   | Planned (Phase 4 — design step-result model first)                            |
-| Sidecar sections + `defineSidecarSection` SDK + composition model + remove hardcoded kickoff aside    | Built (sections + composition + shell menus + declared deterministic actions) |
-| Composer slash-command launchers for recipes (`slashAlias` + `recipe-slash-command` item kind)        | Planned (precondition: extract shared composer-menu hook so kickoff wires `/`, `@`, `$` at all) |
-| `define*` SDK surface (per-placement helpers, no generic primitive, multi-placement via exports)      | Planned (Phase 5 — ships alongside the placements it covers)                  |
-| Run-directory materialization, `context.json`/schema/map                                              | Built                                                                         |
-| Setup script (formerly `init.ts`)                                                                     | Deferred until stage-2 sandbox                                                |
-| Views unified on miniapp model; typed-event action path                                               | Planned (Phase 5)                                                             |
-| `Queryable<T>` contract (Array-backed at MVP)                                                         | Planned (Phase 2 — needed by unified steps)                                   |
-| `Queryable<T>` runtime: SQL-backed + signals (Signia / equivalent); projection-driven invalidation    | Planned (Phase 6 — scale tier)                                                |
-| Agent-discovery types pipeline: generated `.d.ts` + `context.schema.json` + `context-map.md`          | Built                                                                         |
-| `create-recipe` recipe (canonical end-to-end workflow proof)                                          | Built                                                                         |
-| `edit-plugin-module` recipe (single canonical AI-edit entry point; backs "Edit this…" + "Customize…") | Planned (Phase 5 — after context-menu chrome lands)                           |
-| Stage-2 sandboxing                                                                                    | Planned, parallel track                                                       |
+| Area                                                                                                                             | Status                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Project-local discovery + bundled matching                                                                                       | Built                                                                                           |
+| Visibility (predicate + script, timeout, isolation)                                                                              | Built (via `recipe.json` + expression engine)                                                   |
+| TS-module authoring (`recipe.ts`), retire expression engine                                                                      | Planned (Phase 1 target; current engine still active)                                           |
+| Unified workflow step union; kickoff absorbed                                                                                    | Built (legacy runtime; retired in phase 25.7)                                                   |
+| Workflow runtime: bootstrap agent, card, await-card-action, script                                                               | Built (legacy runtime; superseded by Epic 25 primitives)                                        |
+| Workflow runtime: mid-flow agent, tool, present-message, collect-input                                                           | Built (legacy runtime; superseded by Epic 25 primitives in phase 25.4)                          |
+| Three-author conversation model + `t3workExt` seam (system messages, view-in-message)                                            | Built                                                                                           |
+| Shared tool surface for scripts/steps via broker; enforce `allowedToolGroups`                                                    | Built                                                                                           |
+| Deterministic workflows (no-agent workflows skip thread/launch-card) + `action.inline` placement                                 | Built (tool-step no-chat path; backlog inline chip wired)                                       |
+| `agent.task` step (background non-interactive LLM call) + step-result binding model                                              | Subsumed by Epic 25 `agent.task` global; step-result binding obsoleted by replay-based engine (results are scope variables) |
+| Sidecar sections + `defineSidecarSection` SDK + composition model + remove hardcoded kickoff aside                               | Built (sections + composition + shell menus + declared deterministic actions)                   |
+| Composer slash-command launchers for recipes (`slashAlias` + `recipe-slash-command` item kind)                                   | Planned (precondition: extract shared composer-menu hook so kickoff wires `/`, `@`, `$` at all) |
+| `define*` SDK surface (per-placement helpers, no generic primitive, multi-placement via exports)                                 | Planned (Phase 5 — ships alongside the placements it covers)                                    |
+| Run-directory materialization, `context.json`/schema/map                                                                         | Built                                                                                           |
+| Setup script (formerly `init.ts`)                                                                                                | Deferred until stage-2 sandbox                                                                  |
+| Views unified on miniapp model; typed-event action path                                                                          | Planned (Phase 5)                                                                               |
+| `Queryable<T>` contract (Array-backed at MVP)                                                                                    | Planned (Phase 2 — needed by unified steps)                                                     |
+| `Queryable<T>` runtime: SQL-backed + signals (Signia / equivalent); projection-driven invalidation                               | Planned (Phase 6 — scale tier)                                                                  |
+| Agent-discovery types pipeline: generated `.d.ts` + `context.schema.json` + `context-map.md`                                     | Built                                                                                           |
+| `create-recipe` recipe (canonical end-to-end workflow proof)                                                                     | Built                                                                                           |
+| `edit-plugin-module` recipe (single canonical AI-edit entry point; backs "Edit this…" now and remains the base for "Customize…") | Implemented for "Edit this…" (Phase 5c); structured customize flows remain deferred             |
+| Stage-2 sandboxing                                                                                                               | Planned, parallel track                                                                         |
+| **Epic 25 — `.workflow.ts` loader + `meta` static extractor + `defineWorkflow` SDK + ambient types**                             | Planned (25.1)                                                                                  |
+| **Epic 25 — Durable-execution engine: journal, replay, argsHash, `ReplayDriftError`**                                            | Planned (25.2 — foundational rewrite)                                                           |
+| **Epic 25 — Inherited primitives: `agent`, `agent.task`, `parallel`, `pipeline`, `phase`, `log`, `args`, `budget`, `workflow`**  | Planned (25.3)                                                                                  |
+| **Epic 25 — Handle primitives: `ui.show`, `child.spawn`, `thread.send`, `user.ask`, `user.notify`, `wait`**                      | Planned (25.4 — depends on cross-thread messaging broker work)                                  |
+| **Epic 25 — Determinism enforcement: lint rules, banned-global throws, capability gating at load time**                          | Planned (25.5)                                                                                  |
+| **Epic 25 — Migration tooling: legacy `recipe.json` + step-union → `.workflow.ts` conversion**                                   | Planned (25.6)                                                                                  |
+| **Epic 25 — Retire legacy step-union runtime (`recipeWorkflowRuntime*`)**                                                        | Planned (25.7 — after all recipes migrated)                                                     |
 
 ## Implementation Notes
 

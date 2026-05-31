@@ -42,6 +42,7 @@ export function mapDiscoveredRecipesToQuickStarts(
       title: recipe.displayName,
       description: recipe.shortDescription,
       prompt: recipe.prompt,
+      ...(recipe.sourcePath ? { sourcePath: recipe.sourcePath } : {}),
       workflow: {
         kind: "recipe",
         recipeId: recipe.id,

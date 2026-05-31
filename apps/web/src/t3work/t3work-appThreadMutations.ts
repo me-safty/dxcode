@@ -69,7 +69,7 @@ export async function createTicketKickoffThread(input: {
     .getTicketsForProject(resolvedProjectId)
     .find((candidate) => candidate.id === threadInput.ticketId);
 
-  if (!backend || !project || !ticket) return;
+  if (!backend || !project || !ticket) return thread.id;
 
   const jiraSummary = buildJiraWorkItemSummary(ticket);
   const projectTickets = store.getTicketsForProject(resolvedProjectId);
@@ -98,6 +98,8 @@ export async function createTicketKickoffThread(input: {
     },
     { type: "kickoff", projectId: resolvedProjectId, ticketId: threadInput.ticketId },
   );
+
+  return thread.id;
 }
 
 export function selectProjectThread(input: {

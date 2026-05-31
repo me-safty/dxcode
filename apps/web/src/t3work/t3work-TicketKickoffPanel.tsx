@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { usePrimaryEnvironmentId } from "~/environments/primary";
 import { ScrollArea } from "~/t3work/components/ui/t3work-scroll-area";
 import type { BackendApi } from "~/t3work/backend/t3work-types";
 import type { ProjectThread, T3workThreadToolId } from "~/t3work/t3work-types";
@@ -9,13 +10,12 @@ import { ContextAttachmentChip } from "~/t3work/components/t3work-ContextAttachm
 import { T3workSidecarComposition } from "~/t3work/t3work-SidecarComposition";
 import {
   applyT3workRecipeQuickStartLaunchCustomization,
-  areT3workRecipeQuickStartLaunchCustomizationsEqual,
   buildT3workSelectedRecipeKickoffLaunch,
   type T3workSelectedRecipeQuickStart,
 } from "~/t3work/t3work-recipeQuickStartLaunch";
-import { type T3workKickoffComposerHandle } from "~/t3work/t3work-TicketKickoffComposer";
-import { buildSidecarSectionHost } from "~/t3work/t3work-sidecarSectionHost";
 import type { T3workSidecarRecipeInput } from "~/t3work/t3work-sidecarRecipeTypes";
+import { type T3workKickoffComposerHandle } from "~/t3work/t3work-TicketKickoffComposer";
+import { useBundledSidecarRecipeLaunch } from "~/t3work/t3work-useBundledSidecarRecipeLaunch";
 import type { T3workKickoffWorkflow } from "~/t3work/t3work-types";
 
 type TicketKickoffPanelProps = {
@@ -62,42 +62,43 @@ export function TicketKickoffPanel({
   onKickoff,
   renderComposer,
 }: TicketKickoffPanelProps) {
+  const environmentId = usePrimaryEnvironmentId();
   const [localContextAttachments, setLocalContextAttachments] = useState<
     ReadonlyArray<T3WorkContextAttachment>
   >([]);
-  const composerRef = useRef<T3workKickoffComposerHandle | null>(null);
   const [dismissedAttachmentIds, setDismissedAttachmentIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const [selectedRecipe, setSelectedRecipe] = useState<T3workSelectedRecipeQuickStart | null>(null);
-  const sidecarHost = useMemo(
-    () =>
-      buildSidecarSectionHost({
-        placement: "sidecar.section",
-        surface: "workitem.detail.sidepanel",
-        projectId,
-        stageKickoff: (recipe, customization) => {
-          setSelectedRecipe((current) => {
-            if (
-              current?.recipe.id === recipe.id &&
-              areT3workRecipeQuickStartLaunchCustomizationsEqual(
-                current.customization,
-                customization,
-              )
-            ) {
-              return current;
-            }
-
-            return {
-              recipe: applyT3workRecipeQuickStartLaunchCustomization(recipe, customization),
-              ...(customization ? { customization } : {}),
-            };
-          });
-        },
-        openThread: onOpenThread,
+  const { clearSelectedRecipe, composerRef, selectedRecipe, sidecarHost } =
+    useBundledSidecarRecipeLaunch({
+      backend: quickStartRecipeInput.backend,
+      environmentId,
+      projectId,
+      surface: "workitem.detail.sidepanel",
+      projectWorkspaceRoot: quickStartRecipeInput.project.workspace?.rootPath,
+      openThread: onOpenThread,
+      buildSelectedRecipe: (recipe, customization) => ({
+        recipe: applyT3workRecipeQuickStartLaunchCustomization(recipe, customization),
+        ...(customization ? { customization } : {}),
       }),
-    [onOpenThread, projectId],
-  );
+      createThread: async ({ kickoffMessage, kickoffWorkflow, launchConfig }) =>
+        (await Promise.resolve(
+          onKickoff(
+            kickoffMessage,
+            false,
+            launchConfig.selection,
+            launchConfig.runtimeMode,
+            launchConfig.interactionMode,
+            launchConfig.selectedToolIds,
+            localContextAttachments,
+            kickoffWorkflow,
+          ),
+        )) as string | undefined,
+      onLaunched: () => {
+        setLocalContextAttachments([]);
+        setDismissedAttachmentIds(new Set());
+      },
+    });
 
   useEffect(() => {
     if (!injectedContextAttachments || injectedContextAttachments.length === 0) {
@@ -119,6 +120,12 @@ export function TicketKickoffPanel({
       next.add(id);
       return next;
     });
+  };
+
+  const clearPanelState = () => {
+    setLocalContextAttachments([]);
+    setDismissedAttachmentIds(new Set());
+    clearSelectedRecipe();
   };
 
   return (
@@ -167,7 +174,7 @@ export function TicketKickoffPanel({
         {renderComposer({
           composerRef,
           ...(selectedRecipe ? { selectedRecipe } : {}),
-          onClearSelectedRecipe: () => setSelectedRecipe(null),
+          onClearSelectedRecipe: clearSelectedRecipe,
           onSubmit: (text, selection, runtimeMode, interactionMode, selectedToolIds) => {
             const kickoff = selectedRecipe
               ? buildT3workSelectedRecipeKickoffLaunch({
@@ -188,9 +195,7 @@ export function TicketKickoffPanel({
               localContextAttachments,
               selectedRecipe?.recipe.workflow,
             );
-            setLocalContextAttachments([]);
-            setDismissedAttachmentIds(new Set());
-            setSelectedRecipe(null);
+            clearPanelState();
           },
         })}
       </div>

@@ -138,6 +138,7 @@ export function areQuickStartsEqual(
       quickStart.title === other?.title &&
       quickStart.description === other?.description &&
       quickStart.prompt === other?.prompt &&
+      quickStart.sourcePath === other?.sourcePath &&
       areComposerGuidanceEqual(quickStart.composerGuidance, other?.composerGuidance) &&
       areQuickStartWorkflowsEqual(quickStart.workflow, other?.workflow) &&
       areQuickStartActionViewsEqual(quickStart.actionView, other?.actionView)

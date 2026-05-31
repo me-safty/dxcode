@@ -13,6 +13,7 @@ export type T3workSidecarRecipeQuickStart = {
   readonly composerGuidance?: T3workRecipeComposerGuidance;
   readonly prompt: string;
   readonly workflow: T3workKickoffWorkflow;
+  readonly sourcePath?: string;
   readonly actionView?: T3workSidecarRecipeActionView;
 };
 

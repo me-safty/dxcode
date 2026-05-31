@@ -78,6 +78,8 @@ export function buildT3workSidecarItemMenuEntries(input: {
   readonly pinned: boolean;
   readonly onPinItem: () => void;
   readonly onUnpinItem: () => void;
+  readonly editSourcePath?: string | undefined;
+  readonly onEditItem?: ((sourcePath: string) => void) | undefined;
   readonly onHideItem: () => void;
   readonly declaredActions?: ReadonlyArray<SidecarSectionAction> | undefined;
   readonly onRunDeclaredAction: (action: SidecarSectionAction) => void;
@@ -91,6 +93,16 @@ export function buildT3workSidecarItemMenuEntries(input: {
       label: input.pinned ? "Unpin item" : "Pin item",
       onSelect: input.pinned ? input.onUnpinItem : input.onPinItem,
     },
+    ...(input.editSourcePath && input.onEditItem
+      ? [
+          {
+            kind: "action" as const,
+            id: "edit-item",
+            label: "Edit this…",
+            onSelect: () => input.onEditItem?.(input.editSourcePath!),
+          },
+        ]
+      : []),
     {
       kind: "action",
       id: "hide-item",

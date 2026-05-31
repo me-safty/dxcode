@@ -178,6 +178,7 @@ export function visible(ctx) {
             },
             actionViewPath: expect.stringContaining("/qa-test-plan/action.mdx"),
             actionViewSource: expect.stringContaining("<RecipeAction"),
+            sourcePath: expect.stringContaining("/qa-test-plan/recipe.json"),
             workflowPath: expect.stringContaining("/qa-test-plan/workflow.ts"),
           });
 
