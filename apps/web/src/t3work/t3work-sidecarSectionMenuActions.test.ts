@@ -24,6 +24,8 @@ describe("sidecar section menu entries", () => {
       onMoveUp: vi.fn(),
       onMoveDown: vi.fn(),
       onToggleCollapsed: vi.fn(),
+      showResetSection: true,
+      onResetSection: vi.fn(),
       onHideSection: vi.fn(),
       declaredActions: [DECLARED_ACTION],
       onRunDeclaredAction: vi.fn(),
@@ -33,6 +35,7 @@ describe("sidecar section menu entries", () => {
       "Move up",
       "Move down",
       "Collapse section",
+      "Reset section",
       "Hide section",
       "separator",
       "Apply filter now",
@@ -44,6 +47,8 @@ describe("sidecar section menu entries", () => {
       pinned: false,
       onPinItem: vi.fn(),
       onUnpinItem: vi.fn(),
+      showCustomizeItem: true,
+      onCustomizeItem: vi.fn(),
       onHideItem: vi.fn(),
       declaredActions: [DECLARED_ACTION],
       onRunDeclaredAction: vi.fn(),
@@ -51,6 +56,7 @@ describe("sidecar section menu entries", () => {
 
     expect(entries.map((entry) => (entry.kind === "action" ? entry.label : "separator"))).toEqual([
       "Pin item",
+      "Customize…",
       "Hide item",
       "separator",
       "Apply filter now",
@@ -65,6 +71,8 @@ describe("sidecar section menu entries", () => {
       onUnpinItem: vi.fn(),
       editSourcePath: "/workspace/.t3work/recipes/local/recipe.json",
       onEditItem,
+      showCustomizeItem: true,
+      onCustomizeItem: vi.fn(),
       onHideItem: vi.fn(),
       onRunDeclaredAction: vi.fn(),
     });
@@ -72,6 +80,7 @@ describe("sidecar section menu entries", () => {
     expect(entries.map((entry) => (entry.kind === "action" ? entry.label : "separator"))).toEqual([
       "Pin item",
       "Edit this…",
+      "Customize…",
       "Hide item",
     ]);
     const editEntry = entries.find((entry) => entry.kind === "action" && entry.id === "edit-item");
@@ -94,5 +103,32 @@ describe("sidecar section menu entries", () => {
     expect(entries.some((entry) => entry.kind === "action" && entry.id === "edit-item")).toBe(
       false,
     );
+  });
+
+  it("omits reset and customize entries when there are no resettable overrides", () => {
+    const headerEntries = buildT3workSidecarSectionHeaderMenuEntries({
+      collapsed: false,
+      canMoveUp: true,
+      canMoveDown: true,
+      onMoveUp: vi.fn(),
+      onMoveDown: vi.fn(),
+      onToggleCollapsed: vi.fn(),
+      onHideSection: vi.fn(),
+      onRunDeclaredAction: vi.fn(),
+    });
+    const itemEntries = buildT3workSidecarItemMenuEntries({
+      pinned: false,
+      onPinItem: vi.fn(),
+      onUnpinItem: vi.fn(),
+      onHideItem: vi.fn(),
+      onRunDeclaredAction: vi.fn(),
+    });
+
+    expect(
+      headerEntries.some((entry) => entry.kind === "action" && entry.id === "reset-section"),
+    ).toBe(false);
+    expect(
+      itemEntries.some((entry) => entry.kind === "action" && entry.id === "customize-item"),
+    ).toBe(false);
   });
 });

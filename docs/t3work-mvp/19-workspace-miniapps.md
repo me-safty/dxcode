@@ -308,6 +308,7 @@ Right-click / kebab on an individual item (Quick Start card, inline chip, PR row
 | Action                 | Source    | Scope    | Notes                                                                                                                                                   |
 | ---------------------- | --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Edit this…**         | Universal | per-user | Only shown for project-local items with a resolvable source path. Launches the canonical `edit-plugin-module` workflow with that source preselected.    |
+| **Customize…**         | Universal | per-user | Only shown when the item has user-specific hide/pin/order overrides. MVP routes this through a guided reset workflow rather than a broader settings UI. |
 | **Hide item**          | Universal | per-user | Item never shows for this user. Persisted in `t3workStoredSidecarCompositionJson` under `itemHides`. Per-project hide remains **deferred**.             |
 | **Pin to top / Unpin** | Universal | per-user | Boosts the item above its natural rank within its section. Persisted in the same settings payload under `itemPins` / `itemOrderOverrides`.              |
 | _section-specific_     | Section   | varies   | E.g., "Apply filter now" on a backlog Quick Start item. Declared via `defineSidecarSection.itemActions` and launched through the no-chat workflow path. |
@@ -316,16 +317,18 @@ Right-click / kebab on an individual item (Quick Start card, inline chip, PR row
 
 Right-click / kebab on a section header:
 
-| Action                | Source    | Scope    | Notes                                                                       |
-| --------------------- | --------- | -------- | --------------------------------------------------------------------------- |
-| **Hide section**      | Universal | per-user | Persisted in `t3workStoredSidecarCompositionJson`.                          |
-| **Collapse / expand** | Universal | per-user | Also reachable via the section header chevron.                              |
-| **Move up / down**    | Universal | per-user | Keyboard-friendly alternative to drag-to-reorder.                           |
-| _section-specific_    | Section   | varies   | Declared via `defineSidecarSection.sectionActions` when a section has them. |
+| Action                | Source    | Scope    | Notes                                                                                                                                       |
+| --------------------- | --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Hide section**      | Universal | per-user | Persisted in `t3workStoredSidecarCompositionJson`.                                                                                          |
+| **Collapse / expand** | Universal | per-user | Also reachable via the section header chevron.                                                                                              |
+| **Move up / down**    | Universal | per-user | Keyboard-friendly alternative to drag-to-reorder.                                                                                           |
+| **Reset section**     | Universal | per-user | Shown only when the section has user overrides. Runs the same guided reset flow and clears section + item personalization for that section. |
+| _section-specific_    | Section   | varies   | Declared via `defineSidecarSection.sectionActions` when a section has them.                                                                 |
 
 Phase 5a.2 originally stopped there. Phase 5c adds **Edit this…** for project-local
-items with resolvable source paths. Customize/reset/settings/recent-runs menu entries
-remain deferred until their backing workflows and settings surfaces exist.
+items with resolvable source paths plus the guided **Customize…** / **Reset section**
+reset flows. Broader customize/settings/recent-runs entries remain deferred until
+their backing workflows and settings surfaces exist.
 
 #### SDK hooks on `defineSidecarSection`
 

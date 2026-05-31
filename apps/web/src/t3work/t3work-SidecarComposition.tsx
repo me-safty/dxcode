@@ -1,5 +1,9 @@
 import { useMemo, type ReactNode } from "react";
-import type { RecipeSurface, SidecarComposition } from "@t3tools/project-recipes";
+import {
+  resolveSidecarComposition,
+  type RecipeSurface,
+  type SidecarComposition,
+} from "@t3tools/project-recipes";
 import {
   DEFAULT_SIDECAR_COMPOSITION,
   getT3WorkProfile,
@@ -32,6 +36,15 @@ export function T3workSidecarComposition({
   const bundledSectionsById = useMemo(
     () => new Map(listBundledSidecarSections().map((section) => [section.id, section])),
     [],
+  );
+  const defaultComposition = useMemo(
+    () =>
+      resolveSidecarComposition({
+        bundledDefault: DEFAULT_SIDECAR_COMPOSITION,
+        profileDefault,
+        projectDefault,
+      }),
+    [profileDefault, projectDefault],
   );
   const runWorkflowLaunch = useRunT3workDeterministicWorkflowLaunch();
   const {
@@ -76,6 +89,7 @@ export function T3workSidecarComposition({
                 totalVisibleSections={visibleSections.length}
                 surface={surface}
                 host={host}
+                defaultComposition={defaultComposition}
                 personalization={personalization}
                 resolveSectionProps={resolveSectionProps}
                 runWorkflowLaunch={runWorkflowLaunch}

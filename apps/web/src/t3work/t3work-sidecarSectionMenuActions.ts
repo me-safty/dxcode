@@ -33,6 +33,8 @@ export function buildT3workSidecarSectionHeaderMenuEntries(input: {
   readonly onMoveUp: () => void;
   readonly onMoveDown: () => void;
   readonly onToggleCollapsed: () => void;
+  readonly showResetSection?: boolean | undefined;
+  readonly onResetSection?: (() => void) | undefined;
   readonly onHideSection: () => void;
   readonly declaredActions?: ReadonlyArray<SidecarSectionAction> | undefined;
   readonly onRunDeclaredAction: (action: SidecarSectionAction) => void;
@@ -60,6 +62,16 @@ export function buildT3workSidecarSectionHeaderMenuEntries(input: {
       label: input.collapsed ? "Expand section" : "Collapse section",
       onSelect: input.onToggleCollapsed,
     },
+    ...(input.showResetSection && input.onResetSection
+      ? [
+          {
+            kind: "action" as const,
+            id: "reset-section",
+            label: "Reset section",
+            onSelect: input.onResetSection,
+          },
+        ]
+      : []),
     {
       kind: "action",
       id: "hide-section",
@@ -80,6 +92,8 @@ export function buildT3workSidecarItemMenuEntries(input: {
   readonly onUnpinItem: () => void;
   readonly editSourcePath?: string | undefined;
   readonly onEditItem?: ((sourcePath: string) => void) | undefined;
+  readonly showCustomizeItem?: boolean | undefined;
+  readonly onCustomizeItem?: (() => void) | undefined;
   readonly onHideItem: () => void;
   readonly declaredActions?: ReadonlyArray<SidecarSectionAction> | undefined;
   readonly onRunDeclaredAction: (action: SidecarSectionAction) => void;
@@ -100,6 +114,16 @@ export function buildT3workSidecarItemMenuEntries(input: {
             id: "edit-item",
             label: "Edit this…",
             onSelect: () => input.onEditItem?.(input.editSourcePath!),
+          },
+        ]
+      : []),
+    ...(input.showCustomizeItem && input.onCustomizeItem
+      ? [
+          {
+            kind: "action" as const,
+            id: "customize-item",
+            label: "Customize…",
+            onSelect: input.onCustomizeItem,
           },
         ]
       : []),

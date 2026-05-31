@@ -28,6 +28,10 @@ import {
 import { getT3workSidecarSectionComponent } from "~/t3work/t3work-sidecarSectionRegistry";
 import type { SidecarSectionHost } from "~/t3work/t3work-sidecarSectionHost";
 import type { useRunT3workDeterministicWorkflowLaunch } from "~/t3work/t3work-inlineRecipeLaunch";
+import {
+  buildT3workSidecarItemResetLaunch,
+  buildT3workSidecarSectionResetLaunch,
+} from "~/t3work/t3work-sidecarPersonalizationReset";
 
 export function T3workSidecarSectionInstance({
   definition,
@@ -36,6 +40,7 @@ export function T3workSidecarSectionInstance({
   totalVisibleSections,
   surface,
   host,
+  defaultComposition,
   personalization,
   resolveSectionProps,
   runWorkflowLaunch,
@@ -52,6 +57,7 @@ export function T3workSidecarSectionInstance({
   readonly totalVisibleSections: number;
   readonly surface: RecipeSurface;
   readonly host: SidecarSectionHost;
+  readonly defaultComposition: { readonly sections: ReadonlyArray<SidecarCompositionSection> };
   readonly personalization: SidecarPersonalization;
   readonly resolveSectionProps?: ((sectionId: string) => unknown) | undefined;
   readonly runWorkflowLaunch: ReturnType<typeof useRunT3workDeterministicWorkflowLaunch>;
@@ -71,6 +77,13 @@ export function T3workSidecarSectionInstance({
   );
   const sectionItemPersonalization = resolveSidecarSectionItemPersonalization({
     sectionId: definition.id,
+    personalization,
+  });
+  const sectionResetLaunch = buildT3workSidecarSectionResetLaunch({
+    surface,
+    sectionId: definition.id,
+    sectionTitle: definition.title,
+    defaultComposition,
     personalization,
   });
   const runDeclaredAction = (
@@ -103,6 +116,14 @@ export function T3workSidecarSectionInstance({
         onMoveUp: () => moveSection(definition.id, "up"),
         onMoveDown: () => moveSection(definition.id, "down"),
         onToggleCollapsed: () => setCollapsed(definition.id, !collapsed),
+        showResetSection: sectionResetLaunch !== null,
+        onResetSection: sectionResetLaunch
+          ? () => {
+              startTransition(() => {
+                void runWorkflowLaunch(sectionResetLaunch);
+              });
+            }
+          : undefined,
         onHideSection: () => hideSection(definition.id),
         declaredActions: definition.sectionActions?.(),
         onRunDeclaredAction: (action) => runDeclaredAction(action),
@@ -120,10 +141,18 @@ export function T3workSidecarSectionInstance({
                 }),
               wrapItem: (item, content) => {
                 const itemId = getT3workSidecarItemId(item);
+                const itemLabel = getT3workSidecarItemLabel(item);
                 const sourcePath = getT3workSidecarItemSourcePath(item);
                 if (!itemId) {
                   return content;
                 }
+                const itemResetLaunch = buildT3workSidecarItemResetLaunch({
+                  surface,
+                  sectionId: definition.id,
+                  itemId,
+                  itemTitle: itemLabel,
+                  personalization,
+                });
 
                 return (
                   <T3workSidecarSectionItemMenu
@@ -138,11 +167,19 @@ export function T3workSidecarSectionInstance({
                       onEditItem: (targetPath) => {
                         void host.launchRecipe("edit-plugin-module", { targetPath });
                       },
+                      showCustomizeItem: itemResetLaunch !== null,
+                      onCustomizeItem: itemResetLaunch
+                        ? () => {
+                            startTransition(() => {
+                              void runWorkflowLaunch(itemResetLaunch);
+                            });
+                          }
+                        : undefined,
                       onHideItem: () => hideItem(definition.id, itemId),
                       declaredActions: definition.itemActions?.(item),
                       onRunDeclaredAction: (action) => runDeclaredAction(action, itemId),
                     })}
-                    label={getT3workSidecarItemLabel(item)}
+                    label={itemLabel}
                   >
                     {content}
                   </T3workSidecarSectionItemMenu>
