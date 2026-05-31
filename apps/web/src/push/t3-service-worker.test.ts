@@ -57,7 +57,7 @@ function createServiceWorkerTestHarness(): ServiceWorkerTestHarness {
 
   const serviceWorkerPath = join(
     dirname(fileURLToPath(import.meta.url)),
-    "../../public/t3-service-worker.js",
+    "../../public/t3-push-service-worker.js",
   );
   const source = readFileSync(serviceWorkerPath, "utf8");
 

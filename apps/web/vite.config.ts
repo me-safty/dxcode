@@ -7,6 +7,7 @@ import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { defineConfig, type Plugin } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
 import {
   resolveWebAssetBrandForConfiguredChannel,
   resolveWebIconOverrides,
@@ -64,6 +65,7 @@ function resolveDevProxyTarget(wsUrl: string | undefined): string | undefined {
 
 const devProxyTarget = resolveDevProxyTarget(configuredWsUrl);
 const webAssetBrand = resolveWebAssetBrandForConfiguredChannel(configuredHostedAppChannel);
+const serviceWorkerFilename = "t3-service-worker.js";
 
 function webBrandAssetsPlugin(): Plugin {
   return {
@@ -123,6 +125,52 @@ export default defineConfig({
     }),
     tailwindcss(),
     webBrandAssetsPlugin(),
+    VitePWA({
+      filename: serviceWorkerFilename,
+      injectRegister: false,
+      manifest: false,
+      registerType: "prompt",
+      workbox: {
+        cleanupOutdatedCaches: true,
+        globIgnores: [`**/${serviceWorkerFilename}`],
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,webmanifest,woff2}"],
+        importScripts: ["t3-push-service-worker.js"],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        navigateFallback: "/index.html",
+        navigateFallbackDenylist: [
+          /^\/api(?:\/|$)/,
+          /^\/attachments(?:\/|$)/,
+          /^\/\.well-known(?:\/|$)/,
+        ],
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: "StaleWhileRevalidate",
+            options: {
+              cacheName: "google-fonts-stylesheets",
+              expiration: {
+                maxAgeSeconds: 60 * 60 * 24 * 365,
+                maxEntries: 10,
+              },
+            },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "google-fonts-webfonts",
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+              expiration: {
+                maxAgeSeconds: 60 * 60 * 24 * 365,
+                maxEntries: 30,
+              },
+            },
+          },
+        ],
+      },
+    }),
   ],
   optimizeDeps: {
     include: [

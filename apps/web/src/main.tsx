@@ -11,6 +11,7 @@ import { installIosStandaloneBackSwipeGuard } from "./iosStandaloneBackSwipeGuar
 import { getRouter } from "./router";
 import { APP_BASE_NAME } from "./branding";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
+import { registerPwaServiceWorker } from "./pwa/registerPwaServiceWorker";
 import { installServiceWorkerNotificationNavigation } from "./push/notificationNavigation";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
@@ -24,6 +25,7 @@ if (isElectron) {
 }
 
 installIosStandaloneBackSwipeGuard();
+registerPwaServiceWorker();
 
 document.title = APP_BASE_NAME;
 
