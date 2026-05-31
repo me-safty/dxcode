@@ -5,12 +5,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import {
-  ROOT_BASE_PATH,
-  joinBasePath,
-  normalizeBasePath,
-  type NormalizedBasePath,
-} from "@t3tools/shared/basePath";
+import { ROOT_BASE_PATH, joinBasePath, type NormalizedBasePath } from "@t3tools/shared/basePath";
 
 export const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 export const TAILSCALE_STATUS_TIMEOUT_MS = 1_500;
@@ -297,14 +292,14 @@ export const disableTailscaleServe = (
 
 export const probeTailscaleHttpsEndpoint = (input: {
   readonly baseUrl: string;
+  readonly basePath?: NormalizedBasePath;
   readonly timeoutMs?: number;
 }): Effect.Effect<boolean, never, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
     const response = yield* Effect.gen(function* () {
       const url = new URL(input.baseUrl);
-      const basePath = yield* normalizeBasePath(url.pathname);
-      url.pathname = joinBasePath(basePath, "/.well-known/t3/environment");
+      url.pathname = joinBasePath(input.basePath ?? ROOT_BASE_PATH, "/.well-known/t3/environment");
       url.search = "";
       url.hash = "";
       const request = HttpClientRequest.get(url.toString());

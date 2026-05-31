@@ -14,4 +14,4 @@ function resolveRuntimeBasePath(): NormalizedBasePath {
   return Effect.runSync(normalizeBasePath(new URL("..", moduleUrl).pathname));
 }
 
-export const runtimeBasePath = resolveRuntimeBasePath();
+export const BASE_PATH = resolveRuntimeBasePath();

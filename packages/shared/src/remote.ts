@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 
-import { normalizeBasePath, resolveBasePathFromMountedPathname } from "./basePath.ts";
+import { normalizeBasePath } from "./basePath.ts";
 
 const PAIRING_TOKEN_PARAM = "token";
 const HOSTED_PAIRING_HOST_PARAM = "host";
@@ -44,11 +44,7 @@ const toWsBaseUrl = (url: URL): string => {
   return next.toString();
 };
 
-const toHttpBaseUrlFromPathUrl = (url: URL, pathSuffix: string): string => {
-  const next = new URL(url.toString());
-  next.pathname = Effect.runSync(resolveBasePathFromMountedPathname(next.pathname, pathSuffix));
-  return toHttpBaseUrl(next);
-};
+const toHttpBaseUrlFromPairingUrl = (url: URL): string => toHttpBaseUrl(new URL(".", url));
 
 export interface ResolvedRemotePairingTarget {
   readonly credential: string;
@@ -128,7 +124,7 @@ export const resolveRemotePairingTarget = (input: {
     if (!credential) {
       throw new Error("Pairing URL is missing its token.");
     }
-    const httpBaseUrl = toHttpBaseUrlFromPathUrl(url, "/pair");
+    const httpBaseUrl = toHttpBaseUrlFromPairingUrl(url);
     return {
       credential,
       httpBaseUrl,

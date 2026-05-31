@@ -1,5 +1,5 @@
 import { WsRpcGroup } from "@t3tools/contracts";
-import { joinBasePath, resolveBasePathFromMountedPathname } from "@t3tools/shared/basePath";
+import { joinBasePath, normalizeBasePath } from "@t3tools/shared/basePath";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -87,7 +87,7 @@ function resolveWsRpcSocketUrl(rawUrl: string): string {
   }
 
   resolved.pathname = joinBasePath(
-    Effect.runSync(resolveBasePathFromMountedPathname(resolved.pathname, WS_RPC_PATH)),
+    Effect.runSync(normalizeBasePath(resolved.pathname)),
     WS_RPC_PATH,
   );
   resolved.hash = "";

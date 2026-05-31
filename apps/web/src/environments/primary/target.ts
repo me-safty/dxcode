@@ -3,7 +3,7 @@ import type { KnownEnvironment } from "@t3tools/client-runtime";
 import * as Effect from "effect/Effect";
 import { joinBasePath, normalizeBasePath } from "@t3tools/shared/basePath";
 
-import { runtimeBasePath } from "../../basePath";
+import { BASE_PATH } from "../../basePath";
 
 export interface PrimaryEnvironmentTarget {
   readonly source: KnownEnvironment["source"];
@@ -95,7 +95,7 @@ function resolveConfiguredPrimaryTarget(): PrimaryEnvironmentTarget | null {
 }
 
 function resolveWindowOriginPrimaryTarget(): PrimaryEnvironmentTarget {
-  const httpBaseUrl = `${window.location.origin}${runtimeBasePath}/`;
+  const httpBaseUrl = `${window.location.origin}${BASE_PATH}/`;
   const url = new URL(httpBaseUrl);
   if (url.protocol === "http:") {
     url.protocol = "ws:";

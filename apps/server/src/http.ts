@@ -66,15 +66,9 @@ export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
 
 function rewriteIndexHtmlAssetUrls(html: string, basePath: NormalizedBasePath): string {
   return html.replace(
-    /\b(src|href)=(["'])(\.\/[^"']+|\/(?!\/)[^"']*)\2/gu,
-    (_match, attribute: string, quote: string, rawPathname: string) => {
-      const pathname = rawPathname.startsWith("./") ? `/${rawPathname.slice(2)}` : rawPathname;
-      const prefixedPathname =
-        basePath !== "" && pathname !== basePath && !pathname.startsWith(`${basePath}/`)
-          ? `${basePath}${pathname}`
-          : pathname;
-      return `${attribute}=${quote}${prefixedPathname}${quote}`;
-    },
+    /\b(src|href)=(["'])(?:\.\/|\/(?!\/))([^"']+)\2/gu,
+    (_match, attribute: string, quote: string, pathname: string) =>
+      `${attribute}=${quote}${basePath}/${pathname}${quote}`,
   );
 }
 

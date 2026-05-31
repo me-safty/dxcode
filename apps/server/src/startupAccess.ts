@@ -1,13 +1,7 @@
 import { networkInterfaces } from "node:os";
 
 import { QrCode } from "@t3tools/shared/qrCode";
-import {
-  ROOT_BASE_PATH,
-  joinBasePath,
-  normalizeBasePath,
-  type NormalizedBasePath,
-} from "@t3tools/shared/basePath";
-import { probeTailscaleHttpsEndpoint, resolveTailscaleHttpsBaseUrl } from "@t3tools/tailscale";
+import { ROOT_BASE_PATH, joinBasePath, type NormalizedBasePath } from "@t3tools/shared/basePath";
 import * as Effect from "effect/Effect";
 import { HttpServer } from "effect/unstable/http";
 
@@ -97,9 +91,13 @@ export const resolveListeningPort = (address: unknown, fallbackPort: number): nu
   return fallbackPort;
 };
 
-export const buildPairingUrl = (connectionString: string, token: string): string => {
+export const buildPairingUrl = (
+  connectionString: string,
+  token: string,
+  basePath: NormalizedBasePath = ROOT_BASE_PATH,
+): string => {
   const url = new URL(connectionString);
-  url.pathname = joinBasePath(Effect.runSync(normalizeBasePath(url.pathname)), "/pair");
+  url.pathname = joinBasePath(basePath, "/pair");
   url.searchParams.delete("token");
   url.hash = new URLSearchParams([["token", token]]).toString();
   return url.toString();
@@ -142,43 +140,16 @@ export const issueHeadlessServeAccessInfo = Effect.fn("issueHeadlessServeAccessI
   const serverConfig = yield* ServerConfig;
   const httpServer = yield* HttpServer.HttpServer;
   const serverAuth = yield* ServerAuth;
-  const localConnectionString = resolveHeadlessConnectionString(
+  const connectionString = resolveHeadlessConnectionString(
     serverConfig.host,
     resolveListeningPort(httpServer.address, serverConfig.port),
     serverConfig.basePath,
   );
-  const tailscaleConnectionString = serverConfig.tailscaleServeEnabled
-    ? yield* resolveTailscaleHttpsBaseUrl({
-        servePort: serverConfig.tailscaleServePort,
-        basePath: serverConfig.basePath,
-      }).pipe(
-        Effect.flatMap((baseUrl) =>
-          baseUrl
-            ? probeTailscaleHttpsEndpoint({ baseUrl }).pipe(
-                Effect.flatMap((isReachable) =>
-                  isReachable
-                    ? Effect.succeed(baseUrl)
-                    : Effect.logWarning(
-                        "Tailscale HTTPS endpoint did not pass readiness probe; using local connection string.",
-                        { baseUrl },
-                      ).pipe(Effect.as(null)),
-                ),
-              )
-            : Effect.succeed(null),
-        ),
-        Effect.catch((cause) =>
-          Effect.logWarning("Failed to resolve Tailscale HTTPS base URL", { cause }).pipe(
-            Effect.as(null),
-          ),
-        ),
-      )
-    : null;
-  const connectionString = tailscaleConnectionString ?? localConnectionString;
   const issued = yield* serverAuth.issuePairingCredential({ role: "owner" });
 
   return {
     connectionString,
     token: issued.credential,
-    pairingUrl: buildPairingUrl(connectionString, issued.credential),
+    pairingUrl: buildPairingUrl(connectionString, issued.credential, serverConfig.basePath),
   } satisfies HeadlessServeAccessInfo;
 });
