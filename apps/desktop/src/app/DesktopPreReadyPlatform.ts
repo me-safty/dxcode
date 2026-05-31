@@ -12,7 +12,7 @@ export interface DesktopPreReadyElectronOptionsShape {
 export class DesktopPreReadyElectronOptions extends Context.Service<
   DesktopPreReadyElectronOptions,
   DesktopPreReadyElectronOptionsShape
->()("t3/desktop/PreReadyElectronOptions") {}
+>()("@t3tools/desktop/app/DesktopPreReadyPlatform/DesktopPreReadyElectronOptions") {}
 
 export const resolveEarlyLinuxElectronOptionsFromProcess =
   (): DesktopEarlyElectronStartup.EarlyLinuxElectronOptions =>
