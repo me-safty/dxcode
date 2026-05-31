@@ -57,3 +57,36 @@ export function stripBasePathFromPathname(
   }
   return null;
 }
+
+export const resolveBasePathFromMountedPathname = (
+  pathname: string,
+  mountedPathname: string,
+): Effect.Effect<NormalizedBasePath, BasePathParseError> =>
+  Effect.gen(function* () {
+    const normalizedPathname = (pathname.startsWith("/") ? pathname : `/${pathname}`).replace(
+      /\/+$/u,
+      "",
+    );
+    const normalizedMountedPathname = (
+      mountedPathname.startsWith("/") ? mountedPathname : `/${mountedPathname}`
+    ).replace(/\/+$/u, "");
+    const candidatePathname = normalizedPathname || "/";
+    const candidateMountedPathname = normalizedMountedPathname || "/";
+
+    if (
+      candidateMountedPathname !== "/" &&
+      (candidatePathname === candidateMountedPathname ||
+        candidatePathname.endsWith(candidateMountedPathname))
+    ) {
+      const candidateBasePath = yield* normalizeBasePath(
+        candidatePathname.slice(0, -candidateMountedPathname.length) || "/",
+      );
+      if (
+        stripBasePathFromPathname(candidateBasePath, candidatePathname) === candidateMountedPathname
+      ) {
+        return candidateBasePath;
+      }
+    }
+
+    return yield* normalizeBasePath(candidatePathname);
+  });

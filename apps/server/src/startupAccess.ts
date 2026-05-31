@@ -78,15 +78,11 @@ export const resolveHeadlessConnectionHost = (
 export const resolveHeadlessConnectionString = (
   host: string | undefined,
   port: number,
-  basePathOrInterfaces: NormalizedBasePath | NetworkInterfacesMap = ROOT_BASE_PATH,
+  basePath: NormalizedBasePath = ROOT_BASE_PATH,
   interfaces: NetworkInterfacesMap = networkInterfaces(),
 ): string => {
-  const basePath = typeof basePathOrInterfaces === "string" ? basePathOrInterfaces : ROOT_BASE_PATH;
-  const networkInterfacesMap =
-    typeof basePathOrInterfaces === "string" ? interfaces : basePathOrInterfaces;
-  const connectionHost = resolveHeadlessConnectionHost(host, networkInterfacesMap);
-  const connectionPath = basePath === "" ? "" : `${basePath}/`;
-  return `http://${formatHostForUrl(connectionHost)}:${port}${connectionPath}`;
+  const connectionHost = resolveHeadlessConnectionHost(host, interfaces);
+  return `http://${formatHostForUrl(connectionHost)}:${port}${basePath}`;
 };
 
 export const resolveListeningPort = (address: unknown, fallbackPort: number): number => {

@@ -8,13 +8,14 @@ import type {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
-import { normalizeBasePath } from "./basePath.ts";
+import { normalizeBasePath, type NormalizedBasePath } from "./basePath.ts";
 
 export interface CreateAdvertisedEndpointInput {
   readonly id: string;
   readonly label: string;
   readonly provider: AdvertisedEndpointProvider;
   readonly httpBaseUrl: string;
+  readonly basePath?: NormalizedBasePath;
   readonly reachability: AdvertisedEndpointReachability;
   readonly hostedHttpsCompatibility?: AdvertisedEndpointHostedHttpsCompatibility;
   readonly desktopCompatibility?: "compatible" | "unknown";
@@ -24,7 +25,14 @@ export interface CreateAdvertisedEndpointInput {
   readonly description?: string;
 }
 
-export function normalizeHttpBaseUrl(rawValue: string): string {
+export interface AdvertisedEndpointBaseUrlOptions {
+  readonly basePath?: NormalizedBasePath;
+}
+
+export function normalizeHttpBaseUrl(
+  rawValue: string,
+  options?: AdvertisedEndpointBaseUrlOptions,
+): string {
   const url = new URL(rawValue);
   if (url.protocol === "ws:") {
     url.protocol = "http:";
@@ -34,14 +42,17 @@ export function normalizeHttpBaseUrl(rawValue: string): string {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`Endpoint must use HTTP or HTTPS. Received ${url.protocol}`);
   }
-  url.pathname = `${Effect.runSync(normalizeBasePath(url.pathname))}/`;
+  url.pathname = `${options?.basePath ?? Effect.runSync(normalizeBasePath(url.pathname))}/`;
   url.search = "";
   url.hash = "";
   return url.toString();
 }
 
-export function deriveWsBaseUrl(httpBaseUrl: string): string {
-  const url = new URL(normalizeHttpBaseUrl(httpBaseUrl));
+export function deriveWsBaseUrl(
+  httpBaseUrl: string,
+  options?: AdvertisedEndpointBaseUrlOptions,
+): string {
+  const url = new URL(normalizeHttpBaseUrl(httpBaseUrl, options));
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
 }
@@ -49,8 +60,9 @@ export function deriveWsBaseUrl(httpBaseUrl: string): string {
 export function classifyHostedHttpsCompatibility(
   httpBaseUrl: string,
   fallback: AdvertisedEndpointHostedHttpsCompatibility = "unknown",
+  options?: AdvertisedEndpointBaseUrlOptions,
 ): AdvertisedEndpointHostedHttpsCompatibility {
-  const url = new URL(normalizeHttpBaseUrl(httpBaseUrl));
+  const url = new URL(normalizeHttpBaseUrl(httpBaseUrl, options));
   if (url.protocol === "http:") {
     return "mixed-content-blocked";
   }
@@ -58,17 +70,20 @@ export function classifyHostedHttpsCompatibility(
 }
 
 export function createAdvertisedEndpoint(input: CreateAdvertisedEndpointInput): AdvertisedEndpoint {
-  const httpBaseUrl = normalizeHttpBaseUrl(input.httpBaseUrl);
+  const baseUrlOptions =
+    input.basePath === undefined ? undefined : ({ basePath: input.basePath } as const);
+  const httpBaseUrl = normalizeHttpBaseUrl(input.httpBaseUrl, baseUrlOptions);
   return {
     id: input.id,
     label: input.label,
     provider: input.provider,
     httpBaseUrl,
-    wsBaseUrl: deriveWsBaseUrl(httpBaseUrl),
+    wsBaseUrl: deriveWsBaseUrl(httpBaseUrl, baseUrlOptions),
     reachability: input.reachability,
     compatibility: {
       hostedHttpsApp:
-        input.hostedHttpsCompatibility ?? classifyHostedHttpsCompatibility(httpBaseUrl),
+        input.hostedHttpsCompatibility ??
+        classifyHostedHttpsCompatibility(httpBaseUrl, "unknown", baseUrlOptions),
       desktopApp: input.desktopCompatibility ?? "compatible",
     },
     source: input.source,

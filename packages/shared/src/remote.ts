@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 
-import { normalizeBasePath } from "./basePath.ts";
+import { normalizeBasePath, resolveBasePathFromMountedPathname } from "./basePath.ts";
 
 const PAIRING_TOKEN_PARAM = "token";
 const HOSTED_PAIRING_HOST_PARAM = "host";
@@ -46,13 +46,7 @@ const toWsBaseUrl = (url: URL): string => {
 
 const toHttpBaseUrlFromPathUrl = (url: URL, pathSuffix: string): string => {
   const next = new URL(url.toString());
-  const normalizedSuffix = pathSuffix.startsWith("/") ? pathSuffix : `/${pathSuffix}`;
-  const pathname = next.pathname.replace(/\/+$/u, "");
-  if (pathname === normalizedSuffix) {
-    next.pathname = "/";
-  } else if (pathname.endsWith(normalizedSuffix)) {
-    next.pathname = pathname.slice(0, -normalizedSuffix.length) || "/";
-  }
+  next.pathname = Effect.runSync(resolveBasePathFromMountedPathname(next.pathname, pathSuffix));
   return toHttpBaseUrl(next);
 };
 

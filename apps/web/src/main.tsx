@@ -10,12 +10,12 @@ import { isElectron } from "./env";
 import { getRouter } from "./router";
 import { APP_DISPLAY_NAME } from "./branding";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
-import { readRuntimeBasePath } from "./basePath";
+import { runtimeBasePath } from "./basePath";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();
 
-const router = getRouter(history, readRuntimeBasePath());
+const router = getRouter(history, runtimeBasePath);
 
 if (isElectron) {
   syncDocumentWindowControlsOverlayClass();

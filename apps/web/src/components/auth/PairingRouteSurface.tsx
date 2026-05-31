@@ -9,7 +9,7 @@ import {
   submitServerAuthCredential,
 } from "../../environments/primary";
 import { readHostedPairingRequest } from "../../hostedPairing";
-import { readRuntimeBasePath } from "../../basePath";
+import { runtimeBasePath } from "../../basePath";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 
@@ -276,7 +276,7 @@ export function HostedPairingRouteSurface() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => (window.location.href = `${readRuntimeBasePath()}/`)}
+              onClick={() => (window.location.href = `${runtimeBasePath}/`)}
             >
               Open app
             </Button>

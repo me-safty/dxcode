@@ -65,16 +65,17 @@ export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
 }
 
 function rewriteIndexHtmlAssetUrls(html: string, basePath: NormalizedBasePath): string {
-  const assetBase = basePath === "" ? "" : basePath;
   return html.replace(
-    /\b(src|href)=(["'])\.\/([^"']+)\2/gu,
-    (_match, attribute: string, quote: string, pathname: string) =>
-      `${attribute}=${quote}${assetBase}/${pathname}${quote}`,
+    /\b(src|href)=(["'])(\.\/[^"']+|\/(?!\/)[^"']*)\2/gu,
+    (_match, attribute: string, quote: string, rawPathname: string) => {
+      const pathname = rawPathname.startsWith("./") ? `/${rawPathname.slice(2)}` : rawPathname;
+      const prefixedPathname =
+        basePath !== "" && pathname !== basePath && !pathname.startsWith(`${basePath}/`)
+          ? `${basePath}${pathname}`
+          : pathname;
+      return `${attribute}=${quote}${prefixedPathname}${quote}`;
+    },
   );
-}
-
-function prepareIndexHtml(html: string, basePath: NormalizedBasePath): string {
-  return rewriteIndexHtmlAssetUrls(html, basePath);
 }
 
 const requireAuthenticatedRequest = Effect.gen(function* () {
@@ -166,9 +167,7 @@ export const attachmentsRouteLayer = HttpRouter.add(
     const rawRelativePath = url.value.pathname.slice(ATTACHMENTS_ROUTE_PREFIX.length);
     const normalizedRelativePath = normalizeAttachmentRelativePath(rawRelativePath);
     if (!normalizedRelativePath) {
-      return HttpServerResponse.text("Invalid attachment path", {
-        status: 400,
-      });
+      return HttpServerResponse.text("Invalid attachment path", { status: 400 });
     }
 
     const isIdLookup =
@@ -267,7 +266,7 @@ export const staticAndDevRouteLayer = Layer.unwrap(
     const indexHtmlResponse =
       indexHtml === null
         ? HttpServerResponse.text("Not Found", { status: 404 })
-        : HttpServerResponse.text(prepareIndexHtml(indexHtml, config.basePath), {
+        : HttpServerResponse.text(rewriteIndexHtmlAssetUrls(indexHtml, config.basePath), {
             status: 200,
             contentType: "text/html; charset=utf-8",
           });

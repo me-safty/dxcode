@@ -72,7 +72,7 @@ import {
 } from "../ui/menu";
 import { Textarea } from "../ui/textarea";
 import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "../../pairingUrl";
-import { readRuntimeBasePath } from "../../basePath";
+import { runtimeBasePath } from "../../basePath";
 import { readHostedPairingRequest } from "../../hostedPairing";
 import {
   createServerPairingCredential,
@@ -481,7 +481,7 @@ function resolveAdvertisedEndpointPairingUrl(
 }
 
 function resolveCurrentOriginPairingUrl(credential: string): string {
-  const url = new URL(`${readRuntimeBasePath()}/pair`, window.location.href);
+  const url = new URL(`${runtimeBasePath}/pair`, window.location.href);
   return setPairingTokenOnUrl(url, credential).toString();
 }
 

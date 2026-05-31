@@ -6,7 +6,7 @@ import {
   type AuthSessionState,
   type AuthWebSocketTokenResult,
 } from "@t3tools/contracts";
-import { joinBasePath, normalizeBasePath } from "@t3tools/shared/basePath";
+import { joinBasePath } from "@t3tools/shared/basePath";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -29,6 +29,7 @@ import {
   SessionCredentialService,
 } from "../Services/SessionCredentialService.ts";
 import { AuthControlPlaneLive, AuthCoreLive } from "./AuthControlPlane.ts";
+import { ServerConfig } from "../../config.ts";
 
 type BootstrapExchangeResult = {
   readonly response: AuthBootstrapResult;
@@ -68,6 +69,7 @@ export const makeServerAuth = Effect.gen(function* () {
   const bootstrapCredentials = yield* BootstrapCredentialService;
   const authControlPlane = yield* AuthControlPlane;
   const sessions = yield* SessionCredentialService;
+  const serverConfig = yield* ServerConfig;
   const descriptor = yield* policy.getDescriptor();
 
   const authenticateToken = (token: string): Effect.Effect<AuthenticatedSession, AuthError> =>
@@ -320,16 +322,7 @@ export const makeServerAuth = Effect.gen(function* () {
     Effect.gen(function* () {
       const issued = yield* issuePairingCredential({ role: "owner" });
       const url = new URL(baseUrl);
-      const basePath = yield* normalizeBasePath(url.pathname).pipe(
-        Effect.mapError(
-          (cause) =>
-            new AuthError({
-              message: "Invalid startup pairing URL base path.",
-              cause,
-            }),
-        ),
-      );
-      url.pathname = joinBasePath(basePath, "/pair");
+      url.pathname = joinBasePath(serverConfig.basePath, "/pair");
       url.searchParams.delete("token");
       url.hash = new URLSearchParams([["token", issued.credential]]).toString();
       return url.toString();

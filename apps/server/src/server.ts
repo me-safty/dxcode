@@ -321,20 +321,6 @@ export const makeRoutesLayer = Layer.mergeAll(
   websocketRpcRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));
 
-const makeMountedRoutesLayer = Layer.unwrap(
-  Effect.gen(function* () {
-    const config = yield* ServerConfig;
-    if (config.basePath === "") {
-      return makeRoutesLayer;
-    }
-
-    const router = yield* HttpRouter.HttpRouter;
-    return makeRoutesLayer.pipe(
-      Layer.provide(Layer.succeed(HttpRouter.HttpRouter)(router.prefixed(config.basePath))),
-    );
-  }),
-);
-
 export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig;
@@ -422,9 +408,19 @@ export const makeServerLayer = Layer.unwrap(
       : Layer.empty;
 
     const serverApplicationLayer = Layer.mergeAll(
-      HttpRouter.serve(makeMountedRoutesLayer, {
-        disableLogger: !config.logWebSocketEvents,
-      }),
+      HttpRouter.serve(
+        Layer.unwrap(
+          Effect.gen(function* () {
+            const router = yield* HttpRouter.HttpRouter;
+            return makeRoutesLayer.pipe(
+              Layer.provide(Layer.succeed(HttpRouter.HttpRouter)(router.prefixed(config.basePath))),
+            );
+          }),
+        ),
+        {
+          disableLogger: !config.logWebSocketEvents,
+        },
+      ),
       httpListeningLayer,
       runtimeStateLayer,
       tailscaleServeLayer,
