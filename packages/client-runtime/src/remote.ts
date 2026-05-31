@@ -13,6 +13,7 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { identity } from "effect/Function";
+import { joinBasePath, normalizeBasePath } from "@t3tools/shared/basePath";
 import {
   FetchHttpClient,
   HttpClient,
@@ -25,10 +26,11 @@ const RemoteAuthErrorBody = Schema.Struct({
   error: Schema.optional(Schema.String),
 });
 const decodeRemoteAuthErrorBody = decodeJsonResult(RemoteAuthErrorBody);
+const WS_RPC_PATH = "/ws";
 
 const remoteEndpointUrl = (httpBaseUrl: string, pathname: string): string => {
   const url = new URL(httpBaseUrl);
-  url.pathname = pathname;
+  url.pathname = joinBasePath(Effect.runSync(normalizeBasePath(url.pathname)), pathname);
   url.search = "";
   url.hash = "";
   return url.toString();
@@ -261,9 +263,14 @@ export const resolveRemoteWebSocketConnectionUrl = Effect.fn(
   });
 
   const url = new URL(input.wsBaseUrl);
-  if (url.pathname === "" || url.pathname === "/") {
-    url.pathname = "/ws";
-  }
+  const pathname = url.pathname.replace(/\/+$/u, "");
+  const basePathname =
+    pathname === WS_RPC_PATH || pathname.endsWith(`${WS_RPC_PATH}`)
+      ? pathname.slice(0, -WS_RPC_PATH.length) || "/"
+      : pathname;
+  const basePath = yield* normalizeBasePath(basePathname);
+  url.pathname = joinBasePath(basePath, "/ws");
+  url.hash = "";
   url.searchParams.set("wsToken", issued.token);
   return url.toString();
 });

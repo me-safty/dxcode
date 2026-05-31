@@ -1,5 +1,7 @@
 import type { AuthClientMetadata, AuthClientSession, AuthPairingLink } from "@t3tools/contracts";
+import { joinBasePath, normalizeBasePath } from "@t3tools/shared/basePath";
 import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
 
 import type { IssuedBearerSession, IssuedPairingLink } from "./auth/Services/AuthControlPlane.ts";
 
@@ -34,7 +36,8 @@ export function formatIssuedPairingCredential(
   const pairUrl =
     options?.baseUrl != null && options.baseUrl.length > 0
       ? (() => {
-          const url = new URL("/pair", options.baseUrl);
+          const url = new URL(options.baseUrl);
+          url.pathname = joinBasePath(Effect.runSync(normalizeBasePath(url.pathname)), "/pair");
           url.searchParams.delete("token");
           url.hash = new URLSearchParams([["token", credential.credential]]).toString();
           return url.toString();

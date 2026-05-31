@@ -6,6 +6,9 @@ import type {
   AdvertisedEndpointSource,
   AdvertisedEndpointStatus,
 } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+
+import { normalizeBasePath } from "./basePath.ts";
 
 export interface CreateAdvertisedEndpointInput {
   readonly id: string;
@@ -28,12 +31,10 @@ export function normalizeHttpBaseUrl(rawValue: string): string {
   } else if (url.protocol === "wss:") {
     url.protocol = "https:";
   }
-
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`Endpoint must use HTTP or HTTPS. Received ${url.protocol}`);
   }
-
-  url.pathname = "/";
+  url.pathname = `${Effect.runSync(normalizeBasePath(url.pathname))}/`;
   url.search = "";
   url.hash = "";
   return url.toString();

@@ -6,6 +6,7 @@ import {
   type AuthSessionState,
   type AuthWebSocketTokenResult,
 } from "@t3tools/contracts";
+import { joinBasePath, normalizeBasePath } from "@t3tools/shared/basePath";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -316,15 +317,23 @@ export const makeServerAuth = Effect.gen(function* () {
     );
 
   const issueStartupPairingUrl: ServerAuthShape["issueStartupPairingUrl"] = (baseUrl) =>
-    issuePairingCredential({ role: "owner" }).pipe(
-      Effect.map((issued) => {
-        const url = new URL(baseUrl);
-        url.pathname = "/pair";
-        url.searchParams.delete("token");
-        url.hash = new URLSearchParams([["token", issued.credential]]).toString();
-        return url.toString();
-      }),
-    );
+    Effect.gen(function* () {
+      const issued = yield* issuePairingCredential({ role: "owner" });
+      const url = new URL(baseUrl);
+      const basePath = yield* normalizeBasePath(url.pathname).pipe(
+        Effect.mapError(
+          (cause) =>
+            new AuthError({
+              message: "Invalid startup pairing URL base path.",
+              cause,
+            }),
+        ),
+      );
+      url.pathname = joinBasePath(basePath, "/pair");
+      url.searchParams.delete("token");
+      url.hash = new URLSearchParams([["token", issued.credential]]).toString();
+      return url.toString();
+    });
 
   const issueWebSocketToken: ServerAuthShape["issueWebSocketToken"] = (session) =>
     sessions.issueWebSocketToken(session.sessionId).pipe(
