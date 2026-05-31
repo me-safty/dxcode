@@ -4,15 +4,15 @@ import { Suspense, lazy, useCallback, useMemo, useRef, useState } from "react";
 
 import { useComposerHandleContext } from "../composerHandleContext";
 import { formatWorkspaceRelativePath } from "../filePathDisplay";
-import { closeSourceControlPanel, openSourceControlPanel } from "../sourceControlPanelState";
+import { closeSourceControlPanel } from "../sourceControlPanelState";
 import type { WorkspaceFilePreviewDiffReturnTarget } from "../workspaceFilePreview";
 import {
   closeWorkspaceFilePreview,
   openWorkspaceFileExplorer,
   openWorkspaceFilePreview,
-  returnWorkspaceFileExplorerToPreview,
-  returnWorkspaceFilePreviewToExplorer,
+  returnWorkspaceFilePanelBack,
   useWorkspaceFilePanelState,
+  workspaceFilePanelBackButtonLabel,
   type WorkspaceFileExplorerContext,
 } from "../workspaceFilePreview";
 import {
@@ -133,6 +133,7 @@ export function WorkspaceFilesPanel(props: {
       ? explorerViewState.expandedDirectoryPaths
       : emptyExpandedDirectoryPaths;
   const activeExplorerScrollKey = explorerScrollKey(activeExplorerContextKey, searchQuery);
+  const backTarget = filePanel.history[filePanel.history.length - 1] ?? null;
   const explorerScrollTop =
     activeExplorerScrollKey !== null
       ? (explorerScrollTopByKeyRef.current.get(activeExplorerScrollKey) ?? 0)
@@ -178,27 +179,20 @@ export function WorkspaceFilesPanel(props: {
     if (!context) {
       return;
     }
-    openWorkspaceFileExplorer(context, {
-      returnToPreview: filePanel.target
-        ? { target: filePanel.target, returnTarget: filePanel.returnTarget }
-        : null,
-    });
-  }, [filePanel.explorerContext, filePanel.returnTarget, filePanel.target]);
+    openWorkspaceFileExplorer(context);
+  }, [filePanel.explorerContext, filePanel.target]);
 
   const openExplorerFile = useCallback(
     (entry: ProjectEntry) => {
       if (!explorerContext || entry.kind !== "file") {
         return;
       }
-      openWorkspaceFilePreview(
-        {
-          environmentId: explorerContext.environmentId,
-          cwd: explorerContext.cwd,
-          relativePath: entry.path,
-          displayPath: formatWorkspaceRelativePath(entry.path, explorerContext.cwd),
-        },
-        { returnTarget: { kind: "explorer" } },
-      );
+      openWorkspaceFilePreview({
+        environmentId: explorerContext.environmentId,
+        cwd: explorerContext.cwd,
+        relativePath: entry.path,
+        displayPath: formatWorkspaceRelativePath(entry.path, explorerContext.cwd),
+      });
     },
     [explorerContext],
   );
@@ -227,22 +221,16 @@ export function WorkspaceFilesPanel(props: {
     [addPathToInput],
   );
 
-  const handleReturn = useCallback(
-    (returnTarget: NonNullable<typeof filePanel.returnTarget>) => {
-      if (returnTarget.kind === "explorer") {
-        if (explorerContext) {
-          returnWorkspaceFilePreviewToExplorer(explorerContext);
-        }
-        return;
-      }
-      if (returnTarget.kind === "source-control") {
-        openSourceControlPanel();
-        return;
-      }
-      onReturnToDiff(returnTarget);
-    },
-    [explorerContext, onReturnToDiff],
-  );
+  const handleBack = useCallback(() => {
+    if (!backTarget) {
+      return;
+    }
+    if (backTarget.kind === "diff") {
+      onReturnToDiff(backTarget);
+      return;
+    }
+    returnWorkspaceFilePanelBack();
+  }, [backTarget, onReturnToDiff]);
 
   if (filePanel.view === "source-control") {
     return <LazySourceControlPanel mode={mode} />;
@@ -257,10 +245,9 @@ export function WorkspaceFilesPanel(props: {
         expandedDirectoryPaths={expandedDirectoryPaths}
         environmentId={explorerContext.environmentId}
         mode={mode}
-        onBackToPreview={
-          filePanel.explorerReturnPreview ? returnWorkspaceFileExplorerToPreview : undefined
-        }
         onAddFileToInput={addExplorerFileToInput}
+        backButtonLabel={backTarget ? workspaceFilePanelBackButtonLabel(backTarget) : undefined}
+        onBack={backTarget ? handleBack : undefined}
         onClose={closeWorkspaceFilePreview}
         onExpandedDirectoryPathsChange={setExpandedDirectoryPaths}
         onOpenFile={openExplorerFile}
@@ -277,16 +264,16 @@ export function WorkspaceFilesPanel(props: {
     );
   }
 
-  const previewOpenedFromExplorer = filePanel.returnTarget?.kind === "explorer";
+  const previewOpenedFromExplorer = backTarget?.kind === "explorer";
 
   return (
     <WorkspaceFilePreviewPanel
+      backTarget={backTarget}
       mode={mode}
       panelOpen={panelOpen}
       target={filePanel.target}
-      returnTarget={filePanel.returnTarget}
       onAddFileToInput={addPathToInput}
-      onReturn={handleReturn}
+      onBack={backTarget ? handleBack : undefined}
       onShowExplorer={showExplorer}
       showExplorerButton={explorerContext !== null && !previewOpenedFromExplorer}
     />

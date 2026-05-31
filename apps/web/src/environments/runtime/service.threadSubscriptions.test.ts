@@ -336,6 +336,14 @@ function readThreadDetailSubscriptionListener(
   return listener!;
 }
 
+function readHeartbeatFreshMock(callIndex = 0): ReturnType<typeof vi.fn> {
+  const client = mockCreateWsRpcClient.mock.results[callIndex]?.value as
+    | { readonly isHeartbeatFresh: ReturnType<typeof vi.fn> }
+    | undefined;
+  expect(client).toBeDefined();
+  return client!.isHeartbeatFresh;
+}
+
 async function expectThreadDetailReconcileCallCount(count: number): Promise<void> {
   await vi.waitFor(() => {
     expect(mockReconcileThreadDetail).toHaveBeenCalledTimes(count);
@@ -2266,11 +2274,7 @@ describe("retainThreadDetailSubscription", () => {
     } = await import("./service");
 
     const stop = startEnvironmentConnectionService(new QueryClient());
-    const client = mockCreateWsRpcClient.mock.results[0]?.value as
-      | { readonly isHeartbeatFresh: ReturnType<typeof vi.fn> }
-      | undefined;
-    expect(client).toBeDefined();
-    client?.isHeartbeatFresh.mockReturnValue(false);
+    readHeartbeatFreshMock().mockReturnValue(false);
 
     const environmentId = EnvironmentId.make("env-1");
     const threadId = ThreadId.make("thread-active-stale-heartbeat-health-recovery");
@@ -2343,11 +2347,7 @@ describe("retainThreadDetailSubscription", () => {
     } = await import("./service");
 
     const stop = startEnvironmentConnectionService(new QueryClient());
-    const client = mockCreateWsRpcClient.mock.results[0]?.value as
-      | { readonly isHeartbeatFresh: ReturnType<typeof vi.fn> }
-      | undefined;
-    expect(client).toBeDefined();
-    client?.isHeartbeatFresh.mockReturnValue(false);
+    readHeartbeatFreshMock().mockReturnValue(false);
     mockConnectionReconnects[0]?.mockImplementation(() => new Promise(() => undefined));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
@@ -2401,11 +2401,7 @@ describe("retainThreadDetailSubscription", () => {
     } = await import("./service");
 
     const stop = startEnvironmentConnectionService(new QueryClient());
-    const client = mockCreateWsRpcClient.mock.results[0]?.value as
-      | { readonly isHeartbeatFresh: ReturnType<typeof vi.fn> }
-      | undefined;
-    expect(client).toBeDefined();
-    client?.isHeartbeatFresh.mockReturnValue(false);
+    readHeartbeatFreshMock().mockReturnValue(false);
     mockConnectionReconnects[0]?.mockImplementation(() => new Promise(() => undefined));
 
     const environmentId = EnvironmentId.make("env-1");
@@ -3843,11 +3839,8 @@ describe("retainThreadDetailSubscription", () => {
     } = await import("./service");
 
     const stop = startEnvironmentConnectionService(new QueryClient());
-    const client = mockCreateWsRpcClient.mock.results[0]?.value as
-      | { readonly isHeartbeatFresh: ReturnType<typeof vi.fn> }
-      | undefined;
-    expect(client).toBeDefined();
-    client?.isHeartbeatFresh.mockReturnValue(false);
+    const isHeartbeatFresh = readHeartbeatFreshMock();
+    isHeartbeatFresh.mockReturnValue(false);
 
     const environmentId = EnvironmentId.make("env-1");
     const threadId = ThreadId.make("thread-notification-click");
@@ -3875,7 +3868,7 @@ describe("retainThreadDetailSubscription", () => {
     await vi.waitFor(() => {
       expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
     });
-    client?.isHeartbeatFresh.mockReturnValue(true);
+    isHeartbeatFresh.mockReturnValue(true);
 
     const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
@@ -5002,6 +4995,68 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("refreshes active and pending notification threads after transport reconnect when shell bootstrap times out", async () => {
+    const browser = stubBrowserVisibility();
+    const resumeDiagnostics = await import("./resumeDiagnostics");
+    const recordSpy = vi.spyOn(resumeDiagnostics, "recordResumeDiagnostic");
+
+    const {
+      reconcileAfterNotificationClick,
+      retainActiveThreadDetailSubscription,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const activeThreadId = ThreadId.make("thread-notification-timeout-active-refresh");
+    const notificationThreadId = ThreadId.make("thread-notification-timeout-pending-refresh");
+    const activeRelease = retainActiveThreadDetailSubscription(environmentId, activeThreadId);
+    const notificationRelease = retainActiveThreadDetailSubscription(
+      environmentId,
+      notificationThreadId,
+    );
+    mockConnectionReconnects[0]?.mockRejectedValueOnce(
+      new MockEnvironmentShellBootstrapTimeoutError(environmentId, 12_000),
+    );
+
+    browser.setVisibilityState("hidden");
+    browser.documentTarget.dispatchEvent(new Event("visibilitychange"));
+    vi.setSystemTime(Date.now() + 6_000);
+    reconcileAfterNotificationClick({
+      kind: "thread",
+      environmentId,
+      threadId: notificationThreadId,
+    });
+
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    await expectThreadDetailReconcileCallCount(2);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: activeThreadId }),
+    );
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: notificationThreadId }),
+    );
+    expect(
+      recordSpy.mock.calls.some(
+        ([kind, payload]) =>
+          kind === "notification-thread-reconcile-post-reconnect-entry" &&
+          payload?.env === environmentId &&
+          payload.reason === "notification-click:post-transport-reconnect" &&
+          payload.data?.threadId === notificationThreadId &&
+          payload.data?.reconciled === true,
+      ),
+    ).toBe(true);
+
+    notificationRelease();
+    activeRelease();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
   it("refreshes notification target after timeout retry reconnect completes", async () => {
     const browser = stubBrowserVisibility();
 
@@ -5054,7 +5109,7 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("keeps notification target pending when timeout retry also times out", async () => {
+  it("refreshes pending notification target after timeout retry exhaustion when heartbeat is fresh", async () => {
     const browser = stubBrowserVisibility();
 
     const {
@@ -5098,7 +5153,8 @@ describe("retainThreadDetailSubscription", () => {
 
     const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     await vi.advanceTimersByTimeAsync(300);
-    expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
+    await expectThreadDetailReconcileCallCount(1);
+    expect(mockReconcileThreadDetail).toHaveBeenCalledWith(expect.objectContaining({ threadId }));
 
     release();
     stop();
@@ -5133,11 +5189,14 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
       threadId,
     });
+    const isHeartbeatFresh = readHeartbeatFreshMock();
+    isHeartbeatFresh.mockReturnValue(false);
 
     const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     await vi.advanceTimersByTimeAsync(300);
     expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
 
+    isHeartbeatFresh.mockReturnValue(true);
     browser.setVisibilityState("visible");
     await vi.advanceTimersByTimeAsync(15_000);
     await vi.waitFor(() => {
@@ -5212,11 +5271,14 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
       threadId,
     });
+    const isHeartbeatFresh = readHeartbeatFreshMock();
+    isHeartbeatFresh.mockReturnValue(false);
 
     const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     await vi.advanceTimersByTimeAsync(300);
     expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
 
+    isHeartbeatFresh.mockReturnValue(true);
     browser.setVisibilityState("visible");
     await vi.advanceTimersByTimeAsync(15_000);
     await vi.waitFor(() => {
@@ -5284,14 +5346,15 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
       threadId,
     });
-    mockConnectionReconnects[0]?.mockRejectedValueOnce(
-      new MockEnvironmentShellBootstrapTimeoutError(environmentId, 12_000),
-    );
+    const isHeartbeatFresh = readHeartbeatFreshMock();
+    isHeartbeatFresh.mockReturnValue(false);
+    mockConnectionReconnects[0]?.mockRejectedValueOnce(new Error("reconnect failed"));
 
     const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     await vi.advanceTimersByTimeAsync(300);
     expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
 
+    isHeartbeatFresh.mockReturnValue(true);
     browser.setVisibilityState("visible");
     await vi.advanceTimersByTimeAsync(15_000);
     await vi.waitFor(() => {
@@ -5338,6 +5401,8 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
       threadId,
     });
+    const isHeartbeatFresh = readHeartbeatFreshMock();
+    isHeartbeatFresh.mockReturnValue(false);
 
     const notificationRelease = retainActiveThreadDetailSubscription(environmentId, threadId);
     await vi.advanceTimersByTimeAsync(300);
@@ -5353,6 +5418,7 @@ describe("retainThreadDetailSubscription", () => {
     });
     passiveOtherRelease();
 
+    isHeartbeatFresh.mockReturnValue(true);
     const activeOtherRelease = retainActiveThreadDetailSubscription(environmentId, otherThreadId);
     await vi.advanceTimersByTimeAsync(300);
     await expectThreadDetailReconcileCallCount(1);
@@ -5609,11 +5675,7 @@ describe("retainThreadDetailSubscription", () => {
     } = await import("./service");
 
     const stop = startEnvironmentConnectionService(new QueryClient());
-    const client = mockCreateWsRpcClient.mock.results[0]?.value as
-      | { readonly isHeartbeatFresh: ReturnType<typeof vi.fn> }
-      | undefined;
-    expect(client).toBeDefined();
-    client?.isHeartbeatFresh.mockReturnValue(false);
+    readHeartbeatFreshMock().mockReturnValue(false);
 
     const environmentId = EnvironmentId.make("env-1");
     const threadId = ThreadId.make("thread-notification-blocked-diagnostics");

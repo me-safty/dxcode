@@ -13,7 +13,7 @@ import {
 } from "../environmentApi";
 import { FILE_PREVIEW_WORD_WRAP_STORAGE_KEY } from "../filePreviewPreferences";
 import type {
-  WorkspaceFilePreviewReturnTarget,
+  WorkspaceFilePanelHistoryEntry,
   WorkspaceFilePreviewTarget,
 } from "../workspaceFilePreview";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
@@ -359,14 +359,14 @@ function createTarget(input: { relativePath: string; line?: number }): Workspace
 }
 
 async function renderPreview(input: {
+  backTarget?: WorkspaceFilePanelHistoryEntry;
   contents?: string;
   line?: number;
   onAddFileToInput?: (relativePath: string) => void;
-  onReturn?: (target: WorkspaceFilePreviewReturnTarget) => void;
+  onBack?: () => void;
   onShowExplorer?: () => void;
   panelOpen?: boolean;
   relativePath?: string;
-  returnTarget?: WorkspaceFilePreviewReturnTarget;
   showExplorerButton?: boolean;
   sizeBytes?: number;
   truncated?: boolean;
@@ -399,8 +399,8 @@ async function renderPreview(input: {
       input.line === undefined ? { relativePath } : { relativePath, line: input.line },
     ),
     ...(input.onAddFileToInput ? { onAddFileToInput: input.onAddFileToInput } : {}),
-    ...(input.returnTarget ? { returnTarget: input.returnTarget } : {}),
-    ...(input.onReturn ? { onReturn: input.onReturn } : {}),
+    ...(input.backTarget ? { backTarget: input.backTarget } : {}),
+    ...(input.onBack ? { onBack: input.onBack } : {}),
     ...(input.onShowExplorer ? { onShowExplorer: input.onShowExplorer } : {}),
     ...(input.panelOpen !== undefined ? { panelOpen: input.panelOpen } : {}),
     ...(input.showExplorerButton !== undefined
@@ -993,72 +993,80 @@ describe("WorkspaceFilePreviewPanel", () => {
     }
   });
 
-  it("calls the return handler when a diff return target is present", async () => {
-    const onReturn = vi.fn();
-    const returnTarget = {
+  it("calls the back handler when a diff back target is present", async () => {
+    const onBack = vi.fn();
+    const backTarget = {
       kind: "diff",
       diffTurnId: TurnId.make("turn-1"),
       diffFilePath: "src/App.tsx",
-    } satisfies WorkspaceFilePreviewReturnTarget;
+    } satisfies WorkspaceFilePanelHistoryEntry;
     const mounted = await renderPreview({
+      backTarget,
       contents: DEFAULT_CONTENTS,
-      onReturn,
-      returnTarget,
+      onBack,
     });
     try {
       await page.getByRole("button", { name: "Back to diff" }).click();
-      expect(onReturn).toHaveBeenCalledWith(returnTarget);
+      expect(onBack).toHaveBeenCalledTimes(1);
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("calls the return handler when an explorer return target is present", async () => {
-    const onReturn = vi.fn();
-    const returnTarget = {
+  it("calls the back handler when an explorer back target is present", async () => {
+    const onBack = vi.fn();
+    const backTarget = {
       kind: "explorer",
-    } satisfies WorkspaceFilePreviewReturnTarget;
+      context: {
+        environmentId: ENVIRONMENT_ID,
+        cwd: "/repo/project",
+      },
+    } satisfies WorkspaceFilePanelHistoryEntry;
     const mounted = await renderPreview({
+      backTarget,
       contents: DEFAULT_CONTENTS,
-      onReturn,
-      returnTarget,
+      onBack,
     });
     try {
       await page.getByRole("button", { name: "Back to explorer" }).click();
-      expect(onReturn).toHaveBeenCalledWith(returnTarget);
+      expect(onBack).toHaveBeenCalledTimes(1);
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("calls the return handler when a source control return target is present", async () => {
-    const onReturn = vi.fn();
-    const returnTarget = {
+  it("calls the back handler when a source control back target is present", async () => {
+    const onBack = vi.fn();
+    const backTarget = {
       kind: "source-control",
-    } satisfies WorkspaceFilePreviewReturnTarget;
+    } satisfies WorkspaceFilePanelHistoryEntry;
     const mounted = await renderPreview({
+      backTarget,
       contents: DEFAULT_CONTENTS,
-      onReturn,
-      returnTarget,
+      onBack,
     });
     try {
       await page.getByRole("button", { name: "Back to source control" }).click();
-      expect(onReturn).toHaveBeenCalledWith(returnTarget);
+      expect(onBack).toHaveBeenCalledTimes(1);
     } finally {
       await mounted.cleanup();
     }
   });
 
   it("places the return button before the file icon", async () => {
-    const onReturn = vi.fn();
-    const returnTarget = {
+    const onBack = vi.fn();
+    const backTarget = {
       kind: "explorer",
-    } satisfies WorkspaceFilePreviewReturnTarget;
+      context: {
+        environmentId: ENVIRONMENT_ID,
+        cwd: "/repo/project",
+      },
+    } satisfies WorkspaceFilePanelHistoryEntry;
     const mounted = await renderPreview({
+      backTarget,
       contents: DEFAULT_CONTENTS,
-      onReturn,
+      onBack,
       onShowExplorer: vi.fn(),
-      returnTarget,
       showExplorerButton: true,
     });
     try {
@@ -1073,7 +1081,7 @@ describe("WorkspaceFilePreviewPanel", () => {
       ).toBe(true);
 
       await page.getByRole("button", { name: "Back to explorer" }).click();
-      expect(onReturn).toHaveBeenCalledWith(returnTarget);
+      expect(onBack).toHaveBeenCalledTimes(1);
     } finally {
       await mounted.cleanup();
     }

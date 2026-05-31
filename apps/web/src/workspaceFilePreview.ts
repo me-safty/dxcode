@@ -50,6 +50,25 @@ export interface WorkspaceFilePreviewReturnPreview {
 
 export type WorkspaceFilePanelView = "explorer" | "preview" | "source-control";
 
+export interface WorkspaceFilePanelPreviewHistoryEntry {
+  kind: "preview";
+  explorerContext: WorkspaceFileExplorerContext | null;
+  target: WorkspaceFilePreviewTarget;
+}
+
+export interface WorkspaceFilePanelExplorerHistoryEntry {
+  kind: "explorer";
+  context: WorkspaceFileExplorerContext;
+}
+
+export type WorkspaceFilePanelHistoryEntry =
+  | WorkspaceFilePreviewDiffReturnTarget
+  | WorkspaceFilePanelExplorerHistoryEntry
+  | WorkspaceFilePanelPreviewHistoryEntry
+  | WorkspaceFilePreviewSourceControlReturnTarget;
+
+const MAX_WORKSPACE_FILE_PANEL_HISTORY_LENGTH = 50;
+
 interface WorkspaceFilePreviewState {
   open: boolean;
   view: WorkspaceFilePanelView;
@@ -57,6 +76,7 @@ interface WorkspaceFilePreviewState {
   activeExplorerContext: WorkspaceFileExplorerContext | null;
   explorerContext: WorkspaceFileExplorerContext | null;
   explorerReturnPreview: WorkspaceFilePreviewReturnPreview | null;
+  history: ReadonlyArray<WorkspaceFilePanelHistoryEntry>;
   returnTarget: WorkspaceFilePreviewReturnTarget | null;
   openPreview: (
     target: WorkspaceFilePreviewTarget,
@@ -69,6 +89,7 @@ interface WorkspaceFilePreviewState {
   openSourceControl: () => void;
   reopenPanel: () => void;
   reopenPreview: () => void;
+  returnBack: () => void;
   returnExplorerToPreview: () => void;
   returnPreviewToExplorer: (context: WorkspaceFileExplorerContext) => void;
   setActiveExplorerContext: (context: WorkspaceFileExplorerContext | null) => void;
@@ -100,6 +121,16 @@ function sameTargetWorkspace(
   );
 }
 
+function sameOptionalExplorerContext(
+  left: WorkspaceFileExplorerContext | null,
+  right: WorkspaceFileExplorerContext | null,
+): boolean {
+  if (left === null || right === null) {
+    return left === right;
+  }
+  return sameExplorerContextWorkspace(left, right);
+}
+
 function deriveExplorerContextFromTarget(
   target: WorkspaceFilePreviewTarget,
   existingContext: WorkspaceFileExplorerContext | null,
@@ -117,6 +148,211 @@ function deriveExplorerContextFromTarget(
   };
 }
 
+function samePreviewTarget(
+  left: WorkspaceFilePreviewTarget,
+  right: WorkspaceFilePreviewTarget,
+): boolean {
+  return (
+    left.environmentId === right.environmentId &&
+    left.cwd === right.cwd &&
+    left.relativePath === right.relativePath &&
+    left.displayPath === right.displayPath &&
+    left.line === right.line &&
+    left.column === right.column
+  );
+}
+
+function sameDiffReturnTarget(
+  left: WorkspaceFilePreviewDiffReturnTarget,
+  right: WorkspaceFilePreviewDiffReturnTarget,
+): boolean {
+  return (
+    left.diffSource === right.diffSource &&
+    left.diffTurnId === right.diffTurnId &&
+    left.diffFilePath === right.diffFilePath
+  );
+}
+
+function sameHistoryEntry(
+  left: WorkspaceFilePanelHistoryEntry,
+  right: WorkspaceFilePanelHistoryEntry,
+): boolean {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+
+  switch (left.kind) {
+    case "diff":
+      return sameDiffReturnTarget(left, right as WorkspaceFilePreviewDiffReturnTarget);
+    case "explorer":
+      return sameExplorerContextWorkspace(
+        left.context,
+        (right as WorkspaceFilePanelExplorerHistoryEntry).context,
+      );
+    case "preview": {
+      const previewRight = right as WorkspaceFilePanelPreviewHistoryEntry;
+      return (
+        samePreviewTarget(left.target, previewRight.target) &&
+        sameOptionalExplorerContext(left.explorerContext, previewRight.explorerContext)
+      );
+    }
+    case "source-control":
+      return true;
+  }
+}
+
+function appendHistoryEntry(
+  history: ReadonlyArray<WorkspaceFilePanelHistoryEntry>,
+  entry: WorkspaceFilePanelHistoryEntry,
+): ReadonlyArray<WorkspaceFilePanelHistoryEntry> {
+  const previousEntry = history[history.length - 1];
+  if (previousEntry && sameHistoryEntry(previousEntry, entry)) {
+    return history;
+  }
+
+  const nextHistory = [...history, entry];
+  return nextHistory.length > MAX_WORKSPACE_FILE_PANEL_HISTORY_LENGTH
+    ? nextHistory.slice(nextHistory.length - MAX_WORKSPACE_FILE_PANEL_HISTORY_LENGTH)
+    : nextHistory;
+}
+
+function currentHistoryEntry(
+  state: WorkspaceFilePreviewState,
+): WorkspaceFilePanelHistoryEntry | null {
+  if (!state.open) {
+    return null;
+  }
+
+  switch (state.view) {
+    case "explorer":
+      return state.explorerContext ? { kind: "explorer", context: state.explorerContext } : null;
+    case "preview":
+      return state.target
+        ? {
+            kind: "preview",
+            explorerContext: state.explorerContext,
+            target: state.target,
+          }
+        : null;
+    case "source-control":
+      return { kind: "source-control" };
+  }
+}
+
+function historyEntryFromReturnTarget(
+  returnTarget: WorkspaceFilePreviewReturnTarget | null | undefined,
+): WorkspaceFilePanelHistoryEntry | null {
+  if (!returnTarget) {
+    return null;
+  }
+  if (returnTarget.kind === "diff") {
+    return returnTarget;
+  }
+  if (returnTarget.kind === "source-control") {
+    return { kind: "source-control" };
+  }
+  return null;
+}
+
+function previewHistoryEntryFromReturnPreview(
+  returnPreview: WorkspaceFilePreviewReturnPreview,
+): WorkspaceFilePanelPreviewHistoryEntry {
+  return {
+    kind: "preview",
+    explorerContext: deriveExplorerContextFromTarget(returnPreview.target, null, null),
+    target: returnPreview.target,
+  };
+}
+
+function returnTargetFromHistoryEntry(
+  entry: WorkspaceFilePanelHistoryEntry | null | undefined,
+): WorkspaceFilePreviewReturnTarget | null {
+  if (!entry) {
+    return null;
+  }
+
+  switch (entry.kind) {
+    case "diff":
+      return entry;
+    case "explorer":
+      return { kind: "explorer" };
+    case "source-control":
+      return { kind: "source-control" };
+    case "preview":
+      return null;
+  }
+}
+
+function returnTargetForHistory(
+  history: ReadonlyArray<WorkspaceFilePanelHistoryEntry>,
+): WorkspaceFilePreviewReturnTarget | null {
+  return returnTargetFromHistoryEntry(history[history.length - 1]);
+}
+
+function historyWithCurrentEntry(
+  state: WorkspaceFilePreviewState,
+  destination?: WorkspaceFilePanelHistoryEntry,
+): ReadonlyArray<WorkspaceFilePanelHistoryEntry> {
+  const currentEntry = currentHistoryEntry(state);
+  if (!currentEntry || (destination && sameHistoryEntry(currentEntry, destination))) {
+    return state.history;
+  }
+  return appendHistoryEntry(state.history, currentEntry);
+}
+
+function restoreHistoryEntry(
+  state: WorkspaceFilePreviewState,
+  entry: Exclude<WorkspaceFilePanelHistoryEntry, WorkspaceFilePreviewDiffReturnTarget>,
+  history: ReadonlyArray<WorkspaceFilePanelHistoryEntry>,
+): Partial<WorkspaceFilePreviewState> {
+  switch (entry.kind) {
+    case "explorer":
+      return {
+        open: true,
+        view: "explorer",
+        explorerContext: entry.context,
+        explorerReturnPreview: null,
+        history,
+        returnTarget: null,
+      };
+    case "preview":
+      return {
+        open: true,
+        view: "preview",
+        target: entry.target,
+        explorerContext: deriveExplorerContextFromTarget(
+          entry.target,
+          entry.explorerContext,
+          state.activeExplorerContext,
+        ),
+        explorerReturnPreview: null,
+        history,
+        returnTarget: returnTargetForHistory(history),
+      };
+    case "source-control":
+      return {
+        open: true,
+        view: "source-control",
+        explorerReturnPreview: null,
+        history,
+        returnTarget: null,
+      };
+  }
+}
+
+export function workspaceFilePanelBackButtonLabel(target: WorkspaceFilePanelHistoryEntry): string {
+  switch (target.kind) {
+    case "diff":
+      return "Back to diff";
+    case "explorer":
+      return "Back to explorer";
+    case "preview":
+      return "Back to file viewer";
+    case "source-control":
+      return "Back to source control";
+  }
+}
+
 const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => ({
   open: false,
   view: "preview",
@@ -124,34 +360,81 @@ const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => 
   activeExplorerContext: null,
   explorerContext: null,
   explorerReturnPreview: null,
+  history: [],
   returnTarget: null,
   openPreview: (target, options) =>
-    set((state) => ({
-      open: true,
-      view: "preview",
-      target,
-      explorerContext: deriveExplorerContextFromTarget(
+    set((state) => {
+      const explorerContext = deriveExplorerContextFromTarget(
         target,
         state.explorerContext,
         state.activeExplorerContext,
-      ),
-      explorerReturnPreview: null,
-      returnTarget: options?.returnTarget ?? null,
-    })),
+      );
+      const destination = {
+        kind: "preview",
+        explorerContext,
+        target,
+      } satisfies WorkspaceFilePanelPreviewHistoryEntry;
+      let history = historyWithCurrentEntry(state, destination);
+
+      if (!state.open) {
+        const fallbackEntry = historyEntryFromReturnTarget(options?.returnTarget);
+        if (fallbackEntry) {
+          history = appendHistoryEntry(history, fallbackEntry);
+        }
+      }
+
+      return {
+        open: true,
+        view: "preview",
+        target,
+        explorerContext,
+        explorerReturnPreview: null,
+        history,
+        returnTarget: returnTargetForHistory(history),
+      };
+    }),
   openExplorer: (context, options) =>
-    set({
-      open: true,
-      view: "explorer",
-      explorerContext: context,
-      explorerReturnPreview: options?.returnToPreview ?? null,
-      returnTarget: null,
+    set((state) => {
+      const destination = {
+        kind: "explorer",
+        context,
+      } satisfies WorkspaceFilePanelExplorerHistoryEntry;
+      let history: ReadonlyArray<WorkspaceFilePanelHistoryEntry> =
+        state.open && state.view === "explorer" && !options?.returnToPreview
+          ? []
+          : historyWithCurrentEntry(state, destination);
+      const fallbackReturnPreview = !state.open ? (options?.returnToPreview ?? null) : null;
+
+      if (fallbackReturnPreview) {
+        const fallbackEntry = historyEntryFromReturnTarget(fallbackReturnPreview.returnTarget);
+        if (fallbackEntry) {
+          history = appendHistoryEntry(history, fallbackEntry);
+        }
+        history = appendHistoryEntry(
+          history,
+          previewHistoryEntryFromReturnPreview(fallbackReturnPreview),
+        );
+      }
+
+      return {
+        open: true,
+        view: "explorer",
+        explorerContext: context,
+        explorerReturnPreview: fallbackReturnPreview,
+        history,
+        returnTarget: null,
+      };
     }),
   openSourceControl: () =>
-    set({
-      open: true,
-      view: "source-control",
-      explorerReturnPreview: null,
-      returnTarget: null,
+    set((state) => {
+      const history = historyWithCurrentEntry(state, { kind: "source-control" });
+      return {
+        open: true,
+        view: "source-control",
+        explorerReturnPreview: null,
+        history,
+        returnTarget: null,
+      };
     }),
   reopenPanel: () =>
     set((state) => {
@@ -162,6 +445,30 @@ const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => 
       );
       const storedTargetMatchesActive = sameTargetWorkspace(state.target, activeContext);
 
+      if (state.open && state.view === "source-control") {
+        const history = historyWithCurrentEntry(state);
+        if (state.target) {
+          return {
+            ...state,
+            open: true,
+            view: "preview",
+            explorerReturnPreview: null,
+            history,
+            returnTarget: returnTargetForHistory(history),
+          };
+        }
+        if (state.explorerContext) {
+          return {
+            ...state,
+            open: true,
+            view: "explorer",
+            explorerReturnPreview: null,
+            history,
+            returnTarget: null,
+          };
+        }
+      }
+
       if (activeContext && !storedExplorerMatchesActive && !storedTargetMatchesActive) {
         return {
           ...state,
@@ -170,6 +477,7 @@ const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => 
           target: null,
           explorerContext: activeContext,
           explorerReturnPreview: null,
+          history: [],
           returnTarget: null,
         };
       }
@@ -184,6 +492,7 @@ const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => 
           view: "explorer",
           explorerContext: activeContext,
           explorerReturnPreview: null,
+          history: [],
           returnTarget: null,
         };
       }
@@ -203,11 +512,20 @@ const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => 
       return { ...state, open: true, view: "explorer" };
     }),
   reopenPreview: () =>
-    set((state) =>
-      state.target && (!state.open || state.view !== "preview")
-        ? { ...state, open: true, view: "preview", explorerReturnPreview: null }
-        : state,
-    ),
+    set((state) => {
+      if (!state.target || (state.open && state.view === "preview")) {
+        return state;
+      }
+      const history = state.open ? historyWithCurrentEntry(state) : state.history;
+      return {
+        ...state,
+        open: true,
+        view: "preview",
+        explorerReturnPreview: null,
+        history,
+        returnTarget: returnTargetForHistory(history),
+      };
+    }),
   setActiveExplorerContext: (context) =>
     set((state) => {
       if (
@@ -231,11 +549,31 @@ const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => 
 
       return nextState;
     }),
+  returnBack: () =>
+    set((state) => {
+      const previousEntry = state.history[state.history.length - 1];
+      if (!previousEntry || previousEntry.kind === "diff") {
+        return state;
+      }
+
+      return {
+        ...state,
+        ...restoreHistoryEntry(state, previousEntry, state.history.slice(0, -1)),
+      };
+    }),
   returnExplorerToPreview: () =>
     set((state) => {
+      const previousEntry = state.history[state.history.length - 1];
+      if (previousEntry?.kind === "preview") {
+        return {
+          ...state,
+          ...restoreHistoryEntry(state, previousEntry, state.history.slice(0, -1)),
+        };
+      }
       if (!state.explorerReturnPreview) {
         return state;
       }
+      const history = state.history.slice(0, -1);
       return {
         ...state,
         open: true,
@@ -246,28 +584,47 @@ const useWorkspaceFilePreviewStore = create<WorkspaceFilePreviewState>((set) => 
           state.explorerContext,
           state.activeExplorerContext,
         ),
-        returnTarget: state.explorerReturnPreview.returnTarget,
+        history,
+        returnTarget: returnTargetForHistory(history),
         explorerReturnPreview: null,
       };
     }),
   returnPreviewToExplorer: (context) =>
-    set((state) => ({
-      ...state,
-      open: true,
-      view: "explorer",
-      explorerContext: context,
-      explorerReturnPreview: null,
-      returnTarget: null,
-    })),
+    set((state) => {
+      const previousEntry = state.history[state.history.length - 1];
+      if (previousEntry?.kind === "explorer") {
+        return {
+          ...state,
+          ...restoreHistoryEntry(state, previousEntry, state.history.slice(0, -1)),
+        };
+      }
+      return {
+        ...state,
+        open: true,
+        view: "explorer",
+        explorerContext: context,
+        explorerReturnPreview: null,
+        history: [],
+        returnTarget: null,
+      };
+    }),
   closePreview: () =>
     set((state) =>
-      state.open || state.returnTarget || state.explorerReturnPreview
-        ? { ...state, open: false, returnTarget: null, explorerReturnPreview: null }
+      state.open || state.returnTarget || state.explorerReturnPreview || state.history.length > 0
+        ? {
+            ...state,
+            open: false,
+            returnTarget: null,
+            explorerReturnPreview: null,
+            history: [],
+          }
         : state,
     ),
   closeSourceControl: () =>
     set((state) =>
-      state.open && state.view === "source-control" ? { ...state, open: false } : state,
+      state.open && state.view === "source-control"
+        ? { ...state, open: false, history: [], returnTarget: null, explorerReturnPreview: null }
+        : state,
     ),
 }));
 
@@ -411,6 +768,7 @@ export function useWorkspaceFilePreviewState() {
       activeExplorerContext: state.activeExplorerContext,
       explorerContext: state.explorerContext,
       explorerReturnPreview: state.explorerReturnPreview,
+      history: state.history,
       returnTarget: state.returnTarget,
     })),
   );
@@ -448,6 +806,7 @@ export function __readWorkspaceFilePanelStateForTests() {
     activeExplorerContext,
     explorerContext,
     explorerReturnPreview,
+    history,
     returnTarget,
   } = useWorkspaceFilePreviewStore.getState();
   return {
@@ -457,6 +816,7 @@ export function __readWorkspaceFilePanelStateForTests() {
     activeExplorerContext,
     explorerContext,
     explorerReturnPreview,
+    history,
     returnTarget,
   };
 }
@@ -469,8 +829,13 @@ export function __resetWorkspaceFilePanelStateForTests(): void {
     activeExplorerContext: null,
     explorerContext: null,
     explorerReturnPreview: null,
+    history: [],
     returnTarget: null,
   });
+}
+
+export function returnWorkspaceFilePanelBack(): void {
+  useWorkspaceFilePreviewStore.getState().returnBack();
 }
 
 export function returnWorkspaceFileExplorerToPreview(): void {

@@ -1267,10 +1267,10 @@ function getPendingNotificationThreadReconcileRetainBlockReason(
   if (browserResumeReconnectRetryByEnvironment.get(environmentId)?.options.forceReconnect) {
     return "browser-resume-forced-retry-pending";
   }
-  if (browserResumeShellBootstrapTimeoutByEnvironment.has(environmentId)) {
-    return "browser-resume-shell-bootstrap-timeout";
-  }
   if (!connection.client.isHeartbeatFresh()) {
+    if (browserResumeShellBootstrapTimeoutByEnvironment.has(environmentId)) {
+      return "browser-resume-shell-bootstrap-timeout";
+    }
     return "stale-heartbeat";
   }
   return null;
@@ -2982,6 +2982,13 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
             : {}),
         },
       });
+      if (isShellBootstrapTimeout && connection.client.isHeartbeatFresh()) {
+        refreshActiveThreadDetailsForEnvironment(environmentId, refreshReason);
+        refreshPendingNotificationThreadDetailsForEnvironment(
+          environmentId,
+          "notification-click:post-transport-reconnect",
+        );
+      }
       throw error;
     }
   };

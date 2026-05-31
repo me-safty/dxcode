@@ -11,10 +11,7 @@ import {
   __resetEnvironmentApiOverridesForTests,
   __setEnvironmentApiOverrideForTests,
 } from "../environmentApi";
-import {
-  type WorkspaceFilePreviewReturnTarget,
-  type WorkspaceFilePreviewTarget,
-} from "../workspaceFilePreview";
+import { type WorkspaceFilePreviewTarget } from "../workspaceFilePreview";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { WorkspaceFilePreviewPanel } from "./WorkspaceFilePreviewPanel";
@@ -194,7 +191,6 @@ async function renderPreview(
     contents?: string;
     line?: number;
     relativePath?: string;
-    returnTarget?: WorkspaceFilePreviewReturnTarget;
     sheetOnClose?: () => void;
   } = {},
 ) {
@@ -225,7 +221,6 @@ async function renderPreview(
     target: createTarget(
       input.line === undefined ? { relativePath } : { relativePath, line: input.line },
     ),
-    ...(input.returnTarget ? { returnTarget: input.returnTarget } : {}),
   });
   const previewContent = input.sheetOnClose ? (
     <RightPanelSheet open={true} onClose={input.sheetOnClose}>

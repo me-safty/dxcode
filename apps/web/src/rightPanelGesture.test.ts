@@ -5,6 +5,7 @@ import {
   __resetRightPanelGestureStateForTests,
   markRightPanelUsed,
   openLastUsedRightPanel,
+  openRightPanel,
 } from "./rightPanelGesture";
 
 describe("rightPanelGesture", () => {
@@ -35,5 +36,20 @@ describe("rightPanelGesture", () => {
     expect(openLastUsedRightPanel()).toBe(true);
     expect(openDiff).toHaveBeenCalledOnce();
     expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it("does not close file and source-control registrations when switching between them", () => {
+    const closeFile = vi.fn();
+    const closeDiff = vi.fn();
+    const openSourceControl = vi.fn();
+
+    __registerRightPanelForTests("file", { close: closeFile, open: vi.fn() });
+    __registerRightPanelForTests("diff", { close: closeDiff, open: vi.fn() });
+    __registerRightPanelForTests("source-control", { open: openSourceControl });
+
+    expect(openRightPanel("source-control")).toBe(true);
+    expect(openSourceControl).toHaveBeenCalledOnce();
+    expect(closeFile).not.toHaveBeenCalled();
+    expect(closeDiff).toHaveBeenCalledOnce();
   });
 });

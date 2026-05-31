@@ -16,8 +16,10 @@ import {
 import {
   __readWorkspaceFilePanelStateForTests,
   __resetWorkspaceFilePanelStateForTests,
+  closeWorkspaceFilePreview,
   openWorkspaceFileExplorer,
   openWorkspaceFilePreview,
+  openWorkspaceSourceControlPanel,
 } from "../workspaceFilePreview";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
@@ -476,6 +478,82 @@ describe("WorkspaceFilesPanel", () => {
     }
   });
 
+  it("returns from explorer to source control through the stacked file preview", async () => {
+    __setEnvironmentApiOverrideForTests(ENVIRONMENT_ID, createMockEnvironmentApi());
+    const mounted = await renderFilesPanel({
+      initialize: () => {
+        openWorkspaceSourceControlPanel();
+        openWorkspaceFilePreview(createPreviewTarget("README.md"));
+      },
+    });
+    try {
+      await expect.element(page.getByText("export const component = true;")).toBeInTheDocument();
+      await expect
+        .element(page.getByRole("button", { name: "Back to source control" }))
+        .toBeVisible();
+
+      await page.getByRole("button", { name: "Show file explorer" }).click();
+      await expect.element(page.getByRole("button", { name: "Back to file viewer" })).toBeVisible();
+
+      await page.getByRole("button", { name: "Back to file viewer" }).click();
+      await expect
+        .element(page.getByRole("button", { name: "Back to source control" }))
+        .toBeVisible();
+
+      await page.getByRole("button", { name: "Back to source control" }).click();
+      await expect.element(page.getByText("Source control panel")).toBeVisible();
+      expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+        open: true,
+        view: "source-control",
+        history: [],
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps explorer file previews in the right sidebar stack", async () => {
+    const api = createMockEnvironmentApi();
+    __setEnvironmentApiOverrideForTests(ENVIRONMENT_ID, api);
+    const mounted = await renderFilesPanel({
+      initialize: () => {
+        openWorkspaceSourceControlPanel();
+        openWorkspaceFilePreview(createPreviewTarget("README.md"));
+      },
+    });
+    try {
+      await expect
+        .element(page.getByRole("button", { name: "Back to source control" }))
+        .toBeVisible();
+
+      await page.getByRole("button", { name: "Show file explorer" }).click();
+      await page.getByRole("button", { name: /^src$/ }).click();
+      await vi.waitFor(() => {
+        expect(api.projects.listDirectoryEntries).toHaveBeenCalledWith({
+          cwd: WORKSPACE_ROOT,
+          directoryPath: "src",
+          limit: 500,
+        });
+      });
+      await page.getByRole("button", { name: /^App\.tsx$/ }).click();
+
+      await expect.element(page.getByRole("button", { name: "Back to explorer" })).toBeVisible();
+      await page.getByRole("button", { name: "Back to explorer" }).click();
+
+      await expect.element(page.getByRole("button", { name: "Back to file viewer" })).toBeVisible();
+      await page.getByRole("button", { name: "Back to file viewer" }).click();
+
+      await expect
+        .element(page.getByRole("button", { name: "Back to source control" }))
+        .toBeVisible();
+      await page.getByRole("button", { name: "Back to source control" }).click();
+
+      await expect.element(page.getByText("Source control panel")).toBeVisible();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("preserves tree scroll position when returning from preview", async () => {
     const rootEntries = [
       ...Array.from({ length: 40 }, (_, index) => ({
@@ -598,6 +676,7 @@ describe("WorkspaceFilesPanel", () => {
     const mounted = await renderFilesPanel({
       initialize: () => {
         openWorkspaceFilePreview(createPreviewTarget("README.md"));
+        closeWorkspaceFilePreview();
         openWorkspaceFileExplorer({
           environmentId: ENVIRONMENT_ID,
           cwd: WORKSPACE_ROOT,

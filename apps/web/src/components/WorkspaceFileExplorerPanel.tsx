@@ -396,11 +396,12 @@ function WorkspaceSearchEntries(props: {
 }
 
 export function WorkspaceFileExplorerPanel(props: {
+  backButtonLabel?: string | undefined;
   expandedDirectoryPaths: ReadonlySet<string>;
   environmentId: EnvironmentId;
   mode: DiffPanelMode;
   onAddFileToInput?: ((entry: ProjectEntry) => void) | undefined;
-  onBackToPreview?: (() => void) | undefined;
+  onBack?: (() => void) | undefined;
   onClose: () => void;
   onExpandedDirectoryPathsChange: (paths: Set<string>) => void;
   onOpenFile: (entry: ProjectEntry) => void;
@@ -413,11 +414,12 @@ export function WorkspaceFileExplorerPanel(props: {
   workspaceRoot: string;
 }) {
   const {
+    backButtonLabel,
     expandedDirectoryPaths,
     environmentId,
     mode,
     onAddFileToInput,
-    onBackToPreview,
+    onBack,
     onClose,
     onExpandedDirectoryPathsChange,
     onOpenFile,
@@ -499,13 +501,13 @@ export function WorkspaceFileExplorerPanel(props: {
     () => (
       <>
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          {onBackToPreview ? (
+          {onBack ? (
             <Button
               size="icon-xs"
               variant="outline"
-              aria-label="Back to file viewer"
-              title="Back to file viewer"
-              onClick={onBackToPreview}
+              aria-label={backButtonLabel ?? "Back"}
+              title={backButtonLabel ?? "Back"}
+              onClick={onBack}
             >
               <ArrowLeftIcon className="size-3.5" />
             </Button>
@@ -540,7 +542,7 @@ export function WorkspaceFileExplorerPanel(props: {
         </div>
       </>
     ),
-    [onBackToPreview, onClose, refresh, workspaceLabel],
+    [backButtonLabel, onBack, onClose, refresh, workspaceLabel],
   );
 
   return (

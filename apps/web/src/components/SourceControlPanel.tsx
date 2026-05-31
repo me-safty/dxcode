@@ -55,6 +55,7 @@ import { SourceControlPublishDialog } from "./SourceControlPublishDialog";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import {
   buildSourceControlTree,
+  sourceControlFileName,
   statusBadge,
   type SourceControlTreeNode,
 } from "./sourceControlTree";
@@ -314,7 +315,7 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
           .map((file) => ({
             type: "file" as const,
             path: file.path,
-            name: file.path,
+            name: sourceControlFileName(file.path),
             file,
           }));
       }

@@ -11,6 +11,7 @@ import {
   openWorkspaceSourceControlPanel,
   reopenWorkspaceFilePanel,
   resolveWorkspaceFilePreviewTarget,
+  returnWorkspaceFilePanelBack,
   returnWorkspaceFileExplorerToPreview,
   returnWorkspaceFilePreviewToExplorer,
   setActiveWorkspaceFileExplorerContext,
@@ -129,6 +130,114 @@ describe("workspace file panel state", () => {
     });
   });
 
+  it("keeps stack history across source control, preview, and explorer", () => {
+    const previewTarget = createPreviewTarget("src/from-git.ts");
+    openWorkspaceSourceControlPanel();
+    openWorkspaceFilePreview(previewTarget);
+    openWorkspaceFileExplorer({
+      environmentId,
+      cwd: "/repo/project",
+      projectName: "project",
+    });
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "explorer",
+      history: [
+        { kind: "source-control" },
+        {
+          kind: "preview",
+          target: previewTarget,
+        },
+      ],
+    });
+
+    returnWorkspaceFilePanelBack();
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "preview",
+      target: previewTarget,
+      history: [{ kind: "source-control" }],
+      returnTarget: { kind: "source-control" },
+    });
+
+    returnWorkspaceFilePanelBack();
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "source-control",
+      history: [],
+      returnTarget: null,
+    });
+  });
+
+  it("keeps explorer file previews in the same stack", () => {
+    const previewTarget = createPreviewTarget("src/from-git.ts");
+    const explorerFileTarget = createPreviewTarget("src/from-explorer.ts");
+    const explorerContext = {
+      environmentId,
+      cwd: "/repo/project",
+      projectName: "project",
+    };
+
+    openWorkspaceSourceControlPanel();
+    openWorkspaceFilePreview(previewTarget);
+    openWorkspaceFileExplorer(explorerContext);
+    openWorkspaceFilePreview(explorerFileTarget);
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "preview",
+      target: explorerFileTarget,
+      history: [
+        { kind: "source-control" },
+        {
+          kind: "preview",
+          target: previewTarget,
+        },
+        {
+          kind: "explorer",
+          context: explorerContext,
+        },
+      ],
+      returnTarget: { kind: "explorer" },
+    });
+
+    returnWorkspaceFilePanelBack();
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "explorer",
+      explorerContext,
+      history: [
+        { kind: "source-control" },
+        {
+          kind: "preview",
+          target: previewTarget,
+        },
+      ],
+    });
+
+    returnWorkspaceFilePanelBack();
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "preview",
+      target: previewTarget,
+      history: [{ kind: "source-control" }],
+      returnTarget: { kind: "source-control" },
+    });
+
+    returnWorkspaceFilePanelBack();
+
+    expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+      open: true,
+      view: "source-control",
+      history: [],
+    });
+  });
+
   it("opens a preview from the explorer with an explorer return target", () => {
     openWorkspaceFileExplorer({
       environmentId,
@@ -175,6 +284,7 @@ describe("workspace file panel state", () => {
         cwd: "/repo/project",
       },
       explorerReturnPreview: null,
+      history: [],
       returnTarget: null,
       target: {
         environmentId,

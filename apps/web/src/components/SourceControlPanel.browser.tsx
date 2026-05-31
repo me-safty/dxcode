@@ -523,10 +523,11 @@ describe("SourceControlPanel git action runner", () => {
 
     try {
       await vi.waitFor(() => {
-        expect(findButtonByText("src/app.ts")).not.toBeNull();
+        expect(findButtonByText("app.ts")).not.toBeNull();
       });
-      // List view renders full paths and no collapsible folder rows, and offers
+      // List view renders filenames and no collapsible folder rows, and offers
       // the toggle to switch to tree.
+      expect(document.body.textContent).not.toContain("src/app.ts");
       expect(findButtonByExactText("src")).toBeNull();
       expect(document.querySelector('button[aria-label="View as tree"]')).not.toBeNull();
     } finally {

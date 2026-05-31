@@ -10,6 +10,13 @@ export interface RightPanelRegistration {
 const registeredPanels = new Map<RightPanelKind, RightPanelRegistration>();
 let lastUsedRightPanel: RightPanelKind = "file";
 
+function shareFilePanelState(left: RightPanelKind, right: RightPanelKind): boolean {
+  return (
+    (left === "file" && right === "source-control") ||
+    (left === "source-control" && right === "file")
+  );
+}
+
 export function markRightPanelUsed(kind: RightPanelKind): void {
   lastUsedRightPanel = kind;
 }
@@ -22,7 +29,7 @@ export function openRightPanel(kind: RightPanelKind): boolean {
 
   markRightPanelUsed(kind);
   for (const [registeredKind, registeredPanel] of registeredPanels) {
-    if (registeredKind !== kind) {
+    if (registeredKind !== kind && !shareFilePanelState(kind, registeredKind)) {
       registeredPanel.close?.();
     }
   }

@@ -34,6 +34,11 @@ function createDirNode(path: string, name: string): MutableDirNode {
   return { type: "dir", path, name, childDirs: new Map(), files: [] };
 }
 
+export function sourceControlFileName(path: string): string {
+  const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return separatorIndex >= 0 ? path.slice(separatorIndex + 1) : path;
+}
+
 function finalize(node: MutableDirNode): SourceControlTreeDirNode {
   const dirs = [...node.childDirs.values()]
     .map(finalize)
@@ -75,7 +80,7 @@ export function buildSourceControlTree(
       current = next;
     }
 
-    const name = segments[segments.length - 1]!;
+    const name = sourceControlFileName(file.path);
     current.files.push({ type: "file", path: file.path, name, file });
   }
 

@@ -44,10 +44,13 @@ import { resolveDiffThemeName } from "../lib/diffRendering";
 import { gitWorkingTreeDiffQueryOptions } from "../lib/gitReactQuery";
 import { useGitStatus } from "../lib/gitStatusState";
 import type {
-  WorkspaceFilePreviewReturnTarget,
+  WorkspaceFilePanelHistoryEntry,
   WorkspaceFilePreviewTarget,
 } from "../workspaceFilePreview";
-import { closeWorkspaceFilePreview } from "../workspaceFilePreview";
+import {
+  closeWorkspaceFilePreview,
+  workspaceFilePanelBackButtonLabel,
+} from "../workspaceFilePreview";
 import {
   isWorkspaceImagePreviewPath,
   resolveWorkspaceImagePreviewUrl,
@@ -574,24 +577,13 @@ function WorkspaceImagePreview(props: { src: string; alt: string }) {
   );
 }
 
-function returnButtonLabelForTarget(target: WorkspaceFilePreviewReturnTarget): string {
-  switch (target.kind) {
-    case "diff":
-      return "Back to diff";
-    case "explorer":
-      return "Back to explorer";
-    case "source-control":
-      return "Back to source control";
-  }
-}
-
 export function WorkspaceFilePreviewPanel(props: {
+  backTarget?: WorkspaceFilePanelHistoryEntry | null | undefined;
   mode: DiffPanelMode;
   panelOpen?: boolean;
   target: WorkspaceFilePreviewTarget | null;
-  returnTarget?: WorkspaceFilePreviewReturnTarget | null;
   onAddFileToInput?: (relativePath: string) => void;
-  onReturn?: (target: WorkspaceFilePreviewReturnTarget) => void;
+  onBack?: (() => void) | undefined;
   onShowExplorer?: () => void;
   showExplorerButton?: boolean;
 }) {
@@ -755,8 +747,8 @@ export function WorkspaceFilePreviewPanel(props: {
     : "No file selected";
   const title = props.target ? basenameOfPath(props.target.relativePath) : "File preview";
   const subtitle = props.target?.displayPath ?? displayPath;
-  const returnButtonLabel = props.returnTarget
-    ? returnButtonLabelForTarget(props.returnTarget)
+  const returnButtonLabel = props.backTarget
+    ? workspaceFilePanelBackButtonLabel(props.backTarget)
     : "Back";
 
   useEffect(() => {
@@ -951,17 +943,13 @@ export function WorkspaceFilePreviewPanel(props: {
   const header = (
     <>
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        {props.returnTarget && props.onReturn ? (
+        {props.backTarget && props.onBack ? (
           <Button
             size="icon-xs"
             variant="outline"
             aria-label={returnButtonLabel}
             title={returnButtonLabel}
-            onClick={() => {
-              if (props.returnTarget) {
-                props.onReturn?.(props.returnTarget);
-              }
-            }}
+            onClick={props.onBack}
           >
             <ArrowLeftIcon className="size-3.5" />
           </Button>
