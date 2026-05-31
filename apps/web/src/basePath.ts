@@ -11,6 +11,12 @@ function resolveRuntimeBasePath(): NormalizedBasePath {
   if (moduleUrl.protocol !== "http:" && moduleUrl.protocol !== "https:") {
     return ROOT_BASE_PATH;
   }
+
+  const assetsPathIndex = moduleUrl.pathname.lastIndexOf("/assets/");
+  if (assetsPathIndex !== -1) {
+    return Effect.runSync(normalizeBasePath(moduleUrl.pathname.slice(0, assetsPathIndex)));
+  }
+
   return Effect.runSync(normalizeBasePath(new URL("..", moduleUrl).pathname));
 }
 
