@@ -127,6 +127,10 @@ export function useGitActionRunner({
   const setThreadBranch = useStore((store) => store.setThreadBranch);
   const [pendingDefaultBranchAction, setPendingDefaultBranchAction] =
     useState<PendingDefaultBranchAction | null>(null);
+  // True while we await the post-action status refresh. The mutation itself has
+  // already settled by then, so this keeps action buttons in their loading
+  // state until the fresh status lands and the UI can flip cleanly.
+  const [isFinalizingAction, setIsFinalizingAction] = useState(false);
   const activeGitActionProgressRef = useRef<ActiveGitActionProgress | null>(null);
 
   const { data: gitStatus = null, error: gitStatusError } = useGitStatus({
@@ -483,9 +487,18 @@ export function useGitActionRunner({
         activeGitActionProgressRef.current = null;
         syncThreadBranchAfterGitAction(result);
         if (gitCwd) {
-          void refreshGitStatus({ environmentId: activeEnvironmentId, cwd: gitCwd }).catch(
-            () => undefined,
-          );
+          // Await a forced refresh so the action's promise only resolves once
+          // the panel's status reflects the new state, letting buttons flip
+          // cleanly without a stale flash.
+          setIsFinalizingAction(true);
+          try {
+            await refreshGitStatus(
+              { environmentId: activeEnvironmentId, cwd: gitCwd },
+              { force: true },
+            ).catch(() => undefined);
+          } finally {
+            setIsFinalizingAction(false);
+          }
         }
         onSuccess?.();
         if (resolvedProgressToastId === null) {
@@ -627,6 +640,7 @@ export function useGitActionRunner({
     hasPrimaryRemote,
     isDefaultRef,
     isGitActionRunning,
+    isFinalizingAction,
     runGitActionWithToast,
     runPull,
     openExistingPr,

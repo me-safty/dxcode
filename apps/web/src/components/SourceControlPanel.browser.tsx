@@ -653,6 +653,57 @@ describe("SourceControlPanel git action runner", () => {
     }
   });
 
+  it("keeps the primary button loading until the post-action status refresh resolves", async () => {
+    currentGitStatusRef.current = { ...createPanelStatus(), aheadCount: 2, behindCount: 0 };
+
+    const { host, screen } = await renderPanel();
+
+    // Set the controllable mocks after mount so the panel's initial refresh
+    // (which consumes a refresh call) doesn't swallow them.
+    const actionDeferred = createDeferredPromise<unknown>();
+    runStackedActionMutateAsyncSpy.mockImplementationOnce(
+      () => actionDeferred.promise as unknown as Promise<never>,
+    );
+    const refreshDeferred = createDeferredPromise<null>();
+    refreshGitStatusSpy.mockImplementationOnce(() => refreshDeferred.promise);
+
+    try {
+      const pushButton = findButtonByText("Push");
+      expect(pushButton).not.toBeNull();
+      expect(pushButton?.disabled).toBe(false);
+      pushButton?.click();
+
+      // The action resolves; the runner now awaits the forced status refresh.
+      actionDeferred.resolve({
+        action: "push",
+        branch: { status: "skipped_not_requested" },
+        commit: { status: "skipped_not_requested" },
+        push: { status: "pushed" },
+        pr: { status: "skipped_not_requested" },
+        toast: { title: "Pushed", cta: { kind: "none" } },
+      });
+
+      // While the refresh is in flight the Push button stays disabled rather
+      // than flashing back to an actionable state.
+      await vi.waitFor(() => {
+        expect(findButtonByText("Push")?.disabled).toBe(true);
+      });
+
+      // The push landed: the fresh status is clean/up-to-date, so once the
+      // refresh resolves the button flips straight to Commit.
+      currentGitStatusRef.current = { ...createPanelStatus(), aheadCount: 0, behindCount: 0 };
+      refreshDeferred.resolve(null);
+
+      await vi.waitFor(() => {
+        expect(findButtonByText("Push")).toBeNull();
+        expect(findButtonByExactText("Commit")).not.toBeNull();
+      });
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
   it("shows a spinner on the staged row while unstaging", async () => {
     const unstageDeferred = createDeferredPromise<null>();
     unstageFilesMutateAsyncSpy.mockImplementationOnce(() => unstageDeferred.promise);

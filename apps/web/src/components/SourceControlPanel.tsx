@@ -236,7 +236,8 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
     isRepo,
     hasPrimaryRemote,
     isDefaultRef,
-    isGitActionRunning,
+    isGitActionRunning: isGitActionRunningRaw,
+    isFinalizingAction,
     runGitActionWithToast,
     runPull,
     openExistingPr,
@@ -249,6 +250,10 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
   } = runner;
   const SourceControlIcon = sourceControlPresentation.Icon;
   const changeRequestTerminology = sourceControlPresentation.terminology;
+  // Treat the post-action status refresh as "running" so action buttons stay in
+  // their loading/disabled state until the fresh status lands and the primary
+  // button can flip cleanly (Commit -> Push, Push -> gone) without a stale flash.
+  const isGitActionRunning = isGitActionRunningRaw || isFinalizingAction;
 
   const generateCommitMessageMutation = useMutation(
     gitGenerateCommitMessageMutationOptions({ environmentId, cwd }),

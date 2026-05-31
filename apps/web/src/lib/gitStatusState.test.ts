@@ -26,6 +26,16 @@ vi.mock("../environments/runtime/service", () => ({
   },
 }));
 
+function createDeferredPromise<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function registerListener<T>(listeners: Set<(event: T) => void>, listener: (event: T) => void) {
   listeners.add(listener);
   return () => {
@@ -232,17 +242,50 @@ describe("gitStatusState", () => {
     const release = watchGitStatus(TARGET, gitClient);
 
     emitGitStatus(BASE_STATUS);
-    const refreshed = await refreshGitStatus(TARGET, gitClient);
+    const refreshed = await refreshGitStatus(TARGET, { client: gitClient });
 
     expect(gitClient.onStatus).toHaveBeenCalledOnce();
     expect(gitClient.refreshStatus).toHaveBeenCalledWith({ cwd: "/repo" });
     expect(refreshed).toEqual({ ...BASE_STATUS, refName: "/repo-refreshed" });
+    // The unary result is written straight to the atom rather than waiting for
+    // the onStatus broadcast.
     expect(getGitStatusSnapshot(TARGET)).toEqual({
-      data: BASE_STATUS,
+      data: { ...BASE_STATUS, refName: "/repo-refreshed" },
       error: null,
       cause: null,
       isPending: false,
     });
+
+    release();
+  });
+
+  it("does not let a stale refresh clobber a newer one", async () => {
+    const release = watchGitStatus(TARGET, gitClient);
+    emitGitStatus(BASE_STATUS);
+
+    const deferredFirst = createDeferredPromise<VcsStatusResult>();
+    const deferredSecond = createDeferredPromise<VcsStatusResult>();
+    const slowClient = {
+      onStatus: gitClient.onStatus,
+      refreshStatus: vi
+        .fn<(input: { cwd: string }) => Promise<VcsStatusResult>>()
+        .mockReturnValueOnce(deferredFirst.promise)
+        .mockReturnValueOnce(deferredSecond.promise),
+    };
+
+    // Two forced refreshes in flight; the second is the newest request.
+    const firstPromise = refreshGitStatus(TARGET, { client: slowClient, force: true });
+    const secondPromise = refreshGitStatus(TARGET, { client: slowClient, force: true });
+
+    const newest: VcsStatusResult = { ...BASE_STATUS, refName: "newest" };
+    const stale: VcsStatusResult = { ...BASE_STATUS, refName: "stale" };
+    // Resolve the newest first, then the stale one resolves later.
+    deferredSecond.resolve(newest);
+    await secondPromise;
+    deferredFirst.resolve(stale);
+    await firstPromise;
+
+    expect(getGitStatusSnapshot(TARGET).data).toEqual(newest);
 
     release();
   });
