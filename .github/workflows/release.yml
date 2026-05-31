@@ -30,7 +30,7 @@ jobs:
   check_changes:
     name: Check for changes since last nightly
     if: github.event_name == 'schedule'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     outputs:
       has_changes: ${{ steps.check.outputs.has_changes }}
     steps:
@@ -588,8 +588,8 @@ jobs:
   deploy_web:
     name: Deploy hosted web app
     needs: [preflight, release]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    if: ${{ false }} # Disabled for the fork: avoid deploying the hosted web app with upstream Vercel secrets.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -757,14 +757,9 @@ jobs:
 
   announce_discord:
     name: Announce release on Discord
-    if: |
-      always() && !cancelled() &&
-      needs.preflight.result == 'success' &&
-      needs.release.result == 'success' &&
-      needs.deploy_web.result == 'success' &&
-      (needs.finalize.result == 'success' || needs.finalize.result == 'skipped')
+    if: ${{ false }} # Disabled for the fork: avoid posting upstream release announcements.
     needs: [preflight, release, deploy_web, finalize]
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
