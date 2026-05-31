@@ -104,6 +104,18 @@ export function shouldLoadBranchSearchRefs(input: {
   return input.branchCwd !== null && input.isBranchMenuOpen;
 }
 
+export function resolveBranchSelectorDisabled(input: {
+  isBranchActionPending: boolean;
+  isBranchSearchEnabled: boolean;
+  isBranchesSearchPending: boolean;
+  refCount: number;
+}): boolean {
+  if (input.isBranchActionPending) {
+    return true;
+  }
+  return input.isBranchSearchEnabled && input.isBranchesSearchPending && input.refCount === 0;
+}
+
 export function resolveBranchSelectionTarget(input: {
   activeProjectCwd: string;
   activeWorktreePath: string | null;

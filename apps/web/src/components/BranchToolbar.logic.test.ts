@@ -5,6 +5,7 @@ import {
   deriveLocalBranchNameFromRemoteRef,
   resolveEnvironmentOptionLabel,
   resolveBranchSelectionTarget,
+  resolveBranchSelectorDisabled,
   resolveCurrentWorkspaceLabel,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
@@ -315,6 +316,41 @@ describe("dedupeRemoteBranchesWithLocalMatches", () => {
       "upstream/feature",
       "my-org/upstream/feature",
     ]);
+  });
+});
+
+describe("resolveBranchSelectorDisabled", () => {
+  it("does not disable while the lazy ref search is still closed", () => {
+    expect(
+      resolveBranchSelectorDisabled({
+        isBranchActionPending: false,
+        isBranchSearchEnabled: false,
+        isBranchesSearchPending: true,
+        refCount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("disables during the first enabled ref search", () => {
+    expect(
+      resolveBranchSelectorDisabled({
+        isBranchActionPending: false,
+        isBranchSearchEnabled: true,
+        isBranchesSearchPending: true,
+        refCount: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it("disables while a branch action is pending", () => {
+    expect(
+      resolveBranchSelectorDisabled({
+        isBranchActionPending: true,
+        isBranchSearchEnabled: false,
+        isBranchesSearchPending: false,
+        refCount: 3,
+      }),
+    ).toBe(true);
   });
 });
 
