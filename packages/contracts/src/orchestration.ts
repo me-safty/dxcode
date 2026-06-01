@@ -331,9 +331,24 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+export const ThreadTabType = Schema.Literals(["chat"]);
+export type ThreadTabType = typeof ThreadTabType.Type;
+
+export const OrchestrationThreadTab = Schema.Struct({
+  id: ThreadId,
+  groupId: ThreadId,
+  type: ThreadTabType,
+  title: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationThreadTab = typeof OrchestrationThreadTab.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
+  tabGroupId: Schema.optional(ThreadId),
+  tabType: Schema.optional(ThreadTabType),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -380,6 +395,8 @@ export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 export const OrchestrationThreadShell = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
+  tabGroupId: Schema.optional(ThreadId),
+  tabType: Schema.optional(ThreadTabType),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -485,6 +502,8 @@ const ThreadCreateCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   projectId: ProjectId,
+  tabGroupId: Schema.optional(ThreadId),
+  tabType: Schema.optional(ThreadTabType),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -542,6 +561,8 @@ const ThreadInteractionModeSetCommand = Schema.Struct({
 
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
+  tabGroupId: Schema.optional(ThreadId),
+  tabType: Schema.optional(ThreadTabType),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -828,6 +849,8 @@ export const ProjectDeletedPayload = Schema.Struct({
 export const ThreadCreatedPayload = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
+  tabGroupId: Schema.optional(ThreadId),
+  tabType: Schema.optional(ThreadTabType),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),

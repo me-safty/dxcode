@@ -75,6 +75,7 @@ import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
 import { newCommandId, randomUUID } from "~/lib/utils";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
+import { useComposerHandleContext } from "~/composerHandleContext";
 import { readEnvironmentApi } from "~/environmentApi";
 import { readLocalApi } from "~/localApi";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
@@ -282,6 +283,9 @@ function getMenuActionDisabledReason({
   }
 
   if (hasOpenPr) {
+    if (gitStatus.pr?.checks && gitStatus.pr.checks.pending > 0) {
+      return "Checks are still running.";
+    }
     return `View ${terminology.singular} is currently unavailable.`;
   }
   if (!hasBranch) {
@@ -327,6 +331,7 @@ function GitQuickActionIcon({
 }) {
   const iconClassName = "size-3.5";
   if (quickAction.kind === "open_pr") return <SourceControlIcon className={iconClassName} />;
+  if (quickAction.kind === "prompt_ai") return <SourceControlIcon className={iconClassName} />;
   if (quickAction.kind === "open_publish") return <CloudUploadIcon className={iconClassName} />;
   if (quickAction.kind === "run_pull") return <InfoIcon className={iconClassName} />;
   if (quickAction.kind === "run_action") {
@@ -338,6 +343,22 @@ function GitQuickActionIcon({
   }
   if (quickAction.label === "Commit") return <GitCommitIcon className={iconClassName} />;
   return <InfoIcon className={iconClassName} />;
+}
+
+function gitQuickActionToneClassName(tone: GitQuickAction["tone"]): string | undefined {
+  if (tone === "success") {
+    return "border-success/45 bg-success/10 text-success-foreground hover:bg-success/16 dark:text-success";
+  }
+  if (tone === "merged") {
+    return "border-violet-500/40 bg-violet-500/10 text-violet-700 hover:bg-violet-500/16 dark:text-violet-300";
+  }
+  if (tone === "warning") {
+    return "border-warning/40 bg-warning/10 text-warning-foreground hover:bg-warning/16 dark:text-warning";
+  }
+  if (tone === "destructive") {
+    return "border-destructive/40 bg-destructive/8 text-destructive-foreground hover:bg-destructive/12 dark:text-destructive";
+  }
+  return undefined;
 }
 
 interface PublishRepositoryDialogProps {
@@ -970,6 +991,8 @@ export default function GitActionsControl({
         : null,
   );
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
+  const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const composerRef = useComposerHandleContext();
   const setThreadBranch = useStore((store) => store.setThreadBranch);
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
   const [dialogCommitMessage, setDialogCommitMessage] = useState("");
@@ -1127,8 +1150,10 @@ export default function GitActionsControl({
       resolveQuickAction(gitStatusForActions, isGitActionRunning, isDefaultRef, hasPrimaryRemote),
     [gitStatusForActions, hasPrimaryRemote, isDefaultRef, isGitActionRunning],
   );
+  const quickActionToneClassName = gitQuickActionToneClassName(quickAction.tone);
   const quickActionClassName =
-    quickAction.kind === "run_pull" ? PULL_QUICK_ACTION_CLASS_NAME : undefined;
+    quickActionToneClassName ??
+    (quickAction.kind === "run_pull" ? PULL_QUICK_ACTION_CLASS_NAME : undefined);
   const quickActionDisabledReason = quickAction.disabled
     ? (quickAction.hint ?? "This action is currently unavailable.")
     : null;
@@ -1199,11 +1224,11 @@ export default function GitActionsControl({
       });
       return;
     }
-    const prUrl = gitStatusForActions?.pr?.state === "open" ? gitStatusForActions.pr.url : null;
+    const prUrl = gitStatusForActions?.pr?.url ?? null;
     if (!prUrl) {
       toastManager.add({
         type: "error",
-        title: "No open pull request found.",
+        title: "No pull request found.",
         data: threadToastData,
       });
       return;
@@ -1219,6 +1244,28 @@ export default function GitActionsControl({
       );
     });
   }, [gitStatusForActions, threadToastData]);
+
+  const promptAi = useCallback(
+    (prompt: string | undefined) => {
+      const nextPrompt = prompt?.trim();
+      if (!nextPrompt) {
+        return;
+      }
+      const composerDraftTarget = draftId ?? activeThreadRef;
+      if (!composerDraftTarget) {
+        toastManager.add({
+          type: "error",
+          title: "Composer is unavailable.",
+          data: threadToastData,
+        });
+        return;
+      }
+      setComposerDraftPrompt(composerDraftTarget, nextPrompt);
+      composerRef?.current?.resetCursorState({ cursor: nextPrompt.length, prompt: nextPrompt });
+      composerRef?.current?.focusAtEnd();
+    },
+    [activeThreadRef, composerRef, draftId, setComposerDraftPrompt, threadToastData],
+  );
 
   runGitActionWithToast = useEffectEvent(
     async ({
@@ -1503,6 +1550,10 @@ export default function GitActionsControl({
       setIsPublishDialogOpen(true);
       return;
     }
+    if (quickAction.kind === "prompt_ai") {
+      promptAi(quickAction.prompt);
+      return;
+    }
     if (quickAction.kind === "run_pull") {
       const promise = pullAction.run();
       void toastManager.promise<Awaited<ReturnType<typeof pullAction.run>>, ThreadToastData>(
@@ -1545,6 +1596,10 @@ export default function GitActionsControl({
     if (item.disabled) return;
     if (item.kind === "open_pr") {
       void openExistingPr();
+      return;
+    }
+    if (item.kind === "prompt_ai") {
+      promptAi(item.prompt);
       return;
     }
     if (item.dialogAction === "push") {
@@ -1626,7 +1681,10 @@ export default function GitActionsControl({
                 render={
                   <Button
                     aria-disabled="true"
-                    className="cursor-not-allowed rounded-e-none border-e-0 opacity-64 before:rounded-e-none"
+                    className={cn(
+                      "cursor-not-allowed rounded-e-none border-e-0 opacity-64 before:rounded-e-none",
+                      quickActionClassName,
+                    )}
                     size="xs"
                     variant="outline"
                   />
