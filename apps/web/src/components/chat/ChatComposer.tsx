@@ -171,6 +171,25 @@ function appendTranscriptToPrompt(prompt: string, transcript: string): string {
   return /\s$/.test(prompt) ? `${prompt}${transcript}` : `${prompt} ${transcript}`;
 }
 
+const insecureMicrophoneContextMessage =
+  "Microphone access requires a secure HTTPS page. Use the Tailscale HTTPS endpoint, not the Tailscale IP HTTP endpoint.";
+
+const microphonePermissionDeniedMessage =
+  "Microphone permission was denied. Allow microphone access in the browser prompt or site settings, then try again.";
+
+function voiceInputStartErrorMessage(error: unknown): string {
+  if (typeof DOMException === "undefined" || !(error instanceof DOMException)) {
+    return error instanceof Error ? error.message : "Microphone permission was not granted.";
+  }
+  if (error.name === "NotAllowedError" || error.name === "SecurityError") {
+    return microphonePermissionDeniedMessage;
+  }
+  if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+    return "No microphone was found on this device.";
+  }
+  return error.message || "Microphone permission was not granted.";
+}
+
 const extendReplacementRangeForTrailingSpace = (
   text: string,
   rangeEnd: number,
@@ -999,7 +1018,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const showCollapsedMobilePromptRow =
     isComposerCollapsedMobile && !isComposerApprovalState && pendingUserInputs.length === 0;
 
-  const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
+  const composerFooterHasWideActions =
+    showPlanFollowUpPrompt || activePendingProgress !== null || phase === "running";
   const showPlanSidebarToggle = Boolean(activePlan || sidebarProposedPlan || planSidebarOpen);
   const composerFooterActionLayoutKey = useMemo(() => {
     if (activePendingProgress) {
@@ -1093,7 +1113,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
   );
   const collapsedComposerPrimaryActionDisabled =
-    phase === "running" || isSendBusy || isConnecting || !composerSendState.hasSendableContent;
+    isSendBusy || isConnecting || !composerSendState.hasSendableContent;
   const collapsedComposerPrimaryActionLabel = "Send message";
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
@@ -1176,6 +1196,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       );
       return;
     }
+    if (typeof window !== "undefined" && window.isSecureContext === false) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Voice input requires HTTPS",
+          description: insecureMicrophoneContextMessage,
+        }),
+      );
+      return;
+    }
     if (
       typeof navigator === "undefined" ||
       !navigator.mediaDevices?.getUserMedia ||
@@ -1218,8 +1248,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         stackedThreadToast({
           type: "error",
           title: "Could not start voice input",
-          description:
-            error instanceof Error ? error.message : "Microphone permission was not granted.",
+          description: voiceInputStartErrorMessage(error),
         }),
       );
     }
@@ -1787,7 +1816,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const shouldBlurMobileComposerOnSubmit = useCallback(() => {
     if (!isMobileViewport) return false;
-    if (isSendBusy || isConnecting || phase === "running") return false;
+    if (isSendBusy || isConnecting) return false;
     if (activePendingProgress) {
       return activePendingProgress.isLastQuestion && Boolean(activePendingResolvedAnswers);
     }
@@ -1799,7 +1828,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isConnecting,
     isMobileViewport,
     isSendBusy,
-    phase,
     showPlanFollowUpPrompt,
   ]);
 

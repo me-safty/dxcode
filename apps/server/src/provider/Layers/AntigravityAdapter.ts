@@ -98,6 +98,10 @@ interface SessionContext {
   readonly turns: Array<{ readonly id: TurnId; readonly items: Array<unknown> }>;
   activeTurnId: TurnId | undefined;
   readonly pendingGates: Map<string, PendingAntigravityGate>;
+  // Gates that full-access auto-approved and are awaiting the daemon to clear
+  // the WAITING step. Tracked separately from pendingGates so the poller does
+  // not re-open or re-approve the same gate on subsequent cycles.
+  readonly autoApprovedGates: Set<string>;
   poller: NodeJS.Timeout | undefined;
   gatePoller: NodeJS.Timeout | undefined;
   daemonEndpoint: AntigravityDaemonEndpoint | undefined;
@@ -489,6 +493,44 @@ async function ensureAntigravityCliSettings(input: {
   }
 }
 
+// Antigravity has no native "never ask" approval policy like Codex. Its daemon
+// always raises permission gates, so full-access is implemented by replying
+// "allow" to each gate as it appears. This builds the HandleCascadeUserInteraction
+// payload shared by the manual respondToRequest path and the auto-approve path.
+function sendCascadeGateDecision(input: {
+  readonly endpoint: AntigravityDaemonEndpoint;
+  readonly conversationId: string;
+  readonly gate: PendingAntigravityGate;
+  readonly decision: ProviderApprovalDecision;
+}): Promise<unknown> {
+  const { endpoint, conversationId, gate, decision } = input;
+  const allow = decision === "accept" || decision === "acceptForSession";
+  const scope =
+    decision === "acceptForSession" ? "PERMISSION_SCOPE_CONVERSATION" : "PERMISSION_SCOPE_ONCE";
+  const decisionPayload =
+    gate.kind === "filePermission"
+      ? {
+          filePermission: {
+            allow,
+            scope,
+            ...(gate.absolutePathUri ? { absolutePathUri: gate.absolutePathUri } : {}),
+          },
+        }
+      : { permission: { allow, scope } };
+  return antigravityLanguageServerRpc({
+    endpoint,
+    method: "HandleCascadeUserInteraction",
+    body: {
+      cascadeId: conversationId,
+      interaction: {
+        trajectoryId: gate.trajectoryId,
+        stepIndex: gate.stepIndex,
+        ...decisionPayload,
+      },
+    },
+  });
+}
+
 export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(function* (
   settings: AntigravitySettings,
   options: AntigravityAdapterLiveOptions = {},
@@ -557,12 +599,17 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
     if (context.stopped || !context.conversationId || !context.activeTurnId) return;
     const endpoint = endpointFor(context);
     if (!endpoint) return;
+    const conversationId = context.conversationId;
+    // Full-access mirrors Codex's "never ask" policy: Antigravity always raises
+    // gates, so we answer "allow" the moment each one appears instead of waiting
+    // for a human (which other runtime modes still do).
+    const autoApprove = context.session.runtimeMode === "full-access";
     let trajectory: CascadeTrajectory | undefined;
     try {
       const response = (await antigravityLanguageServerRpc({
         endpoint,
         method: "GetCascadeTrajectory",
-        body: { cascadeId: context.conversationId },
+        body: { cascadeId: conversationId },
       })) as CascadeTrajectoryResponse;
       trajectory = response.trajectory;
     } catch {
@@ -571,6 +618,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
     }
     const steps = trajectory?.steps ?? [];
     const seen = new Set<string>();
+    const autoApproveQueue: PendingAntigravityGate[] = [];
     steps.forEach((step, index) => {
       const interaction = step.requestedInteraction;
       if (step.status !== "CORTEX_STEP_STATUS_WAITING" || !interaction) return;
@@ -580,7 +628,9 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       if (!trajectoryId) return;
       const id = `antigravity-approval:${trajectoryId}:${stepIndex}`;
       seen.add(id);
-      if (context.pendingGates.has(id)) return;
+      // Skip gates already surfaced for manual approval or already auto-approved
+      // (the daemon may keep reporting WAITING until it processes our decision).
+      if (context.pendingGates.has(id) || context.autoApprovedGates.has(id)) return;
       const isFile = interaction.filePermission !== undefined;
       const gate: PendingAntigravityGate = {
         requestId: RuntimeRequestId.make(id),
@@ -594,13 +644,34 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
           (isFile ? "Antigravity file access request" : "Antigravity command request"),
         absolutePathUri: isFile ? trimText(interaction.filePermission?.absolutePathUri) : undefined,
       };
-      context.pendingGates.set(id, gate);
-      emitGateOpened(context, gate);
+      if (autoApprove) {
+        // Reserve synchronously so overlapping poll cycles do not approve twice.
+        context.autoApprovedGates.add(id);
+        autoApproveQueue.push(gate);
+      } else {
+        emitGateOpened(context, gate);
+        context.pendingGates.set(id, gate);
+      }
     });
     for (const [id, gate] of context.pendingGates) {
       if (!seen.has(id)) {
         context.pendingGates.delete(id);
         emitGateResolved(context, gate, "external");
+      }
+    }
+    // Drop auto-approved markers once the daemon has cleared the WAITING step.
+    for (const id of context.autoApprovedGates) {
+      if (!seen.has(id)) context.autoApprovedGates.delete(id);
+    }
+    for (const gate of autoApproveQueue) {
+      try {
+        await sendCascadeGateDecision({ endpoint, conversationId, gate, decision: "accept" });
+      } catch {
+        // Auto-approval failed (e.g. daemon RPC error): fall back to manual
+        // approval so the turn is not silently stuck.
+        context.autoApprovedGates.delete(gate.requestId);
+        emitGateOpened(context, gate);
+        context.pendingGates.set(gate.requestId, gate);
       }
     }
   };
@@ -771,6 +842,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       turns: [],
       activeTurnId: undefined,
       pendingGates: new Map(),
+      autoApprovedGates: new Set(),
       poller: undefined,
       gatePoller: undefined,
       daemonEndpoint: undefined,
@@ -1037,6 +1109,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
     const updatedAt = yield* currentTimestamp;
     context.activeTurnId = undefined;
     context.pendingGates.clear();
+    context.autoApprovedGates.clear();
     context.agentApiCancel = undefined;
     context.session = { ...context.session, status: "ready", activeTurnId: undefined, updatedAt };
     emit({
@@ -1061,7 +1134,8 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       Effect.flatMap((context) => {
         const gate = context.pendingGates.get(requestId);
         const endpoint = gate ? endpointFor(context) : undefined;
-        if (!gate || !context.conversationId || !endpoint) {
+        const conversationId = context.conversationId;
+        if (!gate || !conversationId || !endpoint) {
           return Effect.fail(
             new ProviderAdapterRequestError({
               provider: PROVIDER,
@@ -1070,35 +1144,8 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
             }),
           );
         }
-        const allow = decision === "accept" || decision === "acceptForSession";
-        const scope =
-          decision === "acceptForSession"
-            ? "PERMISSION_SCOPE_CONVERSATION"
-            : "PERMISSION_SCOPE_ONCE";
-        const decisionPayload =
-          gate.kind === "filePermission"
-            ? {
-                filePermission: {
-                  allow,
-                  scope,
-                  ...(gate.absolutePathUri ? { absolutePathUri: gate.absolutePathUri } : {}),
-                },
-              }
-            : { permission: { allow, scope } };
         return Effect.tryPromise({
-          try: () =>
-            antigravityLanguageServerRpc({
-              endpoint,
-              method: "HandleCascadeUserInteraction",
-              body: {
-                cascadeId: context.conversationId,
-                interaction: {
-                  trajectoryId: gate.trajectoryId,
-                  stepIndex: gate.stepIndex,
-                  ...decisionPayload,
-                },
-              },
-            }),
+          try: () => sendCascadeGateDecision({ endpoint, conversationId, gate, decision }),
           catch: (cause) =>
             new ProviderAdapterRequestError({
               provider: PROVIDER,
@@ -1109,6 +1156,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
         }).pipe(
           Effect.map(() => {
             context.pendingGates.delete(requestId);
+            context.autoApprovedGates.delete(requestId);
             emitGateResolved(context, gate, decision);
           }),
         );
