@@ -1200,6 +1200,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
           },
         });
+        const revokeBody = (yield* revokeResponse.json) as {
+          readonly revoked: boolean;
+        };
         const revokedSessionResponse = yield* HttpClient.get("/api/auth/session", {
           headers: {
             authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
@@ -1210,9 +1213,39 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         };
 
         assert.equal(revokeResponse.status, 200);
+        assert.equal(revokeBody.revoked, true);
         assert.equal(revokedSessionResponse.status, 200);
         assert.equal(revokedSessionBody.authenticated, false);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects cookie-authenticated self session revocation", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const { cookie } = yield* bootstrapBrowserSession();
+      const revokeResponse = yield* HttpClient.post("/api/auth/session/revoke", {
+        headers: {
+          cookie: cookie?.split(";")[0] ?? "",
+        },
+      });
+      const revokeBody = (yield* revokeResponse.json) as {
+        readonly error?: string;
+      };
+      const sessionResponse = yield* HttpClient.get("/api/auth/session", {
+        headers: {
+          cookie: cookie?.split(";")[0] ?? "",
+        },
+      });
+      const sessionBody = (yield* sessionResponse.json) as {
+        readonly authenticated: boolean;
+      };
+
+      assert.equal(revokeResponse.status, 403);
+      assert.equal(revokeBody.error, "Bearer session authentication required.");
+      assert.equal(sessionResponse.status, 200);
+      assert.equal(sessionBody.authenticated, true);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("issues short-lived websocket tokens for authenticated bearer sessions", () =>
@@ -1283,6 +1316,16 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(wsTokenResponse.status, 200);
       assertBrowserApiCorsHeaders(wsTokenResponse.headers);
       assert.equal(typeof wsTokenBody.token, "string");
+
+      const revokeResponse = yield* HttpClient.post("/api/auth/session/revoke", {
+        headers: {
+          authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
+          origin,
+        },
+      });
+
+      assert.equal(revokeResponse.status, 200);
+      assertBrowserApiCorsHeaders(revokeResponse.headers);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -3600,6 +3643,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.deepEqual(effects, [
         "query:thread-shell:active",
         "dispatch:thread.archive",
+        "query:thread-shell:archived",
         "dispatch:thread.session.stop",
         `terminal.close:${threadId}`,
       ]);

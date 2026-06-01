@@ -34,6 +34,7 @@ import {
 } from "./virtualWorkspaceCache.ts";
 
 const READINESS_PATH = "/.well-known/t3/environment";
+const REVOKE_BEARER_SESSION_TIMEOUT_MS = 5_000;
 const BOOTSTRAP_FD = 3;
 const INHERITED_ENV_ALLOWLIST = [
   "APPDATA",
@@ -866,15 +867,35 @@ async function revokeBearerSession(
   fetchFn: typeof fetch = fetch,
 ): Promise<void> {
   const revokeUrl = new URL("/api/auth/session/revoke", httpBaseUrl);
+  const timeout = createAbortTimeout(REVOKE_BEARER_SESSION_TIMEOUT_MS);
   const response = await fetchFn(revokeUrl, {
     headers: {
       authorization: `Bearer ${bearerToken}`,
     },
     method: "POST",
-    signal: AbortSignal.timeout(1_000),
-  });
+    signal: timeout.signal,
+  }).finally(timeout.clear);
 
   if (!response.ok) {
     throw new Error(`Failed to revoke VS Code backend bearer session (${response.status}).`);
   }
+}
+
+function createAbortTimeout(timeoutMs: number): {
+  readonly signal: AbortSignal;
+  readonly clear: () => void;
+} {
+  if (typeof AbortSignal.timeout === "function") {
+    return {
+      signal: AbortSignal.timeout(timeoutMs),
+      clear: () => {},
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    clear: () => globalThis.clearTimeout(timer),
+  };
 }

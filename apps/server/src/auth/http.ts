@@ -54,6 +54,12 @@ export const authSessionRevokeRouteLayer = HttpRouter.add(
     const serverAuth = yield* ServerAuth;
     const sessions = yield* SessionCredentialService;
     const session = yield* serverAuth.authenticateHttpRequest(request);
+    if (session.method !== "bearer-session-token") {
+      return yield* new AuthError({
+        message: "Bearer session authentication required.",
+        status: 403,
+      });
+    }
     const revoked = yield* sessions.revoke(session.sessionId).pipe(
       Effect.mapError(
         (cause) =>
@@ -63,7 +69,10 @@ export const authSessionRevokeRouteLayer = HttpRouter.add(
           }),
       ),
     );
-    return HttpServerResponse.jsonUnsafe({ revoked }, { status: 200 });
+    return HttpServerResponse.jsonUnsafe(
+      { revoked },
+      { status: 200, headers: browserApiCorsHeaders },
+    );
   }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
 );
 

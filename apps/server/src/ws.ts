@@ -578,18 +578,15 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         normalizedCommand: OrchestrationCommand,
         options?: {
           readonly peerThreadContext?: HostPeerThreadRoutingContext | null;
-          readonly skipPeerFederation?: boolean;
         },
       ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
         const peerDispatch =
-          options?.skipPeerFederation === true
-            ? Effect.succeed(Option.none())
-            : options?.peerThreadContext
-              ? hostPeerFederation.dispatchCommandWithThreadContext(
-                  normalizedCommand,
-                  options.peerThreadContext,
-                )
-              : hostPeerFederation.dispatchCommand(normalizedCommand);
+          options?.peerThreadContext !== undefined && options.peerThreadContext !== null
+            ? hostPeerFederation.dispatchCommandWithThreadContext(
+                normalizedCommand,
+                options.peerThreadContext,
+              )
+            : hostPeerFederation.dispatchCommand(normalizedCommand);
         const dispatchEffect = peerDispatch.pipe(
           Effect.flatMap(
             Option.match({
@@ -698,20 +695,36 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                                     }),
                                   ),
                                   Effect.catch(() =>
-                                    Effect.succeed({
-                                      shouldStop: true,
-                                      peerThreadContext: null,
-                                    }),
+                                    Effect.logWarning(
+                                      "failed to resolve project context for archive session stop routing",
+                                      {
+                                        threadId: normalizedCommand.threadId,
+                                        projectId: thread.projectId,
+                                      },
+                                    ).pipe(
+                                      Effect.as({
+                                        shouldStop: true,
+                                        peerThreadContext: null,
+                                      }),
+                                    ),
                                   ),
                                 );
                             },
                           }),
                         ),
-                        Effect.catch(() =>
-                          Effect.succeed({
-                            shouldStop: false,
-                            peerThreadContext: null,
-                          }),
+                        Effect.catch((cause) =>
+                          Effect.logWarning(
+                            "failed to resolve thread context for archive session stop routing",
+                            {
+                              threadId: normalizedCommand.threadId,
+                              cause,
+                            },
+                          ).pipe(
+                            Effect.as({
+                              shouldStop: false,
+                              peerThreadContext: null,
+                            }),
+                          ),
                         ),
                       )
                   : { shouldStop: false, peerThreadContext: null };
@@ -730,7 +743,6 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
 
                     yield* dispatchNormalizedCommand(stopCommand, {
                       peerThreadContext: archiveSessionStopRouting.peerThreadContext,
-                      skipPeerFederation: archiveSessionStopRouting.peerThreadContext === null,
                     });
                   }).pipe(
                     Effect.catchCause((cause) =>

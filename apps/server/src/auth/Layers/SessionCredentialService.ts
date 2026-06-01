@@ -122,6 +122,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
       sessionId,
     }).pipe(Effect.asVoid);
 
+  // Startup cleanup only; live VS Code backend bearer sessions keep the normal session TTL.
   yield* DateTime.now.pipe(
     Effect.flatMap((revokedAt) =>
       authSessions.revokeStaleDesktopBootstrapBearerSessions({

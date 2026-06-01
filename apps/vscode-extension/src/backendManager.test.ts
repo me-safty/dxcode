@@ -343,6 +343,53 @@ describe("BackendManager", () => {
     );
   });
 
+  it("continues stopping the backend when bearer session revocation fails", async () => {
+    let killMock: ReturnType<typeof vi.fn> | null = null;
+    const outputChannel = makeOutputChannel();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sessionToken: "vscode-bearer-token" }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+      )
+      .mockRejectedValueOnce(new Error("simulated revoke failure"))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sessionToken: "vscode-bearer-token" }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+      );
+    const spawnMock = vi.fn<BackendSpawn>(() => {
+      const child = makeChildProcess(() => {});
+      killMock = child.kill as ReturnType<typeof vi.fn>;
+      return child;
+    });
+    const manager = new BackendManager(
+      { extensionPath: extensionRoot } as never,
+      outputChannel as never,
+      makeDependencies({
+        fetch: fetchMock,
+        spawn: spawnMock,
+      }),
+    );
+
+    await manager.ensureStarted();
+    await manager.stop();
+
+    expect(killMock).toHaveBeenCalledWith("SIGTERM");
+    expect(outputChannel.appendLine).toHaveBeenCalledWith(
+      "[backend] Failed to revoke backend bearer session: simulated revoke failure",
+    );
+    await expect(manager.ensureStarted()).resolves.toMatchObject({
+      bearerToken: "vscode-bearer-token",
+    });
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+  });
+
   it("includes VS Code MCP server bootstrap data when the bridge is enabled", async () => {
     let bootstrapJson = "";
     const writeHostMcpAdvertisement = vi.fn();

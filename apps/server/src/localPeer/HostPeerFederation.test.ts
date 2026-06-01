@@ -16,7 +16,7 @@ import {
 } from "@t3tools/shared/localBackendAdvertisement";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ServerConfigShape } from "../config.ts";
 import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -41,9 +41,6 @@ describe("HostPeerFederation", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
     tempDirs = [];
-  });
-
-  afterAll(() => {
     vi.unstubAllGlobals();
   });
 
@@ -59,7 +56,7 @@ describe("HostPeerFederation", () => {
     const request = getFetchRequest();
     expect(request.url).toBe("http://127.0.0.1:49111/api/local-peer/orchestration/dispatch");
     expect(request.init?.method).toBe("POST");
-    expect(JSON.parse(decodeFetchBody(request.init?.body))).toEqual(interruptCommand());
+    expect(JSON.parse(await decodeFetchBody(request.init?.body))).toEqual(interruptCommand());
   });
 
   it("does not dispatch owner-sensitive commands to later peers after one peer succeeds", async () => {
@@ -82,7 +79,7 @@ describe("HostPeerFederation", () => {
     const request = getFetchRequest();
     expect(request.url).toBe("http://127.0.0.1:49111/api/local-peer/orchestration/dispatch");
     expect(request.init?.method).toBe("POST");
-    expect(JSON.parse(decodeFetchBody(request.init?.body))).toEqual(interruptCommand());
+    expect(JSON.parse(await decodeFetchBody(request.init?.body))).toEqual(interruptCommand());
   });
 
   it("does not route a follow-up prompt after interruption so ownership can transfer locally", async () => {
@@ -162,12 +159,18 @@ function getFetchRequest(index = 0): {
   };
 }
 
-function decodeFetchBody(body: unknown): string {
+async function decodeFetchBody(body: unknown): Promise<string> {
   if (typeof body === "string") {
     return body;
   }
+  if (body instanceof ArrayBuffer) {
+    return new TextDecoder().decode(body);
+  }
   if (body instanceof Uint8Array) {
     return new TextDecoder().decode(body);
+  }
+  if (body instanceof Blob) {
+    return await body.text();
   }
   throw new Error(`Unsupported fetch body type: ${typeof body}`);
 }
