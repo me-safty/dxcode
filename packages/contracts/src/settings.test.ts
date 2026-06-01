@@ -42,6 +42,53 @@ describe("ClientSettings running message delivery", () => {
   });
 });
 
+describe("ClientSettings sidebar project folders", () => {
+  it("defaults project folders to an empty list", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.sidebarProjectFolders).toEqual([]);
+    expect(decodeClientSettings({}).sidebarProjectFolders).toEqual([]);
+  });
+
+  it("decodes project folders and trims persisted values", () => {
+    const decoded = decodeClientSettings({
+      sidebarProjectFolders: [
+        {
+          id: " folder-1 ",
+          name: " Work ",
+          projectKeys: [" local:/repo-a ", "local:/repo-b"],
+        },
+      ],
+    });
+
+    expect(decoded.sidebarProjectFolders).toEqual([
+      {
+        id: "folder-1",
+        name: "Work",
+        projectKeys: ["local:/repo-a", "local:/repo-b"],
+      },
+    ]);
+  });
+
+  it("accepts project folders as a client settings patch", () => {
+    const patch = decodeClientSettingsPatch({
+      sidebarProjectFolders: [
+        {
+          id: "folder-1",
+          name: "Work",
+          projectKeys: ["local:/repo-a"],
+        },
+      ],
+    });
+
+    expect(patch.sidebarProjectFolders).toEqual([
+      {
+        id: "folder-1",
+        name: "Work",
+        projectKeys: ["local:/repo-a"],
+      },
+    ]);
+  });
+});
+
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults to an empty record so legacy configs without the key still decode", () => {
     expect(DEFAULT_SERVER_SETTINGS.providerInstances).toEqual({});
