@@ -17,7 +17,6 @@ import {
   type KeybindingCommand,
   type UploadChatAttachment,
   OrchestrationThreadActivity,
-  PROJECT_CONFIG_RELATIVE_PATH,
   ProviderInteractionMode,
   ProviderDriverKind,
   RuntimeMode,
@@ -132,6 +131,7 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
+import { writeProjectConfigUpdate } from "~/projectConfigFile";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
@@ -208,7 +208,6 @@ import {
   PullRequestCommentSeenStateSchema,
   pullRequestCommentSeenScopeKey,
 } from "~/pullRequestReviewComments";
-import { updateProjectConfigJson } from "../projectConfigFile";
 import { useComposerHandleContext } from "../composerHandleContext";
 import {
   useServerAvailableEditors,
@@ -2671,29 +2670,6 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
-  const writeProjectConfig = useCallback(
-    async (input: {
-      api: NonNullable<ReturnType<typeof readEnvironmentApi>>;
-      projectCwd: string;
-      scripts?: readonly ProjectScript[] | undefined;
-      browserPreviewUrl?: string | null | undefined;
-    }) => {
-      const existing = await input.api.projects.readFile({
-        cwd: input.projectCwd,
-        relativePath: PROJECT_CONFIG_RELATIVE_PATH,
-      });
-      await input.api.projects.writeFile({
-        cwd: input.projectCwd,
-        relativePath: PROJECT_CONFIG_RELATIVE_PATH,
-        contents: updateProjectConfigJson(existing.contents, {
-          scripts: input.scripts,
-          browserPreviewUrl: input.browserPreviewUrl,
-        }),
-      });
-    },
-    [],
-  );
-
   const persistProjectScripts = useCallback(
     async (input: {
       projectId: ProjectId;
@@ -2706,11 +2682,13 @@ export default function ChatView(props: ChatViewProps) {
       const api = readEnvironmentApi(environmentId);
       if (!api) return;
 
-      await writeProjectConfig({
+      await writeProjectConfigUpdate({
         api,
         projectCwd: input.projectCwd,
-        scripts: input.nextScripts,
-        browserPreviewUrl: input.browserPreviewUrl,
+        update: {
+          scripts: input.nextScripts,
+          browserPreviewUrl: input.browserPreviewUrl,
+        },
       });
 
       await api.orchestration.dispatchCommand({
@@ -2733,7 +2711,7 @@ export default function ChatView(props: ChatViewProps) {
         await localApi.server.upsertKeybinding(keybindingRule);
       }
     },
-    [environmentId, writeProjectConfig],
+    [environmentId],
   );
   const saveProjectScript = useCallback(
     async (input: NewProjectScriptInput) => {
@@ -2847,11 +2825,13 @@ export default function ChatView(props: ChatViewProps) {
       const nextBrowserPreviewUrl =
         normalizedPreviewUrl.trim().length > 0 ? normalizedPreviewUrl : null;
 
-      await writeProjectConfig({
+      await writeProjectConfigUpdate({
         api,
         projectCwd: activeProject.cwd,
-        scripts: activeProject.scripts,
-        browserPreviewUrl: nextBrowserPreviewUrl,
+        update: {
+          scripts: activeProject.scripts,
+          browserPreviewUrl: nextBrowserPreviewUrl,
+        },
       });
 
       await api.orchestration.dispatchCommand({
@@ -2861,7 +2841,7 @@ export default function ChatView(props: ChatViewProps) {
         browserPreviewUrl: nextBrowserPreviewUrl,
       });
     },
-    [activeProject, environmentId, writeProjectConfig],
+    [activeProject, environmentId],
   );
 
   const handleRuntimeModeChange = useCallback(
