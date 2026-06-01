@@ -1079,12 +1079,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : null,
     [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
   );
-  const collapsedComposerPrimaryActionDisabled =
-    (phase === "running" && !canSubmitWhileRunning) ||
-    isSendBusy ||
-    isConnecting ||
-    !composerSendState.hasSendableContent;
-  const collapsedComposerPrimaryActionLabel = "Send message";
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
   const openRouterAudioTranscriptionSettings = settings.openRouter.audioTranscription;
@@ -1115,7 +1109,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     showCollapsedMobilePromptRow && phase !== "running" && !composerSendState.hasSendableContent;
   const collapsedComposerPrimaryActionDisabled = collapsedComposerPrimaryActionIsVoice
     ? isVoiceTranscriptionButtonDisabled
-    : phase === "running" || isSendBusy || isConnecting || !composerSendState.hasSendableContent;
+    : (phase === "running" && !canSubmitWhileRunning) ||
+      isSendBusy ||
+      isConnecting ||
+      !composerSendState.hasSendableContent;
   const collapsedComposerPrimaryActionLabel = collapsedComposerPrimaryActionIsVoice
     ? voiceTranscriptionButtonLabel
     : "Send message";
