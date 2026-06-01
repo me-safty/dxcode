@@ -42,7 +42,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useVcsStatus } from "~/lib/vcsStatusState";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
-import { isElectron, isVscodeWebview } from "../env";
+import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
@@ -1341,7 +1341,6 @@ export default function ChatView(props: ChatViewProps) {
   });
   const composerLockedProvider = resolveComposerLockedProvider({
     lockedProvider,
-    isVscodeWebview,
   });
   const primaryServerConfig = useServerConfig();
   const activeEnvRuntimeState = useSavedEnvironmentRuntimeStore((s) =>

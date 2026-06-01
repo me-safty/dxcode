@@ -308,20 +308,18 @@ const makeThread = (input?: {
 });
 
 describe("resolveComposerLockedProvider", () => {
-  it("preserves the conversation lock outside VS Code", () => {
+  it("preserves the conversation lock", () => {
     expect(
       resolveComposerLockedProvider({
         lockedProvider: ProviderDriverKind.make("codex"),
-        isVscodeWebview: false,
       }),
     ).toBe(ProviderDriverKind.make("codex"));
   });
 
-  it("unlocks only the VS Code webview composer model picker", () => {
+  it("keeps the composer unlocked when the conversation is not locked", () => {
     expect(
       resolveComposerLockedProvider({
-        lockedProvider: ProviderDriverKind.make("codex"),
-        isVscodeWebview: true,
+        lockedProvider: null,
       }),
     ).toBeNull();
   });

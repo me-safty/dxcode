@@ -330,9 +330,8 @@ export function deriveLockedProvider(input: {
 
 export function resolveComposerLockedProvider(input: {
   lockedProvider: ProviderDriverKind | null;
-  isVscodeWebview: boolean;
 }): ProviderDriverKind | null {
-  return input.isVscodeWebview ? null : input.lockedProvider;
+  return input.lockedProvider;
 }
 
 export async function waitForStartedServerThread(
