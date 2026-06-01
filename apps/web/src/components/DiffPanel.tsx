@@ -1,6 +1,6 @@
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff, type FileDiffMetadata } from "@pierre/diffs/react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import type { TurnId } from "@t3tools/contracts";
 import {
@@ -11,7 +11,6 @@ import {
   GitBranchIcon,
   PanelRightCloseIcon,
   PilcrowIcon,
-  RotateCcwIcon,
   Rows3Icon,
   TextWrapIcon,
 } from "lucide-react";
@@ -24,10 +23,7 @@ import {
   useState,
 } from "react";
 import { useGitStatus } from "~/lib/gitStatusState";
-import {
-  gitWorkingTreeDiffQueryOptions,
-  vcsRevertUnstagedFilesMutationOptions,
-} from "~/lib/gitReactQuery";
+import { gitWorkingTreeDiffQueryOptions } from "~/lib/gitReactQuery";
 import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
 import { cn } from "~/lib/utils";
 import { resolvePathLinkTarget } from "../terminal-links";
@@ -55,18 +51,8 @@ import { formatShortTimestamp } from "../timestampFormat";
 import { openRightPanel } from "../rightPanelGesture";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { Button } from "./ui/button";
-import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-} from "./ui/alert-dialog";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
-import { toastManager } from "./ui/toast";
 import { openPathInPreferredEditorOrFilePreview } from "../workspaceFilePreview";
 import {
   isWorkspaceImagePreviewPath,
@@ -282,14 +268,11 @@ export { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 
 export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { resolvedTheme } = useTheme();
   const settings = useSettings();
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
   const [diffWordWrap, setDiffWordWrap] = useState(settings.diffWordWrap);
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
-  const [pendingBulkRevertPaths, setPendingBulkRevertPaths] =
-    useState<ReadonlyArray<string> | null>(null);
   const [collapsedDiffFileKeys, setCollapsedDiffFileKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -475,19 +458,8 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       enabled: isGitRepo,
     }),
   );
-  const revertUnstagedFilesMutation = useMutation(
-    vcsRevertUnstagedFilesMutationOptions({
-      environmentId: activeDiffContext?.environmentId ?? null,
-      cwd: activeCwd ?? null,
-      queryClient,
-    }),
-  );
   const refetchWorkingTreeDiff = workingTreeDiffQuery.refetch;
   const workingTreeDiffFetched = workingTreeDiffQuery.isFetched;
-  const unstagedDiffFilePaths = useMemo(
-    () => gitStatusQuery.data?.workingTree.unstaged?.files.map((file) => file.path) ?? [],
-    [gitStatusQuery.data?.workingTree.unstaged?.files],
-  );
   const selectedTurnCheckpointDiff = selectedTurn
     ? activeCheckpointDiffQuery.data?.diff
     : undefined;
@@ -758,31 +730,6 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId];
     return `Turn ${count ?? "?"}`;
   })();
-  const confirmBulkRevert = useCallback(() => {
-    const filePaths = pendingBulkRevertPaths;
-    if (!filePaths || filePaths.length === 0) {
-      setPendingBulkRevertPaths(null);
-      return;
-    }
-
-    setPendingBulkRevertPaths(null);
-    void revertUnstagedFilesMutation
-      .mutateAsync({ filePaths: [...filePaths] })
-      .catch((error: unknown) => {
-        toastManager.add({
-          type: "error",
-          title: "Unable to revert changes",
-          description: error instanceof Error ? error.message : "An error occurred.",
-        });
-      });
-  }, [pendingBulkRevertPaths, revertUnstagedFilesMutation]);
-  const isRevertUnstagedChangesVisible = selectedDiffSource === "unstaged";
-  const isRevertUnstagedChangesDisabled =
-    unstagedDiffFilePaths.length === 0 || revertUnstagedFilesMutation.isPending;
-  const revertUnstagedChangesTitle =
-    unstagedDiffFilePaths.length === 0
-      ? "No unstaged changes to revert"
-      : "Revert all unstaged changes";
   const headerRow = (
     <>
       <div className="hidden min-w-0 flex-1 [-webkit-app-region:no-drag] max-[760px]:block">
@@ -999,18 +946,6 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         >
           <PilcrowIcon className="size-3" />
         </Toggle>
-        {isRevertUnstagedChangesVisible ? (
-          <Button
-            size="icon-xs"
-            variant="outline"
-            aria-label="Revert all unstaged changes"
-            title={revertUnstagedChangesTitle}
-            disabled={isRevertUnstagedChangesDisabled}
-            onClick={() => setPendingBulkRevertPaths(unstagedDiffFilePaths)}
-          >
-            <RotateCcwIcon className="size-3" />
-          </Button>
-        ) : null}
         <Button
           size="icon-xs"
           variant="outline"
@@ -1189,31 +1124,6 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           </>
         )}
       </DiffPanelShell>
-      <AlertDialog
-        open={pendingBulkRevertPaths !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingBulkRevertPaths(null);
-          }
-        }}
-      >
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Revert all unstaged changes?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will discard changes in {pendingBulkRevertPaths?.length ?? 0} file
-              {(pendingBulkRevertPaths?.length ?? 0) === 1 ? "" : "s"}. Staged changes are
-              preserved.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-            <Button variant="destructive" onClick={confirmBulkRevert}>
-              Revert changes
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
     </>
   );
 }

@@ -17,6 +17,7 @@ import {
   PlusIcon,
   RefreshCwIcon,
   SparklesIcon,
+  Undo2Icon,
 } from "lucide-react";
 import {
   type KeyboardEvent,
@@ -60,6 +61,15 @@ import {
   type SourceControlTreeNode,
 } from "./sourceControlTree";
 import { useGitActionRunner } from "./useGitActionRunner";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -78,6 +88,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   gitGenerateCommitMessageMutationOptions,
   gitMutationKeys,
+  vcsRevertUnstagedFilesMutationOptions,
   vcsStageFilesMutationOptions,
   vcsUnstageFilesMutationOptions,
 } from "~/lib/gitReactQuery";
@@ -194,6 +205,11 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
   const [pendingUnstagePaths, setPendingUnstagePaths] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [pendingRevertPaths, setPendingRevertPaths] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [pendingBulkRevertPaths, setPendingBulkRevertPaths] =
+    useState<ReadonlyArray<string> | null>(null);
 
   const routeTarget = useParams({
     strict: false,
@@ -271,6 +287,9 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
   const unstageFilesMutation = useMutation(
     vcsUnstageFilesMutationOptions({ environmentId, cwd, queryClient }),
   );
+  const revertUnstagedFilesMutation = useMutation(
+    vcsRevertUnstagedFilesMutationOptions({ environmentId, cwd, queryClient }),
+  );
 
   const branchName = gitStatus?.refName ?? null;
   const files = useMemo(() => gitStatus?.workingTree.files ?? [], [gitStatus?.workingTree.files]);
@@ -332,7 +351,10 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
   const stagedTree = useMemo(() => buildTree(stagedFiles), [buildTree, stagedFiles]);
   const unstagedTree = useMemo(() => buildTree(unstagedFiles), [buildTree, unstagedFiles]);
 
-  const isStageOperationRunning = stageFilesMutation.isPending || unstageFilesMutation.isPending;
+  const isStageOperationRunning =
+    stageFilesMutation.isPending ||
+    unstageFilesMutation.isPending ||
+    revertUnstagedFilesMutation.isPending;
   const hasStagedFiles = stagedFiles.length > 0;
   const hasUnstagedFiles = unstagedFiles.length > 0;
   const hasChanges = hasStagedFiles || hasUnstagedFiles;
@@ -424,6 +446,47 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
     },
     [unstageFilesMutation],
   );
+
+  const revertUnstagedFiles = useCallback(
+    (filePaths: ReadonlyArray<string>) => {
+      if (filePaths.length === 0) return;
+      const paths = [...filePaths];
+      setPendingRevertPaths((previous) => {
+        const next = new Set(previous);
+        for (const path of paths) next.add(path);
+        return next;
+      });
+      void revertUnstagedFilesMutation
+        .mutateAsync({ filePaths: paths })
+        .catch((error: unknown) => {
+          toastManager.add({
+            type: "error",
+            title: "Unable to revert changes",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          });
+        })
+        .finally(() => {
+          setPendingRevertPaths((previous) => {
+            const next = new Set(previous);
+            for (const path of paths) next.delete(path);
+            return next;
+          });
+        });
+    },
+    [revertUnstagedFilesMutation],
+  );
+
+  const requestBulkRevertUnstagedFiles = useCallback((filePaths: ReadonlyArray<string>) => {
+    if (filePaths.length === 0) return;
+    setPendingBulkRevertPaths([...filePaths]);
+  }, []);
+
+  const confirmBulkRevertUnstagedFiles = useCallback(() => {
+    const filePaths = pendingBulkRevertPaths;
+    setPendingBulkRevertPaths(null);
+    if (!filePaths || filePaths.length === 0) return;
+    revertUnstagedFiles(filePaths);
+  }, [pendingBulkRevertPaths, revertUnstagedFiles]);
 
   const handleRefresh = useCallback(() => {
     if (!environmentId || !cwd) return;
@@ -856,6 +919,7 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
                     resolvedTheme={resolvedTheme}
                     actionDisabled={isGitActionRunning || isStageOperationRunning}
                     pendingPaths={pendingUnstagePaths}
+                    pendingRevertPaths={pendingRevertPaths}
                     onToggleSection={toggleSection}
                     onToggleDir={toggleDir}
                     onSectionAction={unstageFiles}
@@ -874,10 +938,13 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
                     resolvedTheme={resolvedTheme}
                     actionDisabled={isGitActionRunning || isStageOperationRunning}
                     pendingPaths={pendingStagePaths}
+                    pendingRevertPaths={pendingRevertPaths}
                     onToggleSection={toggleSection}
                     onToggleDir={toggleDir}
                     onSectionAction={stageFiles}
                     onFileAction={(path) => stageFiles([path])}
+                    onSectionRevert={requestBulkRevertUnstagedFiles}
+                    onFileRevert={(path) => revertUnstagedFiles([path])}
                     onOpenFilePreview={handleOpenFilePreview}
                   />
                 </div>
@@ -912,6 +979,32 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
           gitCwd={cwd}
         />
       ) : null}
+
+      <AlertDialog
+        open={pendingBulkRevertPaths !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingBulkRevertPaths(null);
+          }
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revert all unstaged changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will discard changes in {pendingBulkRevertPaths?.length ?? 0} file
+              {(pendingBulkRevertPaths?.length ?? 0) === 1 ? "" : "s"}. Staged changes are
+              preserved.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button variant="destructive" onClick={confirmBulkRevertUnstagedFiles}>
+              Revert changes
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
 
       <Dialog
         open={pendingDefaultBranchAction !== null}
@@ -998,10 +1091,13 @@ function SourceControlSectionTree({
   resolvedTheme,
   actionDisabled,
   pendingPaths,
+  pendingRevertPaths,
   onToggleSection,
   onToggleDir,
   onSectionAction,
   onFileAction,
+  onSectionRevert,
+  onFileRevert,
   onOpenFilePreview,
 }: {
   section: SourceControlSection;
@@ -1015,15 +1111,19 @@ function SourceControlSectionTree({
   resolvedTheme: "light" | "dark";
   actionDisabled: boolean;
   pendingPaths: ReadonlySet<string>;
+  pendingRevertPaths: ReadonlySet<string>;
   onToggleSection: (section: SourceControlSection) => void;
   onToggleDir: (path: string) => void;
   onSectionAction: (paths: ReadonlyArray<string>) => void;
   onFileAction: (path: string) => void;
+  onSectionRevert?: ((paths: ReadonlyArray<string>) => void) | undefined;
+  onFileRevert?: ((path: string) => void) | undefined;
   onOpenFilePreview: (path: string) => void;
 }) {
   const ActionIcon = section === "staged" ? MinusIcon : PlusIcon;
   const actionLabel = section === "staged" ? "Unstage all" : "Stage all";
   const sectionActionPending = filePaths.some((path) => pendingPaths.has(path));
+  const sectionRevertPending = filePaths.some((path) => pendingRevertPaths.has(path));
 
   return (
     <section>
@@ -1043,28 +1143,56 @@ function SourceControlSectionTree({
             {fileCount}
           </span>
         </button>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                aria-label={actionLabel}
-                disabled={actionDisabled || fileCount === 0}
-                className="text-muted-foreground/70 hover:text-foreground"
-                onClick={() => onSectionAction(filePaths)}
-              />
-            }
-          >
-            {sectionActionPending ? (
-              <Spinner className="size-3.5" />
-            ) : (
-              <ActionIcon className="size-3.5" />
-            )}
-          </TooltipTrigger>
-          <TooltipPopup side="left">{actionLabel}</TooltipPopup>
-        </Tooltip>
+        <div className="grid shrink-0 grid-cols-[1.75rem_1.75rem] items-center justify-items-center gap-0.5 sm:grid-cols-[1.5rem_1.5rem]">
+          {section === "unstaged" && onSectionRevert ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label="Revert all unstaged changes"
+                    disabled={actionDisabled || fileCount === 0}
+                    className="text-muted-foreground/70 hover:text-foreground"
+                    onClick={() => onSectionRevert(filePaths)}
+                  />
+                }
+              >
+                {sectionRevertPending ? (
+                  <Spinner className="size-3.5" />
+                ) : (
+                  <Undo2Icon className="size-3.5" />
+                )}
+              </TooltipTrigger>
+              <TooltipPopup side="left">Revert all changes</TooltipPopup>
+            </Tooltip>
+          ) : (
+            <span className="size-7 sm:size-6" aria-hidden="true" />
+          )}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={actionLabel}
+                  disabled={actionDisabled || fileCount === 0}
+                  className="text-muted-foreground/70 hover:text-foreground"
+                  onClick={() => onSectionAction(filePaths)}
+                />
+              }
+            >
+              {sectionActionPending ? (
+                <Spinner className="size-3.5" />
+              ) : (
+                <ActionIcon className="size-3.5" />
+              )}
+            </TooltipTrigger>
+            <TooltipPopup side="left">{actionLabel}</TooltipPopup>
+          </Tooltip>
+        </div>
       </div>
       {collapsed || fileCount === 0 ? null : (
         <div className="pl-3">
@@ -1079,8 +1207,10 @@ function SourceControlSectionTree({
               resolvedTheme={resolvedTheme}
               actionDisabled={actionDisabled}
               pendingPaths={pendingPaths}
+              pendingRevertPaths={pendingRevertPaths}
               onToggleDir={onToggleDir}
               onFileAction={onFileAction}
+              onFileRevert={onFileRevert}
               onOpenFilePreview={onOpenFilePreview}
             />
           ))}
@@ -1099,8 +1229,10 @@ function SourceControlTreeRow({
   resolvedTheme,
   actionDisabled,
   pendingPaths,
+  pendingRevertPaths,
   onToggleDir,
   onFileAction,
+  onFileRevert,
   onOpenFilePreview,
 }: {
   node: SourceControlTreeNode;
@@ -1111,8 +1243,10 @@ function SourceControlTreeRow({
   resolvedTheme: "light" | "dark";
   actionDisabled: boolean;
   pendingPaths: ReadonlySet<string>;
+  pendingRevertPaths: ReadonlySet<string>;
   onToggleDir: (path: string) => void;
   onFileAction: (path: string) => void;
+  onFileRevert?: ((path: string) => void) | undefined;
   onOpenFilePreview: (path: string) => void;
 }) {
   const indentStyle = { paddingLeft: `${depth * 12 + 6}px` };
@@ -1158,8 +1292,10 @@ function SourceControlTreeRow({
                 resolvedTheme={resolvedTheme}
                 actionDisabled={actionDisabled}
                 pendingPaths={pendingPaths}
+                pendingRevertPaths={pendingRevertPaths}
                 onToggleDir={onToggleDir}
                 onFileAction={onFileAction}
+                onFileRevert={onFileRevert}
                 onOpenFilePreview={onOpenFilePreview}
               />
             ))}
@@ -1171,6 +1307,7 @@ function SourceControlTreeRow({
   const ActionIcon = section === "staged" ? MinusIcon : PlusIcon;
   const actionLabel = section === "staged" ? `Unstage ${node.path}` : `Stage ${node.path}`;
   const filePending = pendingPaths.has(node.path);
+  const fileRevertPending = pendingRevertPaths.has(node.path);
   return (
     <div
       style={indentStyle}
@@ -1191,37 +1328,68 @@ function SourceControlTreeRow({
           className="size-4 shrink-0"
         />
         <span className="min-w-0 flex-1 truncate text-[13px] text-foreground/90">{node.name}</span>
+      </button>
+      <div className="grid shrink-0 grid-cols-[1.25rem_1.75rem_1.75rem] items-center justify-items-center gap-0.5 sm:grid-cols-[1.25rem_1.5rem_1.5rem]">
         <span
-          className={cn("shrink-0 text-[11px] font-semibold tabular-nums", badge.className)}
+          className={cn("w-5 text-center text-[11px] font-semibold tabular-nums", badge.className)}
           aria-label={badge.label}
           title={badge.label}
         >
           {badge.letter}
         </span>
-      </button>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              aria-label={actionLabel}
-              disabled={actionDisabled}
-              className="shrink-0 text-muted-foreground/70 hover:text-foreground"
-              onClick={(event) => {
-                event.stopPropagation();
-                onFileAction(node.path);
-              }}
-            />
-          }
-        >
-          {filePending ? <Spinner className="size-3.5" /> : <ActionIcon className="size-3.5" />}
-        </TooltipTrigger>
-        <TooltipPopup side="left">
-          {section === "staged" ? "Unstage file" : "Stage file"}
-        </TooltipPopup>
-      </Tooltip>
+        {section === "unstaged" && onFileRevert ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`Revert ${node.path}`}
+                  disabled={actionDisabled}
+                  className="text-muted-foreground/70 hover:text-foreground"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onFileRevert(node.path);
+                  }}
+                />
+              }
+            >
+              {fileRevertPending ? (
+                <Spinner className="size-3.5" />
+              ) : (
+                <Undo2Icon className="size-3.5" />
+              )}
+            </TooltipTrigger>
+            <TooltipPopup side="left">Revert file</TooltipPopup>
+          </Tooltip>
+        ) : (
+          <span className="size-7 sm:size-6" aria-hidden="true" />
+        )}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label={actionLabel}
+                disabled={actionDisabled}
+                className="text-muted-foreground/70 hover:text-foreground"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onFileAction(node.path);
+                }}
+              />
+            }
+          >
+            {filePending ? <Spinner className="size-3.5" /> : <ActionIcon className="size-3.5" />}
+          </TooltipTrigger>
+          <TooltipPopup side="left">
+            {section === "staged" ? "Unstage file" : "Stage file"}
+          </TooltipPopup>
+        </Tooltip>
+      </div>
     </div>
   );
 }

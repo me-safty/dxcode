@@ -31,6 +31,7 @@ const {
   hasServerThreadRef,
   navigateSpy,
   refreshGitStatusSpy,
+  revertUnstagedFilesMutateAsyncSpy,
   runStackedActionMutateAsyncSpy,
   setThreadBranchSpy,
   stageFilesMutateAsyncSpy,
@@ -72,6 +73,7 @@ const {
   hasServerThreadRef: { current: true },
   navigateSpy: vi.fn(),
   refreshGitStatusSpy: vi.fn(() => Promise.resolve(null)),
+  revertUnstagedFilesMutateAsyncSpy: vi.fn(() => Promise.resolve(null)),
   runStackedActionMutateAsyncSpy: vi.fn((input: unknown) => {
     void input;
     return activeRunStackedActionDeferredRef.current.promise;
@@ -129,6 +131,13 @@ vi.mock("@tanstack/react-query", async () => {
         };
       }
 
+      if (options.__kind === "revert-unstaged-files") {
+        return {
+          mutateAsync: revertUnstagedFilesMutateAsyncSpy,
+          isPending: false,
+        };
+      }
+
       if (options.__kind === "pull") {
         return {
           mutateAsync: vi.fn(),
@@ -172,6 +181,7 @@ vi.mock("~/lib/gitReactQuery", () => ({
   },
   gitPullMutationOptions: vi.fn(() => ({ __kind: "pull" })),
   gitRunStackedActionMutationOptions: vi.fn(() => ({ __kind: "run-stacked-action" })),
+  vcsRevertUnstagedFilesMutationOptions: vi.fn(() => ({ __kind: "revert-unstaged-files" })),
   vcsStageFilesMutationOptions: vi.fn(() => ({ __kind: "stage-files" })),
   vcsUnstageFilesMutationOptions: vi.fn(() => ({ __kind: "unstage-files" })),
 }));
@@ -457,6 +467,62 @@ describe("SourceControlPanel git action runner", () => {
       });
       expect(stageFilesMutateAsyncSpy).toHaveBeenCalledWith({ filePaths: ["src/app.ts"] });
       expect(unstageFilesMutateAsyncSpy).toHaveBeenCalledWith({ filePaths: ["staged.ts"] });
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("reverts only unstaged files and confirms bulk revert", async () => {
+    currentGitStatusRef.current = createPanelStatus({
+      stagedFiles: [{ path: "staged.ts", status: "modified", insertions: 1, deletions: 0 }],
+      unstagedFiles: [{ path: "src/app.ts", status: "modified", insertions: 2, deletions: 1 }],
+    });
+    const { host, screen } = await renderPanel();
+
+    try {
+      expect(document.querySelector('button[aria-label="Revert staged.ts"]')).toBeNull();
+      expect(
+        Array.from(
+          document.querySelectorAll(
+            'button[aria-label="Revert all unstaged changes"], button[aria-label="Stage all"]',
+          ),
+        ).map((element) => element.getAttribute("aria-label")),
+      ).toEqual(["Revert all unstaged changes", "Stage all"]);
+      expect(
+        Array.from(
+          (document.querySelector('[title="src/app.ts"]') as HTMLElement).querySelectorAll(
+            'button[aria-label="Revert src/app.ts"], button[aria-label="Stage src/app.ts"], [aria-label="Modified"]',
+          ),
+        ).map((element) => element.getAttribute("aria-label")),
+      ).toEqual(["Modified", "Revert src/app.ts", "Stage src/app.ts"]);
+
+      (
+        document.querySelector('button[aria-label="Revert src/app.ts"]') as HTMLButtonElement
+      ).click();
+      await vi.waitFor(() => {
+        expect(revertUnstagedFilesMutateAsyncSpy).toHaveBeenCalledWith({
+          filePaths: ["src/app.ts"],
+        });
+      });
+
+      revertUnstagedFilesMutateAsyncSpy.mockClear();
+      (
+        document.querySelector(
+          'button[aria-label="Revert all unstaged changes"]',
+        ) as HTMLButtonElement
+      ).click();
+      expect(revertUnstagedFilesMutateAsyncSpy).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("Revert all unstaged changes?");
+      });
+
+      findButtonByText("Revert changes")?.click();
+      await vi.waitFor(() => {
+        expect(revertUnstagedFilesMutateAsyncSpy).toHaveBeenCalledWith({
+          filePaths: ["src/app.ts"],
+        });
+      });
     } finally {
       await screen.unmount();
       host.remove();
