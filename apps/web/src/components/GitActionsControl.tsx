@@ -1732,7 +1732,6 @@ export default function GitActionsControl({
                   variant="outline"
                 />
               }
-              disabled={isGitActionRunning}
             >
               <ChevronDownIcon aria-hidden="true" className="size-4" />
             </MenuTrigger>
