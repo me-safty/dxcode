@@ -61,6 +61,7 @@ import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
+import { normalizeBrowserAgentPreviewUrl } from "../browserAgents";
 import {
   deriveCompletionDividerBeforeEntryId,
   derivePendingApprovals,
@@ -130,7 +131,7 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
-import { writeProjectConfigScripts } from "~/projectConfigFile";
+import { writeProjectConfigUpdate } from "~/projectConfigFile";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
@@ -222,6 +223,7 @@ import { ThreadTabStrip } from "./thread-tabs/ThreadTabStrip";
 import {
   buildThreadContentTabs,
   resolveFallbackThreadTabAfterClose,
+  resolveThreadTabGroupRehomeUpdatesAfterClose,
   threadTabGroupId,
   type ThreadContentTab,
 } from "../threadTabs";
@@ -565,6 +567,7 @@ interface PersistentThreadTerminalDrawerProps {
   visible: boolean;
   launchContext: PersistentTerminalLaunchContext | null;
   focusRequestId: number;
+  toggleShortcutLabel: string | undefined;
   splitShortcutLabel: string | undefined;
   newShortcutLabel: string | undefined;
   closeShortcutLabel: string | undefined;
@@ -578,6 +581,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   visible,
   launchContext,
   focusRequestId,
+  toggleShortcutLabel,
   splitShortcutLabel,
   newShortcutLabel,
   closeShortcutLabel,
@@ -646,6 +650,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     [knownTerminalSessions],
   );
   const storeSetTerminalHeight = useTerminalUiStateStore((state) => state.setTerminalHeight);
+  const storeSetTerminalOpen = useTerminalUiStateStore((state) => state.setTerminalOpen);
   const storeSplitTerminal = useTerminalUiStateStore((state) => state.splitTerminal);
   const storeNewTerminal = useTerminalUiStateStore((state) => state.newTerminal);
   const storeSetActiveTerminal = useTerminalUiStateStore((state) => state.setActiveTerminal);
@@ -706,6 +711,10 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     },
     [storeSetTerminalHeight, threadRef],
   );
+
+  const collapseTerminal = useCallback(() => {
+    storeSetTerminalOpen(threadRef, false);
+  }, [storeSetTerminalOpen, threadRef]);
 
   const splitTerminal = useCallback(() => {
     const api = readEnvironmentApi(threadRef.environmentId);
@@ -838,8 +847,10 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
         terminalGroups={terminalUiState.terminalGroups}
         activeTerminalGroupId={terminalUiState.activeTerminalGroupId}
         focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
+        onCollapseTerminal={collapseTerminal}
         onSplitTerminal={splitTerminal}
         onNewTerminal={createNewTerminal}
+        toggleShortcutLabel={visible ? toggleShortcutLabel : undefined}
         splitShortcutLabel={visible ? splitShortcutLabel : undefined}
         newShortcutLabel={visible ? newShortcutLabel : undefined}
         closeShortcutLabel={visible ? closeShortcutLabel : undefined}
@@ -2663,7 +2674,6 @@ export default function ChatView(props: ChatViewProps) {
     async (input: {
       projectId: ProjectId;
       projectCwd: string;
-      previousScripts: ProjectScript[];
       nextScripts: ProjectScript[];
       browserPreviewUrl: string | null | undefined;
       keybinding?: string | null;
@@ -2672,11 +2682,13 @@ export default function ChatView(props: ChatViewProps) {
       const api = readEnvironmentApi(environmentId);
       if (!api) return;
 
-      await writeProjectConfigScripts({
+      await writeProjectConfigUpdate({
         api,
         projectCwd: input.projectCwd,
-        scripts: input.nextScripts,
-        browserPreviewUrl: input.browserPreviewUrl,
+        update: {
+          scripts: input.nextScripts,
+          browserPreviewUrl: input.browserPreviewUrl,
+        },
       });
 
       await api.orchestration.dispatchCommand({
@@ -2728,7 +2740,6 @@ export default function ChatView(props: ChatViewProps) {
       await persistProjectScripts({
         projectId: activeProject.id,
         projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
         nextScripts,
         browserPreviewUrl: activeProject.browserPreviewUrl,
         keybinding: input.keybinding,
@@ -2764,7 +2775,6 @@ export default function ChatView(props: ChatViewProps) {
       await persistProjectScripts({
         projectId: activeProject.id,
         projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
         nextScripts,
         browserPreviewUrl: activeProject.browserPreviewUrl,
         keybinding: input.keybinding,
@@ -2784,7 +2794,6 @@ export default function ChatView(props: ChatViewProps) {
         await persistProjectScripts({
           projectId: activeProject.id,
           projectCwd: activeProject.cwd,
-          previousScripts: activeProject.scripts,
           nextScripts,
           browserPreviewUrl: activeProject.browserPreviewUrl,
           keybinding: null,
@@ -2805,6 +2814,34 @@ export default function ChatView(props: ChatViewProps) {
       }
     },
     [activeProject, persistProjectScripts],
+  );
+  const updateProjectPreviewUrl = useCallback(
+    async (rawPreviewUrl: string) => {
+      if (!activeProject) return;
+      const api = readEnvironmentApi(environmentId);
+      if (!api) return;
+
+      const normalizedPreviewUrl = normalizeBrowserAgentPreviewUrl(rawPreviewUrl);
+      const nextBrowserPreviewUrl =
+        normalizedPreviewUrl.trim().length > 0 ? normalizedPreviewUrl : null;
+
+      await writeProjectConfigUpdate({
+        api,
+        projectCwd: activeProject.cwd,
+        update: {
+          scripts: activeProject.scripts,
+          browserPreviewUrl: nextBrowserPreviewUrl,
+        },
+      });
+
+      await api.orchestration.dispatchCommand({
+        type: "project.meta.update",
+        commandId: newCommandId(),
+        projectId: activeProject.id,
+        browserPreviewUrl: nextBrowserPreviewUrl,
+      });
+    },
+    [activeProject, environmentId],
   );
 
   const handleRuntimeModeChange = useCallback(
@@ -3139,37 +3176,47 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
-      const fallbackTab = tab.active ? resolveFallbackThreadTabAfterClose(threadTabs, tab) : null;
-      void api.orchestration
-        .dispatchCommand({
+      const fallbackTab = resolveFallbackThreadTabAfterClose(threadTabs, tab);
+      const rehomeUpdates = resolveThreadTabGroupRehomeUpdatesAfterClose(threadTabs, tab);
+      void (async () => {
+        for (const update of rehomeUpdates) {
+          await api.orchestration.dispatchCommand({
+            type: "thread.meta.update",
+            commandId: newCommandId(),
+            threadId: update.threadRef.threadId,
+            tabGroupId: update.tabGroupId,
+          });
+        }
+
+        await api.orchestration.dispatchCommand({
           type: "thread.archive",
           commandId: newCommandId(),
           threadId: tab.threadRef.threadId,
-        })
-        .then(() => {
-          refreshArchivedThreadsForEnvironment(tab.threadRef.environmentId);
-          if (!tab.active) {
-            return;
-          }
-          if (fallbackTab) {
-            return navigate({
-              to: "/$environmentId/$threadId",
-              params: buildThreadRouteParams(fallbackTab.threadRef),
-              search: (previous) => previous,
-              replace: true,
-            });
-          }
-          return navigate({ to: "/", replace: true });
-        })
-        .catch((error) => {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Could not close tab",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
         });
+
+        refreshArchivedThreadsForEnvironment(tab.threadRef.environmentId);
+        if (!tab.active) {
+          return;
+        }
+        if (fallbackTab) {
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(fallbackTab.threadRef),
+            search: (previous) => previous,
+            replace: true,
+          });
+          return;
+        }
+        await navigate({ to: "/", replace: true });
+      })().catch((error) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not close tab",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      });
     },
     [isServerThread, navigate, threadTabs],
   );
@@ -4578,6 +4625,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
+          onUpdateProjectPreviewUrl={updateProjectPreviewUrl}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
           onSubmitGitPrompt={onSubmitGitPrompt}
@@ -4823,6 +4871,7 @@ export default function ChatView(props: ChatViewProps) {
             mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
           }
           focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
+          toggleShortcutLabel={terminalToggleShortcutLabel ?? undefined}
           splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
           newShortcutLabel={newTerminalShortcutLabel ?? undefined}
           closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
