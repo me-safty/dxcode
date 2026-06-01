@@ -663,7 +663,37 @@ describe("when: working tree has local changes", () => {
     assert.deepInclude(quick, {
       kind: "run_action",
       action: "commit_push",
-      label: "Commit & push",
+      label: "Commit and push",
+    });
+  });
+
+  it("resolveQuickAction returns commit and push when open PR checks are pending", () => {
+    const quick = resolveQuickAction(
+      status({
+        hasWorkingTreeChanges: true,
+        pr: {
+          number: 16,
+          title: "Existing PR",
+          url: "https://example.com/pr/16",
+          baseRef: "main",
+          headRef: "feature/test",
+          state: "open",
+          mergeStatus: "mergeable",
+          checks: {
+            total: 2,
+            completed: 1,
+            successful: 1,
+            failed: 0,
+            pending: 1,
+          },
+        },
+      }),
+      false,
+    );
+    assert.deepInclude(quick, {
+      kind: "run_action",
+      action: "commit_push",
+      label: "Commit and push",
     });
   });
 
@@ -750,7 +780,7 @@ describe("when: on default ref without open PR", () => {
     assert.deepInclude(quick, {
       kind: "run_action",
       action: "commit_push",
-      label: "Commit & push",
+      label: "Commit and push",
       disabled: false,
     });
   });

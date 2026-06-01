@@ -292,16 +292,6 @@ export function resolveQuickAction(
     };
   }
 
-  if (hasOpenPr && pr?.checks && pr.checks.pending > 0) {
-    return {
-      label: formatChecksLabel(pr.checks),
-      disabled: true,
-      kind: "show_hint",
-      hint: "Checks are still running.",
-      tone: "warning",
-    };
-  }
-
   if (hasOpenPr && pr?.mergeStatus === "behind") {
     return {
       label: "Rebase / pull",
@@ -335,13 +325,28 @@ export function resolveQuickAction(
       return { label: "Commit", disabled: false, kind: "run_action", action: "commit" };
     }
     if (hasOpenPr || isDefaultRef) {
-      return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
+      return {
+        label: "Commit and push",
+        disabled: false,
+        kind: "run_action",
+        action: "commit_push",
+      };
     }
     return {
       label: `Commit, push & ${terminology.shortLabel}`,
       disabled: false,
       kind: "run_action",
       action: "commit_push_pr",
+    };
+  }
+
+  if (hasOpenPr && pr?.checks && pr.checks.pending > 0) {
+    return {
+      label: formatChecksLabel(pr.checks),
+      disabled: true,
+      kind: "show_hint",
+      hint: "Checks are still running.",
+      tone: "warning",
     };
   }
 
