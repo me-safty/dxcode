@@ -79,6 +79,7 @@ Useful focused commands:
 bun run --filter t3 test src/provider/Layers/CodexAdapter.test.ts
 bun run --filter @t3tools/web test src/session-logic.test.ts
 bun run --filter @t3tools/web test src/environments/runtime/service.coalescing.test.ts src/store.test.ts src/components/chat/MessagesTimeline.test.tsx
+bun run --filter @t3tools/web test src/components/chat/ThreadConversationWidth.test.tsx
 ```
 
 Before considering the branch healthy, also run:
@@ -89,6 +90,27 @@ bun lint
 bun typecheck
 ```
 
+## Conversation Width Defaults
+
+This branch intentionally removes the default max width from the main chat conversation and composer surfaces across browser, desktop, and VS Code extension hosts.
+
+Expected behavior:
+
+- By default, conversation rows, the composer, composer banners, and the branch toolbar expand across the available chat window space.
+- The VS Code `t3code.ui.threadConversationMaxWidth` setting remains available as an explicit opt-in max-width override.
+- Leaving the VS Code setting empty means no maximum width, not the upstream narrow conversation width.
+
+Primary files:
+
+- `apps/web/src/components/chat/ThreadConversationWidth.tsx`
+- `apps/web/src/components/chat/ComposerBannerStack.tsx`
+- `apps/web/src/components/BranchToolbar.tsx`
+- `apps/vscode-extension/package.json`
+
+Relevant tests live in:
+
+- `apps/web/src/components/chat/ThreadConversationWidth.test.tsx`
+
 ## Merge Guidance
 
 When merging from upstream, keep these local behaviors unless upstream has an equivalent implementation:
@@ -98,6 +120,7 @@ When merging from upstream, keep these local behaviors unless upstream has an eq
 3. Subagent output is buffered or coalesced enough that token-by-token UI churn does not make long threads sluggish.
 4. Prompt and output display stays deduplicated in expanded subagent details.
 5. Empty subagent placeholder activities stay hidden.
+6. Chat conversation and composer surfaces default to no maximum width across all host types.
 
 ## Retirement Criteria
 

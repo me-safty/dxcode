@@ -4,16 +4,11 @@ import { cn } from "~/lib/utils";
 
 type ThreadConversationWidthVariant = "timeline" | "composer";
 
-const variantClassNames: Record<ThreadConversationWidthVariant, string> = {
-  timeline: "max-w-3xl",
-  composer: "max-w-208",
-};
-
 function threadConversationWidthClassName(
-  variant: ThreadConversationWidthVariant,
+  _variant: ThreadConversationWidthVariant,
   className: string | undefined,
 ) {
-  return cn("t3-thread-conversation-width mx-auto", variantClassNames[variant], className);
+  return cn("t3-thread-conversation-width mx-auto max-w-none", className);
 }
 
 interface ThreadConversationWidthContainerProps extends ComponentPropsWithRef<"div"> {

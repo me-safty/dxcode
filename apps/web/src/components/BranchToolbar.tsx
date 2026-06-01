@@ -280,7 +280,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-208 items-center gap-2 px-2.5 pb-3 pt-1 sm:px-3">
+    <div className="mx-auto flex w-full max-w-none items-center gap-2 px-2.5 pb-3 pt-1 sm:px-3">
       {showMobileRunContextSelector ? (
         <MobileRunContextSelector
           envLocked={envLocked}
