@@ -72,6 +72,7 @@ const rpcClientMock = {
   },
   vcs: {
     pull: vi.fn(),
+    syncBase: vi.fn(),
     refreshStatus: vi.fn(),
     onStatus: vi.fn((input: { cwd: string }, listener: (event: VcsStatusResult) => void) =>
       registerListener(gitStatusListeners, listener),

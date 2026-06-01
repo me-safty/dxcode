@@ -569,6 +569,44 @@ describe("when: ref is behind upstream", () => {
   });
 });
 
+describe("when: ref is behind its base branch", () => {
+  it("resolveQuickAction returns update from base", () => {
+    const quick = resolveQuickAction(
+      status({ aheadOfDefaultCount: 1, behindOfDefaultCount: 2 }),
+      false,
+    );
+    assert.deepInclude(quick, {
+      kind: "run_sync_base",
+      label: "Update from base",
+      disabled: false,
+      tone: "warning",
+    });
+  });
+
+  it("resolveQuickAction asks for a clean tree before updating from base", () => {
+    const quick = resolveQuickAction(
+      status({ hasWorkingTreeChanges: true, behindOfDefaultCount: 1 }),
+      false,
+    );
+    assert.deepEqual(quick, {
+      label: "Update from base",
+      disabled: true,
+      kind: "show_hint",
+      hint: "Commit or stash local changes before updating from the base branch.",
+      tone: "warning",
+    });
+  });
+
+  it("buildMenuItems disables push and create PR", () => {
+    const items = buildMenuItems(
+      status({ aheadCount: 1, aheadOfDefaultCount: 1, behindOfDefaultCount: 1, pr: null }),
+      false,
+    );
+    assert.equal(items.find((item) => item.id === "push")?.disabled, true);
+    assert.equal(items.find((item) => item.id === "pr")?.disabled, true);
+  });
+});
+
 describe("when: ref has diverged from upstream", () => {
   it("resolveQuickAction returns a disabled sync hint", () => {
     const quick = resolveQuickAction(status({ aheadCount: 2, behindCount: 1 }), false);
