@@ -1,4 +1,5 @@
 import { ProviderDriverKind, T3ChatSettings, type ServerProvider } from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -76,6 +77,7 @@ const makeT3ChatTextGeneration = (): TextGenerationShape => ({
 
 export type T3ChatDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
+  | Crypto.Crypto
   | FileSystem.FileSystem
   | ProviderEventLoggers
   | ServerConfig

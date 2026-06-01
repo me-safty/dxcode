@@ -8,7 +8,7 @@
 import { Context } from "effect";
 import type { Effect } from "effect";
 
-import type { ProcessRunResult } from "../../processRunner.ts";
+import type { ProcessRunOutput } from "../../processRunner.ts";
 import type { GitHubCliError } from "../../sourceControl/GitHubCli.ts";
 import type { PullRequestCheck, PullRequestReviewer, PullRequestLabel } from "@t3tools/contracts";
 
@@ -92,7 +92,7 @@ export interface GitHubCliShape {
     readonly cwd: string;
     readonly args: ReadonlyArray<string>;
     readonly timeoutMs?: number;
-  }) => Effect.Effect<ProcessRunResult, GitHubCliError>;
+  }) => Effect.Effect<ProcessRunOutput, GitHubCliError>;
 
   /**
    * List open pull requests for a head branch.

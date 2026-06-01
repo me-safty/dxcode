@@ -729,7 +729,7 @@ export function makeGitHubCliPRMethods(execute: Execute) {
             result.stdout
               .trim()
               .split("\n")
-              .filter((line) => line.length > 0),
+              .filter((line: string) => line.length > 0),
           ),
         );
       }),

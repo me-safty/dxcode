@@ -1,3 +1,4 @@
+// @effect-diagnostics globalFetchInEffect:off
 import {
   ProviderDriverKind,
   type ServerProvider,

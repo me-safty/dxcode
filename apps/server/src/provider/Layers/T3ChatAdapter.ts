@@ -1,3 +1,5 @@
+// @effect-diagnostics globalFetchInEffect:off
+// @effect-diagnostics preferSchemaOverJson:off
 import {
   type ChatAttachment,
   EventId,
@@ -17,12 +19,12 @@ import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
 } from "@t3tools/shared/model";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
-import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 
@@ -186,13 +188,29 @@ export const makeT3ChatAdapter = Effect.fn("makeT3ChatAdapter")(function* (
       : {}),
   });
 
+  const crypto = yield* Crypto.Crypto;
+  const randomUUIDv4 = crypto.randomUUIDv4.pipe(
+    Effect.mapError(
+      (cause) =>
+        new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "crypto/randomUUIDv4",
+          detail: "Failed to generate T3 Chat runtime identifier.",
+          cause,
+        }),
+    ),
+  );
+
   const sessions = new Map<string, T3ChatSessionContext>();
   const eventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const bridgeExitReason = yield* Ref.make<Option.Option<string>>(Option.none());
 
-  const makeEventStamp = Effect.gen(function* () {
+  const makeEventStamp: Effect.Effect<
+    { readonly eventId: EventId; readonly createdAt: string },
+    ProviderAdapterRequestError
+  > = Effect.gen(function* () {
     return {
-      eventId: EventId.make(yield* Random.nextUUIDv4),
+      eventId: EventId.make(yield* randomUUIDv4),
       createdAt: DateTime.formatIso(yield* DateTime.now),
     };
   });
@@ -357,7 +375,7 @@ export const makeT3ChatAdapter = Effect.fn("makeT3ChatAdapter")(function* (
       })),
       threadMetadata: { id: threadId },
       clientAuth: { isSignedIn: true },
-      responseMessageId: crypto.randomUUID(),
+      responseMessageId: yield* randomUUIDv4,
       model,
       convexSessionId: settings.convexSessionId,
       modelParams: {
@@ -429,7 +447,7 @@ export const makeT3ChatAdapter = Effect.fn("makeT3ChatAdapter")(function* (
     );
 
     ctx.messages.push({
-      id: crypto.randomUUID(),
+      id: yield* randomUUIDv4,
       role: "assistant",
       content: accumulated,
     });
@@ -460,8 +478,8 @@ export const makeT3ChatAdapter = Effect.fn("makeT3ChatAdapter")(function* (
       });
     }
 
-    const turnId = TurnId.make(yield* Random.nextUUIDv4);
-    const itemId = RuntimeItemId.make(yield* Random.nextUUIDv4);
+    const turnId = TurnId.make(yield* randomUUIDv4);
+    const itemId = RuntimeItemId.make(yield* randomUUIDv4);
     const stamp = yield* makeEventStamp;
 
     const bridgeURL = yield* requireBridge();
@@ -471,7 +489,7 @@ export const makeT3ChatAdapter = Effect.fn("makeT3ChatAdapter")(function* (
     });
 
     ctx.messages.push({
-      id: yield* Random.nextUUIDv4,
+      id: yield* randomUUIDv4,
       role: "user",
       content: input.input,
       ...(uploadedAttachments.length > 0 ? { attachments: uploadedAttachments } : {}),
@@ -736,7 +754,10 @@ const readSSEStream = (
   itemId: RuntimeItemId,
   instanceId: ProviderInstanceId,
   emitEvent: (event: ProviderRuntimeEvent) => Effect.Effect<void>,
-  makeEventStamp: Effect.Effect<{ eventId: EventId; createdAt: string }>,
+  makeEventStamp: Effect.Effect<
+    { readonly eventId: EventId; readonly createdAt: string },
+    ProviderAdapterRequestError
+  >,
 ): Effect.Effect<string, ProviderAdapterRequestError> =>
   Effect.gen(function* () {
     const reader = body.getReader();

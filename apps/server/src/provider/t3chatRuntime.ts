@@ -349,7 +349,7 @@ const makeT3ChatRuntime = Effect.gen(function* () {
 });
 
 export class T3ChatRuntime extends Context.Service<T3ChatRuntime, T3ChatRuntimeShape>()(
-  "t3/provider/T3ChatRuntime",
+  "t3/provider/t3chatRuntime",
 ) {}
 
 export const T3ChatRuntimeLive = Layer.effect(T3ChatRuntime, makeT3ChatRuntime).pipe(

@@ -12,6 +12,8 @@ import {
   XCircleIcon,
   XIcon,
 } from "lucide-react";
+import * as Arr from "effect/Array";
+import * as Result from "effect/Result";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   isProviderDriverKind,
@@ -120,9 +122,9 @@ export function deriveProviderModelsForDisplay(input: {
   readonly customModels: ReadonlyArray<string>;
 }): ReadonlyArray<ServerProviderModel> {
   const liveCustomModelsBySlug = new Map(
-    (input.liveModels ?? [])
-      .filter((model) => model.isCustom)
-      .map((model) => [model.slug, model] as const),
+    Arr.filterMap(input.liveModels ?? [], (model) =>
+      model.isCustom ? Result.succeed([model.slug, model] as const) : Result.failVoid,
+    ),
   );
   const serverModels = input.liveModels?.filter((model) => !model.isCustom) ?? [];
   const customModels = input.customModels.map(

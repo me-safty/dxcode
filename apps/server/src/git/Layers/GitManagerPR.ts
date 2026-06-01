@@ -141,10 +141,12 @@ export function makeGitManagerPRMethods(gitHubCli: GitHubCliShape): PRMethods {
         }
 
         return {
-          reviewRequested: rawResult.reviewRequested.map((entry) =>
+          reviewRequested: rawResult.reviewRequested.map((entry: GitHubPullRequestListEntry) =>
             toPullRequestSummary(entry, currentUser),
           ),
-          myPrs: rawResult.myPrs.map((entry) => toPullRequestSummary(entry, currentUser)),
+          myPrs: rawResult.myPrs.map((entry: GitHubPullRequestListEntry) =>
+            toPullRequestSummary(entry, currentUser),
+          ),
           ghAvailable: true,
           error: rawResult.error,
         } satisfies GitListPullRequestsResult;

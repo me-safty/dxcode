@@ -6,9 +6,37 @@ import {
 } from "@t3tools/contracts";
 import { mutationOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { ensureEnvironmentApi } from "../environmentApi";
-import { gitMutationKeys, invalidateGitQueries } from "./gitReactQuery";
 
-export { gitMutationKeys, invalidateGitQueries } from "./gitReactQuery";
+const gitRefsQueryKey = (environmentId: EnvironmentId | null, cwd: string | null) =>
+  ["git", "refs", environmentId ?? null, cwd] as const;
+
+export const gitMutationKeys = {
+  init: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "init", environmentId ?? null, cwd] as const,
+  switchRef: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "switchRef", environmentId ?? null, cwd] as const,
+  runStackedAction: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "run-stacked-action", environmentId ?? null, cwd] as const,
+  pull: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "pull", environmentId ?? null, cwd] as const,
+  preparePullRequestThread: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "prepare-pull-request-thread", environmentId ?? null, cwd] as const,
+  publishRepository: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "mutation", "publish-repository", environmentId ?? null, cwd] as const,
+};
+
+export function invalidateGitQueries(
+  queryClient: QueryClient,
+  input?: { environmentId?: EnvironmentId | null; cwd?: string | null },
+) {
+  const environmentId = input?.environmentId ?? null;
+  const cwd = input?.cwd ?? null;
+  if (cwd !== null) {
+    return queryClient.invalidateQueries({ queryKey: gitRefsQueryKey(environmentId, cwd) });
+  }
+
+  return queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
+}
 
 const GIT_STATUS_STALE_TIME_MS = 5_000;
 const GIT_STATUS_REFETCH_INTERVAL_MS = 15_000;
