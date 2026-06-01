@@ -139,6 +139,7 @@ function createBaseServerConfig(): ServerConfig {
           binaryPath: "",
           homePath: "",
           shadowHomePath: "",
+          launchArgs: "",
           customModels: [],
         },
         claudeAgent: {

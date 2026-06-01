@@ -35,7 +35,7 @@ import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
-import { buildCodexInitializeParams } from "./CodexProvider.ts";
+import { buildCodexInitializeParams, codexAppServerArgs } from "./CodexProvider.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
@@ -97,6 +97,7 @@ export interface CodexSessionRuntimeOptions {
   readonly providerInstanceId?: ProviderInstanceId;
   readonly binaryPath: string;
   readonly homePath?: string;
+  readonly launchArgs?: string;
   readonly environment?: NodeJS.ProcessEnv;
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
@@ -718,9 +719,10 @@ export const makeCodexSessionRuntime = (
       ...(options.environment ?? process.env),
       ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
     };
+    const appServerArgs = codexAppServerArgs(options.launchArgs);
     const child = yield* spawner
       .spawn(
-        ChildProcess.make(options.binaryPath, ["app-server"], {
+        ChildProcess.make(options.binaryPath, appServerArgs, {
           cwd: options.cwd,
           env,
           forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER,

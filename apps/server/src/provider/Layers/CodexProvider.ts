@@ -248,9 +248,15 @@ export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   };
 }
 
+export const codexAppServerArgs = (launchArgs: string | undefined): ReadonlyArray<string> => [
+  "app-server",
+  ...(launchArgs ?? "").trim().split(/\s+/).filter(Boolean),
+];
+
 const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (input: {
   readonly binaryPath: string;
   readonly homePath?: string;
+  readonly launchArgs?: string;
   readonly cwd: string;
   readonly customModels?: ReadonlyArray<string>;
   readonly environment?: NodeJS.ProcessEnv;
@@ -263,7 +269,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   const clientContext = yield* Layer.build(
     CodexClient.layerCommand({
       command: input.binaryPath,
-      args: ["app-server"],
+      args: codexAppServerArgs(input.launchArgs),
       cwd: input.cwd,
       env: {
         ...(input.environment ?? process.env),
@@ -409,6 +415,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   probe: (input: {
     readonly binaryPath: string;
     readonly homePath?: string;
+    readonly launchArgs?: string;
     readonly cwd: string;
     readonly customModels: ReadonlyArray<string>;
     readonly environment?: NodeJS.ProcessEnv;
@@ -446,6 +453,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   const probeResult = yield* probe({
     binaryPath: codexSettings.binaryPath,
     homePath: codexSettings.homePath,
+    launchArgs: codexSettings.launchArgs,
     cwd: process.cwd(),
     customModels: codexSettings.customModels,
     environment,
