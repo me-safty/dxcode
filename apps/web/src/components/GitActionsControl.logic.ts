@@ -27,7 +27,14 @@ export interface GitActionMenuItem {
 export interface GitQuickAction {
   label: string;
   disabled: boolean;
-  kind: "run_action" | "run_pull" | "open_pr" | "open_publish" | "prompt_ai" | "show_hint";
+  kind:
+    | "run_action"
+    | "run_pull"
+    | "run_sync_base"
+    | "open_pr"
+    | "open_publish"
+    | "prompt_ai"
+    | "show_hint";
   action?: GitStackedAction;
   hint?: string;
   tone?: "default" | "success" | "merged" | "warning" | "destructive";
@@ -144,6 +151,7 @@ export function buildMenuItems(
   const hasChanges = gitStatus.hasWorkingTreeChanges;
   const hasOpenPr = gitStatus.pr?.state === "open";
   const isBehind = gitStatus.behindCount > 0;
+  const isBehindBase = (gitStatus.behindOfDefaultCount ?? 0) > 0 && !gitStatus.isDefaultRef;
   const hasDefaultBranchDelta = (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0;
   const canPushWithoutUpstream = hasPrimaryRemote && !gitStatus.hasUpstream;
   const canCommit = !isBusy && hasChanges;
@@ -151,6 +159,7 @@ export function buildMenuItems(
     !isBusy &&
     hasBranch &&
     !isBehind &&
+    !isBehindBase &&
     gitStatus.aheadCount > 0 &&
     (gitStatus.hasUpstream || canPushWithoutUpstream);
   const canCreatePr =
@@ -160,6 +169,7 @@ export function buildMenuItems(
     !hasOpenPr &&
     hasDefaultBranchDelta &&
     !isBehind &&
+    !isBehindBase &&
     (gitStatus.hasUpstream || canPushWithoutUpstream);
   const prItemLabel = (() => {
     const pr = gitStatus.pr;
@@ -236,6 +246,7 @@ export function resolveQuickAction(
   const isAhead = gitStatus.aheadCount > 0;
   const hasDefaultBranchDelta = (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0;
   const isBehind = gitStatus.behindCount > 0;
+  const isBehindBase = (gitStatus.behindOfDefaultCount ?? 0) > 0 && !isDefaultRef;
   const isDiverged = isAhead && isBehind;
   const terminology = resolveChangeRequestTerminology(gitStatus);
 
@@ -297,6 +308,24 @@ export function resolveQuickAction(
       disabled: false,
       kind: "prompt_ai",
       prompt: resolveChangeRequestPrompt({ action: "sync_base", gitStatus }),
+      tone: "warning",
+    };
+  }
+
+  if (isBehindBase) {
+    if (hasChanges) {
+      return {
+        label: "Update from base",
+        disabled: true,
+        kind: "show_hint",
+        hint: "Commit or stash local changes before updating from the base branch.",
+        tone: "warning",
+      };
+    }
+    return {
+      label: "Update from base",
+      disabled: false,
+      kind: "run_sync_base",
       tone: "warning",
     };
   }

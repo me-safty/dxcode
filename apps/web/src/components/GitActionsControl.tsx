@@ -26,6 +26,7 @@ import {
   GlobeIcon,
   ArchiveIcon,
   MessageSquareTextIcon,
+  RefreshCwIcon,
 } from "lucide-react";
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "~/components/Icons";
@@ -72,6 +73,7 @@ import {
   useSourceControlPublishRepositoryAction,
   useVcsInitAction,
   useVcsPullAction,
+  useVcsSyncBaseAction,
 } from "~/lib/sourceControlActions";
 import { refreshVcsStatus, useVcsStatus } from "~/lib/vcsStatusState";
 import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
@@ -141,7 +143,12 @@ interface RunGitActionWithToastInput {
 }
 
 const GIT_STATUS_WINDOW_REFRESH_DEBOUNCE_MS = 250;
-const RUNNING_SOURCE_CONTROL_ACTIONS = ["runStackedAction", "pull", "publishRepository"] as const;
+const RUNNING_SOURCE_CONTROL_ACTIONS = [
+  "runStackedAction",
+  "pull",
+  "syncBase",
+  "publishRepository",
+] as const;
 const PULL_QUICK_ACTION_CLASS_NAME =
   "border-cyan-500/50 bg-cyan-500/12 text-cyan-700 shadow-cyan-500/20 shadow-sm [:hover,[data-pressed]]:bg-cyan-500/18 dark:border-cyan-300/45 dark:bg-cyan-300/12 dark:text-cyan-100 dark:shadow-cyan-300/20 dark:[:hover,[data-pressed]]:bg-cyan-300/18";
 
@@ -267,6 +274,7 @@ function getMenuActionDisabledReason({
   const hasOpenPr = gitStatus.pr?.state === "open";
   const isAhead = gitStatus.aheadCount > 0;
   const isBehind = gitStatus.behindCount > 0;
+  const isBehindBase = (gitStatus.behindOfDefaultCount ?? 0) > 0 && !gitStatus.isDefaultRef;
   const terminology = getSourceControlPresentation(gitStatus.sourceControlProvider).terminology;
 
   if (item.id === "commit") {
@@ -285,6 +293,9 @@ function getMenuActionDisabledReason({
     }
     if (isBehind) {
       return "Branch is behind upstream. Pull/rebase before pushing.";
+    }
+    if (isBehindBase) {
+      return "Branch is behind base. Update from base before pushing.";
     }
     if (!gitStatus.hasUpstream && !hasPrimaryRemote) {
       return 'Add an "origin" remote before pushing.';
@@ -315,6 +326,9 @@ function getMenuActionDisabledReason({
   }
   if (isBehind) {
     return `Branch is behind upstream. Pull/rebase before creating a ${terminology.singular}.`;
+  }
+  if (isBehindBase) {
+    return `Branch is behind base. Update from base before creating a ${terminology.singular}.`;
   }
   return `Create ${terminology.singular} is currently unavailable.`;
 }
@@ -348,6 +362,7 @@ function GitQuickActionIcon({
   if (quickAction.kind === "prompt_ai") return <SourceControlIcon className={iconClassName} />;
   if (quickAction.kind === "open_publish") return <CloudUploadIcon className={iconClassName} />;
   if (quickAction.kind === "run_pull") return <InfoIcon className={iconClassName} />;
+  if (quickAction.kind === "run_sync_base") return <RefreshCwIcon className={iconClassName} />;
   if (quickAction.kind === "run_action") {
     if (quickAction.action === "commit") return <GitCommitIcon className={iconClassName} />;
     if (quickAction.action === "push" || quickAction.action === "commit_push") {
@@ -1131,6 +1146,7 @@ export default function GitActionsControl({
   const initAction = useVcsInitAction(sourceControlScope);
   const runImmediateGitAction = useGitStackedAction(sourceControlScope);
   const pullAction = useVcsPullAction(sourceControlScope);
+  const syncBaseAction = useVcsSyncBaseAction(sourceControlScope);
   const isGitActionRunning = useSourceControlActionRunning(
     sourceControlScope,
     RUNNING_SOURCE_CONTROL_ACTIONS,
@@ -1702,6 +1718,30 @@ export default function GitActionsControl({
       void promise.catch(() => undefined);
       return;
     }
+    if (quickAction.kind === "run_sync_base") {
+      const promise = syncBaseAction.run();
+      void toastManager.promise<Awaited<ReturnType<typeof syncBaseAction.run>>, ThreadToastData>(
+        promise,
+        {
+          loading: { title: "Updating from base...", data: threadToastData },
+          success: (result) => ({
+            title: result.status === "rebased" ? "Updated from base" : "Already up to date",
+            description:
+              result.status === "rebased"
+                ? `Rebased ${result.refName} onto ${result.baseRef}.`
+                : `${result.refName} already includes ${result.baseRef}.`,
+            data: threadToastData,
+          }),
+          error: (err) => ({
+            title: "Base update failed",
+            description: err instanceof Error ? err.message : "An error occurred.",
+            data: threadToastData,
+          }),
+        },
+      );
+      void promise.catch(() => undefined);
+      return;
+    }
     if (quickAction.kind === "show_hint") {
       toastManager.add({
         type: "info",
@@ -1961,6 +2001,16 @@ export default function GitActionsControl({
                 gitStatusForActions.aheadCount === 0 && (
                   <p className="px-2 py-1.5 text-xs text-warning">
                     Behind upstream. Pull/rebase first.
+                  </p>
+                )}
+              {gitStatusForActions &&
+                gitStatusForActions.refName !== null &&
+                !gitStatusForActions.isDefaultRef &&
+                !gitStatusForActions.hasWorkingTreeChanges &&
+                gitStatusForActions.behindCount === 0 &&
+                (gitStatusForActions.behindOfDefaultCount ?? 0) > 0 && (
+                  <p className="px-2 py-1.5 text-xs text-warning">
+                    Behind base. Update from base first.
                   </p>
                 )}
               {gitStatusError && (
