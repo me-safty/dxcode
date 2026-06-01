@@ -30,7 +30,7 @@ import {
   signPayload,
   timingSafeEqualBase64Url,
 } from "../utils.ts";
-import { DESKTOP_BOOTSTRAP_BEARER_SESSION_TTL } from "../sessionPolicy.ts";
+import { DESKTOP_BOOTSTRAP_BEARER_SESSION_STALE_AGE } from "../sessionPolicy.ts";
 
 const SIGNING_SECRET_NAME = "server-signing-key";
 const DEFAULT_SESSION_TTL = Duration.days(30);
@@ -126,7 +126,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     Effect.flatMap((revokedAt) =>
       authSessions.revokeStaleDesktopBootstrapBearerSessions({
         issuedBefore: DateTime.subtract(revokedAt, {
-          milliseconds: Duration.toMillis(DESKTOP_BOOTSTRAP_BEARER_SESSION_TTL),
+          milliseconds: Duration.toMillis(DESKTOP_BOOTSTRAP_BEARER_SESSION_STALE_AGE),
         }),
         revokedAt,
       }),

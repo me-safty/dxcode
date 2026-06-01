@@ -58,6 +58,8 @@ const requestMetadata = {
   ipAddress: "192.168.1.23",
 };
 
+const TWELVE_HOURS_MS = 12 * 60 * 60 * 1_000;
+
 it.layer(NodeServices.layer)("ServerAuthLive", (it) => {
   it.effect("maps invalid bootstrap credential failures to 401", () =>
     Effect.sync(() => {
@@ -129,7 +131,7 @@ it.layer(NodeServices.layer)("ServerAuthLive", (it) => {
     }).pipe(Effect.provide(makeServerAuthLayer())),
   );
 
-  it.effect("labels VS Code desktop-bootstrap bearer sessions and shortens their TTL", () =>
+  it.effect("labels VS Code desktop-bootstrap bearer sessions without shortening their TTL", () =>
     Effect.gen(function* () {
       const serverAuth = yield* ServerAuth;
 
@@ -148,8 +150,7 @@ it.layer(NodeServices.layer)("ServerAuthLive", (it) => {
       expect(verified.role).toBe("owner");
       expect(verified.subject).toBe("desktop-bootstrap");
       expect(current?.client.label).toBe("VS Code");
-      expect(remainingMs).toBeGreaterThan(0);
-      expect(remainingMs).toBeLessThanOrEqual(12 * 60 * 60 * 1_000);
+      expect(remainingMs).toBeGreaterThan(TWELVE_HOURS_MS);
     }).pipe(
       Effect.provide(
         makeServerAuthLayer({
