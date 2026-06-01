@@ -35,6 +35,7 @@ interface ChatHeaderProps {
   isGitRepo: boolean;
   openInCwd: string | null;
   activeProjectScripts: ProjectScript[] | undefined;
+  projectPreviewUrl: string | null | undefined;
   detectedDevServerUrl: string | null;
   preferredScriptId: string | null;
   runningProjectScriptIds: ReadonlySet<string>;
@@ -81,10 +82,13 @@ export function shouldShowPreviewButton(input: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly browserAgentSidebarMode: boolean;
   readonly mainActionRunning: boolean;
+  readonly projectPreviewUrl?: string | null | undefined;
   readonly customPreviewUrl: string;
 }): boolean {
   return (
-    (input.mainActionRunning || input.customPreviewUrl.trim().length > 0) &&
+    (input.mainActionRunning ||
+      (input.projectPreviewUrl?.trim().length ?? 0) > 0 ||
+      input.customPreviewUrl.trim().length > 0) &&
     !input.browserAgentSidebarMode &&
     shouldShowBrowserAgentControls(input)
   );
@@ -105,6 +109,7 @@ export const ChatHeader = memo(function ChatHeader({
   isGitRepo,
   openInCwd,
   activeProjectScripts,
+  projectPreviewUrl,
   detectedDevServerUrl,
   preferredScriptId,
   runningProjectScriptIds,
@@ -146,6 +151,7 @@ export const ChatHeader = memo(function ChatHeader({
     primaryEnvironmentId,
     browserAgentSidebarMode,
     mainActionRunning: mainProjectScriptRunning,
+    projectPreviewUrl,
     customPreviewUrl,
   });
   const showBrowserAnnotationButton = shouldShowBrowserAnnotationButton({
@@ -215,6 +221,7 @@ export const ChatHeader = memo(function ChatHeader({
             <PreviewButton
               activeProjectName={activeProjectName}
               activeProjectScripts={activeProjectScripts}
+              projectPreviewUrl={projectPreviewUrl}
               activeThreadEnvironmentId={activeThreadEnvironmentId}
               activeThreadId={activeThreadId}
               detectedDevServerUrl={detectedDevServerUrl}
