@@ -3654,6 +3654,64 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("stops the provider session after archive when thread lookup fails", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-archive-lookup-failure");
+      const effects: string[] = [];
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+
+      yield* buildAppUnderTest({
+        layers: {
+          terminalManager: {
+            close: (input) =>
+              Effect.sync(() => {
+                effects.push(`terminal.close:${input.threadId}`);
+              }),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                effects.push(`dispatch:${command.type}`);
+                return { sequence: dispatchedCommands.length };
+              }),
+          },
+          projectionSnapshotQuery: {
+            getThreadShellById: () =>
+              Effect.fail(
+                new PersistenceSqlError({
+                  operation: "ProjectionSnapshotQuery.getThreadShellById:query",
+                  detail: "simulated thread lookup failure",
+                }),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const dispatchResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.archive",
+            commandId: CommandId.make("cmd-thread-archive-lookup-failure"),
+            threadId,
+          }),
+        ),
+      );
+
+      assert.equal(dispatchResult.sequence, 1);
+      assert.deepEqual(effects, [
+        "dispatch:thread.archive",
+        "dispatch:thread.session.stop",
+        `terminal.close:${threadId}`,
+      ]);
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ["thread.archive", "thread.session.stop"],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("archives without dispatching session stop when the thread has no session", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("thread-archive-no-session");

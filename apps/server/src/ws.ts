@@ -721,7 +721,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                             },
                           ).pipe(
                             Effect.as({
-                              shouldStop: false,
+                              shouldStop: true,
                               peerThreadContext: null,
                             }),
                           ),
