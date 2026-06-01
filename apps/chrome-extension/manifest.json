@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "T3 Code Browser Agent",
+  "description": "Pairs Chrome with T3 Code so dev-server tabs can be focused and annotated.",
+  "version": "0.0.1",
+  "permissions": ["storage", "tabs", "tabGroups", "windows", "scripting", "sidePanel"],
+  "host_permissions": [
+    "<all_urls>",
+    "http://localhost/*",
+    "https://localhost/*",
+    "http://127.0.0.1/*",
+    "https://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["pairing-content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.html", "popup.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; frame-src http: https:;"
+  },
+  "action": {
+    "default_title": "T3 Code Browser Agent"
+  }
+}

@@ -5,6 +5,8 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import { ServerConfig } from "./config.ts";
 import {
   attachmentsRouteLayer,
+  browserAgentAutoPairRouteLayer,
+  browserAgentExtensionDownloadRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
@@ -13,6 +15,7 @@ import {
 } from "./http.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
+import { browserAgentRouteLayer } from "./browserAgents/ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
@@ -71,6 +74,7 @@ import {
   authPairingLinksRevokeRouteLayer,
   authPairingLinksRouteLayer,
   authPairingCredentialRouteLayer,
+  authSessionBearerTokenRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
 } from "./auth/http.ts";
@@ -311,6 +315,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   authPairingLinksRevokeRouteLayer,
   authPairingLinksRouteLayer,
   authPairingCredentialRouteLayer,
+  authSessionBearerTokenRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
   attachmentsRouteLayer,
@@ -319,7 +324,10 @@ export const makeRoutesLayer = Layer.mergeAll(
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
+  browserAgentAutoPairRouteLayer,
+  browserAgentExtensionDownloadRouteLayer,
   staticAndDevRouteLayer,
+  browserAgentRouteLayer,
   websocketRpcRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));
 

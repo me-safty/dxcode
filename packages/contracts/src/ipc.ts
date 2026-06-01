@@ -45,6 +45,8 @@ import type {
   TerminalAttachStreamEvent,
   TerminalClearInput,
   TerminalCloseInput,
+  TerminalDetectWebServersInput,
+  TerminalDetectWebServersResult,
   TerminalMetadataStreamEvent,
   TerminalOpenInput,
   TerminalResizeInput,
@@ -417,6 +419,7 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
+  openInChrome?: (url: string) => Promise<boolean>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
@@ -511,6 +514,9 @@ export interface EnvironmentApi {
     clear: (input: typeof TerminalClearInput.Encoded) => Promise<void>;
     restart: (input: typeof TerminalRestartInput.Encoded) => Promise<TerminalSessionSnapshot>;
     close: (input: typeof TerminalCloseInput.Encoded) => Promise<void>;
+    detectWebServers?: (
+      input: typeof TerminalDetectWebServersInput.Encoded,
+    ) => Promise<TerminalDetectWebServersResult>;
     onMetadata: (
       callback: (event: TerminalMetadataStreamEvent) => void,
       options?: {

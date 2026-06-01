@@ -74,6 +74,7 @@ export interface WsRpcClient {
     readonly clear: RpcUnaryMethod<typeof WS_METHODS.terminalClear>;
     readonly restart: RpcUnaryMethod<typeof WS_METHODS.terminalRestart>;
     readonly close: RpcUnaryMethod<typeof WS_METHODS.terminalClose>;
+    readonly detectWebServers: RpcUnaryMethod<typeof WS_METHODS.terminalDetectWebServers>;
     readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
     readonly onMetadata: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalMetadata>;
   };
@@ -122,6 +123,12 @@ export interface WsRpcClient {
   };
   readonly review: {
     readonly getDiffPreview: RpcUnaryMethod<typeof WS_METHODS.reviewGetDiffPreview>;
+  };
+  readonly browserAgents: {
+    readonly list: RpcUnaryNoArgMethod<typeof WS_METHODS.browserAgentsList>;
+    readonly openOrFocusPreview: RpcUnaryMethod<typeof WS_METHODS.browserAgentsOpenOrFocusPreview>;
+    readonly activateAnnotation: RpcUnaryMethod<typeof WS_METHODS.browserAgentsActivateAnnotation>;
+    readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeBrowserAgents>;
   };
   readonly server: {
     readonly getConfig: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetConfig>;
@@ -191,6 +198,8 @@ export function createWsRpcClient(
       clear: (input) => transport.request((client) => client[WS_METHODS.terminalClear](input)),
       restart: (input) => transport.request((client) => client[WS_METHODS.terminalRestart](input)),
       close: (input) => transport.request((client) => client[WS_METHODS.terminalClose](input)),
+      detectWebServers: (input) =>
+        transport.request((client) => client[WS_METHODS.terminalDetectWebServers](input)),
       onEvent: (listener, options) =>
         transport.subscribe(
           (client) => client[WS_METHODS.subscribeTerminalEvents]({}),
@@ -277,6 +286,19 @@ export function createWsRpcClient(
     review: {
       getDiffPreview: (input) =>
         transport.request((client) => client[WS_METHODS.reviewGetDiffPreview](input)),
+    },
+    browserAgents: {
+      list: () => transport.request((client) => client[WS_METHODS.browserAgentsList]({})),
+      openOrFocusPreview: (input) =>
+        transport.request((client) => client[WS_METHODS.browserAgentsOpenOrFocusPreview](input)),
+      activateAnnotation: (input) =>
+        transport.request((client) => client[WS_METHODS.browserAgentsActivateAnnotation](input)),
+      subscribe: (listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeBrowserAgents]({}),
+          listener,
+          subscriptionOptions(options, WS_METHODS.subscribeBrowserAgents),
+        ),
     },
     server: {
       getConfig: () => transport.request((client) => client[WS_METHODS.serverGetConfig]({})),

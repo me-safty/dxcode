@@ -32,6 +32,7 @@ function MockWsTransport() {
 
 vi.mock("../primary", () => ({
   getPrimaryKnownEnvironment: mockGetPrimaryKnownEnvironment,
+  readPrimaryBrowserAgentSidebarSessionToken: vi.fn(() => null),
 }));
 
 vi.mock("../../lib/runtime", () => ({
@@ -94,6 +95,7 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
       clear: vi.fn(),
       restart: vi.fn(),
       close: vi.fn(),
+      detectWebServers: vi.fn(async () => ({ servers: [] })),
       onEvent: vi.fn(() => () => undefined),
       onMetadata: vi.fn(() => () => undefined),
     },
@@ -130,6 +132,12 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
     },
     review: {
       getDiffPreview: vi.fn(),
+    },
+    browserAgents: {
+      list: vi.fn(),
+      openOrFocusPreview: vi.fn(),
+      activateAnnotation: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
     },
     server: {
       getConfig: vi.fn(),

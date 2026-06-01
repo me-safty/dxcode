@@ -28,6 +28,7 @@ vi.mock("../primary", () => ({
     },
     environmentId: EnvironmentId.make("env-1"),
   })),
+  readPrimaryBrowserAgentSidebarSessionToken: vi.fn(() => null),
 }));
 
 vi.mock("../../lib/runtime", () => ({
@@ -188,6 +189,7 @@ function createClient() {
       clear: vi.fn(async () => undefined),
       restart: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
+      detectWebServers: vi.fn(async () => ({ servers: [] })),
       onMetadata: vi.fn(() => () => undefined),
     },
     projects: {

@@ -12,6 +12,7 @@ import {
   PlayIcon,
   PlusIcon,
   SettingsIcon,
+  SquareIcon,
   WrenchIcon,
 } from "lucide-react";
 import React, { type FormEvent, type KeyboardEvent, useCallback, useMemo, useState } from "react";
@@ -20,6 +21,7 @@ import {
   keybindingValueForCommand,
   decodeProjectScriptKeybindingRule,
 } from "~/lib/projectScriptKeybindings";
+import { cn } from "~/lib/utils";
 import { keybindingFromKeyboardEvent } from "~/components/settings/KeybindingsSettings.logic";
 import {
   commandForProjectScript,
@@ -62,6 +64,7 @@ const SCRIPT_ICONS: Array<{ id: ProjectScriptIcon; label: string }> = [
   { id: "build", label: "Build" },
   { id: "debug", label: "Debug" },
 ];
+const EMPTY_RUNNING_SCRIPT_IDS = new Set<string>() as ReadonlySet<string>;
 
 function ScriptIcon({
   icon,
@@ -90,6 +93,7 @@ interface ProjectScriptsControlProps {
   scripts: ProjectScript[];
   keybindings: ResolvedKeybindingsConfig;
   preferredScriptId?: string | null;
+  runningScriptIds?: ReadonlySet<string>;
   onRunScript: (script: ProjectScript) => void;
   onAddScript: (input: NewProjectScriptInput) => Promise<void> | void;
   onUpdateScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void> | void;
@@ -100,6 +104,7 @@ export default function ProjectScriptsControl({
   scripts,
   keybindings,
   preferredScriptId = null,
+  runningScriptIds = EMPTY_RUNNING_SCRIPT_IDS,
   onRunScript,
   onAddScript,
   onUpdateScript,
@@ -124,6 +129,7 @@ export default function ProjectScriptsControl({
     }
     return primaryProjectScript(scripts);
   }, [preferredScriptId, scripts]);
+  const primaryScriptRunning = primaryScript ? runningScriptIds.has(primaryScript.id) : false;
   const isEditing = editingScriptId !== null;
   const dropdownItemClassName =
     "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
@@ -222,10 +228,23 @@ export default function ProjectScriptsControl({
           <Button
             size="xs"
             variant="outline"
+            className={cn(
+              primaryScriptRunning &&
+                "border-emerald-500/45 bg-emerald-500/12 text-emerald-700 hover:bg-emerald-500/18 dark:text-emerald-300",
+            )}
             onClick={() => onRunScript(primaryScript)}
-            title={`Run ${primaryScript.name}`}
+            aria-label={
+              primaryScriptRunning ? `Stop ${primaryScript.name}` : `Run ${primaryScript.name}`
+            }
+            title={
+              primaryScriptRunning ? `Stop ${primaryScript.name}` : `Run ${primaryScript.name}`
+            }
           >
-            <ScriptIcon icon={primaryScript.icon} />
+            {primaryScriptRunning ? (
+              <SquareIcon className="size-3.5 fill-current" />
+            ) : (
+              <ScriptIcon icon={primaryScript.icon} />
+            )}
             <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
               {primaryScript.name}
             </span>
@@ -243,13 +262,22 @@ export default function ProjectScriptsControl({
                   keybindings,
                   commandForProjectScript(script.id),
                 );
+                const scriptRunning = runningScriptIds.has(script.id);
                 return (
                   <MenuItem
                     key={script.id}
-                    className={`group ${dropdownItemClassName}`}
+                    className={cn(
+                      "group",
+                      dropdownItemClassName,
+                      scriptRunning && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                    )}
                     onClick={() => onRunScript(script)}
                   >
-                    <ScriptIcon icon={script.icon} className="size-4" />
+                    {scriptRunning ? (
+                      <SquareIcon className="size-4 fill-current" />
+                    ) : (
+                      <ScriptIcon icon={script.icon} className="size-4" />
+                    )}
                     <span className="truncate">
                       {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
                     </span>

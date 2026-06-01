@@ -1,6 +1,12 @@
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import {
+  BROWSER_AGENT_EXTENSION_DOWNLOAD_FILENAME,
+  BROWSER_AGENT_EXTENSION_DOWNLOAD_PATH,
+  BROWSER_AGENT_EXTENSION_DOWNLOADS_DIR,
+  BROWSER_AGENT_EXTENSION_SOURCE_DIR_NAME,
+} from "@t3tools/shared/browserAgent";
 
 import {
   CommandId,
@@ -973,6 +979,48 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("serves browser agent extension downloads before the dev URL redirect", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-router-extension-download-",
+      });
+      const downloadsDir = path.join(staticDir, BROWSER_AGENT_EXTENSION_DOWNLOADS_DIR);
+      const extensionDir = path.join(downloadsDir, BROWSER_AGENT_EXTENSION_SOURCE_DIR_NAME);
+      yield* fileSystem.makeDirectory(extensionDir, { recursive: true });
+      yield* fileSystem.writeFileString(
+        path.join(extensionDir, "manifest.json"),
+        "extension-package-ok",
+      );
+
+      yield* buildAppUnderTest({
+        config: {
+          staticDir,
+          devUrl: new URL("http://127.0.0.1:5173"),
+        },
+      });
+
+      const response = yield* HttpClient.get(BROWSER_AGENT_EXTENSION_DOWNLOAD_PATH).pipe(
+        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers["content-type"], "application/zip");
+      assert.equal(
+        response.headers["content-disposition"],
+        `inline; filename="${BROWSER_AGENT_EXTENSION_DOWNLOAD_FILENAME}"`,
+      );
+      const body = Buffer.from(yield* response.arrayBuffer);
+      assert.equal(body.subarray(0, 2).toString("utf8"), "PK");
+      assert.include(
+        body.toString("utf8"),
+        `${BROWSER_AGENT_EXTENSION_SOURCE_DIR_NAME}/manifest.json`,
+      );
+      assert.include(body.toString("utf8"), "extension-package-ok");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("serves project favicon requests before the dev URL redirect", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -1252,6 +1300,49 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("issues same-session bearer tokens for authenticated sessions", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const response = yield* HttpClient.post("/api/auth/session/bearer-token", {
+        headers: {
+          cookie,
+        },
+      });
+      const body = (yield* response.json) as {
+        readonly authenticated: boolean;
+        readonly role: string;
+        readonly sessionMethod: string;
+        readonly sessionToken?: string;
+        readonly expiresAt: string;
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(body.authenticated, true);
+      assert.equal(body.role, "owner");
+      assert.equal(body.sessionMethod, "bearer-session-token");
+      assert.equal(typeof body.sessionToken, "string");
+      assert.isTrue((body.sessionToken?.length ?? 0) > 0);
+
+      const sessionResponse = yield* HttpClient.get("/api/auth/session", {
+        headers: {
+          authorization: `Bearer ${body.sessionToken ?? ""}`,
+        },
+      });
+      const sessionBody = (yield* sessionResponse.json) as {
+        readonly authenticated: boolean;
+        readonly role?: string;
+        readonly sessionMethod?: string;
+      };
+
+      assert.equal(sessionResponse.status, 200);
+      assert.equal(sessionBody.authenticated, true);
+      assert.equal(sessionBody.role, "owner");
+      assert.equal(sessionBody.sessionMethod, "bearer-session-token");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("issues short-lived websocket tokens for authenticated bearer sessions", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
@@ -1306,6 +1397,20 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertBrowserApiCorsHeaders(sessionResponse.headers);
       assert.equal(sessionBody.authenticated, true);
       assert.equal(sessionBody.sessionMethod, "bearer-session-token");
+
+      const aliasTokenResponse = yield* HttpClient.post("/api/auth/session/bearer-token", {
+        headers: {
+          authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
+          origin,
+        },
+      });
+      const aliasTokenBody = (yield* aliasTokenResponse.json) as {
+        readonly sessionToken?: string;
+      };
+
+      assert.equal(aliasTokenResponse.status, 200);
+      assertBrowserApiCorsHeaders(aliasTokenResponse.headers);
+      assert.equal(typeof aliasTokenBody.sessionToken, "string");
 
       const wsTokenResponse = yield* HttpClient.post("/api/auth/ws-token", {
         headers: {
