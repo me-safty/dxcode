@@ -583,6 +583,33 @@ describe("WorkspaceFilePreviewPanel", () => {
     }
   });
 
+  it("remounts the preview virtualizer when a preserved panel is reopened", async () => {
+    const mounted = await renderPreview({ panelOpen: true });
+    try {
+      // Initial open settles layout and remounts the virtualizer against real dimensions.
+      await vi.waitFor(() => {
+        expect(virtualizerMounts).toHaveLength(2);
+      });
+      await waitForAnimationFrames(3);
+      expect(virtualizerMounts).toHaveLength(2);
+
+      // Preserve the panel (hidden), then reopen the same file via swipe.
+      await mounted.rerenderPanel({ panelOpen: false });
+      await waitForAnimationFrames(3);
+      await mounted.rerenderPanel({ panelOpen: true });
+
+      // The virtualizer must remount so it measures against real dimensions again
+      // instead of leaving a blank page until the user scrolls.
+      await vi.waitFor(() => {
+        expect(virtualizerMounts).toHaveLength(3);
+      });
+      await waitForAnimationFrames(3);
+      expect(virtualizerMounts).toHaveLength(3);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("requests an all-changes working tree diff for a changed preview file", async () => {
     getWorkingTreeDiffMock.mockResolvedValue({ diff: MODIFIED_FILE_DIFF });
     setGitStatusMock([{ deletions: 1, insertions: 1, path: "src/App.tsx" }]);

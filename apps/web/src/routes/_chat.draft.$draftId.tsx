@@ -284,9 +284,17 @@ function DraftChatThreadRouteView() {
     return null;
   }
 
+  // See the thread route: reopen restores from the store, so only keep the
+  // file/source-control panel mounted-while-closed inline, not on the mobile
+  // sheet where the resident diff rendering is a crash risk.
   const shouldRenderFilePanelContent =
-    filePanelOpen || filePanel.target !== null || filePanel.explorerContext !== null;
-  const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
+    filePanelOpen ||
+    (!shouldUseRightPanelSheet &&
+      (filePanel.target !== null || filePanel.explorerContext !== null));
+  // See the thread route: keeping the diff panel (and its worker pool) mounted
+  // after it closes is a memory win for inline layout switches but a crash risk
+  // on the mobile sheet, so tear it down on dismiss there.
+  const shouldRenderDiffContent = diffOpen || (!shouldUseRightPanelSheet && hasOpenedDiff);
 
   return (
     <>

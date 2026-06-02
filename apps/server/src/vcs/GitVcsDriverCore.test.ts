@@ -168,6 +168,22 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("reports individual files inside untracked directories", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "public/images/hero.png", "png bytes\n");
+        yield* writeTextFile(cwd, "public/images/card.webp", "webp bytes\n");
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+        const unstagedPaths = status.workingTree.unstaged.files.map((file) => file.path);
+
+        assert.include(unstagedPaths, "public/images/card.webp");
+        assert.include(unstagedPaths, "public/images/hero.png");
+        assert.notInclude(unstagedPaths, "public/images/");
+      }),
+    );
+
     it.effect("reports default-branch delta separately from upstream delta", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

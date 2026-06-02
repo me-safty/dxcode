@@ -393,6 +393,16 @@ function useFilePreviewVirtualizerLayoutRevision({
   const refreshedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // When the panel is hidden (e.g. a preserved preview reopened via swipe), the
+    // virtualizer keeps its stale 0-height measurements. Forget the refreshed key so
+    // the next time the panel becomes visible we re-run the layout bump and remount
+    // the virtualizer against real dimensions instead of rendering a blank page.
+    if (!enabled) {
+      refreshedKeyRef.current = null;
+    }
+  }, [enabled]);
+
+  useEffect(() => {
     if (!enabled || layoutKey === null) {
       return;
     }

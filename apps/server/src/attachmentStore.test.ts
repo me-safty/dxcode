@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createAttachmentId,
+  createStableAttachmentId,
   parseThreadSegmentFromAttachmentId,
   resolveAttachmentPathById,
 } from "./attachmentStore.ts";
@@ -42,6 +43,20 @@ describe("attachmentStore", () => {
       return;
     }
     expect(parseThreadSegmentFromAttachmentId(attachmentId)).toBe("thread-foo");
+  });
+
+  it("creates deterministic attachment ids from stable keys", () => {
+    const first = createStableAttachmentId("Thread.Foo", "provider-item:ig_1:hash-a");
+    const repeated = createStableAttachmentId("Thread.Foo", "provider-item:ig_1:hash-a");
+    const changed = createStableAttachmentId("Thread.Foo", "provider-item:ig_1:hash-b");
+
+    expect(first).toBeTruthy();
+    expect(first).toBe(repeated);
+    expect(first).not.toBe(changed);
+    expect(first).toMatch(
+      /^thread-foo-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(parseThreadSegmentFromAttachmentId(first ?? "")).toBe("thread-foo");
   });
 
   it("resolves attachment path by id using the extension that exists on disk", () => {

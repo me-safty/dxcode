@@ -1366,7 +1366,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const statusResult = yield* executeGit(
       "GitVcsDriver.statusDetails.status",
       cwd,
-      ["status", "--porcelain=2", "--branch"],
+      ["status", "--porcelain=2", "--branch", "--untracked-files=all"],
       {
         allowNonZeroExit: true,
       },
@@ -1381,7 +1381,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       return yield* createGitCommandError(
         "GitVcsDriver.statusDetails.status",
         cwd,
-        ["status", "--porcelain=2", "--branch"],
+        ["status", "--porcelain=2", "--branch", "--untracked-files=all"],
         stderr || "git status failed",
       );
     }

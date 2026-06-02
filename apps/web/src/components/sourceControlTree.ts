@@ -35,8 +35,9 @@ function createDirNode(path: string, name: string): MutableDirNode {
 }
 
 export function sourceControlFileName(path: string): string {
-  const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return separatorIndex >= 0 ? path.slice(separatorIndex + 1) : path;
+  const normalized = path.replace(/[\\/]+$/g, "");
+  const separatorIndex = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf("\\"));
+  return separatorIndex >= 0 ? normalized.slice(separatorIndex + 1) : normalized;
 }
 
 function finalize(node: MutableDirNode): SourceControlTreeDirNode {

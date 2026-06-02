@@ -637,6 +637,58 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("maps started Codex image generation lifecycle items to generated images", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+        Effect.forkChild,
+      );
+
+      yield* runtime.emit({
+        id: asEventId("evt-image-generation-item-started"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/started",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("ig_started"),
+        payload: {
+          startedAtMs: 1_778_000_000_000,
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "imageGeneration",
+            id: "ig_started",
+            status: "generating",
+            result: "aGVsbG8=",
+            revisedPrompt: "A generated test image",
+            savedPath: null,
+          },
+        },
+      } satisfies ProviderEvent);
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+
+      assert.equal(events.length, 2);
+
+      const generatedEvent = events[0];
+      assert.equal(generatedEvent?.type, "image.generated");
+      if (generatedEvent?.type === "image.generated") {
+        assert.equal(generatedEvent.turnId, "turn-1");
+        assert.equal(generatedEvent.itemId, "ig_started");
+        assert.equal(generatedEvent.payload.name, "ig_started.png");
+        assert.equal(generatedEvent.payload.dataUrl, "data:image/png;base64,aGVsbG8=");
+      }
+
+      const startedEvent = events[1];
+      assert.equal(startedEvent?.type, "item.started");
+      if (startedEvent?.type === "item.started") {
+        assert.equal(startedEvent.payload.itemType, "image_view");
+        assert.equal(startedEvent.payload.status, "inProgress");
+      }
+    }),
+  );
+
   it.effect("maps plan deltas to canonical proposed-plan delta events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();

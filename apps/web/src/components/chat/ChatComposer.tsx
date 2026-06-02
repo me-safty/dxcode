@@ -1122,9 +1122,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Compact footer (mobile/narrow): reasoning effort gets its own picker, so it
   // is excluded from the "more controls" menu. The full traits picker (with
   // reasoning) is still used on the roomier non-compact footer.
-  const providerTraitsMenuContent = renderProviderTraitsMenuContentWithoutReasoning(
-    traitsRenderInput,
-  );
+  const providerTraitsMenuContent =
+    renderProviderTraitsMenuContentWithoutReasoning(traitsRenderInput);
   const providerReasoningPicker = renderProviderReasoningPicker(traitsRenderInput);
   const providerTraitsPicker = renderProviderTraitsPicker(traitsRenderInput);
   const pendingPrimaryAction = useMemo(
@@ -1831,6 +1830,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
     }
     if (key === "Enter" && !event.shiftKey) {
+      // On mobile/touch viewports we mimic WhatsApp/iMessage: Enter always
+      // inserts a line break (returning false lets the editor handle it
+      // natively) and submitting is done via the Send button. Desktop keeps
+      // Enter = submit / Shift+Enter = newline.
+      if (isMobileViewport) {
+        return false;
+      }
       submitComposer();
       return true;
     }
@@ -2445,6 +2451,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : []
                 }
                 skills={selectedProviderStatus?.skills ?? []}
+                enterKeyHint={isMobileViewport ? "enter" : "send"}
                 {...(showMobilePendingAnswerActions ? { className: "max-sm:pb-11" } : {})}
                 onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
                 onChange={onPromptChange}

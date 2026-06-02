@@ -6,8 +6,7 @@ import {
   TERMINAL_ESC,
 } from "./terminalAccessoryKeys";
 
-const ctrl = (letter: string) =>
-  String.fromCharCode(letter.toUpperCase().charCodeAt(0) & 0x1f);
+const ctrl = (letter: string) => String.fromCharCode(letter.toUpperCase().charCodeAt(0) & 0x1f);
 
 describe("applyTerminalCtrlModifier", () => {
   it("maps lowercase letters to their control byte", () => {

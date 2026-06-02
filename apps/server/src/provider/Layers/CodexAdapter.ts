@@ -337,6 +337,23 @@ function imageGenerationPayloadFromItem(
   };
 }
 
+function imageGeneratedRuntimeEventFromItem(
+  event: ProviderEvent,
+  canonicalThreadId: ThreadId,
+  item: unknown,
+): ProviderRuntimeEvent | undefined {
+  const generatedImage = imageGenerationPayloadFromItem(item);
+  if (!generatedImage) {
+    return undefined;
+  }
+
+  return {
+    ...runtimeEventBase(event, canonicalThreadId),
+    type: "image.generated",
+    payload: generatedImage,
+  };
+}
+
 function toRequestTypeFromMethod(method: string): CanonicalRequestType {
   switch (method) {
     case "item/commandExecution/requestApproval":
@@ -884,23 +901,27 @@ function mapToRuntimeEvents(
       EffectCodexSchema.V2RawResponseItemCompletedNotification,
       event.payload,
     );
-    const generatedImage = imageGenerationPayloadFromItem(payload?.item);
-    if (!generatedImage) {
+    const generatedEvent = imageGeneratedRuntimeEventFromItem(
+      event,
+      canonicalThreadId,
+      payload?.item,
+    );
+    if (!generatedEvent) {
       return [];
     }
 
-    return [
-      {
-        ...runtimeEventBase(event, canonicalThreadId),
-        type: "image.generated",
-        payload: generatedImage,
-      },
-    ];
+    return [generatedEvent];
   }
 
   if (event.method === "item/started") {
+    const payload = readPayload(EffectCodexSchema.V2ItemStartedNotification, event.payload);
+    const generatedEvent = imageGeneratedRuntimeEventFromItem(
+      event,
+      canonicalThreadId,
+      payload?.item,
+    );
     const started = mapItemLifecycle(event, canonicalThreadId, "item.started");
-    return started ? [started] : [];
+    return [...(generatedEvent ? [generatedEvent] : []), ...(started ? [started] : [])];
   }
 
   if (event.method === "item/completed") {
@@ -925,20 +946,9 @@ function mapToRuntimeEvents(
         },
       ];
     }
-    const generatedImage = imageGenerationPayloadFromItem(item);
+    const generatedEvent = imageGeneratedRuntimeEventFromItem(event, canonicalThreadId, item);
     const completed = mapItemLifecycle(event, canonicalThreadId, "item.completed");
-    return [
-      ...(generatedImage
-        ? [
-            {
-              ...runtimeEventBase(event, canonicalThreadId),
-              type: "image.generated" as const,
-              payload: generatedImage,
-            },
-          ]
-        : []),
-      ...(completed ? [completed] : []),
-    ];
+    return [...(generatedEvent ? [generatedEvent] : []), ...(completed ? [completed] : [])];
   }
 
   if (

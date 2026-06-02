@@ -30,6 +30,7 @@ import {
   rewriteMarkdownFileUriHref,
 } from "../markdown-links";
 import { readLocalApi } from "../localApi";
+import { MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE } from "../hooks/useMobileEdgeSwipe";
 import { cn } from "../lib/utils";
 import { openPathInPreferredEditorOrFilePreview } from "../workspaceFilePreview";
 import { resolveWorkspaceFilePreviewTarget } from "../workspaceFilePreview";
@@ -93,6 +94,20 @@ function nodeToPlainText(node: ReactNode): string {
   return "";
 }
 
+// Inline code (and the inner `<code>` of fenced blocks) renders through here so
+// a horizontal drag scrolls/selects the snippet instead of moving a panel.
+function MarkdownInlineCode({
+  children,
+  node: _node,
+  ...props
+}: React.ComponentProps<"code"> & { node?: unknown }): React.ReactElement {
+  return (
+    <code {...props} {...{ [MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE]: "true" }}>
+      {children}
+    </code>
+  );
+}
+
 function extractCodeBlock(
   children: ReactNode,
 ): { className: string | undefined; code: string } | null {
@@ -104,7 +119,7 @@ function extractCodeBlock(
   const onlyChild = childNodes[0];
   if (
     !isValidElement<{ className?: string; children?: ReactNode }>(onlyChild) ||
-    onlyChild.type !== "code"
+    (onlyChild.type !== "code" && onlyChild.type !== MarkdownInlineCode)
   ) {
     return null;
   }
@@ -148,7 +163,10 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
   );
 
   return (
-    <div className="chat-markdown-codeblock leading-snug">
+    <div
+      className="chat-markdown-codeblock leading-snug"
+      {...{ [MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE]: "true" }}
+    >
       <button
         type="button"
         className="chat-markdown-copy-button"
@@ -685,10 +703,15 @@ function ChatMarkdown({
           </button>
         );
       },
+      code: MarkdownInlineCode,
       pre({ node: _node, children, ...props }) {
         const codeBlock = extractCodeBlock(children);
         if (!codeBlock) {
-          return <pre {...props}>{children}</pre>;
+          return (
+            <pre {...props} {...{ [MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE]: "true" }}>
+              {children}
+            </pre>
+          );
         }
 
         const stableFallback = (

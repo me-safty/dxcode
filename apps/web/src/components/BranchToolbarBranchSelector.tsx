@@ -1,7 +1,7 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, GitBranchPlusIcon } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -260,11 +260,15 @@ export function BranchToolbarBranchSelector({
     effectiveEnvMode === "worktree" && !envLocked && !activeWorktreePath;
   const checkoutPullRequestItemValue =
     prReference && onCheckoutPullRequestRequest ? `__checkout_pull_request__:${prReference}` : null;
+  // Surface a "create branch" entry as soon as a name is typed. The empty-state
+  // affordance lives in the popover footer (see below) and just focuses the
+  // search box, so a new branch can be made straight from the toggle.
   const canCreateBranch = !isSelectingWorktreeBase && trimmedBranchQuery.length > 0;
   const hasExactBranchMatch = branchByName.has(trimmedBranchQuery);
   const createBranchItemValue = canCreateBranch
     ? `__create_new_branch__:${trimmedBranchQuery}`
     : null;
+  const showCreateBranchFooter = !isSelectingWorktreeBase && trimmedBranchQuery.length === 0;
   const branchPickerItems = useMemo(() => {
     const items = [...branchNames];
     if (createBranchItemValue && !hasExactBranchMatch) {
@@ -299,6 +303,7 @@ export function BranchToolbarBranchSelector({
     (_currentBranch: string | null, optimisticBranch: string | null) => optimisticBranch,
   );
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
+  const branchInputContainerRef = useRef<HTMLDivElement | null>(null);
   const isBranchSelectorDisabled = resolveBranchSelectorDisabled({
     isBranchActionPending,
     isBranchSearchEnabled: shouldQueryBranchRefs,
@@ -549,7 +554,10 @@ export function BranchToolbarBranchSelector({
           value={itemValue}
           onClick={() => createRef(trimmedBranchQuery)}
         >
-          <span className="truncate">Create new ref &quot;{trimmedBranchQuery}&quot;</span>
+          <div className="flex min-w-0 items-center gap-2 py-0.5">
+            <GitBranchPlusIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">Create new ref &quot;{trimmedBranchQuery}&quot;</span>
+          </div>
         </ComboboxItem>
       );
     }
@@ -584,6 +592,12 @@ export function BranchToolbarBranchSelector({
     );
   }
 
+  const focusBranchSearchInput = () => {
+    // Keep the popover open and drop the caret in the search box so the next
+    // keystrokes name the new ref (surfacing the "Create new ref" entry).
+    branchInputContainerRef.current?.querySelector("input")?.focus();
+  };
+
   return (
     <Combobox
       items={branchPickerItems}
@@ -612,11 +626,11 @@ export function BranchToolbarBranchSelector({
         <ChevronDownIcon className="shrink-0" />
       </ComboboxTrigger>
       <ComboboxPopup align="end" side="top" className="w-80">
-        <div className="border-b p-1">
+        <div ref={branchInputContainerRef} className="border-b p-1">
           <ComboboxInput
             className="[&_input]:font-sans rounded-md"
             inputClassName="ring-0"
-            placeholder="Search refs..."
+            placeholder="Search or name a new ref..."
             showTrigger={false}
             size="sm"
             value={branchQuery}
@@ -649,6 +663,21 @@ export function BranchToolbarBranchSelector({
             )}
           </ComboboxList>
         )}
+        {showCreateBranchFooter ? (
+          <div className="border-t p-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start text-muted-foreground hover:text-foreground"
+              // Keep the input focused so the popover stays open and typing names the ref.
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={focusBranchSearchInput}
+            >
+              <GitBranchPlusIcon className="size-3.5 shrink-0" />
+              <span className="truncate">Create new ref…</span>
+            </Button>
+          </div>
+        ) : null}
         {branchStatusText ? <ComboboxStatus>{branchStatusText}</ComboboxStatus> : null}
       </ComboboxPopup>
     </Combobox>

@@ -11,6 +11,9 @@ export const MOBILE_EDGE_SWIPE_VERTICAL_CANCEL_DISTANCE_PX = 18;
 export const MOBILE_EDGE_SWIPE_HORIZONTAL_DOMINANCE_RATIO = 1.25;
 export const MOBILE_EDGE_SWIPE_OPEN_INTENT_TIMEOUT_MS = 350;
 export const MOBILE_EDGE_SWIPE_PANEL_ATTRIBUTE = "data-mobile-edge-swipe-panel";
+// Mark a subtree where a horizontal drag should scroll/select content (e.g.
+// markdown code blocks and inline code) instead of opening or dismissing a panel.
+export const MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE = "data-mobile-edge-swipe-block";
 
 // A quick horizontal flick can trigger the action well before the sustained
 // drag distance is reached. This lets the gesture win over a scrollable body,
@@ -122,7 +125,7 @@ function isBlockedTarget(target: EventTarget | null): boolean {
         "textarea",
         "select",
         "[contenteditable='true']",
-        "[data-mobile-edge-swipe-block='true']",
+        `[${MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE}='true']`,
         ".xterm",
       ].join(","),
     ),

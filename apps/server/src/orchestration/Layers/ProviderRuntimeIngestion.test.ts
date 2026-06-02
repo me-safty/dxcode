@@ -1016,7 +1016,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(fs.existsSync(path.join(harness.attachmentsDir, `${attachment?.id}.png`))).toBe(true);
   });
 
-  it("copies generated provider image payloads into assistant message attachments", async () => {
+  it("copies generated provider image payloads into stable assistant message attachments", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
 
@@ -1054,6 +1054,61 @@ describe("ProviderRuntimeIngestion", () => {
       sizeBytes: 5,
     });
     expect(fs.existsSync(path.join(harness.attachmentsDir, `${attachment?.id}.png`))).toBe(true);
+
+    harness.emit({
+      type: "image.generated",
+      eventId: asEventId("evt-generated-image-repeat"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-generated-image"),
+      itemId: asItemId("item-generated-image"),
+      payload: {
+        name: "generated-cat.png",
+        dataUrl: "data:image/png;base64,aGVsbG8=",
+      },
+    });
+    await harness.drain();
+
+    const repeatedThread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === asThreadId("thread-1"),
+    );
+    const repeatedMessage = repeatedThread?.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-generated-image",
+    );
+    expect(repeatedMessage?.attachments?.map((entry) => entry.id)).toEqual([attachment?.id]);
+
+    harness.emit({
+      type: "image.generated",
+      eventId: asEventId("evt-generated-image-updated"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-generated-image"),
+      itemId: asItemId("item-generated-image"),
+      payload: {
+        name: "generated-cat.png",
+        dataUrl: "data:image/png;base64,d29ybGQ=",
+      },
+    });
+
+    const updatedThread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (candidate: ProviderRuntimeTestMessage) =>
+          candidate.id === "assistant:item-generated-image" &&
+          (candidate.attachments?.length ?? 0) === 2,
+      ),
+    );
+    const updatedMessage = updatedThread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-generated-image",
+    );
+    const updatedAttachments = updatedMessage?.attachments ?? [];
+    expect(updatedAttachments).toHaveLength(2);
+    expect(updatedAttachments[0]?.id).toBe(attachment?.id);
+    expect(updatedAttachments[1]?.id).not.toBe(attachment?.id);
+    expect(
+      fs.existsSync(path.join(harness.attachmentsDir, `${updatedAttachments[1]?.id}.png`)),
+    ).toBe(true);
   });
 
   it("preserves completed tool metadata on projected tool activities", async () => {
@@ -1110,6 +1165,66 @@ describe("ProviderRuntimeIngestion", () => {
     expect(data?.toolCallId).toBe("tool-read-1");
     expect(data?.kind).toBe("read");
     expect(rawOutput?.content).toBe('import * as Effect from "effect/Effect"\n');
+  });
+
+  it("omits generated image bytes from projected image view tool activities", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-image-view-completed-with-data"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-image-view-completed"),
+      itemId: asItemId("item-image-view-completed"),
+      payload: {
+        itemType: "image_view",
+        status: "completed",
+        title: "Image view",
+        data: {
+          result: "top-level-image-bytes",
+          completedAtMs: 123,
+          item: {
+            id: "ig-test",
+            prompt: "paint a cat",
+            result: "nested-image-bytes",
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.id === "evt-image-view-completed-with-data",
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-image-view-completed-with-data",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+    const data =
+      payload?.data && typeof payload.data === "object"
+        ? (payload.data as Record<string, unknown>)
+        : undefined;
+    const item =
+      data?.item && typeof data.item === "object"
+        ? (data.item as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("tool.completed");
+    expect(activity?.summary).toBe("Image view");
+    expect(payload?.itemType).toBe("image_view");
+    expect(data?.result).toBeUndefined();
+    expect(data?.completedAtMs).toBe(123);
+    expect(item?.id).toBe("ig-test");
+    expect(item?.prompt).toBe("paint a cat");
+    expect(item?.result).toBeUndefined();
   });
 
   it("projects provider account rate-limit updates into thread activities", async () => {

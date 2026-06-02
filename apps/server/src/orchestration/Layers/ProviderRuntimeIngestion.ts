@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import { createHash } from "node:crypto";
+
 import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
@@ -11,6 +14,7 @@ import {
   isToolLifecycleItemType,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ThreadId,
+  type ToolLifecycleItemType,
   type ThreadTokenUsageSnapshot,
   TurnId,
   type OrchestrationCheckpointSummary,
@@ -43,7 +47,11 @@ import {
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ServerConfig } from "../../config.ts";
-import { createAttachmentId, resolveAttachmentPath } from "../../attachmentStore.ts";
+import {
+  createAttachmentId,
+  createStableAttachmentId,
+  resolveAttachmentPath,
+} from "../../attachmentStore.ts";
 import {
   imageMimeTypeFromFileName,
   inferImageExtension,
@@ -272,6 +280,55 @@ function requestKindFromCanonicalRequestType(
     default:
       return undefined;
   }
+}
+
+function asPlainRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function omitStringResult(record: Record<string, unknown>): Record<string, unknown> {
+  if (typeof record.result !== "string") {
+    return record;
+  }
+  const { result: _result, ...rest } = record;
+  return rest;
+}
+
+function sanitizeImageViewToolData(data: unknown): unknown {
+  const record = asPlainRecord(data);
+  if (!record) {
+    return data;
+  }
+
+  const sanitizedRecord = omitStringResult(record);
+  const item = asPlainRecord(sanitizedRecord.item);
+  if (!item) {
+    return sanitizedRecord;
+  }
+
+  const sanitizedItem = omitStringResult(item);
+  if (sanitizedItem === item && sanitizedRecord === record) {
+    return data;
+  }
+
+  return {
+    ...sanitizedRecord,
+    item: sanitizedItem,
+  };
+}
+
+function toolActivityDataPayload(
+  itemType: ToolLifecycleItemType,
+  data: unknown,
+): { readonly data?: unknown } {
+  if (data === undefined) {
+    return {};
+  }
+  return {
+    data: itemType === "image_view" ? sanitizeImageViewToolData(data) : data,
+  };
 }
 
 function runtimeEventToActivities(
@@ -580,7 +637,7 @@ function runtimeEventToActivities(
             itemType: event.payload.itemType,
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...toolActivityDataPayload(event.payload.itemType, event.payload.data),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -602,7 +659,7 @@ function runtimeEventToActivities(
           payload: {
             itemType: event.payload.itemType,
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...toolActivityDataPayload(event.payload.itemType, event.payload.data),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -811,6 +868,7 @@ const make = Effect.gen(function* () {
     threadId: ThreadId;
     dataUrl: string;
     name?: string;
+    stableKey?: string;
   }): Effect.Effect<ChatAttachment | null> =>
     Effect.gen(function* () {
       const parsed = parseBase64DataUrl(input.dataUrl);
@@ -823,7 +881,13 @@ const make = Effect.gen(function* () {
         return null;
       }
 
-      const attachmentId = createAttachmentId(input.threadId);
+      const contentHash = createHash("sha256").update(bytes).digest("hex");
+      const attachmentId = input.stableKey
+        ? createStableAttachmentId(
+            input.threadId,
+            `${input.stableKey}:${parsed.mimeType}:${contentHash}`,
+          )
+        : createAttachmentId(input.threadId);
       if (!attachmentId) {
         return null;
       }
@@ -1626,6 +1690,7 @@ const make = Effect.gen(function* () {
           threadId: thread.id,
           dataUrl: event.payload.dataUrl,
           ...(event.payload.name ? { name: event.payload.name } : {}),
+          ...(event.itemId ? { stableKey: `provider-item:${event.itemId}` } : {}),
         });
 
         if (attachment) {

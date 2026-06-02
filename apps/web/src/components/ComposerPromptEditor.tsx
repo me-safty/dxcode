@@ -901,6 +901,12 @@ interface ComposerPromptEditorProps {
   disabled: boolean;
   placeholder: string;
   className?: string;
+  /**
+   * Hint for the soft-keyboard return key. Defaults to "send" (desktop /
+   * Enter-submits). Mobile passes "enter" so the return key inserts a newline
+   * (WhatsApp/iMessage style) and submitting happens via the Send button.
+   */
+  enterKeyHint?: "send" | "enter";
   onRemoveTerminalContext: (contextId: string) => void;
   onChange: (
     nextValue: string,
@@ -1506,6 +1512,7 @@ function ComposerPromptEditorInner({
   disabled,
   placeholder,
   className,
+  enterKeyHint = "send",
   onRemoveTerminalContext,
   onChange,
   onCommandKeyDown,
@@ -1741,7 +1748,7 @@ function ComposerPromptEditorInner({
               aria-placeholder={placeholder}
               autoCapitalize="sentences"
               autoCorrect="on"
-              enterKeyHint="send"
+              enterKeyHint={enterKeyHint}
               inputMode="text"
               placeholder={<span />}
               onPaste={onPaste}
@@ -1778,6 +1785,7 @@ export function ComposerPromptEditor({
   disabled,
   placeholder,
   className,
+  enterKeyHint,
   onRemoveTerminalContext,
   onChange,
   onCommandKeyDown,
@@ -1819,6 +1827,7 @@ export function ComposerPromptEditor({
         onChange={onChange}
         onPaste={onPaste}
         editorRef={editorRef}
+        {...(enterKeyHint ? { enterKeyHint } : {})}
         {...(onCommandKeyDown ? { onCommandKeyDown } : {})}
         {...(className ? { className } : {})}
       />

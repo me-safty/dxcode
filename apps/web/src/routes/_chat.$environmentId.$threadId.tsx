@@ -305,9 +305,21 @@ function ChatThreadRouteView() {
     );
   }
 
-  const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
+  // Keeping the diff panel mounted after it closes lets the worker pool be
+  // reused across layout switches, but on the mobile sheet that resident pool
+  // (up to 6 workers, each holding WASM) is a fixed allocation that can push a
+  // memory-constrained WebContent process over its limit and crash the page on
+  // dismiss. The sheet layout almost never switches mid-session, so tear the
+  // panel down when it closes there and keep the reuse behavior only inline.
+  const shouldRenderDiffContent = diffOpen || (!shouldUseDiffSheet && hasOpenedDiff);
+  // The file/source-control panel retains its target + explorer context in the
+  // store so it can be reopened, which would otherwise keep this panel (and its
+  // diff rendering) mounted behind the dismissed mobile sheet. Reopen restores
+  // from the store regardless, so only keep it mounted-while-closed inline.
   const shouldRenderFilePanelContent =
-    filePanelOpen || filePanel.target !== null || filePanel.explorerContext !== null;
+    filePanelOpen ||
+    (!shouldUseDiffSheet &&
+      (filePanel.target !== null || filePanel.explorerContext !== null));
 
   return (
     <>
