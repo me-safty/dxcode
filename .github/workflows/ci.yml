@@ -37,11 +37,29 @@ jobs:
         run: |
           unset ELECTRON_SKIP_BINARY_DOWNLOAD
           electron_dir="$(dirname "$(node -p "require.resolve('./apps/desktop/node_modules/electron/package.json')")")"
-          if ! node -e "require('./apps/desktop/node_modules/electron')" >/dev/null 2>&1; then
-            rm -rf "$electron_dir/dist" "$electron_dir/path.txt"
-            node "$electron_dir/install.js"
-          fi
-          node -e "require('./apps/desktop/node_modules/electron')"
+          rm -rf "$electron_dir/dist" "$electron_dir/path.txt"
+          env -u ELECTRON_SKIP_BINARY_DOWNLOAD node "$electron_dir/install.js"
+          node - "$electron_dir" <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const electronDir = process.argv[2];
+          const platformPath =
+            process.platform === "darwin"
+              ? "Electron.app/Contents/MacOS/Electron"
+              : process.platform === "win32"
+                ? "electron.exe"
+                : "electron";
+          const electronPath = path.join(electronDir, "dist", platformPath);
+
+          if (!fs.existsSync(electronPath)) {
+            throw new Error(`Missing Electron executable at ${electronPath}`);
+          }
+
+          fs.writeFileSync(path.join(electronDir, "path.txt"), platformPath);
+          NODE
+          electron_path="$(node -p "require('./apps/desktop/node_modules/electron')")"
+          test -x "$electron_path"
 
       - name: Check
         run: vp check
