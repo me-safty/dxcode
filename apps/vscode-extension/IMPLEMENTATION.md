@@ -1322,7 +1322,7 @@ interface T3HostBridge {
     label: string;
     httpBaseUrl: string | null;
     wsBaseUrl: string | null;
-    bootstrapToken?: string;
+    bearerToken?: string;
   } | null;
 }
 ```
@@ -1345,6 +1345,7 @@ Auth/bootstrap decision:
 - The VS Code extension discovers local backend URLs from desktop backend advertisements.
 - The advertised bootstrap credential is a short-lived one-time desktop ticket; the extension exchanges it for a bearer session before creating the webview.
 - The web app receives the bearer token through `window.t3HostBridge`, so it can authenticate without depending on VS Code webview cookies.
+- Implementers should treat `window.t3HostBridge.bearerToken` as the post-exchange bearer session token, not as the advertised one-time bootstrap ticket.
 - Avoid a host-mediated RPC auth proxy unless needed; it would add more extension-specific logic than the current codebase appears to require.
 
 ### Phase 4: Bundle and Load Existing UI

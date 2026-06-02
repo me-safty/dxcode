@@ -390,6 +390,69 @@ describe("DesktopBackendManager", () => {
     }),
   );
 
+  it.effect("does not mark the backend ready when the control session fails", () =>
+    Effect.gen(function* () {
+      const startedPids = yield* Queue.unbounded<number>();
+      const closed = yield* Deferred.make<void>();
+      const controlAttempted = yield* Deferred.make<void>();
+      const backendReady = yield* Ref.make(false);
+      const requestUrls: string[] = [];
+      let readyCount = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            const scope = yield* Scope.Scope;
+            yield* Queue.offer(startedPids, 123);
+            const close = Deferred.succeed(closed, void 0).pipe(Effect.asVoid);
+            yield* Scope.addFinalizer(scope, close);
+            return makeProcess({
+              exitCode: Deferred.await(closed).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+              kill: () => close,
+            });
+          }),
+        ),
+      );
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer((request) => {
+          requestUrls.push(request.url);
+          if (request.url.endsWith("/api/auth/bootstrap/bearer")) {
+            return Deferred.succeed(controlAttempted, void 0).pipe(
+              Effect.as(responseForRequest(request, 500)),
+            );
+          }
+          return Effect.succeed(responseForRequest(request, 200));
+        }),
+        desktopState: {
+          backendReady,
+          quitting: yield* Ref.make(false),
+        },
+        desktopWindow: {
+          handleBackendReady: Effect.sync(() => {
+            readyCount += 1;
+          }),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        assert.equal(yield* Queue.take(startedPids), 123);
+        yield* Deferred.await(controlAttempted);
+
+        assert.isFalse(yield* Ref.get(backendReady));
+        assert.equal(readyCount, 0);
+        const snapshot = yield* manager.snapshot;
+        assert.equal(snapshot.ready, false);
+        assert.notInclude(requestUrls, "http://127.0.0.1:3773/api/auth/desktop-bootstrap-ticket");
+
+        yield* manager.stop();
+      }).pipe(Effect.provide(managerLayer));
+    }),
+  );
+
   it.effect("restarts an unexpectedly exited backend with the Effect clock", () =>
     Effect.gen(function* () {
       const starts = yield* Queue.unbounded<number>();

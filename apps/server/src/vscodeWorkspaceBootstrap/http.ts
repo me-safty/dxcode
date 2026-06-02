@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as path from "node:path";
 import {
   CommandId,
   DEFAULT_MODEL,
@@ -263,7 +265,12 @@ function toSortableTimestamp(value: string | null | undefined): number | null {
 }
 
 function workspaceRootsEqual(left: string, right: string): boolean {
-  return left.replace(/[\\/]+$/u, "") === right.replace(/[\\/]+$/u, "");
+  return normalizeWorkspaceRootForMatch(left) === normalizeWorkspaceRootForMatch(right);
+}
+
+function normalizeWorkspaceRootForMatch(value: string): string {
+  const normalized = path.normalize(value.trim()).replace(/[\\/]+$/u, "");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function resolveWorkspaceName(cwd: string): string {

@@ -143,11 +143,20 @@ class T3SidebarProvider implements vscode.WebviewViewProvider {
   async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
     configureWebview(webviewView.webview, this.#context.extensionUri);
     const disposables: vscode.Disposable[] = [];
-    webviewView.onDidDispose(() => disposeAll(disposables));
+    let currentConnectedDisposable: vscode.Disposable | null = null;
+    webviewView.onDidDispose(() => {
+      currentConnectedDisposable?.dispose();
+      currentConnectedDisposable = null;
+      disposeAll(disposables);
+    });
     const renderConnected = async (
       connection: Awaited<ReturnType<BackendManager["ensureStarted"]>>,
     ) => {
-      disposables.push(await this.#renderConnectedWebview(webviewView.webview, connection));
+      currentConnectedDisposable?.dispose();
+      currentConnectedDisposable = await this.#renderConnectedWebview(
+        webviewView.webview,
+        connection,
+      );
     };
     const connection = await resolveBackendConnectionForWebview(
       this.#backendManager,
@@ -244,16 +253,20 @@ class T3ConversationEditorProvider implements vscode.CustomReadonlyEditorProvide
   ): Promise<void> {
     configureWebview(webviewPanel.webview, this.#context.extensionUri);
     const disposables: vscode.Disposable[] = [];
-    webviewPanel.onDidDispose(() => disposeAll(disposables));
+    let currentConnectedDisposable: vscode.Disposable | null = null;
+    webviewPanel.onDidDispose(() => {
+      currentConnectedDisposable?.dispose();
+      currentConnectedDisposable = null;
+      disposeAll(disposables);
+    });
     const renderConnected = async (
       connection: Awaited<ReturnType<BackendManager["ensureStarted"]>>,
     ) => {
-      disposables.push(
-        await this.#renderConnectedWebview(
-          webviewPanel.webview,
-          connection,
-          routeFromUri(document.uri),
-        ),
+      currentConnectedDisposable?.dispose();
+      currentConnectedDisposable = await this.#renderConnectedWebview(
+        webviewPanel.webview,
+        connection,
+        routeFromUri(document.uri),
       );
     };
     const connection = await resolveBackendConnectionForWebview(

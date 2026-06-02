@@ -220,6 +220,20 @@ function refreshDesktopBackendAdvertisement(
   config: DesktopBackendStartConfig,
   controlBearerToken: string,
 ): Effect.Effect<void, never, HttpClient.HttpClient> {
+  return refreshDesktopBackendAdvertisementStrict(handle, config, controlBearerToken).pipe(
+    Effect.catch((error) =>
+      logBackendManagerWarning("failed to refresh desktop backend advertisement", {
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    ),
+  );
+}
+
+function refreshDesktopBackendAdvertisementStrict(
+  handle: DesktopBackendAdvertisementHandle,
+  config: DesktopBackendStartConfig,
+  controlBearerToken: string,
+): Effect.Effect<void, DesktopBackendAdvertisementError, HttpClient.HttpClient> {
   return Effect.gen(function* () {
     const ticket = yield* issueDesktopBootstrapTicket({
       httpBaseUrl: config.httpBaseUrl,
@@ -239,13 +253,7 @@ function refreshDesktopBackendAdvertisement(
       },
       catch: toDesktopBackendAdvertisementError,
     });
-  }).pipe(
-    Effect.catch((error) =>
-      logBackendManagerWarning("failed to refresh desktop backend advertisement", {
-        message: error instanceof Error ? error.message : String(error),
-      }),
-    ),
-  );
+  });
 }
 
 function issueDesktopControlBearerSession(
@@ -591,6 +599,46 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             });
           }),
           onReady: Effect.fn("desktop.backendManager.onReady")(function* () {
+            const isCurrentRunBeforeAdvertisement = yield* Ref.get(state).pipe(
+              Effect.map((latest) => Option.getOrUndefined(latest.active)?.id === runId),
+            );
+            if (!isCurrentRunBeforeAdvertisement) {
+              return;
+            }
+
+            const controlBearerToken = yield* issueDesktopControlBearerSession(config.value).pipe(
+              Effect.provideService(HttpClient.HttpClient, httpClient),
+              Effect.catch((error) =>
+                logBackendManagerWarning("failed to create desktop backend control session", {
+                  message: error instanceof Error ? error.message : String(error),
+                }).pipe(Effect.as(null)),
+              ),
+            );
+            if (controlBearerToken === null) {
+              return;
+            }
+            const advertisement = makeDesktopBackendAdvertisementHandle({
+              runId,
+              config: config.value,
+            });
+            const advertisementReady = yield* refreshDesktopBackendAdvertisementStrict(
+              advertisement,
+              config.value,
+              controlBearerToken,
+            ).pipe(
+              Effect.provideService(HttpClient.HttpClient, httpClient),
+              Effect.matchEffect({
+                onFailure: (error) =>
+                  logBackendManagerWarning("failed to refresh desktop backend advertisement", {
+                    message: error instanceof Error ? error.message : String(error),
+                  }).pipe(Effect.as(false)),
+                onSuccess: () => Effect.succeed(true),
+              }),
+            );
+            if (!advertisementReady) {
+              return;
+            }
+
             const isCurrentRun = yield* Ref.modify(state, (latest) => {
               const activeRun = Option.getOrUndefined(latest.active);
               if (activeRun?.id !== runId) {
@@ -603,45 +651,27 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                   ...latest,
                   restartAttempt: 0,
                   ready: true,
+                  active: Option.some({
+                    ...activeRun,
+                    advertisement: Option.some(advertisement),
+                  }),
                 },
               ] as const;
             });
             if (!isCurrentRun) {
+              yield* removeDesktopBackendAdvertisementForRun(Option.some(advertisement));
               return;
             }
 
             yield* Ref.set(desktopState.backendReady, true);
-            const controlBearerToken = yield* issueDesktopControlBearerSession(config.value).pipe(
+            yield* Effect.repeat(
+              refreshDesktopBackendAdvertisement(advertisement, config.value, controlBearerToken),
+              Schedule.spaced(Duration.millis(DESKTOP_BACKEND_ADVERTISEMENT_HEARTBEAT_MS)),
+            ).pipe(
               Effect.provideService(HttpClient.HttpClient, httpClient),
-              Effect.catch((error) =>
-                logBackendManagerWarning("failed to create desktop backend control session", {
-                  message: error instanceof Error ? error.message : String(error),
-                }).pipe(Effect.as(null)),
-              ),
+              (effect) => Effect.forkIn(effect, runScope),
+              Effect.asVoid,
             );
-            if (controlBearerToken !== null) {
-              const advertisement = makeDesktopBackendAdvertisementHandle({
-                runId,
-                config: config.value,
-              });
-              yield* refreshDesktopBackendAdvertisement(
-                advertisement,
-                config.value,
-                controlBearerToken,
-              ).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
-              yield* updateActiveRun(runId, (run) => ({
-                ...run,
-                advertisement: Option.some(advertisement),
-              }));
-              yield* Effect.repeat(
-                refreshDesktopBackendAdvertisement(advertisement, config.value, controlBearerToken),
-                Schedule.spaced(Duration.millis(DESKTOP_BACKEND_ADVERTISEMENT_HEARTBEAT_MS)),
-              ).pipe(
-                Effect.provideService(HttpClient.HttpClient, httpClient),
-                (effect) => Effect.forkIn(effect, runScope),
-                Effect.asVoid,
-              );
-            }
             yield* desktopWindow.handleBackendReady.pipe(
               Effect.catch((error) =>
                 logBackendManagerError("failed to open main window after backend readiness", {

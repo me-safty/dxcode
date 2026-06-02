@@ -405,6 +405,90 @@ describe("BackendManager", () => {
     );
   });
 
+  it("revokes a bearer session when stopped during workspace bootstrap", async () => {
+    let bearerSessionCount = 0;
+    let workspaceBootstrapCount = 0;
+    let resolveFirstWorkspaceBootstrapStarted!: () => void;
+    let releaseFirstWorkspaceBootstrap!: () => void;
+    const firstWorkspaceBootstrapStarted = new Promise<void>((resolve) => {
+      resolveFirstWorkspaceBootstrapStarted = resolve;
+    });
+    const releasePromise = new Promise<void>((resolve) => {
+      releaseFirstWorkspaceBootstrap = resolve;
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(input.toString());
+      if (url.pathname === "/.well-known/t3/environment") {
+        return new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      if (url.pathname === "/api/auth/bootstrap/bearer") {
+        bearerSessionCount += 1;
+        return new Response(
+          JSON.stringify({ sessionToken: `desktop-bearer-token-${bearerSessionCount}` }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (url.pathname === "/api/vscode/workspace-bootstrap") {
+        workspaceBootstrapCount += 1;
+        if (workspaceBootstrapCount === 1) {
+          resolveFirstWorkspaceBootstrapStarted();
+          await releasePromise;
+        }
+        return new Response(
+          JSON.stringify({
+            bootstrapProjects: [
+              {
+                workspaceFolderKey: "file::/workspace",
+                workspaceFolderName: "workspace",
+                cwd: "/workspace",
+                projectId: "project-workspace",
+                bootstrapThreadId: `thread-${workspaceBootstrapCount}`,
+                isActive: true,
+              },
+            ],
+          }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+      if (url.pathname === "/api/auth/session/revoke") {
+        return new Response(JSON.stringify({ revoked: true }), { status: 200 });
+      }
+      throw new Error(`Unexpected request URL: ${url.href}`);
+    });
+    const manager = new BackendManager(
+      { extensionPath: extensionRoot } as never,
+      makeOutputChannel() as never,
+      makeDependencies({ fetch: fetchMock }),
+    );
+
+    const firstStart = manager.ensureStarted();
+    await firstWorkspaceBootstrapStarted;
+    await manager.stop();
+    releaseFirstWorkspaceBootstrap();
+    await expect(firstStart).rejects.toThrow("Desktop backend startup was cancelled.");
+
+    await expect(manager.ensureStarted()).resolves.toMatchObject({
+      bearerToken: "desktop-bearer-token-2",
+      initialThreadRoute: "/_chat/environment-desktop/thread-2",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:3773/api/auth/session/revoke"),
+      expect.objectContaining({
+        headers: { authorization: "Bearer desktop-bearer-token-1" },
+        method: "POST",
+      }),
+    );
+  });
+
   it("fails when no desktop backend advertisement is available", async () => {
     const manager = new BackendManager(
       { extensionPath: extensionRoot } as never,

@@ -102,6 +102,17 @@ class DesktopBootstrapTicketRejectedError extends Error {
   }
 }
 
+class BackendStartupCancelledError extends Error {
+  constructor() {
+    super("Desktop backend startup was cancelled.");
+    this.name = "BackendStartupCancelledError";
+  }
+}
+
+interface BackendStartupToken {
+  cancelled: boolean;
+}
+
 export interface BackendManagerDependencies {
   readonly fetch: typeof fetch;
   readonly mkdirSync: typeof fs.mkdirSync;
@@ -131,6 +142,7 @@ const defaultBackendManagerDependencies: BackendManagerDependencies = {
 export class BackendManager {
   #connection: BackendConnection | null = null;
   #starting: Promise<BackendConnection> | null = null;
+  #startupToken: BackendStartupToken | null = null;
   #hostMcpAdvertisement: {
     readonly t3Home: string;
     readonly hostId: string;
@@ -160,11 +172,16 @@ export class BackendManager {
       return this.#starting;
     }
 
-    this.#starting = this.#connect();
+    const startupToken: BackendStartupToken = { cancelled: false };
+    this.#startupToken = startupToken;
+    this.#starting = this.#connect(startupToken);
     try {
       return await this.#starting;
     } finally {
-      this.#starting = null;
+      if (this.#startupToken === startupToken) {
+        this.#starting = null;
+        this.#startupToken = null;
+      }
     }
   }
 
@@ -180,6 +197,10 @@ export class BackendManager {
   async stop(): Promise<void> {
     this.#stopHostMcpAdvertisement();
     const connection = this.#connection;
+    if (this.#startupToken) {
+      this.#startupToken.cancelled = true;
+      this.#startupToken = null;
+    }
     this.#starting = null;
     this.#connection = null;
 
@@ -200,7 +221,7 @@ export class BackendManager {
     }
   }
 
-  async #connect(): Promise<BackendConnection> {
+  async #connect(startupToken: BackendStartupToken): Promise<BackendConnection> {
     const t3Home = resolveT3Home();
     this.#dependencies.mkdirSync(t3Home, { recursive: true });
     const workspaceFolders = await resolveBootstrapWorkspaceFolders({
@@ -208,9 +229,11 @@ export class BackendManager {
       dependencies: this.#dependencies,
       outputChannel: this.#outputChannel,
     });
+    this.#assertStartupActive(startupToken);
     const activeWorkspaceFolder = resolveActiveWorkspaceFolder(workspaceFolders);
     const cwd = activeWorkspaceFolder?.cwd ?? os.homedir();
     const mcpServer = await this.#mcpBridge?.ensureStarted();
+    this.#assertStartupActive(startupToken);
     const mcpToolTimeoutSec = resolveMcpToolTimeoutSec();
 
     this.#refreshHostMcpAdvertisement({
@@ -219,37 +242,53 @@ export class BackendManager {
       workspaceFolders,
       activeWorkspaceFolderKey: activeWorkspaceFolder?.key,
     });
+    this.#assertStartupActive(startupToken);
 
     const { desktopBackend, environment, bearerToken } =
       await this.#connectToDesktopBackendWithFreshTicket(t3Home);
-    const workspaceBootstrap = await ensureWorkspaceBootstrap({
-      httpBaseUrl: desktopBackend.httpBaseUrl,
-      bearerToken,
-      workspaceFolders,
-      activeWorkspaceFolder,
-      fetchFn: this.#dependencies.fetch,
-    });
+    try {
+      this.#assertStartupActive(startupToken);
+      const workspaceBootstrap = await ensureWorkspaceBootstrap({
+        httpBaseUrl: desktopBackend.httpBaseUrl,
+        bearerToken,
+        workspaceFolders,
+        activeWorkspaceFolder,
+        fetchFn: this.#dependencies.fetch,
+      });
+      this.#assertStartupActive(startupToken);
 
-    this.#connection = {
-      httpBaseUrl: desktopBackend.httpBaseUrl,
-      wsBaseUrl: toWebSocketBaseUrl(desktopBackend.httpBaseUrl),
-      bootstrapToken: desktopBackend.bootstrapToken,
-      bearerToken,
-      cwd,
-      t3Home,
-      environmentId: environment.environmentId,
-      workspaceFolders,
-      ...(activeWorkspaceFolder ? { activeWorkspaceFolderKey: activeWorkspaceFolder.key } : {}),
-      bootstrapProjects: workspaceBootstrap.bootstrapProjects,
-      ...(workspaceBootstrap.activeThreadId
-        ? {
-            initialThreadRoute: makeThreadRoute(
-              environment.environmentId,
-              workspaceBootstrap.activeThreadId,
-            ),
-          }
-        : {}),
-    };
+      this.#connection = {
+        httpBaseUrl: desktopBackend.httpBaseUrl,
+        wsBaseUrl: toWebSocketBaseUrl(desktopBackend.httpBaseUrl),
+        bootstrapToken: desktopBackend.bootstrapToken,
+        bearerToken,
+        cwd,
+        t3Home,
+        environmentId: environment.environmentId,
+        workspaceFolders,
+        ...(activeWorkspaceFolder ? { activeWorkspaceFolderKey: activeWorkspaceFolder.key } : {}),
+        bootstrapProjects: workspaceBootstrap.bootstrapProjects,
+        ...(workspaceBootstrap.activeThreadId
+          ? {
+              initialThreadRoute: makeThreadRoute(
+                environment.environmentId,
+                workspaceBootstrap.activeThreadId,
+              ),
+            }
+          : {}),
+      };
+    } catch (error) {
+      await revokeBearerSession(
+        desktopBackend.httpBaseUrl,
+        bearerToken,
+        this.#dependencies.fetch,
+      ).catch((revokeError) => {
+        this.#outputChannel.appendLine(
+          `[backend] Failed to revoke failed startup bearer session: ${errorMessage(revokeError)}`,
+        );
+      });
+      throw error;
+    }
 
     void Promise.resolve().then(() => {
       try {
@@ -282,6 +321,12 @@ export class BackendManager {
     });
 
     return this.#connection;
+  }
+
+  #assertStartupActive(startupToken: BackendStartupToken): void {
+    if (startupToken.cancelled || this.#startupToken !== startupToken) {
+      throw new BackendStartupCancelledError();
+    }
   }
 
   #resolveDesktopBackendAdvertisement(t3Home: string): {
