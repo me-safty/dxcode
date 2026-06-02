@@ -65,7 +65,7 @@ import type {
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
-import { EnvironmentId } from "./baseSchemas.ts";
+import { EnvironmentId, ProjectId, ThreadId } from "./baseSchemas.ts";
 import { AuthBearerBootstrapResult, AuthSessionState, AuthWebSocketTokenResult } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { EditorId } from "./editor.ts";
@@ -310,13 +310,13 @@ export interface T3HostVscodeWorkspaceBootstrapProject {
   readonly workspaceFolderKey: string;
   readonly workspaceFolderName: string;
   readonly cwd: string;
-  readonly projectId: string;
-  readonly bootstrapThreadId: string;
+  readonly projectId: ProjectId;
+  readonly bootstrapThreadId: ThreadId;
   readonly isActive?: boolean;
 }
 
 export interface T3HostVscodeWorkspaceBootstrap {
-  readonly environmentId: string;
+  readonly environmentId: EnvironmentId;
   readonly workspaceFolders: readonly DesktopBootstrapWorkspaceFolder[];
   readonly activeWorkspaceFolderKey?: string;
   readonly bootstrapProjects: readonly T3HostVscodeWorkspaceBootstrapProject[];

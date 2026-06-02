@@ -4,7 +4,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as Schema from "effect/Schema";
-import { DesktopBackendAdvertisement } from "@t3tools/contracts";
+import {
+  DESKTOP_BACKEND_ADVERTISEMENT_VERSION,
+  DesktopBackendAdvertisement,
+} from "@t3tools/contracts";
 import {
   readAdvertisementFilenames,
   readAdvertisementJson,
@@ -69,7 +72,7 @@ export function createDesktopBackendAdvertisement(
   const nowMs = input.nowMs ?? Date.now();
   const expiresAtMs = nowMs + (input.ttlMs ?? DESKTOP_BACKEND_ADVERTISEMENT_TTL_MS);
   return {
-    version: 1,
+    version: DESKTOP_BACKEND_ADVERTISEMENT_VERSION,
     backendId: sanitizeBackendId(input.backendId),
     updatedAt: new Date(nowMs).toISOString(),
     expiresAt: new Date(expiresAtMs).toISOString(),

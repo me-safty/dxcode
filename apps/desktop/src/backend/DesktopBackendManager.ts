@@ -794,10 +794,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
     });
     yield* Option.match(active, {
       onNone: () => Effect.void,
-      onSome: (run) =>
-        closeRun(run, options).pipe(
-          Effect.andThen(removeDesktopBackendAdvertisementForRun(run.advertisement)),
-        ),
+      onSome: (run) => closeRun(run, options),
     });
   });
 

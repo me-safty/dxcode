@@ -122,7 +122,12 @@ const bootstrapVscodeWorkspaces = Effect.fn("bootstrapVscodeWorkspaces")(functio
   const projects: OrchestrationProjectShell[] = [...shellSnapshot.projects];
   const threads: OrchestrationThreadShell[] = [...shellSnapshot.threads];
   const bootstrapProjects: ServerLifecycleBootstrapProjectValue[] = [];
-  const activeWorkspaceKey = input.activeWorkspaceFolderKey ?? input.workspaceFolders[0]?.key;
+  const workspaceFolderKeys = new Set(input.workspaceFolders.map((folder) => folder.key));
+  const activeWorkspaceKey =
+    input.activeWorkspaceFolderKey && workspaceFolderKeys.has(input.activeWorkspaceFolderKey)
+      ? input.activeWorkspaceFolderKey
+      : input.workspaceFolders[0]?.key;
+  const latestActiveThreadByProject = collectLatestActiveThreadsByProject(threads);
 
   for (const folder of input.workspaceFolders) {
     const title = folder.name || resolveWorkspaceName(folder.cwd);
@@ -166,7 +171,7 @@ const bootstrapVscodeWorkspaces = Effect.fn("bootstrapVscodeWorkspaces")(functio
       project = createdProject;
     }
 
-    let thread = findLatestActiveThread(threads, project.id);
+    let thread = latestActiveThreadByProject.get(project.id) ?? null;
     if (!thread) {
       const createdAt = DateTime.formatIso(yield* DateTime.now);
       thread = {
@@ -213,6 +218,7 @@ const bootstrapVscodeWorkspaces = Effect.fn("bootstrapVscodeWorkspaces")(functio
           ),
         );
       threads.push(thread);
+      latestActiveThreadByProject.set(project.id, thread);
     }
 
     bootstrapProjects.push({
@@ -231,22 +237,32 @@ const bootstrapVscodeWorkspaces = Effect.fn("bootstrapVscodeWorkspaces")(functio
   };
 });
 
-function findLatestActiveThread(
+function collectLatestActiveThreadsByProject(
   threads: readonly OrchestrationThreadShell[],
-  projectId: ProjectId,
-): OrchestrationThreadShell | null {
-  return (
-    threads
-      .filter((thread) => thread.projectId === projectId && thread.archivedAt === null)
-      .toSorted((left, right) => {
-        const rightTimestamp = sortableThreadTimestamp(right);
-        const leftTimestamp = sortableThreadTimestamp(left);
-        if (rightTimestamp !== leftTimestamp) {
-          return rightTimestamp - leftTimestamp;
-        }
-        return right.id.localeCompare(left.id);
-      })[0] ?? null
-  );
+): Map<ProjectId, OrchestrationThreadShell> {
+  const latestByProject = new Map<ProjectId, OrchestrationThreadShell>();
+  for (const thread of threads) {
+    if (thread.archivedAt !== null) {
+      continue;
+    }
+    const current = latestByProject.get(thread.projectId);
+    if (!current || compareThreadsByLatestActivity(thread, current) > 0) {
+      latestByProject.set(thread.projectId, thread);
+    }
+  }
+  return latestByProject;
+}
+
+function compareThreadsByLatestActivity(
+  left: OrchestrationThreadShell,
+  right: OrchestrationThreadShell,
+): number {
+  const leftTimestamp = sortableThreadTimestamp(left);
+  const rightTimestamp = sortableThreadTimestamp(right);
+  if (leftTimestamp !== rightTimestamp) {
+    return leftTimestamp - rightTimestamp;
+  }
+  return left.id.localeCompare(right.id);
 }
 
 function sortableThreadTimestamp(thread: OrchestrationThreadShell): number {

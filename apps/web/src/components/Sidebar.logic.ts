@@ -63,12 +63,10 @@ export function resolveVscodeProjectScope(input: {
   const bootstrapProjects = input.serverWelcome?.bootstrapProjects ?? null;
   const vscodeBootstrapProjects = input.vscodeWorkspaceBootstrap?.bootstrapProjects ?? null;
   const bootstrapProjectId = input.serverWelcome?.bootstrapProjectId ?? null;
-  const firstVscodeProjectId = vscodeBootstrapProjects?.[0]?.projectId as ProjectId | undefined;
+  const firstVscodeProjectId = vscodeBootstrapProjects?.[0]?.projectId;
   const activeBootstrapProjectId =
     bootstrapProjects?.find((project) => project.isActive)?.projectId ??
-    (vscodeBootstrapProjects?.find((project) => project.isActive)?.projectId as
-      | ProjectId
-      | undefined) ??
+    vscodeBootstrapProjects?.find((project) => project.isActive)?.projectId ??
     bootstrapProjectId ??
     firstVscodeProjectId;
 
@@ -76,13 +74,13 @@ export function resolveVscodeProjectScope(input: {
     environmentId:
       input.serverWelcome?.environment.environmentId ??
       input.serverConfig?.environment.environmentId ??
-      (input.vscodeWorkspaceBootstrap?.environmentId as EnvironmentId | undefined) ??
+      input.vscodeWorkspaceBootstrap?.environmentId ??
       input.fallbackEnvironmentId ??
       null,
     projectId: bootstrapProjectId ?? firstVscodeProjectId ?? null,
     projectIds:
       bootstrapProjects?.map((project) => project.projectId) ??
-      (vscodeBootstrapProjects?.map((project) => project.projectId) as ProjectId[] | undefined) ??
+      vscodeBootstrapProjects?.map((project) => project.projectId) ??
       null,
     activeProjectId: activeBootstrapProjectId,
     cwd: input.serverConfig?.cwd ?? input.serverWelcome?.cwd ?? null,

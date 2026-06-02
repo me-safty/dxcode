@@ -95,7 +95,7 @@ it.layer(NodeServices.layer)("BootstrapCredentialServiceLive", (it) => {
 
       expect(first.method).toBe("desktop-bootstrap");
       expect(first.role).toBe("owner");
-      expect(first.subject).toBe("desktop-bootstrap");
+      expect(first.subject).toBe("desktop-control");
       expect(second._tag).toBe("BootstrapCredentialError");
       expect(second.message).toContain("Unknown bootstrap credential");
     }).pipe(

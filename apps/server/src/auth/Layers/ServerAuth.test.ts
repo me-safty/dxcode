@@ -131,7 +131,7 @@ it.layer(NodeServices.layer)("ServerAuthLive", (it) => {
     }).pipe(Effect.provide(makeServerAuthLayer())),
   );
 
-  it.effect("labels VS Code desktop-bootstrap bearer sessions without shortening their TTL", () =>
+  it.effect("labels desktop control bearer sessions without shortening their TTL", () =>
     Effect.gen(function* () {
       const serverAuth = yield* ServerAuth;
 
@@ -148,7 +148,7 @@ it.layer(NodeServices.layer)("ServerAuthLive", (it) => {
       const remainingMs = (verified.expiresAt?.epochMilliseconds ?? 0) - now.epochMilliseconds;
 
       expect(verified.role).toBe("owner");
-      expect(verified.subject).toBe("desktop-bootstrap");
+      expect(verified.subject).toBe("desktop-control");
       expect(current?.client.label).toBe("VS Code");
       expect(remainingMs).toBeGreaterThan(TWELVE_HOURS_MS);
     }).pipe(

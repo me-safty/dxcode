@@ -205,7 +205,7 @@ const makeAuthSessionRepository = Effect.gen(function* () {
       sql`
         UPDATE auth_sessions
         SET revoked_at = ${revokedAt}
-        WHERE subject = 'desktop-bootstrap'
+        WHERE subject IN ('desktop-bootstrap', 'desktop-control')
           AND method = 'bearer-session-token'
           AND issued_at < ${issuedBefore}
           AND revoked_at IS NULL

@@ -19,6 +19,8 @@ import { deriveAuthClientMetadata } from "./utils.ts";
 import { browserApiCorsHeaders } from "../httpCors.ts";
 
 const DESKTOP_BOOTSTRAP_TICKET_TTL = Duration.seconds(30);
+const DESKTOP_CONTROL_SESSION_SUBJECT = "desktop-control";
+const DESKTOP_BOOTSTRAP_TICKET_SUBJECT = "desktop-bootstrap";
 
 export const respondToAuthError = (error: AuthError) =>
   Effect.gen(function* () {
@@ -161,16 +163,16 @@ export const authDesktopBootstrapTicketRouteLayer = HttpRouter.add(
     const request = yield* HttpServerRequest.HttpServerRequest;
     const serverAuth = yield* ServerAuth;
     const session = yield* serverAuth.authenticateBearerHttpRequest(request);
-    if (session.role !== "owner" || session.subject !== "desktop-bootstrap") {
+    if (session.role !== "owner" || session.subject !== DESKTOP_CONTROL_SESSION_SUBJECT) {
       return yield* new AuthError({
-        message: "Only desktop bootstrap owner sessions can issue desktop bootstrap tickets.",
+        message: "Only desktop control owner sessions can issue desktop bootstrap tickets.",
         status: 403,
       });
     }
     const result = yield* serverAuth.issuePairingCredential({
       ttl: DESKTOP_BOOTSTRAP_TICKET_TTL,
       role: "owner",
-      subject: "desktop-bootstrap",
+      subject: DESKTOP_BOOTSTRAP_TICKET_SUBJECT,
       label: "VS Code",
     });
     return HttpServerResponse.jsonUnsafe(result satisfies AuthPairingCredentialResult, {

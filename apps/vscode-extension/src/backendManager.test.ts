@@ -67,22 +67,24 @@ function makeDependencies(
   return {
     fetch:
       input.fetch ??
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
+      vi.fn<typeof fetch>(async (requestInput) => {
+        const url = new URL(
+          requestInput instanceof Request ? requestInput.url : requestInput.toString(),
+        );
+        if (url.pathname === "/.well-known/t3/environment") {
+          return new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
             headers: { "content-type": "application/json" },
             status: 200,
-          }),
-        )
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ sessionToken: "desktop-bearer-token" }), {
+          });
+        }
+        if (url.pathname === "/api/auth/bootstrap/bearer") {
+          return new Response(JSON.stringify({ sessionToken: "desktop-bearer-token" }), {
             headers: { "content-type": "application/json" },
             status: 200,
-          }),
-        )
-        .mockResolvedValueOnce(
-          new Response(
+          });
+        }
+        if (url.pathname === "/api/vscode/workspace-bootstrap") {
+          return new Response(
             JSON.stringify({
               environmentId: "environment-desktop",
               bootstrapProjects: [
@@ -100,9 +102,13 @@ function makeDependencies(
               headers: { "content-type": "application/json" },
               status: 200,
             },
-          ),
-        )
-        .mockResolvedValue(new Response(JSON.stringify({ revoked: true }), { status: 200 })),
+          );
+        }
+        if (url.pathname === "/api/auth/session/revoke") {
+          return new Response(JSON.stringify({ revoked: true }), { status: 200 });
+        }
+        throw new Error(`Unexpected request URL: ${url.href}`);
+      }),
     mkdirSync: input.mkdirSync ?? vi.fn(),
     pruneVirtualWorkspaceCache:
       input.pruneVirtualWorkspaceCache ??

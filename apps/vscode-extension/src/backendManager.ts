@@ -245,7 +245,7 @@ export class BackendManager {
     this.#assertStartupActive(startupToken);
 
     const { desktopBackend, environment, bearerToken } =
-      await this.#connectToDesktopBackendWithFreshTicket(t3Home);
+      await this.#connectToDesktopBackendWithFreshTicket(t3Home, startupToken);
     try {
       this.#assertStartupActive(startupToken);
       const workspaceBootstrap = await ensureWorkspaceBootstrap({
@@ -357,7 +357,10 @@ export class BackendManager {
     throw new DesktopBackendUnavailableError();
   }
 
-  async #connectToDesktopBackendWithFreshTicket(t3Home: string): Promise<{
+  async #connectToDesktopBackendWithFreshTicket(
+    t3Home: string,
+    startupToken: BackendStartupToken,
+  ): Promise<{
     readonly desktopBackend: {
       readonly backendId: string;
       readonly httpBaseUrl: string;
@@ -371,9 +374,11 @@ export class BackendManager {
     let lastRejection: DesktopBootstrapTicketRejectedError | null = null;
 
     while (Date.now() < deadline) {
+      this.#assertStartupActive(startupToken);
       const desktopBackend = this.#resolveDesktopBackendAdvertisement(t3Home);
       if (desktopBackend.bootstrapToken === rejectedTicket && Date.now() < deadline) {
         await sleep(DESKTOP_BOOTSTRAP_TICKET_RETRY_INTERVAL_MS);
+        this.#assertStartupActive(startupToken);
         continue;
       }
 
@@ -397,6 +402,7 @@ export class BackendManager {
           rejectedTicket = desktopBackend.bootstrapToken;
           lastRejection = error;
           await sleep(DESKTOP_BOOTSTRAP_TICKET_RETRY_INTERVAL_MS);
+          this.#assertStartupActive(startupToken);
           continue;
         }
         throw error;
@@ -658,9 +664,9 @@ async function ensureWorkspaceBootstrap(input: {
     return { bootstrapProjects: [] };
   }
 
-  const response = await input.fetchFn(
-    new URL(VSCODE_WORKSPACE_BOOTSTRAP_PATH, input.httpBaseUrl),
-    {
+  const bootstrapUrl = new URL(VSCODE_WORKSPACE_BOOTSTRAP_PATH, input.httpBaseUrl);
+  const response = await input
+    .fetchFn(bootstrapUrl, {
       body: JSON.stringify({
         workspaceFolders: input.workspaceFolders,
         ...(input.activeWorkspaceFolder
@@ -672,8 +678,14 @@ async function ensureWorkspaceBootstrap(input: {
         "content-type": "application/json",
       },
       method: "POST",
-    },
-  );
+      signal: AbortSignal.timeout(5_000),
+    })
+    .catch((error) => {
+      throw new Error(
+        `Failed to bootstrap VS Code workspace on desktop backend: ${errorMessage(error)}.`,
+        { cause: error },
+      );
+    });
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
     throw new Error(

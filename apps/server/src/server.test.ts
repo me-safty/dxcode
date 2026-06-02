@@ -1088,7 +1088,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
       const body = (yield* response.json) as { readonly error: string };
 
-      assert.equal(response.status, 401);
+      assert.equal(response.status, 403);
       assert.equal(body.error, "Local peer API is available only from VS Code-hosted backends.");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -1433,6 +1433,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(firstBootstrap.response.status, 200);
       assert.equal(firstBootstrap.body.role, "owner");
       assert.equal(secondBootstrap.response.status, 401);
+
+      const remintResponse = yield* HttpClient.post("/api/auth/desktop-bootstrap-ticket", {
+        headers: {
+          authorization: `Bearer ${firstBootstrap.body.sessionToken ?? ""}`,
+        },
+      });
+      assert.equal(remintResponse.status, 403);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -1448,6 +1455,113 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
 
       assert.equal(response.status, 403);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("falls back to the first VS Code workspace when the active key is unknown", () =>
+    Effect.gen(function* () {
+      const projectOneId = ProjectId.make("project-one");
+      const projectTwoId = ProjectId.make("project-two");
+      const threadOneId = ThreadId.make("thread-one");
+      const threadTwoId = ThreadId.make("thread-two");
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getShellSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 0,
+                updatedAt: "2026-01-01T00:00:00.000Z",
+                projects: [
+                  {
+                    id: projectOneId,
+                    title: "Workspace One",
+                    workspaceRoot: "/workspace/one",
+                    repositoryIdentity: null,
+                    defaultModelSelection,
+                    scripts: [],
+                    createdAt: "2026-01-01T00:00:00.000Z",
+                    updatedAt: "2026-01-01T00:00:00.000Z",
+                  },
+                  {
+                    id: projectTwoId,
+                    title: "Workspace Two",
+                    workspaceRoot: "/workspace/two",
+                    repositoryIdentity: null,
+                    defaultModelSelection,
+                    scripts: [],
+                    createdAt: "2026-01-01T00:00:00.000Z",
+                    updatedAt: "2026-01-01T00:00:00.000Z",
+                  },
+                ],
+                threads: [
+                  makeDefaultOrchestrationThreadShell({
+                    id: threadOneId,
+                    projectId: projectOneId,
+                  }),
+                  makeDefaultOrchestrationThreadShell({
+                    id: threadTwoId,
+                    projectId: projectTwoId,
+                  }),
+                ],
+              }),
+          },
+        },
+      });
+
+      const response = yield* HttpClient.post("/api/vscode/workspace-bootstrap", {
+        headers: {
+          cookie: yield* getAuthenticatedSessionCookieHeader(),
+        },
+        body: yield* HttpBody.json({
+          activeWorkspaceFolderKey: "file::/missing",
+          workspaceFolders: [
+            {
+              key: "file::/workspace/one",
+              name: "one",
+              cwd: "/workspace/one",
+              uriScheme: "file",
+              uriAuthority: "",
+            },
+            {
+              key: "file::/workspace/two",
+              name: "two",
+              cwd: "/workspace/two",
+              uriScheme: "file",
+              uriAuthority: "",
+            },
+          ],
+        }),
+      });
+      const body = (yield* response.json) as {
+        readonly bootstrapProjects: readonly {
+          readonly workspaceFolderKey: string;
+          readonly workspaceFolderName: string;
+          readonly cwd: string;
+          readonly projectId: string;
+          readonly bootstrapThreadId: string;
+          readonly isActive: boolean;
+        }[];
+      };
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(body.bootstrapProjects, [
+        {
+          workspaceFolderKey: "file::/workspace/one",
+          workspaceFolderName: "one",
+          cwd: "/workspace/one",
+          projectId: projectOneId,
+          bootstrapThreadId: threadOneId,
+          isActive: true,
+        },
+        {
+          workspaceFolderKey: "file::/workspace/two",
+          workspaceFolderName: "two",
+          cwd: "/workspace/two",
+          projectId: projectTwoId,
+          bootstrapThreadId: threadTwoId,
+          isActive: false,
+        },
+      ]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

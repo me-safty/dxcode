@@ -493,14 +493,24 @@ async function resolveBackendConnectionForWebview(
     outputChannel.appendLine(`[backend] Failed to connect to desktop backend: ${message}`);
     if (error instanceof DesktopBackendUnavailableError) {
       webview.html = renderDesktopBackendRequiredWebview();
-      const reconnectDisposable = webview.onDidReceiveMessage(async (event: unknown) => {
+      let reconnectDisposed = false;
+      let reconnectDisposable: vscode.Disposable | null = null;
+      const disposeReconnect = () => {
+        if (reconnectDisposed) {
+          return;
+        }
+        reconnectDisposed = true;
+        reconnectDisposable?.dispose();
+        reconnectDisposable = null;
+      };
+      reconnectDisposable = webview.onDidReceiveMessage(async (event: unknown) => {
         if (!isReconnectDesktopBackendMessage(event)) {
           return;
         }
         outputChannel.appendLine("[backend] Reconnect requested from desktop-required webview.");
         try {
           const connection = await backendManager.restart();
-          reconnectDisposable.dispose();
+          disposeReconnect();
           await options?.onReconnect?.(connection);
         } catch (reconnectError) {
           const reconnectMessage = errorMessage(reconnectError);
@@ -520,7 +530,7 @@ async function resolveBackendConnectionForWebview(
           }
         }
       });
-      options?.trackDisposable?.(reconnectDisposable);
+      options?.trackDisposable?.({ dispose: disposeReconnect });
       void vscode.window.showWarningMessage(
         "T3 Code requires the desktop app. Start T3 Code Desktop, then reconnect.",
       );

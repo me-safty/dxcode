@@ -13,7 +13,7 @@ const testLayer = it.layer(AuthSessionRepositoryLive.pipe(Layer.provide(SqlitePe
 const makeSessionId = (value: string) => AuthSessionId.make(value);
 
 testLayer("AuthSessionRepository", (it) => {
-  it.effect("revokes only stale desktop-bootstrap bearer sessions", () =>
+  it.effect("revokes only stale desktop bootstrap/control bearer sessions", () =>
     Effect.gen(function* () {
       const repository = yield* AuthSessionRepository;
       const oldIssuedAt = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z");
@@ -21,6 +21,7 @@ testLayer("AuthSessionRepository", (it) => {
       const expiresAt = DateTime.makeUnsafe("2026-01-30T00:00:00.000Z");
       const cutoff = DateTime.makeUnsafe("2026-01-01T12:00:00.000Z");
       const staleId = makeSessionId("stale-desktop-bootstrap-bearer");
+      const staleControlId = makeSessionId("stale-desktop-control-bearer");
       const freshId = makeSessionId("fresh-desktop-bootstrap-bearer");
       const browserId = makeSessionId("stale-desktop-bootstrap-browser");
       const otherBearerId = makeSessionId("stale-other-bearer");
@@ -36,6 +37,15 @@ testLayer("AuthSessionRepository", (it) => {
       yield* repository.create({
         sessionId: staleId,
         subject: "desktop-bootstrap",
+        role: "owner",
+        method: "bearer-session-token",
+        client,
+        issuedAt: oldIssuedAt,
+        expiresAt,
+      });
+      yield* repository.create({
+        sessionId: staleControlId,
+        subject: "desktop-control",
         role: "owner",
         method: "bearer-session-token",
         client,
@@ -78,7 +88,7 @@ testLayer("AuthSessionRepository", (it) => {
         now: DateTime.makeUnsafe("2026-01-02T00:00:00.000Z"),
       });
 
-      assert.deepEqual(revoked, [staleId]);
+      assert.sameMembers([...revoked], [staleId, staleControlId]);
       assert.sameMembers(
         active.map((session) => session.sessionId),
         [freshId, browserId, otherBearerId],

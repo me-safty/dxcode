@@ -115,12 +115,12 @@ export async function renderT3Webview(input: WebviewRenderInput): Promise<string
 export function renderDesktopBackendRequiredWebview(): string {
   const nonce = crypto.randomBytes(16).toString("base64");
   return `<!doctype html>
-	<html lang="en">
-	  <head>
-	    <meta charset="utf-8">
-	    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${escapeHtml(nonce)}';">
-	    <meta name="viewport" content="width=device-width, initial-scale=1">
-	    <style>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${escapeHtml(nonce)}';">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
       :root {
         color-scheme: light dark;
         font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
@@ -153,52 +153,52 @@ export function renderDesktopBackendRequiredWebview(): string {
         font-size: 13px;
         line-height: 1.45;
       }
-	      p + p {
-	        margin-top: 10px;
-	      }
-	      button {
-	        appearance: none;
-	        border: 1px solid var(--vscode-button-border, transparent);
-	        border-radius: 4px;
-	        background: var(--vscode-button-background);
-	        color: var(--vscode-button-foreground);
-	        cursor: pointer;
-	        font: inherit;
-	        font-size: 13px;
-	        font-weight: 600;
-	        margin-top: 14px;
-	        min-height: 30px;
-	        padding: 5px 12px;
-	      }
-	      button:hover:not(:disabled) {
-	        background: var(--vscode-button-hoverBackground);
-	      }
-	      button:disabled {
-	        cursor: default;
-	        opacity: 0.72;
-	      }
-	    </style>
-	  </head>
-	  <body>
-	    <main>
-	      <h1>Start T3 Code Desktop</h1>
-	      <p>The T3 Code VS Code extension requires the desktop app to be running before the sidebar can load.</p>
-	      <p>Start the desktop app manually, then reconnect.</p>
-	      <button type="button" id="reconnect">Reconnect</button>
-	    </main>
-	    <script nonce="${escapeHtml(nonce)}">
-	      (() => {
-	        const vscode = acquireVsCodeApi();
-	        const button = document.getElementById("reconnect");
-	        button?.addEventListener("click", () => {
-	          button.disabled = true;
-	          button.textContent = "Reconnecting...";
-	          vscode.postMessage({ type: "t3.reconnectDesktopBackend" });
-	        });
-	      })();
-	    </script>
-	  </body>
-	</html>`;
+      p + p {
+        margin-top: 10px;
+      }
+      button {
+        appearance: none;
+        border: 1px solid var(--vscode-button-border, transparent);
+        border-radius: 4px;
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+        cursor: pointer;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        margin-top: 14px;
+        min-height: 30px;
+        padding: 5px 12px;
+      }
+      button:hover:not(:disabled) {
+        background: var(--vscode-button-hoverBackground);
+      }
+      button:disabled {
+        cursor: default;
+        opacity: 0.72;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Start T3 Code Desktop</h1>
+      <p>The T3 Code VS Code extension requires the desktop app to be running before the sidebar can load.</p>
+      <p>Start the desktop app manually, then reconnect.</p>
+      <button type="button" id="reconnect">Reconnect</button>
+    </main>
+    <script nonce="${escapeHtml(nonce)}">
+      (() => {
+        const vscode = acquireVsCodeApi();
+        const button = document.getElementById("reconnect");
+        button?.addEventListener("click", () => {
+          button.disabled = true;
+          button.textContent = "Reconnecting...";
+          vscode.postMessage({ type: "t3.reconnectDesktopBackend" });
+        });
+      })();
+    </script>
+  </body>
+</html>`;
 }
 
 export function renderDesktopBackendConnectionErrorWebview(message: string): string {
