@@ -1,6 +1,6 @@
 # T3 Code for VS Code
 
-Experimental VS Code shell for T3 Code. It starts a local T3 backend, injects a host bridge into the existing T3 web UI, and renders that UI in a sidebar or custom editor webview.
+Experimental VS Code shell for T3 Code. It requires the T3 Code desktop app on the same machine, connects to the desktop-owned local backend, injects a host bridge into the existing T3 web UI, and renders that UI in a sidebar or custom editor webview.
 
 Build a local VSIX from the repository root:
 
@@ -22,9 +22,13 @@ bun run --filter t3code-vscode package -- --target darwin-arm64 --out release-pu
 
 Local packages use the temporary publisher id `t3tools` when `VSCE_PUBLISHER` is not set. For Marketplace publishing, the release workflow uses `@vscode/vsce` with a Visual Studio Marketplace Personal Access Token. Configure the GitHub repository variable `VSCE_PUBLISHER` with the Marketplace publisher id and the GitHub secret `VSCE_PAT` with a token that can publish for that publisher. Stable releases publish normal VSIX packages, and nightly/prerelease releases publish with `--pre-release`.
 
-## Auth Transport
+## Desktop Backend Dependency
 
-VS Code webviews use bearer auth for the extension-owned local backend, not browser cookies. The extension starts the backend with a one-time desktop bootstrap token, exchanges that token for a bearer session from the extension host, and injects the bearer token through `window.t3HostBridge`.
+The VS Code extension does not start or own a T3 backend. The desktop app is a hard dependency and is the single local command point for VS Code webviews, normal desktop renderer windows, browser clients connected to the desktop backend, and remote clients paired through desktop local connections.
+
+The desktop backend writes a short-lived local advertisement under `<T3 home>/desktop-backends/advertisements/<backend-id>.json` after its HTTP readiness check passes. The advertisement includes the loopback HTTP endpoint, a short-lived one-time desktop bootstrap ticket, heartbeat/expiry timestamps, and a protocol version. Writers update only their own file by atomic replace, refresh every 10 seconds, expire after 30 seconds, remove the file on normal stop, and clean stale files opportunistically after a 15 minute grace period.
+
+The desktop process keeps the private startup desktop bootstrap token out of the advertisement. After readiness, desktop exchanges that private seed once for a desktop control bearer session, then mints short-lived one-time VS Code tickets through `POST /api/auth/desktop-bootstrap-ticket`. The VS Code extension reads the advertisement, validates that the endpoint is loopback HTTP, waits briefly for `/.well-known/t3/environment`, exchanges the advertised one-time ticket for a bearer session through `/api/auth/bootstrap/bearer`, and injects the resulting bearer token through `window.t3HostBridge`. If a stale advertised ticket has already been consumed, the extension waits for the advertisement to refresh and retries with the next ticket. If no live desktop advertisement exists, the VS Code extension fails instead of starting a fallback backend and shows a fallback webview with a reconnect button; launching the desktop app remains a manual user action.
 
 The web app then sends authenticated HTTP requests with an `Authorization: Bearer ...` header and requests short-lived WebSocket tokens before opening `/ws`. This avoids relying on cross-origin cookie behavior between the VS Code webview origin and the loopback backend.
 
@@ -37,20 +41,20 @@ The VS Code extension exposes VS Code-backed tools through a local MCP server ow
 - `t3code.mcp.allowedRunCommands`
 - `t3code.mcp.allowedActivateExtensions`
 
-The bridge setting defaults to `true`, the tool timeout setting defaults to `120` seconds, the `vscodeRunCommand` allowlist defaults to `t3code.*`, `vscode.open`, `vscode.diff`, and `revealLine`, and extension activation is disabled by default. When enabled, each VS Code window starts a temporary local socket server with a unique `t3code-vscode-*` name and includes `{ name, socketPath, toolTimeoutSec }` in the desktop bootstrap envelope. The backend converts that metadata into each provider's MCP configuration shape. The per-window name avoids same-named MCP server collisions when multiple VS Code windows are running agents at the same time.
+The bridge setting defaults to `true`, the tool timeout setting defaults to `120` seconds, the `vscodeRunCommand` allowlist defaults to `t3code.*`, `vscode.open`, `vscode.diff`, and `revealLine`, and extension activation is disabled by default. When enabled, each VS Code window starts a temporary local socket server with a unique `t3code-vscode-*` name and advertises `{ name, socketPath, toolTimeoutSec }` in shared host-MCP state. The desktop backend converts discovered metadata into each provider's MCP configuration shape. The per-window name avoids same-named MCP server collisions when multiple VS Code windows are advertising tools at the same time.
 
 The extension MCP server is generic, so that provider integrations translate the same bootstrap MCP server list into their provider-native MCP/tool configuration.
 
 ### Shared Host MCP Discovery
 
-The VS Code extension still starts its own backend with direct MCP bootstrap metadata, but any local T3 backend, including the desktop app backend or a browser connected to that same local backend, can also discover and use an already-running VS Code MCP bridge for the matching project.
+The VS Code extension advertises editor-owned MCP tools, and the desktop backend discovers and injects them for the matching project. Because desktop is the required backend, the extension no longer passes MCP metadata through an extension-owned backend bootstrap path.
 
 The intended model is host-MCP discovery, not a VS Code-only provider special case:
 
 - A host process that owns editor-aware MCP tools advertises its MCP endpoint in shared local T3 state.
-- The VS Code extension is the first host implementation. It advertises the same temporary socket endpoint it already passes through desktop bootstrap today: `{ name, socketPath, toolTimeoutSec }`.
+- The VS Code extension is the first host implementation. It advertises its temporary socket endpoint as `{ name, socketPath, toolTimeoutSec }`.
 - Advertisements include the VS Code workspace folder metadata already used by the extension backend bootstrap: stable workspace folder key, display name, resolved local `cwd`, URI scheme, URI authority, and the active workspace folder key.
-- Provider session startup in any local backend looks up host MCP advertisements for the thread's project workspace root and injects the first matching endpoint into the provider's MCP config.
+- Provider session startup in the desktop backend looks up host MCP advertisements for the thread's project workspace root and injects the first matching endpoint into the provider's MCP config.
 - Matching should follow the same project/workspace scoping rules the VS Code extension uses for sidebar visibility and startup selection. The extension currently resolves workspace folders into stable keys and executable `cwd`s, the server maps those folders to T3 projects in `bootstrapProjects[]`, and the VS Code webview filters by those project ids with a cwd fallback while the welcome payload is settling. Discovery should reuse that metadata shape and extract shared project/workspace matching helpers if they can live outside the React-only sidebar code.
 - If multiple VS Code windows advertise the same project, use the first live match. This is an acceptable edge case and does not need special UI or selection semantics initially.
 - If no matching live advertisement exists, no VS Code MCP server is injected. The provider should fail normally if the user asks for a VS Code MCP tool that is unavailable.
@@ -88,71 +92,49 @@ Provider behavior:
 
 ### Remote Monitoring and Control
 
-Host MCP discovery lets a local backend find VS Code-owned tools, but it does not make remote clients able to monitor and control extension-owned provider sessions by itself. Remote monitoring and control now uses the desktop app backend as the local coordinator for VS Code extension-owned backends on the same workstation.
+Host MCP discovery lets the desktop backend find VS Code-owned tools. Remote monitoring and control use the desktop app backend directly; there are no extension-owned provider sessions to federate.
 
 Supported workflow:
 
 - Multiple VS Code windows can run the T3 extension, usually one per project.
-- The desktop app can run in the background on the same workstation.
+- The desktop app must run in the background or foreground on the same workstation.
 - A remote device on the local network pairs only with the desktop backend through the existing local connection flow.
 - The remote device sees one valid desktop-backed T3 environment. It does not need to know whether VS Code extensions, web app clients, or other local T3 surfaces are open.
-- The remote device can monitor and act on threads started from VS Code or desktop through that single desktop connection, without choosing or understanding the owning local instance.
+- The remote device can monitor and act on threads started from VS Code or desktop through that single desktop connection, without choosing or understanding which local UI surface initiated the work.
 
-Relationship to cross-instance live sync:
+Relationship to live state:
 
-- Cross-instance live sync is the prerequisite for this model. The desktop backend receives live orchestration events from extension-owned backends instead of only reading their final persisted state later.
-- The shared persistence model is not enough on its own because active provider output, approval prompts, user-input prompts, and stop state are live ownership concerns.
-- Host MCP discovery remains useful as adjacent infrastructure: if desktop starts or resumes a provider session for a project that has a running VS Code extension, it can inject that extension's VS Code MCP tools.
-- MCP advertisements are not enough for remote monitoring because they advertise tool endpoints, not thread ownership, orchestration event streams, or provider-control routes.
+- Desktop owns the provider sessions, orchestration event streams, approval prompts, user-input prompts, stop state, and remote-client surface.
+- Host MCP discovery remains the bridge from desktop-owned provider sessions to VS Code-owned tools: if desktop starts or resumes a provider session for a project that has a running VS Code extension, it can inject that extension's VS Code MCP tools.
+- MCP advertisements advertise tool endpoints only; they do not carry thread ownership, orchestration event streams, or provider-control routes.
 
 Implemented architecture:
 
-- VS Code extension backends write local backend presence advertisements alongside host MCP advertisements. Each advertisement includes a backend id, `hostKind: "vscode"`, loopback HTTP endpoint, bearer credential, bootstrapped workspace folder metadata, heartbeat/expiry timestamps, and capability flags for descriptor, health, shell snapshot, orchestration events, and command routing.
-- Advertisement files live under `<T3 home>/local-backends/advertisements/<backend-id>.json`. Writers update only their own file by atomic replace, heartbeat it every 10 seconds, expire it after 30 seconds, best-effort remove it on explicit stop and backend child exit, and opportunistically clean stale files after a 15 minute grace period.
-- Extension-owned backends remain loopback-only. They are reachable by the desktop backend on the workstation, but are not exposed directly to the LAN.
-- The desktop backend discovers local peer backends from advertisement files and uses the existing desktop LAN/local-connection API as the only remote-client surface.
-- Peer backend ids, endpoints, credentials, and ownership details are internal routing metadata. Remote clients keep seeing one desktop-backed T3 environment.
-- The desktop backend merges local orchestration streams with events fetched from advertised VS Code peer backends for shell and thread subscriptions.
-- Owner-sensitive commands are routed back to the backend that owns the live provider session when the thread's project workspace root matches an advertised peer. The routed command set currently includes turn start, turn interrupt, approval responses, structured user-input responses, and session stop.
-- Settled or stopped threads are not force-routed to a peer. A backend that accepts the next safe follow-up becomes the new live session owner.
-
-Peer transport:
-
-- The implementation uses a narrow local-only peer HTTP API between desktop and extension-owned backends instead of exposing the full public remote API between local peers.
-- Peer routes require loopback request source, an owner bearer session, and `hostIntegration: "vscode"` on the serving backend.
-- Peer routes currently cover descriptor, health, shell snapshot, bounded orchestration event replay, and owner-sensitive command dispatch.
-- Desktop polls peer event replay with a short interval and bounded per-request event count. It polls all reachable advertised peers and de-duplicates by event sequence before merging peer events into normal shell/thread streams.
-- The public LAN/local-connection API remains the only remote-client surface. Remote clients continue to connect to desktop normally and must not call peer APIs directly.
-
-Follow-up prompt semantics:
-
-- If the active session owner is reachable and the thread status is `starting`, `running`, or `ready`, desktop routes a follow-up `thread.turn.start` command to that owner.
-- If the thread is interrupted, stopped, or has no live session, desktop does not route the follow-up to a peer. The desktop backend can start the next turn through the normal project/provider context and becomes the new owner.
-- Interrupt, approval response, user-input response, and session stop commands are routed to the live owner whenever the thread has a non-stopped session and a matching reachable peer.
-- If a matching live owner should handle a command but all matching peer requests fail, desktop returns a dispatch error instead of silently adopting the active session.
-- After interrupt or stop, the backend that accepts the next follow-up becomes the new live session owner.
+- The desktop backend writes desktop backend presence advertisements after readiness. Each advertisement includes a backend id, loopback HTTP endpoint, one-time desktop bootstrap ticket, heartbeat/expiry timestamps, and a protocol version.
+- Advertisement files live under `<T3 home>/desktop-backends/advertisements/<backend-id>.json`. Writers update only their own file by atomic replace, heartbeat it every 10 seconds, expire it after 30 seconds, best-effort remove it on backend stop, and opportunistically clean stale files after a 15 minute grace period.
+- The VS Code extension discovers the desktop backend from those advertisements, rejects non-loopback endpoints, exchanges the advertised one-time ticket for a bearer session, retries after stale-ticket `401` responses until the advertisement refreshes, and renders the web app against the desktop backend.
+- The VS Code extension writes host MCP advertisements for its editor-owned MCP socket. Desktop provider startup discovers those advertisements by workspace root and injects the matching endpoint into provider-native MCP config.
+- The public LAN/local-connection API remains the only remote-client surface. Remote clients continue to connect to desktop normally and must not call VS Code MCP sockets directly.
 
 Security boundaries:
 
-- Remote clients authenticate only to the desktop backend. They should not receive credentials for extension-owned local backends, receive peer topology as normal state, or connect to VS Code extension loopback endpoints directly.
-- Desktop-to-extension trust currently reuses the extension backend's owner bearer session stored in a short-lived 0600 local advertisement file. The advertisement itself expires quickly and is removed on normal shutdown, but the bearer credential lifetime is still governed by the existing session system.
+- Remote clients authenticate only to the desktop backend. They should not receive VS Code MCP socket details as normal state or connect to VS Code extension loopback endpoints directly.
+- VS Code-to-desktop trust uses short-lived one-time tickets stored in short-lived local advertisement files. The private desktop startup bootstrap token is exchanged by the desktop process for a control bearer session and is not written to the advertisement file.
 - The VS Code extension remains the trust boundary for VS Code API access. Remote control must not bypass `t3code.mcp.allowedRunCommands`, `t3code.mcp.allowedActivateExtensions`, command registration checks, or result bounding.
-- Federated peer records must be treated as hints, not authority. Desktop should ignore expired, malformed, unreachable, or scope-mismatched peer advertisements.
+- Advertisement records must be treated as hints, not authority. Consumers should ignore expired, malformed, unreachable, non-loopback, or scope-mismatched advertisements.
 
 Remaining follow-up work:
 
-- Replace advertised owner bearer sessions with narrower short-lived local peer credentials if/when the auth layer grows a dedicated peer-token path.
-- Add desktop-local diagnostics or admin surfaces for peer/source labels if troubleshooting needs it. Remote clients should not require or depend on those labels.
-- Decide how aggressively the desktop backend should recover or adopt extension-owned sessions after a VS Code window closes unexpectedly.
-- Validate which provider runtimes can safely transfer ownership after interruption, restart, or resume without losing provider-native context.
+- Add desktop-local diagnostics or admin surfaces for VS Code MCP source labels if troubleshooting needs it. Remote clients should not require or depend on those labels.
 
 Implemented:
 
 - `HostMcpAdvertisement` is a versioned shared contract in `packages/contracts`, with runtime advertisement helpers in `packages/shared/hostMcp`.
-- The VS Code extension writes and heartbeats its per-instance advertisement after `VsCodeMcpBridge.ensureStarted()` succeeds. The advertised workspace folders come from the same `resolveBootstrapWorkspaceFolders(...)` output used for backend bootstrap, with the same active workspace folder key selected by `resolveActiveWorkspaceFolder(...)`.
+- The desktop backend writes and heartbeats `DesktopBackendAdvertisement` records after HTTP readiness succeeds. The VS Code extension reads those records before rendering a webview and shows a manual-start fallback with a reconnect button when no live desktop backend is available.
+- The VS Code extension writes and heartbeats its per-instance host MCP advertisement after `VsCodeMcpBridge.ensureStarted()` succeeds. The advertised workspace folders come from the same `resolveBootstrapWorkspaceFolders(...)` output used for desktop connection scoping, with the same active workspace folder key selected by `resolveActiveWorkspaceFolder(...)`.
 - Provider startup receives the thread's project workspace root, scans live advertisements, matches the target against advertised workspace folders, probes the first live match, and merges it with bootstrap-provided `hostMcpServers`.
 - Producers and consumers run opportunistic advertisement garbage collection. Producers sweep after writing their own heartbeat, and consumers sweep during discovery scans. Both paths cap work per pass and treat deletion failures as non-fatal.
-- The existing per-window MCP server name is preserved. When merging bootstrap and discovered MCP servers, duplicate names are skipped so a VS Code-launched backend does not inject the same bridge twice.
+- The existing per-window MCP server name is preserved. When merging bootstrap and discovered MCP servers, duplicate names are skipped.
 - Initial injection stays at session creation/resume and next-turn startup boundaries. Dynamic MCP registration remains deferred until a provider-specific reliability pass shows it is safe.
 - Tests cover concurrent per-window advertisement writes, stale and malformed advertisement filtering, expired-file cleanup, missing-socket and failed-probe handling, duplicate-name merging, and the no-match/provider-native failure path.
 
@@ -206,7 +188,7 @@ The VS Code webview can also customize chat width with:
 
 The first four settings default to `false`; `t3code.ui.threadConversationMaxWidth` defaults to an empty value, which keeps the React app's normal conversation and prompt input widths. Values are passed to the React app through `window.t3HostBridge.getDisplayPreferences()` at startup and through `window.t3HostBridge.onDisplayPreferencesChanged(...)` while the webview is open, so changes apply without reopening the T3 Code view. When `t3code.ui.enableTerminal` is `false`, the embedded T3 terminal drawer is disabled, terminal keybindings are ignored, terminal-backed project actions are hidden, and any open terminal drawer is closed.
 
-Project management chrome is not configurable in the VS Code extension. The extension backend is started from the active workspace folder and receives the full VS Code workspace folder list, so the React app treats the VS Code surface as a workspace-scoped view: it filters the sidebar to the bootstrapped workspace projects, hides the add-project button, hides redundant project labels only when there is a single visible project, and renders only those projects' threads. This avoids showing unrelated desktop-app projects inside an editor-scoped surface while still supporting multi-root workspaces.
+Project management chrome is not configurable in the VS Code extension. The extension sends the full VS Code workspace folder list to the desktop backend through `POST /api/vscode/workspace-bootstrap`, and the backend ensures a T3 project/thread bootstrap for those folders. The React app treats the VS Code surface as a workspace-scoped view: it filters the sidebar to the bootstrapped workspace projects, hides the add-project button, hides redundant project labels only when there is a single visible project, and renders only those projects' threads. This avoids showing unrelated desktop-app projects inside an editor-scoped surface while still supporting multi-root workspaces.
 
 The thread-history sidebar still shows the "Sidebar options" button when VS Code hides project chrome. In that project-scoped mode, the menu keeps thread controls such as thread sort order and visible thread count, but hides project controls such as project sort order and project grouping. Multi-root VS Code workspaces that show project chrome retain the full sidebar options menu.
 
@@ -230,9 +212,9 @@ This setting defaults to `false`. When it is `false`, VS Code theme/font propaga
 
 ## Virtual Workspace Cache
 
-VS Code virtual workspace folders, such as GitHub RemoteHub folders shaped like `vscode-vfs://github/<owner>/<repo>`, do not provide a real process `cwd`. T3 materializes supported GitHub virtual folders into local partial clones under `<T3 home>/virtual-workspaces/github/<owner>-<repo>-<hash>`, starts the backend from that checkout, and keeps the original VS Code URI-derived folder key in the bootstrap metadata.
+VS Code virtual workspace folders, such as GitHub RemoteHub folders shaped like `vscode-vfs://github/<owner>/<repo>`, do not provide a real process `cwd`. T3 materializes supported GitHub virtual folders into local partial clones under `<T3 home>/virtual-workspaces/github/<owner>-<repo>-<hash>` and keeps the original VS Code URI-derived folder key in host MCP workspace metadata.
 
-Each T3-owned virtual checkout contains `.t3-virtual-workspace.json` with provider, clone URL, workspace folder key, creation time, last-used time, and last-backend-started time. After a backend starts successfully, the extension prunes cache-owned GitHub virtual workspace clones that have not been used for 15 days. Pruning is intentionally conservative: it keeps at least the 10 most recently used checkouts and never deletes a checkout that belongs to the currently running backend.
+Each T3-owned virtual checkout contains `.t3-virtual-workspace.json` with provider, clone URL, workspace folder key, creation time, last-used time, and last-backend-started time. After a desktop backend connection succeeds, the extension prunes cache-owned GitHub virtual workspace clones that have not been used for 15 days. Pruning is intentionally conservative: it keeps at least the 10 most recently used checkouts and never deletes a checkout that belongs to the currently active VS Code workspace.
 
 The explicit command for manual cleanup is:
 
@@ -260,29 +242,23 @@ Implemented so far:
   - `t3code.conversationEditor`
   - virtual resources shaped like `t3-code://route/local/new`
   - thread resources shaped like `t3-code://route/<environmentId>/<threadId>` route directly to the matching T3 thread
-- Added a backend process manager that:
-  - chooses the active executable workspace folder or materialized virtual checkout as `cwd`
-  - allocates a loopback port
-  - generates a bootstrap token
-  - writes a desktop-compatible bootstrap envelope through fd 3
-  - exchanges the bootstrap token for a VS Code bearer session after backend readiness
-  - starts the bundled `dist/server/bin.mjs` with `ELECTRON_RUN_AS_NODE=1`
-  - falls back to a development checkout command when no bundled server exists
-  - supports user-configurable server command, args, cwd, and T3 home
-  - includes enabled VS Code MCP bridge servers in the desktop bootstrap envelope
-  - records T3-owned virtual workspace clone metadata
-  - prunes inactive virtual workspace clones not used for 15 days after successful backend startup
+- Added a desktop backend connection manager that:
+  - chooses the active executable workspace folder or materialized virtual checkout as the VS Code workspace scope
+  - discovers the required desktop-owned backend from `<T3 home>/desktop-backends/advertisements`
+  - rejects non-loopback desktop backend advertisements
   - polls `/.well-known/t3/environment` with a per-request timeout
-  - marks the backend bootstrap with `hostIntegration: "vscode"` so VS Code-only behavior can remain scoped server-side
-  - advertises the extension-owned backend under `<T3 home>/local-backends/advertisements`
-  - heartbeats the local backend advertisement while the backend is alive
-  - removes the local backend advertisement on explicit stop and backend child exit
-  - cleans expired local backend advertisements opportunistically
-  - terminates the backend on extension disposal
+  - exchanges the advertised one-time desktop ticket for a VS Code bearer session after desktop backend readiness
+  - retries stale consumed tickets after `401` until the desktop advertisement refreshes
+  - calls `POST /api/vscode/workspace-bootstrap` so the desktop backend ensures and selects the current workspace projects/threads
+  - injects the desktop backend HTTP URL, WebSocket URL, advertised one-time ticket, and bearer token into the VS Code webview host bridge
+  - records T3-owned virtual workspace clone metadata
+  - prunes inactive virtual workspace clones not used for 15 days after successful desktop connection
+  - supports user-configurable T3 home
+  - fails when no live desktop backend advertisement is available instead of starting an extension-owned backend, and renders a manual-start fallback with a reconnect button
 - Added VS Code MCP support:
   - extension-owned temporary socket MCP server
   - unique MCP server identity per VS Code window
-  - desktop bootstrap `mcpServers` metadata
+  - shared host MCP advertisement metadata
   - provider MCP config injection through provider-appropriate `stdio-to-uds <socketPath>` relays
   - configurable Codex `tool_timeout_sec` propagation from `t3code.mcp.toolTimeoutSec`
   - VS Code diagnostics, references, and workspace-symbol tools backed by VS Code language APIs
@@ -298,10 +274,10 @@ Implemented so far:
   - `getDisplayPreferences()` for host-level UI and capability preferences
   - `getHostAppearance()` for host-level theme/font propagation
 - Added VS Code multi-root bootstrap metadata:
-  - the extension sends every VS Code workspace folder through the desktop bootstrap envelope
+  - the extension advertises every supported VS Code workspace folder in host MCP metadata
   - each folder has a stable key derived from URI scheme, authority, and filesystem path
-  - the active editor's workspace folder is marked as the active bootstrap folder
-  - GitHub RemoteHub virtual folders are materialized into a local T3-managed clone before bootstrapping
+  - the active editor's workspace folder is marked as the active folder
+  - GitHub RemoteHub virtual folders are materialized into a local T3-managed clone before desktop connection and host MCP advertisement
   - T3-owned virtual workspace clones are kept under `<T3 home>/virtual-workspaces/github`
   - the extension keeps at least the 10 most recently used virtual workspace clones and never prunes the active checkout
 - Updated the web app to:
@@ -339,17 +315,14 @@ Implemented so far:
   - applies a restrictive CSP with local backend HTTP and WebSocket connect sources
 - Added VS Code-only MCP orchestration that:
   - starts the extension MCP bridge only from VS Code extension usage
-  - passes bridge metadata through the desktop bootstrap envelope
-  - injects provider-native MCP config for sessions launched by the VS Code-backed backend
+  - advertises bridge metadata through shared host MCP advertisements
+  - lets the desktop backend inject provider-native MCP config for sessions whose project workspace matches a live VS Code window
   - leaves browser and desktop app prompt text, services, and runtime waiting paths untouched
-- Added local backend federation for remote monitoring/control:
-  - versioned local backend advertisement contracts in `packages/contracts`
-  - runtime advertisement helpers in `packages/shared/localBackendAdvertisement`
-  - loopback-only local peer routes for descriptor, health, shell snapshot, bounded orchestration event replay, and owner-sensitive command dispatch
-  - desktop-side peer discovery from matching workspace-folder advertisements
-  - shell and thread WebSocket subscriptions that merge local events with peer backend events
-  - HTTP and WebSocket dispatch paths that route live owner-sensitive commands to the owning VS Code backend
-  - ownership transfer semantics where interrupted/stopped/no-session follow-up prompts can be accepted by the desktop backend instead of being force-routed to the previous peer
+- Added desktop backend discovery for VS Code webviews:
+  - versioned desktop backend advertisement contracts in `packages/contracts`
+  - runtime advertisement helpers in `packages/shared/desktopBackendAdvertisement`
+  - desktop-side advertisement writes after backend readiness
+  - VS Code-side advertisement discovery, loopback validation, readiness polling, and bearer-session exchange
 - Added extension settings for restoring VS Code-hidden T3 Code controls:
   - `t3code.ui.showOpenInPicker`
   - `t3code.ui.showCheckoutModeIndicator`
@@ -370,11 +343,9 @@ Implemented so far:
   - preserves browser/localStorage fallback when no host persistence API is available
 - Added packaging that:
   - builds `apps/web`
-  - builds `apps/server`
   - builds the extension host bundle
   - copies `apps/web/dist` to `apps/vscode-extension/dist/webview`
-  - copies `apps/server/dist` to `apps/vscode-extension/dist/server`
-  - stages extension runtime dependencies under `apps/vscode-extension/dist/node_modules`
+  - stages only the extension host's production dependencies under `apps/vscode-extension/dist/node_modules`
   - supports `--target`, `--out`, and `--pre-release` package options
   - includes extension-local Marketplace metadata for repository and license
   - creates a versioned `apps/vscode-extension/t3code-vscode-<version>.vsix`
@@ -410,10 +381,9 @@ Known packaging notes:
 
 - The generated VSIX is intentionally gitignored.
 - Extension build output under `apps/vscode-extension/dist` is intentionally gitignored.
-- The current local VSIX includes staged runtime dependencies and is still larger than a normal webview-only extension. The initial working artifact was around 119 MB on macOS arm64; pruning runtime-dead staged dependency files reduced the local artifact to around 22 MB.
-- VS Code packaging removes the backend's duplicated `dist/server/client` static web app after copying `apps/server/dist`. The extension webview loads `dist/webview` directly, so the packaged backend does not need its standalone static-client copy.
-- `bun install --production` reports a blocked `node-pty` postinstall in the staged extension runtime, but the installed package includes `node-pty` prebuilds for macOS and Windows. Linux packaging still needs explicit validation.
-- Release packaging is platform-targeted with `vsce --target` because the staged backend runtime includes native dependencies such as `node-pty`.
+- The VS Code extension no longer packages `apps/server/dist` or provider runtime dependencies. The VSIX contains the extension host bundle, webview assets, and the small production dependency set needed by the extension host.
+- The extension webview loads `dist/webview` directly. The desktop app owns the backend runtime and serves normal desktop/web clients.
+- Release packaging remains platform-targeted with `vsce --target` so the release workflow can keep producing platform-specific artifacts if native extension-host dependencies are added later.
 - The release workflow currently builds Marketplace VSIX artifacts for `darwin-arm64`, `darwin-x64`, `linux-x64`, and `win32-x64`. Add `linux-arm64` and `win32-arm64` only after native runtime staging has been validated on matching runners.
 - Marketplace publishing uses the `VSCE_PUBLISHER` GitHub repository variable and `VSCE_PAT` GitHub secret. Per the VS Code publishing docs, `vsce` publishes with a Visual Studio Marketplace Personal Access Token; the token should be scoped so it can publish for the configured publisher.
 
@@ -421,22 +391,22 @@ Known packaging notes:
 
 ### 2026-05-20: Add VS Code MCP Bridge
 
-Decision: expose VS Code-backed tools through an extension-owned MCP server. Keep the MCP server generic and provider-neutral, and translate it into each provider's native MCP config where the provider exposes one.
+Decision: expose VS Code-backed tools through an extension-owned MCP server. Keep the MCP server generic and provider-neutral, advertise it in shared host MCP state, and let the desktop backend translate matching advertisements into each provider's native MCP config where the provider exposes one.
 
 Reasoning:
 
 - MCP is the provider-native shape for tool discovery, invocation, and result routing in the current Codex, Claude Code, OpenCode, and Cursor integrations.
 - The VS Code extension host is still the correct place to execute VS Code commands because it has access to the public `vscode.commands.executeCommand(...)` API.
 - The backend only needs generic MCP server bootstrap metadata. That keeps the extension bridge usable by future providers that can consume MCP without baking Codex semantics into the bridge itself.
-- Browser and desktop app usage should not receive VS Code MCP configuration or extension-host services. MCP startup and integration remain scoped to the VS Code extension bootstrap.
+- Browser and desktop app usage should not receive VS Code MCP configuration unless the desktop backend discovers a matching VS Code host MCP advertisement for the target project.
 - Subagents can use the MCP tools if the underlying harness inherits MCP configuration and permits MCP tools for child agents. Provider-specific subagent behavior should be validated and enhanced in a separate branch, because this branch is focused on the VS Code extension bridge and Codex integration.
 
 Implemented:
 
 - `VsCodeMcpBridge` starts a local socket MCP server from the VS Code extension host.
 - Each bridge instance uses a unique MCP server name so multiple VS Code windows do not advertise the same server key.
-- `BackendManager` includes enabled MCP server metadata in the desktop bootstrap envelope.
-- The server stores bootstrap MCP metadata in `ServerConfig.hostMcpServers`.
+- `BackendManager` writes enabled MCP server metadata into host MCP advertisements.
+- The desktop backend discovers matching advertisements at provider startup and merges them with `ServerConfig.hostMcpServers`.
 - The backend exposes a generic `stdio-to-uds` relay so provider MCP clients can reach the VS Code extension-owned socket without depending on the Codex binary.
 - The Codex adapter converts host MCP metadata into Codex `mcp_servers` config using the Codex CLI relay.
 - The Claude adapter converts host MCP metadata into SDK `mcpServers` config.
@@ -492,45 +462,32 @@ Security boundaries:
 
 ### 2026-05-28: Implement Desktop Federation for Remote Monitoring
 
-Decision: use the desktop backend as the local coordinator for remote monitoring and control of threads running in VS Code extension backends, desktop, or other local T3 surfaces. Remote clients should pair only with the desktop backend and see one valid desktop-backed T3 environment. Desktop should discover, subscribe to, and route control commands to trusted local peer backends behind that facade.
+Status: superseded on 2026-06-02 by the hard desktop-dependency model. The extension no longer starts extension-owned backends, so desktop no longer needs local peer backend federation to monitor or control VS Code-started provider sessions.
 
-Status: implemented for local VS Code extension backends.
+Decision at the time: use the desktop backend as the local coordinator for remote monitoring and control of threads running in VS Code extension backends, desktop, or other local T3 surfaces. Remote clients should pair only with the desktop backend and see one valid desktop-backed T3 environment. Desktop should discover, subscribe to, and route control commands to trusted local peer backends behind that facade.
+
+Current behavior: VS Code webviews connect to the desktop backend directly. Desktop owns provider sessions and remote monitoring/control. VS Code contributes editor-aware MCP tools through host MCP advertisements only.
 
 Reasoning:
 
 - The existing local connection flow already gives remote devices an authenticated path into the desktop backend.
 - Extension-owned backends should remain loopback-only so VS Code-local services and credentials are not exposed directly to the LAN.
-- Cross-instance live sync is required because shared persistence alone cannot represent live provider output, approval prompts, user-input prompts, interrupts, or current session ownership.
-- Host MCP discovery helps when desktop starts or resumes work for a project with a running VS Code extension, but MCP advertisements do not advertise live thread ownership or event streams.
-- Treating desktop as a federator preserves one remote trust boundary while allowing multiple local T3 processes to keep owning their own provider sessions.
-- Hiding peer topology from normal remote clients keeps the local connection feature conceptually simple: the client connects to desktop, and desktop handles local coordination.
-- A narrow local-only peer API keeps backend-to-backend federation smaller than the public remote API while still allowing reuse of the existing auth/session and WebSocket infrastructure.
+- Cross-instance live sync was required only while multiple local backends owned provider sessions. Once desktop became a hard dependency, that ownership split disappeared.
+- Host MCP discovery remains useful because VS Code still owns editor-only tool access, but desktop owns provider sessions, live output, approvals, user input, interrupts, and remote monitoring/control.
+- Hiding VS Code MCP topology from normal remote clients keeps the local connection feature conceptually simple: the client connects to desktop, and desktop handles local coordination.
 
-Implemented behavior:
+Current behavior:
 
-- VS Code extension backends advertise backend presence separately from host MCP tool advertisements.
-- Advertisements use one JSON file per backend under `<T3 home>/local-backends/advertisements`, with atomic replace, heartbeat, expiry, deterministic reads, malformed-record filtering, and best-effort stale cleanup.
-- The extension writes a local backend advertisement after backend readiness and bearer-session exchange, refreshes it while alive, removes it on explicit stop and backend child exit, and cleans stale peer advertisements opportunistically.
-- Desktop discovers live peer backends from advertisement files and keeps extension-owned backends loopback-only.
-- Peer backend communication uses local-only HTTP routes limited to descriptor, health/probe, shell snapshot, bounded orchestration event replay, and owner-sensitive command routing.
-- Peer routes require loopback source, owner bearer auth, and `hostIntegration: "vscode"` on the serving backend.
+- VS Code webviews discover the desktop backend from desktop backend advertisements and connect to that backend directly.
 - Remote clients receive one desktop-scoped state view through the desktop backend's existing authenticated HTTP and WebSocket transport.
-- Desktop shell/thread subscriptions merge local events with peer events fetched from all reachable advertised peers.
-- Owner-sensitive commands are routed back to the backend that owns the active provider session when the peer matches the thread's project workspace root.
-- Follow-up prompts are routed to the live owner while the session is `starting`, `running`, or `ready`. Interrupted, stopped, and no-session threads can be resumed by the desktop backend, making desktop the new live owner.
-- If a matching live owner should handle a command but all matching peer requests fail, desktop returns a dispatch error instead of silently adopting the active session.
+- VS Code extension hosts advertise host MCP tools separately from desktop backend advertisements.
+- Desktop provider startup injects matching VS Code MCP tools by workspace root when a live VS Code host advertisement exists.
 
 Security boundaries:
 
-- Remote clients authenticate only to desktop and never receive credentials, endpoints, or required topology for extension-owned loopback backends.
-- Peer advertisements are hints and must be validated for expiry, reachability, declared scope, and capabilities.
+- Remote clients authenticate only to desktop and never receive VS Code MCP socket details as normal state.
+- Desktop backend advertisements are hints and must be validated for expiry, reachability, loopback transport, and expected schema.
 - VS Code MCP allowlists and command validation remain enforced by the extension-owned MCP bridge.
-
-Remaining work:
-
-- Replace advertised owner bearer sessions with narrower short-lived local peer credentials once a dedicated peer-token path exists.
-- Add desktop-local peer diagnostics if troubleshooting real-world multi-window setups requires it.
-- Extend peer discovery beyond VS Code extension-hosted backends only after another local backend type has a concrete ownership/use case.
 
 ### 2026-05-15: Default VS Code View Into Secondary Side Bar
 
@@ -576,14 +533,14 @@ Automated coverage:
 
 ### 2026-05-14: Treat VS Code as a Single-Workspace Surface
 
-Decision: when running inside the VS Code webview, the T3 web app presents only the project that the extension-owned backend bootstrapped from the current workspace folder.
+Decision: when running inside the VS Code webview, the T3 web app presents only the project set associated with the current VS Code workspace folders.
 
 Status: superseded for multi-root workspaces by the 2026-05-15 multi-root bootstrap decision. The single-project behavior remains the compatibility path when VS Code exposes only one workspace folder.
 
 Reasoning:
 
 - VS Code already defines the active workspace/repository context. Showing the desktop app's full project list inside that context makes it possible to accidentally navigate into unrelated repositories.
-- The extension starts a backend for the selected workspace folder with `--auto-bootstrap-project-from-cwd`, so the web UI has a concrete current-project identity from the welcome payload and server config.
+- The extension advertises workspace-folder metadata and connects to the desktop backend, so the web UI has a concrete workspace-scoped project identity without showing unrelated desktop projects.
 - A single-workspace sidebar keeps thread history useful without duplicating project-management UI that belongs in the desktop app or the command palette.
 
 Implemented:
@@ -607,13 +564,13 @@ Reasoning:
 
 Implemented:
 
-- `DesktopBackendBootstrap` accepts `workspaceFolders[]` and `activeWorkspaceFolderKey`.
+- Host MCP and desktop bootstrap contracts share workspace folder metadata shaped as `workspaceFolders[]` and `activeWorkspaceFolderKey`.
 - Each workspace folder carries `key`, `name`, `cwd`, `uriScheme`, and `uriAuthority`.
-- The VS Code extension builds folder keys as `<scheme>:<authority>:<fsPath>`, sends every workspace folder, and keeps launching the backend from the active folder.
+- The VS Code extension builds folder keys as `<scheme>:<authority>:<fsPath>` and advertises every supported workspace folder.
 - `file:` and `vscode-remote:` workspace folders are treated as directly executable filesystem roots.
 - `vscode-vfs://github/<owner>/<repo>` workspace folders from GitHub RemoteHub are cloned with `git clone --filter=blob:none` into `<T3 home>/virtual-workspaces/github/<owner>-<repo>-<hash>` and bootstrapped from that local checkout.
 - Unsupported virtual workspace folders are skipped instead of passing their `Uri.fsPath` to the backend as a bogus cwd.
-- `ServerConfig` stores the bootstrapped folder list and active folder key from the desktop bootstrap envelope.
+- Desktop provider startup uses advertised workspace folder metadata to match VS Code MCP tools by project workspace root.
 - Server startup resolves or creates one T3 project per bootstrapped folder, creates a startup thread when a project has no active thread, and publishes all results as `bootstrapProjects[]`.
 - The legacy welcome fields `bootstrapProjectId` and `bootstrapThreadId` remain populated from the active folder's project for compatibility.
 - The React app filters VS Code sidebars to the bootstrapped `projectId` set, falling back to bootstrapped `cwd`s while project ids are still settling.
@@ -622,9 +579,9 @@ Implemented:
 
 Operational model:
 
-- Multi-root workspace: one backend process, one T3 project per VS Code root, and one visible thread group per bootstrapped project.
+- Multi-root workspace: one desktop-owned backend, one T3 project per VS Code root, and one visible thread group per bootstrapped project.
 - Git worktree: each worktree path remains a distinct T3 project; repository identity can group it visually, but thread ownership stays on the physical worktree project.
-- Devcontainer or SSH: the workspace folder key includes `vscode-remote` scheme and authority, so the bootstrap identity distinguishes remote/container roots from local roots. The backend still executes inside the environment where the extension host starts it.
+- Devcontainer or SSH: the workspace folder key includes `vscode-remote` scheme and authority, so the bootstrap identity distinguishes remote/container roots from local roots. The extension contributes the resolved executable cwd and editor metadata; the desktop-owned backend remains the provider/session owner.
 - GitHub RemoteHub: the VS Code folder URI is virtual and `Uri.fsPath` is not a usable process cwd. T3 clones the GitHub repository to a local cache, uses that checkout as the project cwd, and preserves the virtual folder key for bootstrap identity.
 - Repository identity: still used for sidebar grouping and labels, not as the persistence key for threads.
 
@@ -825,55 +782,55 @@ Implemented as planned:
 
 ### 2026-05-14: Reuse Desktop Bootstrap Transport
 
-Decision: start the T3 backend with `--bootstrap-fd 3` and pass a desktop-compatible bootstrap envelope.
+Status: superseded on 2026-06-02 by the hard desktop-dependency model. The extension no longer starts a backend with `--bootstrap-fd 3`; it discovers the desktop backend and exchanges an advertised one-time desktop ticket for a bearer session.
+
+Decision at the time: start the T3 backend with `--bootstrap-fd 3` and pass a desktop-compatible bootstrap envelope.
 
 Reasoning:
 
 - The server already supports this flow.
 - It avoids a parallel auth/bootstrap design.
-- The web app can exchange the injected bootstrap token through the existing `/api/auth/bootstrap` endpoint.
+- The existing auth routes provide the exchange surface; current VS Code webviews use the bearer session produced by exchanging an advertised one-time ticket.
 
-Implemented as planned:
+Current behavior:
 
-- The extension generates a bootstrap token.
-- The extension writes `mode`, `noBrowser`, `port`, `t3Home`, `host`, `desktopBootstrapToken`, and Tailscale fields to fd 3.
-- The webview injects the token through `window.t3HostBridge.getLocalEnvironmentBootstrap()`.
-
-Deviation from original plan:
-
-- The extension currently defines the bootstrap payload shape locally instead of importing `DesktopBackendBootstrap` from `@t3tools/contracts`. This avoids pulling schema/runtime dependencies into the extension host bundle for the first prototype.
+- The desktop app generates and owns the private startup bootstrap token.
+- The desktop app writes a short-lived desktop backend advertisement with a one-time VS Code ticket after readiness.
+- The extension reads the advertisement, validates loopback transport, and exchanges the advertised ticket for a bearer session.
+- The webview injects the bearer session through `window.t3HostBridge.getLocalEnvironmentBootstrap()`.
 
 ### 2026-05-14: Start One Backend for the Active Workspace
 
-Decision: use one extension-owned backend process based on the active editor's workspace folder, falling back to the first workspace folder or the user home directory.
+Status: superseded on 2026-06-02 by the hard desktop-dependency model. The extension no longer starts any T3 backend process.
 
-Status: retained. Multi-root support now uses one backend process bootstrapped from the active folder while passing all workspace folders to the backend for project resolution.
+Decision at the time: use one extension-owned backend process based on the active editor's workspace folder, falling back to the first workspace folder or the user home directory.
 
 Reasoning:
 
-- This keeps provider sessions in one backend while allowing the server and web app to resolve multiple workspace projects.
-- It keeps the process manager small while preserving room for a future one-process-per-environment registry if remote/container execution requires it.
+- The active workspace folder still matters for VS Code-scoped startup, host MCP matching, and virtual workspace materialization.
+- Desktop now keeps provider sessions in one central backend while VS Code contributes editor-scoped metadata and tools.
 
 Deviation from original plan:
 
-- The backend manager is not yet a full one-process-per-workspace registry.
-- Multi-root workspace behavior is now project-aware inside one backend process.
+- There is no VS Code backend-process registry.
+- Multi-root workspace behavior is now project-aware through desktop-owned backend state plus VS Code host MCP advertisements.
 
 ### 2026-05-14: Package Staged Runtime Dependencies
 
-Decision: stage runtime dependencies under `apps/vscode-extension/dist/node_modules` and package with `vsce --no-dependencies`.
+Status: narrowed on 2026-06-02 after removing the extension-owned backend. The extension still stages production dependencies under `apps/vscode-extension/dist/node_modules`, but no longer stages server/provider runtime dependencies.
+
+Decision at the time: stage runtime dependencies under `apps/vscode-extension/dist/node_modules` and package with `vsce --no-dependencies`.
 
 Reasoning:
 
-- The server bundle still has external imports such as `effect`, `@effect/platform-node`, `@opencode-ai/sdk`, `@anthropic-ai/claude-agent-sdk`, `@pierre/diffs`, and `node-pty`.
+- The extension host bundle still has external imports that must be available in the VSIX when not bundled by tsdown.
 - Letting `vsce` discover dependencies directly from the monorepo pulled unrelated files and failed while parsing unrelated markdown.
 - Controlled staging produces an installable local VSIX.
 
 Deviation from original plan:
 
-- Packaging is not yet optimized.
-- The VS Code package currently strips `dist/server/client` as a packaging-only shortcut. A cleaner longer-term fix would split the server build so extension packaging can build/copy the backend without producing the standalone web client at all.
-- A local package without `--target` is still useful for development, but release distribution should use platform-specific VSIXs while `node-pty` remains required.
+- Packaging no longer copies `apps/server/dist` or strips `dist/server/client`.
+- A local package without `--target` is still useful for development.
 
 ### 2026-05-15: Publish Platform-targeted VSIXs from Release CI
 
@@ -881,7 +838,7 @@ Decision: build platform-targeted VSIX artifacts in the main release workflow an
 
 Reasoning:
 
-- The extension packages the server runtime and staged production dependencies, including native dependencies such as `node-pty`. A single universal VSIX is higher risk because native binaries and postinstall behavior vary by platform.
+- The extension previously packaged server runtime dependencies; it now depends on the desktop app for the backend. Platform-targeted VSIX artifacts remain useful for consistent release metadata and future native extension-host dependencies.
 - `vsce package --target` lets the VSIX metadata declare the platform it was built for, and Marketplace can serve matching platform packages to VS Code clients.
 - Publishing the exact VSIX files produced by CI keeps GitHub release artifacts and Marketplace artifacts aligned.
 - Marketplace auth should be a release secret, not an interactive login. `vsce publish` accepts a Personal Access Token through `--pat` or the `VSCE_PAT` environment variable.
@@ -1143,7 +1100,7 @@ The VS Code extension needs to provide equivalent information:
 
 - The local T3 backend HTTP URL.
 - The local T3 backend WebSocket URL.
-- The bootstrap token used for silent auth.
+- The bearer token used for local backend auth.
 - Host actions such as open file, reveal path, execute VS Code command, or report focus/theme state.
 
 There are two viable bridge designs:
@@ -1171,14 +1128,12 @@ Create a new workspace package, likely:
 apps/vscode-extension
 ```
 
-The extension would package:
+The extension packages:
 
 - Extension host code.
 - Built `apps/web/dist` assets.
-- A way to run the T3 backend:
-  - either bundled built `apps/server/dist`
-  - or a resolved `t3` executable
-  - or a development-mode command for local extension development
+- A small extension-host production dependency set.
+- No T3 backend runtime; the desktop app owns the backend.
 
 The extension would contribute:
 
@@ -1194,14 +1149,14 @@ The extension would contribute:
 
 The extension runtime would:
 
-- Start a T3 backend process for the current workspace.
-- Pass a bootstrap envelope through fd 3, reusing the existing desktop bootstrap flow.
-- Wait for backend readiness.
+- Discover a live desktop backend advertisement for the current workstation.
+- Exchange the advertised one-time desktop ticket for a VS Code bearer session.
+- Call `POST /api/vscode/workspace-bootstrap` with the current workspace folders.
 - Create a VS Code webview/custom editor.
-- Inject host/bootstrap metadata into the webview.
+- Inject host/bootstrap metadata, including the desktop backend URLs and bearer session, into the webview.
 - Serve local web assets via `webview.asWebviewUri(...)`.
 - Apply a strict Content Security Policy.
-- Route webview messages to VS Code commands and server lifecycle operations.
+- Route webview messages to VS Code commands and desktop reconnection operations.
 
 Recommended URI shape:
 
@@ -1293,7 +1248,8 @@ Confirmed product direction:
 
 - The target UX is Codex-like. It does not need to literally replace VS Code's built-in Chat panel DOM.
 - A T3 Code chat-session entry plus webview/custom-editor backed T3 UI is acceptable and is the plan.
-- Prefer one backend process per VS Code workspace if that can be achieved with minimal churn to the existing T3 codebase.
+- Desktop is a hard dependency and owns the backend process/provider sessions; VS Code does not start an extension-owned T3 backend.
+- Scope the VS Code UI to the current workspace by sending workspace-folder metadata to `POST /api/vscode/workspace-bootstrap`.
 - Use the same T3 home as desktop for now. Reassess after experimenting.
 - Remote workspaces, SSH, and devcontainers are desirable for v1 only if they can be supported with minimal churn.
 - Use best judgement on auth transport. The implementation should fit the existing auth/bootstrap model rather than introduce a large parallel auth design.
@@ -1327,41 +1283,32 @@ Do this first with stable APIs only.
 
 ### Phase 2: Backend Process Manager
 
-Add an extension-side service that:
+Add an extension-side desktop connection service that:
 
 - Resolves workspace folder and cwd.
-- Allocates a local port.
-- Generates a desktop-style bootstrap token.
-- Starts the T3 backend with `--bootstrap-fd 3`.
-- Writes a `DesktopBackendBootstrap` payload to fd 3.
-- Polls health/auth readiness.
-- Restarts on failure where appropriate.
-- Cleans up on extension deactivation.
+- Reads desktop backend advertisements from the shared T3 home.
+- Validates loopback desktop backend URLs.
+- Exchanges the advertised one-time ticket for a bearer session after desktop readiness.
+- Calls `POST /api/vscode/workspace-bootstrap` with workspace folders and active folder metadata.
+- Retries when a consumed advertised ticket returns `401`, waiting for desktop to refresh the advertisement with a new one-time ticket.
+- Shows a manual-start fallback webview when no live desktop advertisement exists.
+- Reconnects on command or fallback button click without launching the desktop app.
 
-Reuse the existing server bootstrap shape from `packages/contracts/src/desktopBootstrap.ts`.
+Reuse the existing advertisement and workspace metadata shapes from `packages/contracts/src/desktopBootstrap.ts`.
 
 Process ownership decision:
 
-- Target model: one T3 backend process per VS Code workspace.
-- Constraint: only do this if it does not require large changes to the existing server/runtime model.
-- Fallback model: one extension-owned backend process that can host multiple T3 projects, using current server capabilities.
-- Initial implementation should map one VS Code workspace folder to one backend process.
-- For multi-root workspaces, start with the active workspace folder or first folder, then improve once the basic extension works.
-- Keep the backend manager abstraction capable of either model so this can change after experimentation.
+- Current model: no VS Code-owned T3 backend process.
+- Desktop owns the backend process and provider sessions.
+- VS Code owns editor-aware MCP sockets and workspace metadata advertisements.
 
 Likely T3 server command shape:
 
 ```text
-node <extension-server-dist>/bin.mjs --bootstrap-fd 3 <workspace-cwd>
+not applicable; the extension does not start the server
 ```
 
-Development mode may use:
-
-```text
-bun --cwd apps/server dev --bootstrap-fd 3 <workspace-cwd>
-```
-
-Production mode should prefer a packaged JS artifact, not depend on Bun being installed by the user.
+Development mode uses the normal desktop app/backend dev commands.
 
 ### Phase 3: Webview Host Bridge
 
@@ -1395,9 +1342,9 @@ Extension webview changes:
 Auth/bootstrap decision:
 
 - Reuse the existing bootstrap flow where practical.
-- The VS Code extension should provide local backend URLs and a bootstrap token to the web app.
-- The web app should exchange the bootstrap token through the existing `/api/auth/bootstrap` route unless VS Code webview cookie behavior proves unreliable.
-- If cookie auth is unreliable in VS Code webviews, prefer the existing bearer-session path over inventing a new auth layer.
+- The VS Code extension discovers local backend URLs from desktop backend advertisements.
+- The advertised bootstrap credential is a short-lived one-time desktop ticket; the extension exchanges it for a bearer session before creating the webview.
+- The web app receives the bearer token through `window.t3HostBridge`, so it can authenticate without depending on VS Code webview cookies.
 - Avoid a host-mediated RPC auth proxy unless needed; it would add more extension-specific logic than the current codebase appears to require.
 
 ### Phase 4: Bundle and Load Existing UI
@@ -1418,8 +1365,8 @@ The webview provider should:
 - Inject metadata:
   - backend HTTP URL
   - backend WS URL
-  - bootstrap token
-  - workspace id/cwd
+  - bearer token
+  - workspace folders and bootstrapped project ids/cwds
   - initial route/thread id
 
 ### Phase 5: Custom Editor and Session Routing
@@ -1513,15 +1460,15 @@ Decide how to package the backend.
 
 Preferred:
 
-- Build `apps/server` into JS artifacts.
-- Include them in the VSIX.
-- Run with VS Code's extension host Node or a child Node executable.
+- Do not build or include `apps/server` in the VSIX.
+- Require the desktop app/backend to be running on the same machine.
+- Connect through the desktop backend advertisement, one-time desktop ticket, and bearer-session exchange.
 
 Concerns:
 
-- Native dependency `node-pty` may require platform-specific VSIX builds.
+- Native extension-host dependencies would require platform-specific VSIX builds if added later.
 - The current Codex extension is platform-specific (`darwin-arm64`), which is a useful precedent.
-- If T3 Code needs native PTY support, the VS Code extension likely needs platform-specific packaging too.
+- If T3 Code adds VS Code extension-host native dependencies later, the extension likely needs platform-specific packaging too.
 
 Marketplace/platform-specific finding:
 
@@ -1546,6 +1493,5 @@ Packaging recommendation:
 
 - Use platform-specific VSIX builds for release distribution.
 - Build the currently validated Marketplace targets in CI: `darwin-arm64`, `darwin-x64`, `linux-x64`, and `win32-x64`.
-- Add CI targets for Linux arm64 and Windows arm64 once matching native runtime staging has been validated.
+- Add CI targets for Linux arm64 and Windows arm64 once there is a validated need for those targets.
 - Keep the universal/local package path for development only.
-- If `node-pty` remains required at runtime, platform-specific VSIXs are the cleaner distribution model.

@@ -119,6 +119,10 @@
       "types": "./src/hostMcp.ts",
       "import": "./src/hostMcp.ts"
     },
+    "./desktopBackendAdvertisement": {
+      "types": "./src/desktopBackendAdvertisement.ts",
+      "import": "./src/desktopBackendAdvertisement.ts"
+    },
     "./localBackendAdvertisement": {
       "types": "./src/localBackendAdvertisement.ts",
       "import": "./src/localBackendAdvertisement.ts"

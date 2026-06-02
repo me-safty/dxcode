@@ -1,0 +1,271 @@
+import {
+  CommandId,
+  DEFAULT_MODEL,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
+  DesktopBootstrapWorkspaceFolder,
+  type DesktopBootstrapWorkspaceFolder as DesktopBootstrapWorkspaceFolderValue,
+  ProjectId,
+  ProviderInstanceId,
+  type ServerLifecycleBootstrapProject as ServerLifecycleBootstrapProjectValue,
+  ThreadId,
+  TrimmedNonEmptyString,
+  type ModelSelection,
+  type OrchestrationProjectShell,
+  type OrchestrationThreadShell,
+} from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
+import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+
+import { AuthError, ServerAuth } from "../auth/Services/ServerAuth.ts";
+import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
+import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+
+const VscodeWorkspaceBootstrapRequest = Schema.Struct({
+  workspaceFolders: Schema.Array(DesktopBootstrapWorkspaceFolder),
+  activeWorkspaceFolderKey: Schema.optional(TrimmedNonEmptyString),
+});
+
+class VscodeWorkspaceBootstrapError extends Data.TaggedError("VscodeWorkspaceBootstrapError")<{
+  readonly message: string;
+  readonly status?: 400 | 500;
+  readonly cause?: unknown;
+}> {}
+
+const DEFAULT_MODEL_SELECTION: ModelSelection = {
+  instanceId: ProviderInstanceId.make("codex"),
+  model: DEFAULT_MODEL,
+};
+
+const respondToBootstrapError = (error: AuthError | VscodeWorkspaceBootstrapError) =>
+  Effect.gen(function* () {
+    if (error._tag === "AuthError") {
+      return HttpServerResponse.jsonUnsafe(
+        { error: error.message },
+        { status: error.status ?? 500 },
+      );
+    }
+
+    if (error.status === 500) {
+      yield* Effect.logError("VS Code workspace bootstrap route failed", {
+        message: error.message,
+        cause: error.cause,
+      });
+    }
+    return HttpServerResponse.jsonUnsafe({ error: error.message }, { status: error.status ?? 500 });
+  });
+
+const authenticateOwnerSession = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const serverAuth = yield* ServerAuth;
+  const session = yield* serverAuth.authenticateHttpRequest(request);
+  if (session.role !== "owner") {
+    return yield* new AuthError({
+      message: "Only owner sessions can bootstrap VS Code workspaces.",
+      status: 403,
+    });
+  }
+  return session;
+});
+
+export const vscodeWorkspaceBootstrapRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/vscode/workspace-bootstrap",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(VscodeWorkspaceBootstrapRequest).pipe(
+      Effect.mapError(
+        (cause) =>
+          new VscodeWorkspaceBootstrapError({
+            message: "Invalid VS Code workspace bootstrap request.",
+            status: 400,
+            cause,
+          }),
+      ),
+    );
+    const result = yield* bootstrapVscodeWorkspaces(input);
+    return HttpServerResponse.jsonUnsafe(result);
+  }).pipe(
+    Effect.catchTags({
+      AuthError: respondToBootstrapError,
+      VscodeWorkspaceBootstrapError: respondToBootstrapError,
+    }),
+  ),
+);
+
+const bootstrapVscodeWorkspaces = Effect.fn("bootstrapVscodeWorkspaces")(function* (input: {
+  readonly workspaceFolders: readonly DesktopBootstrapWorkspaceFolderValue[];
+  readonly activeWorkspaceFolderKey?: string | undefined;
+}) {
+  const crypto = yield* Crypto.Crypto;
+  const randomUUID = crypto.randomUUIDv4;
+  const orchestrationEngine = yield* OrchestrationEngineService;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const serverEnvironment = yield* ServerEnvironment;
+  const environment = yield* serverEnvironment.getDescriptor;
+  const shellSnapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
+    Effect.mapError(
+      (cause) =>
+        new VscodeWorkspaceBootstrapError({
+          message: "Failed to load desktop workspace shell snapshot.",
+          status: 500,
+          cause,
+        }),
+    ),
+  );
+  const projects: OrchestrationProjectShell[] = [...shellSnapshot.projects];
+  const threads: OrchestrationThreadShell[] = [...shellSnapshot.threads];
+  const bootstrapProjects: ServerLifecycleBootstrapProjectValue[] = [];
+  const activeWorkspaceKey = input.activeWorkspaceFolderKey ?? input.workspaceFolders[0]?.key;
+
+  for (const folder of input.workspaceFolders) {
+    const title = folder.name || resolveWorkspaceName(folder.cwd);
+    let project = projects.find((candidate) =>
+      workspaceRootsEqual(candidate.workspaceRoot, folder.cwd),
+    );
+
+    if (!project) {
+      const createdAt = DateTime.formatIso(yield* DateTime.now);
+      const createdProject: OrchestrationProjectShell = {
+        id: ProjectId.make(yield* randomUUID),
+        title,
+        workspaceRoot: folder.cwd,
+        repositoryIdentity: null,
+        defaultModelSelection: DEFAULT_MODEL_SELECTION,
+        scripts: [],
+        createdAt,
+        updatedAt: createdAt,
+      };
+      yield* orchestrationEngine
+        .dispatch({
+          type: "project.create",
+          commandId: CommandId.make(yield* randomUUID),
+          projectId: createdProject.id,
+          title,
+          workspaceRoot: folder.cwd,
+          defaultModelSelection: DEFAULT_MODEL_SELECTION,
+          createdAt,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new VscodeWorkspaceBootstrapError({
+                message: "Failed to create VS Code workspace project.",
+                status: 500,
+                cause,
+              }),
+          ),
+        );
+      projects.push(createdProject);
+      project = createdProject;
+    }
+
+    let thread = findLatestActiveThread(threads, project.id);
+    if (!thread) {
+      const createdAt = DateTime.formatIso(yield* DateTime.now);
+      thread = {
+        id: ThreadId.make(yield* randomUUID),
+        projectId: project.id,
+        title: "New thread",
+        modelSelection: project.defaultModelSelection ?? DEFAULT_MODEL_SELECTION,
+        runtimeMode: "full-access",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        branch: null,
+        worktreePath: null,
+        latestTurn: null,
+        createdAt,
+        updatedAt: createdAt,
+        archivedAt: null,
+        session: null,
+        latestUserMessageAt: null,
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+        hasActionableProposedPlan: false,
+      };
+      yield* orchestrationEngine
+        .dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(yield* randomUUID),
+          threadId: thread.id,
+          projectId: project.id,
+          title: "New thread",
+          modelSelection: thread.modelSelection,
+          runtimeMode: thread.runtimeMode,
+          interactionMode: thread.interactionMode,
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new VscodeWorkspaceBootstrapError({
+                message: "Failed to create VS Code workspace thread.",
+                status: 500,
+                cause,
+              }),
+          ),
+        );
+      threads.push(thread);
+    }
+
+    bootstrapProjects.push({
+      workspaceFolderKey: folder.key,
+      workspaceFolderName: folder.name,
+      cwd: folder.cwd,
+      projectId: project.id,
+      bootstrapThreadId: thread.id,
+      isActive: folder.key === activeWorkspaceKey,
+    });
+  }
+
+  return {
+    environmentId: environment.environmentId,
+    bootstrapProjects,
+  };
+});
+
+function findLatestActiveThread(
+  threads: readonly OrchestrationThreadShell[],
+  projectId: ProjectId,
+): OrchestrationThreadShell | null {
+  return (
+    threads
+      .filter((thread) => thread.projectId === projectId && thread.archivedAt === null)
+      .toSorted((left, right) => {
+        const rightTimestamp = sortableThreadTimestamp(right);
+        const leftTimestamp = sortableThreadTimestamp(left);
+        if (rightTimestamp !== leftTimestamp) {
+          return rightTimestamp - leftTimestamp;
+        }
+        return right.id.localeCompare(left.id);
+      })[0] ?? null
+  );
+}
+
+function sortableThreadTimestamp(thread: OrchestrationThreadShell): number {
+  return (
+    toSortableTimestamp(thread.latestUserMessageAt) ??
+    toSortableTimestamp(thread.updatedAt) ??
+    toSortableTimestamp(thread.createdAt) ??
+    Number.NEGATIVE_INFINITY
+  );
+}
+
+function toSortableTimestamp(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function workspaceRootsEqual(left: string, right: string): boolean {
+  return left.replace(/[\\/]+$/u, "") === right.replace(/[\\/]+$/u, "");
+}
+
+function resolveWorkspaceName(cwd: string): string {
+  return cwd.split(/[/\\]/).findLast((segment) => segment.length > 0) || "project";
+}

@@ -11,7 +11,7 @@ describe("routeFromUri", () => {
 
   it("opens a specific thread route when the URI includes environment and thread ids", () => {
     expect(routeFromUri({ path: "/local/thread with spaces" } as never)).toBe(
-      "/local/thread%20with%20spaces",
+      "/_chat/local/thread%20with%20spaces",
     );
   });
 });

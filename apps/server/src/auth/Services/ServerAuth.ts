@@ -15,6 +15,7 @@ import type {
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
+import type * as Duration from "effect/Duration";
 import type * as Effect from "effect/Effect";
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import type { SessionRole } from "./SessionCredentialService.ts";
@@ -54,7 +55,9 @@ export interface ServerAuthShape {
   ) => Effect.Effect<AuthBearerBootstrapResult, AuthError>;
   readonly issuePairingCredential: (
     input?: AuthCreatePairingCredentialInput & {
+      readonly ttl?: Duration.Duration;
       readonly role?: SessionRole;
+      readonly subject?: string;
     },
   ) => Effect.Effect<AuthPairingCredentialResult, AuthError>;
   readonly listPairingLinks: () => Effect.Effect<ReadonlyArray<AuthPairingLink>, AuthError>;

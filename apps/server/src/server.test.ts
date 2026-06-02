@@ -808,6 +808,7 @@ const bootstrapBrowserSession = (
     });
     const body = (yield* response.json) as {
       readonly authenticated: boolean;
+      readonly role?: string;
       readonly sessionMethod: string;
       readonly expiresAt: string;
     };
@@ -831,6 +832,7 @@ const bootstrapBearerSession = (
     });
     const body = (yield* response.json) as {
       readonly authenticated: boolean;
+      readonly role?: string;
       readonly sessionMethod: string;
       readonly expiresAt: string;
       readonly sessionToken?: string;
@@ -1086,7 +1088,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
       const body = (yield* response.json) as { readonly error: string };
 
-      assert.equal(response.status, 403);
+      assert.equal(response.status, 401);
       assert.equal(body.error, "Local peer API is available only from VS Code-hosted backends.");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -1402,6 +1404,50 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const reusedResult = yield* bootstrapBrowserSession(body.credential);
       assert.equal(reusedResult.response.status, 401);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("issues one-time desktop bootstrap tickets from desktop bearer sessions", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const desktopSession = yield* bootstrapBearerSession();
+      assert.equal(desktopSession.response.status, 200);
+      assert.isDefined(desktopSession.body.sessionToken);
+
+      const ticketResponse = yield* HttpClient.post("/api/auth/desktop-bootstrap-ticket", {
+        headers: {
+          authorization: `Bearer ${desktopSession.body.sessionToken}`,
+        },
+      });
+      const ticketBody = (yield* ticketResponse.json) as {
+        readonly credential: string;
+      };
+
+      assert.equal(ticketResponse.status, 200);
+      assert.equal(typeof ticketBody.credential, "string");
+      assert.isTrue(ticketBody.credential.length > 0);
+
+      const firstBootstrap = yield* bootstrapBearerSession(ticketBody.credential);
+      const secondBootstrap = yield* bootstrapBearerSession(ticketBody.credential);
+      assert.equal(firstBootstrap.response.status, 200);
+      assert.equal(firstBootstrap.body.role, "owner");
+      assert.equal(secondBootstrap.response.status, 401);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects desktop bootstrap ticket requests without a desktop bearer session", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const response = yield* HttpClient.post("/api/auth/desktop-bootstrap-ticket", {
+        headers: {
+          cookie: ownerCookie,
+        },
+      });
+
+      assert.equal(response.status, 403);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

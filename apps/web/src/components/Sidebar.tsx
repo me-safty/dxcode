@@ -222,6 +222,12 @@ const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> =
   separate: "Keep separate",
 };
 
+function readVscodeWorkspaceBootstrap() {
+  return typeof window === "undefined"
+    ? null
+    : (window.t3HostBridge?.getVscodeWorkspaceBootstrap?.() ?? null);
+}
+
 function clampSidebarThreadPreviewCount(value: number): SidebarThreadPreviewCount {
   return Math.min(
     MAX_SIDEBAR_THREAD_PREVIEW_COUNT,
@@ -2915,6 +2921,7 @@ export default function Sidebar() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const serverConfig = useServerConfig();
   const serverWelcome = useServerWelcome();
+  const vscodeWorkspaceBootstrap = isVscodeWebview ? readVscodeWorkspaceBootstrap() : null;
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
   const visibleProjects = useMemo(
@@ -2925,11 +2932,12 @@ export default function Sidebar() {
             resolveVscodeProjectScope({
               serverConfig,
               serverWelcome,
+              vscodeWorkspaceBootstrap,
               fallbackEnvironmentId: primaryEnvironmentId,
             }),
           )
         : projects,
-    [primaryEnvironmentId, projects, serverConfig, serverWelcome],
+    [primaryEnvironmentId, projects, serverConfig, serverWelcome, vscodeWorkspaceBootstrap],
   );
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({

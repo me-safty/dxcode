@@ -17,12 +17,23 @@ import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/unstable/http";
+import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
+  AuthBearerBootstrapResult,
+  AuthPairingCredentialResult,
+  type AuthPairingCredentialResult as AuthPairingCredentialResultValue,
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
 } from "@t3tools/contracts";
+import {
+  cleanupDesktopBackendAdvertisements,
+  createDesktopBackendAdvertisement,
+  DESKTOP_BACKEND_ADVERTISEMENT_HEARTBEAT_MS,
+  removeDesktopBackendAdvertisement,
+  writeDesktopBackendAdvertisement,
+} from "@t3tools/shared/desktopBackendAdvertisement";
 
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
@@ -36,6 +47,8 @@ const DEFAULT_BACKEND_READINESS_INTERVAL = Duration.millis(100);
 const DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT = Duration.seconds(1);
 const DEFAULT_BACKEND_TERMINATE_GRACE = Duration.seconds(2);
 const BACKEND_READINESS_PATH = "/.well-known/t3/environment";
+const AUTH_BEARER_BOOTSTRAP_PATH = "/api/auth/bootstrap/bearer";
+const AUTH_DESKTOP_BOOTSTRAP_TICKET_PATH = "/api/auth/desktop-bootstrap-ticket";
 
 type BackendProcessLayerServices = ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient;
 
@@ -87,6 +100,16 @@ class BackendProcessSpawnError extends Data.TaggedError("BackendProcessSpawnErro
 
 type BackendProcessError = BackendProcessBootstrapEncodeError | BackendProcessSpawnError;
 
+class DesktopBackendAdvertisementError extends Data.TaggedError(
+  "DesktopBackendAdvertisementError",
+)<{
+  readonly cause: unknown;
+}> {
+  override get message() {
+    return this.cause instanceof Error ? this.cause.message : String(this.cause);
+  }
+}
+
 interface RunBackendProcessOptions extends DesktopBackendStartConfig {
   readonly readinessTimeout?: Duration.Duration;
   readonly onStarted?: (pid: number) => Effect.Effect<void>;
@@ -126,6 +149,12 @@ interface ActiveBackendRun {
   readonly scope: Scope.Closeable;
   readonly fiber: Option.Option<Fiber.Fiber<void, never>>;
   readonly pid: Option.Option<number>;
+  readonly advertisement: Option.Option<DesktopBackendAdvertisementHandle>;
+}
+
+interface DesktopBackendAdvertisementHandle {
+  readonly t3Home: string;
+  readonly backendId: string;
 }
 
 interface BackendManagerState {
@@ -175,6 +204,116 @@ const closeRun = (
     options?.timeout ? close.pipe(Effect.timeoutOption(options.timeout), Effect.asVoid) : close
   ).pipe(Effect.ignore);
 };
+
+function makeDesktopBackendAdvertisementHandle(input: {
+  readonly runId: number;
+  readonly config: DesktopBackendStartConfig;
+}): DesktopBackendAdvertisementHandle {
+  return {
+    t3Home: input.config.bootstrap.t3Home,
+    backendId: `desktop-backend-${process.pid}-${input.runId}`,
+  };
+}
+
+function refreshDesktopBackendAdvertisement(
+  handle: DesktopBackendAdvertisementHandle,
+  config: DesktopBackendStartConfig,
+  controlBearerToken: string,
+): Effect.Effect<void, never, HttpClient.HttpClient> {
+  return Effect.gen(function* () {
+    const ticket = yield* issueDesktopBootstrapTicket({
+      httpBaseUrl: config.httpBaseUrl,
+      controlBearerToken,
+    });
+    yield* Effect.try({
+      try: () => {
+        writeDesktopBackendAdvertisement({
+          t3Home: handle.t3Home,
+          advertisement: createDesktopBackendAdvertisement({
+            backendId: handle.backendId,
+            httpBaseUrl: config.httpBaseUrl.href,
+            bootstrapToken: ticket.credential,
+          }),
+        });
+        cleanupDesktopBackendAdvertisements({ t3Home: handle.t3Home });
+      },
+      catch: toDesktopBackendAdvertisementError,
+    });
+  }).pipe(
+    Effect.catch((error) =>
+      logBackendManagerWarning("failed to refresh desktop backend advertisement", {
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    ),
+  );
+}
+
+function issueDesktopControlBearerSession(
+  config: DesktopBackendStartConfig,
+): Effect.Effect<string, DesktopBackendAdvertisementError, HttpClient.HttpClient> {
+  return Effect.gen(function* () {
+    const httpClient = yield* HttpClient.HttpClient;
+    const url = new URL(AUTH_BEARER_BOOTSTRAP_PATH, config.httpBaseUrl);
+    const response = yield* httpClient.execute(
+      HttpClientRequest.post(url.href).pipe(
+        HttpClientRequest.acceptJson,
+        HttpClientRequest.bodyJsonUnsafe({
+          credential: config.bootstrap.desktopBootstrapToken,
+        }),
+      ),
+    );
+    const okResponse = yield* HttpClientResponse.filterStatusOk(response);
+    const decoded = yield* HttpClientResponse.schemaBodyJson(AuthBearerBootstrapResult)(okResponse);
+    return decoded.sessionToken;
+  }).pipe(Effect.mapError(toDesktopBackendAdvertisementError));
+}
+
+function issueDesktopBootstrapTicket(input: {
+  readonly httpBaseUrl: URL;
+  readonly controlBearerToken: string;
+}): Effect.Effect<
+  AuthPairingCredentialResultValue,
+  DesktopBackendAdvertisementError,
+  HttpClient.HttpClient
+> {
+  return Effect.gen(function* () {
+    const httpClient = yield* HttpClient.HttpClient;
+    const url = new URL(AUTH_DESKTOP_BOOTSTRAP_TICKET_PATH, input.httpBaseUrl);
+    const response = yield* httpClient.execute(
+      HttpClientRequest.post(url.href).pipe(
+        HttpClientRequest.acceptJson,
+        HttpClientRequest.bearerToken(input.controlBearerToken),
+      ),
+    );
+    const okResponse = yield* HttpClientResponse.filterStatusOk(response);
+    return yield* HttpClientResponse.schemaBodyJson(AuthPairingCredentialResult)(okResponse);
+  }).pipe(Effect.mapError(toDesktopBackendAdvertisementError));
+}
+
+function removeDesktopBackendAdvertisementForRun(
+  handle: Option.Option<DesktopBackendAdvertisementHandle>,
+): Effect.Effect<void> {
+  return Option.match(handle, {
+    onNone: () => Effect.void,
+    onSome: (advertisement) =>
+      Effect.try({
+        try: () => {
+          removeDesktopBackendAdvertisement(advertisement);
+        },
+        catch: toDesktopBackendAdvertisementError,
+      }).pipe(
+        Effect.catch((error) =>
+          logBackendManagerWarning("failed to remove desktop backend advertisement", {
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        ),
+      ),
+  });
+}
+
+function toDesktopBackendAdvertisementError(cause: unknown): DesktopBackendAdvertisementError {
+  return new DesktopBackendAdvertisementError({ cause });
+}
 
 const waitForHttpReady = Effect.fn("desktop.backendManager.waitForHttpReady")(function* (
   baseUrl: URL,
@@ -367,6 +506,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
               scope: runScope,
               fiber: Option.none(),
               pid: Option.none(),
+              advertisement: Option.none(),
             } satisfies ActiveBackendRun),
             nextRunId: latest.nextRunId + 1,
           },
@@ -377,7 +517,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
         ) {
           yield* mutex.withPermits(1)(
             Effect.gen(function* () {
-              const { isCurrentRun, nextState, pid } = yield* Ref.modify(
+              const { isCurrentRun, nextState, pid, advertisement } = yield* Ref.modify(
                 state,
                 (
                   latest,
@@ -386,6 +526,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                     readonly isCurrentRun: boolean;
                     readonly nextState: BackendManagerState;
                     readonly pid: Option.Option<number>;
+                    readonly advertisement: Option.Option<DesktopBackendAdvertisementHandle>;
                   },
                   BackendManagerState,
                 ] => {
@@ -396,6 +537,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                         isCurrentRun: false,
                         nextState: latest,
                         pid: Option.none<number>(),
+                        advertisement: Option.none<DesktopBackendAdvertisementHandle>(),
                       },
                       latest,
                     ] as const;
@@ -411,6 +553,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                       isCurrentRun: true,
                       nextState: next,
                       pid: currentRun.pid,
+                      advertisement: currentRun.advertisement,
                     },
                     next,
                   ] as const;
@@ -418,6 +561,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
               );
 
               if (isCurrentRun) {
+                yield* removeDesktopBackendAdvertisementForRun(advertisement);
                 if (Option.isSome(pid)) {
                   yield* backendOutputLog.writeSessionBoundary({
                     phase: "END",
@@ -467,6 +611,37 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             }
 
             yield* Ref.set(desktopState.backendReady, true);
+            const controlBearerToken = yield* issueDesktopControlBearerSession(config.value).pipe(
+              Effect.provideService(HttpClient.HttpClient, httpClient),
+              Effect.catch((error) =>
+                logBackendManagerWarning("failed to create desktop backend control session", {
+                  message: error instanceof Error ? error.message : String(error),
+                }).pipe(Effect.as(null)),
+              ),
+            );
+            if (controlBearerToken !== null) {
+              const advertisement = makeDesktopBackendAdvertisementHandle({
+                runId,
+                config: config.value,
+              });
+              yield* refreshDesktopBackendAdvertisement(
+                advertisement,
+                config.value,
+                controlBearerToken,
+              ).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+              yield* updateActiveRun(runId, (run) => ({
+                ...run,
+                advertisement: Option.some(advertisement),
+              }));
+              yield* Effect.repeat(
+                refreshDesktopBackendAdvertisement(advertisement, config.value, controlBearerToken),
+                Schedule.spaced(Duration.millis(DESKTOP_BACKEND_ADVERTISEMENT_HEARTBEAT_MS)),
+              ).pipe(
+                Effect.provideService(HttpClient.HttpClient, httpClient),
+                (effect) => Effect.forkIn(effect, runScope),
+                Effect.asVoid,
+              );
+            }
             yield* desktopWindow.handleBackendReady.pipe(
               Effect.catch((error) =>
                 logBackendManagerError("failed to open main window after backend readiness", {
@@ -589,7 +764,10 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
     });
     yield* Option.match(active, {
       onNone: () => Effect.void,
-      onSome: (run) => closeRun(run, options),
+      onSome: (run) =>
+        removeDesktopBackendAdvertisementForRun(run.advertisement).pipe(
+          Effect.andThen(closeRun(run, options)),
+        ),
     });
   });
 

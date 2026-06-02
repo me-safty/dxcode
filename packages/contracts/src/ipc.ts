@@ -80,6 +80,7 @@ import type {
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
+import type { DesktopBootstrapWorkspaceFolder } from "./desktopBootstrap.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -288,6 +289,7 @@ export type T3HostBridgePostMessage = T3HostRequestMessage;
 
 export interface T3HostBridge {
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
+  getVscodeWorkspaceBootstrap?: () => T3HostVscodeWorkspaceBootstrap | null;
   getDisplayPreferences?: () => T3HostDisplayPreferences | null;
   onDisplayPreferencesChanged?: (
     callback: (preferences: T3HostDisplayPreferences) => void,
@@ -302,6 +304,22 @@ export interface T3HostBridge {
   /** Optional because non-hosted browser surfaces fall back to `window.confirm`. */
   confirm?: (message: string) => Promise<boolean>;
   postMessage?: (message: T3HostBridgePostMessage) => void;
+}
+
+export interface T3HostVscodeWorkspaceBootstrapProject {
+  readonly workspaceFolderKey: string;
+  readonly workspaceFolderName: string;
+  readonly cwd: string;
+  readonly projectId: string;
+  readonly bootstrapThreadId: string;
+  readonly isActive?: boolean;
+}
+
+export interface T3HostVscodeWorkspaceBootstrap {
+  readonly environmentId: string;
+  readonly workspaceFolders: readonly DesktopBootstrapWorkspaceFolder[];
+  readonly activeWorkspaceFolderKey?: string;
+  readonly bootstrapProjects: readonly T3HostVscodeWorkspaceBootstrapProject[];
 }
 
 export const DesktopSshEnvironmentTargetSchema = Schema.Struct({

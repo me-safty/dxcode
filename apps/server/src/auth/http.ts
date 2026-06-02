@@ -2,11 +2,13 @@ import {
   type AuthBearerBootstrapResult,
   AuthBootstrapInput,
   AuthCreatePairingCredentialInput,
+  type AuthPairingCredentialResult,
   AuthRevokeClientSessionInput,
   AuthRevokePairingLinkInput,
   type AuthWebSocketTokenResult,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
@@ -15,6 +17,8 @@ import { AuthError, ServerAuth } from "./Services/ServerAuth.ts";
 import { SessionCredentialService } from "./Services/SessionCredentialService.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
 import { browserApiCorsHeaders } from "../httpCors.ts";
+
+const DESKTOP_BOOTSTRAP_TICKET_TTL = Duration.seconds(30);
 
 export const respondToAuthError = (error: AuthError) =>
   Effect.gen(function* () {
@@ -144,6 +148,32 @@ export const authBearerBootstrapRouteLayer = HttpRouter.add(
       deriveAuthClientMetadata({ request }),
     );
     return HttpServerResponse.jsonUnsafe(result satisfies AuthBearerBootstrapResult, {
+      status: 200,
+      headers: browserApiCorsHeaders,
+    });
+  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+);
+
+export const authDesktopBootstrapTicketRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/auth/desktop-bootstrap-ticket",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    const session = yield* serverAuth.authenticateBearerHttpRequest(request);
+    if (session.role !== "owner" || session.subject !== "desktop-bootstrap") {
+      return yield* new AuthError({
+        message: "Only desktop bootstrap owner sessions can issue desktop bootstrap tickets.",
+        status: 403,
+      });
+    }
+    const result = yield* serverAuth.issuePairingCredential({
+      ttl: DESKTOP_BOOTSTRAP_TICKET_TTL,
+      role: "owner",
+      subject: "desktop-bootstrap",
+      label: "VS Code",
+    });
+    return HttpServerResponse.jsonUnsafe(result satisfies AuthPairingCredentialResult, {
       status: 200,
       headers: browserApiCorsHeaders,
     });

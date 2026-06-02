@@ -24,6 +24,18 @@ export const DesktopBootstrapMcpServer = Schema.Struct({
 });
 export type DesktopBootstrapMcpServer = typeof DesktopBootstrapMcpServer.Type;
 
+export const DESKTOP_BACKEND_ADVERTISEMENT_VERSION = 1;
+
+export const DesktopBackendAdvertisement = Schema.Struct({
+  version: Schema.Literal(DESKTOP_BACKEND_ADVERTISEMENT_VERSION),
+  backendId: TrimmedNonEmptyString,
+  updatedAt: TrimmedNonEmptyString,
+  expiresAt: TrimmedNonEmptyString,
+  httpBaseUrl: TrimmedNonEmptyString,
+  bootstrapToken: TrimmedNonEmptyString,
+});
+export type DesktopBackendAdvertisement = typeof DesktopBackendAdvertisement.Type;
+
 export const HOST_MCP_ADVERTISEMENT_VERSION = 1;
 
 export const HostMcpAdvertisement = Schema.Struct({

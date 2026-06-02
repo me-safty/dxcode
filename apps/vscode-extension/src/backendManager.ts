@@ -3,20 +3,13 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { spawn as spawnChildProcess } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
-import {
-  spawn as spawnChildProcess,
-  type ChildProcessWithoutNullStreams,
-} from "node:child_process";
 import { DEFAULT_MCP_TOOL_TIMEOUT_SEC, normalizeMcpToolTimeoutSec } from "@t3tools/shared/mcp";
 import {
-  cleanupLocalBackendAdvertisements,
-  createLocalBackendAdvertisement,
-  LOCAL_BACKEND_ADVERTISEMENT_HEARTBEAT_MS,
-  removeLocalBackendAdvertisement,
-  writeLocalBackendAdvertisement,
-  type CleanupLocalBackendAdvertisementsResult,
-} from "@t3tools/shared/localBackendAdvertisement";
+  cleanupDesktopBackendAdvertisements,
+  readDesktopBackendAdvertisements,
+} from "@t3tools/shared/desktopBackendAdvertisement";
 import {
   cleanupHostMcpAdvertisements,
   createHostMcpAdvertisement,
@@ -35,45 +28,9 @@ import {
 
 const READINESS_PATH = "/.well-known/t3/environment";
 const REVOKE_BEARER_SESSION_TIMEOUT_MS = 5_000;
-const BOOTSTRAP_FD = 3;
-const INHERITED_ENV_ALLOWLIST = [
-  "APPDATA",
-  "COMSPEC",
-  "HOME",
-  "LANG",
-  "LC_ALL",
-  "LOCALAPPDATA",
-  "NODE_EXTRA_CA_CERTS",
-  "PATH",
-  "Path",
-  "PATHEXT",
-  "ProgramFiles",
-  "ProgramFiles(x86)",
-  "SystemRoot",
-  "TEMP",
-  "TMP",
-  "TMPDIR",
-  "USERPROFILE",
-  "WINDIR",
-  "XDG_CACHE_HOME",
-  "XDG_CONFIG_HOME",
-  "XDG_DATA_HOME",
-] as const;
-
-interface BackendBootstrap {
-  readonly mode: "desktop";
-  readonly hostIntegration: "vscode";
-  readonly noBrowser: boolean;
-  readonly port: number;
-  readonly t3Home: string;
-  readonly host: string;
-  readonly desktopBootstrapToken: string;
-  readonly tailscaleServeEnabled: boolean;
-  readonly tailscaleServePort: number;
-  readonly workspaceFolders?: readonly BootstrapWorkspaceFolder[];
-  readonly activeWorkspaceFolderKey?: string;
-  readonly mcpServers?: readonly BackendMcpServerBootstrap[];
-}
+const DESKTOP_BOOTSTRAP_TICKET_RETRY_TIMEOUT_MS = 15_000;
+const DESKTOP_BOOTSTRAP_TICKET_RETRY_INTERVAL_MS = 250;
+const VSCODE_WORKSPACE_BOOTSTRAP_PATH = "/api/vscode/workspace-bootstrap";
 
 interface BootstrapWorkspaceFolder {
   readonly key: string;
@@ -90,6 +47,20 @@ export interface BackendConnection {
   readonly bearerToken: string;
   readonly cwd: string;
   readonly t3Home: string;
+  readonly environmentId: string;
+  readonly workspaceFolders: readonly BootstrapWorkspaceFolder[];
+  readonly activeWorkspaceFolderKey?: string | undefined;
+  readonly bootstrapProjects: readonly BackendWorkspaceBootstrapProject[];
+  readonly initialThreadRoute?: string | undefined;
+}
+
+export interface BackendWorkspaceBootstrapProject {
+  readonly workspaceFolderKey: string;
+  readonly workspaceFolderName: string;
+  readonly cwd: string;
+  readonly projectId: string;
+  readonly bootstrapThreadId: string;
+  readonly isActive?: boolean | undefined;
 }
 
 export interface BackendMcpServerBootstrap {
@@ -102,24 +73,6 @@ export interface BackendMcpBridge {
   ensureStarted(): Promise<BackendMcpServerBootstrap | null>;
 }
 
-interface ResolvedServerCommand {
-  readonly command: string;
-  readonly args: readonly string[];
-  readonly cwd: string;
-}
-
-export interface BackendSpawnOptions {
-  readonly cwd: string;
-  readonly env: NodeJS.ProcessEnv;
-  readonly stdio: readonly ["ignore", "pipe", "pipe", "pipe"];
-}
-
-export type BackendSpawn = (
-  command: string,
-  args: readonly string[],
-  options: BackendSpawnOptions,
-) => ChildProcessWithoutNullStreams;
-
 export interface BackendRunCommandOptions {
   readonly cwd?: string;
 }
@@ -130,45 +83,52 @@ export type BackendRunCommand = (
   options?: BackendRunCommandOptions,
 ) => Promise<void>;
 
+export class DesktopBackendUnavailableError extends Error {
+  constructor(
+    message = "T3 Code for VS Code requires the T3 Code desktop app to be running on this machine.",
+  ) {
+    super(message);
+    this.name = "DesktopBackendUnavailableError";
+  }
+}
+
+class DesktopBootstrapTicketRejectedError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`Desktop bootstrap ticket was rejected (${status}).`);
+    this.name = "DesktopBootstrapTicketRejectedError";
+    this.status = status;
+  }
+}
+
 export interface BackendManagerDependencies {
-  readonly findAvailablePort: () => Promise<number>;
   readonly fetch: typeof fetch;
   readonly mkdirSync: typeof fs.mkdirSync;
   readonly pruneVirtualWorkspaceCache: typeof pruneVirtualWorkspaceCacheImpl;
   readonly randomBytes: typeof crypto.randomBytes;
-  readonly spawn: BackendSpawn;
   readonly runCommand: BackendRunCommand;
+  readonly readDesktopBackendAdvertisements: typeof readDesktopBackendAdvertisements;
+  readonly cleanupDesktopBackendAdvertisements: typeof cleanupDesktopBackendAdvertisements;
   readonly writeHostMcpAdvertisement: typeof writeHostMcpAdvertisement;
   readonly removeHostMcpAdvertisement: typeof removeHostMcpAdvertisement;
   readonly cleanupHostMcpAdvertisements: typeof cleanupHostMcpAdvertisements;
-  readonly writeLocalBackendAdvertisement: typeof writeLocalBackendAdvertisement;
-  readonly removeLocalBackendAdvertisement: typeof removeLocalBackendAdvertisement;
-  readonly cleanupLocalBackendAdvertisements: typeof cleanupLocalBackendAdvertisements;
 }
 
 const defaultBackendManagerDependencies: BackendManagerDependencies = {
-  findAvailablePort,
   fetch,
   mkdirSync: fs.mkdirSync,
   pruneVirtualWorkspaceCache: pruneVirtualWorkspaceCacheImpl,
   randomBytes: crypto.randomBytes,
-  spawn: (command, args, options) =>
-    spawnChildProcess(command, [...args], {
-      cwd: options.cwd,
-      env: options.env,
-      stdio: [...options.stdio],
-    }) as ChildProcessWithoutNullStreams,
   runCommand,
+  readDesktopBackendAdvertisements,
+  cleanupDesktopBackendAdvertisements,
   writeHostMcpAdvertisement,
   removeHostMcpAdvertisement,
   cleanupHostMcpAdvertisements,
-  writeLocalBackendAdvertisement,
-  removeLocalBackendAdvertisement,
-  cleanupLocalBackendAdvertisements,
 };
 
 export class BackendManager {
-  #process: ChildProcessWithoutNullStreams | null = null;
   #connection: BackendConnection | null = null;
   #starting: Promise<BackendConnection> | null = null;
   #hostMcpAdvertisement: {
@@ -176,30 +136,23 @@ export class BackendManager {
     readonly hostId: string;
     readonly interval: NodeJS.Timeout;
   } | null = null;
-  #localBackendAdvertisement: {
-    readonly t3Home: string;
-    readonly backendId: string;
-    readonly interval: NodeJS.Timeout;
-  } | null = null;
   #outputChannel: vscode.OutputChannel;
-  readonly #context: vscode.ExtensionContext;
   readonly #dependencies: BackendManagerDependencies;
   readonly #mcpBridge: BackendMcpBridge | null;
 
   constructor(
-    context: vscode.ExtensionContext,
+    _context: vscode.ExtensionContext,
     outputChannel: vscode.OutputChannel,
     dependencies: BackendManagerDependencies = defaultBackendManagerDependencies,
     mcpBridge: BackendMcpBridge | null = null,
   ) {
-    this.#context = context;
     this.#outputChannel = outputChannel;
     this.#dependencies = dependencies;
     this.#mcpBridge = mcpBridge;
   }
 
   async ensureStarted(): Promise<BackendConnection> {
-    if (this.#connection && this.#process && !this.#process.killed) {
+    if (this.#connection) {
       return this.#connection;
     }
 
@@ -207,7 +160,7 @@ export class BackendManager {
       return this.#starting;
     }
 
-    this.#starting = this.#start();
+    this.#starting = this.#connect();
     try {
       return await this.#starting;
     } finally {
@@ -225,51 +178,29 @@ export class BackendManager {
   }
 
   async stop(): Promise<void> {
-    this.#stopLocalBackendAdvertisement();
     this.#stopHostMcpAdvertisement();
-    const child = this.#process;
     const connection = this.#connection;
     this.#starting = null;
-    this.#process = null;
     this.#connection = null;
 
-    if (connection) {
-      try {
-        await revokeBearerSession(
-          connection.httpBaseUrl,
-          connection.bearerToken,
-          this.#dependencies.fetch,
-        );
-      } catch (error) {
-        this.#outputChannel.appendLine(
-          `[backend] Failed to revoke backend bearer session: ${errorMessage(error)}`,
-        );
-      }
-    }
-
-    if (!child || child.killed) {
+    if (!connection) {
       return;
     }
 
-    await new Promise<void>((resolve) => {
-      let resolved = false;
-      const finish = () => {
-        if (resolved) return;
-        resolved = true;
-        resolve();
-      };
-
-      void sleep(2_000).then(() => {
-        if (resolved) return;
-        child.kill("SIGKILL");
-        finish();
-      });
-      child.once("exit", finish);
-      child.kill("SIGTERM");
-    });
+    try {
+      await revokeBearerSession(
+        connection.httpBaseUrl,
+        connection.bearerToken,
+        this.#dependencies.fetch,
+      );
+    } catch (error) {
+      this.#outputChannel.appendLine(
+        `[backend] Failed to revoke desktop bearer session: ${errorMessage(error)}`,
+      );
+    }
   }
 
-  async #start(): Promise<BackendConnection> {
+  async #connect(): Promise<BackendConnection> {
     const t3Home = resolveT3Home();
     this.#dependencies.mkdirSync(t3Home, { recursive: true });
     const workspaceFolders = await resolveBootstrapWorkspaceFolders({
@@ -279,150 +210,155 @@ export class BackendManager {
     });
     const activeWorkspaceFolder = resolveActiveWorkspaceFolder(workspaceFolders);
     const cwd = activeWorkspaceFolder?.cwd ?? os.homedir();
-    const port = await this.#dependencies.findAvailablePort();
-    const host = "127.0.0.1";
-    const bootstrapToken = this.#dependencies.randomBytes(24).toString("hex");
-    const command = resolveServerCommand(this.#context, cwd);
     const mcpServer = await this.#mcpBridge?.ensureStarted();
     const mcpToolTimeoutSec = resolveMcpToolTimeoutSec();
+
     this.#refreshHostMcpAdvertisement({
       t3Home,
       mcpServer: mcpServer ? { ...mcpServer, toolTimeoutSec: mcpToolTimeoutSec } : null,
       workspaceFolders,
       activeWorkspaceFolderKey: activeWorkspaceFolder?.key,
     });
-    const bootstrap: BackendBootstrap = {
-      mode: "desktop",
-      hostIntegration: "vscode",
-      noBrowser: true,
-      port,
-      t3Home,
-      host,
-      desktopBootstrapToken: bootstrapToken,
-      tailscaleServeEnabled: false,
-      tailscaleServePort: 443,
-      ...(workspaceFolders.length > 0 ? { workspaceFolders } : {}),
-      ...(activeWorkspaceFolder ? { activeWorkspaceFolderKey: activeWorkspaceFolder.key } : {}),
-      ...(mcpServer ? { mcpServers: [{ ...mcpServer, toolTimeoutSec: mcpToolTimeoutSec }] } : {}),
-    };
-    const args = [
-      ...command.args,
-      "--bootstrap-fd",
-      String(BOOTSTRAP_FD),
-      "--auto-bootstrap-project-from-cwd",
+
+    const { desktopBackend, environment, bearerToken } =
+      await this.#connectToDesktopBackendWithFreshTicket(t3Home);
+    const workspaceBootstrap = await ensureWorkspaceBootstrap({
+      httpBaseUrl: desktopBackend.httpBaseUrl,
+      bearerToken,
+      workspaceFolders,
+      activeWorkspaceFolder,
+      fetchFn: this.#dependencies.fetch,
+    });
+
+    this.#connection = {
+      httpBaseUrl: desktopBackend.httpBaseUrl,
+      wsBaseUrl: toWebSocketBaseUrl(desktopBackend.httpBaseUrl),
+      bootstrapToken: desktopBackend.bootstrapToken,
+      bearerToken,
       cwd,
-    ];
+      t3Home,
+      environmentId: environment.environmentId,
+      workspaceFolders,
+      ...(activeWorkspaceFolder ? { activeWorkspaceFolderKey: activeWorkspaceFolder.key } : {}),
+      bootstrapProjects: workspaceBootstrap.bootstrapProjects,
+      ...(workspaceBootstrap.activeThreadId
+        ? {
+            initialThreadRoute: makeThreadRoute(
+              environment.environmentId,
+              workspaceBootstrap.activeThreadId,
+            ),
+          }
+        : {}),
+    };
 
-    this.#outputChannel.appendLine(`[backend] Starting: ${command.command} ${args.join(" ")}`);
-
-    const child = this.#dependencies.spawn(command.command, args, {
-      cwd: command.cwd,
-      env: backendEnv(),
-      stdio: ["ignore", "pipe", "pipe", "pipe"],
-    }) as ChildProcessWithoutNullStreams;
-
-    this.#process = child;
-    child.stdout.on("data", (chunk: Buffer) => {
-      this.#outputChannel.append(chunk.toString());
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      this.#outputChannel.append(chunk.toString());
-    });
-    child.once("exit", (code, signal) => {
-      this.#outputChannel.appendLine(
-        `[backend] Exited code=${code ?? "null"} signal=${signal ?? "null"}`,
-      );
-      if (this.#process === child) {
-        this.#stopLocalBackendAdvertisement();
-        this.#stopHostMcpAdvertisement();
-        this.#process = null;
-        this.#connection = null;
+    void Promise.resolve().then(() => {
+      try {
+        const result = this.#dependencies.pruneVirtualWorkspaceCache({
+          t3Home,
+          activeCheckoutPaths: workspaceFolders.map((folder) => folder.cwd),
+          outputChannel: this.#outputChannel,
+        });
+        if (result.deleted > 0 || result.errors > 0) {
+          this.#outputChannel.appendLine(
+            `[backend] Pruned ${result.deleted} virtual workspace checkout(s); kept ${result.kept}; errors ${result.errors}.`,
+          );
+        }
+      } catch (error) {
+        this.#outputChannel.appendLine(
+          `[backend] Failed to prune virtual workspace cache: ${errorMessage(error)}`,
+        );
       }
     });
 
+    void Promise.resolve().then(() => {
+      try {
+        const result = this.#dependencies.cleanupHostMcpAdvertisements({ t3Home });
+        logHostMcpCleanupResult(this.#outputChannel, result);
+      } catch (error) {
+        this.#outputChannel.appendLine(
+          `[mcp] Failed to clean host MCP advertisements: ${errorMessage(error)}`,
+        );
+      }
+    });
+
+    return this.#connection;
+  }
+
+  #resolveDesktopBackendAdvertisement(t3Home: string): {
+    readonly backendId: string;
+    readonly httpBaseUrl: string;
+    readonly bootstrapToken: string;
+  } {
     try {
-      const bootstrapPipe = child.stdio[BOOTSTRAP_FD];
-      if (!bootstrapPipe || !("write" in bootstrapPipe)) {
-        throw new Error("Failed to open backend bootstrap pipe.");
+      this.#dependencies.cleanupDesktopBackendAdvertisements({ t3Home });
+      const result = this.#dependencies.readDesktopBackendAdvertisements({ t3Home });
+      for (const advertisement of result.advertisements) {
+        if (!isLoopbackHttpBaseUrl(advertisement.httpBaseUrl)) {
+          continue;
+        }
+        return {
+          backendId: advertisement.backendId,
+          httpBaseUrl: advertisement.httpBaseUrl,
+          bootstrapToken: advertisement.bootstrapToken,
+        };
       }
-      bootstrapPipe.end(JSON.stringify(bootstrap));
+    } catch (error) {
+      throw new Error(
+        `Failed to discover the required T3 Code desktop backend: ${errorMessage(error)}`,
+        { cause: error },
+      );
+    }
 
-      const httpBaseUrl = `http://${host}:${port}`;
-      const wsBaseUrl = `ws://${host}:${port}`;
-      await waitForBackendReady(httpBaseUrl, this.#dependencies.fetch);
-      const bearerToken = await exchangeBootstrapBearerSession(
-        httpBaseUrl,
-        bootstrapToken,
+    throw new DesktopBackendUnavailableError();
+  }
+
+  async #connectToDesktopBackendWithFreshTicket(t3Home: string): Promise<{
+    readonly desktopBackend: {
+      readonly backendId: string;
+      readonly httpBaseUrl: string;
+      readonly bootstrapToken: string;
+    };
+    readonly environment: { readonly environmentId: string };
+    readonly bearerToken: string;
+  }> {
+    const deadline = Date.now() + DESKTOP_BOOTSTRAP_TICKET_RETRY_TIMEOUT_MS;
+    let rejectedTicket: string | null = null;
+    let lastRejection: DesktopBootstrapTicketRejectedError | null = null;
+
+    while (Date.now() < deadline) {
+      const desktopBackend = this.#resolveDesktopBackendAdvertisement(t3Home);
+      if (desktopBackend.bootstrapToken === rejectedTicket && Date.now() < deadline) {
+        await sleep(DESKTOP_BOOTSTRAP_TICKET_RETRY_INTERVAL_MS);
+        continue;
+      }
+
+      const environment = await waitForBackendReady(
+        desktopBackend.httpBaseUrl,
         this.#dependencies.fetch,
       );
-      this.#refreshLocalBackendAdvertisement({
-        t3Home,
-        httpBaseUrl,
-        bearerToken,
-        workspaceFolders,
-        activeWorkspaceFolderKey: activeWorkspaceFolder?.key,
-      });
-
-      this.#connection = {
-        httpBaseUrl,
-        wsBaseUrl,
-        bootstrapToken,
-        bearerToken,
-        cwd,
-        t3Home,
-      };
-      void Promise.resolve().then(() => {
-        try {
-          const result = this.#dependencies.pruneVirtualWorkspaceCache({
-            t3Home,
-            activeCheckoutPaths: workspaceFolders.map((folder) => folder.cwd),
-            outputChannel: this.#outputChannel,
-          });
-          if (result.deleted > 0 || result.errors > 0) {
-            this.#outputChannel.appendLine(
-              `[backend] Pruned ${result.deleted} virtual workspace checkout(s); kept ${result.kept}; errors ${result.errors}.`,
-            );
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          this.#outputChannel.appendLine(
-            `[backend] Failed to prune virtual workspace cache: ${message}`,
-          );
+      try {
+        const bearerToken = await exchangeBootstrapBearerSession(
+          desktopBackend.httpBaseUrl,
+          desktopBackend.bootstrapToken,
+          this.#dependencies.fetch,
+        );
+        return { desktopBackend, environment, bearerToken };
+      } catch (error) {
+        if (
+          error instanceof DesktopBootstrapTicketRejectedError &&
+          error.status === 401 &&
+          Date.now() < deadline
+        ) {
+          rejectedTicket = desktopBackend.bootstrapToken;
+          lastRejection = error;
+          await sleep(DESKTOP_BOOTSTRAP_TICKET_RETRY_INTERVAL_MS);
+          continue;
         }
-      });
-      void Promise.resolve().then(() => {
-        try {
-          const result = this.#dependencies.cleanupHostMcpAdvertisements({ t3Home });
-          logHostMcpCleanupResult(this.#outputChannel, result);
-        } catch (error) {
-          this.#outputChannel.appendLine(
-            `[mcp] Failed to clean host MCP advertisements: ${errorMessage(error)}`,
-          );
-        }
-      });
-      void Promise.resolve().then(() => {
-        try {
-          const result = this.#dependencies.cleanupLocalBackendAdvertisements({ t3Home });
-          logLocalBackendCleanupResult(this.#outputChannel, result);
-        } catch (error) {
-          this.#outputChannel.appendLine(
-            `[backend] Failed to clean local backend advertisements: ${errorMessage(error)}`,
-          );
-        }
-      });
-      return this.#connection;
-    } catch (error) {
-      this.#stopLocalBackendAdvertisement();
-      this.#stopHostMcpAdvertisement();
-      if (this.#process === child) {
-        this.#process = null;
-        this.#connection = null;
+        throw error;
       }
-      if (!child.killed) {
-        child.kill();
-      }
-      throw error;
     }
+
+    throw lastRejection ?? new Error("Timed out waiting for a fresh desktop bootstrap ticket.");
   }
 
   #refreshHostMcpAdvertisement(input: {
@@ -499,84 +435,6 @@ export class BackendManager {
       );
     }
   }
-
-  #refreshLocalBackendAdvertisement(input: {
-    readonly t3Home: string;
-    readonly httpBaseUrl: string;
-    readonly bearerToken: string;
-    readonly workspaceFolders: readonly BootstrapWorkspaceFolder[];
-    readonly activeWorkspaceFolderKey?: string | undefined;
-  }): void {
-    this.#stopLocalBackendAdvertisement();
-    if (input.workspaceFolders.length === 0) {
-      return;
-    }
-
-    const backendId = `vscode-backend-${process.pid}-${this.#dependencies
-      .randomBytes(8)
-      .toString("hex")}`;
-    const writeAdvertisement = () => {
-      this.#dependencies.writeLocalBackendAdvertisement({
-        t3Home: input.t3Home,
-        advertisement: createLocalBackendAdvertisement({
-          backendId,
-          httpBaseUrl: input.httpBaseUrl,
-          bearerToken: input.bearerToken,
-          workspaceFolders: input.workspaceFolders,
-          activeWorkspaceFolderKey: input.activeWorkspaceFolderKey,
-        }),
-      });
-    };
-
-    try {
-      writeAdvertisement();
-    } catch (error) {
-      this.#outputChannel.appendLine(
-        `[backend] Failed to write local backend advertisement: ${errorMessage(error)}`,
-      );
-      return;
-    }
-
-    // @effect-diagnostics-next-line globalTimers:off
-    const interval = setInterval(() => {
-      try {
-        writeAdvertisement();
-        const result = this.#dependencies.cleanupLocalBackendAdvertisements({
-          t3Home: input.t3Home,
-        });
-        logLocalBackendCleanupResult(this.#outputChannel, result);
-      } catch (error) {
-        this.#outputChannel.appendLine(
-          `[backend] Failed to refresh local backend advertisement: ${errorMessage(error)}`,
-        );
-      }
-    }, LOCAL_BACKEND_ADVERTISEMENT_HEARTBEAT_MS);
-    interval.unref?.();
-    this.#localBackendAdvertisement = {
-      t3Home: input.t3Home,
-      backendId,
-      interval,
-    };
-  }
-
-  #stopLocalBackendAdvertisement(): void {
-    const advertisement = this.#localBackendAdvertisement;
-    this.#localBackendAdvertisement = null;
-    if (!advertisement) {
-      return;
-    }
-    clearInterval(advertisement.interval);
-    try {
-      this.#dependencies.removeLocalBackendAdvertisement({
-        t3Home: advertisement.t3Home,
-        backendId: advertisement.backendId,
-      });
-    } catch (error) {
-      this.#outputChannel.appendLine(
-        `[backend] Failed to remove local backend advertisement: ${errorMessage(error)}`,
-      );
-    }
-  }
 }
 
 function errorMessage(error: unknown): string {
@@ -590,17 +448,6 @@ function logHostMcpCleanupResult(
   if (result.deleted > 0 || result.errors > 0) {
     outputChannel.appendLine(
       `[mcp] Cleaned ${result.deleted} expired host MCP advertisement(s); errors ${result.errors}.`,
-    );
-  }
-}
-
-function logLocalBackendCleanupResult(
-  outputChannel: vscode.OutputChannel,
-  result: CleanupLocalBackendAdvertisementsResult,
-): void {
-  if (result.deleted > 0 || result.errors > 0) {
-    outputChannel.appendLine(
-      `[backend] Cleaned ${result.deleted} expired local backend advertisement(s); errors ${result.errors}.`,
     );
   }
 }
@@ -698,93 +545,6 @@ export function resolveMcpToolTimeoutSec(): number {
   return normalizeMcpToolTimeoutSec(configured);
 }
 
-function resolveServerCommand(
-  context: vscode.ExtensionContext,
-  workspaceCwd: string,
-): ResolvedServerCommand {
-  const configuration = vscode.workspace.getConfiguration("t3code");
-  const configuredCommand = configuration.get<string>("server.command")?.trim();
-  const configuredArgs = configuration.get<readonly string[]>("server.args") ?? [];
-  const configuredCwd = configuration.get<string>("server.cwd")?.trim();
-
-  if (configuredCommand) {
-    return {
-      command: configuredCommand,
-      args: configuredArgs,
-      cwd: configuredCwd || workspaceCwd,
-    };
-  }
-
-  const bundledEntry = path.join(context.extensionPath, "dist", "server", "bin.mjs");
-  if (fs.existsSync(bundledEntry)) {
-    return {
-      command: process.execPath,
-      args: [bundledEntry],
-      cwd: workspaceCwd,
-    };
-  }
-
-  const developmentRepoRoot = findDevelopmentRepoRoot(context.extensionPath, workspaceCwd);
-  if (developmentRepoRoot) {
-    return {
-      command: "bun",
-      args: ["--cwd", path.join(developmentRepoRoot, "apps/server"), "run", "dev", "--"],
-      cwd: developmentRepoRoot,
-    };
-  }
-
-  throw new Error(
-    "Unable to resolve a T3 backend. Build the extension package or configure t3code.server.command.",
-  );
-}
-
-function findDevelopmentRepoRoot(...candidates: readonly string[]): string | null {
-  for (const candidate of candidates) {
-    let current = path.resolve(candidate);
-    while (true) {
-      if (fs.existsSync(path.join(current, "apps/server/src/bin.ts"))) {
-        return current;
-      }
-
-      const parent = path.dirname(current);
-      if (parent === current) {
-        break;
-      }
-      current = parent;
-    }
-  }
-  return null;
-}
-
-function backendEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const name of INHERITED_ENV_ALLOWLIST) {
-    const value = process.env[name];
-    if (value !== undefined) {
-      env[name] = value;
-    }
-  }
-  env.ELECTRON_RUN_AS_NODE = "1";
-  return env;
-}
-
-function findAvailablePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.on("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (typeof address !== "object" || address === null) {
-        server.close(() => reject(new Error("Unable to allocate a local backend port.")));
-        return;
-      }
-      const { port } = address;
-      server.close(() => resolve(port));
-    });
-  });
-}
-
 function runCommand(
   command: string,
   args: readonly string[],
@@ -816,23 +576,80 @@ function runCommand(
 async function waitForBackendReady(
   httpBaseUrl: string,
   fetchFn: typeof fetch = fetch,
-): Promise<void> {
-  const deadline = Date.now() + 60_000;
+): Promise<{ readonly environmentId: string }> {
+  const deadline = Date.now() + 10_000;
   const readinessUrl = new URL(READINESS_PATH, httpBaseUrl);
 
   while (Date.now() < deadline) {
     try {
       const response = await fetchFn(readinessUrl, { signal: AbortSignal.timeout(1_000) });
       if (response.ok) {
-        return;
+        const body = (await response.json()) as { readonly environmentId?: unknown };
+        if (typeof body.environmentId !== "string" || body.environmentId.length === 0) {
+          throw new Error("Desktop backend readiness response did not include an environment id.");
+        }
+        return { environmentId: body.environmentId };
       }
     } catch {
-      // Retry until the backend binds the port.
+      // Retry until the desktop backend is ready or its advertisement expires.
     }
     await sleep(100);
   }
 
-  throw new Error(`Timed out waiting for T3 backend readiness at ${readinessUrl.toString()}.`);
+  throw new Error(`Timed out waiting for T3 desktop backend readiness at ${readinessUrl}.`);
+}
+
+async function ensureWorkspaceBootstrap(input: {
+  readonly httpBaseUrl: string;
+  readonly bearerToken: string;
+  readonly workspaceFolders: readonly BootstrapWorkspaceFolder[];
+  readonly activeWorkspaceFolder?: BootstrapWorkspaceFolder | undefined;
+  readonly fetchFn: typeof fetch;
+}): Promise<{
+  readonly bootstrapProjects: readonly BackendWorkspaceBootstrapProject[];
+  readonly activeThreadId?: string | undefined;
+}> {
+  if (input.workspaceFolders.length === 0) {
+    return { bootstrapProjects: [] };
+  }
+
+  const response = await input.fetchFn(
+    new URL(VSCODE_WORKSPACE_BOOTSTRAP_PATH, input.httpBaseUrl),
+    {
+      body: JSON.stringify({
+        workspaceFolders: input.workspaceFolders,
+        ...(input.activeWorkspaceFolder
+          ? { activeWorkspaceFolderKey: input.activeWorkspaceFolder.key }
+          : {}),
+      }),
+      headers: {
+        authorization: `Bearer ${input.bearerToken}`,
+        "content-type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(
+      `Failed to bootstrap VS Code workspace on desktop backend (${response.status})${errorText ? `: ${errorText}` : ""}.`,
+    );
+  }
+  const body = (await response.json()) as {
+    readonly bootstrapProjects?: readonly BackendWorkspaceBootstrapProject[];
+  };
+  const bootstrapProjects = body.bootstrapProjects ?? [];
+
+  const activeProject =
+    bootstrapProjects.find((project) => project.isActive) ?? bootstrapProjects[0] ?? null;
+  return {
+    bootstrapProjects,
+    ...(activeProject ? { activeThreadId: activeProject.bootstrapThreadId } : {}),
+  };
+}
+
+function makeThreadRoute(environmentId: string, threadId: string): string {
+  return `/_chat/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`;
 }
 
 async function exchangeBootstrapBearerSession(
@@ -850,12 +667,15 @@ async function exchangeBootstrapBearerSession(
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to create VS Code backend bearer session (${response.status}).`);
+    if (response.status === 401) {
+      throw new DesktopBootstrapTicketRejectedError(response.status);
+    }
+    throw new Error(`Failed to create desktop bearer session (${response.status}).`);
   }
 
   const body = (await response.json()) as { readonly sessionToken?: unknown };
   if (typeof body.sessionToken !== "string" || body.sessionToken.length === 0) {
-    throw new Error("Backend bearer session response did not include a session token.");
+    throw new Error("Desktop bearer session response did not include a session token.");
   }
 
   return body.sessionToken;
@@ -877,8 +697,31 @@ async function revokeBearerSession(
   }).finally(timeout.clear);
 
   if (!response.ok) {
-    throw new Error(`Failed to revoke VS Code backend bearer session (${response.status}).`);
+    throw new Error(`Failed to revoke desktop bearer session (${response.status}).`);
   }
+}
+
+function toWebSocketBaseUrl(httpBaseUrl: string): string {
+  const url = new URL(httpBaseUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.href;
+}
+
+function isLoopbackHttpBaseUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" || url.username || url.password) {
+    return false;
+  }
+  const hostname = url.hostname.toLowerCase().replace(/^\[(.*)\]$/u, "$1");
+  if (hostname === "localhost" || hostname === "::1") {
+    return true;
+  }
+  return net.isIP(hostname) === 4 && hostname.startsWith("127.");
 }
 
 function createAbortTimeout(timeoutMs: number): {

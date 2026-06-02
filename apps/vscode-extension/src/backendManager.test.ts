@@ -1,15 +1,11 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import * as crypto from "node:crypto";
-import { EventEmitter } from "node:events";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   BackendManager,
   type BackendManagerDependencies,
-  type BackendSpawn,
   resolveMcpToolTimeoutSec,
 } from "./backendManager.ts";
 
@@ -47,7 +43,8 @@ vi.mock("vscode", () => ({
   },
   workspace: {
     getConfiguration: () => ({
-      get: (key: string) => vscodeState.settings[key],
+      get: (key: string, fallback?: unknown) =>
+        key in vscodeState.settings ? vscodeState.settings[key] : fallback,
     }),
     getWorkspaceFolder: (uri: { fsPath: string }) =>
       vscodeState.workspaceFolders.find((folder) => uri.fsPath.startsWith(folder.uri.fsPath)),
@@ -64,67 +61,48 @@ function makeOutputChannel() {
   };
 }
 
-function makeChildProcess(onBootstrap: (value: string) => void): ChildProcessWithoutNullStreams {
-  const stdout = new EventEmitter();
-  const stderr = new EventEmitter();
-  const child = new EventEmitter() as EventEmitter & {
-    killed: boolean;
-    kill: ReturnType<typeof vi.fn>;
-    stdout: EventEmitter;
-    stderr: EventEmitter;
-    stdio: unknown[];
-  };
-
-  child.killed = false;
-  child.kill = vi.fn(() => {
-    child.killed = true;
-    child.emit("exit", 0, null);
-    return true;
-  });
-  child.stdout = stdout;
-  child.stderr = stderr;
-  child.stdio = [
-    null,
-    stdout,
-    stderr,
-    {
-      write: vi.fn(),
-      end: vi.fn(onBootstrap),
-    },
-  ];
-
-  return child as unknown as ChildProcessWithoutNullStreams;
-}
-
-function makeDependencies(input: {
-  readonly spawn: BackendSpawn;
-  readonly fetch?: typeof fetch;
-  readonly findAvailablePort?: () => Promise<number>;
-  readonly mkdirSync?: typeof fs.mkdirSync;
-  readonly pruneVirtualWorkspaceCache?: BackendManagerDependencies["pruneVirtualWorkspaceCache"];
-  readonly randomBytes?: typeof import("node:crypto").randomBytes;
-  readonly runCommand?: BackendManagerDependencies["runCommand"];
-  readonly writeHostMcpAdvertisement?: BackendManagerDependencies["writeHostMcpAdvertisement"];
-  readonly removeHostMcpAdvertisement?: BackendManagerDependencies["removeHostMcpAdvertisement"];
-  readonly cleanupHostMcpAdvertisements?: BackendManagerDependencies["cleanupHostMcpAdvertisements"];
-  readonly writeLocalBackendAdvertisement?: BackendManagerDependencies["writeLocalBackendAdvertisement"];
-  readonly removeLocalBackendAdvertisement?: BackendManagerDependencies["removeLocalBackendAdvertisement"];
-  readonly cleanupLocalBackendAdvertisements?: BackendManagerDependencies["cleanupLocalBackendAdvertisements"];
-}): BackendManagerDependencies {
+function makeDependencies(
+  input: Partial<BackendManagerDependencies> = {},
+): BackendManagerDependencies {
   return {
     fetch:
       input.fetch ??
       vi
         .fn<typeof fetch>()
-        .mockResolvedValueOnce(new Response(null, { status: 200 }))
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ sessionToken: "vscode-bearer-token" }), {
+          new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
             headers: { "content-type": "application/json" },
             status: 200,
           }),
         )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ sessionToken: "desktop-bearer-token" }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              environmentId: "environment-desktop",
+              bootstrapProjects: [
+                {
+                  workspaceFolderKey: "file::/workspace",
+                  workspaceFolderName: "workspace",
+                  cwd: "/workspace",
+                  projectId: "project-workspace",
+                  bootstrapThreadId: "thread-latest",
+                  isActive: true,
+                },
+              ],
+            }),
+            {
+              headers: { "content-type": "application/json" },
+              status: 200,
+            },
+          ),
+        )
         .mockResolvedValue(new Response(JSON.stringify({ revoked: true }), { status: 200 })),
-    findAvailablePort: input.findAvailablePort ?? vi.fn().mockResolvedValue(49111),
     mkdirSync: input.mkdirSync ?? vi.fn(),
     pruneVirtualWorkspaceCache:
       input.pruneVirtualWorkspaceCache ??
@@ -136,18 +114,29 @@ function makeDependencies(input: {
     randomBytes:
       input.randomBytes ??
       (vi.fn(() =>
-        Buffer.from("0123456789abcdef01234567"),
+        Buffer.from("0123456789abcdef"),
       ) as unknown as typeof import("node:crypto").randomBytes),
-    spawn: input.spawn,
     runCommand: input.runCommand ?? vi.fn().mockResolvedValue(undefined),
+    readDesktopBackendAdvertisements:
+      input.readDesktopBackendAdvertisements ??
+      vi.fn(() => ({
+        advertisements: [
+          {
+            version: 1 as const,
+            backendId: "desktop-backend-1",
+            updatedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 30_000).toISOString(),
+            httpBaseUrl: "http://127.0.0.1:3773/",
+            bootstrapToken: "desktop-bootstrap-token",
+          },
+        ],
+        malformed: 0,
+      })),
+    cleanupDesktopBackendAdvertisements: input.cleanupDesktopBackendAdvertisements ?? vi.fn(),
     writeHostMcpAdvertisement: input.writeHostMcpAdvertisement ?? vi.fn(),
     removeHostMcpAdvertisement: input.removeHostMcpAdvertisement ?? vi.fn(),
     cleanupHostMcpAdvertisements:
       input.cleanupHostMcpAdvertisements ?? vi.fn(() => ({ deleted: 0, errors: 0 })),
-    writeLocalBackendAdvertisement: input.writeLocalBackendAdvertisement ?? vi.fn(),
-    removeLocalBackendAdvertisement: input.removeLocalBackendAdvertisement ?? vi.fn(),
-    cleanupLocalBackendAdvertisements:
-      input.cleanupLocalBackendAdvertisements ?? vi.fn(() => ({ deleted: 0, errors: 0 })),
   };
 }
 
@@ -156,8 +145,6 @@ describe("BackendManager", () => {
 
   beforeEach(() => {
     extensionRoot = fs.mkdtempSync(path.join(os.tmpdir(), "t3code-vscode-extension-"));
-    fs.mkdirSync(path.join(extensionRoot, "dist", "server"), { recursive: true });
-    fs.writeFileSync(path.join(extensionRoot, "dist", "server", "bin.mjs"), "");
     vscodeState.settings = {};
     vscodeState.workspaceFolders = [
       {
@@ -179,70 +166,67 @@ describe("BackendManager", () => {
     vi.unstubAllEnvs();
   });
 
-  it("starts the bundled backend with desktop bootstrap data on fd 3", async () => {
-    let bootstrapJson = "";
-    const spawnMock = vi.fn<BackendSpawn>(() =>
-      makeChildProcess((value) => {
-        bootstrapJson = value;
-      }),
-    );
+  it("connects to the advertised desktop backend and advertises VS Code MCP", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(null, { status: 200 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ sessionToken: "vscode-bearer-token" }), {
+        new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
           headers: { "content-type": "application/json" },
           status: 200,
         }),
-      );
-    const mkdirSyncMock = vi.fn<typeof fs.mkdirSync>();
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sessionToken: "desktop-bearer-token" }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            environmentId: "environment-desktop",
+            bootstrapProjects: [
+              {
+                workspaceFolderKey: "file::/workspace",
+                workspaceFolderName: "workspace",
+                cwd: "/workspace",
+                projectId: "project-workspace",
+                bootstrapThreadId: "thread-latest",
+                isActive: true,
+              },
+            ],
+          }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        ),
+      )
+      .mockResolvedValue(new Response(JSON.stringify({ revoked: true }), { status: 200 }));
+    const writeHostMcpAdvertisementMock = vi.fn();
     const manager = new BackendManager(
       { extensionPath: extensionRoot } as never,
       makeOutputChannel() as never,
       makeDependencies({
         fetch: fetchMock,
-        mkdirSync: mkdirSyncMock,
-        spawn: spawnMock,
+        writeHostMcpAdvertisement: writeHostMcpAdvertisementMock,
       }),
+      {
+        ensureStarted: vi.fn().mockResolvedValue({
+          name: "t3code-vscode-abc",
+          socketPath: "/tmp/t3code-vscode.sock",
+        }),
+      },
     );
 
     await expect(manager.ensureStarted()).resolves.toEqual({
-      httpBaseUrl: "http://127.0.0.1:49111",
-      wsBaseUrl: "ws://127.0.0.1:49111",
-      bootstrapToken: "303132333435363738396162636465663031323334353637",
-      bearerToken: "vscode-bearer-token",
+      httpBaseUrl: "http://127.0.0.1:3773/",
+      wsBaseUrl: "ws://127.0.0.1:3773/",
+      bootstrapToken: "desktop-bootstrap-token",
+      bearerToken: "desktop-bearer-token",
       cwd: "/workspace",
       t3Home: path.join(os.homedir(), ".t3"),
-    });
-
-    expect(spawnMock).toHaveBeenCalledWith(
-      process.execPath,
-      [
-        path.join(extensionRoot, "dist", "server", "bin.mjs"),
-        "--bootstrap-fd",
-        "3",
-        "--auto-bootstrap-project-from-cwd",
-        "/workspace",
-      ],
-      expect.objectContaining({
-        cwd: "/workspace",
-        stdio: ["ignore", "pipe", "pipe", "pipe"],
-      }),
-    );
-    expect(spawnMock.mock.calls[0]?.[2]?.env?.ELECTRON_RUN_AS_NODE).toBe("1");
-    expect(mkdirSyncMock).toHaveBeenCalledWith(path.join(os.homedir(), ".t3"), {
-      recursive: true,
-    });
-    expect(JSON.parse(bootstrapJson)).toEqual({
-      mode: "desktop",
-      hostIntegration: "vscode",
-      noBrowser: true,
-      port: 49111,
-      t3Home: path.join(os.homedir(), ".t3"),
-      host: "127.0.0.1",
-      desktopBootstrapToken: "303132333435363738396162636465663031323334353637",
-      tailscaleServeEnabled: false,
-      tailscaleServePort: 443,
+      environmentId: "environment-desktop",
       workspaceFolders: [
         {
           key: "file::/workspace",
@@ -253,62 +237,59 @@ describe("BackendManager", () => {
         },
       ],
       activeWorkspaceFolderKey: "file::/workspace",
+      bootstrapProjects: [
+        {
+          workspaceFolderKey: "file::/workspace",
+          workspaceFolderName: "workspace",
+          cwd: "/workspace",
+          projectId: "project-workspace",
+          bootstrapThreadId: "thread-latest",
+          isActive: true,
+        },
+      ],
+      initialThreadRoute: "/_chat/environment-desktop/thread-latest",
     });
+
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("http://127.0.0.1:49111/.well-known/t3/environment"),
+      new URL("http://127.0.0.1:3773/.well-known/t3/environment"),
       expect.objectContaining({
         signal: expect.any(AbortSignal),
       }),
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("http://127.0.0.1:49111/api/auth/bootstrap/bearer"),
-      {
-        body: JSON.stringify({
-          credential: "303132333435363738396162636465663031323334353637",
-        }),
-        headers: {
-          "content-type": "application/json",
-        },
+      new URL("http://127.0.0.1:3773/api/auth/bootstrap/bearer"),
+      expect.objectContaining({
+        body: JSON.stringify({ credential: "desktop-bootstrap-token" }),
         method: "POST",
-      },
-    );
-  });
-
-  it("advertises the running local backend and removes the advertisement on stop", async () => {
-    const writeLocalBackendAdvertisement = vi.fn();
-    const removeLocalBackendAdvertisement = vi.fn();
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(null, { status: 200 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ sessionToken: "vscode-bearer-token" }), {
-          headers: { "content-type": "application/json" },
-          status: 200,
-        }),
-      )
-      .mockResolvedValueOnce(new Response(JSON.stringify({ revoked: true }), { status: 200 }));
-    const spawnMock = vi.fn<BackendSpawn>(() => makeChildProcess(() => {}));
-    const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
-      makeOutputChannel() as never,
-      makeDependencies({
-        fetch: fetchMock,
-        removeLocalBackendAdvertisement,
-        spawn: spawnMock,
-        writeLocalBackendAdvertisement,
       }),
     );
+    expect(writeHostMcpAdvertisementMock).toHaveBeenCalledWith({
+      t3Home: path.join(os.homedir(), ".t3"),
+      advertisement: expect.objectContaining({
+        hostKind: "vscode",
+        mcpServer: {
+          name: "t3code-vscode-abc",
+          socketPath: "/tmp/t3code-vscode.sock",
+          toolTimeoutSec: 120,
+        },
+        workspaceFolders: [
+          {
+            key: "file::/workspace",
+            name: "workspace",
+            cwd: "/workspace",
+            uriScheme: "file",
+            uriAuthority: "",
+          },
+        ],
+        activeWorkspaceFolderKey: "file::/workspace",
+      }),
+    });
 
-    await manager.ensureStarted();
-
-    expect(writeLocalBackendAdvertisement).toHaveBeenCalledWith(
+    await manager.stop();
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:3773/api/vscode/workspace-bootstrap"),
       expect.objectContaining({
-        t3Home: path.join(os.homedir(), ".t3"),
-        advertisement: expect.objectContaining({
-          backendId: expect.stringMatching(/^vscode-backend-/),
-          hostKind: "vscode",
-          httpBaseUrl: "http://127.0.0.1:49111",
-          bearerToken: "vscode-bearer-token",
+        body: JSON.stringify({
           workspaceFolders: [
             {
               key: "file::/workspace",
@@ -320,439 +301,132 @@ describe("BackendManager", () => {
           ],
           activeWorkspaceFolderKey: "file::/workspace",
         }),
-      }),
-    );
-
-    const backendId =
-      writeLocalBackendAdvertisement.mock.calls[0]?.[0]?.advertisement.backendId ?? "";
-    await manager.stop();
-
-    expect(removeLocalBackendAdvertisement).toHaveBeenCalledWith({
-      t3Home: path.join(os.homedir(), ".t3"),
-      backendId,
-    });
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("http://127.0.0.1:49111/api/auth/session/revoke"),
-      {
         headers: {
-          authorization: "Bearer vscode-bearer-token",
+          authorization: "Bearer desktop-bearer-token",
+          "content-type": "application/json",
         },
         method: "POST",
-        signal: expect.any(AbortSignal),
-      },
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:3773/api/auth/session/revoke"),
+      expect.objectContaining({
+        headers: {
+          authorization: "Bearer desktop-bearer-token",
+        },
+        method: "POST",
+      }),
     );
   });
 
-  it("continues stopping the backend when bearer session revocation fails", async () => {
-    let killMock: ReturnType<typeof vi.fn> | null = null;
-    const outputChannel = makeOutputChannel();
+  it("waits for a refreshed desktop bootstrap ticket after a stale ticket is rejected", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(null, { status: 200 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ sessionToken: "vscode-bearer-token" }), {
+        new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
           headers: { "content-type": "application/json" },
           status: 200,
         }),
       )
-      .mockRejectedValueOnce(new Error("simulated revoke failure"))
-      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "stale" }), { status: 401 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ sessionToken: "vscode-bearer-token" }), {
+        new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sessionToken: "desktop-bearer-token" }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ bootstrapProjects: [] }), {
           headers: { "content-type": "application/json" },
           status: 200,
         }),
       );
-    const spawnMock = vi.fn<BackendSpawn>(() => {
-      const child = makeChildProcess(() => {});
-      killMock = child.kill as ReturnType<typeof vi.fn>;
-      return child;
-    });
-    const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
-      outputChannel as never,
-      makeDependencies({
-        fetch: fetchMock,
-        spawn: spawnMock,
-      }),
-    );
-
-    await manager.ensureStarted();
-    await manager.stop();
-
-    expect(killMock).toHaveBeenCalledWith("SIGTERM");
-    expect(outputChannel.appendLine).toHaveBeenCalledWith(
-      "[backend] Failed to revoke backend bearer session: simulated revoke failure",
-    );
-    await expect(manager.ensureStarted()).resolves.toMatchObject({
-      bearerToken: "vscode-bearer-token",
-    });
-    expect(spawnMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("includes VS Code MCP server bootstrap data when the bridge is enabled", async () => {
-    let bootstrapJson = "";
-    const writeHostMcpAdvertisement = vi.fn();
-    const spawnMock = vi.fn<BackendSpawn>(() =>
-      makeChildProcess((value) => {
-        bootstrapJson = value;
-      }),
-    );
-    const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
-      makeOutputChannel() as never,
-      makeDependencies({ spawn: spawnMock, writeHostMcpAdvertisement }),
-      {
-        ensureStarted: async () => ({
-          name: "t3code-vscode",
-          socketPath: "/tmp/t3code-vscode-mcp/mcp.sock",
-        }),
-      },
-    );
-
-    await manager.ensureStarted();
-
-    expect(JSON.parse(bootstrapJson)).toMatchObject({
-      mcpServers: [
-        {
-          name: "t3code-vscode",
-          socketPath: "/tmp/t3code-vscode-mcp/mcp.sock",
-          toolTimeoutSec: 120,
-        },
-      ],
-    });
-    expect(writeHostMcpAdvertisement).toHaveBeenCalledWith(
-      expect.objectContaining({
-        t3Home: path.join(os.homedir(), ".t3"),
-        advertisement: expect.objectContaining({
-          hostKind: "vscode",
-          mcpServer: {
-            name: "t3code-vscode",
-            socketPath: "/tmp/t3code-vscode-mcp/mcp.sock",
-            toolTimeoutSec: 120,
+    const readDesktopBackendAdvertisements = vi
+      .fn()
+      .mockReturnValueOnce({
+        advertisements: [
+          {
+            version: 1 as const,
+            backendId: "desktop-backend-1",
+            updatedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 30_000).toISOString(),
+            httpBaseUrl: "http://127.0.0.1:3773/",
+            bootstrapToken: "stale-ticket",
           },
-          workspaceFolders: [
-            {
-              key: "file::/workspace",
-              name: "workspace",
-              cwd: "/workspace",
-              uriScheme: "file",
-              uriAuthority: "",
-            },
-          ],
-          activeWorkspaceFolderKey: "file::/workspace",
-        }),
-      }),
-    );
-  });
-
-  it("includes the configured MCP tool timeout in bootstrap data", async () => {
-    vscodeState.settings["mcp.toolTimeoutSec"] = 900;
-    let bootstrapJson = "";
-    const spawnMock = vi.fn<BackendSpawn>(() =>
-      makeChildProcess((value) => {
-        bootstrapJson = value;
-      }),
-    );
-    const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
-      makeOutputChannel() as never,
-      makeDependencies({ spawn: spawnMock }),
-      {
-        ensureStarted: async () => ({
-          name: "t3code-vscode",
-          socketPath: "/tmp/t3code-vscode-mcp/mcp.sock",
-        }),
-      },
-    );
-
-    await manager.ensureStarted();
-
-    expect(JSON.parse(bootstrapJson)).toMatchObject({
-      mcpServers: [
-        {
-          name: "t3code-vscode",
-          socketPath: "/tmp/t3code-vscode-mcp/mcp.sock",
-          toolTimeoutSec: 900,
-        },
-      ],
-    });
-  });
-
-  it.each([
-    ["below minimum", 4],
-    ["zero", 0],
-    ["negative", -1],
-    ["NaN", Number.NaN],
-    ["fractional", 30.5],
-    ["infinite", Number.POSITIVE_INFINITY],
-  ])("falls back to the default MCP tool timeout for %s values", (_name, value) => {
-    vscodeState.settings["mcp.toolTimeoutSec"] = value;
-
-    expect(resolveMcpToolTimeoutSec()).toBe(120);
-  });
-
-  it("uses an explicitly configured server command without leaking inherited backend env", async () => {
-    vscodeState.settings["server.command"] = "/usr/local/bin/t3";
-    vscodeState.settings["server.args"] = ["serve"];
-    vscodeState.settings["server.cwd"] = "/configured/server";
-    vscodeState.settings.home = "/custom/t3-home";
-    vi.stubEnv("T3CODE_PORT", "3999");
-
-    const spawnMock = vi.fn<BackendSpawn>(() => makeChildProcess(() => {}));
-    const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
-      makeOutputChannel() as never,
-      makeDependencies({ spawn: spawnMock }),
-    );
-
-    await manager.ensureStarted();
-
-    expect(spawnMock).toHaveBeenCalledWith(
-      "/usr/local/bin/t3",
-      ["serve", "--bootstrap-fd", "3", "--auto-bootstrap-project-from-cwd", "/workspace"],
-      expect.objectContaining({
-        cwd: "/configured/server",
-      }),
-    );
-    expect(spawnMock.mock.calls[0]?.[2]?.env?.T3CODE_PORT).toBeUndefined();
-    expect(spawnMock.mock.calls[0]?.[2]?.env?.ELECTRON_RUN_AS_NODE).toBe("1");
-  });
-
-  it("passes all VS Code workspace folders and marks the active folder", async () => {
-    vscodeState.workspaceFolders = [
-      {
-        name: "api",
-        uri: {
-          scheme: "vscode-remote",
-          authority: "ssh-remote+box",
-          path: "/workspaces/api",
-          fsPath: "/workspaces/api",
-        },
-      },
-      {
-        name: "web",
-        uri: {
-          scheme: "vscode-remote",
-          authority: "ssh-remote+box",
-          path: "/workspaces/web",
-          fsPath: "/workspaces/web",
-        },
-      },
-    ];
-    vscodeState.activeEditorPath = "/workspaces/web/src/App.tsx";
-    let bootstrapJson = "";
-    const spawnMock = vi.fn<BackendSpawn>(() =>
-      makeChildProcess((value) => {
-        bootstrapJson = value;
-      }),
-    );
-    const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
-      makeOutputChannel() as never,
-      makeDependencies({ spawn: spawnMock }),
-    );
-
-    await expect(manager.ensureStarted()).resolves.toMatchObject({
-      cwd: "/workspaces/web",
-    });
-
-    expect(spawnMock).toHaveBeenCalledWith(
-      process.execPath,
-      [
-        path.join(extensionRoot, "dist", "server", "bin.mjs"),
-        "--bootstrap-fd",
-        "3",
-        "--auto-bootstrap-project-from-cwd",
-        "/workspaces/web",
-      ],
-      expect.objectContaining({
-        cwd: "/workspaces/web",
-      }),
-    );
-    expect(JSON.parse(bootstrapJson)).toMatchObject({
-      workspaceFolders: [
-        {
-          key: "vscode-remote:ssh-remote+box:/workspaces/api",
-          name: "api",
-          cwd: "/workspaces/api",
-          uriScheme: "vscode-remote",
-          uriAuthority: "ssh-remote+box",
-        },
-        {
-          key: "vscode-remote:ssh-remote+box:/workspaces/web",
-          name: "web",
-          cwd: "/workspaces/web",
-          uriScheme: "vscode-remote",
-          uriAuthority: "ssh-remote+box",
-        },
-      ],
-      activeWorkspaceFolderKey: "vscode-remote:ssh-remote+box:/workspaces/web",
-    });
-  });
-
-  it("materializes GitHub RemoteHub virtual workspaces before starting the backend", async () => {
-    const t3Home = path.join(extensionRoot, "t3-home");
-    vscodeState.settings.home = t3Home;
-    vscodeState.workspaceFolders = [
-      {
-        name: "vscode",
-        uri: {
-          scheme: "vscode-vfs",
-          authority: "github",
-          path: "/microsoft/vscode",
-          fsPath: "/microsoft/vscode",
-        },
-      },
-    ];
-    vscodeState.activeEditorPath = "/microsoft/vscode/src/vs/code/electron-main/main.ts";
-    const key = "vscode-vfs:github:/microsoft/vscode";
-    const checkoutHash = crypto.createHash("sha256").update(key).digest("hex").slice(0, 12);
-    const checkoutPath = path.join(
-      t3Home,
-      "virtual-workspaces",
-      "github",
-      `microsoft-vscode-${checkoutHash}`,
-    );
-    let bootstrapJson = "";
-    const spawnMock = vi.fn<BackendSpawn>(() =>
-      makeChildProcess((value) => {
-        bootstrapJson = value;
-      }),
-    );
-    const runCommandMock = vi
-      .fn<BackendManagerDependencies["runCommand"]>()
-      .mockImplementation(async (_command, args) => {
-        const checkoutDir = args[3];
-        if (checkoutDir) {
-          fs.mkdirSync(path.join(checkoutDir, ".git"), { recursive: true });
-        }
+        ],
+        malformed: 0,
+      })
+      .mockReturnValue({
+        advertisements: [
+          {
+            version: 1 as const,
+            backendId: "desktop-backend-1",
+            updatedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 30_000).toISOString(),
+            httpBaseUrl: "http://127.0.0.1:3773/",
+            bootstrapToken: "fresh-ticket",
+          },
+        ],
+        malformed: 0,
       });
     const manager = new BackendManager(
       { extensionPath: extensionRoot } as never,
       makeOutputChannel() as never,
-      makeDependencies({ runCommand: runCommandMock, spawn: spawnMock }),
+      makeDependencies({
+        fetch: fetchMock,
+        readDesktopBackendAdvertisements,
+      }),
     );
 
     await expect(manager.ensureStarted()).resolves.toMatchObject({
-      cwd: checkoutPath,
+      bootstrapToken: "fresh-ticket",
+      bearerToken: "desktop-bearer-token",
     });
 
-    expect(runCommandMock).toHaveBeenCalledWith("git", [
-      "clone",
-      "--filter=blob:none",
-      "https://github.com/microsoft/vscode.git",
-      checkoutPath,
-    ]);
-    expect(spawnMock).toHaveBeenCalledWith(
-      process.execPath,
-      [
-        path.join(extensionRoot, "dist", "server", "bin.mjs"),
-        "--bootstrap-fd",
-        "3",
-        "--auto-bootstrap-project-from-cwd",
-        checkoutPath,
-      ],
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:3773/api/auth/bootstrap/bearer"),
       expect.objectContaining({
-        cwd: checkoutPath,
+        body: JSON.stringify({ credential: "stale-ticket" }),
+        method: "POST",
       }),
     );
-    expect(JSON.parse(bootstrapJson)).toMatchObject({
-      workspaceFolders: [
-        {
-          key,
-          name: "vscode",
-          cwd: checkoutPath,
-          uriScheme: "vscode-vfs",
-          uriAuthority: "github",
-        },
-      ],
-      activeWorkspaceFolderKey: key,
-    });
-  });
-
-  it("does not pass unsupported virtual workspace fsPath values as backend cwd", async () => {
-    vscodeState.workspaceFolders = [
-      {
-        name: "virtual",
-        uri: {
-          scheme: "memfs",
-          authority: "example",
-          path: "/virtual/project",
-          fsPath: "/virtual/project",
-        },
-      },
-    ];
-    vscodeState.activeEditorPath = "/virtual/project/file.ts";
-    const outputChannel = makeOutputChannel();
-    const spawnMock = vi.fn<BackendSpawn>(() => makeChildProcess(() => {}));
-    const runCommandMock = vi
-      .fn<BackendManagerDependencies["runCommand"]>()
-      .mockResolvedValue(undefined);
-    const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
-      outputChannel as never,
-      makeDependencies({ runCommand: runCommandMock, spawn: spawnMock }),
-    );
-
-    await expect(manager.ensureStarted()).resolves.toMatchObject({
-      cwd: os.homedir(),
-    });
-
-    expect(runCommandMock).not.toHaveBeenCalled();
-    expect(spawnMock).toHaveBeenCalledWith(
-      process.execPath,
-      [
-        path.join(extensionRoot, "dist", "server", "bin.mjs"),
-        "--bootstrap-fd",
-        "3",
-        "--auto-bootstrap-project-from-cwd",
-        os.homedir(),
-      ],
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:3773/api/auth/bootstrap/bearer"),
       expect.objectContaining({
-        cwd: os.homedir(),
+        body: JSON.stringify({ credential: "fresh-ticket" }),
+        method: "POST",
       }),
-    );
-    expect(outputChannel.appendLine).toHaveBeenCalledWith(
-      expect.stringContaining("Skipping unsupported virtual workspace folder"),
     );
   });
 
-  it("reuses the active backend connection after readiness succeeds", async () => {
-    const spawnMock = vi.fn<BackendSpawn>(() => makeChildProcess(() => {}));
+  it("fails when no desktop backend advertisement is available", async () => {
     const manager = new BackendManager(
       { extensionPath: extensionRoot } as never,
       makeOutputChannel() as never,
-      makeDependencies({ spawn: spawnMock }),
-    );
-
-    await manager.ensureStarted();
-    await manager.ensureStarted();
-
-    expect(spawnMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("terminates the child process when startup fails after spawn", async () => {
-    let killMock: ReturnType<typeof vi.fn> | null = null;
-    const spawnMock = vi.fn<BackendSpawn>(() => {
-      const child = makeChildProcess(() => {});
-      killMock = child.kill as ReturnType<typeof vi.fn>;
-      return child;
-    });
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response(null, { status: 200 }))
-      .mockResolvedValueOnce(new Response(null, { status: 401 }));
-    const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
-      makeOutputChannel() as never,
-      makeDependencies({ fetch: fetchMock, spawn: spawnMock }),
+      makeDependencies({
+        readDesktopBackendAdvertisements: vi.fn(() => ({
+          advertisements: [],
+          malformed: 0,
+        })),
+      }),
     );
 
     await expect(manager.ensureStarted()).rejects.toThrow(
-      "Failed to create VS Code backend bearer session",
+      "T3 Code for VS Code requires the T3 Code desktop app to be running on this machine.",
     );
+  });
 
-    expect(killMock).toHaveBeenCalled();
+  it("normalizes MCP tool timeout settings", () => {
+    vscodeState.settings["mcp.toolTimeoutSec"] = 2;
+    expect(resolveMcpToolTimeoutSec()).toBe(120);
+
+    vscodeState.settings["mcp.toolTimeoutSec"] = 30;
+    expect(resolveMcpToolTimeoutSec()).toBe(30);
   });
 });

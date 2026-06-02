@@ -87,7 +87,7 @@ it.layer(NodeServices.layer)("BootstrapCredentialServiceLive", (it) => {
     }).pipe(Effect.provide(makeBootstrapCredentialLayer())),
   );
 
-  it.effect("seeds the desktop bootstrap credential as a one-time grant", () =>
+  it.effect("seeds the desktop bootstrap credential as a one-time local grant", () =>
     Effect.gen(function* () {
       const bootstrapCredentials = yield* BootstrapCredentialService;
       const first = yield* bootstrapCredentials.consume("desktop-bootstrap-token");
@@ -97,7 +97,7 @@ it.layer(NodeServices.layer)("BootstrapCredentialServiceLive", (it) => {
       expect(first.role).toBe("owner");
       expect(first.subject).toBe("desktop-bootstrap");
       expect(second._tag).toBe("BootstrapCredentialError");
-      expect(second.status).toBe(401);
+      expect(second.message).toContain("Unknown bootstrap credential");
     }).pipe(
       Effect.provide(
         makeBootstrapCredentialLayer({
@@ -107,16 +107,15 @@ it.layer(NodeServices.layer)("BootstrapCredentialServiceLive", (it) => {
     ),
   );
 
-  it.effect("reports seeded desktop bootstrap credentials as expired after their ttl", () =>
+  it.effect("expires seeded desktop bootstrap credentials after the one-time token ttl", () =>
     Effect.gen(function* () {
       const bootstrapCredentials = yield* BootstrapCredentialService;
 
       yield* TestClock.adjust(Duration.minutes(6));
-      const expired = yield* Effect.flip(bootstrapCredentials.consume("desktop-bootstrap-token"));
+      const grant = yield* Effect.flip(bootstrapCredentials.consume("desktop-bootstrap-token"));
 
-      expect(expired._tag).toBe("BootstrapCredentialError");
-      expect(expired.status).toBe(401);
-      expect(expired.message).toContain("Bootstrap credential expired");
+      expect(grant._tag).toBe("BootstrapCredentialError");
+      expect(grant.message).toContain("Bootstrap credential expired");
     }).pipe(
       Effect.provide(
         Layer.merge(
