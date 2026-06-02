@@ -97,9 +97,11 @@ jobs:
 
       - name: Ensure Electron runtime is installed
         run: |
+          unset ELECTRON_SKIP_BINARY_DOWNLOAD
+          electron_dir="$(dirname "$(node -p "require.resolve('./apps/desktop/node_modules/electron/package.json')")")"
           if ! node -e "require('./apps/desktop/node_modules/electron')" >/dev/null 2>&1; then
-            rm -rf apps/desktop/node_modules/electron/dist apps/desktop/node_modules/electron/path.txt
-            node apps/desktop/node_modules/electron/install.js
+            rm -rf "$electron_dir/dist" "$electron_dir/path.txt"
+            node "$electron_dir/install.js"
           fi
           node -e "require('./apps/desktop/node_modules/electron')"
 
