@@ -561,8 +561,10 @@ const make = Effect.gen(function* () {
       );
 
       if (isArm64HostRunningIntelBuild(environment.runtimeInfo)) {
+        const hostLabel = environment.platform === "darwin" ? "Apple Silicon" : "ARM64";
+        const intelLabel = environment.platform === "darwin" ? "Intel" : "x64";
         yield* logUpdaterInfo(
-          "Apple Silicon host detected while running Intel build; updates will switch to arm64 packages",
+          `${hostLabel} host detected while running ${intelLabel} build; updates will switch to arm64 packages`,
         );
       }
 

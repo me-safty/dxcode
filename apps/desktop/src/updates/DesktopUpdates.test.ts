@@ -124,6 +124,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     isPackaged: true,
     resourcesPath: "/missing/resources",
     runningUnderArm64Translation: false,
+    windowsProcessorArchitectures: [],
   }).pipe(
     Layer.provide(
       Layer.mergeAll(

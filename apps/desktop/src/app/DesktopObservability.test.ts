@@ -47,6 +47,7 @@ const environmentInput = (baseDir: string) =>
     isPackaged: false,
     resourcesPath: "/repo/resources",
     runningUnderArm64Translation: false,
+    windowsProcessorArchitectures: [],
   }) satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
 const makeEnvironmentLayer = (baseDir: string) =>

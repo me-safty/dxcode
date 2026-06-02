@@ -215,6 +215,7 @@ describe("DesktopShellEnvironment", () => {
           "C:\\Windows\\System32",
           "C:\\Users\\testuser\\AppData\\Roaming\\npm",
           "C:\\Users\\testuser\\AppData\\Local\\Programs\\nodejs",
+          "C:\\Users\\testuser\\AppData\\Local\\Programs\\nodejs-arm64",
           "C:\\Users\\testuser\\AppData\\Local\\Volta\\bin",
           "C:\\Users\\testuser\\AppData\\Local\\pnpm",
           "C:\\Users\\testuser\\.bun\\bin",

@@ -26,6 +26,7 @@ const environmentInput = {
   isPackaged: false,
   resourcesPath: "/repo/resources",
   runningUnderArm64Translation: false,
+  windowsProcessorArchitectures: [],
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
 const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {

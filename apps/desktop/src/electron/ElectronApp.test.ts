@@ -87,6 +87,7 @@ describe("ElectronApp", () => {
         isPackaged: true,
         resourcesPath: process.resourcesPath,
         runningUnderArm64Translation: false,
+        windowsProcessorArchitectures: [],
       });
     }).pipe(Effect.provide(ElectronApp.layer)),
   );
