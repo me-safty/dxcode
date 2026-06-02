@@ -7,6 +7,7 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import { resolveTailscaleHttpsBaseUrl } from "@t3tools/tailscale";
 import * as Data from "effect/Data";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -19,11 +20,12 @@ import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import * as Context from "effect/Context";
 import * as Console from "effect/Console";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 
 import { ServerConfig } from "./config.ts";
 import { Keybindings } from "./keybindings.ts";
-import { Open } from "./open.ts";
+import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor.ts";
@@ -56,7 +58,7 @@ export interface ServerRuntimeStartupShape {
 export class ServerRuntimeStartup extends Context.Service<
   ServerRuntimeStartup,
   ServerRuntimeStartupShape
->()("t3/serverRuntimeStartup") {}
+>()("salchi/serverRuntimeStartup") {}
 
 interface QueuedCommand {
   readonly run: Effect.Effect<void, never>;
@@ -170,6 +172,8 @@ export const resolveWelcomeBase = Effect.gen(function* () {
 });
 
 export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
+  const randomUUID = crypto.randomUUIDv4;
   const serverConfig = yield* ServerConfig;
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -188,12 +192,12 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
 
       if (Option.isNone(existingProject)) {
         const createdAt = DateTime.formatIso(yield* DateTime.now);
-        nextProjectId = ProjectId.make(crypto.randomUUID());
+        nextProjectId = ProjectId.make(yield* randomUUID);
         const bootstrapProjectTitle = path.basename(serverConfig.cwd) || "project";
         nextProjectDefaultModelSelection = getAutoBootstrapDefaultModelSelection();
         yield* orchestrationEngine.dispatch({
           type: "project.create",
-          commandId: CommandId.make(crypto.randomUUID()),
+          commandId: CommandId.make(yield* randomUUID),
           projectId: nextProjectId,
           title: bootstrapProjectTitle,
           workspaceRoot: serverConfig.cwd,
@@ -210,10 +214,10 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
         yield* projectionReadModelQuery.getFirstActiveThreadIdByProjectId(nextProjectId);
       if (Option.isNone(existingThreadId)) {
         const createdAt = DateTime.formatIso(yield* DateTime.now);
-        const createdThreadId = ThreadId.make(crypto.randomUUID());
+        const createdThreadId = ThreadId.make(yield* randomUUID);
         yield* orchestrationEngine.dispatch({
           type: "thread.create",
-          commandId: CommandId.make(crypto.randomUUID()),
+          commandId: CommandId.make(yield* randomUUID),
           threadId: createdThreadId,
           projectId: nextProjectId,
           title: "New thread",
@@ -247,7 +251,16 @@ const resolveStartupBrowserTarget = Effect.gen(function* () {
     serverConfig.host && !isWildcardHost(serverConfig.host)
       ? `http://${formatHostForUrl(serverConfig.host)}:${serverConfig.port}`
       : localUrl;
-  const baseTarget = serverConfig.devUrl?.toString() ?? bindUrl;
+  const tailscaleUrl = serverConfig.tailscaleServeEnabled
+    ? yield* resolveTailscaleHttpsBaseUrl({ servePort: serverConfig.tailscaleServePort }).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("failed to resolve Tailscale startup URL", { cause }).pipe(
+            Effect.as(null),
+          ),
+        ),
+      )
+    : null;
+  const baseTarget = serverConfig.devUrl?.toString() ?? tailscaleUrl ?? bindUrl;
   return yield* Effect.succeed(serverConfig.mode === "desktop" ? baseTarget : undefined).pipe(
     Effect.flatMap((target) =>
       target ? Effect.succeed(target) : serverAuth.issueStartupPairingUrl(baseTarget),
@@ -261,9 +274,9 @@ const maybeOpenBrowser = (target: string) =>
     if (serverConfig.noBrowser) {
       return;
     }
-    const { openBrowser } = yield* Open;
+    const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
 
-    yield* openBrowser(target).pipe(
+    yield* externalLauncher.launchBrowser(target).pipe(
       Effect.catch(() =>
         Effect.logInfo("browser auto-open unavailable", {
           hint: `Open ${target} in your browser.`,
@@ -441,9 +454,9 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
         yield* Effect.logDebug("startup phase: browser open check");
         const startupBrowserTarget = yield* resolveStartupBrowserTarget;
         if (serverConfig.mode !== "desktop") {
-          yield* Effect.logInfo(
-            "Authentication required. Open T3 Code using the pairing URL.",
-          ).pipe(Effect.annotateLogs({ pairingUrl: startupBrowserTarget }));
+          yield* Effect.logInfo("Authentication required. Open Salchi using the pairing URL.").pipe(
+            Effect.annotateLogs({ pairingUrl: startupBrowserTarget }),
+          );
         }
         yield* runStartupPhase("browser.open", maybeOpenBrowser(startupBrowserTarget));
       }

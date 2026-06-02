@@ -18,6 +18,8 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     },
     projects: {
       searchEntries: rpcClient.projects.searchEntries,
+      listDirectoryEntries: rpcClient.projects.listDirectoryEntries,
+      readFile: rpcClient.projects.readFile,
       writeFile: rpcClient.projects.writeFile,
     },
     filesystem: {
@@ -38,6 +40,10 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       createRef: rpcClient.vcs.createRef,
       switchRef: rpcClient.vcs.switchRef,
       init: rpcClient.vcs.init,
+      stageFiles: rpcClient.vcs.stageFiles,
+      unstageFiles: rpcClient.vcs.unstageFiles,
+      revertUnstagedFiles: rpcClient.vcs.revertUnstagedFiles,
+      getWorkingTreeDiff: rpcClient.vcs.getWorkingTreeDiff,
     },
     git: {
       resolvePullRequest: rpcClient.git.resolvePullRequest,
@@ -47,6 +53,8 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       dispatchCommand: rpcClient.orchestration.dispatchCommand,
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
+      getThreadDetailPage: rpcClient.orchestration.getThreadDetailPage,
+      reconcileThreadDetail: rpcClient.orchestration.reconcileThreadDetail,
       getArchivedShellSnapshot: rpcClient.orchestration.getArchivedShellSnapshot,
       subscribeShell: (callback, options) =>
         rpcClient.orchestration.subscribeShell(callback, options),

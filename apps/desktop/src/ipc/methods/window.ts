@@ -133,3 +133,18 @@ export const openExternal = makeIpcMethod({
     return yield* shell.openExternal(url);
   }),
 });
+
+export const forceReload = makeIpcMethod({
+  channel: IpcChannels.FORCE_RELOAD_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.forceReload")(function* () {
+    const electronWindow = yield* ElectronWindow.ElectronWindow;
+    const window = yield* electronWindow.focusedMainOrFirst;
+    if (Option.isNone(window)) {
+      return;
+    }
+
+    window.value.webContents.reloadIgnoringCache();
+  }),
+});

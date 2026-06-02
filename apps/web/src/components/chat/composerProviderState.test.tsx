@@ -7,9 +7,13 @@ import {
 } from "@t3tools/contracts";
 import {
   getComposerProviderState,
+  renderProviderReasoningPicker,
   renderProviderTraitsMenuContent,
+  renderProviderTraitsMenuContentWithoutReasoning,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
+import { shouldRenderTraitsControls } from "./TraitsPicker";
+import { DraftId } from "../../composerDraftStore";
 
 // Everything in composerProviderState is now data-driven by the model's
 // optionDescriptors, so these tests use a single synthetic provider/model and
@@ -178,6 +182,30 @@ describe("getComposerProviderState", () => {
     });
   });
 
+  it("keeps Codex Auto Review in dispatch options without making it a traits control", () => {
+    const models = modelWith([
+      { id: "autoReview", label: "Auto Review", type: "boolean", currentValue: false },
+    ]);
+    const state = getComposerProviderState({
+      provider: PROVIDER,
+      model: MODEL,
+      models,
+      prompt: "",
+      modelOptions: undefined,
+    });
+
+    expect(state.modelOptionsForDispatch).toEqual(selections(["autoReview", false]));
+    expect(
+      shouldRenderTraitsControls({
+        provider: PROVIDER,
+        model: MODEL,
+        models,
+        prompt: "",
+        modelOptions: state.modelOptionsForDispatch,
+      }),
+    ).toBe(false);
+  });
+
   it("adds ultrathink class names when the prompt triggers a promptInjectedValues descriptor", () => {
     const state = getComposerProviderState({
       provider: PROVIDER,
@@ -238,5 +266,47 @@ describe("provider traits render guards", () => {
 
     expect(renderProviderTraitsPicker(args)).toBeNull();
     expect(renderProviderTraitsMenuContent(args)).toBeNull();
+  });
+});
+
+describe("compact reasoning split", () => {
+  const DRAFT_ID = DraftId.make("draft-reasoning-split");
+
+  function argsFor(descriptors: ReadonlyArray<ProviderOptionDescriptor>) {
+    return {
+      provider: PROVIDER,
+      model: MODEL,
+      models: modelWith(descriptors),
+      modelOptions: undefined,
+      prompt: "",
+      onPromptChange: () => {},
+      draftId: DRAFT_ID,
+    };
+  }
+
+  it("renders a reasoning picker only when the model exposes a reasoning control", () => {
+    const reasoning = selectDescriptor("reasoningEffort", [
+      { id: "low", label: "Low" },
+      { id: "high", label: "High", isDefault: true },
+    ]);
+
+    expect(renderProviderReasoningPicker(argsFor([reasoning]))).not.toBeNull();
+    expect(renderProviderReasoningPicker(argsFor([booleanDescriptor("fastMode")]))).toBeNull();
+  });
+
+  it("excludes reasoning from the compact more-controls menu", () => {
+    const reasoning = selectDescriptor("reasoningEffort", [
+      { id: "low", label: "Low" },
+      { id: "high", label: "High", isDefault: true },
+    ]);
+
+    // Reasoning-only model: the more-controls traits section collapses to null.
+    expect(renderProviderTraitsMenuContentWithoutReasoning(argsFor([reasoning]))).toBeNull();
+    // With another trait present, the menu renders (and that trait is reasoning's sibling).
+    expect(
+      renderProviderTraitsMenuContentWithoutReasoning(
+        argsFor([reasoning, booleanDescriptor("fastMode")]),
+      ),
+    ).not.toBeNull();
   });
 });

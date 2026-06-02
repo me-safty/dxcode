@@ -1,8 +1,7 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, GitBranchPlusIcon } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -26,13 +25,16 @@ import { useStore } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
 import {
   deriveLocalBranchNameFromRemoteRef,
+  resolveBranchSelectorDisabled,
   resolveBranchSelectionTarget,
   resolveBranchToolbarValue,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
+  shouldLoadBranchSearchRefs,
   shouldIncludeBranchPickerItem,
 } from "./BranchToolbar.logic";
 import { Button } from "./ui/button";
+import { VirtualizedList, type VirtualizedListHandle } from "./virtualization/VirtualizedList";
 import {
   Combobox,
   ComboboxEmpty,
@@ -204,13 +206,17 @@ export function BranchToolbarBranchSelector({
   const branchStatusQuery = useGitStatus({ environmentId, cwd: branchCwd });
   const trimmedBranchQuery = branchQuery.trim();
   const deferredTrimmedBranchQuery = deferredBranchQuery.trim();
+  const shouldQueryBranchRefs = shouldLoadBranchSearchRefs({
+    branchCwd,
+    isBranchMenuOpen,
+  });
 
   useEffect(() => {
-    if (!branchCwd) return;
+    if (!shouldQueryBranchRefs || !branchCwd) return;
     void queryClient.prefetchInfiniteQuery(
       gitBranchSearchInfiniteQueryOptions({ environmentId, cwd: branchCwd, query: "" }),
     );
-  }, [branchCwd, environmentId, queryClient]);
+  }, [branchCwd, environmentId, queryClient, shouldQueryBranchRefs]);
 
   const {
     data: branchesSearchData,
@@ -223,6 +229,7 @@ export function BranchToolbarBranchSelector({
       environmentId,
       cwd: branchCwd,
       query: deferredTrimmedBranchQuery,
+      enabled: shouldQueryBranchRefs,
     }),
   );
   const refs = useMemo(
@@ -253,11 +260,15 @@ export function BranchToolbarBranchSelector({
     effectiveEnvMode === "worktree" && !envLocked && !activeWorktreePath;
   const checkoutPullRequestItemValue =
     prReference && onCheckoutPullRequestRequest ? `__checkout_pull_request__:${prReference}` : null;
+  // Surface a "create branch" entry as soon as a name is typed. The empty-state
+  // affordance lives in the popover footer (see below) and just focuses the
+  // search box, so a new branch can be made straight from the toggle.
   const canCreateBranch = !isSelectingWorktreeBase && trimmedBranchQuery.length > 0;
   const hasExactBranchMatch = branchByName.has(trimmedBranchQuery);
   const createBranchItemValue = canCreateBranch
     ? `__create_new_branch__:${trimmedBranchQuery}`
     : null;
+  const showCreateBranchFooter = !isSelectingWorktreeBase && trimmedBranchQuery.length === 0;
   const branchPickerItems = useMemo(() => {
     const items = [...branchNames];
     if (createBranchItemValue && !hasExactBranchMatch) {
@@ -292,6 +303,13 @@ export function BranchToolbarBranchSelector({
     (_currentBranch: string | null, optimisticBranch: string | null) => optimisticBranch,
   );
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
+  const branchInputContainerRef = useRef<HTMLDivElement | null>(null);
+  const isBranchSelectorDisabled = resolveBranchSelectorDisabled({
+    isBranchActionPending,
+    isBranchSearchEnabled: shouldQueryBranchRefs,
+    isBranchesSearchPending,
+    refCount: refs.length,
+  });
   const shouldVirtualizeBranchList = filteredBranchPickerItems.length > 40;
   const totalBranchCount = branchesSearchData?.pages[0]?.totalCount ?? 0;
   const branchStatusText = isBranchesSearchPending
@@ -451,7 +469,7 @@ export function BranchToolbarBranchSelector({
 
     void fetchNextPage().catch(() => undefined);
   }, [fetchNextPage, hasNextPage, isBranchMenuOpen, isFetchingNextPage]);
-  const branchListRef = useRef<LegendListRef | null>(null);
+  const branchListRef = useRef<VirtualizedListHandle | null>(null);
   const setBranchListRef = useCallback((element: HTMLDivElement | null) => {
     branchListScrollElementRef.current = (element?.parentElement as HTMLDivElement | null) ?? null;
   }, []);
@@ -495,6 +513,7 @@ export function BranchToolbarBranchSelector({
     effectiveEnvMode,
     resolvedActiveBranch,
   });
+  const branchListHeightPx = Math.min(filteredBranchPickerItems.length * 28, 224);
 
   function renderPickerItem(itemValue: string, index: number) {
     if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
@@ -535,7 +554,10 @@ export function BranchToolbarBranchSelector({
           value={itemValue}
           onClick={() => createRef(trimmedBranchQuery)}
         >
-          <span className="truncate">Create new ref &quot;{trimmedBranchQuery}&quot;</span>
+          <div className="flex min-w-0 items-center gap-2 py-0.5">
+            <GitBranchPlusIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">Create new ref &quot;{trimmedBranchQuery}&quot;</span>
+          </div>
         </ComboboxItem>
       );
     }
@@ -570,6 +592,12 @@ export function BranchToolbarBranchSelector({
     );
   }
 
+  const focusBranchSearchInput = () => {
+    // Keep the popover open and drop the caret in the search box so the next
+    // keystrokes name the new ref (surfacing the "Create new ref" entry).
+    branchInputContainerRef.current?.querySelector("input")?.focus();
+  };
+
   return (
     <Combobox
       items={branchPickerItems}
@@ -592,17 +620,17 @@ export function BranchToolbarBranchSelector({
       <ComboboxTrigger
         render={<Button variant="ghost" size="xs" />}
         className={cn("min-w-0 text-muted-foreground/70 hover:text-foreground/80", className)}
-        disabled={(isBranchesSearchPending && refs.length === 0) || isBranchActionPending}
+        disabled={isBranchSelectorDisabled}
       >
         <span className="min-w-0 max-w-[240px] truncate">{triggerLabel}</span>
         <ChevronDownIcon className="shrink-0" />
       </ComboboxTrigger>
       <ComboboxPopup align="end" side="top" className="w-80">
-        <div className="border-b p-1">
+        <div ref={branchInputContainerRef} className="border-b p-1">
           <ComboboxInput
             className="[&_input]:font-sans rounded-md"
             inputClassName="ring-0"
-            placeholder="Search refs..."
+            placeholder="Search or name a new ref..."
             showTrigger={false}
             size="sm"
             value={branchQuery}
@@ -613,19 +641,19 @@ export function BranchToolbarBranchSelector({
 
         {shouldVirtualizeBranchList ? (
           <ComboboxListVirtualized>
-            <LegendList<string>
+            <VirtualizedList<string>
               ref={branchListRef}
               data={filteredBranchPickerItems}
               keyExtractor={(item) => item}
               renderItem={({ item, index }) => renderPickerItem(item, index)}
               estimatedItemSize={28}
-              drawDistance={336}
+              increaseViewportBy={336}
               onEndReached={() => {
                 if (hasNextPage && !isFetchingNextPage) {
                   void fetchNextPage().catch(() => undefined);
                 }
               }}
-              style={{ maxHeight: "14rem" }}
+              style={{ height: branchListHeightPx }}
             />
           </ComboboxListVirtualized>
         ) : (
@@ -635,6 +663,21 @@ export function BranchToolbarBranchSelector({
             )}
           </ComboboxList>
         )}
+        {showCreateBranchFooter ? (
+          <div className="border-t p-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start text-muted-foreground hover:text-foreground"
+              // Keep the input focused so the popover stays open and typing names the ref.
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={focusBranchSearchInput}
+            >
+              <GitBranchPlusIcon className="size-3.5 shrink-0" />
+              <span className="truncate">Create new ref…</span>
+            </Button>
+          </div>
+        ) : null}
         {branchStatusText ? <ComboboxStatus>{branchStatusText}</ComboboxStatus> : null}
       </ComboboxPopup>
     </Combobox>

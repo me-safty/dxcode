@@ -1,5 +1,7 @@
 import {
   type GitActionProgressEvent,
+  type GenerateCommitMessageInput,
+  type GenerateCommitMessageResult,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
   type VcsStatusResult,
@@ -53,9 +55,119 @@ interface GitRunStackedActionOptions {
   readonly onProgress?: (event: GitActionProgressEvent) => void;
 }
 
+export const DISPATCH_COMMAND_REQUEST_TIMEOUT_MS = 8_000;
+export const DISPATCH_COMMAND_RECONNECT_TIMEOUT_MS = 8_000;
+
+class DispatchCommandTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`SocketCloseError: orchestration.dispatchCommand timed out after ${timeoutMs}ms.`);
+    this.name = "DispatchCommandTimeoutError";
+  }
+}
+
+function isDispatchCommandTimeoutError(error: unknown): error is DispatchCommandTimeoutError {
+  return error instanceof DispatchCommandTimeoutError;
+}
+
+function formatErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  createError: () => Error,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  return new Promise<T>((resolve, reject) => {
+    const clear = () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
+    timeoutId = setTimeout(() => {
+      timeoutId = null;
+      reject(createError());
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clear();
+        resolve(value);
+      },
+      (error) => {
+        clear();
+        reject(error);
+      },
+    );
+  });
+}
+
+function toDispatchCommandTransportError(context: string, error: unknown): Error {
+  return new Error(`SocketCloseError: ${context}: ${formatErrorMessage(error)}`);
+}
+
+async function reconnectForDispatchCommand(transport: WsTransport, context: string): Promise<void> {
+  try {
+    await withTimeout(
+      transport.reconnect(),
+      DISPATCH_COMMAND_RECONNECT_TIMEOUT_MS,
+      () =>
+        new Error(
+          `SocketCloseError: orchestration.dispatchCommand reconnect timed out after ${DISPATCH_COMMAND_RECONNECT_TIMEOUT_MS}ms.`,
+        ),
+    );
+  } catch (error) {
+    throw toDispatchCommandTransportError(context, error);
+  }
+}
+
+async function dispatchCommandWithConnectionRecovery(
+  transport: WsTransport,
+  input: RpcInput<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>,
+): ReturnType<RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>> {
+  const dispatch = () =>
+    transport.request((client) => client[ORCHESTRATION_WS_METHODS.dispatchCommand](input));
+
+  if (!transport.isHeartbeatFresh()) {
+    await reconnectForDispatchCommand(transport, "dispatchCommand pre-flight reconnect failed");
+  }
+
+  try {
+    return await withTimeout(
+      dispatch(),
+      DISPATCH_COMMAND_REQUEST_TIMEOUT_MS,
+      () => new DispatchCommandTimeoutError(DISPATCH_COMMAND_REQUEST_TIMEOUT_MS),
+    );
+  } catch (error) {
+    if (!isDispatchCommandTimeoutError(error)) {
+      throw error;
+    }
+  }
+
+  await reconnectForDispatchCommand(transport, "dispatchCommand reconnect after timeout failed");
+
+  try {
+    return await withTimeout(
+      dispatch(),
+      DISPATCH_COMMAND_REQUEST_TIMEOUT_MS,
+      () => new DispatchCommandTimeoutError(DISPATCH_COMMAND_REQUEST_TIMEOUT_MS),
+    );
+  } catch (error) {
+    throw toDispatchCommandTransportError("dispatchCommand retry failed", error);
+  }
+}
+
 export interface WsRpcClient {
   readonly dispose: () => Promise<void>;
   readonly reconnect: () => Promise<void>;
+  readonly isHeartbeatFresh: () => boolean;
   readonly terminal: {
     readonly open: RpcUnaryMethod<typeof WS_METHODS.terminalOpen>;
     readonly write: RpcUnaryMethod<typeof WS_METHODS.terminalWrite>;
@@ -67,6 +179,8 @@ export interface WsRpcClient {
   };
   readonly projects: {
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
+    readonly listDirectoryEntries: RpcUnaryMethod<typeof WS_METHODS.projectsListDirectoryEntries>;
+    readonly readFile: RpcUnaryMethod<typeof WS_METHODS.projectsReadFile>;
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
   };
   readonly filesystem: {
@@ -86,6 +200,10 @@ export interface WsRpcClient {
   readonly vcs: {
     readonly pull: RpcUnaryMethod<typeof WS_METHODS.vcsPull>;
     readonly refreshStatus: RpcUnaryMethod<typeof WS_METHODS.vcsRefreshStatus>;
+    readonly stageFiles: RpcUnaryMethod<typeof WS_METHODS.vcsStageFiles>;
+    readonly unstageFiles: RpcUnaryMethod<typeof WS_METHODS.vcsUnstageFiles>;
+    readonly revertUnstagedFiles: RpcUnaryMethod<typeof WS_METHODS.vcsRevertUnstagedFiles>;
+    readonly getWorkingTreeDiff: RpcUnaryMethod<typeof WS_METHODS.vcsGetWorkingTreeDiff>;
     readonly onStatus: (
       input: RpcInput<typeof WS_METHODS.subscribeVcsStatus>,
       listener: (status: VcsStatusResult) => void,
@@ -106,6 +224,9 @@ export interface WsRpcClient {
       input: GitRunStackedActionInput,
       options?: GitRunStackedActionOptions,
     ) => Promise<GitRunStackedActionResult>;
+    readonly generateCommitMessage: (
+      input: GenerateCommitMessageInput,
+    ) => Promise<GenerateCommitMessageResult>;
     readonly resolvePullRequest: RpcUnaryMethod<typeof WS_METHODS.gitResolvePullRequest>;
     readonly preparePullRequestThread: RpcUnaryMethod<
       typeof WS_METHODS.gitPreparePullRequestThread
@@ -120,6 +241,7 @@ export interface WsRpcClient {
     readonly refreshProviders: (
       input?: RpcInput<typeof WS_METHODS.serverRefreshProviders>,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverRefreshProviders>>;
+    readonly refreshUsageLimits: RpcUnaryNoArgMethod<typeof WS_METHODS.serverRefreshUsageLimits>;
     readonly updateProvider: RpcUnaryMethod<typeof WS_METHODS.serverUpdateProvider>;
     readonly upsertKeybinding: RpcUnaryMethod<typeof WS_METHODS.serverUpsertKeybinding>;
     readonly removeKeybinding: RpcUnaryMethod<typeof WS_METHODS.serverRemoveKeybinding>;
@@ -134,7 +256,20 @@ export interface WsRpcClient {
     readonly getProcessDiagnostics: RpcUnaryNoArgMethod<
       typeof WS_METHODS.serverGetProcessDiagnostics
     >;
+    readonly getProcessResourceHistory: RpcUnaryMethod<
+      typeof WS_METHODS.serverGetProcessResourceHistory
+    >;
     readonly signalProcess: RpcUnaryMethod<typeof WS_METHODS.serverSignalProcess>;
+    readonly getPushConfig: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetPushConfig>;
+    readonly registerPushSubscription: RpcUnaryMethod<
+      typeof WS_METHODS.serverRegisterPushSubscription
+    >;
+    readonly unregisterPushSubscription: RpcUnaryMethod<
+      typeof WS_METHODS.serverUnregisterPushSubscription
+    >;
+    readonly sendTestPushNotification: RpcUnaryMethod<
+      typeof WS_METHODS.serverSendTestPushNotification
+    >;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
@@ -143,6 +278,14 @@ export interface WsRpcClient {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
+    readonly getThreadDetailPage: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.getThreadDetailPage
+    >;
+    readonly reconcileThreadDetail: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.reconcileThreadDetail
+    >;
+    readonly probeSync: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.probeSync>;
+    readonly replayEvents: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.replayEvents>;
     readonly getArchivedShellSnapshot: RpcUnaryNoArgMethod<
       typeof ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot
     >;
@@ -158,6 +301,7 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       resetWsReconnectBackoff();
       await transport.reconnect();
     },
+    isHeartbeatFresh: () => transport.isHeartbeatFresh(),
     terminal: {
       open: (input) => transport.request((client) => client[WS_METHODS.terminalOpen](input)),
       write: (input) => transport.request((client) => client[WS_METHODS.terminalWrite](input)),
@@ -174,6 +318,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
     projects: {
       searchEntries: (input) =>
         transport.request((client) => client[WS_METHODS.projectsSearchEntries](input)),
+      listDirectoryEntries: (input) =>
+        transport.request((client) => client[WS_METHODS.projectsListDirectoryEntries](input)),
+      readFile: (input) =>
+        transport.request((client) => client[WS_METHODS.projectsReadFile](input)),
       writeFile: (input) =>
         transport.request((client) => client[WS_METHODS.projectsWriteFile](input)),
     },
@@ -196,6 +344,13 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       pull: (input) => transport.request((client) => client[WS_METHODS.vcsPull](input)),
       refreshStatus: (input) =>
         transport.request((client) => client[WS_METHODS.vcsRefreshStatus](input)),
+      stageFiles: (input) => transport.request((client) => client[WS_METHODS.vcsStageFiles](input)),
+      unstageFiles: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsUnstageFiles](input)),
+      revertUnstagedFiles: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsRevertUnstagedFiles](input)),
+      getWorkingTreeDiff: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsGetWorkingTreeDiff](input)),
       onStatus: (input, listener, options) => {
         let current: VcsStatusResult | null = null;
         return transport.subscribe(
@@ -236,6 +391,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
 
         throw new Error("Git action stream completed without a final result.");
       },
+      generateCommitMessage: (input) =>
+        transport.request((client) => client[WS_METHODS.gitGenerateCommitMessage](input)),
       resolvePullRequest: (input) =>
         transport.request((client) => client[WS_METHODS.gitResolvePullRequest](input)),
       preparePullRequestThread: (input) =>
@@ -245,6 +402,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       getConfig: () => transport.request((client) => client[WS_METHODS.serverGetConfig]({})),
       refreshProviders: (input) =>
         transport.request((client) => client[WS_METHODS.serverRefreshProviders](input ?? {})),
+      refreshUsageLimits: () =>
+        transport.request((client) => client[WS_METHODS.serverRefreshUsageLimits]({})),
       updateProvider: (input) =>
         transport.request((client) => client[WS_METHODS.serverUpdateProvider](input)),
       upsertKeybinding: (input) =>
@@ -264,10 +423,24 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) =>
           client[WS_METHODS.serverGetProcessDiagnostics]({}).pipe(Effect.withTracerEnabled(false)),
         ),
+      getProcessResourceHistory: (input) =>
+        transport.request((client) =>
+          client[WS_METHODS.serverGetProcessResourceHistory](input).pipe(
+            Effect.withTracerEnabled(false),
+          ),
+        ),
       signalProcess: (input) =>
         transport.request((client) =>
           client[WS_METHODS.serverSignalProcess](input).pipe(Effect.withTracerEnabled(false)),
         ),
+      getPushConfig: () =>
+        transport.request((client) => client[WS_METHODS.serverGetPushConfig]({})),
+      registerPushSubscription: (input) =>
+        transport.request((client) => client[WS_METHODS.serverRegisterPushSubscription](input)),
+      unregisterPushSubscription: (input) =>
+        transport.request((client) => client[WS_METHODS.serverUnregisterPushSubscription](input)),
+      sendTestPushNotification: (input) =>
+        transport.request((client) => client[WS_METHODS.serverSendTestPushNotification](input)),
       subscribeConfig: (listener, options) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerConfig]({}), listener, {
           ...options,
@@ -285,12 +458,21 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         }),
     },
     orchestration: {
-      dispatchCommand: (input) =>
-        transport.request((client) => client[ORCHESTRATION_WS_METHODS.dispatchCommand](input)),
+      dispatchCommand: (input) => dispatchCommandWithConnectionRecovery(transport, input),
       getTurnDiff: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getTurnDiff](input)),
       getFullThreadDiff: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getFullThreadDiff](input)),
+      getThreadDetailPage: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.getThreadDetailPage](input)),
+      reconcileThreadDetail: (input) =>
+        transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.reconcileThreadDetail](input),
+        ),
+      probeSync: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.probeSync](input)),
+      replayEvents: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.replayEvents](input)),
       getArchivedShellSnapshot: () =>
         transport.request((client) =>
           client[ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]({}),

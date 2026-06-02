@@ -25,14 +25,17 @@ import {
   ProviderSendTurnInput,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Crypto from "effect/Crypto";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as FileSystem from "effect/FileSystem";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
@@ -55,10 +58,14 @@ import { ServerConfig } from "../../config.ts";
 import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
+  CODEX_USAGE_REFRESH_TIMEOUT,
+  makeCodexAppServerClient,
   makeCodexSessionRuntime,
+  type CodexAppServerClientHandle,
   type CodexSessionRuntimeError,
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeShape,
+  type MakeCodexAppServerClientOptions,
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError);
@@ -78,6 +85,13 @@ export interface CodexAdapterLiveOptions {
   ) => Effect.Effect<
     CodexSessionRuntimeShape,
     CodexSessionRuntimeError,
+    ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
+  >;
+  readonly makeCodexAppServerClient?: (
+    options: MakeCodexAppServerClientOptions,
+  ) => Effect.Effect<
+    CodexAppServerClientHandle,
+    CodexErrors.CodexAppServerError,
     ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
   >;
   readonly nativeEventLogPath?: string;
@@ -189,6 +203,23 @@ function normalizeCodexTokenUsage(
   };
 }
 
+function resolveCodexApprovalsReviewer(
+  modelSelection: ProviderSendTurnInput["modelSelection"] | undefined,
+  boundInstanceId: ProviderInstanceId,
+): EffectCodexSchema.V2TurnStartParams__ApprovalsReviewer | undefined {
+  if (modelSelection?.instanceId !== boundInstanceId) {
+    return undefined;
+  }
+  const autoReview = getModelSelectionBooleanOptionValue(modelSelection, "autoReview");
+  if (autoReview === true) {
+    return "auto_review";
+  }
+  if (autoReview === false) {
+    return "user";
+  }
+  return undefined;
+}
+
 function toTurnStatus(
   value: EffectCodexSchema.V2TurnCompletedNotification["turn"]["status"] | "cancelled",
 ): "completed" | "failed" | "cancelled" | "interrupted" {
@@ -279,6 +310,48 @@ function itemDetail(item: CodexLifecycleItem): string | undefined {
     return trimmed;
   }
   return undefined;
+}
+
+function imageGenerationPayloadFromItem(
+  item: unknown,
+): { readonly name: string; readonly dataUrl: string } | undefined {
+  if (!item || typeof item !== "object") {
+    return undefined;
+  }
+
+  const record = item as Record<string, unknown>;
+  if (record.type !== "imageGeneration" && record.type !== "image_generation_call") {
+    return undefined;
+  }
+
+  const result = trimText(typeof record.result === "string" ? record.result : undefined);
+  if (!result) {
+    return undefined;
+  }
+
+  const id = trimText(typeof record.id === "string" ? record.id : undefined);
+  const baseName = id ? `${id}.png` : "generated-image.png";
+  return {
+    name: baseName,
+    dataUrl: /^data:image\//i.test(result) ? result : `data:image/png;base64,${result}`,
+  };
+}
+
+function imageGeneratedRuntimeEventFromItem(
+  event: ProviderEvent,
+  canonicalThreadId: ThreadId,
+  item: unknown,
+): ProviderRuntimeEvent | undefined {
+  const generatedImage = imageGenerationPayloadFromItem(item);
+  if (!generatedImage) {
+    return undefined;
+  }
+
+  return {
+    ...runtimeEventBase(event, canonicalThreadId),
+    type: "image.generated",
+    payload: generatedImage,
+  };
 }
 
 function toRequestTypeFromMethod(method: string): CanonicalRequestType {
@@ -823,9 +896,32 @@ function mapToRuntimeEvents(
     ];
   }
 
+  if (event.method === "rawResponseItem/completed") {
+    const payload = readPayload(
+      EffectCodexSchema.V2RawResponseItemCompletedNotification,
+      event.payload,
+    );
+    const generatedEvent = imageGeneratedRuntimeEventFromItem(
+      event,
+      canonicalThreadId,
+      payload?.item,
+    );
+    if (!generatedEvent) {
+      return [];
+    }
+
+    return [generatedEvent];
+  }
+
   if (event.method === "item/started") {
+    const payload = readPayload(EffectCodexSchema.V2ItemStartedNotification, event.payload);
+    const generatedEvent = imageGeneratedRuntimeEventFromItem(
+      event,
+      canonicalThreadId,
+      payload?.item,
+    );
     const started = mapItemLifecycle(event, canonicalThreadId, "item.started");
-    return started ? [started] : [];
+    return [...(generatedEvent ? [generatedEvent] : []), ...(started ? [started] : [])];
   }
 
   if (event.method === "item/completed") {
@@ -850,8 +946,9 @@ function mapToRuntimeEvents(
         },
       ];
     }
+    const generatedEvent = imageGeneratedRuntimeEventFromItem(event, canonicalThreadId, item);
     const completed = mapItemLifecycle(event, canonicalThreadId, "item.completed");
-    return completed ? [completed] : [];
+    return [...(generatedEvent ? [generatedEvent] : []), ...(completed ? [completed] : [])];
   }
 
   if (
@@ -1349,6 +1446,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("codex");
   const fileSystem = yield* FileSystem.FileSystem;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const crypto = yield* Crypto.Crypto;
   const serverConfig = yield* Effect.service(ServerConfig);
   const nativeEventLogger =
     options?.nativeEventLogger ??
@@ -1361,6 +1459,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const sessions = new Map<ThreadId, CodexAdapterSessionContext>();
+  let accountClient:
+    | {
+        readonly scope: Scope.Scope;
+        readonly client: CodexClient.CodexAppServerClientShape;
+      }
+    | undefined;
 
   const startSession: CodexAdapterShape["startSession"] = (input) =>
     Effect.scoped(
@@ -1378,6 +1482,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           yield* Effect.suspend(() => stopSessionInternal(existing));
         }
 
+        const approvalsReviewer = resolveCodexApprovalsReviewer(
+          input.modelSelection,
+          boundInstanceId,
+        );
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
@@ -1396,6 +1504,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode") === true
             ? { serviceTier: "fast" }
             : {}),
+          ...(approvalsReviewer
+            ? {
+                approvalsReviewer:
+                  approvalsReviewer as EffectCodexSchema.V2ThreadStartParams__ApprovalsReviewer,
+              }
+            : {}),
         };
         const sessionScope = yield* Scope.make("sequential");
         let sessionScopeTransferred = false;
@@ -1406,6 +1520,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const runtime = yield* createRuntime(runtimeInput).pipe(
           Effect.provideService(Scope.Scope, sessionScope),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+          Effect.provideService(Crypto.Crypto, crypto),
           Effect.mapError(
             (cause) =>
               new ProviderAdapterProcessError({
@@ -1514,6 +1629,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       input.modelSelection?.instanceId === boundInstanceId
         ? getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode")
         : undefined;
+    const approvalsReviewer = resolveCodexApprovalsReviewer(input.modelSelection, boundInstanceId);
     return yield* session.runtime
       .sendTurn({
         ...(input.input !== undefined ? { input: input.input } : {}),
@@ -1526,6 +1642,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             }
           : {}),
         ...(fastMode === true ? { serviceTier: "fast" } : {}),
+        ...(approvalsReviewer ? { approvalsReviewer } : {}),
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })
@@ -1655,14 +1772,78 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const hasSession: CodexAdapterShape["hasSession"] = (threadId) =>
     Effect.succeed(Boolean(sessions.get(threadId) && !sessions.get(threadId)?.stopped));
 
+  const refreshUsage: NonNullable<CodexAdapterShape["refreshUsage"]> = () =>
+    Effect.forEach(
+      Array.from(sessions.values()).filter((session) => !session.stopped),
+      (session) =>
+        session.runtime.refreshUsage.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logDebug("codex.adapter.usage.refresh-failed", {
+              threadId: session.threadId,
+              cause,
+            }),
+          ),
+        ),
+      { concurrency: "unbounded", discard: true },
+    ).pipe(Effect.asVoid);
+
+  const getAccountRateLimits: NonNullable<CodexAdapterShape["getAccountRateLimits"]> = () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") {
+        return undefined;
+      }
+
+      if (!accountClient) {
+        const accountScope = yield* Scope.make("sequential");
+        const createAccountClient = options?.makeCodexAppServerClient ?? makeCodexAppServerClient;
+        const handle = yield* createAccountClient({
+          binaryPath: codexConfig.binaryPath,
+          ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+          cwd: process.cwd(),
+          ...(options?.environment ? { environment: options.environment } : {}),
+        }).pipe(
+          Effect.provideService(Scope.Scope, accountScope),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+        );
+        accountClient = {
+          scope: accountScope,
+          client: handle.client,
+        };
+      }
+
+      return yield* accountClient.client.request("account/rateLimits/read", undefined).pipe(
+        Effect.timeoutOption(CODEX_USAGE_REFRESH_TIMEOUT),
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.void,
+            onSome: (value) => Effect.succeed(value),
+          }),
+        ),
+      );
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logDebug("codex.account-rate-limits.failed", { cause }).pipe(Effect.as(undefined)),
+      ),
+    );
+
   const stopAll: CodexAdapterShape["stopAll"] = () =>
     Effect.forEach(Array.from(sessions.values()), stopSessionInternal, {
       concurrency: 1,
       discard: true,
     }).pipe(Effect.asVoid);
 
+  const closeAccountClient = Effect.gen(function* () {
+    if (!accountClient) {
+      return;
+    }
+    const current = accountClient;
+    accountClient = undefined;
+    yield* Scope.close(current.scope, Exit.void);
+  });
+
   yield* Effect.acquireRelease(Effect.void, () =>
     stopAll().pipe(
+      Effect.andThen(closeAccountClient),
       Effect.andThen(Queue.shutdown(runtimeEventQueue)),
       Effect.andThen(managedNativeEventLogger?.close() ?? Effect.void),
       Effect.ignore,
@@ -1684,6 +1865,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     stopSession,
     listSessions,
     hasSession,
+    refreshUsage,
+    getAccountRateLimits,
     stopAll,
     get streamEvents() {
       return Stream.fromQueue(runtimeEventQueue);

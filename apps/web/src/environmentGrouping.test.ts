@@ -88,12 +88,15 @@ function makeEmptyEnvironmentState(): EnvironmentState {
     threadTurnStateById: {},
     messageIdsByThreadId: {},
     messageByThreadId: {},
+    queuedTurnIdsByThreadId: {},
+    queuedTurnByThreadId: {},
     activityIdsByThreadId: {},
     activityByThreadId: {},
     proposedPlanIdsByThreadId: {},
     proposedPlanByThreadId: {},
     turnDiffIdsByThreadId: {},
     turnDiffSummaryByThreadId: {},
+    threadDetailPageInfoByThreadId: {},
     sidebarThreadSummaryById: {},
     bootstrapComplete: true,
   };
@@ -217,6 +220,7 @@ function makeFixtureState(): AppState {
       [primaryEnvId]: primaryEnvState,
       [remoteEnvId]: remoteEnvState,
     },
+    accountRateLimitsByInstanceId: {},
   };
 }
 

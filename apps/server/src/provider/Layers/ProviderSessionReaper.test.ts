@@ -173,6 +173,7 @@ describe("ProviderSessionReaper", () => {
         });
       },
       rollbackConversation: () => unsupported(),
+      refreshUsage: () => Effect.succeed({ accountRateLimits: [] }),
       streamEvents: Stream.empty,
     };
 
@@ -210,6 +211,7 @@ describe("ProviderSessionReaper", () => {
                 : Option.none(),
             ),
           getThreadDetailById: () => Effect.die("unused"),
+          getThreadDetailSnapshotById: () => Effect.die("unused"),
         }),
       ),
       Layer.provideMerge(NodeServices.layer),

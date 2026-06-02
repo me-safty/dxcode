@@ -50,7 +50,10 @@ import {
   providerErrorLabelFromInstanceHint,
   ProviderCommandReactorLive,
 } from "./ProviderCommandReactor.ts";
-import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import {
+  OrchestrationEngineService,
+  type OrchestrationEngineShape,
+} from "../Services/OrchestrationEngine.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -63,6 +66,16 @@ const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
+
+function emptyWorkingTree() {
+  return {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  };
+}
 
 const deriveServerPathsSync = (baseDir: string, devUrl: URL | undefined) =>
   Effect.runSync(deriveServerPaths(baseDir, devUrl).pipe(Effect.provide(NodeServices.layer)));
@@ -142,6 +155,8 @@ describe("ProviderCommandReactor", () => {
     readonly baseDir?: string;
     readonly threadModelSelection?: ModelSelection;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
+    readonly autoCompleteTurns?: boolean;
+    readonly startReactor?: boolean;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
     const baseDir = input?.baseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "t3code-reactor-"));
@@ -150,6 +165,8 @@ describe("ProviderCommandReactor", () => {
     createdStateDirs.add(stateDir);
     const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
     let nextSessionIndex = 1;
+    let nextTurnIndex = 1;
+    let engineRef: OrchestrationEngineShape | null = null;
     const runtimeSessions: Array<ProviderSession> = [];
     const modelSelection = input?.threadModelSelection ?? {
       instanceId: ProviderInstanceId.make("codex"),
@@ -211,10 +228,60 @@ describe("ProviderCommandReactor", () => {
       runtimeSessions.push(session);
       return Effect.succeed(session);
     });
-    const sendTurn = vi.fn((_: unknown) =>
-      Effect.succeed({
-        threadId: ThreadId.make("thread-1"),
-        turnId: asTurnId("turn-1"),
+    const sendTurn = vi.fn<ProviderServiceShape["sendTurn"]>((rawInput) =>
+      Effect.gen(function* () {
+        const threadId = rawInput.threadId;
+        const turnId = asTurnId(`turn-${nextTurnIndex++}`);
+        if (input?.autoCompleteTurns !== false && engineRef) {
+          const nowForTurn = `2026-01-01T00:00:${String(nextTurnIndex).padStart(2, "0")}.000Z`;
+          const activeRuntimeSession = runtimeSessions.find(
+            (session) => session.threadId === threadId,
+          );
+          const providerName = activeRuntimeSession?.provider ?? ProviderDriverKind.make("codex");
+          const providerInstanceId =
+            activeRuntimeSession?.providerInstanceId ?? ProviderInstanceId.make("codex");
+          const runtimeMode = activeRuntimeSession?.runtimeMode ?? "approval-required";
+          yield* engineRef
+            .dispatch({
+              type: "thread.session.set",
+              commandId: CommandId.make(`cmd-session-running-${turnId}`),
+              threadId,
+              session: {
+                threadId,
+                status: "running",
+                providerName,
+                providerInstanceId,
+                runtimeMode,
+                activeTurnId: turnId,
+                lastError: null,
+                updatedAt: nowForTurn,
+              },
+              createdAt: nowForTurn,
+            })
+            .pipe(Effect.orDie);
+          yield* engineRef
+            .dispatch({
+              type: "thread.session.set",
+              commandId: CommandId.make(`cmd-session-ready-${turnId}`),
+              threadId,
+              session: {
+                threadId,
+                status: "ready",
+                providerName,
+                providerInstanceId,
+                runtimeMode,
+                activeTurnId: null,
+                lastError: null,
+                updatedAt: nowForTurn,
+              },
+              createdAt: nowForTurn,
+            })
+            .pipe(Effect.orDie);
+        }
+        return {
+          threadId,
+          turnId,
+        };
       }),
     );
     const interruptTurn = vi.fn((_: unknown) => Effect.void);
@@ -253,11 +320,7 @@ describe("ProviderCommandReactor", () => {
         isDefaultRef: false,
         refName: "renamed-branch",
         hasWorkingTreeChanges: false,
-        workingTree: {
-          files: [],
-          insertions: 0,
-          deletions: 0,
-        },
+        workingTree: emptyWorkingTree(),
         hasUpstream: true,
         aheadCount: 0,
         behindCount: 0,
@@ -284,7 +347,7 @@ describe("ProviderCommandReactor", () => {
     const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
     const service: ProviderServiceShape = {
       startSession: startSession as ProviderServiceShape["startSession"],
-      sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
+      sendTurn,
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
@@ -314,6 +377,7 @@ describe("ProviderCommandReactor", () => {
         });
       },
       rollbackConversation: () => unsupported(),
+      refreshUsage: () => Effect.succeed({ accountRateLimits: [] }),
       get streamEvents() {
         return Stream.fromPubSub(runtimeEventPubSub);
       },
@@ -357,15 +421,20 @@ describe("ProviderCommandReactor", () => {
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
+      Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(NodeServices.layer),
     );
     runtime = ManagedRuntime.make(layer);
 
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    engineRef = engine;
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
     scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+    const startReactor = () => Effect.runPromise(reactor.start().pipe(Scope.provide(scope!)));
+    if (input?.startReactor !== false) {
+      await startReactor();
+    }
     const drain = () => Effect.runPromise(reactor.drain);
 
     await Effect.runPromise(
@@ -410,6 +479,7 @@ describe("ProviderCommandReactor", () => {
       generateThreadTitle,
       runtimeSessions,
       stateDir,
+      startReactor,
       drain,
     };
   }
@@ -451,6 +521,244 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("queues turn starts while a provider turn is running and sends them FIFO after completion", async () => {
+    const harness = await createHarness({ autoCompleteTurns: false });
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-queue-1"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-queue-1"),
+          role: "user",
+          text: "first queued turn",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-running-queue-1"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-1"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-queue-2"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-queue-2"),
+          role: "user",
+          text: "second queued turn",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+
+    await harness.drain();
+    expect(harness.sendTurn.mock.calls.length).toBe(1);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-ready-queue-1"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:02.000Z",
+        },
+        createdAt: "2026-01-01T00:00:02.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      threadId: ThreadId.make("thread-1"),
+      input: "second queued turn",
+    });
+  });
+
+  it("promotes queued turns FIFO after the current turn settles and skips cancelled turns", async () => {
+    const harness = await createHarness({ autoCompleteTurns: false });
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-running-before-persistent-queue"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-running-before-persistent-queue"),
+          role: "user",
+          text: "running turn",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-running-persistent-queue"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-running-persistent-queue"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.queue",
+        commandId: CommandId.make("cmd-persistent-queue-1"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-persistent-queue-1"),
+          role: "user",
+          text: "oldest queued turn",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.queue",
+        commandId: CommandId.make("cmd-persistent-queue-2"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-persistent-queue-2"),
+          role: "user",
+          text: "cancelled queued turn",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:02.000Z",
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.queued-turn.cancel",
+        commandId: CommandId.make("cmd-persistent-queue-cancel-2"),
+        threadId: ThreadId.make("thread-1"),
+        messageId: asMessageId("user-message-persistent-queue-2"),
+        createdAt: "2026-01-01T00:00:02.500Z",
+      }),
+    );
+
+    await harness.drain();
+    expect(harness.sendTurn.mock.calls.length).toBe(1);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-ready-persistent-queue"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:03.000Z",
+        },
+        createdAt: "2026-01-01T00:00:03.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    await harness.drain();
+    expect(harness.sendTurn.mock.calls).toHaveLength(2);
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      threadId: ThreadId.make("thread-1"),
+      input: "oldest queued turn",
+    });
+
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.queuedTurns).toEqual([]);
+    expect(thread?.messages.map((message) => message.text)).toContain("oldest queued turn");
+    expect(thread?.messages.map((message) => message.text)).not.toContain("cancelled queued turn");
+  });
+
+  it("promotes persisted queued turns on reactor startup when the thread is idle", async () => {
+    const harness = await createHarness({ startReactor: false });
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.queue",
+        commandId: CommandId.make("cmd-startup-queue"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-startup-queue"),
+          role: "user",
+          text: "queued before reactor start",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+    expect(harness.sendTurn.mock.calls).toHaveLength(0);
+
+    await harness.startReactor();
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.make("thread-1"),
+      input: "queued before reactor start",
+    });
   });
 
   it("generates a thread title on the first turn", async () => {
@@ -1547,6 +1855,7 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.interruptTurn.mock.calls.length === 1);
     expect(harness.interruptTurn.mock.calls[0]?.[0]).toEqual({
       threadId: "thread-1",
+      turnId: "turn-1",
     });
   });
 

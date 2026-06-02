@@ -5,6 +5,8 @@ import * as Layer from "effect/Layer";
 import {
   GitManagerError,
   GitCommandError,
+  type GenerateCommitMessageInput,
+  type GenerateCommitMessageResult,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
   type VcsCreateRefInput,
@@ -18,7 +20,9 @@ import {
   type GitPreparePullRequestThreadResult,
   type GitPullRequestRefInput,
   type VcsPullResult,
+  type VcsRevertUnstagedFilesInput,
   type VcsRemoveWorktreeInput,
+  type VcsStageFilesInput,
   type GitResolvePullRequestResult,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
@@ -26,6 +30,9 @@ import {
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
   type VcsStatusResult,
+  type VcsUnstageFilesInput,
+  type VcsWorkingTreeDiffInput,
+  type VcsWorkingTreeDiffResult,
 } from "@t3tools/contracts";
 
 import { GitManager, type GitRunStackedActionOptions } from "./GitManager.ts";
@@ -46,10 +53,21 @@ export interface GitWorkflowServiceShape {
   readonly invalidateRemoteStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly invalidateStatus: (cwd: string) => Effect.Effect<void, never>;
   readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
+  readonly stageFiles: (input: VcsStageFilesInput) => Effect.Effect<void, GitCommandError>;
+  readonly unstageFiles: (input: VcsUnstageFilesInput) => Effect.Effect<void, GitCommandError>;
+  readonly revertUnstagedFiles: (
+    input: VcsRevertUnstagedFilesInput,
+  ) => Effect.Effect<void, GitCommandError>;
+  readonly readWorkingTreeDiff: (
+    input: VcsWorkingTreeDiffInput,
+  ) => Effect.Effect<VcsWorkingTreeDiffResult, GitCommandError>;
   readonly runStackedAction: (
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,
   ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>;
+  readonly generateCommitMessage: (
+    input: GenerateCommitMessageInput,
+  ) => Effect.Effect<GenerateCommitMessageResult, GitManagerServiceError>;
   readonly resolvePullRequest: (
     input: GitPullRequestRefInput,
   ) => Effect.Effect<GitResolvePullRequestResult, GitManagerServiceError>;
@@ -77,7 +95,7 @@ export interface GitWorkflowServiceShape {
 export class GitWorkflowService extends Context.Service<
   GitWorkflowService,
   GitWorkflowServiceShape
->()("t3/git/GitWorkflowService") {}
+>()("salchi/git/GitWorkflowService") {}
 
 const unsupportedGitWorkflow = (operation: string, cwd: string, detail: string) =>
   new GitManagerError({
@@ -104,6 +122,8 @@ function nonRepositoryLocalStatus(): VcsStatusLocalResult {
       files: [],
       insertions: 0,
       deletions: 0,
+      staged: { files: [], insertions: 0, deletions: 0 },
+      unstaged: { files: [], insertions: 0, deletions: 0 },
     },
   };
 }
@@ -272,9 +292,29 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
       ensureGitCommand("GitWorkflowService.pullCurrentBranch", cwd).pipe(
         Effect.andThen(git.pullCurrentBranch(cwd)),
       ),
+    stageFiles: (input) =>
+      ensureGitCommand("GitWorkflowService.stageFiles", input.cwd).pipe(
+        Effect.andThen(git.stageFiles(input)),
+      ),
+    unstageFiles: (input) =>
+      ensureGitCommand("GitWorkflowService.unstageFiles", input.cwd).pipe(
+        Effect.andThen(git.unstageFiles(input)),
+      ),
+    revertUnstagedFiles: (input) =>
+      ensureGitCommand("GitWorkflowService.revertUnstagedFiles", input.cwd).pipe(
+        Effect.andThen(git.revertUnstagedFiles(input)),
+      ),
+    readWorkingTreeDiff: (input) =>
+      ensureGitCommand("GitWorkflowService.readWorkingTreeDiff", input.cwd).pipe(
+        Effect.andThen(git.readWorkingTreeDiff(input)),
+      ),
     runStackedAction: (input, options) =>
       ensureGit("GitWorkflowService.runStackedAction", input.cwd).pipe(
         Effect.andThen(gitManager.runStackedAction(input, options)),
+      ),
+    generateCommitMessage: (input) =>
+      ensureGit("GitWorkflowService.generateCommitMessage", input.cwd).pipe(
+        Effect.andThen(gitManager.generateCommitMessage(input)),
       ),
     resolvePullRequest: routeGitManager(
       "GitWorkflowService.resolvePullRequest",

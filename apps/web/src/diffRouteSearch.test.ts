@@ -1,6 +1,12 @@
+import { retainSearchParams } from "@tanstack/react-router";
 import { describe, expect, it } from "vitest";
 
-import { parseDiffRouteSearch } from "./diffRouteSearch";
+import {
+  buildClosedDiffSearch,
+  buildOpenDiffSearch,
+  type DiffRouteSearch,
+  parseDiffRouteSearch,
+} from "./diffRouteSearch";
 
 describe("parseDiffRouteSearch", () => {
   it("parses valid diff search values", () => {
@@ -60,6 +66,68 @@ describe("parseDiffRouteSearch", () => {
     });
   });
 
+  it("parses working tree diff sources", () => {
+    expect(
+      parseDiffRouteSearch({
+        diff: "1",
+        diffSource: "unstaged",
+      }),
+    ).toEqual({
+      diff: "1",
+      diffSource: "unstaged",
+    });
+
+    expect(
+      parseDiffRouteSearch({
+        diff: "1",
+        diffSource: "staged",
+      }),
+    ).toEqual({
+      diff: "1",
+      diffSource: "staged",
+    });
+  });
+
+  it("drops invalid working tree diff sources", () => {
+    const parsed = parseDiffRouteSearch({
+      diff: "1",
+      diffSource: "working-tree",
+    });
+
+    expect(parsed).toEqual({
+      diff: "1",
+    });
+  });
+
+  it("lets working tree diff source override stale turn values", () => {
+    const parsed = parseDiffRouteSearch({
+      diff: "1",
+      diffSource: "staged",
+      diffTurnId: "turn-1",
+      diffFilePath: "src/app.ts",
+    });
+
+    expect(parsed).toEqual({
+      diff: "1",
+      diffSource: "staged",
+      diffFilePath: "src/app.ts",
+    });
+  });
+
+  it("keeps file value when working tree diff source is selected", () => {
+    const parsed = parseDiffRouteSearch({
+      diff: "1",
+      diffSource: "unstaged",
+      diffFilePath: "src/app.ts",
+    });
+
+    expect(parsed).toEqual({
+      diff: "1",
+      diffSource: "unstaged",
+      diffFilePath: "src/app.ts",
+    });
+  });
+
   it("normalizes whitespace-only values", () => {
     const parsed = parseDiffRouteSearch({
       diff: "1",
@@ -69,6 +137,78 @@ describe("parseDiffRouteSearch", () => {
 
     expect(parsed).toEqual({
       diff: "1",
+    });
+  });
+});
+
+describe("buildOpenDiffSearch", () => {
+  it("opens unstaged diff while stripping stale turn and file values", () => {
+    expect(
+      buildOpenDiffSearch(
+        {
+          diff: "1",
+          diffSource: "staged",
+          diffTurnId: "turn-1",
+          diffFilePath: "src/app.ts",
+          panel: "activity",
+        },
+        { source: "unstaged" },
+      ),
+    ).toEqual({
+      diff: "1",
+      diffSource: "unstaged",
+      panel: "activity",
+    });
+  });
+
+  it("opens the generic all-turns diff without a source", () => {
+    expect(
+      buildOpenDiffSearch({
+        diff: "1",
+        diffSource: "unstaged",
+        diffTurnId: "turn-1",
+        diffFilePath: "src/app.ts",
+        panel: "activity",
+      }),
+    ).toEqual({
+      diff: "1",
+      panel: "activity",
+    });
+  });
+});
+
+describe("buildClosedDiffSearch", () => {
+  it("marks diff params as intentionally closed for search middleware", () => {
+    expect(
+      buildClosedDiffSearch({
+        diff: "1",
+        diffSource: "unstaged",
+        diffTurnId: "turn-1",
+        diffFilePath: "src/app.ts",
+        panel: "activity",
+      }),
+    ).toEqual({
+      diff: undefined,
+      diffSource: undefined,
+      diffTurnId: undefined,
+      diffFilePath: undefined,
+      panel: "activity",
+    });
+  });
+
+  it("prevents retained diff search params from reopening the panel", () => {
+    const retainDiff = retainSearchParams<DiffRouteSearch>(["diff"]);
+
+    expect(
+      retainDiff({
+        search: { diff: "1" },
+        next: (search) => buildClosedDiffSearch(search),
+      }),
+    ).toEqual({
+      diff: undefined,
+      diffSource: undefined,
+      diffTurnId: undefined,
+      diffFilePath: undefined,
     });
   });
 });

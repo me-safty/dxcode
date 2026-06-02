@@ -22,9 +22,14 @@ import {
   type VcsListRefsInput,
   type VcsListRefsResult,
   type VcsPullResult,
+  type VcsRevertUnstagedFilesInput,
   type VcsRemoveWorktreeInput,
+  type VcsStageFilesInput,
   type VcsStatusInput,
   type VcsStatusResult,
+  type VcsUnstageFilesInput,
+  type VcsWorkingTreeDiffInput,
+  type VcsWorkingTreeDiffResult,
 } from "@t3tools/contracts";
 import * as GitVcsDriverCore from "./GitVcsDriverCore.ts";
 import * as VcsDriver from "./VcsDriver.ts";
@@ -160,6 +165,20 @@ export interface GitVcsDriverShape {
   readonly status: (input: VcsStatusInput) => Effect.Effect<VcsStatusResult, GitCommandError>;
   readonly statusDetails: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
   readonly statusDetailsLocal: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
+  readonly readWorkingTreeDiff: (
+    input: VcsWorkingTreeDiffInput,
+  ) => Effect.Effect<VcsWorkingTreeDiffResult, GitCommandError>;
+  readonly stageFiles: (input: VcsStageFilesInput) => Effect.Effect<void, GitCommandError>;
+  readonly unstageFiles: (input: VcsUnstageFilesInput) => Effect.Effect<void, GitCommandError>;
+  readonly revertUnstagedFiles: (
+    input: VcsRevertUnstagedFilesInput,
+  ) => Effect.Effect<void, GitCommandError>;
+  readonly readStagedCommitContext: (
+    cwd: string,
+  ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
+  readonly readCommitPreviewContext: (
+    cwd: string,
+  ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
   readonly prepareCommitContext: (
     cwd: string,
     filePaths?: readonly string[],
@@ -217,7 +236,7 @@ export interface GitVcsDriverShape {
 }
 
 export class GitVcsDriver extends Context.Service<GitVcsDriver, GitVcsDriverShape>()(
-  "t3/vcs/GitVcsDriver",
+  "salchi/vcs/GitVcsDriver",
 ) {}
 
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
@@ -608,9 +627,9 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       const commitEnv: NodeJS.ProcessEnv = {
         ...process.env,
         GIT_INDEX_FILE: tempIndexPath,
-        GIT_AUTHOR_NAME: "T3 Code",
+        GIT_AUTHOR_NAME: "Salchi",
         GIT_AUTHOR_EMAIL: "t3code@users.noreply.github.com",
-        GIT_COMMITTER_NAME: "T3 Code",
+        GIT_COMMITTER_NAME: "Salchi",
         GIT_COMMITTER_EMAIL: "t3code@users.noreply.github.com",
       };
 

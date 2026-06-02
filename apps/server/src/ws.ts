@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -24,6 +25,8 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
+  ProjectListDirectoryEntriesError,
+  ProjectReadFileError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
@@ -33,6 +36,10 @@ import {
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
+import {
+  computeOrchestrationThreadDetailFingerprint,
+  orchestrationThreadDetailFingerprintsEqual,
+} from "@t3tools/shared/orchestrationThreadDetailFingerprint";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -40,7 +47,7 @@ import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { ServerConfig } from "./config.ts";
 import { Keybindings } from "./keybindings.ts";
-import { Open, resolveAvailableEditors } from "./open.ts";
+import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -50,6 +57,7 @@ import {
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
+import { ProviderService } from "./provider/Services/ProviderService.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
@@ -66,6 +74,7 @@ import { RepositoryIdentityResolver } from "./project/Services/RepositoryIdentit
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
+import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as SourceControlDiscoveryLayer from "./sourceControl/SourceControlDiscovery.ts";
 import { SourceControlRepositoryService } from "./sourceControl/SourceControlRepositoryService.ts";
@@ -87,10 +96,13 @@ import {
   type SessionCredentialChange,
 } from "./auth/Services/SessionCredentialService.ts";
 import { respondToAuthError } from "./auth/http.ts";
+import { WebPushService } from "./push/Services/WebPushService.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isOrchestrationGetSnapshotError = Schema.is(OrchestrationGetSnapshotError);
 const isWorkspacePathOutsideRootError = Schema.is(WorkspacePathOutsideRootError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+const THREAD_DETAIL_RECONCILE_EVENT_LIMIT = 500;
 
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
@@ -111,6 +123,113 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
     event.type === "thread.turn-diff-completed" ||
     event.type === "thread.reverted" ||
     event.type === "thread.session-set"
+  );
+}
+
+type OrderedCatchupInput =
+  | {
+      readonly kind: "caught-up";
+    }
+  | {
+      readonly kind: "event";
+      readonly event: OrchestrationEvent;
+    };
+
+interface OrderedCatchupState {
+  readonly bufferedEvents: ReadonlyArray<OrchestrationEvent>;
+  readonly caughtUp: boolean;
+  readonly emittedSequence: number;
+}
+
+function selectOrderedUniqueCatchupEvents(
+  events: ReadonlyArray<OrchestrationEvent>,
+  emittedSequence: number,
+): ReadonlyArray<OrchestrationEvent> {
+  const seenSequences = new Set<number>();
+  const orderedEvents = events
+    .filter((event) => event.sequence > emittedSequence)
+    .toSorted((left, right) => left.sequence - right.sequence);
+  const uniqueEvents: OrchestrationEvent[] = [];
+
+  for (const event of orderedEvents) {
+    if (seenSequences.has(event.sequence)) {
+      continue;
+    }
+    seenSequences.add(event.sequence);
+    uniqueEvents.push(event);
+  }
+
+  return uniqueEvents;
+}
+
+function streamOrderedCatchupEvents<E, R1, R2>(input: {
+  readonly fromSequenceExclusive: number;
+  readonly replayStream: Stream.Stream<OrchestrationEvent, E, R1>;
+  readonly liveStream: Stream.Stream<OrchestrationEvent, E, R2>;
+}): Stream.Stream<OrchestrationEvent, E, R1 | R2> {
+  const replayItems = Stream.concat(
+    input.replayStream.pipe(
+      Stream.map(
+        (event): OrderedCatchupInput => ({
+          kind: "event",
+          event,
+        }),
+      ),
+    ),
+    Stream.succeed({
+      kind: "caught-up",
+    } satisfies OrderedCatchupInput),
+  );
+  const liveItems = input.liveStream.pipe(
+    Stream.filter((event) => event.sequence > input.fromSequenceExclusive),
+    Stream.map(
+      (event): OrderedCatchupInput => ({
+        kind: "event",
+        event,
+      }),
+    ),
+  );
+
+  return Stream.merge(replayItems, liveItems).pipe(
+    Stream.mapAccum(
+      (): OrderedCatchupState => ({
+        bufferedEvents: [],
+        caughtUp: false,
+        emittedSequence: input.fromSequenceExclusive,
+      }),
+      (state, item) => {
+        if (!state.caughtUp) {
+          if (item.kind === "caught-up") {
+            const orderedEvents = selectOrderedUniqueCatchupEvents(
+              state.bufferedEvents,
+              state.emittedSequence,
+            );
+            const nextState: OrderedCatchupState = {
+              bufferedEvents: [],
+              caughtUp: true,
+              emittedSequence: orderedEvents.at(-1)?.sequence ?? state.emittedSequence,
+            };
+            return [nextState, orderedEvents] as const;
+          }
+
+          const nextState: OrderedCatchupState = {
+            ...state,
+            bufferedEvents: [...state.bufferedEvents, item.event],
+          };
+          return [nextState, [] as ReadonlyArray<OrchestrationEvent>] as const;
+        }
+
+        if (item.kind === "caught-up" || item.event.sequence <= state.emittedSequence) {
+          return [state, [] as ReadonlyArray<OrchestrationEvent>] as const;
+        }
+
+        const nextState: OrderedCatchupState = {
+          ...state,
+          emittedSequence: item.event.sequence,
+        };
+        return [nextState, [item.event]] as const;
+      },
+    ),
   );
 }
 
@@ -159,16 +278,18 @@ function toAuthAccessStreamEvent(
 const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
+      const crypto = yield* Crypto.Crypto;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
       const orchestrationEngine = yield* OrchestrationEngineService;
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
       const keybindings = yield* Keybindings;
-      const open = yield* Open;
+      const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const gitWorkflow = yield* GitWorkflowService;
       const vcsProvisioning = yield* VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
       const providerRegistry = yield* ProviderRegistry;
+      const providerService = yield* ProviderService;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const config = yield* ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents;
@@ -193,8 +314,23 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const bootstrapCredentials = yield* BootstrapCredentialService;
       const sessions = yield* SessionCredentialService;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
+      const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
+      const webPush = yield* WebPushService;
+      const toDispatchCommandError = (cause: unknown, fallbackMessage: string) =>
+        isOrchestrationDispatchCommandError(cause)
+          ? cause
+          : new OrchestrationDispatchCommandError({
+              message: cause instanceof Error ? cause.message : fallbackMessage,
+              cause,
+            });
+      const randomUUID = crypto.randomUUIDv4.pipe(
+        Effect.mapError((cause) =>
+          toDispatchCommandError(cause, "Failed to generate orchestration command identifier."),
+        ),
+      );
+      const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
       const serverCommandId = (tag: string) =>
-        CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
+        randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -210,29 +346,28 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         readonly payload: Record<string, unknown>;
         readonly tone: "info" | "error";
       }) =>
-        orchestrationEngine.dispatch({
-          type: "thread.activity.append",
+        Effect.all({
           commandId: serverCommandId("setup-script-activity"),
-          threadId: input.threadId,
-          activity: {
-            id: EventId.make(crypto.randomUUID()),
-            tone: input.tone,
-            kind: input.kind,
-            summary: input.summary,
-            payload: input.payload,
-            turnId: null,
-            createdAt: input.createdAt,
-          },
-          createdAt: input.createdAt,
-        });
-
-      const toDispatchCommandError = (cause: unknown, fallbackMessage: string) =>
-        isOrchestrationDispatchCommandError(cause)
-          ? cause
-          : new OrchestrationDispatchCommandError({
-              message: cause instanceof Error ? cause.message : fallbackMessage,
-              cause,
-            });
+          activityId: serverEventId,
+        }).pipe(
+          Effect.flatMap(({ commandId, activityId }) =>
+            orchestrationEngine.dispatch({
+              type: "thread.activity.append",
+              commandId,
+              threadId: input.threadId,
+              activity: {
+                id: activityId,
+                tone: input.tone,
+                kind: input.kind,
+                summary: input.summary,
+                payload: input.payload,
+                turnId: null,
+                createdAt: input.createdAt,
+              },
+              createdAt: input.createdAt,
+            }),
+          ),
+        );
 
       const toBootstrapDispatchCommandCauseError = (cause: Cause.Cause<unknown>) => {
         const error = Cause.squash(cause);
@@ -368,13 +503,16 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
 
           const cleanupCreatedThread = () =>
             createdThread
-              ? orchestrationEngine
-                  .dispatch({
-                    type: "thread.delete",
-                    commandId: serverCommandId("bootstrap-thread-delete"),
-                    threadId: command.threadId,
-                  })
-                  .pipe(Effect.ignoreCause({ log: true }))
+              ? serverCommandId("bootstrap-thread-delete").pipe(
+                  Effect.flatMap((commandId) =>
+                    orchestrationEngine.dispatch({
+                      type: "thread.delete",
+                      commandId,
+                      threadId: command.threadId,
+                    }),
+                  ),
+                  Effect.ignoreCause({ log: true }),
+                )
               : Effect.void;
 
           const recordSetupScriptLaunchFailure = (input: {
@@ -497,7 +635,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             if (bootstrap?.createThread) {
               yield* orchestrationEngine.dispatch({
                 type: "thread.create",
-                commandId: serverCommandId("bootstrap-thread-create"),
+                commandId: yield* serverCommandId("bootstrap-thread-create"),
                 threadId: command.threadId,
                 projectId: bootstrap.createThread.projectId,
                 title: bootstrap.createThread.title,
@@ -521,7 +659,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               targetWorktreePath = worktree.worktree.path;
               yield* orchestrationEngine.dispatch({
                 type: "thread.meta.update",
-                commandId: serverCommandId("bootstrap-thread-meta-update"),
+                commandId: yield* serverCommandId("bootstrap-thread-meta-update"),
                 threadId: command.threadId,
                 branch: worktree.worktree.refName,
                 worktreePath: targetWorktreePath,
@@ -583,7 +721,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           keybindings: keybindingsConfig.keybindings,
           issues: keybindingsConfig.issues,
           providers,
-          availableEditors: resolveAvailableEditors(),
+          availableEditors: ExternalLauncher.resolveAvailableEditors(),
           observability: {
             logsDirectoryPath: config.logsDir,
             localTracingEnabled: true,
@@ -721,6 +859,130 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.probeSync]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.probeSync,
+            projectionSnapshotQuery.getSnapshotSequence().pipe(
+              Effect.map(({ snapshotSequence }) => ({
+                clientSequence: input.clientSequence,
+                serverSequence: snapshotSequence,
+                behind: snapshotSequence > input.clientSequence,
+              })),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: "Failed to probe orchestration sync state",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.reconcileThreadDetail]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.reconcileThreadDetail,
+            Effect.gen(function* () {
+              const snapshotOption = yield* projectionSnapshotQuery
+                .getThreadDetailSnapshotById(input.threadId, input.page ?? {})
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: `Failed to load thread ${input.threadId}`,
+                        cause,
+                      }),
+                  ),
+                );
+
+              if (Option.isNone(snapshotOption)) {
+                return yield* new OrchestrationGetSnapshotError({
+                  message: `Thread ${input.threadId} was not found`,
+                  cause: input.threadId,
+                });
+              }
+
+              const snapshot = snapshotOption.value;
+              const serverSequence = snapshot.snapshotSequence;
+              const serverFingerprint = computeOrchestrationThreadDetailFingerprint(snapshot);
+              const snapshotResult = (
+                reason:
+                  | "missing-client-verification"
+                  | "unverified-client-cursor"
+                  | "fingerprint-mismatch"
+                  | "too-many-events",
+              ) => ({
+                kind: "snapshot" as const,
+                reason,
+                serverSequence,
+                serverFingerprint,
+                snapshot,
+              });
+
+              if (input.clientSequence === null) {
+                return snapshotResult("missing-client-verification");
+              }
+
+              if (
+                input.verifiedSequence !== input.clientSequence ||
+                input.verifiedFingerprint === null
+              ) {
+                return snapshotResult("unverified-client-cursor");
+              }
+
+              if (input.clientSequence >= serverSequence) {
+                if (
+                  orchestrationThreadDetailFingerprintsEqual(
+                    input.verifiedFingerprint,
+                    serverFingerprint,
+                  )
+                ) {
+                  return {
+                    kind: "current" as const,
+                    serverSequence,
+                    serverFingerprint,
+                  };
+                }
+                return snapshotResult("fingerprint-mismatch");
+              }
+
+              const replayedEvents = yield* Stream.runCollect(
+                orchestrationEngine.readEvents(
+                  clamp(input.clientSequence, {
+                    maximum: Number.MAX_SAFE_INTEGER,
+                    minimum: 0,
+                  }),
+                ),
+              ).pipe(
+                Effect.map((events) => Array.from(events)),
+                Effect.flatMap(enrichOrchestrationEvents),
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: `Failed to reconcile thread ${input.threadId}`,
+                      cause,
+                    }),
+                ),
+              );
+              const threadDetailEvents = replayedEvents.filter(
+                (event) =>
+                  event.aggregateKind === "thread" &&
+                  event.aggregateId === input.threadId &&
+                  isThreadDetailEvent(event),
+              );
+
+              if (threadDetailEvents.length > THREAD_DETAIL_RECONCILE_EVENT_LIMIT) {
+                return snapshotResult("too-many-events");
+              }
+
+              return {
+                kind: "events" as const,
+                serverSequence,
+                serverFingerprint,
+                events: threadDetailEvents,
+              };
+            }),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.subscribeShell]: (_input) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeShell,
@@ -738,19 +1000,34 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 ),
               );
 
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-                Stream.mapEffect(toShellStreamEvent),
-                Stream.flatMap((event) =>
-                  Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
+              const toShellItemStream = <E, R>(events: Stream.Stream<OrchestrationEvent, E, R>) =>
+                events.pipe(
+                  Stream.mapEffect(toShellStreamEvent),
+                  Stream.flatMap((event) =>
+                    Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
+                  ),
+                );
+              const replayStream = orchestrationEngine.readEvents(snapshot.snapshotSequence).pipe(
+                Stream.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: "Failed to replay orchestration shell events",
+                      cause,
+                    }),
                 ),
               );
+              const catchupStream = streamOrderedCatchupEvents({
+                fromSequenceExclusive: snapshot.snapshotSequence,
+                replayStream,
+                liveStream: orchestrationEngine.streamDomainEvents,
+              });
 
               return Stream.concat(
                 Stream.make({
                   kind: "snapshot" as const,
                   snapshot,
                 }),
-                liveStream,
+                toShellItemStream(catchupStream),
               );
             }),
             { "rpc.aggregate": "orchestration" },
@@ -772,12 +1049,38 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.getThreadDetailPage]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getThreadDetailPage,
+            projectionSnapshotQuery.getThreadDetailSnapshotById(input.threadId, input.page).pipe(
+              Effect.flatMap((snapshot) =>
+                Option.isSome(snapshot)
+                  ? Effect.succeed(snapshot.value)
+                  : Effect.fail(
+                      new OrchestrationGetSnapshotError({
+                        message: `Thread ${input.threadId} was not found`,
+                        cause: input.threadId,
+                      }),
+                    ),
+              ),
+              Effect.mapError((cause) =>
+                isOrchestrationGetSnapshotError(cause)
+                  ? cause
+                  : new OrchestrationGetSnapshotError({
+                      message: `Failed to load thread ${input.threadId}`,
+                      cause,
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.subscribeThread]: (input) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeThread,
             Effect.gen(function* () {
-              const [threadDetail, snapshotSequence] = yield* Effect.all([
-                projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
+              const threadDetailSnapshot = yield* projectionSnapshotQuery
+                .getThreadDetailSnapshotById(input.threadId, input.page ?? {})
+                .pipe(
                   Effect.mapError(
                     (cause) =>
                       new OrchestrationGetSnapshotError({
@@ -785,48 +1088,49 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                         cause,
                       }),
                   ),
-                ),
-                projectionSnapshotQuery.getSnapshotSequence().pipe(
-                  Effect.map(({ snapshotSequence }) => snapshotSequence),
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationGetSnapshotError({
-                        message: "Failed to load orchestration snapshot sequence",
-                        cause,
-                      }),
-                  ),
-                ),
-              ]);
+                );
 
-              if (Option.isNone(threadDetail)) {
+              if (Option.isNone(threadDetailSnapshot)) {
                 return yield* new OrchestrationGetSnapshotError({
                   message: `Thread ${input.threadId} was not found`,
                   cause: input.threadId,
                 });
               }
 
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-                Stream.filter(
-                  (event) =>
-                    event.aggregateKind === "thread" &&
-                    event.aggregateId === input.threadId &&
-                    isThreadDetailEvent(event),
+              const snapshot = threadDetailSnapshot.value;
+              const isSubscribedThreadDetailEvent = (event: OrchestrationEvent) =>
+                event.aggregateKind === "thread" &&
+                event.aggregateId === input.threadId &&
+                isThreadDetailEvent(event);
+              const toThreadItemStream = <E, R>(events: Stream.Stream<OrchestrationEvent, E, R>) =>
+                events.pipe(
+                  Stream.filter(isSubscribedThreadDetailEvent),
+                  Stream.map((event) => ({
+                    kind: "event" as const,
+                    event,
+                  })),
+                );
+              const replayStream = orchestrationEngine.readEvents(snapshot.snapshotSequence).pipe(
+                Stream.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: `Failed to replay thread ${input.threadId}`,
+                      cause,
+                    }),
                 ),
-                Stream.map((event) => ({
-                  kind: "event" as const,
-                  event,
-                })),
               );
+              const catchupStream = streamOrderedCatchupEvents({
+                fromSequenceExclusive: snapshot.snapshotSequence,
+                replayStream,
+                liveStream: orchestrationEngine.streamDomainEvents,
+              });
 
               return Stream.concat(
                 Stream.make({
                   kind: "snapshot" as const,
-                  snapshot: {
-                    snapshotSequence,
-                    thread: threadDetail.value,
-                  },
+                  snapshot,
                 }),
-                liveStream,
+                toThreadItemStream(catchupStream),
               );
             }),
             { "rpc.aggregate": "orchestration" },
@@ -844,6 +1148,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ).pipe(Effect.map((providers) => ({ providers }))),
             { "rpc.aggregate": "server" },
           ),
+        [WS_METHODS.serverRefreshUsageLimits]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverRefreshUsageLimits, providerService.refreshUsage(), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverUpdateProvider]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverUpdateProvider,
@@ -909,10 +1217,46 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.serverGetProcessDiagnostics, processDiagnostics.read, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetProcessResourceHistory]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetProcessResourceHistory,
+            processResourceMonitor.readHistory(input),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
         [WS_METHODS.serverSignalProcess]: (input) =>
           observeRpcEffect(WS_METHODS.serverSignalProcess, processDiagnostics.signal(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetPushConfig]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverGetPushConfig, webPush.getConfig, {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverRegisterPushSubscription]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverRegisterPushSubscription,
+            webPush.registerSubscription(currentSessionId, input),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
+        [WS_METHODS.serverUnregisterPushSubscription]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverUnregisterPushSubscription,
+            webPush.unregisterSubscription(currentSessionId, input),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
+        [WS_METHODS.serverSendTestPushNotification]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverSendTestPushNotification,
+            webPush.sendTestNotification(currentSessionId, input),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           observeRpcEffect(
             WS_METHODS.sourceControlLookupRepository,
@@ -953,6 +1297,36 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "workspace" },
           ),
+        [WS_METHODS.projectsListDirectoryEntries]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsListDirectoryEntries,
+            workspaceEntries.listDirectory(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProjectListDirectoryEntriesError({
+                    message: `Failed to list workspace entries: ${cause.detail}`,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsReadFile]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsReadFile,
+            workspaceFileSystem.readFile(input).pipe(
+              Effect.mapError((cause) => {
+                const message = isWorkspacePathOutsideRootError(cause)
+                  ? "Workspace file path must stay within the project root."
+                  : cause.detail;
+                return new ProjectReadFileError({
+                  message,
+                  cause,
+                });
+              }),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
         [WS_METHODS.projectsWriteFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsWriteFile,
@@ -970,7 +1344,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.shellOpenInEditor]: (input) =>
-          observeRpcEffect(WS_METHODS.shellOpenInEditor, open.openInEditor(input), {
+          observeRpcEffect(WS_METHODS.shellOpenInEditor, externalLauncher.launchEditor(input), {
             "rpc.aggregate": "workspace",
           }),
         [WS_METHODS.filesystemBrowse]: (input) =>
@@ -1001,6 +1375,44 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(
             WS_METHODS.vcsRefreshStatus,
             vcsStatusBroadcaster.refreshStatus(input.cwd),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
+        [WS_METHODS.vcsStageFiles]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsStageFiles,
+            gitWorkflow
+              .stageFiles(input)
+              .pipe(Effect.andThen(vcsStatusBroadcaster.refreshLocalStatus(input.cwd))),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
+        [WS_METHODS.vcsUnstageFiles]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsUnstageFiles,
+            gitWorkflow
+              .unstageFiles(input)
+              .pipe(Effect.andThen(vcsStatusBroadcaster.refreshLocalStatus(input.cwd))),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
+        [WS_METHODS.vcsRevertUnstagedFiles]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsRevertUnstagedFiles,
+            gitWorkflow
+              .revertUnstagedFiles(input)
+              .pipe(Effect.andThen(vcsStatusBroadcaster.refreshLocalStatus(input.cwd))),
+            {
+              "rpc.aggregate": "vcs",
+            },
+          ),
+        [WS_METHODS.vcsGetWorkingTreeDiff]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsGetWorkingTreeDiff,
+            gitWorkflow.readWorkingTreeDiff(input),
             {
               "rpc.aggregate": "vcs",
             },
@@ -1039,6 +1451,12 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 ),
             ),
             { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.gitGenerateCommitMessage]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitGenerateCommitMessage,
+            gitWorkflow.generateCommitMessage(input),
+            { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.gitResolvePullRequest]: (input) =>
           observeRpcEffect(

@@ -1,33 +1,32 @@
 import Mime from "@effect/platform-node/Mime";
+import {
+  IMAGE_EXTENSION_BY_MIME_TYPE,
+  MIME_TYPE_BY_IMAGE_EXTENSION,
+  SAFE_IMAGE_FILE_EXTENSIONS,
+  imageExtensionFromFileName as sharedImageExtensionFromFileName,
+} from "@t3tools/shared/imageMime";
 
-export const IMAGE_EXTENSION_BY_MIME_TYPE: Record<string, string> = {
-  "image/avif": ".avif",
-  "image/bmp": ".bmp",
-  "image/gif": ".gif",
-  "image/heic": ".heic",
-  "image/heif": ".heif",
-  "image/jpeg": ".jpg",
-  "image/jpg": ".jpg",
-  "image/png": ".png",
-  "image/svg+xml": ".svg",
-  "image/tiff": ".tiff",
-  "image/webp": ".webp",
-};
+export { IMAGE_EXTENSION_BY_MIME_TYPE, MIME_TYPE_BY_IMAGE_EXTENSION, SAFE_IMAGE_FILE_EXTENSIONS };
 
-export const SAFE_IMAGE_FILE_EXTENSIONS = new Set([
-  ".avif",
-  ".bmp",
-  ".gif",
-  ".heic",
-  ".heif",
-  ".ico",
-  ".jpeg",
-  ".jpg",
-  ".png",
-  ".svg",
-  ".tiff",
-  ".webp",
-]);
+export function imageExtensionFromFileName(fileName: string): string | null {
+  return sharedImageExtensionFromFileName(fileName);
+}
+
+export function imageMimeTypeFromFileName(fileName: string): string | null {
+  const extension = imageExtensionFromFileName(fileName);
+  if (!extension) {
+    return null;
+  }
+  if (Object.hasOwn(MIME_TYPE_BY_IMAGE_EXTENSION, extension)) {
+    return MIME_TYPE_BY_IMAGE_EXTENSION[extension] ?? null;
+  }
+  const inferred = Mime.getType(fileName);
+  return inferred?.startsWith("image/") ? inferred : null;
+}
+
+export function isSafeImageFileName(fileName: string): boolean {
+  return imageMimeTypeFromFileName(fileName) !== null;
+}
 
 export function parseBase64DataUrl(
   dataUrl: string,
@@ -35,10 +34,13 @@ export function parseBase64DataUrl(
   const match = /^data:([^,]+),([a-z0-9+/=\r\n ]+)$/i.exec(dataUrl.trim());
   if (!match) return null;
 
-  const headerParts = (match[1] ?? "")
-    .split(";")
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
+  const headerParts: Array<string> = [];
+  for (const part of (match[1] ?? "").split(";")) {
+    const trimmed = part.trim();
+    if (trimmed.length > 0) {
+      headerParts.push(trimmed);
+    }
+  }
   if (headerParts.length < 2) {
     return null;
   }

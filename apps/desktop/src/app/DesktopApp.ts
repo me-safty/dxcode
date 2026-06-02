@@ -1,8 +1,8 @@
 import * as Cause from "effect/Cause";
+import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 
 import * as NetService from "@t3tools/shared/Net";
@@ -25,8 +25,13 @@ import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
 const MAX_TCP_PORT = 65_535;
 const DESKTOP_BACKEND_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::"] as const;
+const DISABLED_CHROMIUM_OVERSCROLL_FEATURES = [
+  "OverscrollHistoryNavigation",
+  "TouchpadOverscrollHistoryNavigation",
+] as const;
 
-const makeDesktopRunId = Random.nextUUIDv4.pipe(
+const makeDesktopRunId = Crypto.Crypto.pipe(
+  Effect.flatMap((crypto) => crypto.randomUUIDv4),
   Effect.map((value) => value.replaceAll("-", "").slice(0, 12)),
 );
 
@@ -118,7 +123,7 @@ const handleFatalStartupError = Effect.fn("desktop.startup.handleFatalStartupErr
   const wasQuitting = yield* Ref.getAndSet(state.quitting, true);
   if (!wasQuitting) {
     yield* electronDialog.showErrorBox(
-      "T3 Code failed to start",
+      "Salchi failed to start",
       `Stage: ${stage}\n${message}${detail}`,
     );
   }
@@ -199,6 +204,13 @@ const startup = Effect.gen(function* () {
   yield* electronApp.setPath("userData", userDataPath);
   yield* logStartupInfo("runtime logging configured", { logDir: environment.logDir });
   yield* desktopSettings.load;
+
+  // Renderer history blockers run after Chromium has started the swipe affordance.
+  // Disable overscroll history navigation in Chromium before app ready.
+  yield* electronApp.appendCommandLineSwitch(
+    "disable-features",
+    DISABLED_CHROMIUM_OVERSCROLL_FEATURES.join(","),
+  );
 
   if (environment.platform === "linux") {
     yield* electronApp.appendCommandLineSwitch("class", environment.linuxWmClass);

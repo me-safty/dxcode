@@ -6,15 +6,18 @@ import {
   type ErrorComponentProps,
   useLocation,
   useNavigate,
+  useRouter,
 } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
-import { APP_DISPLAY_NAME } from "../branding";
+import { APP_BASE_NAME, APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import { BackNavigationBlocker } from "../components/BackNavigationBlocker";
 import { CommandPalette } from "../components/CommandPalette";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
+import { PwaPushNotificationPrompt } from "../components/pwa-push-notification-prompt";
 import {
   SlowRpcAckToastCoordinator,
   WebSocketConnectionCoordinator,
@@ -28,6 +31,7 @@ import {
   toastManager,
 } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
+import { isStandalonePwa } from "../env";
 import { readLocalApi } from "../localApi";
 import { useSettings } from "../hooks/useSettings";
 import {
@@ -58,10 +62,14 @@ import { configureClientTracing } from "../observability/clientTracing";
 import {
   ensurePrimaryEnvironmentReady,
   getPrimaryKnownEnvironment,
+  peekCachedAuthGateState,
+  readPrimaryEnvironmentDescriptor,
   resolveInitialServerAuthGateState,
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+import { getLastNotificationNavigationTarget } from "../push/notificationNavigation";
+import { shouldNavigateToStartupBootstrapThread } from "../startupNavigation";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -72,6 +80,7 @@ export const Route = createRootRouteWithContext<{
         authGateState: {
           status: "hosted-pairing",
         } as const,
+        authGateRevalidationRequired: false,
       };
     }
 
@@ -81,6 +90,16 @@ export const Route = createRootRouteWithContext<{
         authGateState: {
           status: "hosted-static",
         } as const,
+        authGateRevalidationRequired: false,
+      };
+    }
+
+    const cachedDescriptor = readPrimaryEnvironmentDescriptor();
+    const cachedAuthGate = peekCachedAuthGateState();
+    if (cachedDescriptor && cachedAuthGate) {
+      return {
+        authGateState: cachedAuthGate,
+        authGateRevalidationRequired: true,
       };
     }
 
@@ -90,18 +109,19 @@ export const Route = createRootRouteWithContext<{
     ]);
     return {
       authGateState,
+      authGateRevalidationRequired: false,
     };
   },
   component: RootRouteView,
   errorComponent: RootRouteErrorView,
   head: () => ({
-    meta: [{ name: "title", content: APP_DISPLAY_NAME }],
+    meta: [{ name: "title", content: APP_BASE_NAME }],
   }),
 });
 
 function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
-  const { authGateState } = Route.useRouteContext();
+  const { authGateState, authGateRevalidationRequired } = Route.useRouteContext();
   const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
 
   useEffect(() => {
@@ -132,6 +152,8 @@ function RootRouteView() {
   return (
     <ToastProvider>
       <AnchoredToastProvider>
+        <BackNavigationBlocker />
+        {authGateRevalidationRequired ? <BackgroundAuthRevalidator /> : null}
         {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />
@@ -139,6 +161,7 @@ function RootRouteView() {
         <HostedStaticEnvironmentBootstrap />
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
         {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
+        {primaryEnvironmentAuthenticated ? <PwaPushNotificationPrompt /> : null}
         {primaryEnvironmentAuthenticated ? <WebSocketConnectionCoordinator /> : null}
         {primaryEnvironmentAuthenticated ? <SlowRpcAckToastCoordinator /> : null}
         {primaryEnvironmentAuthenticated ? (
@@ -149,6 +172,34 @@ function RootRouteView() {
       </AnchoredToastProvider>
     </ToastProvider>
   );
+}
+
+function BackgroundAuthRevalidator() {
+  const router = useRouter();
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      ensurePrimaryEnvironmentReady().catch(() => null),
+      resolveInitialServerAuthGateState().catch(() => null),
+    ]).then(([, freshAuth]) => {
+      if (cancelled) {
+        return;
+      }
+      if (!freshAuth) {
+        return;
+      }
+      if (freshAuth.status !== "authenticated") {
+        void router.invalidate();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  return null;
 }
 
 function HostedStaticEnvironmentBootstrap() {
@@ -301,13 +352,14 @@ function EventRouter() {
         return;
       }
 
-      if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
+      const bootstrapProjectId = payload.bootstrapProjectId;
+      const bootstrapThreadId = payload.bootstrapThreadId;
+      if (!bootstrapProjectId || !bootstrapThreadId) {
         return;
       }
       const bootstrapEnvironmentState =
         useStore.getState().environmentStateById[payload.environment.environmentId];
-      const bootstrapProject =
-        bootstrapEnvironmentState?.projectById[payload.bootstrapProjectId] ?? null;
+      const bootstrapProject = bootstrapEnvironmentState?.projectById[bootstrapProjectId] ?? null;
       const bootstrapProjectKey =
         (bootstrapProject
           ? deriveLogicalProjectKeyFromSettings(bootstrapProject, projectGroupingSettings)
@@ -315,26 +367,29 @@ function EventRouter() {
         (serverConfig?.cwd
           ? derivePhysicalProjectKeyFromPath(payload.environment.environmentId, serverConfig.cwd)
           : null) ??
-        scopedProjectKey(
-          scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
-        );
+        scopedProjectKey(scopeProjectRef(payload.environment.environmentId, bootstrapProjectId));
       useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true);
 
-      if (readPathname() !== "/") {
-        return;
-      }
-      if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
+      if (
+        !shouldNavigateToStartupBootstrapThread({
+          pathname: readPathname(),
+          bootstrapThreadId,
+          handledBootstrapThreadId: handledBootstrapThreadIdRef.current,
+          lastNotificationNavigationTarget: getLastNotificationNavigationTarget(),
+          isStandalonePwa: isStandalonePwa(),
+        })
+      ) {
         return;
       }
       await navigate({
         to: "/$environmentId/$threadId",
         params: {
           environmentId: payload.environment.environmentId,
-          threadId: payload.bootstrapThreadId,
+          threadId: bootstrapThreadId,
         },
         replace: true,
       });
-      handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
+      handledBootstrapThreadIdRef.current = bootstrapThreadId;
     })().catch(() => undefined);
   });
 

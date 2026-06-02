@@ -1,35 +1,54 @@
 import { EnvironmentId, MessageId } from "@t3tools/contracts";
-import { createRef } from "react";
+import { createRef, type ReactNode, type Ref } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { LegendListRef } from "@legendapp/list/react";
+import type { VirtualizedListHandle } from "../virtualization/VirtualizedList";
 
-vi.mock("@legendapp/list/react", async () => {
-  const React = await import("react");
+const virtualizedListMockState = vi.hoisted(() => ({
+  latestProps: null as
+    | null
+    | (Record<string, unknown> & {
+        readonly firstItemIndex?: never;
+        readonly onStartReached?: never;
+        readonly onVisibleRangeChange?: never;
+      }),
+}));
 
-  const LegendList = React.forwardRef(function MockLegendList(
-    props: {
-      data: Array<{ id: string }>;
-      keyExtractor: (item: { id: string }) => string;
-      renderItem: (args: { item: { id: string } }) => React.ReactNode;
-      ListHeaderComponent?: React.ReactNode;
-      ListFooterComponent?: React.ReactNode;
-    },
-    _ref: React.ForwardedRef<LegendListRef>,
-  ) {
+vi.mock("../virtualization/VirtualizedList", () => {
+  const virtualizedListTestId = "virtualized-list";
+
+  const VirtualizedList = (props: {
+    data: Array<{ id: string }>;
+    keyExtractor: (item: { id: string }) => string;
+    renderItem: (args: { item: { id: string }; index: number }) => ReactNode;
+    ListHeaderComponent?: ReactNode;
+    ListFooterComponent?: ReactNode;
+    maintainVisibleContentPosition?: unknown;
+    ref?: Ref<VirtualizedListHandle>;
+    "data-testid"?: string;
+  }) => {
+    virtualizedListMockState.latestProps = props;
     return (
-      <div data-testid="legend-list">
+      <div data-testid={props["data-testid"] ?? virtualizedListTestId}>
         {props.ListHeaderComponent}
-        {props.data.map((item) => (
-          <div key={props.keyExtractor(item)}>{props.renderItem({ item })}</div>
+        {props.data.map((item, index) => (
+          <div key={props.keyExtractor(item)}>{props.renderItem({ item, index })}</div>
         ))}
         {props.ListFooterComponent}
       </div>
     );
-  });
+  };
 
-  return { LegendList };
+  return { VirtualizedList };
 });
+
+vi.mock("../ChatMarkdown", () => ({
+  default: (props: { text: string; environmentId?: EnvironmentId }) => (
+    <div data-chat-markdown-environment-id={props.environmentId ?? ""}>{props.text}</div>
+  ),
+}));
+
+import { MessagesTimeline } from "./MessagesTimeline";
 
 function matchMedia() {
   return {
@@ -72,6 +91,13 @@ beforeAll(() => {
   });
 });
 
+function getLatestVirtualizedListProps() {
+  if (!virtualizedListMockState.latestProps) {
+    throw new Error("VirtualizedList was not rendered.");
+  }
+  return virtualizedListMockState.latestProps;
+}
+
 const ACTIVE_THREAD_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const MESSAGE_CREATED_AT = "2026-03-17T19:12:28.000Z";
 
@@ -81,7 +107,7 @@ function buildProps() {
     activeTurnInProgress: false,
     activeTurnId: null,
     activeTurnStartedAt: null,
-    listRef: createRef<LegendListRef | null>(),
+    listRef: createRef<VirtualizedListHandle | null>(),
     completionDividerBeforeEntryId: null,
     completionSummary: null,
     turnDiffSummaryByAssistantMessageId: new Map(),
@@ -121,9 +147,111 @@ function buildUserTimelineEntry(text: string) {
   };
 }
 
+function buildAssistantTimelineEntry(text: string) {
+  return {
+    id: "entry-1",
+    kind: "message" as const,
+    createdAt: MESSAGE_CREATED_AT,
+    message: {
+      id: MessageId.make("message-1"),
+      role: "assistant" as const,
+      text,
+      createdAt: MESSAGE_CREATED_AT,
+      streaming: false,
+    },
+  };
+}
+
 describe("MessagesTimeline", () => {
-  it("renders collapse controls for long user messages", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
+  it("renders an older-page control when thread detail has more history", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        hasOlderThreadDetail
+        onLoadOlderThreadDetail={() => {}}
+        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
+      />,
+    );
+
+    expect(markup).toContain("Older");
+    expect(markup).toContain("lucide-chevron-up");
+    expect(markup).not.toContain('disabled=""');
+  });
+
+  it("does not pass prepend or auto-load props into the timeline virtualizer", () => {
+    renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
+      />,
+    );
+
+    expect(getLatestVirtualizedListProps().firstItemIndex).toBeUndefined();
+    expect(getLatestVirtualizedListProps().onStartReached).toBeUndefined();
+    expect(getLatestVirtualizedListProps().onVisibleRangeChange).toBeUndefined();
+    expect(getLatestVirtualizedListProps().maintainVisibleContentPosition).toEqual({
+      data: true,
+      size: true,
+    });
+  });
+
+  it("shows the older-page control as busy while loading history", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        hasOlderThreadDetail
+        isLoadingOlderThreadDetail
+        onLoadOlderThreadDetail={() => {}}
+        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
+      />,
+    );
+
+    expect(markup).toContain("Loading earlier messages...");
+    expect(markup).toContain("lucide-loader-circle");
+    expect(markup).toContain('role="status"');
+    expect(markup).not.toContain("lucide-chevron-up");
+  });
+
+  it("renders the manual older button without auto-calling the loader", () => {
+    const onLoadOlderThreadDetail = vi.fn();
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        hasOlderThreadDetail
+        onLoadOlderThreadDetail={onLoadOlderThreadDetail}
+        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
+      />,
+    );
+
+    expect(markup).toContain("Older");
+    expect(onLoadOlderThreadDetail).not.toHaveBeenCalled();
+  });
+
+  it("does not wire automatic older history loading while loading or without older history", () => {
+    renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        hasOlderThreadDetail
+        isLoadingOlderThreadDetail
+        onLoadOlderThreadDetail={() => {}}
+        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
+      />,
+    );
+    expect(getLatestVirtualizedListProps().onStartReached).toBeUndefined();
+    expect(getLatestVirtualizedListProps().onVisibleRangeChange).toBeUndefined();
+
+    renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        onLoadOlderThreadDetail={() => {}}
+        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
+      />,
+    );
+    expect(getLatestVirtualizedListProps().onStartReached).toBeUndefined();
+    expect(getLatestVirtualizedListProps().onVisibleRangeChange).toBeUndefined();
+  });
+
+  it("renders collapse controls for long user messages", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -137,8 +265,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
-  it("does not render collapse controls for short user messages", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
+  it("does not render collapse controls for short user messages", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -150,8 +277,19 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-collapsible="false"');
   });
 
-  it("renders inline terminal labels with the composer chip UI", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
+  it("passes the active environment id into assistant markdown for file previews", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        markdownCwd="/repo/project"
+        timelineEntries={[buildAssistantTimelineEntry("[index.ts](src/index.ts)")]}
+      />,
+    );
+
+    expect(markup).toContain('data-chat-markdown-environment-id="environment-local"');
+  });
+
+  it("renders inline terminal labels with the composer chip UI", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -177,8 +315,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Show full message");
   }, 20_000);
 
-  it("keeps the copy button for collapsed long user messages", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
+  it("keeps the copy button for collapsed long user messages", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -191,8 +328,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
-  it("renders context compaction entries in the normal work log", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
+  it("renders context compaction entries in the normal work log", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -216,8 +352,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Work log");
   });
 
-  it("formats changed file paths from the workspace root", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
+  it("formats changed file paths from the workspace root", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}

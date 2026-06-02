@@ -51,6 +51,8 @@ const rpcClientMock = {
   },
   projects: {
     searchEntries: vi.fn(),
+    listDirectoryEntries: vi.fn(),
+    readFile: vi.fn(),
     writeFile: vi.fn(),
   },
   filesystem: {
@@ -67,6 +69,7 @@ const rpcClientMock = {
   vcs: {
     pull: vi.fn(),
     refreshStatus: vi.fn(),
+    getWorkingTreeDiff: vi.fn(),
     onStatus: vi.fn((input: { cwd: string }, listener: (event: VcsStatusResult) => void) =>
       registerListener(gitStatusListeners, listener),
     ),
@@ -79,6 +82,7 @@ const rpcClientMock = {
   },
   git: {
     runStackedAction: vi.fn(),
+    generateCommitMessage: vi.fn(),
     resolvePullRequest: vi.fn(),
     preparePullRequestThread: vi.fn(),
   },
@@ -225,6 +229,7 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     setTheme: async () => undefined,
     showContextMenu: async () => null,
     openExternal: async () => true,
+    forceReload: async () => undefined,
     onMenuAction: () => () => undefined,
     getUpdateState: async () => {
       throw new Error("getUpdateState not implemented in test");
@@ -304,7 +309,13 @@ const baseGitStatus: VcsStatusResult = {
   isDefaultRef: false,
   refName: "feature/streamed",
   hasWorkingTreeChanges: false,
-  workingTree: { files: [], insertions: 0, deletions: 0 },
+  workingTree: {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  },
   hasUpstream: true,
   aheadCount: 0,
   behindCount: 0,
@@ -410,6 +421,25 @@ describe("wsApi", () => {
     expect(rpcClientMock.vcs.refreshStatus).toHaveBeenCalledWith({ cwd: "/repo" });
   });
 
+  it("forwards working tree diff requests directly to the RPC client", async () => {
+    rpcClientMock.vcs.getWorkingTreeDiff.mockResolvedValue({ diff: "patch" });
+    const { createEnvironmentApi } = await import("./environmentApi");
+
+    const api = createEnvironmentApi(rpcClientMock as never);
+
+    await api.vcs.getWorkingTreeDiff({
+      cwd: "/repo",
+      target: "unstaged",
+      ignoreWhitespace: true,
+    });
+
+    expect(rpcClientMock.vcs.getWorkingTreeDiff).toHaveBeenCalledWith({
+      cwd: "/repo",
+      target: "unstaged",
+      ignoreWhitespace: true,
+    });
+  });
+
   it("forwards shell stream subscription options to the RPC client", async () => {
     const { createEnvironmentApi } = await import("./environmentApi");
 
@@ -461,6 +491,27 @@ describe("wsApi", () => {
       cwd: "/tmp/project",
       relativePath: "plan.md",
       contents: "# Plan\n",
+    });
+  });
+
+  it("forwards workspace file reads to the project RPC", async () => {
+    rpcClientMock.projects.readFile.mockResolvedValue({
+      relativePath: "src/index.ts",
+      contents: "export {};\n",
+      truncated: false,
+      sizeBytes: 11,
+    });
+    const { createEnvironmentApi } = await import("./environmentApi");
+
+    const api = createEnvironmentApi(rpcClientMock as never);
+    await api.projects.readFile({
+      cwd: "/tmp/project",
+      relativePath: "src/index.ts",
+    });
+
+    expect(rpcClientMock.projects.readFile).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+      relativePath: "src/index.ts",
     });
   });
 

@@ -1,9 +1,10 @@
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
-import { PanelLeftCloseIcon, PanelLeftIcon } from "lucide-react";
+import { Loader2Icon, PanelLeftCloseIcon, PanelLeftIcon } from "lucide-react";
 import * as React from "react";
 import { cn } from "~/lib/utils";
+import { usePwaServiceWorkerUpdateStore } from "~/pwa/serviceWorkerUpdateState";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
@@ -18,13 +19,14 @@ import {
 import { Skeleton } from "~/components/ui/skeleton";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useIsMobile } from "~/hooks/useMediaQuery";
+import { useMobileEdgeSwipe } from "~/hooks/useMobileEdgeSwipe";
 import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
 import * as Schema from "effect/Schema";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
-const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
+const SIDEBAR_WIDTH_MOBILE = "min(24rem, 88vw)";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
 
@@ -77,7 +79,7 @@ const SidebarContext = React.createContext<SidebarContextProps | null>(null);
 const SidebarInstanceContext = React.createContext<SidebarInstanceContextProps | null>(null);
 
 function useSidebar() {
-  const context = React.useContext(SidebarContext);
+  const context = React.use(SidebarContext);
   if (!context) {
     throw new Error("useSidebar must be used within a SidebarProvider.");
   }
@@ -130,6 +132,24 @@ function SidebarProvider({
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
   }, [isMobile, setOpen]);
 
+  useMobileEdgeSwipe({
+    blockedByOpenPanelSide: "right",
+    enabled: isMobile && !openMobile,
+    onSwipe: () => setOpenMobile(true),
+    side: "left",
+    startArea: "screen",
+    startSurface: "outside-panels",
+  });
+
+  useMobileEdgeSwipe({
+    action: "close",
+    enabled: isMobile && openMobile,
+    onSwipe: () => setOpenMobile(false),
+    side: "left",
+    startArea: "screen",
+    startSurface: "panel",
+  });
+
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
   const state = open ? "expanded" : "collapsed";
@@ -148,7 +168,7 @@ function SidebarProvider({
   );
 
   return (
-    <SidebarContext.Provider value={contextValue}>
+    <SidebarContext value={contextValue}>
       <div
         className={cn(
           "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
@@ -166,7 +186,7 @@ function SidebarProvider({
       >
         {children}
       </div>
-    </SidebarContext.Provider>
+    </SidebarContext>
   );
 }
 
@@ -206,7 +226,7 @@ function Sidebar({
 
   if (collapsible === "none") {
     return (
-      <SidebarInstanceContext.Provider value={instanceContextValue}>
+      <SidebarInstanceContext value={instanceContextValue}>
         <div
           className={cn(
             "flex h-full w-(--sidebar-width) flex-col bg-sidebar text-sidebar-foreground",
@@ -217,15 +237,16 @@ function Sidebar({
         >
           {children}
         </div>
-      </SidebarInstanceContext.Provider>
+      </SidebarInstanceContext>
     );
   }
 
   if (isMobile) {
     return (
-      <SidebarInstanceContext.Provider value={instanceContextValue}>
-        <Sheet onOpenChange={setOpenMobile} open={openMobile} {...props}>
+      <SidebarInstanceContext value={instanceContextValue}>
+        <Sheet modal={false} onOpenChange={setOpenMobile} open={openMobile} {...props}>
           <SheetPopup
+            allowOutsidePointerEvents
             className={cn(
               "w-(--sidebar-width) max-w-none bg-sidebar p-0 text-sidebar-foreground",
               className,
@@ -234,6 +255,7 @@ function Sidebar({
             data-sidebar="sidebar"
             data-slot="sidebar"
             showCloseButton={false}
+            showBackdrop={false}
             side={side}
             style={
               {
@@ -255,12 +277,12 @@ function Sidebar({
             </div>
           </SheetPopup>
         </Sheet>
-      </SidebarInstanceContext.Provider>
+      </SidebarInstanceContext>
     );
   }
 
   return (
-    <SidebarInstanceContext.Provider value={instanceContextValue}>
+    <SidebarInstanceContext value={instanceContextValue}>
       <div
         className="group peer hidden text-sidebar-foreground md:block"
         data-collapsible={state === "collapsed" ? collapsible : ""}
@@ -305,16 +327,20 @@ function Sidebar({
           </div>
         </div>
       </div>
-    </SidebarInstanceContext.Provider>
+    </SidebarInstanceContext>
   );
 }
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
   const { toggleSidebar, openMobile } = useSidebar();
+  const updateStatus = usePwaServiceWorkerUpdateStore((state) => state.status);
+  const isCheckingForUpdate = usePwaServiceWorkerUpdateStore((state) => state.isCheckingForUpdate);
+  const updateAvailable = updateStatus === "ready";
+  const showCheckingIndicator = isCheckingForUpdate && !updateAvailable;
 
   return (
     <Button
-      className={cn("size-7", className)}
+      className={cn("relative size-7", className)}
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
       onClick={(event) => {
@@ -326,7 +352,19 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       {...props}
     >
       {openMobile ? <PanelLeftCloseIcon /> : <PanelLeftIcon />}
-      <span className="sr-only">Toggle Sidebar</span>
+      {updateAvailable && (
+        <span
+          aria-hidden
+          className="absolute right-0.5 top-0.5 size-2 rounded-full bg-blue-500 ring-2 ring-background dark:bg-blue-400"
+        />
+      )}
+      {showCheckingIndicator && (
+        <Loader2Icon
+          aria-hidden
+          className="absolute right-0 top-0 size-2.5 animate-spin text-muted-foreground"
+        />
+      )}
+      <span className="sr-only">Toggle Sidebar{updateAvailable ? " (update available)" : ""}</span>
     </Button>
   );
 }
@@ -345,7 +383,7 @@ function SidebarRail({
   ...props
 }: React.ComponentProps<"button">) {
   const { open, toggleSidebar } = useSidebar();
-  const sidebarInstance = React.useContext(SidebarInstanceContext);
+  const sidebarInstance = React.use(SidebarInstanceContext);
   const railRef = React.useRef<HTMLButtonElement | null>(null);
   const suppressClickRef = React.useRef(false);
   const resizeStateRef = React.useRef<{
@@ -688,7 +726,7 @@ function SidebarGroup({ className, ...props }: React.ComponentProps<"div">) {
 function SidebarGroupLabel({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn(
-      "flex h-8 shrink-0 items-center rounded-lg px-2 font-medium text-sidebar-foreground text-xs outline-hidden ring-ring transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+      "flex h-8 shrink-0 items-center rounded-lg px-2 font-medium text-sidebar-foreground text-[13px] outline-hidden ring-ring transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 md:text-xs [&>svg]:size-4 [&>svg]:shrink-0",
       "group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0",
       className,
     ),
@@ -767,7 +805,7 @@ const sidebarMenuButtonVariants = cva(
       size: {
         default: "h-8 text-sm",
         lg: "h-12 text-sm group-data-[collapsible=icon]:p-0!",
-        sm: "h-7 text-xs",
+        sm: "h-7 text-[13px] md:text-xs",
       },
       variant: {
         default: "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -889,7 +927,7 @@ function SidebarMenuSkeleton({
 }: React.ComponentProps<"div"> & {
   showIcon?: boolean;
 }) {
-  // Random width between 50 to 90%.
+  // Random width between 50 to 90%. Intentionally wrapped in useMemo to avoid changing width on every render.
   const width = React.useMemo(() => {
     return `${Math.floor(Math.random() * 40) + 50}%`;
   }, []);
@@ -955,7 +993,7 @@ function SidebarMenuSubButton({
     className: cn(
       "-translate-x-px flex h-7 min-w-0 cursor-pointer items-center gap-2 overflow-hidden rounded-lg px-2 text-sidebar-foreground outline-hidden ring-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
       "data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground",
-      size === "sm" && "text-xs",
+      size === "sm" && "text-[13px] md:text-xs",
       size === "md" && "text-sm",
       "group-data-[collapsible=icon]:hidden",
       className,

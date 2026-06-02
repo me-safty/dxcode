@@ -1,4 +1,9 @@
-import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ProviderOptionSelection,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import { EnvironmentId } from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { page, userEvent } from "vitest/browser";
@@ -253,8 +258,10 @@ async function mountPicker(props: {
   lockedProvider: ProviderDriverKind | null;
   lockedContinuationGroupKey?: string | null;
   providers?: ReadonlyArray<ServerProvider>;
+  modelOptionSelections?: ReadonlyArray<ProviderOptionSelection> | null;
   settings?: UnifiedSettings;
   triggerVariant?: "ghost" | "outline";
+  compact?: boolean;
 }) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -276,7 +283,9 @@ async function mountPicker(props: {
       lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
       instanceEntries={instanceEntries}
       modelOptionsByInstance={modelOptionsByInstance}
+      modelOptionSelections={props.modelOptionSelections}
       triggerVariant={props.triggerVariant}
+      {...(props.compact ? { compact: true } : {})}
       onInstanceModelChange={onInstanceModelChange}
     />,
     { container: host },
@@ -618,10 +627,58 @@ describe("ProviderModelPicker", () => {
       expect(trigger).not.toBeNull();
       const label = trigger?.textContent ?? "";
       expect(label).not.toContain("gpt-5-codex");
-      expect(label).toContain("Claude Opus 4.6");
+      // The trigger drops the company prefix ("Claude") from the selected model.
+      expect(label).not.toContain("Claude");
+      expect(label).toContain("Opus 4.6");
     } finally {
       await screen.unmount();
       host.remove();
+    }
+  });
+
+  it("shows the selected reasoning level after the trigger model name", async () => {
+    const mounted = await mountPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      modelOptionSelections: [{ id: "reasoningEffort", value: "high" }],
+    });
+
+    try {
+      const trigger = document.querySelector<HTMLElement>(
+        '[data-chat-provider-model-picker="true"]',
+      );
+      expect(trigger).not.toBeNull();
+      const label = trigger?.textContent ?? "";
+      // The trigger drops the "GPT-" company prefix from the selected model.
+      expect(label).not.toContain("GPT-5 Codex");
+      expect(label).toContain("5 Codex");
+      expect(label).toContain("high");
+      expect(label.indexOf("high")).toBeGreaterThan(label.indexOf("5 Codex"));
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("omits the reasoning level from the compact trigger (it has its own picker)", async () => {
+    const mounted = await mountPicker({
+      activeInstanceId: CODEX_INSTANCE_ID,
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      modelOptionSelections: [{ id: "reasoningEffort", value: "high" }],
+      compact: true,
+    });
+
+    try {
+      const trigger = document.querySelector<HTMLElement>(
+        '[data-chat-provider-model-picker="true"]',
+      );
+      expect(trigger).not.toBeNull();
+      const label = trigger?.textContent ?? "";
+      expect(label).toContain("5 Codex");
+      expect(label).not.toContain("high");
+    } finally {
+      await mounted.cleanup();
     }
   });
 

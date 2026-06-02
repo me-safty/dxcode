@@ -26,6 +26,16 @@ vi.mock("../environments/runtime/service", () => ({
   },
 }));
 
+function createDeferredPromise<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function registerListener<T>(listeners: Set<(event: T) => void>, listener: (event: T) => void) {
   listeners.add(listener);
   return () => {
@@ -38,6 +48,13 @@ const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const OTHER_ENVIRONMENT_ID = EnvironmentId.make("environment-remote");
 const TARGET = { environmentId: ENVIRONMENT_ID, cwd: "/repo" } as const;
 const FRESH_TARGET = { environmentId: ENVIRONMENT_ID, cwd: "/fresh" } as const;
+const emptyWorkingTree: VcsStatusResult["workingTree"] = {
+  files: [],
+  insertions: 0,
+  deletions: 0,
+  staged: { files: [], insertions: 0, deletions: 0 },
+  unstaged: { files: [], insertions: 0, deletions: 0 },
+};
 
 const BASE_STATUS: VcsStatusResult = {
   isRepo: true,
@@ -45,7 +62,7 @@ const BASE_STATUS: VcsStatusResult = {
   isDefaultRef: false,
   refName: "feature/push-status",
   hasWorkingTreeChanges: false,
-  workingTree: { files: [], insertions: 0, deletions: 0 },
+  workingTree: emptyWorkingTree,
   hasUpstream: true,
   aheadCount: 0,
   behindCount: 0,
@@ -84,6 +101,13 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
     },
     projects: {
       searchEntries: vi.fn(async () => []),
+      listDirectoryEntries: vi.fn(async () => ({ entries: [], truncated: false })),
+      readFile: vi.fn(async () => ({
+        contents: "",
+        relativePath: "README.md",
+        sizeBytes: 0,
+        truncated: false,
+      })),
       writeFile: vi.fn(async () => undefined),
     },
     shell: {
@@ -107,6 +131,7 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
     },
     git: {
       runStackedAction: vi.fn(async () => ({}) as any),
+      generateCommitMessage: vi.fn(async () => ({}) as any),
       resolvePullRequest: vi.fn(async () => undefined),
       preparePullRequestThread: vi.fn(async () => undefined),
     },
@@ -217,17 +242,50 @@ describe("gitStatusState", () => {
     const release = watchGitStatus(TARGET, gitClient);
 
     emitGitStatus(BASE_STATUS);
-    const refreshed = await refreshGitStatus(TARGET, gitClient);
+    const refreshed = await refreshGitStatus(TARGET, { client: gitClient });
 
     expect(gitClient.onStatus).toHaveBeenCalledOnce();
     expect(gitClient.refreshStatus).toHaveBeenCalledWith({ cwd: "/repo" });
     expect(refreshed).toEqual({ ...BASE_STATUS, refName: "/repo-refreshed" });
+    // The unary result is written straight to the atom rather than waiting for
+    // the onStatus broadcast.
     expect(getGitStatusSnapshot(TARGET)).toEqual({
-      data: BASE_STATUS,
+      data: { ...BASE_STATUS, refName: "/repo-refreshed" },
       error: null,
       cause: null,
       isPending: false,
     });
+
+    release();
+  });
+
+  it("does not let a stale refresh clobber a newer one", async () => {
+    const release = watchGitStatus(TARGET, gitClient);
+    emitGitStatus(BASE_STATUS);
+
+    const deferredFirst = createDeferredPromise<VcsStatusResult>();
+    const deferredSecond = createDeferredPromise<VcsStatusResult>();
+    const slowClient = {
+      onStatus: gitClient.onStatus,
+      refreshStatus: vi
+        .fn<(input: { cwd: string }) => Promise<VcsStatusResult>>()
+        .mockReturnValueOnce(deferredFirst.promise)
+        .mockReturnValueOnce(deferredSecond.promise),
+    };
+
+    // Two forced refreshes in flight; the second is the newest request.
+    const firstPromise = refreshGitStatus(TARGET, { client: slowClient, force: true });
+    const secondPromise = refreshGitStatus(TARGET, { client: slowClient, force: true });
+
+    const newest: VcsStatusResult = { ...BASE_STATUS, refName: "newest" };
+    const stale: VcsStatusResult = { ...BASE_STATUS, refName: "stale" };
+    // Resolve the newest first, then the stale one resolves later.
+    deferredSecond.resolve(newest);
+    await secondPromise;
+    deferredFirst.resolve(stale);
+    await firstPromise;
+
+    expect(getGitStatusSnapshot(TARGET).data).toEqual(newest);
 
     release();
   });

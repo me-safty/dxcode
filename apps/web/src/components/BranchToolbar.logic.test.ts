@@ -5,12 +5,14 @@ import {
   deriveLocalBranchNameFromRemoteRef,
   resolveEnvironmentOptionLabel,
   resolveBranchSelectionTarget,
+  resolveBranchSelectorDisabled,
   resolveCurrentWorkspaceLabel,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
   resolveEnvModeLabel,
   resolveBranchToolbarValue,
   resolveLockedWorkspaceLabel,
+  shouldLoadBranchSearchRefs,
   shouldIncludeBranchPickerItem,
 } from "./BranchToolbar.logic";
 
@@ -81,6 +83,32 @@ describe("resolveBranchToolbarValue", () => {
         currentGitBranch: "main",
       }),
     ).toBe("main");
+  });
+});
+
+describe("shouldLoadBranchSearchRefs", () => {
+  it("does not load refs while the branch menu is closed", () => {
+    expect(
+      shouldLoadBranchSearchRefs({
+        branchCwd: "/repo",
+        isBranchMenuOpen: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("loads refs only when a cwd is available and the menu is open", () => {
+    expect(
+      shouldLoadBranchSearchRefs({
+        branchCwd: "/repo",
+        isBranchMenuOpen: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldLoadBranchSearchRefs({
+        branchCwd: null,
+        isBranchMenuOpen: true,
+      }),
+    ).toBe(false);
   });
 });
 
@@ -288,6 +316,41 @@ describe("dedupeRemoteBranchesWithLocalMatches", () => {
       "upstream/feature",
       "my-org/upstream/feature",
     ]);
+  });
+});
+
+describe("resolveBranchSelectorDisabled", () => {
+  it("does not disable while the lazy ref search is still closed", () => {
+    expect(
+      resolveBranchSelectorDisabled({
+        isBranchActionPending: false,
+        isBranchSearchEnabled: false,
+        isBranchesSearchPending: true,
+        refCount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("disables during the first enabled ref search", () => {
+    expect(
+      resolveBranchSelectorDisabled({
+        isBranchActionPending: false,
+        isBranchSearchEnabled: true,
+        isBranchesSearchPending: true,
+        refCount: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it("disables while a branch action is pending", () => {
+    expect(
+      resolveBranchSelectorDisabled({
+        isBranchActionPending: true,
+        isBranchSearchEnabled: false,
+        isBranchesSearchPending: false,
+        refCount: 3,
+      }),
+    ).toBe(true);
   });
 });
 

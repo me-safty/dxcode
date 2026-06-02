@@ -1,6 +1,5 @@
-import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
 import { CheckIcon, CopyIcon } from "lucide-react";
-import type { ServerProviderSkill } from "@t3tools/contracts";
+import type { EnvironmentId, ServerProviderSkill } from "@t3tools/contracts";
 import React, {
   Children,
   Suspense,
@@ -23,10 +22,7 @@ import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { openInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
-import { fnv1a32 } from "../lib/diffRendering";
-import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import {
   normalizeMarkdownLinkDestination,
@@ -34,7 +30,26 @@ import {
   rewriteMarkdownFileUriHref,
 } from "../markdown-links";
 import { readLocalApi } from "../localApi";
+import { MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE } from "../hooks/useMobileEdgeSwipe";
 import { cn } from "../lib/utils";
+import { openPathInPreferredEditorOrFilePreview } from "../workspaceFilePreview";
+import { resolveWorkspaceFilePreviewTarget } from "../workspaceFilePreview";
+import { resolveEnvironmentHttpUrl } from "../environments/runtime";
+import {
+  isWorkspaceImagePreviewPath,
+  resolveWorkspaceImagePreviewUrl,
+} from "../workspaceImagePreview";
+import {
+  createCodeHighlightCacheKey,
+  getCachedHighlightedCodeHtml,
+  getCodeHighlighterPromise,
+  highlightCodeToHtml,
+  resolveCodeHighlightLanguageFromFenceClass,
+  setCachedHighlightedCodeHtml,
+} from "../codeHighlighting";
+import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
+
+const CHAT_MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -60,27 +75,13 @@ class CodeHighlightErrorBoundary extends React.Component<
 interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
+  environmentId?: EnvironmentId | undefined;
   isStreaming?: boolean;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
-
-const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
-const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
-const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
-const highlightedCodeCache = new LRUCache<string>(
-  MAX_HIGHLIGHT_CACHE_ENTRIES,
-  MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
-);
-const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
-
-function extractFenceLanguage(className: string | undefined): string {
-  const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
-  const raw = match?.[1] ?? "text";
-  // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
-  return raw === "gitignore" ? "ini" : raw;
-}
 
 function nodeToPlainText(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") {
@@ -95,6 +96,20 @@ function nodeToPlainText(node: ReactNode): string {
   return "";
 }
 
+// Inline code (and the inner `<code>` of fenced blocks) renders through here so
+// a horizontal drag scrolls/selects the snippet instead of moving a panel.
+function MarkdownInlineCode({
+  children,
+  node: _node,
+  ...props
+}: React.ComponentProps<"code"> & { node?: unknown }): React.ReactElement {
+  return (
+    <code {...props} {...{ [MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE]: "true" }}>
+      {children}
+    </code>
+  );
+}
+
 function extractCodeBlock(
   children: ReactNode,
 ): { className: string | undefined; code: string } | null {
@@ -106,7 +121,7 @@ function extractCodeBlock(
   const onlyChild = childNodes[0];
   if (
     !isValidElement<{ className?: string; children?: ReactNode }>(onlyChild) ||
-    onlyChild.type !== "code"
+    (onlyChild.type !== "code" && onlyChild.type !== MarkdownInlineCode)
   ) {
     return null;
   }
@@ -115,35 +130,6 @@ function extractCodeBlock(
     className: onlyChild.props.className,
     code: nodeToPlainText(onlyChild.props.children),
   };
-}
-
-function createHighlightCacheKey(code: string, language: string, themeName: DiffThemeName): string {
-  return `${fnv1a32(code).toString(36)}:${code.length}:${language}:${themeName}`;
-}
-
-function estimateHighlightedSize(html: string, code: string): number {
-  return Math.max(html.length * 2, code.length * 3);
-}
-
-function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
-  const cached = highlighterPromiseCache.get(language);
-  if (cached) return cached;
-
-  const promise = getSharedHighlighter({
-    themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
-    langs: [language as SupportedLanguages],
-    preferredHighlighter: "shiki-js",
-  }).catch((err) => {
-    highlighterPromiseCache.delete(language);
-    if (language === "text") {
-      // "text" itself failed — Shiki cannot initialize at all, surface the error
-      throw err;
-    }
-    // Language not supported by Shiki — fall back to "text"
-    return getHighlighterPromise("text");
-  });
-  highlighterPromiseCache.set(language, promise);
-  return promise;
 }
 
 function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
@@ -179,7 +165,10 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
   );
 
   return (
-    <div className="chat-markdown-codeblock leading-snug">
+    <div
+      className="chat-markdown-codeblock leading-snug"
+      {...{ [MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE]: "true" }}
+    >
       <button
         type="button"
         className="chat-markdown-copy-button"
@@ -190,6 +179,40 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
         {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
       </button>
       {children}
+    </div>
+  );
+}
+
+export function splitCodeBlockLinesForStableFallback(code: string): readonly string[] {
+  return code.split("\n");
+}
+
+export function StableCodeBlockFallback({
+  code,
+  themeName,
+}: {
+  readonly code: string;
+  readonly themeName: DiffThemeName;
+}) {
+  const lines = splitCodeBlockLinesForStableFallback(code);
+  let nextLineStartOffset = 0;
+
+  return (
+    <div className="chat-markdown-shiki chat-markdown-shiki-fallback">
+      <pre className={`shiki ${themeName}`} tabIndex={0} data-code-highlight-state="fallback">
+        <code>
+          {lines.map((line, index) => {
+            const lineStartOffset = nextLineStartOffset;
+            nextLineStartOffset += line.length + 1;
+            return (
+              <React.Fragment key={`${lineStartOffset}:${line}`}>
+                <span className="line">{line}</span>
+                {index < lines.length - 1 ? "\n" : null}
+              </React.Fragment>
+            );
+          })}
+        </code>
+      </pre>
     </div>
   );
 }
@@ -207,14 +230,15 @@ function SuspenseShikiCodeBlock({
   themeName,
   isStreaming,
 }: SuspenseShikiCodeBlockProps) {
-  const language = extractFenceLanguage(className);
-  const cacheKey = createHighlightCacheKey(code, language, themeName);
-  const cachedHighlightedHtml = !isStreaming ? highlightedCodeCache.get(cacheKey) : null;
+  const language = resolveCodeHighlightLanguageFromFenceClass(className);
+  const cacheKey = createCodeHighlightCacheKey(code, language, themeName, "chat-markdown");
+  const cachedHighlightedHtml = !isStreaming ? getCachedHighlightedCodeHtml(cacheKey) : null;
 
   if (cachedHighlightedHtml != null) {
     return (
       <div
         className="chat-markdown-shiki"
+        data-code-highlight-state="highlighted"
         dangerouslySetInnerHTML={{ __html: cachedHighlightedHtml }}
       />
     );
@@ -246,33 +270,23 @@ function UncachedShikiCodeBlock({
   cacheKey,
   isStreaming,
 }: UncachedShikiCodeBlockProps) {
-  const highlighter = use(getHighlighterPromise(language));
+  const highlighter = use(getCodeHighlighterPromise(language));
   const highlightedHtml = useMemo(() => {
-    try {
-      return highlighter.codeToHtml(code, { lang: language, theme: themeName });
-    } catch (error) {
-      // Log highlighting failures for debugging while falling back to plain text
-      console.warn(
-        `Code highlighting failed for language "${language}", falling back to plain text.`,
-        error instanceof Error ? error.message : error,
-      );
-      // If highlighting fails for this language, render as plain text
-      return highlighter.codeToHtml(code, { lang: "text", theme: themeName });
-    }
+    return highlightCodeToHtml({ highlighter, code, language, themeName });
   }, [code, highlighter, language, themeName]);
 
   useEffect(() => {
     if (!isStreaming) {
-      highlightedCodeCache.set(
-        cacheKey,
-        highlightedHtml,
-        estimateHighlightedSize(highlightedHtml, code),
-      );
+      setCachedHighlightedCodeHtml(cacheKey, highlightedHtml, code);
     }
   }, [cacheKey, code, highlightedHtml, isStreaming]);
 
   return (
-    <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+    <div
+      className="chat-markdown-shiki"
+      data-code-highlight-state="highlighted"
+      dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+    />
   );
 }
 
@@ -283,6 +297,8 @@ interface MarkdownFileLinkProps {
   filePath: string;
   label: string;
   theme: "light" | "dark";
+  cwd?: string | undefined;
+  environmentId?: EnvironmentId | undefined;
   className?: string | undefined;
 }
 
@@ -291,6 +307,7 @@ const MARKDOWN_FILE_LINK_CLASS_NAME =
   "chat-markdown-file-link relative top-[2px] max-w-full no-underline";
 const MARKDOWN_FILE_LINK_ICON_CLASS_NAME = "chat-markdown-file-link-icon size-3.5 shrink-0";
 const MARKDOWN_FILE_LINK_LABEL_CLASS_NAME = "chat-markdown-file-link-label truncate";
+const MARKDOWN_ATTACHMENTS_ROUTE_PREFIX = "/attachments/";
 
 function pathParentSegments(path: string): string[] {
   const normalized = path.replaceAll("\\", "/");
@@ -367,6 +384,78 @@ function normalizeMarkdownLinkHrefKey(href: string): string {
   return rewriteMarkdownFileUriHref(normalizedHref) ?? normalizedHref;
 }
 
+function basenameFromPath(path: string): string {
+  const normalizedPath = path.replaceAll("\\", "/");
+  const separatorIndex = normalizedPath.lastIndexOf("/");
+  return separatorIndex >= 0 ? normalizedPath.slice(separatorIndex + 1) : normalizedPath;
+}
+
+function resolveEnvironmentPathUrl(input: {
+  environmentId: EnvironmentId | undefined;
+  pathname: string;
+  searchParams?: Record<string, string>;
+}): string | null {
+  if (!input.environmentId) {
+    return null;
+  }
+  try {
+    return resolveEnvironmentHttpUrl({
+      environmentId: input.environmentId,
+      pathname: input.pathname,
+      ...(input.searchParams ? { searchParams: input.searchParams } : {}),
+    });
+  } catch {
+    return null;
+  }
+}
+
+function resolveMarkdownImagePreview(input: {
+  src: string | undefined;
+  alt: string | undefined;
+  cwd: string | undefined;
+  environmentId: EnvironmentId | undefined;
+}): { src: string; name: string } | null {
+  if (!input.src) {
+    return null;
+  }
+
+  const href = normalizeMarkdownLinkHrefKey(input.src);
+  if (href.startsWith(MARKDOWN_ATTACHMENTS_ROUTE_PREFIX)) {
+    const resolvedSrc = resolveEnvironmentPathUrl({
+      environmentId: input.environmentId,
+      pathname: href,
+    });
+    return resolvedSrc ? { src: resolvedSrc, name: input.alt || basenameFromPath(href) } : null;
+  }
+
+  const fileLinkMeta = resolveMarkdownFileLinkMeta(href, input.cwd);
+  if (!fileLinkMeta || !input.cwd || !input.environmentId) {
+    return null;
+  }
+  if (!isWorkspaceImagePreviewPath(fileLinkMeta.filePath)) {
+    return null;
+  }
+
+  const previewTarget = resolveWorkspaceFilePreviewTarget({
+    environmentId: input.environmentId,
+    cwd: input.cwd,
+    targetPath: fileLinkMeta.targetPath,
+    displayPath: fileLinkMeta.displayPath,
+  });
+  if (!previewTarget) {
+    return null;
+  }
+
+  const resolvedSrc = resolveWorkspaceImagePreviewUrl({
+    environmentId: previewTarget.environmentId,
+    cwd: previewTarget.cwd,
+    relativePath: previewTarget.relativePath,
+  });
+  return resolvedSrc
+    ? { src: resolvedSrc, name: input.alt || fileLinkMeta.basename || previewTarget.displayPath }
+    : null;
+}
+
 const MarkdownFileLink = memo(function MarkdownFileLink({
   href,
   targetPath,
@@ -374,19 +463,17 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   filePath,
   label,
   theme,
+  cwd,
+  environmentId,
   className,
 }: MarkdownFileLinkProps) {
   const handleOpen = useCallback(() => {
-    const api = readLocalApi();
-    if (!api) {
-      toastManager.add({
-        type: "error",
-        title: "Open in editor is unavailable",
-      });
-      return;
-    }
-
-    void openInPreferredEditor(api, targetPath).catch((error) => {
+    void openPathInPreferredEditorOrFilePreview({
+      targetPath,
+      cwd,
+      environmentId,
+      displayPath,
+    }).catch((error) => {
       toastManager.add(
         stackedThreadToast({
           type: "error",
@@ -395,7 +482,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         }),
       );
     });
-  }, [targetPath]);
+  }, [cwd, displayPath, environmentId, targetPath]);
 
   const handleCopy = useCallback((value: string, title: string) => {
     if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
@@ -439,7 +526,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
 
       const clicked = await api.contextMenu.show(
         [
-          { id: "open", label: "Open in editor" },
+          { id: "open", label: "Open file" },
           { id: "copy-relative", label: "Copy relative path" },
           { id: "copy-full", label: "Copy full path" },
         ] as const,
@@ -508,6 +595,8 @@ function areMarkdownFileLinkPropsEqual(
     previous.filePath === next.filePath &&
     previous.label === next.label &&
     previous.theme === next.theme &&
+    previous.cwd === next.cwd &&
+    previous.environmentId === next.environmentId &&
     previous.className === next.className
   );
 }
@@ -515,8 +604,10 @@ function areMarkdownFileLinkPropsEqual(
 function ChatMarkdown({
   text,
   cwd,
+  environmentId,
   isStreaming = false,
   skills = EMPTY_MARKDOWN_SKILLS,
+  onImageExpand,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
@@ -576,20 +667,63 @@ function ChatMarkdown({
             filePath={fileLinkMeta.filePath}
             label={labelParts.join(" · ")}
             theme={resolvedTheme}
+            cwd={cwd}
+            environmentId={environmentId}
             className={props.className}
           />
         );
       },
+      img({ node: _node, src, alt }) {
+        const image = resolveMarkdownImagePreview({
+          src,
+          alt,
+          cwd,
+          environmentId,
+        });
+        if (!image) {
+          return null;
+        }
+
+        const preview = {
+          images: [{ src: image.src, name: image.name }],
+          index: 0,
+        } satisfies ExpandedImagePreview;
+
+        return (
+          <button
+            type="button"
+            className="chat-markdown-image-button"
+            aria-label={`Preview ${image.name}`}
+            onClick={() => onImageExpand?.(preview)}
+          >
+            <img
+              src={image.src}
+              alt={alt ?? image.name}
+              className="chat-markdown-image"
+              loading="lazy"
+            />
+          </button>
+        );
+      },
+      code: MarkdownInlineCode,
       pre({ node: _node, children, ...props }) {
         const codeBlock = extractCodeBlock(children);
         if (!codeBlock) {
-          return <pre {...props}>{children}</pre>;
+          return (
+            <pre {...props} {...{ [MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE]: "true" }}>
+              {children}
+            </pre>
+          );
         }
+
+        const stableFallback = (
+          <StableCodeBlockFallback code={codeBlock.code} themeName={diffThemeName} />
+        );
 
         return (
           <MarkdownCodeBlock code={codeBlock.code}>
-            <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
-              <Suspense fallback={<pre {...props}>{children}</pre>}>
+            <CodeHighlightErrorBoundary fallback={stableFallback}>
+              <Suspense fallback={stableFallback}>
                 <SuspenseShikiCodeBlock
                   className={codeBlock.className}
                   code={codeBlock.code}
@@ -605,8 +739,11 @@ function ChatMarkdown({
     [
       diffThemeName,
       fileLinkParentSuffixByPath,
+      environmentId,
       isStreaming,
       markdownFileLinkMetaByHref,
+      onImageExpand,
+      cwd,
       resolvedTheme,
       skills,
     ],
@@ -615,7 +752,7 @@ function ChatMarkdown({
   return (
     <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={CHAT_MARKDOWN_REMARK_PLUGINS}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >

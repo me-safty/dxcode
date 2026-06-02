@@ -20,6 +20,8 @@ const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHO
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
+const ignoreCancel = process.env.T3_ACP_IGNORE_CANCEL === "1";
+const hangPromptAfterPermission = process.env.T3_ACP_HANG_PROMPT_AFTER_PERMISSION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
 const sessionId = "mock-session-1";
 
@@ -286,11 +288,13 @@ const program = Effect.gen(function* () {
     }),
   );
 
-  yield* agent.handleCancel(({ sessionId }) =>
-    Effect.sync(() => {
-      cancelledSessions.add(String(sessionId ?? "mock-session-1"));
-    }),
-  );
+  if (!ignoreCancel) {
+    yield* agent.handleCancel(({ sessionId }) =>
+      Effect.sync(() => {
+        cancelledSessions.add(String(sessionId ?? "mock-session-1"));
+      }),
+    );
+  }
 
   yield* agent.handlePrompt((request) =>
     Effect.gen(function* () {
@@ -400,6 +404,10 @@ const program = Effect.gen(function* () {
           cancelledSessions.delete(requestedSessionId) ||
           permission.outcome.outcome === "cancelled";
 
+        if (hangPromptAfterPermission) {
+          return yield* Effect.never;
+        }
+
         yield* agent.client.sessionUpdate({
           sessionId: requestedSessionId,
           update: {
@@ -482,6 +490,10 @@ const program = Effect.gen(function* () {
           ],
         });
 
+        if (hangPromptAfterPermission) {
+          return yield* Effect.never;
+        }
+
         return { stopReason: "end_turn" };
       }
 
@@ -511,6 +523,10 @@ const program = Effect.gen(function* () {
           content: { type: "text", text: promptResponseText ?? "hello from mock" },
         },
       });
+
+      if (hangPromptAfterPermission) {
+        return yield* Effect.never;
+      }
 
       return { stopReason: "end_turn" };
     }),

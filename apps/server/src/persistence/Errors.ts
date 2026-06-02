@@ -1,9 +1,7 @@
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 
-// ===============================
 // Core Persistence Errors
-// ===============================
 
 export class PersistenceSqlError extends Schema.TaggedErrorClass<PersistenceSqlError>()(
   "PersistenceSqlError",
@@ -63,9 +61,7 @@ export function toPersistenceDecodeCauseError(operation: string) {
 export const isPersistenceError = (u: unknown) =>
   isPersistenceSqlError(u) || isPersistenceDecodeError(u);
 
-// ===============================
 // Provider Session Repository Errors
-// ===============================
 
 export class ProviderSessionRepositoryValidationError extends Schema.TaggedErrorClass<ProviderSessionRepositoryValidationError>()(
   "ProviderSessionRepositoryValidationError",
@@ -106,5 +102,6 @@ export type OrchestrationCommandReceiptRepositoryError =
 export type ProviderSessionRuntimeRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 export type AuthPairingLinkRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 export type AuthSessionRepositoryError = PersistenceSqlError | PersistenceDecodeError;
+export type WebPushSubscriptionRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 
 export type ProjectionRepositoryError = PersistenceSqlError | PersistenceDecodeError;

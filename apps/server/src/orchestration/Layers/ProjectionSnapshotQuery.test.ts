@@ -321,6 +321,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               updatedAt: "2026-02-24T00:00:05.000Z",
             },
           ],
+          queuedTurns: [],
           proposedPlans: [
             {
               id: "plan-1",
@@ -1009,6 +1010,547 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         },
       ]);
     }),
+  );
+
+  it.effect("paginates thread detail snapshots by collection cursors", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_thread_proposed_plans`;
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-page',
+          'Project Page',
+          '/tmp/project-page',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-04-03T00:00:00.000Z',
+          '2026-04-03T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-page',
+          'project-page',
+          'Thread Page',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'default',
+          NULL,
+          NULL,
+          'turn-5',
+          '2026-04-03T00:00:05.000Z',
+          0,
+          0,
+          0,
+          '2026-04-03T00:00:00.000Z',
+          '2026-04-03T00:00:05.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id,
+          thread_id,
+          turn_id,
+          role,
+          text,
+          is_streaming,
+          created_at,
+          updated_at
+        )
+        VALUES
+          ('message-1', 'thread-page', 'turn-1', 'user', 'message 1', 0, '2026-04-03T00:00:01.000Z', '2026-04-03T00:00:01.000Z'),
+          ('message-2', 'thread-page', 'turn-2', 'user', 'message 2', 0, '2026-04-03T00:00:02.000Z', '2026-04-03T00:00:02.000Z'),
+          ('message-3', 'thread-page', 'turn-3', 'user', 'message 3', 0, '2026-04-03T00:00:03.000Z', '2026-04-03T00:00:03.000Z'),
+          ('message-4', 'thread-page', 'turn-4', 'user', 'message 4', 0, '2026-04-03T00:00:04.000Z', '2026-04-03T00:00:04.000Z'),
+          ('message-5', 'thread-page', 'turn-5', 'user', 'message 5', 0, '2026-04-03T00:00:05.000Z', '2026-04-03T00:00:05.000Z')
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_proposed_plans (
+          plan_id,
+          thread_id,
+          turn_id,
+          plan_markdown,
+          implemented_at,
+          implementation_thread_id,
+          created_at,
+          updated_at
+        )
+        VALUES
+          ('plan-1', 'thread-page', 'turn-1', 'plan 1', NULL, NULL, '2026-04-03T00:00:01.000Z', '2026-04-03T00:00:01.000Z'),
+          ('plan-2', 'thread-page', 'turn-2', 'plan 2', NULL, NULL, '2026-04-03T00:00:02.000Z', '2026-04-03T00:00:02.000Z'),
+          ('plan-3', 'thread-page', 'turn-3', 'plan 3', NULL, NULL, '2026-04-03T00:00:03.000Z', '2026-04-03T00:00:03.000Z'),
+          ('plan-4', 'thread-page', 'turn-4', 'plan 4', NULL, NULL, '2026-04-03T00:00:04.000Z', '2026-04-03T00:00:04.000Z'),
+          ('plan-5', 'thread-page', 'turn-5', 'plan 5', NULL, NULL, '2026-04-03T00:00:05.000Z', '2026-04-03T00:00:05.000Z')
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          ('activity-1', 'thread-page', 'turn-1', 'info', 'runtime.note', 'activity 1', '{}', 1, '2026-04-03T00:00:01.000Z'),
+          ('activity-2', 'thread-page', 'turn-2', 'info', 'runtime.note', 'activity 2', '{}', 2, '2026-04-03T00:00:02.000Z'),
+          ('activity-3', 'thread-page', 'turn-3', 'info', 'runtime.note', 'activity 3', '{}', 3, '2026-04-03T00:00:03.000Z'),
+          ('activity-4', 'thread-page', 'turn-4', 'info', 'runtime.note', 'activity 4', '{}', 4, '2026-04-03T00:00:04.000Z'),
+          ('activity-5', 'thread-page', 'turn-5', 'info', 'runtime.note', 'activity 5', '{}', 5, '2026-04-03T00:00:05.000Z')
+      `;
+
+      yield* sql`
+        INSERT INTO projection_turns (
+          thread_id,
+          turn_id,
+          pending_message_id,
+          source_proposed_plan_thread_id,
+          source_proposed_plan_id,
+          assistant_message_id,
+          state,
+          requested_at,
+          started_at,
+          completed_at,
+          checkpoint_turn_count,
+          checkpoint_ref,
+          checkpoint_status,
+          checkpoint_files_json
+        )
+        VALUES
+          ('thread-page', 'turn-1', 'message-1', NULL, NULL, NULL, 'completed', '2026-04-03T00:00:01.000Z', '2026-04-03T00:00:01.000Z', '2026-04-03T00:00:01.000Z', 1, 'checkpoint-1', 'ready', '[]'),
+          ('thread-page', 'turn-2', 'message-2', NULL, NULL, NULL, 'completed', '2026-04-03T00:00:02.000Z', '2026-04-03T00:00:02.000Z', '2026-04-03T00:00:02.000Z', 2, 'checkpoint-2', 'ready', '[]'),
+          ('thread-page', 'turn-3', 'message-3', NULL, NULL, NULL, 'completed', '2026-04-03T00:00:03.000Z', '2026-04-03T00:00:03.000Z', '2026-04-03T00:00:03.000Z', 3, 'checkpoint-3', 'ready', '[]'),
+          ('thread-page', 'turn-4', 'message-4', NULL, NULL, NULL, 'completed', '2026-04-03T00:00:04.000Z', '2026-04-03T00:00:04.000Z', '2026-04-03T00:00:04.000Z', 4, 'checkpoint-4', 'ready', '[]'),
+          ('thread-page', 'turn-5', 'message-5', NULL, NULL, NULL, 'completed', '2026-04-03T00:00:05.000Z', '2026-04-03T00:00:05.000Z', '2026-04-03T00:00:05.000Z', 5, 'checkpoint-5', 'ready', '[]')
+      `;
+
+      const firstPage = yield* snapshotQuery.getThreadDetailSnapshotById(
+        ThreadId.make("thread-page"),
+        {
+          limits: {
+            messages: 2,
+            proposedPlans: 2,
+            activities: 2,
+            checkpoints: 2,
+          },
+        },
+      );
+
+      assert.equal(firstPage._tag, "Some");
+      if (firstPage._tag === "Some") {
+        assert.deepEqual(
+          firstPage.value.thread.messages.map((message) => message.id),
+          [asMessageId("message-4"), asMessageId("message-5")],
+        );
+        assert.deepEqual(
+          firstPage.value.thread.proposedPlans.map((plan) => plan.id),
+          ["plan-4", "plan-5"],
+        );
+        assert.deepEqual(
+          firstPage.value.thread.activities.map((activity) => activity.id),
+          [asEventId("activity-4"), asEventId("activity-5")],
+        );
+        assert.deepEqual(
+          firstPage.value.thread.checkpoints.map((checkpoint) => checkpoint.turnId),
+          [asTurnId("turn-4"), asTurnId("turn-5")],
+        );
+        assert.equal(firstPage.value.pageInfo.messages.hasMoreBefore, true);
+        assert.deepEqual(firstPage.value.pageInfo.messages.startCursor, {
+          id: "message-4",
+          createdAt: "2026-04-03T00:00:04.000Z",
+        });
+        assert.deepEqual(firstPage.value.pageInfo.activities.startCursor, {
+          id: "activity-4",
+          createdAt: "2026-04-03T00:00:04.000Z",
+          sequence: 4,
+        });
+        assert.deepEqual(firstPage.value.pageInfo.checkpoints.startCursor, {
+          id: "turn-4",
+          createdAt: "2026-04-03T00:00:04.000Z",
+          checkpointTurnCount: 4,
+        });
+      }
+
+      const firstPageInfo = firstPage._tag === "Some" ? firstPage.value.pageInfo : null;
+      assert.notEqual(firstPageInfo, null);
+
+      const activityOnlyOlderPage = yield* snapshotQuery.getThreadDetailSnapshotById(
+        ThreadId.make("thread-page"),
+        {
+          before: {
+            activities: firstPageInfo!.activities.startCursor!,
+          },
+          limits: {
+            messages: 2,
+            proposedPlans: 2,
+            activities: 2,
+            checkpoints: 2,
+          },
+        },
+      );
+
+      assert.equal(activityOnlyOlderPage._tag, "Some");
+      if (activityOnlyOlderPage._tag === "Some") {
+        assert.deepEqual(activityOnlyOlderPage.value.thread.messages, []);
+        assert.deepEqual(activityOnlyOlderPage.value.thread.proposedPlans, []);
+        assert.deepEqual(activityOnlyOlderPage.value.thread.checkpoints, []);
+        assert.deepEqual(
+          activityOnlyOlderPage.value.thread.activities.map((activity) => activity.id),
+          [asEventId("activity-2"), asEventId("activity-3")],
+        );
+        assert.equal(activityOnlyOlderPage.value.pageInfo.messages.hasMoreBefore, false);
+        assert.equal(activityOnlyOlderPage.value.pageInfo.messages.startCursor, null);
+        assert.equal(activityOnlyOlderPage.value.pageInfo.proposedPlans.hasMoreBefore, false);
+        assert.equal(activityOnlyOlderPage.value.pageInfo.proposedPlans.startCursor, null);
+        assert.equal(activityOnlyOlderPage.value.pageInfo.checkpoints.hasMoreBefore, false);
+        assert.equal(activityOnlyOlderPage.value.pageInfo.checkpoints.startCursor, null);
+      }
+
+      const secondPage = yield* snapshotQuery.getThreadDetailSnapshotById(
+        ThreadId.make("thread-page"),
+        {
+          before: {
+            messages: firstPageInfo!.messages.startCursor!,
+            proposedPlans: firstPageInfo!.proposedPlans.startCursor!,
+            activities: firstPageInfo!.activities.startCursor!,
+            checkpoints: firstPageInfo!.checkpoints.startCursor!,
+          },
+          limits: {
+            messages: 2,
+            proposedPlans: 2,
+            activities: 2,
+            checkpoints: 2,
+          },
+        },
+      );
+
+      assert.equal(secondPage._tag, "Some");
+      if (secondPage._tag === "Some") {
+        assert.deepEqual(
+          secondPage.value.thread.messages.map((message) => message.id),
+          [asMessageId("message-2"), asMessageId("message-3")],
+        );
+        assert.deepEqual(
+          secondPage.value.thread.proposedPlans.map((plan) => plan.id),
+          ["plan-2", "plan-3"],
+        );
+        assert.deepEqual(
+          secondPage.value.thread.activities.map((activity) => activity.id),
+          [asEventId("activity-2"), asEventId("activity-3")],
+        );
+        assert.deepEqual(
+          secondPage.value.thread.checkpoints.map((checkpoint) => checkpoint.turnId),
+          [asTurnId("turn-2"), asTurnId("turn-3")],
+        );
+        assert.equal(secondPage.value.pageInfo.messages.hasMoreBefore, true);
+        assert.deepEqual(secondPage.value.pageInfo.messages.startCursor, {
+          id: "message-2",
+          createdAt: "2026-04-03T00:00:02.000Z",
+        });
+      }
+
+      const secondPageInfo = secondPage._tag === "Some" ? secondPage.value.pageInfo : null;
+      assert.notEqual(secondPageInfo, null);
+
+      const finalPage = yield* snapshotQuery.getThreadDetailSnapshotById(
+        ThreadId.make("thread-page"),
+        {
+          before: {
+            messages: secondPageInfo!.messages.startCursor!,
+            proposedPlans: secondPageInfo!.proposedPlans.startCursor!,
+            activities: secondPageInfo!.activities.startCursor!,
+            checkpoints: secondPageInfo!.checkpoints.startCursor!,
+          },
+          limits: {
+            messages: 2,
+            proposedPlans: 2,
+            activities: 2,
+            checkpoints: 2,
+          },
+        },
+      );
+
+      assert.equal(finalPage._tag, "Some");
+      if (finalPage._tag === "Some") {
+        assert.deepEqual(
+          finalPage.value.thread.messages.map((message) => message.id),
+          [asMessageId("message-1")],
+        );
+        assert.deepEqual(
+          finalPage.value.thread.proposedPlans.map((plan) => plan.id),
+          ["plan-1"],
+        );
+        assert.deepEqual(
+          finalPage.value.thread.activities.map((activity) => activity.id),
+          [asEventId("activity-1")],
+        );
+        assert.deepEqual(
+          finalPage.value.thread.checkpoints.map((checkpoint) => checkpoint.turnId),
+          [asTurnId("turn-1")],
+        );
+        assert.equal(finalPage.value.pageInfo.messages.hasMoreBefore, false);
+        assert.equal(finalPage.value.pageInfo.proposedPlans.hasMoreBefore, false);
+        assert.equal(finalPage.value.pageInfo.activities.hasMoreBefore, false);
+        assert.equal(finalPage.value.pageInfo.checkpoints.hasMoreBefore, false);
+      }
+    }),
+  );
+
+  it.effect(
+    "progresses older detail cursors through duplicate timestamps and mixed activity sequences",
+    () =>
+      Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+
+        yield* sql`DELETE FROM projection_projects`;
+        yield* sql`DELETE FROM projection_threads`;
+        yield* sql`DELETE FROM projection_thread_messages`;
+        yield* sql`DELETE FROM projection_thread_activities`;
+        yield* sql`DELETE FROM projection_thread_proposed_plans`;
+        yield* sql`DELETE FROM projection_turns`;
+
+        yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-cursor-edge',
+          'Project Cursor Edge',
+          '/tmp/project-cursor-edge',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-04-04T00:00:00.000Z',
+          '2026-04-04T00:00:00.000Z',
+          NULL
+        )
+      `;
+
+        yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-cursor-edge',
+          'project-cursor-edge',
+          'Thread Cursor Edge',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'default',
+          NULL,
+          NULL,
+          NULL,
+          '2026-04-04T00:00:10.000Z',
+          0,
+          0,
+          0,
+          '2026-04-04T00:00:00.000Z',
+          '2026-04-04T00:00:10.000Z',
+          NULL
+        )
+      `;
+
+        yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id,
+          thread_id,
+          turn_id,
+          role,
+          text,
+          is_streaming,
+          created_at,
+          updated_at
+        )
+        VALUES
+          ('message-a', 'thread-cursor-edge', NULL, 'user', 'message a', 0, '2026-04-04T00:00:10.000Z', '2026-04-04T00:00:10.000Z'),
+          ('message-b', 'thread-cursor-edge', NULL, 'user', 'message b', 0, '2026-04-04T00:00:10.000Z', '2026-04-04T00:00:10.000Z'),
+          ('message-c', 'thread-cursor-edge', NULL, 'user', 'message c', 0, '2026-04-04T00:00:10.000Z', '2026-04-04T00:00:10.000Z')
+      `;
+
+        yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          ('activity-null-old', 'thread-cursor-edge', NULL, 'info', 'runtime.note', 'null old', '{}', NULL, '2026-04-04T00:00:01.000Z'),
+          ('activity-null-new', 'thread-cursor-edge', NULL, 'info', 'runtime.note', 'null new', '{}', NULL, '2026-04-04T00:00:02.000Z'),
+          ('activity-seq-1', 'thread-cursor-edge', NULL, 'info', 'runtime.note', 'seq 1', '{}', 1, '2026-04-04T00:00:03.000Z'),
+          ('activity-seq-2', 'thread-cursor-edge', NULL, 'info', 'runtime.note', 'seq 2', '{}', 2, '2026-04-04T00:00:04.000Z')
+      `;
+
+        const firstPage = yield* snapshotQuery.getThreadDetailSnapshotById(
+          ThreadId.make("thread-cursor-edge"),
+          {
+            limits: {
+              messages: 1,
+              activities: 1,
+            },
+          },
+        );
+        assert.equal(firstPage._tag, "Some");
+        if (firstPage._tag !== "Some") {
+          return;
+        }
+        assert.deepEqual(
+          firstPage.value.thread.messages.map((message) => message.id),
+          [asMessageId("message-c")],
+        );
+        assert.deepEqual(
+          firstPage.value.thread.activities.map((activity) => activity.id),
+          [asEventId("activity-seq-2")],
+        );
+
+        const secondPage = yield* snapshotQuery.getThreadDetailSnapshotById(
+          ThreadId.make("thread-cursor-edge"),
+          {
+            before: {
+              messages: firstPage.value.pageInfo.messages.startCursor!,
+              activities: firstPage.value.pageInfo.activities.startCursor!,
+            },
+            limits: {
+              messages: 1,
+              activities: 1,
+            },
+          },
+        );
+        assert.equal(secondPage._tag, "Some");
+        if (secondPage._tag !== "Some") {
+          return;
+        }
+        assert.deepEqual(
+          secondPage.value.thread.messages.map((message) => message.id),
+          [asMessageId("message-b")],
+        );
+        assert.deepEqual(
+          secondPage.value.thread.activities.map((activity) => activity.id),
+          [asEventId("activity-seq-1")],
+        );
+
+        const thirdPage = yield* snapshotQuery.getThreadDetailSnapshotById(
+          ThreadId.make("thread-cursor-edge"),
+          {
+            before: {
+              messages: secondPage.value.pageInfo.messages.startCursor!,
+              activities: secondPage.value.pageInfo.activities.startCursor!,
+            },
+            limits: {
+              messages: 1,
+              activities: 1,
+            },
+          },
+        );
+        assert.equal(thirdPage._tag, "Some");
+        if (thirdPage._tag !== "Some") {
+          return;
+        }
+        assert.deepEqual(
+          thirdPage.value.thread.messages.map((message) => message.id),
+          [asMessageId("message-a")],
+        );
+        assert.deepEqual(
+          thirdPage.value.thread.activities.map((activity) => activity.id),
+          [asEventId("activity-null-new")],
+        );
+
+        const finalPage = yield* snapshotQuery.getThreadDetailSnapshotById(
+          ThreadId.make("thread-cursor-edge"),
+          {
+            before: {
+              messages: thirdPage.value.pageInfo.messages.startCursor!,
+              activities: thirdPage.value.pageInfo.activities.startCursor!,
+            },
+            limits: {
+              messages: 1,
+              activities: 1,
+            },
+          },
+        );
+        assert.equal(finalPage._tag, "Some");
+        if (finalPage._tag === "Some") {
+          assert.deepEqual(finalPage.value.thread.messages, []);
+          assert.deepEqual(
+            finalPage.value.thread.activities.map((activity) => activity.id),
+            [asEventId("activity-null-old")],
+          );
+          assert.equal(finalPage.value.pageInfo.messages.hasMoreBefore, false);
+        }
+      }),
   );
 
   it.effect("uses projection_threads.latest_turn_id for targeted thread latest turn queries", () =>

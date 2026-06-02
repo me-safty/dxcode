@@ -1,8 +1,17 @@
+// @effect-diagnostics nodeBuiltinImport:off - Vite config runs in Node and resolves local brand asset files.
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
+import {
+  resolveWebAssetBrandForConfiguredChannel,
+  resolveWebIconOverrides,
+} from "../../scripts/lib/brand-assets.ts";
 import pkg from "./package.json" with { type: "json" };
 
 const port = Number(process.env.PORT ?? 5733);
@@ -10,6 +19,7 @@ const host = process.env.HOST?.trim() || "localhost";
 const configuredWsUrl = process.env.VITE_WS_URL?.trim();
 const configuredHostedAppChannel = process.env.VITE_HOSTED_APP_CHANNEL?.trim() || "";
 const configuredAppVersion = process.env.APP_VERSION?.trim() || pkg.version;
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const configuredHostedAppUrl = (() => {
   const explicitHostedAppUrl = process.env.VITE_HOSTED_APP_URL?.trim();
   if (explicitHostedAppUrl) {
@@ -54,6 +64,52 @@ function resolveDevProxyTarget(wsUrl: string | undefined): string | undefined {
 }
 
 const devProxyTarget = resolveDevProxyTarget(configuredWsUrl);
+const webAssetBrand = resolveWebAssetBrandForConfiguredChannel(configuredHostedAppChannel);
+const serviceWorkerFilename = "t3-service-worker.js";
+
+function webBrandAssetsPlugin(): Plugin {
+  return {
+    name: "t3code-web-brand-assets",
+    configureServer(server) {
+      const devOverrides = new Map(
+        resolveWebIconOverrides("development", "").map((override) => [
+          `/${override.targetRelativePath.replace(/^\//, "")}`,
+          path.join(repoRoot, override.sourceRelativePath),
+        ]),
+      );
+      server.middlewares.use(async (req, res, next) => {
+        const urlPath = req.url?.split("?")[0];
+        if (!urlPath) {
+          next();
+          return;
+        }
+        const sourcePath = devOverrides.get(urlPath);
+        if (!sourcePath) {
+          next();
+          return;
+        }
+        try {
+          const data = await fs.readFile(sourcePath);
+          res.setHeader("Content-Type", urlPath.endsWith(".ico") ? "image/x-icon" : "image/png");
+          res.setHeader("Cache-Control", "no-cache");
+          res.end(data);
+        } catch (cause) {
+          next(cause);
+        }
+      });
+    },
+    async closeBundle() {
+      await Promise.all(
+        resolveWebIconOverrides(webAssetBrand, "apps/web/dist").map((override) =>
+          fs.copyFile(
+            path.join(repoRoot, override.sourceRelativePath),
+            path.join(repoRoot, override.targetRelativePath),
+          ),
+        ),
+      );
+    },
+  };
+}
 
 export default defineConfig({
   plugins: [
@@ -68,6 +124,53 @@ export default defineConfig({
       presets: [reactCompilerPreset()],
     }),
     tailwindcss(),
+    webBrandAssetsPlugin(),
+    VitePWA({
+      filename: serviceWorkerFilename,
+      injectRegister: false,
+      manifest: false,
+      registerType: "prompt",
+      workbox: {
+        cleanupOutdatedCaches: true,
+        globIgnores: [`**/${serviceWorkerFilename}`],
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,webmanifest,woff2}"],
+        importScripts: ["t3-push-service-worker.js"],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        navigateFallback: "/index.html",
+        navigateFallbackDenylist: [
+          /^\/api(?:\/|$)/,
+          /^\/attachments(?:\/|$)/,
+          /^\/\.well-known(?:\/|$)/,
+        ],
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: "StaleWhileRevalidate",
+            options: {
+              cacheName: "google-fonts-stylesheets",
+              expiration: {
+                maxAgeSeconds: 60 * 60 * 24 * 365,
+                maxEntries: 10,
+              },
+            },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "google-fonts-webfonts",
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+              expiration: {
+                maxAgeSeconds: 60 * 60 * 24 * 365,
+                maxEntries: 30,
+              },
+            },
+          },
+        ],
+      },
+    }),
   ],
   optimizeDeps: {
     include: [

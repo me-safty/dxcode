@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyProjectionEvent,
   shouldApplyProjectionEvent,
   shouldApplyProjectionSnapshot,
   shouldApplyTerminalEvent,
@@ -144,5 +145,19 @@ describe("shouldApplyProjectionEvent", () => {
         sequence: 6,
       }),
     ).toBe(true);
+  });
+});
+
+describe("classifyProjectionEvent", () => {
+  it("identifies contiguous, stale, and gap events", () => {
+    const current = {
+      sequence: 5,
+      updatedAt: "2026-04-22T10:05:00.000Z",
+    };
+
+    expect(classifyProjectionEvent({ current, sequence: 6 })).toBe("apply");
+    expect(classifyProjectionEvent({ current, sequence: 5 })).toBe("stale");
+    expect(classifyProjectionEvent({ current, sequence: 4 })).toBe("stale");
+    expect(classifyProjectionEvent({ current, sequence: 7 })).toBe("gap");
   });
 });

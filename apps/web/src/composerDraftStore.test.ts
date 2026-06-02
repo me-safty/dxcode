@@ -13,6 +13,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type ModelSelection,
+  type OrchestrationProposedPlanId,
   type ProviderOptionSelection,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -21,6 +22,7 @@ import { createModelSelection } from "@t3tools/shared/model";
 // `stickyModelSelectionByProvider` maps are keyed by `ProviderInstanceId`
 // in production; these aliases keep the legacy-key migration tests concise.
 const CODEX_INSTANCE = ProviderInstanceId.make("codex");
+const CODEX_SECONDARY_INSTANCE = ProviderInstanceId.make("codex_secondary");
 const CLAUDE_AGENT_INSTANCE = ProviderInstanceId.make("claudeAgent");
 const CURSOR_INSTANCE = ProviderInstanceId.make("cursor");
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
@@ -927,6 +929,45 @@ describe("composerDraftStore project draft thread mapping", () => {
       envMode: "local",
     });
   });
+
+  it("persists and hydrates source proposed plan context on draft threads", () => {
+    const sourceThreadId = ThreadId.make("thread-source-plan");
+    const sourcePlanId = "plan-source-draft" as OrchestrationProposedPlanId;
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    store.setDraftThreadContext(draftId, {
+      sourceProposedPlan: {
+        threadId: sourceThreadId,
+        planId: sourcePlanId,
+      },
+    });
+
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => {
+          draftThreadsByThreadKey?: Record<string, { sourceProposedPlan?: unknown }>;
+        };
+        merge: (
+          persistedState: unknown,
+          currentState: ReturnType<typeof useComposerDraftStore.getState>,
+        ) => ReturnType<typeof useComposerDraftStore.getState>;
+      };
+    };
+    const persistedState = persistApi.getOptions().partialize(useComposerDraftStore.getState());
+
+    expect(persistedState.draftThreadsByThreadKey?.[draftId]?.sourceProposedPlan).toEqual({
+      threadId: sourceThreadId,
+      planId: sourcePlanId,
+    });
+
+    const mergedState = persistApi
+      .getOptions()
+      .merge(persistedState, useComposerDraftStore.getInitialState());
+    expect(mergedState.draftThreadsByThreadKey[draftId]?.sourceProposedPlan).toEqual({
+      threadId: sourceThreadId,
+      planId: sourcePlanId,
+    });
+  });
 });
 
 describe("composerDraftStore modelSelection", () => {
@@ -1197,6 +1238,43 @@ describe("composerDraftStore modelSelection", () => {
     expect(useComposerDraftStore.getState().stickyModelSelectionByProvider[CODEX_INSTANCE]).toEqual(
       modelSelection(CODEX_DRIVER, "gpt-5.4", {
         fastMode: true,
+      }),
+    );
+  });
+
+  it("stores provider option changes on a selected custom instance", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setProviderModelOptions(
+      threadRef,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "low" }),
+      {
+        instanceId: CODEX_SECONDARY_INSTANCE,
+        model: "gpt-5-codex",
+        persistSticky: true,
+      },
+    );
+
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_SECONDARY_INSTANCE],
+    ).toEqual(
+      expect.objectContaining({
+        instanceId: CODEX_SECONDARY_INSTANCE,
+        options: [{ id: "reasoningEffort", value: "low" }],
+      }),
+    );
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.activeProvider).toBe(CODEX_SECONDARY_INSTANCE);
+    expect(useComposerDraftStore.getState().stickyActiveProvider).toBe(CODEX_SECONDARY_INSTANCE);
+    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider[CODEX_INSTANCE]).toBe(
+      undefined,
+    );
+    expect(
+      useComposerDraftStore.getState().stickyModelSelectionByProvider[CODEX_SECONDARY_INSTANCE],
+    ).toEqual(
+      expect.objectContaining({
+        instanceId: CODEX_SECONDARY_INSTANCE,
+        options: [{ id: "reasoningEffort", value: "low" }],
       }),
     );
   });

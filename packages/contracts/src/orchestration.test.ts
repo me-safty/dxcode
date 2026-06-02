@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import { it } from "@effect/vitest";
+import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -9,6 +8,7 @@ import {
   ModelSelection,
   OrchestrationCommand,
   OrchestrationEvent,
+  OrchestrationReadModel,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
@@ -16,6 +16,7 @@ import {
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
   OrchestrationSession,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ProjectCreateCommand,
   ThreadMetaUpdatedPayload,
   ThreadTurnStartCommand,
@@ -49,6 +50,7 @@ function getOptionValue(
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
+const decodeOrchestrationReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
@@ -223,6 +225,81 @@ it.effect("decodes thread.turn.start defaults for provider and runtime mode", ()
   }),
 );
 
+it.effect("decodes internal attachment add commands for assistant images", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationCommand({
+      type: "thread.message.attachments.add",
+      commandId: "cmd-attachments-add",
+      threadId: "thread-1",
+      messageId: "assistant:item-1",
+      role: "assistant",
+      attachments: [
+        {
+          type: "image",
+          id: "thread-1-attachment-1",
+          name: "result.png",
+          mimeType: "image/png",
+          sizeBytes: 4,
+        },
+      ],
+      turnId: "turn-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    if (parsed.type !== "thread.message.attachments.add") {
+      assert.fail(`Expected thread.message.attachments.add command, received ${parsed.type}.`);
+    }
+    assert.strictEqual(parsed.role, "assistant");
+    assert.strictEqual(parsed.attachments[0]?.id, "thread-1-attachment-1");
+  }),
+);
+
+it.effect("rejects invalid assistant image attachment metadata", () =>
+  Effect.gen(function* () {
+    const invalidMime = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.message.attachments.add",
+        commandId: "cmd-attachments-bad-mime",
+        threadId: "thread-1",
+        messageId: "assistant:item-1",
+        role: "assistant",
+        attachments: [
+          {
+            type: "image",
+            id: "thread-1-attachment-1",
+            name: "result.txt",
+            mimeType: "text/plain",
+            sizeBytes: 4,
+          },
+        ],
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    const oversized = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.message.attachments.add",
+        commandId: "cmd-attachments-oversized",
+        threadId: "thread-1",
+        messageId: "assistant:item-1",
+        role: "assistant",
+        attachments: [
+          {
+            type: "image",
+            id: "thread-1-attachment-1",
+            name: "result.png",
+            mimeType: "image/png",
+            sizeBytes: PROVIDER_SEND_TURN_MAX_IMAGE_BYTES + 1,
+          },
+        ],
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    assert.strictEqual(invalidMime._tag, "Failure");
+    assert.strictEqual(oversized._tag, "Failure");
+  }),
+);
+
 it.effect("preserves explicit provider and runtime mode in thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({
@@ -245,6 +322,50 @@ it.effect("preserves explicit provider and runtime mode in thread.turn.start", (
     assert.strictEqual(parsed.modelSelection?.instanceId, "codex");
     assert.strictEqual(parsed.runtimeMode, "full-access");
     assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+  }),
+);
+
+it.effect("decodes queued turn commands", () =>
+  Effect.gen(function* () {
+    const queued = yield* decodeOrchestrationCommand({
+      type: "thread.turn.queue",
+      commandId: "cmd-queue-1",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-queued-1",
+        role: "user",
+        text: "queued prompt",
+        attachments: [],
+      },
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    const cancel = yield* decodeOrchestrationCommand({
+      type: "thread.queued-turn.cancel",
+      commandId: "cmd-queue-cancel",
+      threadId: "thread-1",
+      messageId: "msg-queued-1",
+      createdAt: "2026-01-01T00:00:01.000Z",
+    });
+    const dispatch = yield* decodeOrchestrationCommand({
+      type: "thread.queued-turn.dispatch",
+      commandId: "cmd-queue-dispatch",
+      threadId: "thread-1",
+      messageId: "msg-queued-1",
+      createdAt: "2026-01-01T00:00:02.000Z",
+    });
+
+    if (queued.type !== "thread.turn.queue") {
+      assert.fail(`Expected thread.turn.queue command, received ${queued.type}.`);
+    }
+    assert.strictEqual(queued.modelSelection?.instanceId, "codex");
+    assert.strictEqual(cancel.type, "thread.queued-turn.cancel");
+    assert.strictEqual(dispatch.type, "thread.queued-turn.dispatch");
   }),
 );
 
@@ -379,7 +500,9 @@ it.effect("decodes thread archived and unarchived events", () =>
       },
     });
 
-    assert.strictEqual(archived.type, "thread.archived");
+    if (archived.type !== "thread.archived") {
+      assert.fail(`Expected thread.archived event, received ${archived.type}.`);
+    }
     assert.strictEqual(archived.payload.archivedAt, "2026-01-01T00:00:00.000Z");
     assert.strictEqual(unarchived.type, "thread.unarchived");
   }),
@@ -578,6 +701,124 @@ it.effect("decodes thread.turn-start-requested title seed when present", () =>
       createdAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.titleSeed, "Investigate reconnect failures");
+  }),
+);
+
+it.effect("decodes queued turn events and thread snapshots", () =>
+  Effect.gen(function* () {
+    const queuedPayload = {
+      threadId: "thread-1",
+      messageId: "msg-queued-1",
+      role: "user",
+      text: "queued prompt",
+      attachments: [],
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const queued = yield* decodeOrchestrationEvent({
+      sequence: 1,
+      eventId: "event-queue",
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      type: "thread.turn-queued",
+      payload: queuedPayload,
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      commandId: "cmd-queue",
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+    });
+    const cancelled = yield* decodeOrchestrationEvent({
+      sequence: 2,
+      eventId: "event-cancel",
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      type: "thread.queued-turn-cancelled",
+      payload: {
+        threadId: "thread-1",
+        messageId: "msg-queued-1",
+        cancelledAt: "2026-01-01T00:00:01.000Z",
+      },
+      occurredAt: "2026-01-01T00:00:01.000Z",
+      commandId: "cmd-cancel",
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+    });
+    const dispatched = yield* decodeOrchestrationEvent({
+      sequence: 3,
+      eventId: "event-dispatch",
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      type: "thread.queued-turn-dispatched",
+      payload: {
+        threadId: "thread-1",
+        messageId: "msg-queued-1",
+        dispatchedAt: "2026-01-01T00:00:02.000Z",
+      },
+      occurredAt: "2026-01-01T00:00:02.000Z",
+      commandId: "cmd-dispatch",
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+    });
+    const snapshot = yield* decodeOrchestrationReadModel({
+      snapshotSequence: 3,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      projects: [
+        {
+          id: "project-1",
+          title: "Project",
+          workspaceRoot: "/tmp/project",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          scripts: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          deletedAt: null,
+        },
+      ],
+      threads: [
+        {
+          id: "thread-1",
+          projectId: "project-1",
+          title: "Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          latestTurn: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          messages: [],
+          queuedTurns: [queuedPayload],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [],
+          session: null,
+        },
+      ],
+    });
+
+    assert.strictEqual(queued.type, "thread.turn-queued");
+    assert.strictEqual(cancelled.type, "thread.queued-turn-cancelled");
+    assert.strictEqual(dispatched.type, "thread.queued-turn-dispatched");
+    assert.strictEqual(snapshot.threads[0]?.queuedTurns[0]?.messageId, "msg-queued-1");
   }),
 );
 

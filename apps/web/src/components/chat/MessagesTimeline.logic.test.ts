@@ -268,6 +268,59 @@ describe("deriveMessagesTimelineRows", () => {
     expect(assistantRows[1]?.showCompletionDivider).toBe(true);
   });
 
+  it("marks only the active assistant turn as streaming for copy controls", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "assistant-one-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:10Z",
+          message: {
+            id: "assistant-one" as never,
+            role: "assistant",
+            text: "Earlier response.",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:10Z",
+            completedAt: "2026-01-01T00:00:11Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "assistant-two-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:20Z",
+          message: {
+            id: "assistant-two" as never,
+            role: "assistant",
+            text: "Active response.",
+            turnId: "turn-2" as never,
+            createdAt: "2026-01-01T00:00:20Z",
+            completedAt: "2026-01-01T00:00:30Z",
+            streaming: false,
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: "assistant-two-entry",
+      completionSummary: "done",
+      isWorking: false,
+      activeTurnInProgress: true,
+      activeTurnId: "turn-2" as never,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const assistantRows = rows.filter(
+      (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
+        row.kind === "message" && row.message.role === "assistant",
+    );
+
+    expect(assistantRows[0]?.assistantCopyStreaming).toBe(false);
+    expect(assistantRows[0]?.completionSummary).toBeNull();
+    expect(assistantRows[1]?.assistantCopyStreaming).toBe(true);
+    expect(assistantRows[1]?.completionSummary).toBe("done");
+  });
+
   it("projects assistant diff summaries and user revert counts onto the affected rows", () => {
     const assistantTurnDiffSummary = {
       turnId: "turn-1" as never,
@@ -327,6 +380,63 @@ describe("deriveMessagesTimelineRows", () => {
 
     expect(userRow?.revertTurnCount).toBe(1);
     expect(assistantRow?.assistantTurnDiffSummary).toBe(assistantTurnDiffSummary);
+  });
+
+  it("keeps a work-group row id stable when older work entries prepend into the group", () => {
+    const recentWorkEntry = {
+      id: "work-recent",
+      createdAt: "2026-01-01T00:00:01Z",
+      label: "read",
+      detail: "Reading package.json",
+      tone: "tool" as const,
+    };
+    const olderWorkEntry = {
+      id: "work-older",
+      createdAt: "2026-01-01T00:00:00Z",
+      label: "thinking",
+      detail: "Inspecting repository state",
+      tone: "thinking" as const,
+    };
+
+    const recentRows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "entry-work-recent",
+          kind: "work",
+          createdAt: recentWorkEntry.createdAt,
+          entry: recentWorkEntry,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+    const prependedRows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "entry-work-older",
+          kind: "work",
+          createdAt: olderWorkEntry.createdAt,
+          entry: olderWorkEntry,
+        },
+        {
+          id: "entry-work-recent",
+          kind: "work",
+          createdAt: recentWorkEntry.createdAt,
+          entry: recentWorkEntry,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(recentRows[0]?.id).toBe("work-group:work-recent");
+    expect(prependedRows[0]?.id).toBe("work-group:work-recent");
   });
 });
 

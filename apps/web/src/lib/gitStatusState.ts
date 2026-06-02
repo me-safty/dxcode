@@ -58,6 +58,10 @@ const watchedGitStatuses = new Map<string, WatchedGitStatus>();
 const knownGitStatusKeys = new Set<string>();
 const gitStatusRefreshInFlight = new Map<string, Promise<VcsStatusResult>>();
 const gitStatusLastRefreshAtByKey = new Map<string, number>();
+// Monotonic per-key request counter. Each refresh captures a token at start and
+// only writes its result if it is still the latest, so an older in-flight
+// refresh (e.g. started before a commit) cannot clobber newer data.
+const gitStatusRefreshTokenByKey = new Map<string, number>();
 
 const GIT_STATUS_REFRESH_DEBOUNCE_MS = 1_000;
 
@@ -116,34 +120,62 @@ export function watchGitStatus(target: GitStatusTarget, client?: GitStatusClient
   return () => unwatchGitStatus(targetKey);
 }
 
+function writeGitStatus(targetKey: string, status: VcsStatusResult): void {
+  appAtomRegistry.set(gitStatusStateAtom(targetKey), {
+    data: status,
+    error: null,
+    cause: null,
+    isPending: false,
+  });
+}
+
 export function refreshGitStatus(
   target: GitStatusTarget,
-  client?: GitStatusClient,
+  options?: { client?: GitStatusClient; force?: boolean },
 ): Promise<VcsStatusResult | null> {
   const targetKey = getGitStatusTargetKey(target);
   if (targetKey === null || target.cwd === null) {
     return Promise.resolve(null);
   }
 
-  const resolvedClient = client ?? readResolvedGitStatusClient(target)?.client;
+  const force = options?.force ?? false;
+  const resolvedClient = options?.client ?? readResolvedGitStatusClient(target)?.client;
   if (!resolvedClient) {
     return Promise.resolve(getGitStatusSnapshot(target).data);
   }
 
-  const currentInFlight = gitStatusRefreshInFlight.get(targetKey);
-  if (currentInFlight) {
-    return currentInFlight;
-  }
+  if (!force) {
+    const currentInFlight = gitStatusRefreshInFlight.get(targetKey);
+    if (currentInFlight) {
+      return currentInFlight;
+    }
 
-  const lastRequestedAt = gitStatusLastRefreshAtByKey.get(targetKey) ?? 0;
-  if (Date.now() - lastRequestedAt < GIT_STATUS_REFRESH_DEBOUNCE_MS) {
-    return Promise.resolve(getGitStatusSnapshot(target).data);
+    const lastRequestedAt = gitStatusLastRefreshAtByKey.get(targetKey) ?? 0;
+    if (Date.now() - lastRequestedAt < GIT_STATUS_REFRESH_DEBOUNCE_MS) {
+      return Promise.resolve(getGitStatusSnapshot(target).data);
+    }
   }
 
   gitStatusLastRefreshAtByKey.set(targetKey, Date.now());
-  const refreshPromise = resolvedClient.refreshStatus({ cwd: target.cwd }).finally(() => {
-    gitStatusRefreshInFlight.delete(targetKey);
-  });
+  const requestToken = (gitStatusRefreshTokenByKey.get(targetKey) ?? 0) + 1;
+  gitStatusRefreshTokenByKey.set(targetKey, requestToken);
+  const cwd = target.cwd;
+  const refreshPromise = resolvedClient
+    .refreshStatus({ cwd })
+    .then((status) => {
+      // Apply the authoritative status returned by the unary RPC immediately,
+      // rather than waiting for the slower onStatus broadcast. Skip if a newer
+      // refresh has since started, to avoid clobbering fresher data.
+      if (gitStatusRefreshTokenByKey.get(targetKey) === requestToken) {
+        writeGitStatus(targetKey, status);
+      }
+      return status;
+    })
+    .finally(() => {
+      if (gitStatusRefreshInFlight.get(targetKey) === refreshPromise) {
+        gitStatusRefreshInFlight.delete(targetKey);
+      }
+    });
   gitStatusRefreshInFlight.set(targetKey, refreshPromise);
   return refreshPromise;
 }
@@ -155,6 +187,7 @@ export function resetGitStatusStateForTests(): void {
   watchedGitStatuses.clear();
   gitStatusRefreshInFlight.clear();
   gitStatusLastRefreshAtByKey.clear();
+  gitStatusRefreshTokenByKey.clear();
 
   for (const key of knownGitStatusKeys) {
     appAtomRegistry.set(gitStatusStateAtom(key), INITIAL_GIT_STATUS_STATE);

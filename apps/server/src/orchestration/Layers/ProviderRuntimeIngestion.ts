@@ -1,6 +1,10 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import { createHash } from "node:crypto";
+
 import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
+  type ChatAttachment,
   CommandId,
   MessageId,
   type OrchestrationEvent,
@@ -8,7 +12,9 @@ import {
   type OrchestrationProposedPlanId,
   CheckpointRef,
   isToolLifecycleItemType,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ThreadId,
+  type ToolLifecycleItemType,
   type ThreadTokenUsageSnapshot,
   TurnId,
   type OrchestrationCheckpointSummary,
@@ -19,10 +25,13 @@ import {
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
+import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -37,10 +46,20 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ServerConfig } from "../../config.ts";
+import {
+  createAttachmentId,
+  createStableAttachmentId,
+  resolveAttachmentPath,
+} from "../../attachmentStore.ts";
+import {
+  imageMimeTypeFromFileName,
+  inferImageExtension,
+  parseBase64DataUrl,
+} from "../../imageMime.ts";
+import { WorkspacePaths } from "../../workspace/Services/WorkspacePaths.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
-const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
-  CommandId.make(`provider:${event.eventId}:${tag}:${crypto.randomUUID()}`);
 
 interface AssistantSegmentState {
   baseKey: string;
@@ -261,6 +280,55 @@ function requestKindFromCanonicalRequestType(
     default:
       return undefined;
   }
+}
+
+function asPlainRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function omitStringResult(record: Record<string, unknown>): Record<string, unknown> {
+  if (typeof record.result !== "string") {
+    return record;
+  }
+  const { result: _result, ...rest } = record;
+  return rest;
+}
+
+function sanitizeImageViewToolData(data: unknown): unknown {
+  const record = asPlainRecord(data);
+  if (!record) {
+    return data;
+  }
+
+  const sanitizedRecord = omitStringResult(record);
+  const item = asPlainRecord(sanitizedRecord.item);
+  if (!item) {
+    return sanitizedRecord;
+  }
+
+  const sanitizedItem = omitStringResult(item);
+  if (sanitizedItem === item && sanitizedRecord === record) {
+    return data;
+  }
+
+  return {
+    ...sanitizedRecord,
+    item: sanitizedItem,
+  };
+}
+
+function toolActivityDataPayload(
+  itemType: ToolLifecycleItemType,
+  data: unknown,
+): { readonly data?: unknown } {
+  if (data === undefined) {
+    return {};
+  }
+  return {
+    data: itemType === "image_view" ? sanitizeImageViewToolData(data) : data,
+  };
 }
 
 function runtimeEventToActivities(
@@ -533,6 +601,27 @@ function runtimeEventToActivities(
       ];
     }
 
+    case "account.rate-limits.updated": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "account.rate-limits.updated",
+          summary: "Usage limits updated",
+          payload: {
+            provider: event.provider,
+            ...(event.providerInstanceId !== undefined
+              ? { providerInstanceId: event.providerInstanceId }
+              : {}),
+            rateLimits: event.payload.rateLimits,
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     case "item.updated": {
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
@@ -548,7 +637,7 @@ function runtimeEventToActivities(
             itemType: event.payload.itemType,
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...toolActivityDataPayload(event.payload.itemType, event.payload.data),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -570,7 +659,7 @@ function runtimeEventToActivities(
           payload: {
             itemType: event.payload.itemType,
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...toolActivityDataPayload(event.payload.itemType, event.payload.data),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -607,11 +696,20 @@ function runtimeEventToActivities(
 }
 
 const make = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const serverConfig = yield* ServerConfig;
+  const workspacePaths = yield* WorkspacePaths;
+  const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
+    crypto.randomUUIDv4.pipe(
+      Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
+    );
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -651,6 +749,171 @@ const make = Effect.gen(function* () {
       .getThreadShellById(threadId)
       .pipe(Effect.map(Option.getOrUndefined));
   });
+
+  const relativePathForPersistedFile = (workspaceRoot: string, filename: string) => {
+    const trimmedFilename = filename.trim();
+    if (trimmedFilename.length === 0 || trimmedFilename.includes("\0")) {
+      return null;
+    }
+
+    if (!path.isAbsolute(trimmedFilename)) {
+      return trimmedFilename;
+    }
+
+    const root = path.resolve(workspaceRoot);
+    const absoluteFilePath = path.resolve(trimmedFilename);
+    const normalizedRoot = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+    if (!absoluteFilePath.startsWith(normalizedRoot)) {
+      return null;
+    }
+
+    const relativePath = path.relative(root, absoluteFilePath).replaceAll("\\", "/");
+    return relativePath.length > 0 ? relativePath : null;
+  };
+
+  const materializePersistedImageFile = (input: {
+    threadId: ThreadId;
+    workspaceRoot: string;
+    filename: string;
+  }): Effect.Effect<ChatAttachment | null> =>
+    Effect.gen(function* () {
+      const relativePath = relativePathForPersistedFile(input.workspaceRoot, input.filename);
+      if (!relativePath) {
+        return null;
+      }
+
+      const mimeType = imageMimeTypeFromFileName(relativePath);
+      if (!mimeType) {
+        return null;
+      }
+
+      const target = yield* workspacePaths
+        .resolveRelativePathWithinRoot({
+          workspaceRoot: input.workspaceRoot,
+          relativePath,
+        })
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!target) {
+        return null;
+      }
+
+      const fileInfo = yield* fileSystem
+        .stat(target.absolutePath)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!fileInfo || fileInfo.type !== "File") {
+        return null;
+      }
+      const fileSize = Number(fileInfo.size);
+      if (fileSize <= 0 || fileSize > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+        return null;
+      }
+
+      const attachmentId = createAttachmentId(input.threadId);
+      if (!attachmentId) {
+        return null;
+      }
+
+      const attachment: ChatAttachment = {
+        type: "image",
+        id: attachmentId,
+        name: path.basename(target.relativePath),
+        mimeType,
+        sizeBytes: fileSize,
+      };
+      const attachmentPath = resolveAttachmentPath({
+        attachmentsDir: serverConfig.attachmentsDir,
+        attachment,
+      });
+      if (!attachmentPath) {
+        return null;
+      }
+
+      const bytes = yield* fileSystem
+        .readFile(target.absolutePath)
+        .pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!bytes || bytes.byteLength === 0) {
+        return null;
+      }
+
+      yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true });
+      yield* fileSystem.writeFile(attachmentPath, bytes);
+      return attachment;
+    }).pipe(Effect.catch(() => Effect.succeed(null)));
+
+  const generatedImageName = (input: { name: string | undefined; mimeType: string }) => {
+    const extension = inferImageExtension({
+      mimeType: input.mimeType,
+      ...(input.name ? { fileName: input.name } : {}),
+    });
+    const fallback = extension === ".bin" ? "generated-image.png" : `generated-image${extension}`;
+    const baseName = input.name
+      ? path
+          .basename(input.name)
+          .replaceAll("\0", " ")
+          .replaceAll("\r", " ")
+          .replaceAll("\n", " ")
+          .replaceAll("\t", " ")
+          .trim()
+      : "";
+    const candidate = baseName.length > 0 ? baseName : fallback;
+    const withExtension = /\.[a-z0-9]{1,8}$/i.test(candidate)
+      ? candidate
+      : `${candidate}${extension}`;
+    return withExtension.length <= 255
+      ? withExtension
+      : `${withExtension.slice(0, Math.max(1, 255 - extension.length))}${extension}`;
+  };
+
+  const materializeGeneratedImage = (input: {
+    threadId: ThreadId;
+    dataUrl: string;
+    name?: string;
+    stableKey?: string;
+  }): Effect.Effect<ChatAttachment | null> =>
+    Effect.gen(function* () {
+      const parsed = parseBase64DataUrl(input.dataUrl);
+      if (!parsed || !parsed.mimeType.startsWith("image/")) {
+        return null;
+      }
+
+      const bytes = Buffer.from(parsed.base64, "base64");
+      if (bytes.byteLength <= 0 || bytes.byteLength > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+        return null;
+      }
+
+      const contentHash = createHash("sha256").update(bytes).digest("hex");
+      const attachmentId = input.stableKey
+        ? createStableAttachmentId(
+            input.threadId,
+            `${input.stableKey}:${parsed.mimeType}:${contentHash}`,
+          )
+        : createAttachmentId(input.threadId);
+      if (!attachmentId) {
+        return null;
+      }
+
+      const attachment: ChatAttachment = {
+        type: "image",
+        id: attachmentId,
+        name: generatedImageName({
+          name: input.name,
+          mimeType: parsed.mimeType,
+        }),
+        mimeType: parsed.mimeType,
+        sizeBytes: bytes.byteLength,
+      };
+      const attachmentPath = resolveAttachmentPath({
+        attachmentsDir: serverConfig.attachmentsDir,
+        attachment,
+      });
+      if (!attachmentPath) {
+        return null;
+      }
+
+      yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true });
+      yield* fileSystem.writeFile(attachmentPath, bytes);
+      return attachment;
+    }).pipe(Effect.catch(() => Effect.succeed(null)));
 
   const rememberAssistantMessageId = (threadId: ThreadId, turnId: TurnId, messageId: MessageId) =>
     Cache.getOption(turnMessageIdsByTurnKey, providerTurnKey(threadId, turnId)).pipe(
@@ -848,7 +1111,7 @@ const make = Effect.gen(function* () {
 
       yield* orchestrationEngine.dispatch({
         type: "thread.message.assistant.delta",
-        commandId: providerCommandId(input.event, input.commandTag),
+        commandId: yield* providerCommandId(input.event, input.commandTag),
         threadId: input.threadId,
         messageId: input.messageId,
         delta: bufferedText,
@@ -915,7 +1178,7 @@ const make = Effect.gen(function* () {
       if (hasRenderableText) {
         yield* orchestrationEngine.dispatch({
           type: "thread.message.assistant.delta",
-          commandId: providerCommandId(input.event, input.finalDeltaCommandTag),
+          commandId: yield* providerCommandId(input.event, input.finalDeltaCommandTag),
           threadId: input.threadId,
           messageId: input.messageId,
           delta: text,
@@ -927,7 +1190,7 @@ const make = Effect.gen(function* () {
       if (input.hasProjectedMessage || hasRenderableText) {
         yield* orchestrationEngine.dispatch({
           type: "thread.message.assistant.complete",
-          commandId: providerCommandId(input.event, input.commandTag),
+          commandId: yield* providerCommandId(input.event, input.commandTag),
           threadId: input.threadId,
           messageId: input.messageId,
           ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -1003,7 +1266,7 @@ const make = Effect.gen(function* () {
       const existingPlan = findProposedPlanById(input.threadProposedPlans, input.planId);
       yield* orchestrationEngine.dispatch({
         type: "thread.proposed-plan.upsert",
-        commandId: providerCommandId(input.event, "proposed-plan-upsert"),
+        commandId: yield* providerCommandId(input.event, "proposed-plan-upsert"),
         threadId: input.threadId,
         proposedPlan: {
           id: input.planId,
@@ -1159,10 +1422,11 @@ const make = Effect.gen(function* () {
         return;
       }
 
+      const commandUuid = yield* crypto.randomUUIDv4;
       yield* orchestrationEngine.dispatch({
         type: "thread.proposed-plan.upsert",
         commandId: CommandId.make(
-          `provider:source-proposed-plan-implemented:${implementationThreadId}:${crypto.randomUUID()}`,
+          `provider:source-proposed-plan-implemented:${implementationThreadId}:${commandUuid}`,
         ),
         threadId: sourceThread.id,
         proposedPlan: {
@@ -1238,16 +1502,31 @@ const make = Effect.gen(function* () {
         event.type === "turn.started" ||
         event.type === "turn.completed"
       ) {
+        const sessionStateStatus =
+          event.type === "session.state.changed"
+            ? orchestrationSessionStatusFromRuntimeState(event.payload.state)
+            : null;
+        const sessionStateReferencesCompletedLatestTurn =
+          sessionStateStatus === "running" &&
+          activeTurnId === null &&
+          eventTurnId !== undefined &&
+          sameId(thread.latestTurn?.turnId, eventTurnId) &&
+          thread.latestTurn?.completedAt != null;
         const nextActiveTurnId =
           event.type === "turn.started"
             ? (eventTurnId ?? null)
             : event.type === "turn.completed" || event.type === "session.exited"
               ? null
-              : activeTurnId;
+              : sessionStateStatus === "running"
+                ? (activeTurnId ??
+                  (sessionStateReferencesCompletedLatestTurn ? null : (eventTurnId ?? null)))
+                : activeTurnId;
         const status = (() => {
           switch (event.type) {
             case "session.state.changed":
-              return orchestrationSessionStatusFromRuntimeState(event.payload.state);
+              return (sessionStateStatus ?? "ready") === "running" && nextActiveTurnId === null
+                ? "ready"
+                : (sessionStateStatus ?? "ready");
             case "turn.started":
               return "running";
             case "session.exited":
@@ -1296,7 +1575,7 @@ const make = Effect.gen(function* () {
 
           yield* orchestrationEngine.dispatch({
             type: "thread.session.set",
-            commandId: providerCommandId(event, "thread-session-set"),
+            commandId: yield* providerCommandId(event, "thread-session-set"),
             threadId: thread.id,
             session: {
               threadId: thread.id,
@@ -1342,7 +1621,7 @@ const make = Effect.gen(function* () {
           if (spillChunk.length > 0) {
             yield* orchestrationEngine.dispatch({
               type: "thread.message.assistant.delta",
-              commandId: providerCommandId(event, "assistant-delta-buffer-spill"),
+              commandId: yield* providerCommandId(event, "assistant-delta-buffer-spill"),
               threadId: thread.id,
               messageId: assistantMessageId,
               delta: spillChunk,
@@ -1353,10 +1632,85 @@ const make = Effect.gen(function* () {
         } else {
           yield* orchestrationEngine.dispatch({
             type: "thread.message.assistant.delta",
-            commandId: providerCommandId(event, "assistant-delta"),
+            commandId: yield* providerCommandId(event, "assistant-delta"),
             threadId: thread.id,
             messageId: assistantMessageId,
             delta: assistantDelta,
+            ...(turnId ? { turnId } : {}),
+            createdAt: now,
+          });
+        }
+      }
+
+      if (event.type === "files.persisted" && event.payload.files.length > 0) {
+        const checkpointContextOption = yield* projectionSnapshotQuery
+          .getThreadCheckpointContext(thread.id)
+          .pipe(Effect.catch(() => Effect.succeed(Option.none())));
+        const checkpointContext = Option.getOrUndefined(checkpointContextOption);
+        const workspaceRoot = checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot;
+        if (workspaceRoot) {
+          const attachments = (yield* Effect.forEach(
+            event.payload.files,
+            (file) =>
+              materializePersistedImageFile({
+                threadId: thread.id,
+                workspaceRoot,
+                filename: file.filename,
+              }),
+            { concurrency: 1 },
+          )).filter((attachment): attachment is ChatAttachment => attachment !== null);
+
+          if (attachments.length > 0) {
+            const turnId = toTurnId(event.turnId);
+            const assistantMessageId = yield* getOrCreateAssistantMessageId({
+              threadId: thread.id,
+              event,
+              ...(turnId ? { turnId } : {}),
+            });
+            if (turnId) {
+              yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
+            }
+
+            yield* orchestrationEngine.dispatch({
+              type: "thread.message.attachments.add",
+              commandId: yield* providerCommandId(event, "assistant-attachments-add"),
+              threadId: thread.id,
+              messageId: assistantMessageId,
+              role: "assistant",
+              attachments,
+              ...(turnId ? { turnId } : {}),
+              createdAt: now,
+            });
+          }
+        }
+      }
+
+      if (event.type === "image.generated") {
+        const attachment = yield* materializeGeneratedImage({
+          threadId: thread.id,
+          dataUrl: event.payload.dataUrl,
+          ...(event.payload.name ? { name: event.payload.name } : {}),
+          ...(event.itemId ? { stableKey: `provider-item:${event.itemId}` } : {}),
+        });
+
+        if (attachment) {
+          const turnId = toTurnId(event.turnId);
+          const assistantMessageId = yield* getOrCreateAssistantMessageId({
+            threadId: thread.id,
+            event,
+            ...(turnId ? { turnId } : {}),
+          });
+          if (turnId) {
+            yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
+          }
+
+          yield* orchestrationEngine.dispatch({
+            type: "thread.message.attachments.add",
+            commandId: yield* providerCommandId(event, "assistant-generated-image-add"),
+            threadId: thread.id,
+            messageId: assistantMessageId,
+            role: "assistant",
+            attachments: [attachment],
             ...(turnId ? { turnId } : {}),
             createdAt: now,
           });
@@ -1546,7 +1900,7 @@ const make = Effect.gen(function* () {
         if (shouldApplyRuntimeError) {
           yield* orchestrationEngine.dispatch({
             type: "thread.session.set",
-            commandId: providerCommandId(event, "runtime-error-session-set"),
+            commandId: yield* providerCommandId(event, "runtime-error-session-set"),
             threadId: thread.id,
             session: {
               threadId: thread.id,
@@ -1568,7 +1922,7 @@ const make = Effect.gen(function* () {
       if (event.type === "thread.metadata.updated" && event.payload.name) {
         yield* orchestrationEngine.dispatch({
           type: "thread.meta.update",
-          commandId: providerCommandId(event, "thread-meta-update"),
+          commandId: yield* providerCommandId(event, "thread-meta-update"),
           threadId: thread.id,
           title: event.payload.name,
         });
@@ -1596,7 +1950,7 @@ const make = Effect.gen(function* () {
             );
             yield* orchestrationEngine.dispatch({
               type: "thread.turn.diff.complete",
-              commandId: providerCommandId(event, "thread-turn-diff-complete"),
+              commandId: yield* providerCommandId(event, "thread-turn-diff-complete"),
               threadId: thread.id,
               turnId,
               completedAt: now,
@@ -1613,13 +1967,17 @@ const make = Effect.gen(function* () {
 
       const activities = runtimeEventToActivities(event);
       yield* Effect.forEach(activities, (activity) =>
-        orchestrationEngine.dispatch({
-          type: "thread.activity.append",
-          commandId: providerCommandId(event, "thread-activity-append"),
-          threadId: thread.id,
-          activity,
-          createdAt: activity.createdAt,
-        }),
+        providerCommandId(event, "thread-activity-append").pipe(
+          Effect.flatMap((commandId) =>
+            orchestrationEngine.dispatch({
+              type: "thread.activity.append",
+              commandId,
+              threadId: thread.id,
+              activity,
+              createdAt: activity.createdAt,
+            }),
+          ),
+        ),
       ).pipe(Effect.asVoid);
     });
 

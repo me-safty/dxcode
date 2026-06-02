@@ -12,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
+  CheckpointRef,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
@@ -49,6 +50,7 @@ import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeInge
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { WorkspacePathsLive } from "../../workspace/Layers/WorkspacePaths.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
 function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
@@ -120,6 +122,7 @@ function createProviderServiceHarness() {
       });
     },
     rollbackConversation: () => unsupported(),
+    refreshUsage: () => Effect.succeed({ accountRateLimits: [] }),
     get streamEvents() {
       return Stream.fromPubSub(runtimeEventPubSub);
     },
@@ -219,6 +222,8 @@ describe("ProviderRuntimeIngestion", () => {
 
   async function createHarness(options?: { serverSettings?: Partial<ServerSettings> }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
+    const serverBaseDir = makeTempDir("t3-provider-server-");
+    const attachmentsDir = path.join(serverBaseDir, "userdata", "attachments");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
     const provider = createProviderServiceHarness();
     const orchestrationLayer = OrchestrationEngineLive.pipe(
@@ -239,7 +244,8 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), serverBaseDir)),
+      Layer.provideMerge(WorkspacePathsLive),
       Layer.provideMerge(NodeServices.layer),
     );
     runtime = ManagedRuntime.make(layer);
@@ -311,6 +317,8 @@ describe("ProviderRuntimeIngestion", () => {
 
     return {
       engine,
+      workspaceRoot,
+      attachmentsDir,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       emit: provider.emit,
       setProviderSession: provider.setSession,
@@ -362,7 +370,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("applies provider session.state.changed transitions directly", async () => {
     const harness = await createHarness();
-    const waitingAt = "2026-01-01T00:00:00.000Z";
+    const waitingAt = "2026-01-01T00:00:01.000Z";
 
     harness.emit({
       type: "session.state.changed",
@@ -378,9 +386,12 @@ describe("ProviderRuntimeIngestion", () => {
 
     let thread = await waitForThread(
       harness.readModel,
-      (entry) => entry.session?.status === "running" && entry.session?.activeTurnId === null,
+      (entry) =>
+        entry.session?.status === "ready" &&
+        entry.session?.activeTurnId === null &&
+        entry.session?.updatedAt === waitingAt,
     );
-    expect(thread.session?.status).toBe("running");
+    expect(thread.session?.status).toBe("ready");
     expect(thread.session?.lastError).toBeNull();
 
     harness.emit({
@@ -446,6 +457,214 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("ready");
     expect(thread.session?.lastError).toBeNull();
+  });
+
+  it("keeps a running session state attached to the active turn", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const waitingAt = "2026-01-01T00:00:01.000Z";
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-before-session-waiting"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-session-waiting"),
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-session-waiting",
+    );
+
+    harness.emit({
+      type: "session.state.changed",
+      eventId: asEventId("evt-session-state-waiting-active-turn"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: waitingAt,
+      payload: {
+        state: "waiting",
+        reason: "awaiting approval",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.session?.status === "running" &&
+        entry.session?.activeTurnId === "turn-session-waiting" &&
+        entry.session.updatedAt === waitingAt,
+    );
+    expect(thread.session?.status).toBe("running");
+    expect(thread.session?.activeTurnId).toBe("turn-session-waiting");
+  });
+
+  it("does not resurrect a completed turn when a late running session state has no active turn", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const completedAt = "2026-01-01T00:00:06.000Z";
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-before-late-state"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-late-state"),
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" && thread.session?.activeTurnId === "turn-late-state",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-before-late-state"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-late-state"),
+      itemId: asItemId("item-late-state"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "done",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-message-completed-before-late-state"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: completedAt,
+      turnId: asTurnId("turn-late-state"),
+      itemId: asItemId("item-late-state"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-before-late-state"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: completedAt,
+      turnId: asTurnId("turn-late-state"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) => thread.session?.status === "ready" && thread.session?.activeTurnId === null,
+    );
+
+    harness.emit({
+      type: "session.state.changed",
+      eventId: asEventId("evt-late-session-state-running"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: "2026-01-01T00:00:07.000Z",
+      payload: {
+        state: "running",
+        reason: "late provider status",
+      },
+    });
+    await harness.drain();
+
+    const snapshot = await harness.readModel();
+    const thread = snapshot.threads.find((entry) => entry.id === asThreadId("thread-1"));
+    expect(thread?.session?.status).toBe("ready");
+    expect(thread?.session?.activeTurnId).toBeNull();
+  });
+
+  it("does not resurrect a completed turn when a late running session state references that turn", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const completedAt = "2026-01-01T00:00:06.000Z";
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-before-late-turn-state"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-late-turn-state"),
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-late-turn-state",
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-before-late-turn-state"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: completedAt,
+      turnId: asTurnId("turn-late-turn-state"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) => thread.session?.status === "ready" && thread.session?.activeTurnId === null,
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.make("cmd-complete-diff-before-late-turn-state"),
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-late-turn-state"),
+        checkpointRef: CheckpointRef.make("checkpoint:late-turn-state"),
+        status: "ready",
+        files: [],
+        assistantMessageId: asMessageId("assistant:late-turn-state"),
+        checkpointTurnCount: 1,
+        completedAt,
+        createdAt: completedAt,
+      }),
+    );
+
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.latestTurn?.turnId === "turn-late-turn-state" &&
+        thread.latestTurn.completedAt === completedAt,
+    );
+
+    harness.emit({
+      type: "session.state.changed",
+      eventId: asEventId("evt-late-session-state-running-with-turn"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-late-turn-state"),
+      createdAt: "2026-01-01T00:00:07.000Z",
+      payload: {
+        state: "running",
+        reason: "late provider status",
+      },
+    });
+    await harness.drain();
+
+    const snapshot = await harness.readModel();
+    const thread = snapshot.threads.find((entry) => entry.id === asThreadId("thread-1"));
+    expect(thread?.session?.status).toBe("ready");
+    expect(thread?.session?.activeTurnId).toBeNull();
   });
 
   it("does not clear active turn when session/thread started arrives mid-turn", async () => {
@@ -751,6 +970,147 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.streaming).toBe(false);
   });
 
+  it("copies persisted provider image files into assistant message attachments", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const imagePath = path.join(harness.workspaceRoot, "outputs", "pizza-cat.png");
+    fs.mkdirSync(path.dirname(imagePath), { recursive: true });
+    fs.writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+    harness.emit({
+      type: "files.persisted",
+      eventId: asEventId("evt-files-persisted-image"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-image"),
+      itemId: asItemId("item-image"),
+      payload: {
+        files: [
+          {
+            filename: "outputs/pizza-cat.png",
+            fileId: "file-image",
+          },
+        ],
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-image" && (message.attachments?.length ?? 0) === 1,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-image",
+    );
+    const attachment = message?.attachments?.[0];
+    expect(message?.role).toBe("assistant");
+    expect(message?.text).toBe("");
+    expect(attachment).toMatchObject({
+      type: "image",
+      name: "pizza-cat.png",
+      mimeType: "image/png",
+      sizeBytes: 4,
+    });
+    expect(fs.existsSync(path.join(harness.attachmentsDir, `${attachment?.id}.png`))).toBe(true);
+  });
+
+  it("copies generated provider image payloads into stable assistant message attachments", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "image.generated",
+      eventId: asEventId("evt-generated-image"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-generated-image"),
+      itemId: asItemId("item-generated-image"),
+      payload: {
+        name: "generated-cat.png",
+        dataUrl: "data:image/png;base64,aGVsbG8=",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-generated-image" &&
+          (message.attachments?.length ?? 0) === 1,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-generated-image",
+    );
+    const attachment = message?.attachments?.[0];
+    expect(message?.role).toBe("assistant");
+    expect(message?.text).toBe("");
+    expect(attachment).toMatchObject({
+      type: "image",
+      name: "generated-cat.png",
+      mimeType: "image/png",
+      sizeBytes: 5,
+    });
+    expect(fs.existsSync(path.join(harness.attachmentsDir, `${attachment?.id}.png`))).toBe(true);
+
+    harness.emit({
+      type: "image.generated",
+      eventId: asEventId("evt-generated-image-repeat"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-generated-image"),
+      itemId: asItemId("item-generated-image"),
+      payload: {
+        name: "generated-cat.png",
+        dataUrl: "data:image/png;base64,aGVsbG8=",
+      },
+    });
+    await harness.drain();
+
+    const repeatedThread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === asThreadId("thread-1"),
+    );
+    const repeatedMessage = repeatedThread?.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-generated-image",
+    );
+    expect(repeatedMessage?.attachments?.map((entry) => entry.id)).toEqual([attachment?.id]);
+
+    harness.emit({
+      type: "image.generated",
+      eventId: asEventId("evt-generated-image-updated"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-generated-image"),
+      itemId: asItemId("item-generated-image"),
+      payload: {
+        name: "generated-cat.png",
+        dataUrl: "data:image/png;base64,d29ybGQ=",
+      },
+    });
+
+    const updatedThread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (candidate: ProviderRuntimeTestMessage) =>
+          candidate.id === "assistant:item-generated-image" &&
+          (candidate.attachments?.length ?? 0) === 2,
+      ),
+    );
+    const updatedMessage = updatedThread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-generated-image",
+    );
+    const updatedAttachments = updatedMessage?.attachments ?? [];
+    expect(updatedAttachments).toHaveLength(2);
+    expect(updatedAttachments[0]?.id).toBe(attachment?.id);
+    expect(updatedAttachments[1]?.id).not.toBe(attachment?.id);
+    expect(
+      fs.existsSync(path.join(harness.attachmentsDir, `${updatedAttachments[1]?.id}.png`)),
+    ).toBe(true);
+  });
+
   it("preserves completed tool metadata on projected tool activities", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
@@ -805,6 +1165,124 @@ describe("ProviderRuntimeIngestion", () => {
     expect(data?.toolCallId).toBe("tool-read-1");
     expect(data?.kind).toBe("read");
     expect(rawOutput?.content).toBe('import * as Effect from "effect/Effect"\n');
+  });
+
+  it("omits generated image bytes from projected image view tool activities", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-image-view-completed-with-data"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-image-view-completed"),
+      itemId: asItemId("item-image-view-completed"),
+      payload: {
+        itemType: "image_view",
+        status: "completed",
+        title: "Image view",
+        data: {
+          result: "top-level-image-bytes",
+          completedAtMs: 123,
+          item: {
+            id: "ig-test",
+            prompt: "paint a cat",
+            result: "nested-image-bytes",
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.id === "evt-image-view-completed-with-data",
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-image-view-completed-with-data",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+    const data =
+      payload?.data && typeof payload.data === "object"
+        ? (payload.data as Record<string, unknown>)
+        : undefined;
+    const item =
+      data?.item && typeof data.item === "object"
+        ? (data.item as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("tool.completed");
+    expect(activity?.summary).toBe("Image view");
+    expect(payload?.itemType).toBe("image_view");
+    expect(data?.result).toBeUndefined();
+    expect(data?.completedAtMs).toBe(123);
+    expect(item?.id).toBe("ig-test");
+    expect(item?.prompt).toBe("paint a cat");
+    expect(item?.result).toBeUndefined();
+  });
+
+  it("projects provider account rate-limit updates into thread activities", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "account.rate-limits.updated",
+      eventId: asEventId("evt-rate-limits-updated"),
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        rateLimits: {
+          rateLimits: {
+            primary: {
+              usedPercent: 25,
+              windowDurationMins: 300,
+            },
+            secondary: {
+              usedPercent: 10,
+              windowDurationMins: 10_080,
+            },
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-rate-limits-updated",
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-rate-limits-updated",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("account.rate-limits.updated");
+    expect(activity?.summary).toBe("Usage limits updated");
+    expect(payload?.provider).toBe("codex");
+    expect(payload?.providerInstanceId).toBe("codex");
+    expect(payload?.rateLimits).toEqual({
+      rateLimits: {
+        primary: {
+          usedPercent: 25,
+          windowDurationMins: 300,
+        },
+        secondary: {
+          usedPercent: 10,
+          windowDurationMins: 10_080,
+        },
+      },
+    });
   });
 
   it("normalizes command execution activities to ran-command summaries", async () => {
@@ -2577,6 +3055,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(checkpoint?.status).toBe("missing");
     expect(checkpoint?.assistantMessageId).toBe("assistant:item-p1-assistant");
     expect(checkpoint?.checkpointRef).toBe("provider-diff:evt-turn-diff-updated");
+    expect(thread.latestTurn?.state).not.toBe("completed");
   });
 
   it("projects context window updates into normalized thread activities", async () => {

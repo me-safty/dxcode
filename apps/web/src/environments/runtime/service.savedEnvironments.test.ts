@@ -121,6 +121,7 @@ vi.mock("~/store", () => ({
     getState: () => ({
       syncServerShellSnapshot: vi.fn(),
       syncServerThreadDetail: vi.fn(),
+      mergeServerThreadDetailTailSnapshot: vi.fn(),
       removeServerThreadDetail: vi.fn(),
       applyServerShellEvent: vi.fn(),
     }),
@@ -196,6 +197,13 @@ function createClient() {
     },
     projects: {
       searchEntries: vi.fn(async () => []),
+      listDirectoryEntries: vi.fn(async () => ({ entries: [], truncated: false })),
+      readFile: vi.fn(async () => ({
+        contents: "",
+        relativePath: "README.md",
+        sizeBytes: 0,
+        truncated: false,
+      })),
       writeFile: vi.fn(async () => undefined),
     },
     shell: {
@@ -206,6 +214,7 @@ function createClient() {
       refreshStatus: vi.fn(async () => undefined),
       onStatus: vi.fn(() => () => undefined),
       runStackedAction: vi.fn(async () => ({})),
+      generateCommitMessage: vi.fn(async () => ({})),
       listBranches: vi.fn(async () => []),
       createWorktree: vi.fn(async () => undefined),
       removeWorktree: vi.fn(async () => undefined),

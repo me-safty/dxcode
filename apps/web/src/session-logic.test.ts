@@ -1,6 +1,7 @@
 import {
   EventId,
   MessageId,
+  ProviderDriverKind,
   ThreadId,
   TurnId,
   type OrchestrationThreadActivity,
@@ -11,6 +12,7 @@ import {
   deriveCompletionDividerBeforeEntryId,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  derivePhase,
   derivePendingApprovals,
   derivePendingUserInputs,
   deriveTimelineEntries,
@@ -18,9 +20,12 @@ import {
   findLatestProposedPlan,
   findSidebarProposedPlan,
   hasActionableProposedPlan,
+  hasActiveSessionWork,
   hasToolActivityForTurn,
   isLatestTurnSettled,
 } from "./session-logic";
+
+let nextActivityId = 0;
 
 function makeActivity(overrides: {
   id?: string;
@@ -34,7 +39,7 @@ function makeActivity(overrides: {
 }): OrchestrationThreadActivity {
   const payload = overrides.payload ?? {};
   return {
-    id: EventId.make(overrides.id ?? crypto.randomUUID()),
+    id: EventId.make(overrides.id ?? `activity-${nextActivityId++}`),
     createdAt: overrides.createdAt ?? "2026-02-23T00:00:00.000Z",
     kind: overrides.kind ?? "tool.started",
     summary: overrides.summary ?? "Tool call",
@@ -667,6 +672,42 @@ describe("deriveWorkLogEntries", () => {
 
     const entries = deriveWorkLogEntries(activities, TurnId.make("turn-2"));
     expect(entries.map((entry) => entry.id)).toEqual(["turn-2"]);
+  });
+
+  it("keeps runtime warnings visible across latest-turn filtering", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "old-warning",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        turnId: "turn-1",
+        kind: "runtime.warning",
+        summary: "Runtime warning",
+        tone: "info",
+        payload: { message: "Reconnecting... 2/5" },
+      }),
+      makeActivity({
+        id: "old-tool",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-1",
+        summary: "Ran command",
+        kind: "tool.completed",
+      }),
+      makeActivity({
+        id: "current-tool",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        turnId: "turn-2",
+        summary: "Ran command",
+        kind: "tool.completed",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-2"));
+    expect(entries.map((entry) => entry.id)).toEqual(["old-warning", "current-tool"]);
+    expect(entries[0]).toMatchObject({
+      label: "Provider warning",
+      detail: "Reconnecting... 2/5",
+      tone: "info",
+    });
   });
 
   it("omits checkpoint captured info entries", () => {
@@ -1342,8 +1383,8 @@ describe("deriveTimelineEntries", () => {
   });
 });
 
-describe("deriveWorkLogEntries context window handling", () => {
-  it("excludes context window updates from the work log", () => {
+describe("deriveWorkLogEntries usage telemetry handling", () => {
+  it("excludes usage telemetry updates from the work log", () => {
     const entries = deriveWorkLogEntries(
       [
         makeActivity({
@@ -1351,6 +1392,13 @@ describe("deriveWorkLogEntries context window handling", () => {
           turnId: "turn-1",
           kind: "context-window.updated",
           summary: "Context window updated",
+          tone: "info",
+        }),
+        makeActivity({
+          id: "rate-limits-1",
+          turnId: "turn-1",
+          kind: "account.rate-limits.updated",
+          summary: "Usage limits updated",
           tone: "info",
         }),
         makeActivity({
@@ -1415,12 +1463,30 @@ describe("isLatestTurnSettled", () => {
     completedAt: "2026-02-27T21:10:06.000Z",
   } as const;
 
-  it("returns false while the same turn is still active in a running session", () => {
+  it("returns false while a running session still owns the completed latest turn", () => {
+    // A completed assistant message can stamp latestTurn.completedAt before
+    // the provider turn itself is done. While activeTurnId still names that
+    // turn, the active session is the authoritative signal.
     expect(
       isLatestTurnSettled(latestTurn, {
         orchestrationStatus: "running",
         activeTurnId: TurnId.make("turn-1"),
       }),
+    ).toBe(false);
+  });
+
+  it("returns false while the same turn is still active before completion", () => {
+    expect(
+      isLatestTurnSettled(
+        {
+          ...latestTurn,
+          completedAt: null,
+        },
+        {
+          orchestrationStatus: "running",
+          activeTurnId: TurnId.make("turn-1"),
+        },
+      ),
     ).toBe(false);
   });
 
@@ -1431,6 +1497,15 @@ describe("isLatestTurnSettled", () => {
         activeTurnId: TurnId.make("turn-2"),
       }),
     ).toBe(false);
+  });
+
+  it("returns true when a stale running session has no active turn after completion", () => {
+    expect(
+      isLatestTurnSettled(latestTurn, {
+        orchestrationStatus: "running",
+        activeTurnId: undefined,
+      }),
+    ).toBe(true);
   });
 
   it("returns true once the session is no longer running that turn", () => {
@@ -1456,6 +1531,103 @@ describe("isLatestTurnSettled", () => {
   });
 });
 
+describe("derivePhase", () => {
+  const completedLatestTurn = {
+    turnId: TurnId.make("turn-1"),
+    startedAt: "2026-02-27T21:10:00.000Z",
+    completedAt: "2026-02-27T21:10:06.000Z",
+  } as const;
+
+  it("treats a running session with no active turn as ready when the latest turn is complete", () => {
+    expect(
+      derivePhase(
+        {
+          provider: ProviderDriverKind.make("codex"),
+          status: "running",
+          orchestrationStatus: "running",
+          activeTurnId: undefined,
+          createdAt: "2026-02-27T21:10:00.000Z",
+          updatedAt: "2026-02-27T21:10:06.000Z",
+        },
+        completedLatestTurn,
+      ),
+    ).toBe("ready");
+  });
+
+  it("treats a running session with no active turn and no latest turn as ready", () => {
+    expect(
+      derivePhase(
+        {
+          provider: ProviderDriverKind.make("codex"),
+          status: "running",
+          orchestrationStatus: "running",
+          activeTurnId: undefined,
+          createdAt: "2026-02-27T21:10:00.000Z",
+          updatedAt: "2026-02-27T21:10:06.000Z",
+        },
+        null,
+      ),
+    ).toBe("ready");
+  });
+
+  it("keeps running while the session still owns the completed latest turn", () => {
+    // latestTurn.completedAt can mean the current assistant message finished,
+    // not that the whole provider turn finished.
+    expect(
+      derivePhase(
+        {
+          provider: ProviderDriverKind.make("codex"),
+          status: "running",
+          orchestrationStatus: "running",
+          activeTurnId: TurnId.make("turn-1"),
+          createdAt: "2026-02-27T21:10:00.000Z",
+          updatedAt: "2026-02-27T21:10:00.000Z",
+        },
+        completedLatestTurn,
+      ),
+    ).toBe("running");
+  });
+
+  it("keeps running when latestTurn is running before the session status catches up", () => {
+    expect(
+      derivePhase(
+        {
+          provider: ProviderDriverKind.make("codex"),
+          status: "ready",
+          orchestrationStatus: "ready",
+          activeTurnId: undefined,
+          createdAt: "2026-02-27T21:10:00.000Z",
+          updatedAt: "2026-02-27T21:10:00.000Z",
+        },
+        {
+          ...completedLatestTurn,
+          state: "running",
+          completedAt: null,
+        },
+      ),
+    ).toBe("running");
+  });
+
+  it("keeps running when the provider has an active incomplete turn", () => {
+    expect(
+      derivePhase(
+        {
+          provider: ProviderDriverKind.make("codex"),
+          status: "running",
+          orchestrationStatus: "running",
+          activeTurnId: TurnId.make("turn-1"),
+          createdAt: "2026-02-27T21:10:00.000Z",
+          updatedAt: "2026-02-27T21:10:00.000Z",
+        },
+        {
+          ...completedLatestTurn,
+          completedAt: null,
+        },
+      ),
+    ).toBe("running");
+  });
+});
+
 describe("deriveActiveWorkStartedAt", () => {
   const latestTurn = {
     turnId: TurnId.make("turn-1"),
@@ -1464,6 +1636,22 @@ describe("deriveActiveWorkStartedAt", () => {
   } as const;
 
   it("prefers the in-flight turn start when the latest turn is not settled", () => {
+    expect(
+      deriveActiveWorkStartedAt(
+        {
+          ...latestTurn,
+          completedAt: null,
+        },
+        {
+          orchestrationStatus: "running",
+          activeTurnId: TurnId.make("turn-1"),
+        },
+        "2026-02-27T21:11:00.000Z",
+      ),
+    ).toBe("2026-02-27T21:10:00.000Z");
+  });
+
+  it("keeps the active turn start while a running session still owns a completed latest turn", () => {
     expect(
       deriveActiveWorkStartedAt(
         latestTurn,
@@ -1514,5 +1702,88 @@ describe("deriveActiveWorkStartedAt", () => {
         "2026-02-27T21:11:00.000Z",
       ),
     ).toBe("2026-02-27T21:11:00.000Z");
+  });
+});
+
+describe("hasActiveSessionWork", () => {
+  const completedLatestTurn = {
+    turnId: TurnId.make("turn-1"),
+    startedAt: "2026-02-27T21:10:00.000Z",
+    completedAt: "2026-02-27T21:10:06.000Z",
+  } as const;
+
+  it("treats an active turn as work until the session leaves running status", () => {
+    expect(
+      hasActiveSessionWork(completedLatestTurn, {
+        orchestrationStatus: "running",
+        activeTurnId: TurnId.make("turn-1"),
+      }),
+    ).toBe(true);
+
+    expect(
+      hasActiveSessionWork(completedLatestTurn, {
+        orchestrationStatus: "ready",
+        activeTurnId: TurnId.make("turn-1"),
+      }),
+    ).toBe(false);
+  });
+
+  it("treats an active turn as work while latestTurn shows it still in flight", () => {
+    expect(
+      hasActiveSessionWork(
+        { ...completedLatestTurn, completedAt: null },
+        {
+          orchestrationStatus: "running",
+          activeTurnId: TurnId.make("turn-1"),
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it("treats a running latestTurn as work while the session status is still ready", () => {
+    expect(
+      hasActiveSessionWork(
+        {
+          ...completedLatestTurn,
+          state: "running",
+          completedAt: null,
+        },
+        {
+          orchestrationStatus: "ready",
+          activeTurnId: undefined,
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it("treats a different active turn as work even when the latest projected turn completed", () => {
+    expect(
+      hasActiveSessionWork(completedLatestTurn, {
+        orchestrationStatus: "running",
+        activeTurnId: TurnId.make("turn-2"),
+      }),
+    ).toBe(true);
+  });
+
+  it("falls back to latest-turn completion only when the session has no active turn id", () => {
+    expect(
+      hasActiveSessionWork(
+        {
+          ...completedLatestTurn,
+          completedAt: null,
+        },
+        {
+          orchestrationStatus: "running",
+          activeTurnId: undefined,
+        },
+      ),
+    ).toBe(true);
+
+    expect(
+      hasActiveSessionWork(completedLatestTurn, {
+        orchestrationStatus: "running",
+        activeTurnId: undefined,
+      }),
+    ).toBe(false);
   });
 });

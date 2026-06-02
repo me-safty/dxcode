@@ -10,6 +10,9 @@ export const runServerCommand = (
   options?: {
     readonly startupPresentation?: StartupPresentation;
     readonly forceAutoBootstrapProjectFromCwd?: boolean;
+    readonly defaultHost?: string;
+    readonly defaultTailscaleServeEnabled?: boolean;
+    readonly defaultTailscaleServePort?: number;
   },
 ) =>
   Effect.gen(function* () {
@@ -19,13 +22,13 @@ export const runServerCommand = (
   });
 
 export const startCommand = Command.make("start", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run the T3 Code server."),
+  Command.withDescription("Run the Salchi server."),
   Command.withHandler((flags) => runServerCommand(flags)),
 );
 
 export const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription(
-    "Run the T3 Code server without opening a browser and print headless pairing details.",
+    "Run the Salchi server without opening a browser and print headless pairing details.",
   ),
   Command.withHandler((flags) =>
     runServerCommand(flags, {

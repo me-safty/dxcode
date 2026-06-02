@@ -56,6 +56,9 @@ it("builds a pairing URL that embeds the token in the hash", () => {
   expect(buildPairingUrl("http://192.168.1.42:3773", "PAIRCODE")).toBe(
     "http://192.168.1.42:3773/pair#token=PAIRCODE",
   );
+  expect(buildPairingUrl("https://desktop.tail.ts.net/", "PAIRCODE")).toBe(
+    "https://desktop.tail.ts.net/pair#token=PAIRCODE",
+  );
 });
 
 it("renders terminal QR codes as a multi-line unicode block grid", () => {

@@ -1,6 +1,8 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import {
+  EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
   EnvironmentId,
+  MessageId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -14,12 +16,18 @@ import { type Thread } from "../types";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
+  buildOlderThreadDetailPageCursors,
   createLocalDispatchSnapshot,
+  deriveIsInterrupting,
   deriveComposerSendState,
+  hasOlderThreadDetailPage,
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
+  resolveInterruptTurnId,
   resolveSendEnvMode,
+  shouldShowThreadDetailLoading,
   shouldWriteThreadErrorToCurrentServerThread,
+  shouldIgnoreInterruptClick,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 
@@ -214,6 +222,11 @@ describe("shouldWriteThreadErrorToCurrentServerThread", () => {
 
 const makeThread = (input?: {
   id?: ThreadId;
+  messages?: Thread["messages"];
+  activities?: Thread["activities"];
+  proposedPlans?: Thread["proposedPlans"];
+  turnDiffSummaries?: Thread["turnDiffSummaries"];
+  session?: Thread["session"];
   latestTurn?: {
     turnId: TurnId;
     state: "running" | "completed";
@@ -230,9 +243,10 @@ const makeThread = (input?: {
   modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
   runtimeMode: "full-access" as const,
   interactionMode: "default" as const,
-  session: null,
-  messages: [],
-  proposedPlans: [],
+  session: input?.session ?? null,
+  messages: input?.messages ?? [],
+  queuedTurns: [],
+  proposedPlans: input?.proposedPlans ?? [],
   error: null,
   createdAt: "2026-03-29T00:00:00.000Z",
   archivedAt: null,
@@ -245,8 +259,98 @@ const makeThread = (input?: {
     : null,
   branch: null,
   worktreePath: null,
-  turnDiffSummaries: [],
-  activities: [],
+  turnDiffSummaries: input?.turnDiffSummaries ?? [],
+  activities: input?.activities ?? [],
+});
+
+describe("interrupt controls", () => {
+  it("uses the running latest turn id for stop commands", () => {
+    const runningTurnId = TurnId.make("turn-running");
+    const sessionTurnId = TurnId.make("turn-session");
+
+    expect(
+      resolveInterruptTurnId(
+        makeThread({
+          session: {
+            provider: ProviderDriverKind.make("cursor"),
+            status: "running",
+            createdAt: "2026-03-29T00:00:00.000Z",
+            updatedAt: "2026-03-29T00:00:01.000Z",
+            orchestrationStatus: "running",
+            activeTurnId: sessionTurnId,
+          },
+          latestTurn: {
+            turnId: runningTurnId,
+            state: "running",
+            requestedAt: "2026-03-29T00:00:00.000Z",
+            startedAt: "2026-03-29T00:00:01.000Z",
+            completedAt: null,
+          },
+        }),
+      ),
+    ).toBe(runningTurnId);
+  });
+
+  it("falls back to the active session turn id while projections catch up", () => {
+    const activeTurnId = TurnId.make("turn-active");
+
+    expect(
+      resolveInterruptTurnId(
+        makeThread({
+          session: {
+            provider: ProviderDriverKind.make("cursor"),
+            status: "running",
+            createdAt: "2026-03-29T00:00:00.000Z",
+            updatedAt: "2026-03-29T00:00:01.000Z",
+            orchestrationStatus: "running",
+            activeTurnId,
+          },
+          latestTurn: null,
+        }),
+      ),
+    ).toBe(activeTurnId);
+  });
+
+  it("suppresses repeated stop clicks for the same active turn", () => {
+    const turnId = TurnId.make("turn-1");
+
+    expect(shouldIgnoreInterruptClick({ turnId, interruptingTurnId: turnId })).toBe(true);
+    expect(
+      shouldIgnoreInterruptClick({
+        turnId,
+        interruptingTurnId: TurnId.make("turn-2"),
+      }),
+    ).toBe(false);
+    expect(shouldIgnoreInterruptClick({ turnId: undefined, interruptingTurnId: turnId })).toBe(
+      false,
+    );
+  });
+
+  it("only shows stopping state for the active running turn", () => {
+    const turnId = TurnId.make("turn-1");
+
+    expect(
+      deriveIsInterrupting({
+        interruptingTurnId: turnId,
+        phase: "running",
+        activeTurnId: turnId,
+      }),
+    ).toBe(true);
+    expect(
+      deriveIsInterrupting({
+        interruptingTurnId: turnId,
+        phase: "ready",
+        activeTurnId: turnId,
+      }),
+    ).toBe(false);
+    expect(
+      deriveIsInterrupting({
+        interruptingTurnId: turnId,
+        phase: "running",
+        activeTurnId: TurnId.make("turn-2"),
+      }),
+    ).toBe(false);
+  });
 });
 
 function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) {
@@ -314,6 +418,20 @@ function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) 
         Object.fromEntries(thread.messages.map((message) => [message.id, message])),
       ]),
     ),
+    queuedTurnIdsByThreadId: Object.fromEntries(
+      threads.map((thread) => [
+        thread.id,
+        thread.queuedTurns.map((queuedTurn) => queuedTurn.messageId),
+      ]),
+    ),
+    queuedTurnByThreadId: Object.fromEntries(
+      threads.map((thread) => [
+        thread.id,
+        Object.fromEntries(
+          thread.queuedTurns.map((queuedTurn) => [queuedTurn.messageId, queuedTurn]),
+        ),
+      ]),
+    ),
     activityIdsByThreadId: Object.fromEntries(
       threads.map((thread) => [thread.id, thread.activities.map((activity) => activity.id)]),
     ),
@@ -344,6 +462,7 @@ function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) 
         Object.fromEntries(thread.turnDiffSummaries.map((summary) => [summary.turnId, summary])),
       ]),
     ),
+    threadDetailPageInfoByThreadId: {},
     sidebarThreadSummaryById: {},
     bootstrapComplete: true,
   };
@@ -359,6 +478,133 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   setStoreThreads([]);
+});
+
+describe("shouldShowThreadDetailLoading", () => {
+  it("keeps a started thread shell in a loading state until detail rows arrive", () => {
+    expect(
+      shouldShowThreadDetailLoading(
+        makeThread({
+          latestTurn: {
+            turnId: TurnId.make("turn-complete"),
+            state: "completed",
+            requestedAt: "2026-03-29T00:00:01.000Z",
+            startedAt: "2026-03-29T00:00:02.000Z",
+            completedAt: "2026-03-29T00:00:10.000Z",
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not show detail loading for genuinely unstarted draft threads", () => {
+    expect(shouldShowThreadDetailLoading(makeThread())).toBe(false);
+  });
+
+  it("shows detail loading for a known existing shell thread before detail rows arrive", () => {
+    expect(
+      shouldShowThreadDetailLoading(makeThread(), {
+        hasKnownConversationContent: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not show detail loading after conversation detail content arrives", () => {
+    expect(
+      shouldShowThreadDetailLoading(
+        makeThread({
+          latestTurn: {
+            turnId: TurnId.make("turn-complete"),
+            state: "completed",
+            requestedAt: "2026-03-29T00:00:01.000Z",
+            startedAt: "2026-03-29T00:00:02.000Z",
+            completedAt: "2026-03-29T00:00:10.000Z",
+          },
+          messages: [
+            {
+              id: MessageId.make("message-1"),
+              role: "assistant",
+              text: "Done.",
+              createdAt: "2026-03-29T00:00:10.000Z",
+              completedAt: "2026-03-29T00:00:10.000Z",
+              streaming: false,
+              turnId: TurnId.make("turn-complete"),
+            },
+          ],
+        }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("thread detail pagination cursors", () => {
+  it("does not offer older detail loading when no collection has a usable cursor", () => {
+    expect(hasOlderThreadDetailPage(null)).toBe(false);
+    expect(hasOlderThreadDetailPage(EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO)).toBe(false);
+    expect(
+      hasOlderThreadDetailPage({
+        ...EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+        messages: {
+          hasMoreBefore: true,
+          startCursor: null,
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("builds a request cursor only for collections with older rows", () => {
+    const pageInfo = {
+      ...EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+      messages: {
+        hasMoreBefore: true,
+        startCursor: {
+          id: "message-4",
+          createdAt: "2026-03-29T00:00:04.000Z",
+        },
+      },
+      proposedPlans: {
+        hasMoreBefore: false,
+        startCursor: {
+          id: "plan-4",
+          createdAt: "2026-03-29T00:00:04.000Z",
+        },
+      },
+      activities: {
+        hasMoreBefore: true,
+        startCursor: {
+          id: "activity-4",
+          createdAt: "2026-03-29T00:00:04.000Z",
+          sequence: 4,
+        },
+      },
+      checkpoints: {
+        hasMoreBefore: true,
+        startCursor: {
+          id: "turn-4",
+          createdAt: "2026-03-29T00:00:04.000Z",
+          checkpointTurnCount: 4,
+        },
+      },
+    };
+
+    expect(hasOlderThreadDetailPage(pageInfo)).toBe(true);
+    expect(buildOlderThreadDetailPageCursors(pageInfo)).toEqual({
+      messages: {
+        id: "message-4",
+        createdAt: "2026-03-29T00:00:04.000Z",
+      },
+      activities: {
+        id: "activity-4",
+        createdAt: "2026-03-29T00:00:04.000Z",
+        sequence: 4,
+      },
+      checkpoints: {
+        id: "turn-4",
+        createdAt: "2026-03-29T00:00:04.000Z",
+        checkpointTurnCount: 4,
+      },
+    });
+  });
 });
 
 describe("waitForStartedServerThread", () => {
@@ -466,6 +712,31 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     orchestrationStatus: "idle" as const,
   };
 
+  const makeLocalDispatch = () =>
+    createLocalDispatchSnapshot({
+      id: ThreadId.make("thread-1"),
+      environmentId: localEnvironmentId,
+      codexThreadId: null,
+      projectId,
+      title: "Thread",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      session: previousSession,
+      messages: [],
+      queuedTurns: [],
+      proposedPlans: [],
+      error: null,
+      createdAt: "2026-03-29T00:00:00.000Z",
+      archivedAt: null,
+      updatedAt: "2026-03-29T00:00:10.000Z",
+      latestTurn: previousLatestTurn,
+      branch: null,
+      worktreePath: null,
+      turnDiffSummaries: [],
+      activities: [],
+    });
+
   it("does not clear local dispatch before server state changes", () => {
     const localDispatch = createLocalDispatchSnapshot({
       id: ThreadId.make("thread-1"),
@@ -478,6 +749,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       interactionMode: "default",
       session: previousSession,
       messages: [],
+      queuedTurns: [],
       proposedPlans: [],
       error: null,
       createdAt: "2026-03-29T00:00:00.000Z",
@@ -496,8 +768,87 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
         phase: "ready",
         latestTurn: previousLatestTurn,
         session: previousSession,
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
+        threadError: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps local dispatch active when only the submitted user message is persisted", () => {
+    const localDispatch = createLocalDispatchSnapshot({
+      id: ThreadId.make("thread-1"),
+      environmentId: localEnvironmentId,
+      codexThreadId: null,
+      projectId,
+      title: "Thread",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      session: previousSession,
+      messages: [],
+      queuedTurns: [],
+      proposedPlans: [],
+      error: null,
+      createdAt: "2026-03-29T00:00:00.000Z",
+      archivedAt: null,
+      updatedAt: "2026-03-29T00:00:10.000Z",
+      latestTurn: previousLatestTurn,
+      branch: null,
+      worktreePath: null,
+      turnDiffSummaries: [],
+      activities: [],
+    });
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch,
+        phase: "ready",
+        latestTurn: previousLatestTurn,
+        session: previousSession,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
+        threadError: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not clear local dispatch when the snapshotted completed turn is updated", () => {
+    const localDispatch = createLocalDispatchSnapshot({
+      id: ThreadId.make("thread-1"),
+      environmentId: localEnvironmentId,
+      codexThreadId: null,
+      projectId,
+      title: "Thread",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      session: previousSession,
+      messages: [],
+      queuedTurns: [],
+      proposedPlans: [],
+      error: null,
+      createdAt: "2026-03-29T00:00:00.000Z",
+      archivedAt: null,
+      updatedAt: "2026-03-29T00:00:10.000Z",
+      latestTurn: previousLatestTurn,
+      branch: null,
+      worktreePath: null,
+      turnDiffSummaries: [],
+      activities: [],
+    });
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch,
+        phase: "ready",
+        latestTurn: {
+          ...previousLatestTurn,
+          completedAt: "2026-03-29T00:00:11.000Z",
+        },
+        session: previousSession,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
     ).toBe(false);
@@ -515,6 +866,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       interactionMode: "default",
       session: previousSession,
       messages: [],
+      queuedTurns: [],
       proposedPlans: [],
       error: null,
       createdAt: "2026-03-29T00:00:00.000Z",
@@ -542,8 +894,8 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
           ...previousSession,
           updatedAt: "2026-03-29T00:01:30.000Z",
         },
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
     ).toBe(true);
@@ -561,6 +913,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       interactionMode: "default",
       session: previousSession,
       messages: [],
+      queuedTurns: [],
       proposedPlans: [],
       error: null,
       createdAt: "2026-03-29T00:00:00.000Z",
@@ -585,8 +938,8 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
           activeTurnId: TurnId.make("turn-2"),
           updatedAt: "2026-03-29T00:01:00.000Z",
         },
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
     ).toBe(false);
@@ -604,6 +957,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       interactionMode: "default",
       session: previousSession,
       messages: [],
+      queuedTurns: [],
       proposedPlans: [],
       error: null,
       createdAt: "2026-03-29T00:00:00.000Z",
@@ -628,8 +982,8 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
           activeTurnId: undefined,
           updatedAt: "2026-03-29T00:01:00.000Z",
         },
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
     ).toBe(false);
@@ -647,6 +1001,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       interactionMode: "default",
       session: previousSession,
       messages: [],
+      queuedTurns: [],
       proposedPlans: [],
       error: null,
       createdAt: "2026-03-29T00:00:00.000Z",
@@ -678,14 +1033,14 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
           activeTurnId: TurnId.make("turn-2"),
           updatedAt: "2026-03-29T00:01:01.000Z",
         },
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
     ).toBe(true);
   });
 
-  it("clears local dispatch when the session changes without an observed running phase", () => {
+  it("keeps local dispatch active when the session changes without an observed running phase", () => {
     const localDispatch = createLocalDispatchSnapshot({
       id: ThreadId.make("thread-1"),
       environmentId: localEnvironmentId,
@@ -697,6 +1052,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       interactionMode: "default",
       session: previousSession,
       messages: [],
+      queuedTurns: [],
       proposedPlans: [],
       error: null,
       createdAt: "2026-03-29T00:00:00.000Z",
@@ -718,10 +1074,99 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
           ...previousSession,
           updatedAt: "2026-03-29T00:00:11.000Z",
         },
-        hasPendingApproval: false,
-        hasPendingUserInput: false,
+        pendingApprovalCreatedAt: null,
+        pendingUserInputCreatedAt: null,
         threadError: null,
       }),
+    ).toBe(false);
+  });
+
+  it("clears local dispatch when the server reports a terminal non-running session status", () => {
+    const terminalSessions = [
+      { orchestrationStatus: "error" as const, status: "error" as const },
+      { orchestrationStatus: "stopped" as const, status: "closed" as const },
+      { orchestrationStatus: "interrupted" as const, status: "ready" as const },
+    ];
+
+    for (const terminalSession of terminalSessions) {
+      expect(
+        hasServerAcknowledgedLocalDispatch({
+          localDispatch: makeLocalDispatch(),
+          phase: "ready",
+          latestTurn: previousLatestTurn,
+          session: {
+            ...previousSession,
+            ...terminalSession,
+            updatedAt: "2026-03-29T00:00:11.000Z",
+          },
+          pendingApprovalCreatedAt: null,
+          pendingUserInputCreatedAt: null,
+          threadError: null,
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("clears local dispatch for pending user action or thread error", () => {
+    const localDispatch = {
+      ...makeLocalDispatch(),
+      startedAt: "2026-03-29T00:00:11.000Z",
+    };
+    const baseInput = {
+      localDispatch,
+      phase: "ready" as const,
+      latestTurn: previousLatestTurn,
+      session: previousSession,
+      pendingApprovalCreatedAt: null,
+      pendingUserInputCreatedAt: null,
+      threadError: null,
+    };
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...baseInput,
+        pendingApprovalCreatedAt: "2026-03-29T00:00:12.000Z",
+      }),
     ).toBe(true);
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...baseInput,
+        pendingUserInputCreatedAt: "2026-03-29T00:00:12.000Z",
+      }),
+    ).toBe(true);
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...baseInput,
+        threadError: "Provider failed",
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores pending user action state registered before local dispatch began", () => {
+    const baseInput = {
+      localDispatch: {
+        ...makeLocalDispatch(),
+        startedAt: "2026-03-29T00:00:11.000Z",
+      },
+      phase: "ready" as const,
+      latestTurn: previousLatestTurn,
+      session: previousSession,
+      pendingApprovalCreatedAt: null,
+      pendingUserInputCreatedAt: null,
+      threadError: null,
+    };
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...baseInput,
+        pendingApprovalCreatedAt: "2026-03-29T00:00:10.000Z",
+      }),
+    ).toBe(false);
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...baseInput,
+        pendingUserInputCreatedAt: "2026-03-29T00:00:10.000Z",
+      }),
+    ).toBe(false);
   });
 });

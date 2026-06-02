@@ -975,6 +975,126 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("backs off before retrying live subscriptions that exit before their first value", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    const listener = vi.fn();
+
+    const unsubscribeLifecycle = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      listener,
+      { retryDelay: 50 },
+    );
+    const unsubscribeTerminal = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeTerminalEvents]({}),
+      listener,
+      { retryDelay: 50 },
+    );
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const socket = getSocket();
+    socket.open();
+
+    await waitFor(() => {
+      expect(socket.sent).toHaveLength(2);
+    });
+
+    const firstRequests = socket.sent.map((message) => JSON.parse(message) as { id: string });
+    expect(firstRequests).toHaveLength(2);
+    for (const request of firstRequests) {
+      socket.serverMessage(
+        JSON.stringify({
+          _tag: "Exit",
+          requestId: request.id,
+          exit: {
+            _tag: "Success",
+            value: null,
+          },
+        }),
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(socket.sent).toHaveLength(2);
+
+    await waitFor(() => {
+      expect(socket.sent.length).toBeGreaterThanOrEqual(4);
+    });
+    expect(listener).not.toHaveBeenCalled();
+
+    unsubscribeLifecycle();
+    unsubscribeTerminal();
+    await transport.dispose();
+  });
+
+  it("keeps live subscription recovery immediate after the stream has produced values", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    const listener = vi.fn();
+
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      listener,
+      { retryDelay: 250 },
+    );
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const socket = getSocket();
+    socket.open();
+
+    await waitFor(() => {
+      expect(socket.sent).toHaveLength(1);
+    });
+
+    const firstRequest = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    const welcomeEvent = {
+      version: 1,
+      sequence: 1,
+      type: "welcome",
+      payload: {
+        environment: {
+          environmentId: "environment-local",
+          label: "Local environment",
+          platform: { os: "darwin", arch: "arm64" },
+          serverVersion: "0.0.0-test",
+          capabilities: { repositoryIdentity: true },
+        },
+        cwd: "/tmp/recovered",
+        projectName: "recovered",
+      },
+    };
+    socket.serverMessage(
+      JSON.stringify({
+        _tag: "Chunk",
+        requestId: firstRequest.id,
+        values: [welcomeEvent],
+      }),
+    );
+    await waitFor(() => {
+      expect(listener).toHaveBeenCalledWith(welcomeEvent);
+    });
+
+    socket.serverMessage(
+      JSON.stringify({
+        _tag: "Exit",
+        requestId: firstRequest.id,
+        exit: {
+          _tag: "Success",
+          value: null,
+        },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(socket.sent.length).toBeGreaterThanOrEqual(2);
+    });
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
   it("does not retry stream subscriptions after application-level failures", async () => {
     const transport = createTransport("ws://localhost:3020");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);

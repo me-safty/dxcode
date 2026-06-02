@@ -1,11 +1,15 @@
-# T3 Code
+<p align="center">
+  <img src="./assets/salchi/salchi-logo-transparent.png" alt="Salchi app icon" width="128" height="128" />
+</p>
 
-T3 Code is a minimal web GUI for coding agents (currently Codex, Claude, and OpenCode, more coming soon).
+# Salchi
+
+Salchi is a minimal web GUI for coding agents (currently Codex, Claude, and OpenCode, more coming soon).
 
 ## Installation
 
 > [!WARNING]
-> T3 Code currently supports Codex, Claude, and OpenCode.
+> Salchi currently supports Codex, Claude, and OpenCode.
 > Install and authenticate at least one provider before use:
 >
 > - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
@@ -15,30 +19,12 @@ T3 Code is a minimal web GUI for coding agents (currently Codex, Claude, and Ope
 ### Run without installing
 
 ```bash
-npx t3
+npx salchi
 ```
 
 ### Desktop app
 
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
-
-#### Windows (`winget`)
-
-```bash
-winget install T3Tools.T3Code
-```
-
-#### macOS (Homebrew)
-
-```bash
-brew install --cask t3-code
-```
-
-#### Arch Linux (AUR)
-
-```bash
-yay -S t3code-bin
-```
+Install the latest version of the desktop app from [GitHub Releases](https://github.com/JoseRFelix/salchi/releases).
 
 ## Some notes
 

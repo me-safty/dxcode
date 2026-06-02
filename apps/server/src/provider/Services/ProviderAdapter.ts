@@ -115,6 +115,16 @@ export interface ProviderAdapterShape<TError> {
   ) => Effect.Effect<ProviderThreadSnapshot, TError>;
 
   /**
+   * Best-effort refresh for usage/rate-limit telemetry on active sessions.
+   */
+  readonly refreshUsage?: () => Effect.Effect<void, TError>;
+
+  /**
+   * Best-effort account-level rate limits without an active session.
+   */
+  readonly getAccountRateLimits?: () => Effect.Effect<unknown | undefined, TError>;
+
+  /**
    * Stop all sessions owned by this adapter.
    */
   readonly stopAll: () => Effect.Effect<void, TError>;

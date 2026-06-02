@@ -636,6 +636,13 @@ function runStackedAction(
   );
 }
 
+function generateCommitMessage(
+  manager: GitManagerShape,
+  input: { cwd: string; filePaths?: readonly string[]; target?: "commit" | "staged" },
+) {
+  return manager.generateCommitMessage(input);
+}
+
 function resolvePullRequest(manager: GitManagerShape, input: { cwd: string; reference: string }) {
   return manager.resolvePullRequest(input);
 }
@@ -699,6 +706,13 @@ function makeManager(input?: {
 }
 
 const asThreadId = (threadId: string) => threadId as ThreadId;
+const emptyWorkingTree = {
+  files: [],
+  insertions: 0,
+  deletions: 0,
+  staged: { files: [], insertions: 0, deletions: 0 },
+  unstaged: { files: [], insertions: 0, deletions: 0 },
+};
 
 const GitManagerTestLayer = GitVcsDriver.layer.pipe(
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-git-manager-test-" })),
@@ -903,11 +917,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         isDefaultRef: false,
         refName: null,
         hasWorkingTreeChanges: false,
-        workingTree: {
-          files: [],
-          insertions: 0,
-          deletions: 0,
-        },
+        workingTree: emptyWorkingTree,
         hasUpstream: false,
         aheadCount: 0,
         behindCount: 0,
@@ -933,11 +943,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         isDefaultRef: false,
         refName: null,
         hasWorkingTreeChanges: false,
-        workingTree: {
-          files: [],
-          insertions: 0,
-          deletions: 0,
-        },
+        workingTree: emptyWorkingTree,
         hasUpstream: false,
         aheadCount: 0,
         behindCount: 0,
@@ -1383,6 +1389,30 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect("generates a commit message without creating a commit", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      fs.writeFileSync(path.join(repoDir, "README.md"), "hello\npreview\n");
+
+      const { manager } = yield* makeManager();
+      const countBefore = yield* runGit(repoDir, ["rev-list", "--count", "HEAD"]).pipe(
+        Effect.map((result) => result.stdout.trim()),
+      );
+      const result = yield* generateCommitMessage(manager, { cwd: repoDir });
+      const countAfter = yield* runGit(repoDir, ["rev-list", "--count", "HEAD"]).pipe(
+        Effect.map((result) => result.stdout.trim()),
+      );
+
+      expect(result).toEqual({
+        subject: "Implement stacked git actions",
+        body: "",
+        commitMessage: "Implement stacked git actions",
+      });
+      expect(countAfter).toBe(countBefore);
+    }),
+  );
+
   it.effect("uses custom commit message when provided", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
@@ -1448,6 +1478,129 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       );
       expect(statusStdout).toContain("b.txt");
       expect(statusStdout).not.toContain("a.txt");
+    }),
+  );
+
+  it.effect("commits only already staged files when the index is not empty", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      fs.writeFileSync(path.join(repoDir, "staged.txt"), "staged\n");
+      fs.writeFileSync(path.join(repoDir, "unstaged.txt"), "unstaged\n");
+      yield* runGit(repoDir, ["add", "staged.txt"]);
+
+      const { manager } = yield* makeManager();
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+      });
+
+      expect(result.commit.status).toBe("created");
+      const committedFiles = yield* runGit(repoDir, [
+        "show",
+        "--name-only",
+        "--pretty=",
+        "HEAD",
+      ]).pipe(
+        Effect.map((r) =>
+          r.stdout
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean),
+        ),
+      );
+      expect(committedFiles).toEqual(["staged.txt"]);
+      const statusStdout = yield* runGit(repoDir, ["status", "--porcelain"]).pipe(
+        Effect.map((r) => r.stdout),
+      );
+      expect(statusStdout).toContain("?? unstaged.txt");
+    }),
+  );
+
+  it.effect("stages all files before committing when the index is empty", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      fs.writeFileSync(path.join(repoDir, "a.txt"), "file a\n");
+      fs.writeFileSync(path.join(repoDir, "b.txt"), "file b\n");
+
+      const { manager } = yield* makeManager();
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+      });
+
+      expect(result.commit.status).toBe("created");
+      const committedFiles = yield* runGit(repoDir, [
+        "show",
+        "--name-only",
+        "--pretty=",
+        "HEAD",
+      ]).pipe(
+        Effect.map((r) =>
+          r.stdout
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .sort(),
+        ),
+      );
+      expect(committedFiles).toEqual(["a.txt", "b.txt"]);
+      const statusStdout = yield* runGit(repoDir, ["status", "--porcelain"]).pipe(
+        Effect.map((r) => r.stdout.trim()),
+      );
+      expect(statusStdout).toBe("");
+    }),
+  );
+
+  it.effect("generates commit messages from staged files when the index is not empty", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      fs.writeFileSync(path.join(repoDir, "staged.txt"), "staged\n");
+      fs.writeFileSync(path.join(repoDir, "unstaged.txt"), "unstaged\n");
+      yield* runGit(repoDir, ["add", "staged.txt"]);
+      let stagedSummary = "";
+
+      const { manager } = yield* makeManager({
+        textGeneration: {
+          generateCommitMessage: (input) =>
+            Effect.sync(() => {
+              stagedSummary = input.stagedSummary;
+              return { subject: "Use staged context", body: "" };
+            }),
+        },
+      });
+      yield* generateCommitMessage(manager, { cwd: repoDir });
+
+      expect(stagedSummary).toContain("staged.txt");
+      expect(stagedSummary).not.toContain("unstaged.txt");
+    }),
+  );
+
+  it.effect("previews all changes for generated commit messages without staging", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      fs.writeFileSync(path.join(repoDir, "a.txt"), "file a\n");
+      let stagedSummary = "";
+
+      const { manager } = yield* makeManager({
+        textGeneration: {
+          generateCommitMessage: (input) =>
+            Effect.sync(() => {
+              stagedSummary = input.stagedSummary;
+              return { subject: "Preview all changes", body: "" };
+            }),
+        },
+      });
+      yield* generateCommitMessage(manager, { cwd: repoDir });
+
+      expect(stagedSummary).toContain("a.txt");
+      const cachedDiff = yield* runGit(repoDir, ["diff", "--cached", "--name-only"]).pipe(
+        Effect.map((r) => r.stdout.trim()),
+      );
+      expect(cachedDiff).toBe("");
     }),
   );
 

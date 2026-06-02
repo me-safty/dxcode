@@ -130,6 +130,10 @@ describe("createThreadJumpHintVisibilityController", () => {
 });
 
 describe("getSidebarThreadIdsToPrewarm", () => {
+  it("does not prewarm thread details by default", () => {
+    expect(getSidebarThreadIdsToPrewarm(["t1", "t2", "t3"])).toEqual([]);
+  });
+
   it("returns only the first visible thread ids up to the prewarm limit", () => {
     expect(getSidebarThreadIdsToPrewarm(["t1", "t2", "t3"], 2)).toEqual(["t1", "t2"]);
   });
@@ -483,6 +487,7 @@ describe("resolveThreadStatusPill", () => {
     session: {
       provider: ProviderDriverKind.make("codex"),
       status: "running" as const,
+      activeTurnId: "turn-1" as never,
       createdAt: "2026-03-09T10:00:00.000Z",
       updatedAt: "2026-03-09T10:00:00.000Z",
       orchestrationStatus: "running" as const,
@@ -520,6 +525,101 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Working", pulse: true });
   });
 
+  it("shows working for a local dispatch before server running state arrives", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          hasActiveLocalDispatch: true,
+          latestTurn: makeLatestTurn(),
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+            activeTurnId: undefined,
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("shows working for a coarse running sidebar session before turn detail arrives", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          latestTurn: null,
+          session: {
+            ...baseThread.session,
+            activeTurnId: undefined,
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("does not show working for a completed turn with a stale running session and no active turn", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          session: {
+            ...baseThread.session,
+            activeTurnId: undefined,
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Completed", pulse: false });
+  });
+
+  it("keeps working while the running session still owns a completed latest turn", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+        },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("keeps working when a different active turn is running after the latest projected turn completed", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          session: {
+            ...baseThread.session,
+            activeTurnId: "turn-2" as never,
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("shows completed once the session leaves running after the latest turn completed", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+            activeTurnId: undefined,
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Completed", pulse: false });
+  });
+
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
     expect(
       resolveThreadStatusPill({
@@ -527,6 +627,42 @@ describe("resolveThreadStatusPill", () => {
           ...baseThread,
           hasActionableProposedPlan: true,
           latestTurn: makeLatestTurn(),
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Plan Ready", pulse: false });
+  });
+
+  it("clears plan ready once the thread has been visited after the plan-mode turn completed", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          hasActionableProposedPlan: true,
+          latestTurn: makeLatestTurn({ completedAt: "2026-03-09T10:05:00.000Z" }),
+          lastVisitedAt: "2026-03-09T10:05:00.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("still shows plan ready when the plan-mode turn completed after the last visit", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          hasActionableProposedPlan: true,
+          latestTurn: makeLatestTurn({ completedAt: "2026-03-09T10:05:00.000Z" }),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
           session: {
             ...baseThread.session,
             status: "ready",
@@ -569,6 +705,44 @@ describe("resolveThreadStatusPill", () => {
         },
       }),
     ).toMatchObject({ label: "Completed", pulse: false });
+  });
+
+  it("does not show completed for the active thread even with unseen completion", () => {
+    expect(
+      resolveThreadStatusPill({
+        isActiveThread: true,
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("still shows plan ready for the active thread when completion is unseen", () => {
+    expect(
+      resolveThreadStatusPill({
+        isActiveThread: true,
+        thread: {
+          ...baseThread,
+          hasActionableProposedPlan: true,
+          latestTurn: makeLatestTurn({ completedAt: "2026-03-09T10:05:00.000Z" }),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Plan Ready", pulse: false });
   });
 });
 
@@ -732,6 +906,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     interactionMode: DEFAULT_INTERACTION_MODE,
     session: null,
     messages: [],
+    queuedTurns: [],
     proposedPlans: [],
     error: null,
     createdAt: "2026-03-09T10:00:00.000Z",

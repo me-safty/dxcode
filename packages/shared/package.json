@@ -1,12 +1,15 @@
 {
   "name": "@t3tools/shared",
-  "version": "0.0.0-alpha.1",
   "private": true,
   "type": "module",
   "exports": {
     "./model": {
       "types": "./src/model.ts",
       "import": "./src/model.ts"
+    },
+    "./advertisedEndpoint": {
+      "types": "./src/advertisedEndpoint.ts",
+      "import": "./src/advertisedEndpoint.ts"
     },
     "./git": {
       "types": "./src/git.ts",
@@ -87,10 +90,18 @@
     "./keybindings": {
       "types": "./src/keybindings.ts",
       "import": "./src/keybindings.ts"
+    },
+    "./imageMime": {
+      "types": "./src/imageMime.ts",
+      "import": "./src/imageMime.ts"
+    },
+    "./orchestrationThreadDetailFingerprint": {
+      "types": "./src/orchestrationThreadDetailFingerprint.ts",
+      "import": "./src/orchestrationThreadDetailFingerprint.ts"
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
@@ -98,11 +109,9 @@
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/language-service": "catalog:",
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
-    "typescript": "catalog:",
     "vitest": "catalog:"
   }
 }

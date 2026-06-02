@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
-import { OpenError, OpenInEditorInput } from "./editor.ts";
+import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
 import { AuthAccessStreamEvent } from "./auth.ts";
 import {
   FilesystemBrowseInput,
@@ -11,6 +11,8 @@ import {
 } from "./filesystem.ts";
 import {
   GitActionProgressEvent,
+  GenerateCommitMessageInput,
+  GenerateCommitMessageResult,
   VcsSwitchRefInput,
   VcsSwitchRefResult,
   GitCommandError,
@@ -30,9 +32,15 @@ import {
   VcsRemoveWorktreeInput,
   GitResolvePullRequestResult,
   GitRunStackedActionInput,
+  VcsWorkingTreeDiffInput,
+  VcsWorkingTreeDiffResult,
   VcsStatusInput,
+  VcsStatusLocalResult,
   VcsStatusResult,
   VcsStatusStreamEvent,
+  VcsRevertUnstagedFilesInput,
+  VcsStageFilesInput,
+  VcsUnstageFilesInput,
 } from "./git.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
@@ -48,11 +56,17 @@ import {
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
-import { ProviderInstanceId } from "./providerInstance.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import {
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectListDirectoryEntriesError,
+  ProjectListDirectoryEntriesInput,
+  ProjectListDirectoryEntriesResult,
+  ProjectReadFileError,
+  ProjectReadFileInput,
+  ProjectReadFileResult,
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
@@ -79,11 +93,22 @@ import {
   ServerProviderUpdatedPayload,
   ServerTraceDiagnosticsResult,
   ServerProcessDiagnosticsResult,
+  ServerProcessResourceHistoryInput,
+  ServerProcessResourceHistoryResult,
   ServerSignalProcessInput,
   ServerSignalProcessResult,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
+import {
+  ServerPushConfig,
+  ServerPushNotificationError,
+  ServerPushSendResult,
+  ServerPushSubscriptionStatus,
+  ServerRegisterPushSubscriptionInput,
+  ServerSendTestPushNotificationInput,
+  ServerUnregisterPushSubscriptionInput,
+} from "./push.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   SourceControlCloneRepositoryInput,
@@ -103,6 +128,8 @@ export const WS_METHODS = {
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
   projectsSearchEntries: "projects.searchEntries",
+  projectsListDirectoryEntries: "projects.listDirectoryEntries",
+  projectsReadFile: "projects.readFile",
   projectsWriteFile: "projects.writeFile",
 
   // Shell methods
@@ -114,6 +141,10 @@ export const WS_METHODS = {
   // VCS methods
   vcsPull: "vcs.pull",
   vcsRefreshStatus: "vcs.refreshStatus",
+  vcsStageFiles: "vcs.stageFiles",
+  vcsUnstageFiles: "vcs.unstageFiles",
+  vcsRevertUnstagedFiles: "vcs.revertUnstagedFiles",
+  vcsGetWorkingTreeDiff: "vcs.getWorkingTreeDiff",
   vcsListRefs: "vcs.listRefs",
   vcsCreateWorktree: "vcs.createWorktree",
   vcsRemoveWorktree: "vcs.removeWorktree",
@@ -123,6 +154,7 @@ export const WS_METHODS = {
 
   // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
+  gitGenerateCommitMessage: "git.generateCommitMessage",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
@@ -137,6 +169,7 @@ export const WS_METHODS = {
   // Server meta
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
+  serverRefreshUsageLimits: "server.refreshUsageLimits",
   serverUpdateProvider: "server.updateProvider",
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverRemoveKeybinding: "server.removeKeybinding",
@@ -145,7 +178,12 @@ export const WS_METHODS = {
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
+  serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
+  serverGetPushConfig: "server.getPushConfig",
+  serverRegisterPushSubscription: "server.registerPushSubscription",
+  serverUnregisterPushSubscription: "server.unregisterPushSubscription",
+  serverSendTestPushNotification: "server.sendTestPushNotification",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -191,6 +229,19 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
   success: ServerProviderUpdatedPayload,
 });
 
+export const WsServerRefreshUsageLimitsAccountRateLimit = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  provider: ProviderDriverKind,
+  rateLimits: Schema.Unknown,
+});
+
+export const WsServerRefreshUsageLimitsRpc = Rpc.make(WS_METHODS.serverRefreshUsageLimits, {
+  payload: Schema.Struct({}),
+  success: Schema.Struct({
+    accountRateLimits: Schema.Array(WsServerRefreshUsageLimitsAccountRateLimit),
+  }),
+});
+
 export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvider, {
   payload: ServerProviderUpdateInput,
   success: ServerProviderUpdatedPayload,
@@ -224,10 +275,51 @@ export const WsServerGetProcessDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetPro
   success: ServerProcessDiagnosticsResult,
 });
 
+export const WsServerGetProcessResourceHistoryRpc = Rpc.make(
+  WS_METHODS.serverGetProcessResourceHistory,
+  {
+    payload: ServerProcessResourceHistoryInput,
+    success: ServerProcessResourceHistoryResult,
+  },
+);
+
 export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
 });
+
+export const WsServerGetPushConfigRpc = Rpc.make(WS_METHODS.serverGetPushConfig, {
+  payload: Schema.Struct({}),
+  success: ServerPushConfig,
+  error: ServerPushNotificationError,
+});
+
+export const WsServerRegisterPushSubscriptionRpc = Rpc.make(
+  WS_METHODS.serverRegisterPushSubscription,
+  {
+    payload: ServerRegisterPushSubscriptionInput,
+    success: ServerPushSubscriptionStatus,
+    error: ServerPushNotificationError,
+  },
+);
+
+export const WsServerUnregisterPushSubscriptionRpc = Rpc.make(
+  WS_METHODS.serverUnregisterPushSubscription,
+  {
+    payload: ServerUnregisterPushSubscriptionInput,
+    success: ServerPushSubscriptionStatus,
+    error: ServerPushNotificationError,
+  },
+);
+
+export const WsServerSendTestPushNotificationRpc = Rpc.make(
+  WS_METHODS.serverSendTestPushNotification,
+  {
+    payload: ServerSendTestPushNotificationInput,
+    success: ServerPushSendResult,
+    error: ServerPushNotificationError,
+  },
+);
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(
   WS_METHODS.sourceControlLookupRepository,
@@ -259,6 +351,18 @@ export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntr
   error: ProjectSearchEntriesError,
 });
 
+export const WsProjectsListDirectoryEntriesRpc = Rpc.make(WS_METHODS.projectsListDirectoryEntries, {
+  payload: ProjectListDirectoryEntriesInput,
+  success: ProjectListDirectoryEntriesResult,
+  error: ProjectListDirectoryEntriesError,
+});
+
+export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
+  payload: ProjectReadFileInput,
+  success: ProjectReadFileResult,
+  error: ProjectReadFileError,
+});
+
 export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
@@ -266,8 +370,8 @@ export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
 });
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
-  payload: OpenInEditorInput,
-  error: OpenError,
+  payload: LaunchEditorInput,
+  error: ExternalLauncherError,
 });
 
 export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
@@ -295,11 +399,41 @@ export const WsVcsRefreshStatusRpc = Rpc.make(WS_METHODS.vcsRefreshStatus, {
   error: GitManagerServiceError,
 });
 
+export const WsVcsStageFilesRpc = Rpc.make(WS_METHODS.vcsStageFiles, {
+  payload: VcsStageFilesInput,
+  success: VcsStatusLocalResult,
+  error: GitManagerServiceError,
+});
+
+export const WsVcsUnstageFilesRpc = Rpc.make(WS_METHODS.vcsUnstageFiles, {
+  payload: VcsUnstageFilesInput,
+  success: VcsStatusLocalResult,
+  error: GitManagerServiceError,
+});
+
+export const WsVcsRevertUnstagedFilesRpc = Rpc.make(WS_METHODS.vcsRevertUnstagedFiles, {
+  payload: VcsRevertUnstagedFilesInput,
+  success: VcsStatusLocalResult,
+  error: GitManagerServiceError,
+});
+
+export const WsVcsGetWorkingTreeDiffRpc = Rpc.make(WS_METHODS.vcsGetWorkingTreeDiff, {
+  payload: VcsWorkingTreeDiffInput,
+  success: VcsWorkingTreeDiffResult,
+  error: GitCommandError,
+});
+
 export const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction, {
   payload: GitRunStackedActionInput,
   success: GitActionProgressEvent,
   error: GitManagerServiceError,
   stream: true,
+});
+
+export const WsGitGenerateCommitMessageRpc = Rpc.make(WS_METHODS.gitGenerateCommitMessage, {
+  payload: GenerateCommitMessageInput,
+  success: GenerateCommitMessageResult,
+  error: GitManagerServiceError,
 });
 
 export const WsGitResolvePullRequestRpc = Rpc.make(WS_METHODS.gitResolvePullRequest, {
@@ -410,11 +544,35 @@ export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.
   error: OrchestrationReplayEventsError,
 });
 
+export const WsOrchestrationReconcileThreadDetailRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.reconcileThreadDetail,
+  {
+    payload: OrchestrationRpcSchemas.reconcileThreadDetail.input,
+    success: OrchestrationRpcSchemas.reconcileThreadDetail.output,
+    error: OrchestrationGetSnapshotError,
+  },
+);
+
+export const WsOrchestrationProbeSyncRpc = Rpc.make(ORCHESTRATION_WS_METHODS.probeSync, {
+  payload: OrchestrationRpcSchemas.probeSync.input,
+  success: OrchestrationRpcSchemas.probeSync.output,
+  error: OrchestrationGetSnapshotError,
+});
+
 export const WsOrchestrationGetArchivedShellSnapshotRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot,
   {
     payload: OrchestrationRpcSchemas.getArchivedShellSnapshot.input,
     success: OrchestrationRpcSchemas.getArchivedShellSnapshot.output,
+    error: OrchestrationGetSnapshotError,
+  },
+);
+
+export const WsOrchestrationGetThreadDetailPageRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getThreadDetailPage,
+  {
+    payload: OrchestrationRpcSchemas.getThreadDetailPage.input,
+    success: OrchestrationRpcSchemas.getThreadDetailPage.output,
     error: OrchestrationGetSnapshotError,
   },
 );
@@ -464,6 +622,7 @@ export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess,
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
+  WsServerRefreshUsageLimitsRpc,
   WsServerUpdateProviderRpc,
   WsServerUpsertKeybindingRpc,
   WsServerRemoveKeybindingRpc,
@@ -472,18 +631,30 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,
+  WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
+  WsServerGetPushConfigRpc,
+  WsServerRegisterPushSubscriptionRpc,
+  WsServerUnregisterPushSubscriptionRpc,
+  WsServerSendTestPushNotificationRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
   WsProjectsSearchEntriesRpc,
+  WsProjectsListDirectoryEntriesRpc,
+  WsProjectsReadFileRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsSubscribeVcsStatusRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
+  WsVcsStageFilesRpc,
+  WsVcsUnstageFilesRpc,
+  WsVcsRevertUnstagedFilesRpc,
+  WsVcsGetWorkingTreeDiffRpc,
   WsGitRunStackedActionRpc,
+  WsGitGenerateCommitMessageRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsVcsListRefsRpc,
@@ -505,8 +676,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
+  WsOrchestrationProbeSyncRpc,
   WsOrchestrationReplayEventsRpc,
+  WsOrchestrationReconcileThreadDetailRpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
+  WsOrchestrationGetThreadDetailPageRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
 );

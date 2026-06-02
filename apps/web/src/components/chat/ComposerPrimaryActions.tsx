@@ -1,5 +1,11 @@
 import { memo, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import {
+  ArrowUpIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  LoaderCircleIcon,
+  SquareIcon,
+} from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -16,6 +22,7 @@ interface ComposerPrimaryActionsProps {
   compact: boolean;
   pendingAction: PendingActionState | null;
   isRunning: boolean;
+  isInterrupting?: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
   isSendBusy: boolean;
@@ -55,6 +62,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   pendingAction,
   isRunning,
+  isInterrupting = false,
   showPlanFollowUpPrompt,
   promptHasText,
   isSendBusy,
@@ -124,17 +132,57 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
 
   if (isRunning) {
     return (
-      <button
-        type="button"
-        className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
-        {...pointerFocusProps}
-        onClick={onInterrupt}
-        aria-label="Stop generation"
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-          <rect x="2" y="2" width="8" height="8" rx="1.5" />
-        </svg>
-      </button>
+      <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
+        <button
+          type="button"
+          className={cn(
+            "flex size-8 items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 disabled:cursor-wait disabled:opacity-80 sm:h-8 sm:w-8",
+            isInterrupting ? "hover:scale-100" : "cursor-pointer hover:bg-rose-500 hover:scale-105",
+          )}
+          {...pointerFocusProps}
+          onClick={onInterrupt}
+          disabled={isInterrupting}
+          aria-label={isInterrupting ? "Stopping generation" : "Stop generation"}
+        >
+          {isInterrupting ? (
+            <LoaderCircleIcon className="size-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <SquareIcon className="size-3 fill-current stroke-0" aria-hidden="true" />
+          )}
+        </button>
+        {hasSendableContent ? (
+          <button
+            type="submit"
+            className="flex size-8 enabled:cursor-pointer items-center justify-center rounded-full bg-primary/90 text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105 disabled:pointer-events-none disabled:opacity-30 disabled:hover:scale-100 sm:h-8 sm:w-8"
+            {...pointerFocusProps}
+            disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
+            aria-label={isSendBusy ? "Queueing message" : "Queue message"}
+          >
+            {isSendBusy ? (
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                className="animate-spin"
+                aria-hidden="true"
+              >
+                <circle
+                  cx="7"
+                  cy="7"
+                  r="5.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeDasharray="20 12"
+                />
+              </svg>
+            ) : (
+              <ArrowUpIcon className="size-4" strokeWidth={2.2} />
+            )}
+          </button>
+        ) : null}
+      </div>
     );
   }
 
@@ -168,11 +216,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           <MenuTrigger
             render={
               <Button
+                type="button"
                 size="sm"
                 variant="default"
-                className="h-9 rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8"
+                className="h-9 min-w-9 touch-manipulation rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8 sm:min-w-0"
                 aria-label="Implementation actions"
-                {...pointerFocusProps}
                 disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
               />
             }

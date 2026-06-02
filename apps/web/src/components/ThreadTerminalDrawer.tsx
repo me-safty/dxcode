@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import {
+  type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
@@ -20,7 +21,12 @@ import {
 } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
-import { openInPreferredEditor } from "../editorPreferences";
+import {
+  applyTerminalCtrlModifier,
+  TERMINAL_ACCESSORY_KEYS,
+  type TerminalAccessoryKey,
+  type TerminalModifier,
+} from "~/lib/terminalAccessoryKeys";
 import {
   collectWrappedTerminalLinkLine,
   extractTerminalLinks,
@@ -46,12 +52,81 @@ import {
   type ThreadTerminalGroup,
 } from "../types";
 import { readEnvironmentApi } from "~/environmentApi";
+import { useIsMobile } from "~/hooks/useMediaQuery";
 import { readLocalApi } from "~/localApi";
 import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalStateStore";
+import { openPathInPreferredEditorOrFilePreview } from "../workspaceFilePreview";
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
 const MULTI_CLICK_SELECTION_ACTION_DELAY_MS = 260;
+const KEYBOARD_INSET_THRESHOLD = 80;
+const TOUCH_SCROLL_ACTIVATION_PX = 6;
+
+export interface TerminalKeyboardViewport {
+  bottomInset: number;
+  visibleHeight: number | null;
+}
+
+const EMPTY_TERMINAL_KEYBOARD_VIEWPORT: TerminalKeyboardViewport = Object.freeze({
+  bottomInset: 0,
+  visibleHeight: null,
+});
+
+function terminalKeyboardViewportEqual(
+  left: TerminalKeyboardViewport,
+  right: TerminalKeyboardViewport,
+): boolean {
+  return left.bottomInset === right.bottomInset && left.visibleHeight === right.visibleHeight;
+}
+
+export function resolveTerminalKeyboardViewport(input: {
+  layoutViewportHeight: number;
+  visualViewportHeight: number | null | undefined;
+  visualViewportOffsetTop: number | null | undefined;
+}): TerminalKeyboardViewport {
+  const layoutViewportHeight = Number.isFinite(input.layoutViewportHeight)
+    ? Math.max(0, input.layoutViewportHeight)
+    : 0;
+  const visualViewportHeight =
+    typeof input.visualViewportHeight === "number" && Number.isFinite(input.visualViewportHeight)
+      ? Math.max(0, input.visualViewportHeight)
+      : null;
+  const visualViewportOffsetTop =
+    typeof input.visualViewportOffsetTop === "number" &&
+    Number.isFinite(input.visualViewportOffsetTop)
+      ? Math.max(0, input.visualViewportOffsetTop)
+      : 0;
+
+  if (layoutViewportHeight <= 0 || visualViewportHeight === null || visualViewportHeight <= 0) {
+    return EMPTY_TERMINAL_KEYBOARD_VIEWPORT;
+  }
+
+  const bottomInset = Math.max(
+    0,
+    Math.ceil(layoutViewportHeight - visualViewportHeight - visualViewportOffsetTop),
+  );
+  if (bottomInset < KEYBOARD_INSET_THRESHOLD) {
+    return EMPTY_TERMINAL_KEYBOARD_VIEWPORT;
+  }
+
+  return {
+    bottomInset,
+    visibleHeight: visualViewportHeight,
+  };
+}
+
+function readTerminalKeyboardViewport(): TerminalKeyboardViewport {
+  if (typeof window === "undefined" || !window.visualViewport) {
+    return EMPTY_TERMINAL_KEYBOARD_VIEWPORT;
+  }
+
+  return resolveTerminalKeyboardViewport({
+    layoutViewportHeight: window.innerHeight,
+    visualViewportHeight: window.visualViewport.height,
+    visualViewportOffsetTop: window.visualViewport.offsetTop,
+  });
+}
 
 function maxDrawerHeight(): number {
   if (typeof window === "undefined") return DEFAULT_THREAD_TERMINAL_HEIGHT;
@@ -62,6 +137,35 @@ function clampDrawerHeight(height: number): number {
   const safeHeight = Number.isFinite(height) ? height : DEFAULT_THREAD_TERMINAL_HEIGHT;
   const maxHeight = maxDrawerHeight();
   return Math.min(Math.max(Math.round(safeHeight), MIN_DRAWER_HEIGHT), maxHeight);
+}
+
+export function resolveRenderedDrawerHeight(
+  drawerHeight: number,
+  keyboardViewport: TerminalKeyboardViewport,
+): number {
+  if (keyboardViewport.bottomInset <= 0 || keyboardViewport.visibleHeight === null) {
+    return drawerHeight;
+  }
+  const keyboardMaxHeight = Math.max(
+    MIN_DRAWER_HEIGHT,
+    Math.floor(keyboardViewport.visibleHeight * MAX_DRAWER_HEIGHT_RATIO),
+  );
+  return Math.min(drawerHeight, keyboardMaxHeight);
+}
+
+export function resolveTerminalTouchScroll(input: {
+  accumulatedPixels: number;
+  rowHeight: number;
+}): { lines: number; remainingPixels: number } {
+  const rowHeight = Number.isFinite(input.rowHeight) && input.rowHeight > 0 ? input.rowHeight : 1;
+  const lines =
+    input.accumulatedPixels < 0
+      ? Math.ceil(input.accumulatedPixels / rowHeight)
+      : Math.floor(input.accumulatedPixels / rowHeight);
+  return {
+    lines,
+    remainingPixels: input.accumulatedPixels - lines * rowHeight,
+  };
 }
 
 function writeSystemMessage(terminal: Terminal, message: string): void {
@@ -262,6 +366,8 @@ interface TerminalViewportProps {
   resizeEpoch: number;
   drawerHeight: number;
   keybindings: ResolvedKeybindingsConfig;
+  pendingModifierRef?: MutableRefObject<TerminalModifier | null>;
+  onModifierConsumed?: () => void;
 }
 
 export function TerminalViewport({
@@ -279,6 +385,8 @@ export function TerminalViewport({
   resizeEpoch,
   drawerHeight,
   keybindings,
+  pendingModifierRef,
+  onModifierConsumed,
 }: TerminalViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -291,8 +399,17 @@ export function TerminalViewport({
   const selectionActionOpenRef = useRef(false);
   const selectionActionTimerRef = useRef<number | null>(null);
   const keybindingsRef = useRef(keybindings);
+  const onModifierConsumedRef = useRef(onModifierConsumed);
   const lastAppliedTerminalEventIdRef = useRef(0);
   const terminalHydratedRef = useRef(false);
+  const touchScrollStateRef = useRef<{
+    accumulatedPixels: number;
+    active: boolean;
+    lastY: number;
+    startX: number;
+    startY: number;
+    touchId: number;
+  } | null>(null);
   const handleSessionExited = useEffectEvent(() => {
     onSessionExited();
   });
@@ -304,6 +421,10 @@ export function TerminalViewport({
   useEffect(() => {
     keybindingsRef.current = keybindings;
   }, [keybindings]);
+
+  useEffect(() => {
+    onModifierConsumedRef.current = onModifierConsumed;
+  }, [onModifierConsumed]);
 
   useEffect(() => {
     const mount = containerRef.current;
@@ -501,7 +622,12 @@ export function TerminalViewport({
               }
 
               const target = resolvePathLinkTarget(match.text, cwd);
-              void openInPreferredEditor(localApi, target).catch((error) => {
+              void openPathInPreferredEditorOrFilePreview({
+                targetPath: target,
+                environmentId,
+                cwd,
+                displayPath: match.text,
+              }).catch((error) => {
                 writeSystemMessage(
                   latestTerminal,
                   error instanceof Error ? error.message : "Unable to open path",
@@ -514,8 +640,14 @@ export function TerminalViewport({
     });
 
     const inputDisposable = terminal.onData((data) => {
+      let payload = data;
+      if (pendingModifierRef?.current === "ctrl") {
+        pendingModifierRef.current = null;
+        onModifierConsumedRef.current?.();
+        payload = applyTerminalCtrlModifier(data) ?? data;
+      }
       void api.terminal
-        .write({ threadId, terminalId, data })
+        .write({ threadId, terminalId, data: payload })
         .catch((err) =>
           writeSystemMessage(
             terminal,
@@ -553,8 +685,86 @@ export function TerminalViewport({
       clearSelectionAction();
       selectionGestureActiveRef.current = event.button === 0;
     };
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        touchScrollStateRef.current = null;
+        return;
+      }
+      const touch = event.touches[0];
+      if (!touch) {
+        touchScrollStateRef.current = null;
+        return;
+      }
+      touchScrollStateRef.current = {
+        accumulatedPixels: 0,
+        active: false,
+        lastY: touch.clientY,
+        startX: touch.clientX,
+        startY: touch.clientY,
+        touchId: touch.identifier,
+      };
+    };
+    const handleTouchMove = (event: TouchEvent) => {
+      const scrollState = touchScrollStateRef.current;
+      const activeTerminal = terminalRef.current;
+      const mountElement = containerRef.current;
+      if (!scrollState || !activeTerminal || !mountElement) {
+        return;
+      }
+
+      const touch = Array.from(event.changedTouches).find(
+        (changedTouch) => changedTouch.identifier === scrollState.touchId,
+      );
+      if (!touch) {
+        return;
+      }
+
+      const totalX = touch.clientX - scrollState.startX;
+      const totalY = touch.clientY - scrollState.startY;
+      if (!scrollState.active) {
+        if (Math.abs(totalY) < TOUCH_SCROLL_ACTIVATION_PX) {
+          return;
+        }
+        if (Math.abs(totalX) > Math.abs(totalY)) {
+          touchScrollStateRef.current = null;
+          return;
+        }
+        scrollState.active = true;
+      }
+
+      event.preventDefault();
+      const deltaPixels = scrollState.lastY - touch.clientY;
+      scrollState.lastY = touch.clientY;
+      scrollState.accumulatedPixels += deltaPixels;
+      const rowHeight = mountElement.clientHeight / Math.max(activeTerminal.rows, 1);
+      const resolved = resolveTerminalTouchScroll({
+        accumulatedPixels: scrollState.accumulatedPixels,
+        rowHeight,
+      });
+      scrollState.accumulatedPixels = resolved.remainingPixels;
+      if (resolved.lines !== 0) {
+        clearSelectionAction();
+        activeTerminal.scrollLines(resolved.lines);
+      }
+    };
+    const handleTouchEnd = (event: TouchEvent) => {
+      const scrollState = touchScrollStateRef.current;
+      if (!scrollState) {
+        return;
+      }
+      const hasTouch = Array.from(event.touches).some(
+        (touch) => touch.identifier === scrollState.touchId,
+      );
+      if (!hasTouch) {
+        touchScrollStateRef.current = null;
+      }
+    };
     window.addEventListener("mouseup", handleMouseUp);
     mount.addEventListener("pointerdown", handlePointerDown);
+    mount.addEventListener("touchstart", handleTouchStart, { passive: true });
+    mount.addEventListener("touchmove", handleTouchMove, { passive: false });
+    mount.addEventListener("touchend", handleTouchEnd);
+    mount.addEventListener("touchcancel", handleTouchEnd);
 
     const themeObserver = new MutationObserver(() => {
       const activeTerminal = terminalRef.current;
@@ -744,6 +954,10 @@ export function TerminalViewport({
       }
       window.removeEventListener("mouseup", handleMouseUp);
       mount.removeEventListener("pointerdown", handlePointerDown);
+      mount.removeEventListener("touchstart", handleTouchStart);
+      mount.removeEventListener("touchmove", handleTouchMove);
+      mount.removeEventListener("touchend", handleTouchEnd);
+      mount.removeEventListener("touchcancel", handleTouchEnd);
       themeObserver.disconnect();
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -793,7 +1007,7 @@ export function TerminalViewport({
   return (
     <div
       ref={containerRef}
-      className="relative h-full w-full overflow-hidden rounded-[4px] bg-background"
+      className="relative h-full w-full touch-none overflow-hidden rounded-[4px] bg-background"
     />
   );
 }
@@ -852,6 +1066,49 @@ function TerminalActionButton({ label, className, onClick, children }: TerminalA
   );
 }
 
+interface TerminalAccessoryKeyBarProps {
+  armedModifier: TerminalModifier | null;
+  onKeyDown: (key: TerminalAccessoryKey) => void;
+}
+
+function TerminalAccessoryKeyBar({ armedModifier, onKeyDown }: TerminalAccessoryKeyBarProps) {
+  return (
+    <div
+      // The bar spans the screen's right edge, so its horizontal scroll would
+      // otherwise be read as a right edge-swipe and open the sidebar.
+      data-mobile-edge-swipe-block="true"
+      className="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-border/60 bg-background px-2 py-1.5 [scrollbar-width:none]"
+    >
+      {TERMINAL_ACCESSORY_KEYS.map((key) => {
+        const isArmed = key.kind === "modifier" && armedModifier === key.modifier;
+        return (
+          <button
+            key={key.id}
+            type="button"
+            tabIndex={-1}
+            aria-label={key.ariaLabel}
+            aria-pressed={key.kind === "modifier" ? isArmed : undefined}
+            className={`inline-flex h-8 min-w-9 shrink-0 items-center justify-center rounded-md border px-2 font-mono text-sm leading-none transition-colors ${
+              isArmed
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border/70 bg-muted/30 text-foreground/90 active:bg-accent"
+            }`}
+            // Prevent the default mousedown so tapping a key never blurs the
+            // terminal's hidden textarea (which would dismiss the soft keyboard).
+            // The key is sent on click instead — the browser suppresses click
+            // when a touch becomes a scroll, so dragging the bar scrolls rather
+            // than firing buttons.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onKeyDown(key)}
+          >
+            {key.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function ThreadTerminalDrawer({
   threadRef,
   threadId,
@@ -876,9 +1133,15 @@ export default function ThreadTerminalDrawer({
   onAddTerminalContext,
   keybindings,
 }: ThreadTerminalDrawerProps) {
+  const isMobile = useIsMobile();
   const [drawerHeight, setDrawerHeight] = useState(() => clampDrawerHeight(height));
+  const [keyboardViewport, setKeyboardViewport] = useState<TerminalKeyboardViewport>(
+    EMPTY_TERMINAL_KEYBOARD_VIEWPORT,
+  );
   const [resizeEpoch, setResizeEpoch] = useState(0);
+  const drawerRef = useRef<HTMLElement>(null);
   const drawerHeightRef = useRef(drawerHeight);
+  const keyboardViewportRef = useRef(keyboardViewport);
   const lastSyncedHeightRef = useRef(clampDrawerHeight(height));
   const onHeightChangeRef = useRef(onHeightChange);
   const resizeStateRef = useRef<{
@@ -887,6 +1150,8 @@ export default function ThreadTerminalDrawer({
     startHeight: number;
   } | null>(null);
   const didResizeDuringDragRef = useRef(false);
+  const pendingTerminalModifierRef = useRef<TerminalModifier | null>(null);
+  const [armedModifier, setArmedModifier] = useState<TerminalModifier | null>(null);
 
   const normalizedTerminalIds = useMemo(() => {
     const cleaned = [...new Set(terminalIds.map((id) => id.trim()).filter((id) => id.length > 0))];
@@ -999,6 +1264,7 @@ export default function ThreadTerminalDrawer({
   const closeTerminalActionLabel = closeShortcutLabel
     ? `Close Terminal (${closeShortcutLabel})`
     : "Close Terminal";
+  const renderedDrawerHeight = resolveRenderedDrawerHeight(drawerHeight, keyboardViewport);
   const onSplitTerminalAction = useCallback(() => {
     if (hasReachedSplitLimit) return;
     onSplitTerminal();
@@ -1007,6 +1273,42 @@ export default function ThreadTerminalDrawer({
     onNewTerminal();
   }, [onNewTerminal]);
 
+  const sendActiveTerminalInput = useCallback(
+    (data: string) => {
+      const api = readEnvironmentApi(threadRef.environmentId);
+      if (!api) return;
+      void api.terminal
+        .write({ threadId, terminalId: resolvedActiveTerminalId, data })
+        .catch(() => undefined);
+    },
+    [resolvedActiveTerminalId, threadId, threadRef.environmentId],
+  );
+
+  const handleModifierConsumed = useCallback(() => {
+    setArmedModifier(null);
+  }, []);
+
+  const handleAccessoryKey = useCallback(
+    (key: TerminalAccessoryKey) => {
+      if (key.kind === "modifier") {
+        setArmedModifier((current) => {
+          const next = current === key.modifier ? null : key.modifier;
+          pendingTerminalModifierRef.current = next;
+          return next;
+        });
+        return;
+      }
+      // A pending Ctrl latch only applies to the next character typed on the
+      // soft keyboard, not to another accessory key — clear it and send the key.
+      if (pendingTerminalModifierRef.current !== null) {
+        pendingTerminalModifierRef.current = null;
+        setArmedModifier(null);
+      }
+      sendActiveTerminalInput(key.data);
+    },
+    [sendActiveTerminalInput],
+  );
+
   useEffect(() => {
     onHeightChangeRef.current = onHeightChange;
   }, [onHeightChange]);
@@ -1014,6 +1316,15 @@ export default function ThreadTerminalDrawer({
   useEffect(() => {
     drawerHeightRef.current = drawerHeight;
   }, [drawerHeight]);
+
+  const applyKeyboardViewport = useCallback((nextViewport: TerminalKeyboardViewport) => {
+    if (terminalKeyboardViewportEqual(keyboardViewportRef.current, nextViewport)) {
+      return;
+    }
+    keyboardViewportRef.current = nextViewport;
+    setKeyboardViewport(nextViewport);
+    setResizeEpoch((value) => value + 1);
+  }, []);
 
   const syncHeight = useCallback((nextHeight: number) => {
     const clampedHeight = clampDrawerHeight(nextHeight);
@@ -1075,6 +1386,7 @@ export default function ThreadTerminalDrawer({
 
   useEffect(() => {
     if (!visible) {
+      applyKeyboardViewport(EMPTY_TERMINAL_KEYBOARD_VIEWPORT);
       return;
     }
 
@@ -1094,7 +1406,66 @@ export default function ThreadTerminalDrawer({
     return () => {
       window.removeEventListener("resize", onWindowResize);
     };
-  }, [syncHeight, visible]);
+  }, [applyKeyboardViewport, syncHeight, visible]);
+
+  useEffect(() => {
+    if (!visible) {
+      applyKeyboardViewport(EMPTY_TERMINAL_KEYBOARD_VIEWPORT);
+      return;
+    }
+
+    let frame: number | null = null;
+    let focusOutTimer: number | null = null;
+
+    const updateKeyboardViewport = () => {
+      frame = null;
+      const drawer = drawerRef.current;
+      const activeElement = document.activeElement;
+      const terminalFocused = Boolean(
+        drawer && activeElement instanceof Node && drawer.contains(activeElement),
+      );
+      applyKeyboardViewport(
+        terminalFocused ? readTerminalKeyboardViewport() : EMPTY_TERMINAL_KEYBOARD_VIEWPORT,
+      );
+    };
+
+    const scheduleKeyboardViewportUpdate = () => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(updateKeyboardViewport);
+    };
+
+    const onFocusOut = () => {
+      if (focusOutTimer !== null) {
+        window.clearTimeout(focusOutTimer);
+      }
+      focusOutTimer = window.setTimeout(() => {
+        focusOutTimer = null;
+        scheduleKeyboardViewportUpdate();
+      }, 0);
+    };
+
+    const visualViewport = window.visualViewport;
+    document.addEventListener("focusin", scheduleKeyboardViewportUpdate);
+    document.addEventListener("focusout", onFocusOut);
+    window.addEventListener("resize", scheduleKeyboardViewportUpdate);
+    visualViewport?.addEventListener("resize", scheduleKeyboardViewportUpdate);
+    visualViewport?.addEventListener("scroll", scheduleKeyboardViewportUpdate);
+    scheduleKeyboardViewportUpdate();
+
+    return () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      if (focusOutTimer !== null) {
+        window.clearTimeout(focusOutTimer);
+      }
+      document.removeEventListener("focusin", scheduleKeyboardViewportUpdate);
+      document.removeEventListener("focusout", onFocusOut);
+      window.removeEventListener("resize", scheduleKeyboardViewportUpdate);
+      visualViewport?.removeEventListener("resize", scheduleKeyboardViewportUpdate);
+      visualViewport?.removeEventListener("scroll", scheduleKeyboardViewportUpdate);
+    };
+  }, [applyKeyboardViewport, visible]);
 
   useEffect(() => {
     if (!visible) {
@@ -1111,8 +1482,13 @@ export default function ThreadTerminalDrawer({
 
   return (
     <aside
+      ref={drawerRef}
       className="thread-terminal-drawer relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border/80 bg-background"
-      style={{ height: `${drawerHeight}px` }}
+      style={{
+        height: `${renderedDrawerHeight}px`,
+        marginBottom:
+          keyboardViewport.bottomInset > 0 ? `${keyboardViewport.bottomInset}px` : undefined,
+      }}
     >
       <div
         className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize"
@@ -1122,39 +1498,68 @@ export default function ThreadTerminalDrawer({
         onPointerCancel={handleResizePointerEnd}
       />
 
-      {!hasTerminalSidebar && (
-        <div className="pointer-events-none absolute right-2 top-2 z-20">
-          <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background/70">
+      {!hasTerminalSidebar &&
+        (isMobile ? (
+          <div className="flex shrink-0 items-center justify-end gap-1 border-b border-border/60 bg-background px-2 pb-1 pt-1.5">
             <TerminalActionButton
-              className={`p-1 text-foreground/90 transition-colors ${
+              className={`inline-flex size-8 items-center justify-center rounded-md text-foreground/90 transition-colors ${
                 hasReachedSplitLimit
-                  ? "cursor-not-allowed opacity-45 hover:bg-transparent"
-                  : "hover:bg-accent"
+                  ? "cursor-not-allowed opacity-45"
+                  : "hover:bg-accent active:bg-accent"
               }`}
               onClick={onSplitTerminalAction}
               label={splitTerminalActionLabel}
             >
-              <SquareSplitHorizontal className="size-3.25" />
+              <SquareSplitHorizontal className="size-4" />
             </TerminalActionButton>
-            <div className="h-4 w-px bg-border/80" />
             <TerminalActionButton
-              className="p-1 text-foreground/90 transition-colors hover:bg-accent"
+              className="inline-flex size-8 items-center justify-center rounded-md text-foreground/90 transition-colors hover:bg-accent active:bg-accent"
               onClick={onNewTerminalAction}
               label={newTerminalActionLabel}
             >
-              <Plus className="size-3.25" />
+              <Plus className="size-4" />
             </TerminalActionButton>
-            <div className="h-4 w-px bg-border/80" />
             <TerminalActionButton
-              className="p-1 text-foreground/90 transition-colors hover:bg-accent"
+              className="inline-flex size-8 items-center justify-center rounded-md text-foreground/90 transition-colors hover:bg-accent active:bg-accent"
               onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
               label={closeTerminalActionLabel}
             >
-              <Trash2 className="size-3.25" />
+              <Trash2 className="size-4" />
             </TerminalActionButton>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="pointer-events-none absolute right-2 top-2 z-20">
+            <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background/70">
+              <TerminalActionButton
+                className={`p-1 text-foreground/90 transition-colors ${
+                  hasReachedSplitLimit
+                    ? "cursor-not-allowed opacity-45 hover:bg-transparent"
+                    : "hover:bg-accent"
+                }`}
+                onClick={onSplitTerminalAction}
+                label={splitTerminalActionLabel}
+              >
+                <SquareSplitHorizontal className="size-3.25" />
+              </TerminalActionButton>
+              <div className="h-4 w-px bg-border/80" />
+              <TerminalActionButton
+                className="p-1 text-foreground/90 transition-colors hover:bg-accent"
+                onClick={onNewTerminalAction}
+                label={newTerminalActionLabel}
+              >
+                <Plus className="size-3.25" />
+              </TerminalActionButton>
+              <div className="h-4 w-px bg-border/80" />
+              <TerminalActionButton
+                className="p-1 text-foreground/90 transition-colors hover:bg-accent"
+                onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
+                label={closeTerminalActionLabel}
+              >
+                <Trash2 className="size-3.25" />
+              </TerminalActionButton>
+            </div>
+          </div>
+        ))}
 
       <div className="min-h-0 w-full flex-1">
         <div className={`flex h-full min-h-0 ${hasTerminalSidebar ? "gap-1.5" : ""}`}>
@@ -1192,8 +1597,10 @@ export default function ThreadTerminalDrawer({
                         focusRequestId={focusRequestId}
                         autoFocus={terminalId === resolvedActiveTerminalId}
                         resizeEpoch={resizeEpoch}
-                        drawerHeight={drawerHeight}
+                        drawerHeight={renderedDrawerHeight}
                         keybindings={keybindings}
+                        pendingModifierRef={pendingTerminalModifierRef}
+                        onModifierConsumed={handleModifierConsumed}
                       />
                     </div>
                   </div>
@@ -1215,41 +1622,57 @@ export default function ThreadTerminalDrawer({
                   focusRequestId={focusRequestId}
                   autoFocus
                   resizeEpoch={resizeEpoch}
-                  drawerHeight={drawerHeight}
+                  drawerHeight={renderedDrawerHeight}
                   keybindings={keybindings}
+                  pendingModifierRef={pendingTerminalModifierRef}
+                  onModifierConsumed={handleModifierConsumed}
                 />
               </div>
             )}
           </div>
 
           {hasTerminalSidebar && (
-            <aside className="flex w-36 min-w-36 flex-col border border-border/70 bg-muted/10">
-              <div className="flex h-[22px] items-stretch justify-end border-b border-border/70">
+            <aside
+              className={`flex flex-col border border-border/70 bg-muted/10 ${
+                isMobile ? "w-32 min-w-32" : "w-36 min-w-36"
+              }`}
+            >
+              <div
+                className={`flex items-stretch justify-end border-b border-border/70 ${
+                  isMobile ? "h-9" : "h-[22px]"
+                }`}
+              >
                 <div className="inline-flex h-full items-stretch">
                   <TerminalActionButton
-                    className={`inline-flex h-full items-center px-1 text-foreground/90 transition-colors ${
+                    className={`inline-flex h-full items-center ${
+                      isMobile ? "px-2" : "px-1"
+                    } text-foreground/90 transition-colors ${
                       hasReachedSplitLimit
                         ? "cursor-not-allowed opacity-45 hover:bg-transparent"
-                        : "hover:bg-accent/70"
+                        : "hover:bg-accent/70 active:bg-accent/70"
                     }`}
                     onClick={onSplitTerminalAction}
                     label={splitTerminalActionLabel}
                   >
-                    <SquareSplitHorizontal className="size-3.25" />
+                    <SquareSplitHorizontal className={isMobile ? "size-4" : "size-3.25"} />
                   </TerminalActionButton>
                   <TerminalActionButton
-                    className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
+                    className={`inline-flex h-full items-center border-l border-border/70 ${
+                      isMobile ? "px-2" : "px-1"
+                    } text-foreground/90 transition-colors hover:bg-accent/70 active:bg-accent/70`}
                     onClick={onNewTerminalAction}
                     label={newTerminalActionLabel}
                   >
-                    <Plus className="size-3.25" />
+                    <Plus className={isMobile ? "size-4" : "size-3.25"} />
                   </TerminalActionButton>
                   <TerminalActionButton
-                    className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
+                    className={`inline-flex h-full items-center border-l border-border/70 ${
+                      isMobile ? "px-2" : "px-1"
+                    } text-foreground/90 transition-colors hover:bg-accent/70 active:bg-accent/70`}
                     onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
                     label={closeTerminalActionLabel}
                   >
-                    <Trash2 className="size-3.25" />
+                    <Trash2 className={isMobile ? "size-4" : "size-3.25"} />
                   </TerminalActionButton>
                 </div>
               </div>
@@ -1348,6 +1771,10 @@ export default function ThreadTerminalDrawer({
           )}
         </div>
       </div>
+
+      {isMobile && keyboardViewport.bottomInset > 0 && (
+        <TerminalAccessoryKeyBar armedModifier={armedModifier} onKeyDown={handleAccessoryKey} />
+      )}
     </aside>
   );
 }

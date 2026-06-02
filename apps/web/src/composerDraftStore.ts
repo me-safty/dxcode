@@ -4,6 +4,7 @@ import {
   defaultInstanceIdForDriver,
   type EnvironmentId,
   ModelSelection,
+  OrchestrationProposedPlanId,
   ProjectId,
   ProviderInstanceId,
   ProviderInteractionMode,
@@ -92,6 +93,12 @@ const PersistedTerminalContextDraft = Schema.Struct({
 });
 type PersistedTerminalContextDraft = typeof PersistedTerminalContextDraft.Type;
 
+const PersistedDraftSourceProposedPlan = Schema.Struct({
+  threadId: ThreadId,
+  planId: OrchestrationProposedPlanId,
+});
+export type DraftSourceProposedPlan = typeof PersistedDraftSourceProposedPlan.Type;
+
 const PersistedComposerThreadDraftState = Schema.Struct({
   prompt: Schema.String,
   attachments: Schema.Array(PersistedComposerImageAttachment),
@@ -179,6 +186,7 @@ const PersistedDraftThreadState = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   envMode: DraftThreadEnvModeSchema,
+  sourceProposedPlan: Schema.optionalKey(Schema.NullOr(PersistedDraftSourceProposedPlan)),
   promotedTo: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({
@@ -248,6 +256,7 @@ export interface DraftSessionState {
   branch: string | null;
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
+  sourceProposedPlan?: DraftSourceProposedPlan | null;
   promotedTo?: ScopedThreadRef | null;
 }
 
@@ -311,6 +320,7 @@ interface ComposerDraftStoreState {
       envMode?: DraftThreadEnvMode;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      sourceProposedPlan?: DraftSourceProposedPlan | null;
     },
   ) => void;
   /** Creates or updates the draft session tracked for a concrete project ref. */
@@ -325,6 +335,7 @@ interface ComposerDraftStoreState {
       envMode?: DraftThreadEnvMode;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      sourceProposedPlan?: DraftSourceProposedPlan | null;
     },
   ) => void;
   /** Updates mutable draft-session metadata without touching composer content. */
@@ -338,6 +349,7 @@ interface ComposerDraftStoreState {
       envMode?: DraftThreadEnvMode;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      sourceProposedPlan?: DraftSourceProposedPlan | null;
     },
   ) => void;
   clearProjectDraftThreadId: (projectRef: ScopedProjectRef) => void;
@@ -371,6 +383,7 @@ interface ComposerDraftStoreState {
     provider: ProviderDriverKind,
     nextProviderOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined,
     options?: {
+      instanceId?: ProviderInstanceId | null | undefined;
       model?: string | null | undefined;
       persistSticky?: boolean;
     },
@@ -450,11 +463,13 @@ function cloneModelSelection(selection: ModelSelection): DeepMutable<ModelSelect
 function compactModelSelectionByProvider(
   selections: Partial<Record<ProviderInstanceId, ModelSelection>>,
 ): DeepMutable<Record<ProviderInstanceId, ModelSelection>> {
-  return Object.fromEntries(
-    Object.entries(selections)
-      .filter((entry): entry is [string, ModelSelection] => entry[1] !== undefined)
-      .map(([provider, selection]) => [provider, cloneModelSelection(selection)]),
-  ) as DeepMutable<Record<ProviderInstanceId, ModelSelection>>;
+  const entries: Array<[string, DeepMutable<ModelSelection>]> = [];
+  for (const [provider, selection] of Object.entries(selections)) {
+    if (selection !== undefined) {
+      entries.push([provider, cloneModelSelection(selection)]);
+    }
+  }
+  return Object.fromEntries(entries) as DeepMutable<Record<ProviderInstanceId, ModelSelection>>;
 }
 
 const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<PersistedComposerDraftStoreState>({
@@ -1016,6 +1031,27 @@ function normalizeDraftThreadEnvMode(
   return fallbackWorktreePath ? "worktree" : "local";
 }
 
+function normalizeSourceProposedPlan(value: unknown): DraftSourceProposedPlan | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const threadId = candidate.threadId;
+  const planId = candidate.planId;
+  if (
+    typeof threadId !== "string" ||
+    threadId.length === 0 ||
+    typeof planId !== "string" ||
+    planId.trim().length === 0
+  ) {
+    return null;
+  }
+  return {
+    threadId: threadId as ThreadId,
+    planId: planId as OrchestrationProposedPlanId,
+  };
+}
+
 function projectDraftKey(projectRef: ScopedProjectRef): string {
   return scopedProjectKey(projectRef);
 }
@@ -1157,6 +1193,7 @@ function createDraftThreadState(
     envMode?: DraftThreadEnvMode;
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
+    sourceProposedPlan?: DraftSourceProposedPlan | null;
   },
 ): DraftThreadState {
   const projectChanged =
@@ -1175,6 +1212,12 @@ function createDraftThreadState(
         ? null
         : (existingThread?.branch ?? null)
       : (options.branch ?? null);
+  const nextSourceProposedPlan =
+    options && "sourceProposedPlan" in options
+      ? (options.sourceProposedPlan ?? null)
+      : projectChanged
+        ? null
+        : (existingThread?.sourceProposedPlan ?? null);
   return {
     threadId,
     environmentId: projectRef.environmentId,
@@ -1193,6 +1236,7 @@ function createDraftThreadState(
         : projectChanged
           ? "local"
           : (existingThread?.envMode ?? "local")),
+    sourceProposedPlan: nextSourceProposedPlan,
     promotedTo: null,
   };
 }
@@ -1205,6 +1249,16 @@ function scopedThreadRefsEqual(
     return left === right;
   }
   return left.environmentId === right.environmentId && left.threadId === right.threadId;
+}
+
+function sourceProposedPlansEqual(
+  left: DraftSourceProposedPlan | null | undefined,
+  right: DraftSourceProposedPlan | null | undefined,
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+  return left.threadId === right.threadId && left.planId === right.planId;
 }
 
 function isDraftThreadPromoting(draftThread: DraftThreadState | null | undefined): boolean {
@@ -1224,6 +1278,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
+    sourceProposedPlansEqual(left.sourceProposedPlan, right.sourceProposedPlan) &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
   );
 }
@@ -1319,6 +1374,9 @@ function normalizePersistedDraftThreads(
       const branch = candidateDraftThread.branch;
       const worktreePath = candidateDraftThread.worktreePath;
       const normalizedWorktreePath = typeof worktreePath === "string" ? worktreePath : null;
+      const sourceProposedPlan = normalizeSourceProposedPlan(
+        candidateDraftThread.sourceProposedPlan,
+      );
       const promotedToCandidate = candidateDraftThread.promotedTo;
       const promotedToRecord =
         promotedToCandidate && typeof promotedToCandidate === "object"
@@ -1365,6 +1423,7 @@ function normalizePersistedDraftThreads(
         branch: typeof branch === "string" ? branch : null,
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
+        sourceProposedPlan,
         promotedTo,
       };
     }
@@ -1410,6 +1469,7 @@ function normalizePersistedDraftThreads(
           branch: null,
           worktreePath: null,
           envMode: "local",
+          sourceProposedPlan: null,
           promotedTo: null,
         };
       } else if (
@@ -1422,6 +1482,7 @@ function normalizePersistedDraftThreads(
           environmentId: projectRef.environmentId,
           projectId: projectRef.projectId,
           logicalProjectKey,
+          sourceProposedPlan: null,
         };
       }
     }
@@ -1808,9 +1869,12 @@ function verifyPersistedAttachments(
     const persistedAttachments = attachments.filter(
       (attachment) => imageIdSet.has(attachment.id) && persistedIdSet.has(attachment.id),
     );
-    const nonPersistedImageIds = current.images
-      .map((image) => image.id)
-      .filter((imageId) => !persistedIdSet.has(imageId));
+    const nonPersistedImageIds: string[] = [];
+    for (const image of current.images) {
+      if (!persistedIdSet.has(image.id)) {
+        nonPersistedImageIds.push(image.id);
+      }
+    }
     const nextDraft: ComposerThreadDraftState = {
       ...current,
       persistedAttachments,
@@ -1925,6 +1989,7 @@ function toHydratedDraftThreadState(
     branch: persistedDraftThread.branch,
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
+    sourceProposedPlan: persistedDraftThread.sourceProposedPlan ?? null,
     promotedTo: persistedDraftThread.promotedTo
       ? scopeThreadRef(
           persistedDraftThread.promotedTo.environmentId as EnvironmentId,
@@ -2110,6 +2175,12 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   ? null
                   : existing.branch
                 : (options.branch ?? null);
+            const nextSourceProposedPlan =
+              "sourceProposedPlan" in options
+                ? (options.sourceProposedPlan ?? null)
+                : projectChanged
+                  ? null
+                  : (existing.sourceProposedPlan ?? null);
             const nextDraftThread: DraftThreadState = {
               threadId: existing.threadId,
               environmentId: nextProjectRef.environmentId,
@@ -2130,6 +2201,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   : projectChanged
                     ? "local"
                     : (existing.envMode ?? "local")),
+              sourceProposedPlan: nextSourceProposedPlan,
               promotedTo: existing.promotedTo ?? null,
             };
             const isUnchanged =
@@ -2142,6 +2214,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.branch === existing.branch &&
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
+              sourceProposedPlansEqual(
+                nextDraftThread.sourceProposedPlan,
+                existing.sourceProposedPlan,
+              ) &&
               scopedThreadRefsEqual(nextDraftThread.promotedTo, existing.promotedTo);
             if (isUnchanged) {
               return state;
@@ -2456,7 +2532,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           if (normalizedProvider === null) {
             return;
           }
-          const instanceKey = defaultInstanceIdForDriver(normalizedProvider);
+          const instanceKey = options?.instanceId ?? defaultInstanceIdForDriver(normalizedProvider);
           const fallbackModel =
             normalizeModelSlug(options?.model, normalizedProvider) ??
             DEFAULT_MODEL_BY_PROVIDER[normalizedProvider] ??
@@ -2501,7 +2577,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 const { options: _, ...rest } = stickyBase;
                 nextStickyMap[instanceKey] = rest as ModelSelection;
               }
-              nextStickyActiveProvider = base.activeProvider ?? instanceKey;
+              nextStickyActiveProvider = options?.instanceId
+                ? instanceKey
+                : (base.activeProvider ?? instanceKey);
             }
 
             if (
@@ -2514,6 +2592,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 
             const nextDraft: ComposerThreadDraftState = {
               ...base,
+              ...(options?.instanceId ? { activeProvider: instanceKey } : {}),
               modelSelectionByProvider: nextMap,
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };

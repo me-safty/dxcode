@@ -1,7 +1,79 @@
+import { Link } from "@tanstack/react-router";
+import { useMemo } from "react";
+import { useShallow } from "zustand/react/shallow";
+
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { SidebarInset, SidebarTrigger } from "./ui/sidebar";
 import { isElectron } from "../env";
+import {
+  selectProjectsAcrossEnvironments,
+  selectSidebarThreadsAcrossEnvironments,
+  useStore,
+} from "../store";
+import { formatRelativeTimeLabel } from "../timestampFormat";
+import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
+import { deriveRecentThreadProjectGroups } from "./NoActiveThreadState.logic";
+
+function threadActivityTimestamp(thread: SidebarThreadSummary): string {
+  return thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt;
+}
+
+function RecentChats() {
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const recentGroups = useMemo(
+    () => deriveRecentThreadProjectGroups({ projects, threads }),
+    [projects, threads],
+  );
+
+  if (recentGroups.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-7 w-full min-w-0 text-left">
+      <div className="mb-3 text-xs font-medium text-muted-foreground uppercase">Recent chats</div>
+      <div className="space-y-5">
+        {recentGroups.map((group) => (
+          <section key={group.projectKey} className="min-w-0">
+            <div className="flex min-w-0 items-baseline gap-2">
+              <div className="truncate text-sm font-medium text-foreground">
+                {group.project.name}
+              </div>
+              <div className="truncate text-xs text-muted-foreground/65" title={group.project.cwd}>
+                {group.project.cwd}
+              </div>
+            </div>
+            <div className="mt-2 divide-y divide-border/70 overflow-hidden rounded-md border border-border/65 bg-background/55">
+              {group.threads.map((thread) => {
+                const timestamp = threadActivityTimestamp(thread);
+                return (
+                  <Link
+                    key={`${thread.environmentId}:${thread.id}`}
+                    to="/$environmentId/$threadId"
+                    params={{
+                      environmentId: thread.environmentId,
+                      threadId: thread.id,
+                    }}
+                    className="group flex min-w-0 items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    <span className="min-w-0 truncate text-sm text-foreground/90 group-hover:text-foreground">
+                      {thread.title}
+                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground/65">
+                      {formatRelativeTimeLabel(timestamp)}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function NoActiveThreadState() {
   return (
@@ -30,13 +102,14 @@ export function NoActiveThreadState() {
         </header>
 
         <Empty className="flex-1">
-          <div className="w-full max-w-lg rounded-3xl border border-border/55 bg-card/20 px-8 py-12 shadow-sm/5">
+          <div className="w-full max-w-2xl rounded-2xl border border-border/55 bg-card/20 px-6 py-10 shadow-sm/5 sm:px-8 sm:py-12">
             <EmptyHeader className="max-w-none">
               <EmptyTitle className="text-foreground text-xl">Pick a thread to continue</EmptyTitle>
               <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
                 Select an existing thread or create a new one to get started.
               </EmptyDescription>
             </EmptyHeader>
+            <RecentChats />
           </div>
         </Empty>
       </div>

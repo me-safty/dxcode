@@ -1,5 +1,6 @@
 import {
   type ProviderDriverKind,
+  type ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
   type ScopedThreadRef,
@@ -29,6 +30,7 @@ import {
 import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
+import { AUTO_REVIEW_MODEL_OPTION_ID } from "./ComposerAccessMenuContent";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 
@@ -44,6 +46,21 @@ type TraitsPersistence =
     };
 
 const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
+const COMPOSER_ACCESS_BOOLEAN_DESCRIPTOR_IDS = new Set([AUTO_REVIEW_MODEL_OPTION_ID]);
+
+/**
+ * Descriptor ids that represent the model's reasoning-effort control across
+ * providers (Claude: `effort`, Codex: `reasoningEffort`, Cursor: `reasoning`).
+ * The compact composer promotes this control out of the "more controls" menu
+ * into its own dedicated picker, so callers filter on these ids.
+ */
+export const REASONING_OPTION_IDS = new Set(["reasoningEffort", "reasoning", "effort"]);
+
+export function isReasoningDescriptor(descriptor: ProviderOptionDescriptor): boolean {
+  return REASONING_OPTION_IDS.has(descriptor.id);
+}
+
+export type DescriptorFilter = (descriptor: ProviderOptionDescriptor) => boolean;
 
 function replaceDescriptorCurrentValue(
   descriptors: ReadonlyArray<ProviderOptionDescriptor>,
@@ -82,12 +99,14 @@ function getSelectedTraits(
   prompt: string,
   modelOptions: ProviderOptions | null | undefined,
   allowPromptInjectedEffort: boolean,
+  descriptorFilter?: DescriptorFilter,
 ) {
   const caps = getProviderModelCapabilities(models, model, provider);
-  const descriptors = getProviderOptionDescriptors({
+  const allDescriptors = getProviderOptionDescriptors({
     caps,
     selections: modelOptions,
   });
+  const descriptors = descriptorFilter ? allDescriptors.filter(descriptorFilter) : allDescriptors;
   const selectDescriptors = descriptors.filter(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "select" }> =>
       descriptor.type === "select",
@@ -96,14 +115,21 @@ function getSelectedTraits(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "boolean" }> =>
       descriptor.type === "boolean",
   );
+  const traitsBooleanDescriptors = booleanDescriptors.filter(
+    (descriptor) => !COMPOSER_ACCESS_BOOLEAN_DESCRIPTOR_IDS.has(descriptor.id),
+  );
+  const traitsDescriptors = descriptors.filter(
+    (descriptor) =>
+      descriptor.type !== "boolean" || !COMPOSER_ACCESS_BOOLEAN_DESCRIPTOR_IDS.has(descriptor.id),
+  );
   const primarySelectDescriptor = selectDescriptors[0] ?? null;
   const contextWindowDescriptor =
     selectDescriptors.find((descriptor) => descriptor.id === "contextWindow") ?? null;
   const agentDescriptor = selectDescriptors.find((descriptor) => descriptor.id === "agent") ?? null;
   const fastModeDescriptor =
-    booleanDescriptors.find((descriptor) => descriptor.id === "fastMode") ?? null;
+    traitsBooleanDescriptors.find((descriptor) => descriptor.id === "fastMode") ?? null;
   const thinkingDescriptor =
-    booleanDescriptors.find((descriptor) => descriptor.id === "thinking") ?? null;
+    traitsBooleanDescriptors.find((descriptor) => descriptor.id === "thinking") ?? null;
 
   // Prompt-controlled effort (e.g. ultrathink in prompt text)
   const ultrathinkPromptControlled =
@@ -130,9 +156,13 @@ function getSelectedTraits(
 
   return {
     caps,
+    // Full descriptor set (pre-filter) so writes preserve the values of
+    // descriptors hidden by `descriptorFilter`.
+    allDescriptors,
     descriptors,
+    traitsDescriptors,
     selectDescriptors,
-    booleanDescriptors,
+    booleanDescriptors: traitsBooleanDescriptors,
     primarySelectDescriptor,
     contextWindowDescriptor,
     agentDescriptor,
@@ -156,6 +186,7 @@ function getTraitsSectionVisibility(input: {
   prompt: string;
   modelOptions: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
+  descriptorFilter?: DescriptorFilter;
 }) {
   const selected = getSelectedTraits(
     input.provider,
@@ -164,6 +195,7 @@ function getTraitsSectionVisibility(input: {
     input.prompt,
     input.modelOptions,
     input.allowPromptInjectedEffort ?? true,
+    input.descriptorFilter,
   );
 
   const showEffort = selected.primarySelectDescriptor !== null;
@@ -190,30 +222,40 @@ export function shouldRenderTraitsControls(input: {
   prompt: string;
   modelOptions: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
+  descriptorFilter?: DescriptorFilter;
 }): boolean {
   return getTraitsSectionVisibility(input).hasAnyControls;
 }
 
 export interface TraitsMenuContentProps {
   provider: ProviderDriverKind;
+  instanceId?: ProviderInstanceId;
   models: ReadonlyArray<ServerProviderModel>;
   model: string | null | undefined;
   prompt: string;
   onPromptChange: (prompt: string) => void;
   modelOptions?: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
+  /**
+   * Restricts the rendered option descriptors. The compact composer uses this
+   * to split the reasoning-effort control into its own picker while keeping the
+   * remaining traits in the "more controls" menu.
+   */
+  descriptorFilter?: DescriptorFilter;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
 }
 
 export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   provider,
+  instanceId,
   models,
   model,
   prompt,
   onPromptChange,
   modelOptions,
   allowPromptInjectedEffort = true,
+  descriptorFilter,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
@@ -228,14 +270,15 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
         return;
       }
       setProviderModelOptions(threadTarget, provider, nextOptions, {
+        ...(instanceId ? { instanceId } : {}),
         model,
         persistSticky: true,
       });
     },
-    [model, persistence, provider, setProviderModelOptions],
+    [instanceId, model, persistence, provider, setProviderModelOptions],
   );
   const {
-    descriptors,
+    allDescriptors,
     selectDescriptors,
     booleanDescriptors,
     primarySelectDescriptor,
@@ -249,9 +292,16 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     prompt,
     modelOptions,
     allowPromptInjectedEffort,
+    ...(descriptorFilter ? { descriptorFilter } : {}),
   });
-  const updateDescriptors = (nextDescriptors: ReadonlyArray<ProviderOptionDescriptor>) => {
-    updateModelOptions(buildProviderOptionSelectionsFromDescriptors(nextDescriptors));
+  // Apply edits against the full descriptor set so that descriptors hidden by
+  // `descriptorFilter` keep their current values when we persist.
+  const updateDescriptorValue = (descriptorId: string, value: string | boolean) => {
+    updateModelOptions(
+      buildProviderOptionSelectionsFromDescriptors(
+        replaceDescriptorCurrentValue(allDescriptors, descriptorId, value),
+      ),
+    );
   };
 
   const handleSelectChange = (
@@ -272,7 +322,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       const stripped = prompt.replace(/^Ultrathink:\s*/i, "");
       onPromptChange(stripped);
     }
-    updateDescriptors(replaceDescriptorCurrentValue(descriptors, descriptor.id, value));
+    updateDescriptorValue(descriptor.id, value);
   };
 
   if (!hasAnyControls) {
@@ -326,9 +376,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
             <MenuRadioGroup
               value={descriptor.currentValue === true ? "on" : "off"}
               onValueChange={(value) => {
-                updateDescriptors(
-                  replaceDescriptorCurrentValue(descriptors, descriptor.id, value === "on"),
-                );
+                updateDescriptorValue(descriptor.id, value === "on");
               }}
             >
               <MenuRadioItem value="on">On</MenuRadioItem>
@@ -343,18 +391,20 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
 
 export const TraitsPicker = memo(function TraitsPicker({
   provider,
+  instanceId,
   models,
   model,
   prompt,
   onPromptChange,
   modelOptions,
   allowPromptInjectedEffort = true,
+  descriptorFilter,
   triggerVariant,
   triggerClassName,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
+  const { traitsDescriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
     getTraitsSectionVisibility({
       provider,
       models,
@@ -362,6 +412,7 @@ export const TraitsPicker = memo(function TraitsPicker({
       prompt,
       modelOptions,
       allowPromptInjectedEffort,
+      ...(descriptorFilter ? { descriptorFilter } : {}),
     });
   if (
     !shouldRenderTraitsControls({
@@ -371,27 +422,29 @@ export const TraitsPicker = memo(function TraitsPicker({
       prompt,
       modelOptions,
       allowPromptInjectedEffort,
+      ...(descriptorFilter ? { descriptorFilter } : {}),
     })
   ) {
     return null;
   }
 
-  const triggerLabel =
-    descriptors
-      .map((descriptor) => {
-        if (ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id) {
-          return "Ultrathink";
-        }
-        if (descriptor.type === "boolean") {
-          if (descriptor.id === "fastMode") {
-            return descriptor.currentValue === true ? "Fast" : "Normal";
-          }
-          return `${descriptor.label} ${descriptor.currentValue === true ? "On" : "Off"}`;
-        }
-        return getProviderOptionCurrentLabel(descriptor);
-      })
-      .filter((label): label is string => typeof label === "string" && label.length > 0)
-      .join(" · ") || "";
+  const triggerLabels: Array<string> = [];
+  for (const descriptor of traitsDescriptors) {
+    const label =
+      ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id
+        ? "Ultrathink"
+        : descriptor.type === "boolean"
+          ? descriptor.id === "fastMode"
+            ? descriptor.currentValue === true
+              ? "Fast"
+              : "Normal"
+            : `${descriptor.label} ${descriptor.currentValue === true ? "On" : "Off"}`
+          : getProviderOptionCurrentLabel(descriptor);
+    if (typeof label === "string" && label.length > 0) {
+      triggerLabels.push(label);
+    }
+  }
+  const triggerLabel = triggerLabels.join(" · ");
 
   const isCodexStyle = provider === "codex";
 
@@ -431,12 +484,14 @@ export const TraitsPicker = memo(function TraitsPicker({
       <MenuPopup align="start">
         <TraitsMenuContent
           provider={provider}
+          {...(instanceId ? { instanceId } : {})}
           models={models}
           model={model}
           prompt={prompt}
           onPromptChange={onPromptChange}
           modelOptions={modelOptions}
           allowPromptInjectedEffort={allowPromptInjectedEffort}
+          {...(descriptorFilter ? { descriptorFilter } : {})}
           {...persistence}
         />
       </MenuPopup>

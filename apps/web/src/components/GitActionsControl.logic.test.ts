@@ -11,6 +11,14 @@ import {
   resolveThreadBranchUpdate,
 } from "./GitActionsControl.logic";
 
+const emptyWorkingTree: VcsStatusResult["workingTree"] = {
+  files: [],
+  insertions: 0,
+  deletions: 0,
+  staged: { files: [], insertions: 0, deletions: 0 },
+  unstaged: { files: [], insertions: 0, deletions: 0 },
+};
+
 function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
   return {
     isRepo: true,
@@ -18,11 +26,7 @@ function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
     isDefaultRef: false,
     refName: "feature/test",
     hasWorkingTreeChanges: false,
-    workingTree: {
-      files: [],
-      insertions: 0,
-      deletions: 0,
-    },
+    workingTree: emptyWorkingTree,
     hasUpstream: true,
     aheadCount: 0,
     behindCount: 0,
@@ -389,12 +393,12 @@ describe("when: ref has diverged from upstream", () => {
 });
 
 describe("when: working tree has local changes", () => {
-  it("resolveQuickAction returns commit, push, and create PR", () => {
+  it("resolveQuickAction returns commit and push while leaving PR creation explicit", () => {
     const quick = resolveQuickAction(status({ hasWorkingTreeChanges: true }), false);
     assert.deepInclude(quick, {
       kind: "run_action",
-      action: "commit_push_pr",
-      label: "Commit, push & PR",
+      action: "commit_push",
+      label: "Commit & push",
     });
   });
 
@@ -472,9 +476,19 @@ describe("when: working tree has local changes", () => {
         hasWorkingTreeChanges: true,
         aheadCount: 1,
         workingTree: {
-          files: [{ path: ".vercel/project.json", insertions: 1, deletions: 0 }],
+          files: [
+            { path: ".vercel/project.json", status: "modified", insertions: 1, deletions: 0 },
+          ],
           insertions: 1,
           deletions: 0,
+          staged: { files: [], insertions: 0, deletions: 0 },
+          unstaged: {
+            files: [
+              { path: ".vercel/project.json", status: "modified", insertions: 1, deletions: 0 },
+            ],
+            insertions: 1,
+            deletions: 0,
+          },
         },
       }),
       false,
@@ -539,15 +553,15 @@ describe("when: on default ref without open PR", () => {
 });
 
 describe("when: working tree has local changes and ref is behind upstream", () => {
-  it("resolveQuickAction still prefers commit, push, and create PR", () => {
+  it("resolveQuickAction commits before sync actions", () => {
     const quick = resolveQuickAction(
       status({ hasWorkingTreeChanges: true, behindCount: 1 }),
       false,
     );
     assert.deepInclude(quick, {
       kind: "run_action",
-      action: "commit_push_pr",
-      label: "Commit, push & PR",
+      action: "commit",
+      label: "Commit",
     });
   });
 

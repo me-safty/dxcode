@@ -54,6 +54,7 @@ import { RuntimeReceiptBusTest } from "../src/orchestration/Layers/RuntimeReceip
 import { OrchestrationReactorLive } from "../src/orchestration/Layers/OrchestrationReactor.ts";
 import { ProviderCommandReactorLive } from "../src/orchestration/Layers/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionLive } from "../src/orchestration/Layers/ProviderRuntimeIngestion.ts";
+import { WebPushNotificationReactorNoop } from "../src/push/Layers/WebPushNotificationReactor.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -79,6 +80,16 @@ import { GitWorkflowService } from "../src/git/GitWorkflowService.ts";
 import * as VcsProcess from "../src/vcs/VcsProcess.ts";
 
 const decodeCodexSettings = Schema.decodeEffect(CodexSettings);
+
+function emptyWorkingTree() {
+  return {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  };
+}
 
 function runGit(cwd: string, args: ReadonlyArray<string>) {
   return execFileSync("git", args, {
@@ -338,7 +349,7 @@ export const makeOrchestrationIntegrationHarness = (
               isDefaultRef: true,
               refName: "main",
               hasWorkingTreeChanges: false,
-              workingTree: { files: [], insertions: 0, deletions: 0 },
+              workingTree: emptyWorkingTree(),
             }),
           refreshStatus: () => Effect.die("refreshStatus should not be called in this test"),
           streamStatus: () => Stream.empty,
@@ -364,6 +375,7 @@ export const makeOrchestrationIntegrationHarness = (
           drain: Effect.void,
         }),
       ),
+      Layer.provideMerge(WebPushNotificationReactorNoop),
     );
     const layer = Layer.empty.pipe(
       Layer.provideMerge(runtimeServicesLayer),

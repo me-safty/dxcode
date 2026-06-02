@@ -11,10 +11,7 @@ import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import {
-  DEVELOPMENT_ICON_OVERRIDES,
-  PUBLISH_ICON_OVERRIDES,
-} from "../../../scripts/lib/brand-assets.ts";
+import { PUBLISH_ICON_OVERRIDES } from "../../../scripts/lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import rootPackageJson from "../../../package.json" with { type: "json" };
@@ -22,6 +19,8 @@ import serverPackageJson from "../package.json" with { type: "json" };
 
 interface PackageJson {
   name: string;
+  description: string;
+  license: string;
   repository: {
     type: string;
     url: string;
@@ -71,12 +70,15 @@ const applyPublishIconOverrides = Effect.fn("applyPublishIconOverrides")(functio
 ) {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
+  const backupDirectory = yield* fs.makeTempDirectoryScoped({
+    prefix: "salchi-publish-icons-",
+  });
   const backups: PublishIconBackup[] = [];
 
   for (const override of PUBLISH_ICON_OVERRIDES) {
     const sourcePath = path.join(repoRoot, override.sourceRelativePath);
     const targetPath = path.join(serverDir, override.targetRelativePath);
-    const backupPath = `${targetPath}.publish-bak`;
+    const backupPath = path.join(backupDirectory, `${backups.length}-${path.basename(targetPath)}`);
 
     if (!(yield* fs.exists(sourcePath))) {
       return yield* new CliError({
@@ -110,32 +112,32 @@ const restorePublishIconOverrides = Effect.fn("restorePublishIconOverrides")(fun
   }
 });
 
-const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")(function* (
+const applyProductionIconOverrides = Effect.fn("applyProductionIconOverrides")(function* (
   repoRoot: string,
   serverDir: string,
 ) {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
 
-  for (const override of DEVELOPMENT_ICON_OVERRIDES) {
+  for (const override of PUBLISH_ICON_OVERRIDES) {
     const sourcePath = path.join(repoRoot, override.sourceRelativePath);
     const targetPath = path.join(serverDir, override.targetRelativePath);
 
     if (!(yield* fs.exists(sourcePath))) {
       return yield* new CliError({
-        message: `Missing development icon source: ${sourcePath}`,
+        message: `Missing production icon source: ${sourcePath}`,
       });
     }
     if (!(yield* fs.exists(targetPath))) {
       return yield* new CliError({
-        message: `Missing development icon target: ${targetPath}. Build web first.`,
+        message: `Missing production icon target: ${targetPath}. Build web first.`,
       });
     }
 
     yield* fs.copyFile(sourcePath, targetPath);
   }
 
-  yield* Effect.log("[cli] Applied development icon overrides to dist/client");
+  yield* Effect.log("[cli] Applied production icon overrides to dist/client");
 });
 
 // ---------------------------------------------------------------------------
@@ -170,7 +172,7 @@ const buildCmd = Command.make(
 
       if (yield* fs.exists(webDist)) {
         yield* fs.copy(webDist, clientTarget);
-        yield* applyDevelopmentIconOverrides(repoRoot, serverDir);
+        yield* applyProductionIconOverrides(repoRoot, serverDir);
         yield* Effect.log("[cli] Bundled web app into dist/client");
       } else {
         yield* Effect.logWarning("[cli] Web dist not found — skipping client bundle.");
@@ -217,6 +219,8 @@ const publishCmd = Command.make(
           const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
           const pkg: PackageJson = {
             name: serverPackageJson.name,
+            description: serverPackageJson.description,
+            license: serverPackageJson.license,
             repository: serverPackageJson.repository,
             bin: serverPackageJson.bin,
             type: serverPackageJson.type,

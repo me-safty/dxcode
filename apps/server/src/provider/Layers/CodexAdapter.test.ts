@@ -32,6 +32,7 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
 import { ServerConfig } from "../../config.ts";
@@ -40,17 +41,19 @@ import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import {
+  type CodexAppServerClientHandle,
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeSendTurnInput,
   type CodexSessionRuntimeShape,
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
+import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner";
 import { makeCodexAdapter } from "./CodexAdapter.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
 class CodexAdapter extends Context.Service<CodexAdapter, CodexAdapterShape>()(
-  "test/CodexAdapter",
+  "salchi/provider/Layers/CodexAdapter.test/CodexAdapter",
 ) {}
 
 const asThreadId = (value: string): ThreadId => ThreadId.make(value);
@@ -140,6 +143,8 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   rollbackThread(numTurns: number) {
     return Effect.promise(() => this.rollbackThreadImpl(numTurns));
   }
+
+  readonly refreshUsage = Effect.void;
 
   respondToRequest(requestId: ApprovalRequestId, decision: ProviderApprovalDecision) {
     return Effect.promise(() => this.respondToRequestImpl(requestId, decision));
@@ -272,11 +277,13 @@ validationLayer("CodexAdapterLive validation", (it) => {
         threadId: asThreadId("thread-1"),
         modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
           { id: "fastMode", value: true },
+          { id: "autoReview", value: true },
         ]),
         runtimeMode: "full-access",
       });
 
       assert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0], {
+        approvalsReviewer: "auto_review",
         binaryPath: "codex",
         cwd: process.cwd(),
         model: "gpt-5.3-codex",
@@ -345,6 +352,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
           modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
             { id: "reasoningEffort", value: "high" },
             { id: "fastMode", value: true },
+            { id: "autoReview", value: false },
           ]),
           attachments: [],
         }),
@@ -355,6 +363,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         model: "gpt-5.3-codex",
         effort: "high",
         serviceTier: "fast",
+        approvalsReviewer: "user",
       });
     }),
   );
@@ -399,6 +408,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
             [
               { id: "reasoningEffort", value: "high" },
               { id: "fastMode", value: true },
+              { id: "autoReview", value: true },
             ],
           ),
           attachments: [],
@@ -410,6 +420,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         model: "gpt-5.3-codex",
         effort: "high",
         serviceTier: "fast",
+        approvalsReviewer: "auto_review",
       });
     }).pipe(Effect.provide(customLayer));
   });
@@ -530,6 +541,151 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       }
       assert.equal(firstEvent.value.turnId, "turn-1");
       assert.equal(firstEvent.value.payload.planMarkdown, "## Final plan\n\n- one\n- two");
+    }),
+  );
+
+  it.effect("maps completed Codex image generation raw response items to generated images", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-image-generated"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "rawResponseItem/completed",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("ig_1"),
+        payload: {
+          threadId: "provider-thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "image_generation_call",
+            id: "ig_1",
+            status: "generating",
+            result: "aGVsbG8=",
+          },
+        },
+      });
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+
+      assert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") {
+        return;
+      }
+      assert.equal(firstEvent.value.type, "image.generated");
+      if (firstEvent.value.type !== "image.generated") {
+        return;
+      }
+      assert.equal(firstEvent.value.turnId, "turn-1");
+      assert.equal(firstEvent.value.itemId, "ig_1");
+      assert.equal(firstEvent.value.payload.name, "ig_1.png");
+      assert.equal(firstEvent.value.payload.dataUrl, "data:image/png;base64,aGVsbG8=");
+    }),
+  );
+
+  it.effect("maps completed Codex image generation lifecycle items to generated images", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+        Effect.forkChild,
+      );
+
+      yield* runtime.emit({
+        id: asEventId("evt-image-generation-item-completed"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/completed",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("ig_2"),
+        payload: {
+          completedAtMs: 1_778_000_000_000,
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "imageGeneration",
+            id: "ig_2",
+            status: "generating",
+            result: "aGVsbG8=",
+            revisedPrompt: "A generated test image",
+            savedPath: "/tmp/ig_2.png",
+          },
+        },
+      } satisfies ProviderEvent);
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+
+      assert.equal(events.length, 2);
+
+      const generatedEvent = events[0];
+      assert.equal(generatedEvent?.type, "image.generated");
+      if (generatedEvent?.type === "image.generated") {
+        assert.equal(generatedEvent.turnId, "turn-1");
+        assert.equal(generatedEvent.itemId, "ig_2");
+        assert.equal(generatedEvent.payload.name, "ig_2.png");
+        assert.equal(generatedEvent.payload.dataUrl, "data:image/png;base64,aGVsbG8=");
+      }
+
+      const completedEvent = events[1];
+      assert.equal(completedEvent?.type, "item.completed");
+      if (completedEvent?.type === "item.completed") {
+        assert.equal(completedEvent.payload.itemType, "image_view");
+      }
+    }),
+  );
+
+  it.effect("maps started Codex image generation lifecycle items to generated images", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+        Effect.forkChild,
+      );
+
+      yield* runtime.emit({
+        id: asEventId("evt-image-generation-item-started"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/started",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("ig_started"),
+        payload: {
+          startedAtMs: 1_778_000_000_000,
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "imageGeneration",
+            id: "ig_started",
+            status: "generating",
+            result: "aGVsbG8=",
+            revisedPrompt: "A generated test image",
+            savedPath: null,
+          },
+        },
+      } satisfies ProviderEvent);
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+
+      assert.equal(events.length, 2);
+
+      const generatedEvent = events[0];
+      assert.equal(generatedEvent?.type, "image.generated");
+      if (generatedEvent?.type === "image.generated") {
+        assert.equal(generatedEvent.turnId, "turn-1");
+        assert.equal(generatedEvent.itemId, "ig_started");
+        assert.equal(generatedEvent.payload.name, "ig_started.png");
+        assert.equal(generatedEvent.payload.dataUrl, "data:image/png;base64,aGVsbG8=");
+      }
+
+      const startedEvent = events[1];
+      assert.equal(startedEvent?.type, "item.started");
+      if (startedEvent?.type === "item.started") {
+        assert.equal(startedEvent.payload.itemType, "image_view");
+        assert.equal(startedEvent.payload.status, "inProgress");
+      }
     }),
   );
 
@@ -1115,6 +1271,74 @@ scopedFailureLayer("CodexAdapterLive scoped startup failure", (it) => {
     }),
   );
 });
+
+it.effect("reuses a lazy account client for getAccountRateLimits and closes it on shutdown", () =>
+  Effect.gen(function* () {
+    const request = vi.fn(() =>
+      Effect.succeed({
+        rateLimits: {
+          primary: {
+            usedPercent: 41,
+            windowDurationMins: 300,
+          },
+        },
+      }),
+    );
+    const createAccountClient = vi.fn(
+      (): Effect.Effect<CodexAppServerClientHandle, CodexErrors.CodexAppServerError> =>
+        Effect.succeed({
+          client: {
+            request,
+          } as unknown as CodexClient.CodexAppServerClientShape,
+          child: {} as ChildProcessHandle,
+        }),
+    );
+    const scope = yield* Scope.make("sequential");
+    let scopeClosed = false;
+
+    try {
+      const layer = Layer.effect(
+        CodexAdapter,
+        Effect.gen(function* () {
+          const codexConfig = decodeCodexSettings({});
+          return yield* makeCodexAdapter(codexConfig, {
+            makeCodexAppServerClient: createAccountClient,
+          });
+        }),
+      ).pipe(
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(ServerSettingsService.layerTest()),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      const context = yield* Layer.buildWithScope(layer, scope);
+      const adapter = yield* Effect.service(CodexAdapter).pipe(Effect.provide(context));
+      const getAccountRateLimits = adapter.getAccountRateLimits;
+      assert.ok(getAccountRateLimits);
+
+      const first = yield* getAccountRateLimits();
+      const second = yield* getAccountRateLimits();
+      assert.equal(createAccountClient.mock.calls.length, 1);
+      assert.equal(request.mock.calls.length, 2);
+      assert.deepEqual(first, {
+        rateLimits: {
+          primary: {
+            usedPercent: 41,
+            windowDurationMins: 300,
+          },
+        },
+      });
+      assert.deepEqual(second, first);
+
+      yield* Scope.close(scope, Exit.void);
+      scopeClosed = true;
+    } finally {
+      if (!scopeClosed) {
+        yield* Scope.close(scope, Exit.void);
+      }
+    }
+  }),
+);
 
 it.effect("flushes managed native logs when the adapter layer shuts down", () =>
   Effect.gen(function* () {

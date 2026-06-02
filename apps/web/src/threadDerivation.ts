@@ -1,4 +1,9 @@
-import type { MessageId, ThreadId, TurnId } from "@t3tools/contracts";
+import {
+  EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+  type MessageId,
+  type ThreadId,
+  type TurnId,
+} from "@t3tools/contracts";
 import type { EnvironmentState } from "./store";
 import type {
   ChatMessage,
@@ -11,10 +16,12 @@ import type {
 } from "./types";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
+const EMPTY_QUEUED_TURNS: Thread["queuedTurns"] = [];
 const EMPTY_ACTIVITIES: Thread["activities"] = [];
 const EMPTY_PROPOSED_PLANS: ProposedPlan[] = [];
 const EMPTY_TURN_DIFF_SUMMARIES: TurnDiffSummary[] = [];
 const EMPTY_MESSAGE_MAP: Record<MessageId, ChatMessage> = {};
+const EMPTY_QUEUED_TURN_MAP: Record<MessageId, Thread["queuedTurns"][number]> = {};
 const EMPTY_ACTIVITY_MAP: Record<string, Thread["activities"][number]> = {};
 const EMPTY_PROPOSED_PLAN_MAP: Record<string, ProposedPlan> = {};
 const EMPTY_TURN_DIFF_MAP: Record<TurnId, TurnDiffSummary> = {};
@@ -26,9 +33,11 @@ const threadCache = new WeakMap<
     session: ThreadSession | null;
     turnState: ThreadTurnState | undefined;
     messages: Thread["messages"];
+    queuedTurns: Thread["queuedTurns"];
     activities: Thread["activities"];
     proposedPlans: Thread["proposedPlans"];
     turnDiffSummaries: Thread["turnDiffSummaries"];
+    detailPageInfo: Thread["detailPageInfo"];
     thread: Thread;
   }
 >();
@@ -65,6 +74,17 @@ function selectThreadMessages(state: EnvironmentState, threadId: ThreadId): Thre
     state.messageIdsByThreadId[threadId],
     state.messageByThreadId[threadId] ?? EMPTY_MESSAGE_MAP,
     EMPTY_MESSAGES,
+  );
+}
+
+function selectThreadQueuedTurns(
+  state: EnvironmentState,
+  threadId: ThreadId,
+): Thread["queuedTurns"] {
+  return collectByIds(
+    state.queuedTurnIdsByThreadId[threadId],
+    state.queuedTurnByThreadId[threadId] ?? EMPTY_QUEUED_TURN_MAP,
+    EMPTY_QUEUED_TURNS,
   );
 }
 
@@ -110,9 +130,12 @@ export function getThreadFromEnvironmentState(
   const session = state.threadSessionById[threadId] ?? null;
   const turnState = state.threadTurnStateById[threadId];
   const messages = selectThreadMessages(state, threadId);
+  const queuedTurns = selectThreadQueuedTurns(state, threadId);
   const activities = selectThreadActivities(state, threadId);
   const proposedPlans = selectThreadProposedPlans(state, threadId);
   const turnDiffSummaries = selectThreadTurnDiffSummaries(state, threadId);
+  const detailPageInfo =
+    state.threadDetailPageInfoByThreadId[threadId] ?? EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO;
   const cached = threadCache.get(shell);
 
   if (
@@ -120,9 +143,11 @@ export function getThreadFromEnvironmentState(
     cached.session === session &&
     cached.turnState === turnState &&
     cached.messages === messages &&
+    cached.queuedTurns === queuedTurns &&
     cached.activities === activities &&
     cached.proposedPlans === proposedPlans &&
-    cached.turnDiffSummaries === turnDiffSummaries
+    cached.turnDiffSummaries === turnDiffSummaries &&
+    cached.detailPageInfo === detailPageInfo
   ) {
     return cached.thread;
   }
@@ -133,18 +158,22 @@ export function getThreadFromEnvironmentState(
     latestTurn: turnState?.latestTurn ?? null,
     pendingSourceProposedPlan: turnState?.pendingSourceProposedPlan,
     messages,
+    queuedTurns,
     activities,
     proposedPlans,
     turnDiffSummaries,
+    detailPageInfo,
   };
 
   threadCache.set(shell, {
     session,
     turnState,
     messages,
+    queuedTurns,
     activities,
     proposedPlans,
     turnDiffSummaries,
+    detailPageInfo,
     thread,
   });
 

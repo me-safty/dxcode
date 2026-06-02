@@ -8,7 +8,7 @@ import {
   Link2Icon,
   Settings2Icon,
 } from "lucide-react";
-import { useCanGoBack, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 
 import {
   SidebarContent,
@@ -20,6 +20,7 @@ import {
   SidebarSeparator,
   useSidebar,
 } from "../ui/sidebar";
+import { SidebarPwaUpdateButton } from "../sidebar/SidebarPwaUpdateButton";
 
 export type SettingsSectionPath =
   | "/settings/general"
@@ -44,7 +45,6 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
-  const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
   const handleSectionClick = useCallback(
     (to: SettingsSectionPath) => {
@@ -59,12 +59,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     if (isMobile) {
       setOpenMobile(false);
     }
-    if (canGoBack) {
-      window.history.back();
-      return;
-    }
-    void navigate({ to: "/" });
-  }, [canGoBack, isMobile, navigate, setOpenMobile]);
+    void navigate({ to: "/", replace: true });
+  }, [isMobile, navigate, setOpenMobile]);
 
   return (
     <>
@@ -104,11 +100,12 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
 
       <SidebarSeparator />
       <SidebarFooter className="p-2">
+        <SidebarPwaUpdateButton />
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
               size="sm"
-              className="gap-2 px-2 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="gap-2 px-2 py-2 text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={handleBackClick}
             >
               <ArrowLeftIcon className="size-4" />

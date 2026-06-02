@@ -16,6 +16,10 @@ export const GitStackedAction = Schema.Literals([
   "commit_push_pr",
 ]);
 export type GitStackedAction = typeof GitStackedAction.Type;
+export const VcsWorkingTreeDiffTarget = Schema.Literals(["unstaged", "staged", "all"]);
+export type VcsWorkingTreeDiffTarget = typeof VcsWorkingTreeDiffTarget.Type;
+export const GenerateCommitMessageTarget = Schema.Literals(["commit", "staged"]);
+export type GenerateCommitMessageTarget = typeof GenerateCommitMessageTarget.Type;
 export const GitActionProgressPhase = Schema.Literals(["branch", "commit", "push", "pr"]);
 export type GitActionProgressPhase = typeof GitActionProgressPhase.Type;
 export const GitActionProgressKind = Schema.Literals([
@@ -83,6 +87,17 @@ export const VcsRef = Schema.Struct({
 });
 export type VcsRef = typeof VcsRef.Type;
 
+export const VcsWorkingTreeFileStatus = Schema.Literals([
+  "modified",
+  "added",
+  "deleted",
+  "renamed",
+  "copied",
+  "untracked",
+  "conflicted",
+]);
+export type VcsWorkingTreeFileStatus = typeof VcsWorkingTreeFileStatus.Type;
+
 const VcsWorktree = Schema.Struct({
   path: TrimmedNonEmptyStringSchema,
   refName: TrimmedNonEmptyStringSchema,
@@ -109,6 +124,16 @@ export const VcsPullInput = Schema.Struct({
 });
 export type VcsPullInput = typeof VcsPullInput.Type;
 
+export const VcsWorkingTreeDiffInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  target: VcsWorkingTreeDiffTarget,
+  ignoreWhitespace: Schema.optional(Schema.Boolean),
+  filePaths: Schema.optional(
+    Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
+  ),
+});
+export type VcsWorkingTreeDiffInput = typeof VcsWorkingTreeDiffInput.Type;
+
 export const GitRunStackedActionInput = Schema.Struct({
   actionId: TrimmedNonEmptyStringSchema,
   cwd: TrimmedNonEmptyStringSchema,
@@ -120,6 +145,33 @@ export const GitRunStackedActionInput = Schema.Struct({
   ),
 });
 export type GitRunStackedActionInput = typeof GitRunStackedActionInput.Type;
+
+export const GenerateCommitMessageInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  filePaths: Schema.optional(
+    Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
+  ),
+  target: Schema.optional(GenerateCommitMessageTarget),
+});
+export type GenerateCommitMessageInput = typeof GenerateCommitMessageInput.Type;
+
+export const VcsStageFilesInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  filePaths: Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
+});
+export type VcsStageFilesInput = typeof VcsStageFilesInput.Type;
+
+export const VcsUnstageFilesInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  filePaths: Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
+});
+export type VcsUnstageFilesInput = typeof VcsUnstageFilesInput.Type;
+
+export const VcsRevertUnstagedFilesInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  filePaths: Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
+});
+export type VcsRevertUnstagedFilesInput = typeof VcsRevertUnstagedFilesInput.Type;
 
 export const VcsListRefsInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
@@ -195,6 +247,20 @@ const VcsStatusChangeRequest = Schema.Struct({
   state: VcsStatusChangeRequestState,
 });
 
+const VcsWorkingTreeFile = Schema.Struct({
+  path: TrimmedNonEmptyStringSchema,
+  status: VcsWorkingTreeFileStatus,
+  insertions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+
+export const VcsWorkingTreeChangeSet = Schema.Struct({
+  files: Schema.Array(VcsWorkingTreeFile),
+  insertions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+export type VcsWorkingTreeChangeSet = typeof VcsWorkingTreeChangeSet.Type;
+
 const VcsStatusLocalShape = {
   isRepo: Schema.Boolean,
   sourceControlProvider: Schema.optional(SourceControlProviderInfo),
@@ -203,15 +269,11 @@ const VcsStatusLocalShape = {
   refName: Schema.NullOr(TrimmedNonEmptyStringSchema),
   hasWorkingTreeChanges: Schema.Boolean,
   workingTree: Schema.Struct({
-    files: Schema.Array(
-      Schema.Struct({
-        path: TrimmedNonEmptyStringSchema,
-        insertions: NonNegativeInt,
-        deletions: NonNegativeInt,
-      }),
-    ),
+    files: Schema.Array(VcsWorkingTreeFile),
     insertions: NonNegativeInt,
     deletions: NonNegativeInt,
+    staged: VcsWorkingTreeChangeSet,
+    unstaged: VcsWorkingTreeChangeSet,
   }),
 };
 
@@ -234,6 +296,11 @@ export const VcsStatusResult = Schema.Struct({
   ...VcsStatusRemoteShape,
 });
 export type VcsStatusResult = typeof VcsStatusResult.Type;
+
+export const VcsWorkingTreeDiffResult = Schema.Struct({
+  diff: Schema.String,
+});
+export type VcsWorkingTreeDiffResult = typeof VcsWorkingTreeDiffResult.Type;
 
 export const VcsStatusStreamEvent = Schema.Union([
   Schema.TaggedStruct("snapshot", {
@@ -308,6 +375,13 @@ export const GitRunStackedActionResult = Schema.Struct({
   toast: GitRunStackedActionToast,
 });
 export type GitRunStackedActionResult = typeof GitRunStackedActionResult.Type;
+
+export const GenerateCommitMessageResult = Schema.Struct({
+  subject: TrimmedNonEmptyStringSchema,
+  body: Schema.String,
+  commitMessage: TrimmedNonEmptyStringSchema,
+});
+export type GenerateCommitMessageResult = typeof GenerateCommitMessageResult.Type;
 
 export const VcsPullResult = Schema.Struct({
   status: Schema.Literals(["pulled", "skipped_up_to_date"]),

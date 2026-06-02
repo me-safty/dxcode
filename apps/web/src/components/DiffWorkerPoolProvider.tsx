@@ -1,6 +1,7 @@
 import { WorkerPoolContextProvider, useWorkerPool } from "@pierre/diffs/react";
 import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 import { useEffect, useMemo, type ReactNode } from "react";
+import { CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH } from "../codeHighlighting";
 import { useTheme } from "../hooks/useTheme";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 
@@ -46,7 +47,7 @@ export function DiffWorkerPoolProvider({ children }: { children?: ReactNode }) {
       }}
       highlighterOptions={{
         theme: diffThemeName,
-        tokenizeMaxLineLength: 1_000,
+        tokenizeMaxLineLength: CODE_HIGHLIGHT_TOKENIZE_MAX_LINE_LENGTH,
       }}
     >
       <DiffWorkerThemeSync themeName={diffThemeName} />

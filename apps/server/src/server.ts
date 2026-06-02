@@ -10,10 +10,12 @@ import {
   serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   browserApiCorsLayer,
+  workspaceGitImageRouteLayer,
+  workspaceImageRouteLayer,
 } from "./http.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
-import { OpenLive } from "./open.ts";
+import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
@@ -76,8 +78,13 @@ import {
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
+import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
+import { webResumeDiagnosticsRouteLayer } from "./diagnostics/WebResumeLog.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
+import { WebPushSubscriptionRepositoryLive } from "./persistence/Layers/WebPushSubscriptions.ts";
+import { WebPushNotificationReactorLive } from "./push/Layers/WebPushNotificationReactor.ts";
+import { WebPushServiceLive } from "./push/Layers/WebPushService.ts";
 import {
   clearPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
@@ -144,6 +151,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(ProviderCommandReactorLive),
   Layer.provideMerge(CheckpointReactorLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
+  Layer.provideMerge(WebPushNotificationReactorLive),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );
 
@@ -235,6 +243,12 @@ const AuthLayerLive = ServerAuthLive.pipe(
   Layer.provide(ServerSecretStoreLive),
 );
 
+const WebPushLayerLive = WebPushServiceLive.pipe(
+  Layer.provideMerge(WebPushSubscriptionRepositoryLive),
+  Layer.provideMerge(PersistenceLayerLive),
+  Layer.provide(ServerSecretStoreLive),
+);
+
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(ProviderLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
@@ -275,14 +289,16 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(RepositoryIdentityResolverLive),
   Layer.provideMerge(ServerEnvironmentLive),
   Layer.provideMerge(AuthLayerLive),
+  Layer.provideMerge(WebPushLayerLive),
 );
 
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // Misc.
   Layer.provideMerge(ProcessDiagnostics.layer),
+  Layer.provideMerge(ProcessResourceMonitor.layer),
   Layer.provideMerge(TraceDiagnostics.layer),
   Layer.provideMerge(AnalyticsServiceLayerLive),
-  Layer.provideMerge(OpenLive),
+  Layer.provideMerge(ExternalLauncher.layer),
   Layer.provideMerge(ServerLifecycleEventsLive),
   Layer.provide(NetService.layer),
 );
@@ -308,6 +324,9 @@ export const makeRoutesLayer = Layer.mergeAll(
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
+  webResumeDiagnosticsRouteLayer,
+  workspaceGitImageRouteLayer,
+  workspaceImageRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));

@@ -107,6 +107,83 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("reports per-file working tree statuses", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "modified.ts", "export const value = 1;\n");
+        yield* writeTextFile(cwd, "deleted.ts", "delete me\n");
+        yield* writeTextFile(cwd, "renamed-source.ts", "rename me\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "add status fixtures"]);
+
+        yield* writeTextFile(cwd, "modified.ts", "export const value = 2;\n");
+        yield* writeTextFile(cwd, "added.ts", "export const added = true;\n");
+        yield* writeTextFile(cwd, "untracked.ts", "export const untracked = true;\n");
+        yield* git(cwd, ["add", "added.ts"]);
+        yield* git(cwd, ["rm", "deleted.ts"]);
+        yield* git(cwd, ["mv", "renamed-source.ts", "renamed-target.ts"]);
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+        const statusesByPath = new Map(
+          status.workingTree.files.map((file) => [file.path, file.status]),
+        );
+
+        assert.equal(statusesByPath.get("modified.ts"), "modified");
+        assert.equal(statusesByPath.get("added.ts"), "added");
+        assert.equal(statusesByPath.get("untracked.ts"), "untracked");
+        assert.equal(statusesByPath.get("deleted.ts"), "deleted");
+        assert.equal(statusesByPath.get("renamed-target.ts"), "renamed");
+      }),
+    );
+
+    it.effect("splits staged and unstaged working tree status", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "partial.txt", "base\n");
+        yield* writeTextFile(cwd, "rename-source.txt", "rename me\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "add split fixtures"]);
+
+        yield* writeTextFile(cwd, "partial.txt", "base\nstaged\n");
+        yield* git(cwd, ["add", "partial.txt"]);
+        yield* writeTextFile(cwd, "partial.txt", "base\nstaged\nunstaged\n");
+        yield* writeTextFile(cwd, "untracked.txt", "untracked\n");
+        yield* git(cwd, ["mv", "rename-source.txt", "rename-target.txt"]);
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+        const stagedStatusesByPath = new Map(
+          status.workingTree.staged.files.map((file) => [file.path, file.status]),
+        );
+        const unstagedStatusesByPath = new Map(
+          status.workingTree.unstaged.files.map((file) => [file.path, file.status]),
+        );
+
+        assert.equal(stagedStatusesByPath.get("partial.txt"), "modified");
+        assert.equal(unstagedStatusesByPath.get("partial.txt"), "modified");
+        assert.equal(stagedStatusesByPath.get("rename-target.txt"), "renamed");
+        assert.equal(unstagedStatusesByPath.get("untracked.txt"), "untracked");
+        assert.equal(stagedStatusesByPath.has("untracked.txt"), false);
+      }),
+    );
+
+    it.effect("reports individual files inside untracked directories", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "public/images/hero.png", "png bytes\n");
+        yield* writeTextFile(cwd, "public/images/card.webp", "webp bytes\n");
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+        const unstagedPaths = status.workingTree.unstaged.files.map((file) => file.path);
+
+        assert.include(unstagedPaths, "public/images/card.webp");
+        assert.include(unstagedPaths, "public/images/hero.png");
+        assert.notInclude(unstagedPaths, "public/images/");
+      }),
+    );
+
     it.effect("reports default-branch delta separately from upstream delta", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -212,6 +289,365 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
     );
   });
 
+  describe("staging operations", () => {
+    it.effect("stages requested files", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "stage-me.txt", "stage me\n");
+        yield* driver.stageFiles({ cwd, filePaths: ["stage-me.txt"] });
+
+        const status = yield* driver.statusDetails(cwd);
+        assert.include(
+          status.workingTree.staged.files.map((file) => file.path),
+          "stage-me.txt",
+        );
+        assert.notInclude(
+          status.workingTree.unstaged.files.map((file) => file.path),
+          "stage-me.txt",
+        );
+      }),
+    );
+
+    it.effect("unstages requested files with an existing HEAD", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "unstage-me.txt", "unstage me\n");
+        yield* git(cwd, ["add", "unstage-me.txt"]);
+        yield* driver.unstageFiles({ cwd, filePaths: ["unstage-me.txt"] });
+
+        const status = yield* driver.statusDetails(cwd);
+        assert.notInclude(
+          status.workingTree.staged.files.map((file) => file.path),
+          "unstage-me.txt",
+        );
+        assert.include(
+          status.workingTree.unstaged.files.map((file) => file.path),
+          "unstage-me.txt",
+        );
+      }),
+    );
+
+    it.effect("unstages requested files before the first commit", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* driver.initRepo({ cwd });
+        yield* writeTextFile(cwd, "first.txt", "first\n");
+        yield* git(cwd, ["add", "first.txt"]);
+        yield* driver.unstageFiles({ cwd, filePaths: ["first.txt"] });
+
+        const status = yield* driver.statusDetails(cwd);
+        assert.notInclude(
+          status.workingTree.staged.files.map((file) => file.path),
+          "first.txt",
+        );
+        assert.include(
+          status.workingTree.unstaged.files.map((file) => file.path),
+          "first.txt",
+        );
+      }),
+    );
+
+    it.effect("reverts requested unstaged tracked and untracked files", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+
+        yield* writeTextFile(cwd, "README.md", "# changed\n");
+        yield* writeTextFile(cwd, "scratch.txt", "scratch\n");
+        yield* writeTextFile(cwd, "staged-only.txt", "staged\n");
+        yield* git(cwd, ["add", "staged-only.txt"]);
+        yield* driver.revertUnstagedFiles({
+          cwd,
+          filePaths: ["README.md", "scratch.txt", "staged-only.txt"],
+        });
+
+        const readme = yield* fileSystem.readFileString(pathService.join(cwd, "README.md"));
+        const scratchExists = yield* fileSystem.exists(pathService.join(cwd, "scratch.txt"));
+        const status = yield* driver.statusDetails(cwd);
+
+        assert.equal(readme, "# test\n");
+        assert.equal(scratchExists, false);
+        assert.include(
+          status.workingTree.staged.files.map((file) => file.path),
+          "staged-only.txt",
+        );
+        assert.notInclude(
+          status.workingTree.unstaged.files.map((file) => file.path),
+          "README.md",
+        );
+      }),
+    );
+
+    it.effect("preserves staged content when reverting unstaged edits to the same file", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+
+        yield* writeTextFile(cwd, "mixed.txt", "staged\n");
+        yield* git(cwd, ["add", "mixed.txt"]);
+        yield* writeTextFile(cwd, "mixed.txt", "unstaged\n");
+        yield* driver.revertUnstagedFiles({ cwd, filePaths: ["mixed.txt"] });
+
+        const mixed = yield* fileSystem.readFileString(pathService.join(cwd, "mixed.txt"));
+        const status = yield* driver.statusDetails(cwd);
+
+        assert.equal(mixed, "staged\n");
+        assert.include(
+          status.workingTree.staged.files.map((file) => file.path),
+          "mixed.txt",
+        );
+        assert.notInclude(
+          status.workingTree.unstaged.files.map((file) => file.path),
+          "mixed.txt",
+        );
+      }),
+    );
+  });
+
+  describe("working tree diffs", () => {
+    it.effect("returns only staged changes for staged diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "staged.txt", "base\n");
+        yield* writeTextFile(cwd, "unstaged.txt", "base\n");
+        yield* git(cwd, ["add", "staged.txt", "unstaged.txt"]);
+        yield* git(cwd, ["commit", "-m", "add fixture files"]);
+        yield* writeTextFile(cwd, "staged.txt", "base\nstaged change\n");
+        yield* writeTextFile(cwd, "unstaged.txt", "base\nunstaged change\n");
+        yield* git(cwd, ["add", "staged.txt"]);
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "staged",
+          ignoreWhitespace: false,
+        });
+
+        assert.include(result.diff, "+staged change");
+        assert.notInclude(result.diff, "+unstaged change");
+      }),
+    );
+
+    it.effect("returns tracked unstaged changes for unstaged diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "staged.txt", "base\n");
+        yield* writeTextFile(cwd, "unstaged.txt", "base\n");
+        yield* git(cwd, ["add", "staged.txt", "unstaged.txt"]);
+        yield* git(cwd, ["commit", "-m", "add fixture files"]);
+        yield* writeTextFile(cwd, "staged.txt", "base\nstaged change\n");
+        yield* writeTextFile(cwd, "unstaged.txt", "base\nunstaged change\n");
+        yield* git(cwd, ["add", "staged.txt"]);
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "unstaged",
+          ignoreWhitespace: false,
+        });
+
+        assert.include(result.diff, "+unstaged change");
+        assert.notInclude(result.diff, "+staged change");
+      }),
+    );
+
+    it.effect("returns staged and unstaged changes for all diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "staged.txt", "base\n");
+        yield* writeTextFile(cwd, "unstaged.txt", "base\n");
+        yield* git(cwd, ["add", "staged.txt", "unstaged.txt"]);
+        yield* git(cwd, ["commit", "-m", "add fixture files"]);
+        yield* writeTextFile(cwd, "staged.txt", "base\nstaged change\n");
+        yield* writeTextFile(cwd, "unstaged.txt", "base\nunstaged change\n");
+        yield* git(cwd, ["add", "staged.txt"]);
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "all",
+          ignoreWhitespace: false,
+        });
+
+        assert.include(result.diff, "+staged change");
+        assert.include(result.diff, "+unstaged change");
+      }),
+    );
+
+    it.effect("respects filePaths for all diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "included.txt", "base\n");
+        yield* writeTextFile(cwd, "excluded.txt", "base\n");
+        yield* git(cwd, ["add", "included.txt", "excluded.txt"]);
+        yield* git(cwd, ["commit", "-m", "add fixture files"]);
+        yield* writeTextFile(cwd, "included.txt", "base\nincluded change\n");
+        yield* writeTextFile(cwd, "excluded.txt", "base\nexcluded change\n");
+        yield* writeTextFile(cwd, "untracked.txt", "untracked change\n");
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "all",
+          ignoreWhitespace: false,
+          filePaths: ["included.txt"],
+        });
+
+        assert.include(result.diff, "+included change");
+        assert.notInclude(result.diff, "+excluded change");
+        assert.notInclude(result.diff, "+untracked change");
+      }),
+    );
+
+    it.effect("includes untracked files in all diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "untracked.txt", "untracked change\n");
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "all",
+          ignoreWhitespace: false,
+        });
+
+        assert.include(result.diff, "diff --git a/untracked.txt b/untracked.txt");
+        assert.include(result.diff, "+untracked change");
+      }),
+    );
+
+    it.effect("does not mutate the real git index for all diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "untracked.txt", "untracked change\n");
+        const beforeStatus = yield* git(cwd, ["status", "--porcelain"]);
+
+        yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "all",
+          ignoreWhitespace: false,
+        });
+
+        const afterStatus = yield* git(cwd, ["status", "--porcelain"]);
+        assert.equal(afterStatus, beforeStatus);
+        assert.include(afterStatus, "?? untracked.txt");
+      }),
+    );
+
+    it.effect("diffs against the empty tree before the first commit for all requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* driver.initRepo({ cwd });
+        yield* writeTextFile(cwd, "first.txt", "first file\n");
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "all",
+          ignoreWhitespace: false,
+        });
+
+        assert.include(result.diff, "diff --git a/first.txt b/first.txt");
+        assert.include(result.diff, "+first file");
+      }),
+    );
+
+    it.effect("includes untracked files in unstaged diff requests", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "untracked.txt", "untracked change\n");
+
+        const result = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "unstaged",
+          ignoreWhitespace: false,
+        });
+
+        assert.include(result.diff, "diff --git a/untracked.txt b/untracked.txt");
+        assert.include(result.diff, "+untracked change");
+      }),
+    );
+
+    it.effect("does not mutate the real git index when including untracked files", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "untracked.txt", "untracked change\n");
+        const beforeStatus = yield* git(cwd, ["status", "--porcelain"]);
+
+        yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "unstaged",
+          ignoreWhitespace: false,
+        });
+
+        const afterStatus = yield* git(cwd, ["status", "--porcelain"]);
+        assert.equal(afterStatus, beforeStatus);
+        assert.include(afterStatus, "?? untracked.txt");
+      }),
+    );
+
+    it.effect("honors ignoreWhitespace for working tree diffs", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* writeTextFile(cwd, "spacing.txt", "value\n");
+        yield* git(cwd, ["add", "spacing.txt"]);
+        yield* git(cwd, ["commit", "-m", "add spacing fixture"]);
+        yield* writeTextFile(cwd, "spacing.txt", "value   \n");
+
+        const withWhitespace = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "unstaged",
+          ignoreWhitespace: false,
+        });
+        const withoutWhitespace = yield* driver.readWorkingTreeDiff({
+          cwd,
+          target: "unstaged",
+          ignoreWhitespace: true,
+        });
+
+        assert.include(withWhitespace.diff, "+value");
+        assert.equal(withoutWhitespace.diff.trim(), "");
+      }),
+    );
+  });
+
   describe("refName operations", () => {
     it.effect("creates, checks out, renames, and lists refs", () =>
       Effect.gen(function* () {
@@ -313,6 +749,90 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("remote operations", () => {
+    it.effect("disables interactive auth prompts for push commands", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const tempDir = yield* makeTmpDir("git-vcs-driver-push-env-");
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        const sshLogPath = pathService.join(tempDir, "ssh-env.txt");
+        const sshWrapperPath = pathService.join(tempDir, "ssh-wrapper.sh");
+        const previousGitSsh = process.env.GIT_SSH;
+        const previousAskpassRequire = process.env.SSH_ASKPASS_REQUIRE;
+        const previousTerminalPrompt = process.env.GIT_TERMINAL_PROMPT;
+        const previousGcmInteractive = process.env.GCM_INTERACTIVE;
+        const previousAskpassLog = process.env.T3_TEST_SSH_ASKPASS_LOG;
+
+        yield* fileSystem.writeFileString(
+          sshWrapperPath,
+          [
+            "#!/bin/sh",
+            'printf "SSH_ASKPASS_REQUIRE=%s\\n" "${SSH_ASKPASS_REQUIRE:-}" >> "$T3_TEST_SSH_ASKPASS_LOG"',
+            'printf "GIT_TERMINAL_PROMPT=%s\\n" "${GIT_TERMINAL_PROMPT:-}" >> "$T3_TEST_SSH_ASKPASS_LOG"',
+            'printf "GCM_INTERACTIVE=%s\\n" "${GCM_INTERACTIVE:-}" >> "$T3_TEST_SSH_ASKPASS_LOG"',
+            'printf "ARGS=%s\\n" "$*" >> "$T3_TEST_SSH_ASKPASS_LOG"',
+            "exit 1",
+            "",
+          ].join("\n"),
+        );
+        yield* fileSystem.chmod(sshWrapperPath, 0o755);
+        yield* git(cwd, ["remote", "add", "origin", "ssh://example.invalid/repo.git"]);
+        yield* driver.createRef({ cwd, refName: "feature/push-auth" });
+        yield* driver.switchRef({ cwd, refName: "feature/push-auth" });
+        yield* writeTextFile(cwd, "feature.txt", "feature\n");
+        yield* driver.prepareCommitContext(cwd);
+        yield* driver.commit(cwd, "Add feature", "");
+
+        yield* Effect.gen(function* () {
+          process.env.GIT_SSH = sshWrapperPath;
+          process.env.SSH_ASKPASS_REQUIRE = "force";
+          process.env.GIT_TERMINAL_PROMPT = "1";
+          process.env.GCM_INTERACTIVE = "always";
+          process.env.T3_TEST_SSH_ASKPASS_LOG = sshLogPath;
+
+          yield* driver.pushCurrentBranch(cwd, null).pipe(Effect.flip);
+
+          const loggedEnvironment = yield* fileSystem.readFileString(sshLogPath);
+          assert.include(loggedEnvironment, "SSH_ASKPASS_REQUIRE=never");
+          assert.include(loggedEnvironment, "GIT_TERMINAL_PROMPT=0");
+          assert.include(loggedEnvironment, "GCM_INTERACTIVE=Never");
+          assert.include(loggedEnvironment, "git-receive-pack");
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (previousGitSsh === undefined) {
+                delete process.env.GIT_SSH;
+              } else {
+                process.env.GIT_SSH = previousGitSsh;
+              }
+              if (previousAskpassRequire === undefined) {
+                delete process.env.SSH_ASKPASS_REQUIRE;
+              } else {
+                process.env.SSH_ASKPASS_REQUIRE = previousAskpassRequire;
+              }
+              if (previousTerminalPrompt === undefined) {
+                delete process.env.GIT_TERMINAL_PROMPT;
+              } else {
+                process.env.GIT_TERMINAL_PROMPT = previousTerminalPrompt;
+              }
+              if (previousGcmInteractive === undefined) {
+                delete process.env.GCM_INTERACTIVE;
+              } else {
+                process.env.GCM_INTERACTIVE = previousGcmInteractive;
+              }
+              if (previousAskpassLog === undefined) {
+                delete process.env.T3_TEST_SSH_ASKPASS_LOG;
+              } else {
+                process.env.T3_TEST_SSH_ASKPASS_LOG = previousAskpassLog;
+              }
+            }),
+          ),
+        );
+      }),
+    );
+
     it.effect("pushes with upstream setup and skips when already up to date", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

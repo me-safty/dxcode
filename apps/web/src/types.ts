@@ -2,6 +2,8 @@ import type {
   EnvironmentId,
   ModelSelection,
   OrchestrationLatestTurn,
+  OrchestrationQueuedTurn,
+  OrchestrationThreadDetailPageInfo,
   OrchestrationProposedPlanId,
   RepositoryIdentity,
   OrchestrationSessionStatus,
@@ -54,6 +56,10 @@ export interface ChatMessage {
   streaming: boolean;
 }
 
+export type QueuedTurn = Omit<OrchestrationQueuedTurn, "attachments"> & {
+  attachments: ChatAttachment[];
+};
+
 export interface ProposedPlan {
   id: OrchestrationProposedPlanId;
   turnId: TurnId | null;
@@ -104,6 +110,7 @@ export interface Thread {
   interactionMode: ProviderInteractionMode;
   session: ThreadSession | null;
   messages: ChatMessage[];
+  queuedTurns: QueuedTurn[];
   proposedPlans: ProposedPlan[];
   error: string | null;
   createdAt: string;
@@ -115,6 +122,7 @@ export interface Thread {
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  detailPageInfo?: OrchestrationThreadDetailPageInfo;
 }
 
 export interface ThreadShell {

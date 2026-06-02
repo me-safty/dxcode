@@ -125,6 +125,10 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         rpcClient
           ? rpcClient.server.refreshProviders()
           : Promise.reject(unavailableLocalBackendError()),
+      refreshUsageLimits: () =>
+        rpcClient
+          ? rpcClient.server.refreshUsageLimits()
+          : Promise.reject(unavailableLocalBackendError()),
       updateProvider: (input) =>
         rpcClient
           ? rpcClient.server.updateProvider(input)
@@ -155,9 +159,29 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         rpcClient
           ? rpcClient.server.getProcessDiagnostics()
           : Promise.reject(unavailableLocalBackendError()),
+      getProcessResourceHistory: (input) =>
+        rpcClient
+          ? rpcClient.server.getProcessResourceHistory(input)
+          : Promise.reject(unavailableLocalBackendError()),
       signalProcess: (input) =>
         rpcClient
           ? rpcClient.server.signalProcess(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      getPushConfig: () =>
+        rpcClient
+          ? rpcClient.server.getPushConfig()
+          : Promise.reject(unavailableLocalBackendError()),
+      registerPushSubscription: (input) =>
+        rpcClient
+          ? rpcClient.server.registerPushSubscription(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      unregisterPushSubscription: (input) =>
+        rpcClient
+          ? rpcClient.server.unregisterPushSubscription(input)
+          : Promise.reject(unavailableLocalBackendError()),
+      sendTestPushNotification: (input) =>
+        rpcClient
+          ? rpcClient.server.sendTestPushNotification(input)
           : Promise.reject(unavailableLocalBackendError()),
     },
   };
@@ -194,7 +218,9 @@ export function ensureLocalApi(): LocalApi {
 export async function __resetLocalApiForTests() {
   cachedApi = undefined;
   const { __resetClientSettingsPersistenceForTests } = await import("./hooks/useSettings");
+  const { clearOrchestrationStartupCacheForTests } = await import("./orchestrationStartupCache");
   __resetClientSettingsPersistenceForTests();
+  clearOrchestrationStartupCacheForTests();
   await resetEnvironmentServiceForTests();
   resetGitStatusStateForTests();
   resetSourceControlDiscoveryStateForTests();

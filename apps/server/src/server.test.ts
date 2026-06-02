@@ -5,12 +5,13 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
   DEFAULT_SERVER_SETTINGS,
+  EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
   EnvironmentId,
   EventId,
   GitCommandError,
   KeybindingRule,
   MessageId,
-  OpenError,
+  ExternalLauncherError,
   type OrchestrationThreadShell,
   TerminalNotRunningError,
   type OrchestrationCommand,
@@ -25,6 +26,7 @@ import {
   WsRpcGroup,
   EditorId,
 } from "@t3tools/contracts";
+import { computeOrchestrationThreadDetailFingerprint } from "@t3tools/shared/orchestrationThreadDetailFingerprint";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
 import * as Clock from "effect/Clock";
@@ -40,6 +42,7 @@ import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
+  Cookies,
   FetchHttpClient,
   HttpBody,
   HttpClient,
@@ -53,6 +56,16 @@ import { vi } from "vitest";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
+function emptyWorkingTree() {
+  return {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  };
+}
+
 import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
@@ -63,7 +76,7 @@ import {
 } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { GitManager, type GitManagerShape } from "./git/GitManager.ts";
 import { Keybindings, type KeybindingsShape } from "./keybindings.ts";
-import { Open, type OpenShape } from "./open.ts";
+import * as ExternalLauncher from "./process/externalLauncher.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -79,6 +92,7 @@ import {
   ProviderRegistry,
   type ProviderRegistryShape,
 } from "./provider/Services/ProviderRegistry.ts";
+import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
@@ -115,8 +129,10 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
+import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as Data from "effect/Data";
+import { WebPushServiceNoop } from "./push/Layers/WebPushService.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -169,6 +185,7 @@ const makeDefaultOrchestrationReadModel = () => {
         archivedAt: null,
         latestTurn: null,
         messages: [],
+        queuedTurns: [],
         session: null,
         activities: [],
         proposedPlans: [],
@@ -318,8 +335,9 @@ const buildAppUnderTest = (options?: {
   layers?: {
     keybindings?: Partial<KeybindingsShape>;
     providerRegistry?: Partial<ProviderRegistryShape>;
+    providerService?: Partial<ProviderServiceShape>;
     serverSettings?: Partial<ServerSettingsShape>;
-    open?: Partial<OpenShape>;
+    externalLauncher?: Partial<ExternalLauncher.ExternalLauncherShape>;
     vcsDriver?: Partial<VcsDriver.VcsDriverShape>;
     vcsDriverRegistry?: Partial<VcsDriverRegistry.VcsDriverRegistryShape>;
     gitVcsDriver?: Partial<GitVcsDriver.GitVcsDriverShape>;
@@ -530,6 +548,33 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
+        Layer.mock(ProviderService)({
+          startSession: () => Effect.die("Unsupported provider service call in test"),
+          sendTurn: () => Effect.die("Unsupported provider service call in test"),
+          interruptTurn: () => Effect.die("Unsupported provider service call in test"),
+          respondToRequest: () => Effect.die("Unsupported provider service call in test"),
+          respondToUserInput: () => Effect.die("Unsupported provider service call in test"),
+          stopSession: () => Effect.die("Unsupported provider service call in test"),
+          listSessions: () => Effect.succeed([]),
+          getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+          getInstanceInfo: (instanceId) =>
+            Effect.succeed({
+              instanceId,
+              driverKind: ProviderDriverKind.make(String(instanceId)),
+              displayName: undefined,
+              enabled: true,
+              continuationIdentity: {
+                driverKind: ProviderDriverKind.make(String(instanceId)),
+                continuationKey: `${instanceId}:test`,
+              },
+            }),
+          rollbackConversation: () => Effect.die("Unsupported provider service call in test"),
+          refreshUsage: () => Effect.succeed({ accountRateLimits: [] }),
+          streamEvents: Stream.empty,
+          ...options?.layers?.providerService,
+        }),
+      ),
+      Layer.provide(
         Layer.mock(ServerSettingsService)({
           start: Effect.void,
           ready: Effect.void,
@@ -540,8 +585,8 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(Open)({
-          ...options?.layers?.open,
+        Layer.mock(ExternalLauncher.ExternalLauncher)({
+          ...options?.layers?.externalLauncher,
         }),
       ),
       Layer.provide(
@@ -561,6 +606,22 @@ const buildAppUnderTest = (options?: {
               signal: input.signal,
               signaled: true,
               message: Option.none(),
+            }),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProcessResourceMonitor.ProcessResourceMonitor)({
+          readHistory: (input) =>
+            Effect.succeed({
+              readAt: TEST_EPOCH,
+              windowMs: input.windowMs,
+              bucketMs: input.bucketMs,
+              sampleIntervalMs: 5_000,
+              retainedSampleCount: 0,
+              totalCpuSecondsApprox: 0,
+              buckets: [],
+              topProcesses: [],
+              error: Option.none(),
             }),
         }),
       ),
@@ -641,6 +702,7 @@ const buildAppUnderTest = (options?: {
           getProjectShellById: () => Effect.succeed(Option.none()),
           getThreadShellById: () => Effect.succeed(Option.none()),
           getThreadDetailById: () => Effect.succeed(Option.none()),
+          getThreadDetailSnapshotById: () => Effect.succeed(Option.none()),
           getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
           getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
@@ -667,6 +729,7 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.checkpointDiffQuery,
         }),
       ),
+      Layer.provide(WebPushServiceNoop),
     );
 
     const appLayer = servedRoutesLayer.pipe(
@@ -763,13 +826,6 @@ const appendSessionCookieToWsUrl = (url: string, sessionCookieHeader: string) =>
   return isAbsoluteUrl ? next.toString() : `${next.pathname}${next.search}${next.hash}`;
 };
 
-const getHttpServerUrl = (pathname = "") =>
-  Effect.gen(function* () {
-    const server = yield* HttpServer.HttpServer;
-    const address = server.address as HttpServer.TcpAddress;
-    return `http://127.0.0.1:${address.port}${pathname}`;
-  });
-
 const bootstrapBrowserSession = (
   credential = defaultDesktopBootstrapToken,
   options?: {
@@ -777,20 +833,11 @@ const bootstrapBrowserSession = (
   },
 ) =>
   Effect.gen(function* () {
-    const bootstrapUrl = yield* getHttpServerUrl("/api/auth/bootstrap");
-    const response = yield* Effect.promise(() =>
-      fetch(bootstrapUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...options?.headers,
-        },
-        body: JSON.stringify({
-          credential,
-        }),
-      }),
-    );
-    const body = (yield* Effect.promise(() => response.json())) as {
+    const response = yield* HttpClient.post("/api/auth/bootstrap", {
+      headers: options?.headers,
+      body: yield* HttpBody.json({ credential }),
+    });
+    const body = (yield* response.json) as {
       readonly authenticated: boolean;
       readonly sessionMethod: string;
       readonly expiresAt: string;
@@ -798,7 +845,7 @@ const bootstrapBrowserSession = (
     return {
       response,
       body,
-      cookie: response.headers.get("set-cookie"),
+      cookie: Cookies.toSetCookieHeaders(response.cookies)[0] ?? null,
     };
   });
 
@@ -809,20 +856,11 @@ const bootstrapBearerSession = (
   },
 ) =>
   Effect.gen(function* () {
-    const bootstrapUrl = yield* getHttpServerUrl("/api/auth/bootstrap/bearer");
-    const response = yield* Effect.promise(() =>
-      fetch(bootstrapUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...options?.headers,
-        },
-        body: JSON.stringify({
-          credential,
-        }),
-      }),
-    );
-    const body = (yield* Effect.promise(() => response.json())) as {
+    const response = yield* HttpClient.post("/api/auth/bootstrap/bearer", {
+      headers: options?.headers,
+      body: yield* HttpBody.json({ credential }),
+    });
+    const body = (yield* response.json) as {
       readonly authenticated: boolean;
       readonly sessionMethod: string;
       readonly expiresAt: string;
@@ -842,7 +880,7 @@ class AuthenticationGetterError extends Data.TaggedError("AuthenticationGetterEr
 const getAuthenticatedSessionCookieHeader = (credential = defaultDesktopBootstrapToken) =>
   Effect.gen(function* () {
     const { response, cookie } = yield* bootstrapBrowserSession(credential);
-    if (!response.ok) {
+    if (response.status !== 200) {
       return yield* new AuthenticationGetterError({
         message: `Expected bootstrap session response to succeed, got ${response.status}`,
       });
@@ -860,7 +898,7 @@ const getAuthenticatedSessionCookieHeader = (credential = defaultDesktopBootstra
 const getAuthenticatedBearerSessionToken = (credential = defaultDesktopBootstrapToken) =>
   Effect.gen(function* () {
     const { response, body } = yield* bootstrapBearerSession(credential);
-    if (!response.ok) {
+    if (response.status !== 200) {
       return yield* new AuthenticationGetterError({
         message: `Expected bearer bootstrap response to succeed, got ${response.status}`,
       });
@@ -891,14 +929,14 @@ const splitHeaderTokens = (value: string | null) =>
     .filter((token) => token.length > 0)
     .toSorted();
 
-const assertBrowserApiCorsHeaders = (headers: Headers) => {
-  assert.equal(headers.get("access-control-allow-origin"), "*");
-  assert.deepEqual(splitHeaderTokens(headers.get("access-control-allow-methods")), [
+const assertBrowserApiCorsHeaders = (headers: Readonly<Record<string, string | undefined>>) => {
+  assert.equal(headers["access-control-allow-origin"], "*");
+  assert.deepEqual(splitHeaderTokens(headers["access-control-allow-methods"] ?? null), [
     "GET",
     "OPTIONS",
     "POST",
   ]);
-  assert.deepEqual(splitHeaderTokens(headers.get("access-control-allow-headers")), [
+  assert.deepEqual(splitHeaderTokens(headers["access-control-allow-headers"] ?? null), [
     "authorization",
     "b3",
     "content-type",
@@ -947,14 +985,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         config: { devUrl: new URL("http://127.0.0.1:5173") },
       });
 
-      const url = yield* getHttpServerUrl("/foo/bar?token=test-token");
-      const response = yield* Effect.promise(() => fetch(url, { redirect: "manual" }));
+      const response = yield* HttpClient.get("/foo/bar?token=test-token").pipe(
+        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+      );
 
       assert.equal(response.status, 302);
-      assert.equal(
-        response.headers.get("location"),
-        "http://127.0.0.1:5173/foo/bar?token=test-token",
-      );
+      assert.equal(response.headers.location, "http://127.0.0.1:5173/foo/bar?token=test-token");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -1017,11 +1053,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
-      const response = yield* Effect.promise(() => fetch(url));
-      const body = (yield* Effect.promise(() =>
-        response.json(),
-      )) as typeof testEnvironmentDescriptor;
+      const response = yield* HttpClient.get("/.well-known/t3/environment");
+      const body = (yield* response.json) as typeof testEnvironmentDescriptor;
 
       assert.equal(response.status, 200);
       assert.deepEqual(body, testEnvironmentDescriptor);
@@ -1032,17 +1065,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
-      const response = yield* Effect.promise(() =>
-        fetch(url, {
-          headers: {
-            origin: crossOriginClientOrigin,
-          },
-        }),
-      );
-      const body = (yield* Effect.promise(() =>
-        response.json(),
-      )) as typeof testEnvironmentDescriptor;
+      const response = yield* HttpClient.get("/.well-known/t3/environment", {
+        headers: {
+          origin: crossOriginClientOrigin,
+        },
+      });
+      const body = (yield* response.json) as typeof testEnvironmentDescriptor;
 
       assert.equal(response.status, 200);
       assertBrowserApiCorsHeaders(response.headers);
@@ -1054,9 +1082,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/api/auth/session");
-      const response = yield* Effect.promise(() => fetch(url));
-      const body = (yield* Effect.promise(() => response.json())) as {
+      const response = yield* HttpClient.get("/api/auth/session");
+      const body = (yield* response.json) as {
         readonly authenticated: boolean;
         readonly auth: {
           readonly policy: string;
@@ -1094,15 +1121,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.isUndefined((bootstrapBody as { readonly sessionToken?: string }).sessionToken);
       assert.isDefined(setCookie);
 
-      const sessionUrl = yield* getHttpServerUrl("/api/auth/session");
-      const sessionResponse = yield* Effect.promise(() =>
-        fetch(sessionUrl, {
-          headers: {
-            cookie: setCookie?.split(";")[0] ?? "",
-          },
-        }),
-      );
-      const sessionBody = (yield* Effect.promise(() => sessionResponse.json())) as {
+      const sessionResponse = yield* HttpClient.get("/api/auth/session", {
+        headers: {
+          cookie: setCookie?.split(";")[0] ?? "",
+        },
+      });
+      const sessionBody = (yield* sessionResponse.json) as {
         readonly authenticated: boolean;
         readonly sessionMethod?: string;
       };
@@ -1128,15 +1152,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(typeof bootstrapBody.sessionToken, "string");
         assert.isTrue((bootstrapBody.sessionToken?.length ?? 0) > 0);
 
-        const sessionUrl = yield* getHttpServerUrl("/api/auth/session");
-        const sessionResponse = yield* Effect.promise(() =>
-          fetch(sessionUrl, {
-            headers: {
-              authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
-            },
-          }),
-        );
-        const sessionBody = (yield* Effect.promise(() => sessionResponse.json())) as {
+        const sessionResponse = yield* HttpClient.get("/api/auth/session", {
+          headers: {
+            authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
+          },
+        });
+        const sessionBody = (yield* sessionResponse.json) as {
           readonly authenticated: boolean;
           readonly sessionMethod?: string;
         };
@@ -1152,16 +1173,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       yield* buildAppUnderTest();
 
       const bearerToken = yield* getAuthenticatedBearerSessionToken();
-      const wsTokenUrl = yield* getHttpServerUrl("/api/auth/ws-token");
-      const wsTokenResponse = yield* Effect.promise(() =>
-        fetch(wsTokenUrl, {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${bearerToken}`,
-          },
-        }),
-      );
-      const wsTokenBody = (yield* Effect.promise(() => wsTokenResponse.json())) as {
+      const wsTokenResponse = yield* HttpClient.post("/api/auth/ws-token", {
+        headers: {
+          authorization: `Bearer ${bearerToken}`,
+        },
+      });
+      const wsTokenBody = (yield* wsTokenResponse.json) as {
         readonly token: string;
         readonly expiresAt: string;
       };
@@ -1190,16 +1207,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(bootstrapBody.authenticated, true);
       assert.equal(typeof bootstrapBody.sessionToken, "string");
 
-      const sessionUrl = yield* getHttpServerUrl("/api/auth/session");
-      const sessionResponse = yield* Effect.promise(() =>
-        fetch(sessionUrl, {
-          headers: {
-            authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
-            origin,
-          },
-        }),
-      );
-      const sessionBody = (yield* Effect.promise(() => sessionResponse.json())) as {
+      const sessionResponse = yield* HttpClient.get("/api/auth/session", {
+        headers: {
+          authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
+          origin,
+        },
+      });
+      const sessionBody = (yield* sessionResponse.json) as {
         readonly authenticated: boolean;
         readonly sessionMethod?: string;
       };
@@ -1209,17 +1223,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(sessionBody.authenticated, true);
       assert.equal(sessionBody.sessionMethod, "bearer-session-token");
 
-      const wsTokenUrl = yield* getHttpServerUrl("/api/auth/ws-token");
-      const wsTokenResponse = yield* Effect.promise(() =>
-        fetch(wsTokenUrl, {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
-            origin,
-          },
-        }),
-      );
-      const wsTokenBody = (yield* Effect.promise(() => wsTokenResponse.json())) as {
+      const wsTokenResponse = yield* HttpClient.post("/api/auth/ws-token", {
+        headers: {
+          authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
+          origin,
+        },
+      });
+      const wsTokenBody = (yield* wsTokenResponse.json) as {
         readonly token: string;
       };
 
@@ -1235,17 +1245,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       Effect.gen(function* () {
         yield* buildAppUnderTest();
 
-        const wsTokenUrl = yield* getHttpServerUrl("/api/auth/ws-token");
-        const response = yield* Effect.promise(() =>
-          fetch(wsTokenUrl, {
-            method: "OPTIONS",
-            headers: {
-              origin: crossOriginClientOrigin,
-              "access-control-request-method": "POST",
-              "access-control-request-headers": "authorization",
-            },
-          }),
-        );
+        const response = yield* HttpClient.options("/api/auth/ws-token", {
+          headers: {
+            origin: crossOriginClientOrigin,
+            "access-control-request-method": "POST",
+            "access-control-request-headers": "authorization",
+          },
+        });
 
         assert.equal(response.status, 204);
         assertBrowserApiCorsHeaders(response.headers);
@@ -1256,16 +1262,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const wsTokenUrl = yield* getHttpServerUrl("/api/auth/ws-token");
-      const response = yield* Effect.promise(() =>
-        fetch(wsTokenUrl, {
-          method: "POST",
-          headers: {
-            origin: crossOriginClientOrigin,
-          },
-        }),
-      );
-      const body = (yield* Effect.promise(() => response.json())) as {
+      const response = yield* HttpClient.post("/api/auth/ws-token", {
+        headers: {
+          origin: crossOriginClientOrigin,
+        },
+      });
+      const body = (yield* response.json) as {
         readonly error?: string;
       };
 
@@ -1340,17 +1342,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         readonly credential: string;
       }>;
 
-      const revokeUrl = yield* getHttpServerUrl("/api/auth/pairing-links/revoke");
-      const revokeResponse = yield* Effect.promise(() =>
-        fetch(revokeUrl, {
-          method: "POST",
-          headers: {
-            cookie: ownerCookie,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ id: createdBody.id }),
-        }),
-      );
+      const revokeResponse = yield* HttpClient.post("/api/auth/pairing-links/revoke", {
+        headers: {
+          cookie: ownerCookie,
+        },
+        body: yield* HttpBody.json({ id: createdBody.id }),
+      });
       const revokedBootstrap = yield* bootstrapBrowserSession(createdBody.credential);
 
       assert.equal(createdResponse.status, 200);
@@ -1403,20 +1400,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
 
       const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const pairingTokenUrl = yield* getHttpServerUrl("/api/auth/pairing-token");
-      const ownerPairingResponse = yield* Effect.promise(() =>
-        fetch(pairingTokenUrl, {
-          method: "POST",
-          headers: {
-            cookie: ownerCookie,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            label: "Julius iPhone",
-          }),
-        }),
-      );
-      const ownerPairingBody = (yield* Effect.promise(() => ownerPairingResponse.json())) as {
+      const ownerPairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
+        headers: {
+          cookie: ownerCookie,
+        },
+        body: yield* HttpBody.json({ label: "Julius iPhone" }),
+      });
+      const ownerPairingBody = (yield* ownerPairingResponse.json) as {
         readonly credential: string;
         readonly label?: string;
       };
@@ -1431,17 +1421,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.isDefined(pairedSessionCookie);
 
       const pairedSessionCookieHeader = pairedSessionCookie ?? "";
-      const listClientsUrl = yield* getHttpServerUrl("/api/auth/clients");
-      const listBeforeResponse = yield* Effect.promise(() =>
-        fetch(listClientsUrl, {
-          headers: {
-            cookie: ownerCookie,
-          },
-        }),
-      );
-      const clientsBefore = (yield* Effect.promise(() =>
-        listBeforeResponse.json(),
-      )) as ReadonlyArray<{
+      const listBeforeResponse = yield* HttpClient.get("/api/auth/clients", {
+        headers: {
+          cookie: ownerCookie,
+        },
+      });
+      const clientsBefore = (yield* listBeforeResponse.json) as ReadonlyArray<{
         readonly sessionId: string;
         readonly current: boolean;
         readonly client: {
@@ -1538,17 +1523,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const pairedSessionId = clients.find((entry) => !entry.current)?.sessionId;
       assert.isDefined(pairedSessionId);
 
-      const revokeUrl = yield* getHttpServerUrl("/api/auth/clients/revoke");
-      const revokeResponse = yield* Effect.promise(() =>
-        fetch(revokeUrl, {
-          method: "POST",
-          headers: {
-            cookie: ownerCookie,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ sessionId: pairedSessionId }),
-        }),
-      );
+      const revokeResponse = yield* HttpClient.post("/api/auth/clients/revoke", {
+        headers: {
+          cookie: ownerCookie,
+        },
+        body: yield* HttpBody.json({ sessionId: pairedSessionId }),
+      });
       const pairedClientPairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
         headers: {
           cookie: pairedSessionCookie,
@@ -1648,16 +1628,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         yield* buildAppUnderTest();
 
         const bearerToken = yield* getAuthenticatedBearerSessionToken();
-        const wsTokenUrl = yield* getHttpServerUrl("/api/auth/ws-token");
-        const wsTokenResponse = yield* Effect.promise(() =>
-          fetch(wsTokenUrl, {
-            method: "POST",
-            headers: {
-              authorization: `Bearer ${bearerToken}`,
-            },
-          }),
-        );
-        const wsTokenBody = (yield* Effect.promise(() => wsTokenResponse.json())) as {
+        const wsTokenResponse = yield* HttpClient.post("/api/auth/ws-token", {
+          headers: {
+            authorization: `Bearer ${bearerToken}`,
+          },
+        });
+        const wsTokenBody = (yield* wsTokenResponse.json) as {
           readonly token: string;
         };
         const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsToken=${encodeURIComponent(wsTokenBody.token)}`;
@@ -1859,8 +1835,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           "content-type": "application/json",
           origin: "http://localhost:5733",
         },
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
-        body: HttpBody.text(JSON.stringify(payload), "application/json"),
+        body: yield* HttpBody.json(payload),
       });
 
       assert.equal(response.status, 204);
@@ -1917,31 +1892,24 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/api/observability/v1/traces");
-      const response = yield* Effect.promise(() =>
-        fetch(url, {
-          method: "OPTIONS",
-          headers: {
-            origin: "http://localhost:5733",
-            "access-control-request-method": "POST",
-            "access-control-request-headers": "content-type",
-          },
-        }),
-      );
+      const response = yield* HttpClient.options("/api/observability/v1/traces", {
+        headers: {
+          origin: "http://localhost:5733",
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "content-type",
+        },
+      });
 
       assert.equal(response.status, 204);
-      assert.equal(response.headers.get("access-control-allow-origin"), "*");
-      assert.deepEqual(splitHeaderTokens(response.headers.get("access-control-allow-methods")), [
-        "GET",
-        "OPTIONS",
-        "POST",
-      ]);
-      assert.deepEqual(splitHeaderTokens(response.headers.get("access-control-allow-headers")), [
-        "authorization",
-        "b3",
-        "content-type",
-        "traceparent",
-      ]);
+      assert.equal(response.headers["access-control-allow-origin"], "*");
+      assert.deepEqual(
+        splitHeaderTokens(response.headers["access-control-allow-methods"] ?? null),
+        ["GET", "OPTIONS", "POST"],
+      );
+      assert.deepEqual(
+        splitHeaderTokens(response.headers["access-control-allow-headers"] ?? null),
+        ["authorization", "b3", "content-type", "traceparent"],
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -1978,8 +1946,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             cookie: yield* getAuthenticatedSessionCookieHeader(),
             "content-type": "application/json",
           },
-          // @effect-diagnostics-next-line preferSchemaOverJson:off
-          body: HttpBody.text(JSON.stringify(payload), "application/json"),
+          body: yield* HttpBody.json(payload),
         });
 
         assert.equal(response.status, 204);
@@ -2426,6 +2393,37 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes websocket rpc projects.listDirectoryEntries", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-ws-project-list-directory-",
+      });
+      yield* fs.makeDirectory(path.join(workspaceDir, "src"), { recursive: true });
+      yield* fs.writeFileString(path.join(workspaceDir, "src", "index.ts"), "export {};");
+      yield* fs.writeFileString(path.join(workspaceDir, "README.md"), "# Readme\n");
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsListDirectoryEntries]({
+            cwd: workspaceDir,
+            limit: 10,
+          }),
+        ),
+      );
+
+      assert.deepEqual(
+        response.entries.map((entry) => `${entry.kind}:${entry.path}`),
+        ["directory:src", "file:README.md"],
+      );
+      assert.equal(response.truncated, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc projects.writeFile", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -2448,6 +2446,33 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.relativePath, "nested/created.txt");
       const persisted = yield* fs.readFileString(path.join(workspaceDir, "nested", "created.txt"));
       assert.equal(persisted, "written-by-rpc");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc projects.readFile", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-read-" });
+      yield* fs.makeDirectory(path.join(workspaceDir, "src"), { recursive: true });
+      yield* fs.writeFileString(path.join(workspaceDir, "src", "index.ts"), "export {};\n");
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsReadFile]({
+            cwd: workspaceDir,
+            relativePath: "src/index.ts",
+          }),
+        ),
+      );
+
+      assert.equal(response.relativePath, "src/index.ts");
+      assert.equal(response.contents, "export {};\n");
+      assert.equal(response.truncated, false);
+      assert.equal(response.sizeBytes, "export {};\n".length);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -2512,13 +2537,39 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes websocket rpc projects.readFile errors", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-read-" });
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsReadFile]({
+            cwd: workspaceDir,
+            relativePath: "../escape.txt",
+          }),
+        ).pipe(Effect.result),
+      );
+
+      assertTrue(result._tag === "Failure");
+      assertTrue(result.failure._tag === "ProjectReadFileError");
+      assert.equal(
+        result.failure.message,
+        "Workspace file path must stay within the project root.",
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc shell.openInEditor", () =>
     Effect.gen(function* () {
       let openedInput: { cwd: string; editor: EditorId } | null = null;
       yield* buildAppUnderTest({
         layers: {
-          open: {
-            openInEditor: (input) =>
+          externalLauncher: {
+            launchEditor: (input) =>
               Effect.sync(() => {
                 openedInput = input;
               }),
@@ -2542,11 +2593,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
   it.effect("routes websocket rpc shell.openInEditor errors", () =>
     Effect.gen(function* () {
-      const openError = new OpenError({ message: "Editor command not found: cursor" });
+      const externalLauncherError = new ExternalLauncherError({
+        message: "Editor command not found: cursor",
+      });
       yield* buildAppUnderTest({
         layers: {
-          open: {
-            openInEditor: () => Effect.fail(openError),
+          externalLauncher: {
+            launchEditor: () => Effect.fail(externalLauncherError),
           },
         },
       });
@@ -2561,7 +2614,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ).pipe(Effect.result),
       );
 
-      assertFailure(result, openError);
+      assertFailure(result, externalLauncherError);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -2580,7 +2633,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 isDefaultRef: true,
                 refName: "main",
                 hasWorkingTreeChanges: false,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
+                workingTree: emptyWorkingTree(),
               }),
             remoteStatus: () =>
               Effect.succeed({
@@ -2596,7 +2649,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 isDefaultRef: true,
                 refName: "main",
                 hasWorkingTreeChanges: false,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
+                workingTree: emptyWorkingTree(),
                 hasUpstream: true,
                 aheadCount: 0,
                 behindCount: 0,
@@ -2649,6 +2702,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 );
 
                 return result;
+              }),
+            generateCommitMessage: () =>
+              Effect.succeed({
+                subject: "feat: demo",
+                body: "",
+                commitMessage: "feat: demo",
               }),
             resolvePullRequest: () =>
               Effect.succeed({
@@ -2852,7 +2911,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 isDefaultRef: true,
                 refName: "main",
                 hasWorkingTreeChanges: true,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
+                workingTree: emptyWorkingTree(),
               }),
             remoteStatus: () =>
               Effect.sync(() => {
@@ -2873,7 +2932,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   isDefaultRef: true,
                   refName: "main",
                   hasWorkingTreeChanges: true,
-                  workingTree: { files: [], insertions: 0, deletions: 0 },
+                  workingTree: emptyWorkingTree(),
                   hasUpstream: true,
                   aheadCount: 0,
                   behindCount: 0,
@@ -2929,7 +2988,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 isDefaultRef: false,
                 refName: "feature/demo",
                 hasWorkingTreeChanges: true,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
+                workingTree: emptyWorkingTree(),
               }),
             remoteStatus: () =>
               Effect.sync(() => {
@@ -2950,7 +3009,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   isDefaultRef: false,
                   refName: "feature/demo",
                   hasWorkingTreeChanges: true,
-                  workingTree: { files: [], insertions: 0, deletions: 0 },
+                  workingTree: emptyWorkingTree(),
                   hasUpstream: true,
                   aheadCount: 0,
                   behindCount: 0,
@@ -3001,7 +3060,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 isDefaultRef: true,
                 refName: "main",
                 hasWorkingTreeChanges: false,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
+                workingTree: emptyWorkingTree(),
               }),
             remoteStatus: () =>
               Effect.sleep(Duration.seconds(2)).pipe(
@@ -3047,7 +3106,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   isDefaultRef: false,
                   refName: "feature/demo",
                   hasWorkingTreeChanges: false,
-                  workingTree: { files: [], insertions: 0, deletions: 0 },
+                  workingTree: emptyWorkingTree(),
                 }),
               remoteStatus: () =>
                 Effect.sleep(Duration.seconds(2)).pipe(
@@ -3126,7 +3185,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                       isDefaultRef: false,
                       refName: "feature/demo",
                       hasWorkingTreeChanges: false,
-                      workingTree: { files: [], insertions: 0, deletions: 0 },
+                      workingTree: emptyWorkingTree(),
                     }),
                   ),
                 ),
@@ -3214,6 +3273,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             archivedAt: null,
             latestTurn: null,
             messages: [],
+            queuedTurns: [],
             session: null,
             activities: [],
             proposedPlans: [],
@@ -3222,11 +3282,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           },
         ],
       };
+      const threadDetailSnapshot = {
+        snapshotSequence: 1,
+        thread: snapshot.threads[0]!,
+        pageInfo: EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+      };
 
       yield* buildAppUnderTest({
         layers: {
           projectionSnapshotQuery: {
             getSnapshot: () => Effect.succeed(snapshot),
+            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 9 }),
+            getThreadDetailSnapshotById: () => Effect.succeed(Option.some(threadDetailSnapshot)),
           },
           orchestrationEngine: {
             dispatch: () => Effect.succeed({ sequence: 7 }),
@@ -3293,6 +3360,36 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
       assert.deepEqual(replayResult, []);
+
+      const syncProbe = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.probeSync]({
+            clientSequence: 5,
+          }),
+        ),
+      );
+      assert.deepEqual(syncProbe, {
+        clientSequence: 5,
+        serverSequence: 9,
+        behind: true,
+      });
+
+      const fingerprint = computeOrchestrationThreadDetailFingerprint(threadDetailSnapshot);
+      const reconcileResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.reconcileThreadDetail]({
+            threadId: ThreadId.make("thread-1"),
+            clientSequence: 1,
+            verifiedSequence: 1,
+            verifiedFingerprint: fingerprint,
+          }),
+        ),
+      );
+      assert.deepEqual(reconcileResult, {
+        kind: "current",
+        serverSequence: 1,
+        serverFingerprint: fingerprint,
+      });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -3820,11 +3917,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             isDefaultRef: false,
             refName: "t3code/bootstrap-refName",
             hasWorkingTreeChanges: false,
-            workingTree: {
-              files: [],
-              insertions: 0,
-              deletions: 0,
-            },
+            workingTree: emptyWorkingTree(),
             hasUpstream: true,
             aheadCount: 0,
             behindCount: 0,

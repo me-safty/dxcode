@@ -34,6 +34,7 @@ import {
 } from "./methods/updates.ts";
 import {
   confirm,
+  forceReload,
   getAppBranding,
   getLocalEnvironmentBootstrap,
   openExternal,
@@ -75,6 +76,7 @@ export const installDesktopIpcHandlers = Effect.gen(function* () {
   yield* ipc.handle(setTheme);
   yield* ipc.handle(showContextMenu);
   yield* ipc.handle(openExternal);
+  yield* ipc.handle(forceReload);
 
   yield* ipc.handle(getUpdateState);
   yield* ipc.handle(setUpdateChannel);

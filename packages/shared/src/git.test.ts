@@ -10,6 +10,14 @@ import {
   WORKTREE_BRANCH_PREFIX,
 } from "./git.ts";
 
+const emptyWorkingTree = {
+  files: [],
+  insertions: 0,
+  deletions: 0,
+  staged: { files: [], insertions: 0, deletions: 0 },
+  unstaged: { files: [], insertions: 0, deletions: 0 },
+} satisfies VcsStatusResult["workingTree"];
+
 describe("normalizeGitRemoteUrl", () => {
   it("canonicalizes equivalent GitHub remotes across protocol variants", () => {
     expect(normalizeGitRemoteUrl("git@github.com:T3Tools/T3Code.git")).toBe(
@@ -55,7 +63,14 @@ describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
 
 describe("isTemporaryWorktreeBranch", () => {
   it("matches the generated temporary worktree refName format", () => {
-    expect(isTemporaryWorktreeBranch(buildTemporaryWorktreeBranchName())).toBe(true);
+    expect(
+      isTemporaryWorktreeBranch(
+        buildTemporaryWorktreeBranchName((byteLength) => {
+          expect(byteLength).toBe(4);
+          return "DEADBEEF";
+        }),
+      ),
+    ).toBe(true);
   });
 
   it("matches generated temporary worktree refs", () => {
@@ -86,7 +101,7 @@ describe("applyGitStatusStreamEvent", () => {
       isDefaultRef: false,
       refName: null,
       hasWorkingTreeChanges: false,
-      workingTree: { files: [], insertions: 0, deletions: 0 },
+      workingTree: emptyWorkingTree,
       hasUpstream: true,
       aheadCount: 2,
       behindCount: 1,
@@ -107,9 +122,15 @@ describe("applyGitStatusStreamEvent", () => {
       refName: "feature/demo",
       hasWorkingTreeChanges: true,
       workingTree: {
-        files: [{ path: "src/demo.ts", insertions: 1, deletions: 0 }],
+        files: [{ path: "src/demo.ts", status: "modified", insertions: 1, deletions: 0 }],
         insertions: 1,
         deletions: 0,
+        staged: {
+          files: [{ path: "src/demo.ts", status: "modified", insertions: 1, deletions: 0 }],
+          insertions: 1,
+          deletions: 0,
+        },
+        unstaged: { files: [], insertions: 0, deletions: 0 },
       },
       hasUpstream: false,
       aheadCount: 0,

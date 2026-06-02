@@ -8,6 +8,7 @@ import type {
   Options as ClaudeQueryOptions,
   PermissionMode,
   PermissionResult,
+  SDKControlGetContextUsageResponse,
   SDKMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -39,10 +40,11 @@ import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString);
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
 class ClaudeAdapter extends Context.Service<ClaudeAdapter, ClaudeAdapterShape>()(
-  "test/ClaudeAdapter",
+  "salchi/provider/Layers/ClaudeAdapter.test/ClaudeAdapter",
 ) {}
 
 class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
@@ -58,6 +60,21 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setModelCalls: Array<string | undefined> = [];
   public readonly setPermissionModeCalls: Array<string> = [];
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
+  public readonly getContextUsageCalls: Array<void> = [];
+  public contextUsageResponse: SDKControlGetContextUsageResponse = {
+    categories: [],
+    totalTokens: 0,
+    maxTokens: 0,
+    rawMaxTokens: 0,
+    percentage: 0,
+    gridRows: [],
+    model: "claude-test",
+    memoryFiles: [],
+    mcpTools: [],
+    agents: [],
+    isAutoCompactEnabled: false,
+    apiUsage: null,
+  };
   public closeCalls = 0;
 
   emit(message: SDKMessage): void {
@@ -110,6 +127,11 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
     this.setMaxThinkingTokensCalls.push(maxThinkingTokens);
   };
 
+  readonly getContextUsage = async (): Promise<SDKControlGetContextUsageResponse> => {
+    this.getContextUsageCalls.push(undefined);
+    return this.contextUsageResponse;
+  };
+
   readonly close = (): void => {
     this.closeCalls += 1;
     this.finish();
@@ -156,6 +178,9 @@ function makeHarness(config?: {
   readonly baseDir?: string;
   readonly claudeConfig?: Partial<ClaudeSettings>;
   readonly instanceId?: ProviderInstanceId;
+  readonly enableOAuthUsage?: boolean;
+  readonly enableStatuslineUsage?: boolean;
+  readonly fetchOAuthUsage?: ClaudeAdapterLiveOptions["fetchOAuthUsage"];
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -167,6 +192,13 @@ function makeHarness(config?: {
 
   const adapterOptions: ClaudeAdapterLiveOptions = {
     ...(config?.instanceId ? { instanceId: config.instanceId } : {}),
+    ...(config?.enableOAuthUsage !== undefined
+      ? { enableOAuthUsage: config.enableOAuthUsage }
+      : {}),
+    ...(config?.enableStatuslineUsage !== undefined
+      ? { enableStatuslineUsage: config.enableStatuslineUsage }
+      : {}),
+    ...(config?.fetchOAuthUsage ? { fetchOAuthUsage: config.fetchOAuthUsage } : {}),
     createQuery: (input) => {
       createInput = input;
       return query;
@@ -396,6 +428,266 @@ describe("ClaudeAdapterLive", () => {
 
       const createInput = harness.getLastCreateQueryInput();
       assert.equal(createInput?.options.env?.HOME, path.join(os.homedir(), ".claude-work"));
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("returns account rate limits without an active session", () => {
+    const homeDir = mkdtempSync(path.join(os.tmpdir(), "claude-oauth-account-"));
+    const credentialsDir = path.join(homeDir, ".claude");
+    mkdirSync(credentialsDir, { recursive: true });
+    writeFileSync(
+      path.join(credentialsDir, ".credentials.json"),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "test-access-token",
+          refreshToken: "test-refresh-token",
+          expiresAt: 4_102_444_800_000,
+          scopes: ["user:profile", "user:inference"],
+          subscriptionType: "pro",
+          rateLimitTier: "default_claude_ai",
+        },
+      }),
+    );
+
+    const harness = makeHarness({
+      claudeConfig: { homePath: homeDir },
+      enableOAuthUsage: true,
+      fetchOAuthUsage: async ({ accessToken }) => {
+        assert.equal(accessToken, "test-access-token");
+        return {
+          five_hour: {
+            utilization: 18,
+            resets_at: "2026-05-18T06:20:00.000Z",
+          },
+          seven_day: {
+            utilization: 27,
+            resets_at: "2026-05-19T18:00:00.000Z",
+          },
+        };
+      },
+    });
+
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() =>
+          rmSync(homeDir, {
+            recursive: true,
+            force: true,
+          }),
+        ),
+      );
+
+      const adapter = yield* ClaudeAdapter;
+      const getAccountRateLimits = adapter.getAccountRateLimits;
+      assert.ok(getAccountRateLimits);
+      const rateLimits = yield* getAccountRateLimits();
+      assert.deepEqual(rateLimits, {
+        source: "claude.oauth.usage",
+        primary: {
+          usedPercent: 18,
+          windowDurationMins: 300,
+          resetsAt: "2026-05-18T06:20:00.000Z",
+        },
+        secondary: {
+          usedPercent: 27,
+          windowDurationMins: 10080,
+          resetsAt: "2026-05-19T18:00:00.000Z",
+        },
+      });
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("emits Claude subscription usage from the OAuth usage endpoint", () => {
+    const homeDir = mkdtempSync(path.join(os.tmpdir(), "claude-oauth-usage-"));
+    const credentialsDir = path.join(homeDir, ".claude");
+    mkdirSync(credentialsDir, { recursive: true });
+    writeFileSync(
+      path.join(credentialsDir, ".credentials.json"),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "test-access-token",
+          refreshToken: "test-refresh-token",
+          expiresAt: 4_102_444_800_000,
+          scopes: ["user:profile", "user:inference"],
+          subscriptionType: "pro",
+          rateLimitTier: "default_claude_ai",
+        },
+      }),
+    );
+
+    const harness = makeHarness({
+      claudeConfig: { homePath: homeDir },
+      enableOAuthUsage: true,
+      fetchOAuthUsage: async ({ accessToken }) => {
+        assert.equal(accessToken, "test-access-token");
+        return {
+          five_hour: {
+            utilization: 12,
+            resets_at: "2026-05-18T06:20:00.000Z",
+          },
+          seven_day: {
+            utilization: 34,
+            resets_at: "2026-05-19T18:00:00.000Z",
+          },
+        };
+      },
+    });
+
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() =>
+          rmSync(homeDir, {
+            recursive: true,
+            force: true,
+          }),
+        ),
+      );
+
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 4).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const rateLimitsEvent = runtimeEvents.find(
+        (event) => event.type === "account.rate-limits.updated",
+      );
+      assert.equal(rateLimitsEvent?.type, "account.rate-limits.updated");
+      if (rateLimitsEvent?.type === "account.rate-limits.updated") {
+        assert.deepEqual(rateLimitsEvent.payload.rateLimits, {
+          source: "claude.oauth.usage",
+          primary: {
+            usedPercent: 12,
+            windowDurationMins: 300,
+            resetsAt: "2026-05-18T06:20:00.000Z",
+          },
+          secondary: {
+            usedPercent: 34,
+            windowDurationMins: 10080,
+            resetsAt: "2026-05-19T18:00:00.000Z",
+          },
+        });
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("emits Claude subscription usage from statusline rate limits", () => {
+    const baseDir = mkdtempSync(path.join(os.tmpdir(), "claude-statusline-usage-"));
+    const harness = makeHarness({
+      baseDir,
+      enableStatuslineUsage: true,
+    });
+
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() =>
+          rmSync(baseDir, {
+            recursive: true,
+            force: true,
+          }),
+        ),
+      );
+
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 4).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      const capturePath =
+        createInput?.options.env?.T3CODE_CLAUDE_STATUSLINE_CAPTURE_PATH ?? undefined;
+      assert.ok(capturePath);
+      const settings = createInput?.options.settings as
+        | { readonly statusLine?: { readonly command?: unknown } }
+        | undefined;
+      assert.equal(typeof settings, "object");
+      assert.equal(typeof settings?.statusLine?.command, "string");
+
+      writeFileSync(
+        capturePath,
+        encodeUnknownJsonString({
+          rate_limits: {
+            five_hour: {
+              used_percentage: 6,
+              resets_at: "2026-05-18T06:20:00.000Z",
+            },
+            seven_day: {
+              used_percentage: 29,
+              resets_at: "2026-05-19T18:00:00.000Z",
+            },
+          },
+        }),
+      );
+
+      const refreshUsage = adapter.refreshUsage;
+      assert.ok(refreshUsage);
+      yield* refreshUsage();
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const rateLimitsEvent = runtimeEvents.find(
+        (event) => event.type === "account.rate-limits.updated",
+      );
+      assert.equal(rateLimitsEvent?.type, "account.rate-limits.updated");
+      if (rateLimitsEvent?.type === "account.rate-limits.updated") {
+        assert.deepEqual(rateLimitsEvent.payload.rateLimits, {
+          source: "claude.statusline",
+          primary: {
+            usedPercent: 6,
+            windowDurationMins: 300,
+            resetsAt: "2026-05-18T06:20:00.000Z",
+          },
+          secondary: {
+            usedPercent: 29,
+            windowDurationMins: 10080,
+            resetsAt: "2026-05-19T18:00:00.000Z",
+          },
+        });
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("uses high as the Claude Opus 4.8 default effort", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-4-8",
+        },
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.effort, "high");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

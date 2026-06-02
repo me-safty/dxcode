@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+
+import * as Arr from "effect/Array";
 import * as Cache from "effect/Cache";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -16,7 +19,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { GitCommandError, type VcsRef } from "@t3tools/contracts";
+import { GitCommandError, type VcsRef, type VcsWorkingTreeFileStatus } from "@t3tools/contracts";
 import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
@@ -37,13 +40,19 @@ const PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES = 49_000;
 const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
+const WORKING_TREE_DIFF_MAX_OUTPUT_BYTES = 10_000_000;
+const GIT_EMPTY_TREE_OBJECT_ID = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const WORKING_TREE_DIFF_GIT_ADD_MAX_ARG_BYTES = 64 * 1024;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
-const STATUS_UPSTREAM_REFRESH_ENV = Object.freeze({
+const NON_INTERACTIVE_GIT_AUTH_ENV = Object.freeze({
   SSH_ASKPASS_REQUIRE: "never",
+  GIT_TERMINAL_PROMPT: "0",
+  GCM_INTERACTIVE: "Never",
 } satisfies NodeJS.ProcessEnv);
+const STATUS_UPSTREAM_REFRESH_ENV = NON_INTERACTIVE_GIT_AUTH_ENV;
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
 const GIT_LIST_BRANCHES_DEFAULT_LIMIT = 100;
 const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitVcsDriver.GitStatusDetails>({
@@ -53,7 +62,13 @@ const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitVcsDriver.GitStatusDetail
   branch: null,
   upstreamRef: null,
   hasWorkingTreeChanges: false,
-  workingTree: { files: [], insertions: 0, deletions: 0 },
+  workingTree: {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  },
   hasUpstream: false,
   aheadCount: 0,
   behindCount: 0,
@@ -114,26 +129,213 @@ function parseNumstatEntries(
   return entries;
 }
 
-function parsePorcelainPath(line: string): string | null {
-  if (line.startsWith("? ") || line.startsWith("! ")) {
-    const simple = line.slice(2).trim();
-    return simple.length > 0 ? simple : null;
+function splitNullSeparatedPaths(input: string, truncated: boolean): string[] {
+  const parts = input.split("\0");
+  if (parts.length === 0) return [];
+
+  if (truncated && parts[parts.length - 1]?.length) {
+    parts.pop();
   }
 
-  if (!(line.startsWith("1 ") || line.startsWith("2 ") || line.startsWith("u "))) {
+  return parts.filter((value) => value.length > 0);
+}
+
+function chunkPathsForGitArgs(relativePaths: ReadonlyArray<string>): string[][] {
+  const chunks: string[][] = [];
+  let chunk: string[] = [];
+  let chunkBytes = 0;
+
+  for (const relativePath of relativePaths) {
+    const relativePathBytes = Buffer.byteLength(relativePath) + 1;
+    if (
+      chunk.length > 0 &&
+      chunkBytes + relativePathBytes > WORKING_TREE_DIFF_GIT_ADD_MAX_ARG_BYTES
+    ) {
+      chunks.push(chunk);
+      chunk = [];
+      chunkBytes = 0;
+    }
+
+    chunk.push(relativePath);
+    chunkBytes += relativePathBytes;
+  }
+
+  if (chunk.length > 0) {
+    chunks.push(chunk);
+  }
+
+  return chunks;
+}
+
+function normalizeGitStatusPath(pathValue: string): string {
+  return pathValue.replace(/\\/g, "/").replace(/\/+$/g, "");
+}
+
+function gitStatusPathMatchesRequest(statusPath: string, requestedPath: string): boolean {
+  const normalizedStatusPath = normalizeGitStatusPath(statusPath);
+  const normalizedRequestedPath = normalizeGitStatusPath(requestedPath);
+  return (
+    normalizedStatusPath === normalizedRequestedPath ||
+    normalizedStatusPath.startsWith(`${normalizedRequestedPath}/`)
+  );
+}
+
+interface ParsedPorcelainFileStatus {
+  readonly path: string;
+  readonly status: VcsWorkingTreeFileStatus;
+}
+
+interface ParsedPorcelainFileStatuses {
+  readonly staged?: ParsedPorcelainFileStatus;
+  readonly unstaged?: ParsedPorcelainFileStatus;
+}
+
+function sliceAfterSpaceCount(value: string, spaceCount: number): string {
+  let cursor = -1;
+  for (let index = 0; index < spaceCount; index += 1) {
+    cursor = value.indexOf(" ", cursor + 1);
+    if (cursor < 0) {
+      return "";
+    }
+  }
+  return value.slice(cursor + 1);
+}
+
+function parsePorcelainPathAfterFieldCount(
+  line: string,
+  fieldCountBeforePath: number,
+): string | null {
+  const pathPart = sliceAfterSpaceCount(line, fieldCountBeforePath).trim();
+  if (pathPart.length === 0) {
     return null;
   }
+  const tabIndex = pathPart.indexOf("\t");
+  const filePath = tabIndex >= 0 ? pathPart.slice(0, tabIndex).trim() : pathPart;
+  return filePath.length > 0 ? filePath : null;
+}
 
-  const tabIndex = line.indexOf("\t");
-  if (tabIndex >= 0) {
-    const fromTab = line.slice(tabIndex + 1);
-    const [filePath] = fromTab.split("\t");
-    return filePath?.trim().length ? filePath.trim() : null;
+function statusFromPorcelainCode(code: string): VcsWorkingTreeFileStatus | null {
+  switch (code) {
+    case ".":
+    case " ":
+      return null;
+    case "D":
+      return "deleted";
+    case "A":
+      return "added";
+    case "R":
+      return "renamed";
+    case "C":
+      return "copied";
+    default:
+      return "modified";
+  }
+}
+
+function statusToNameStatus(status: VcsWorkingTreeFileStatus): string {
+  switch (status) {
+    case "added":
+    case "untracked":
+      return "A";
+    case "deleted":
+      return "D";
+    case "renamed":
+      return "R";
+    case "copied":
+      return "C";
+    case "conflicted":
+      return "U";
+    case "modified":
+      return "M";
+  }
+}
+
+function parsePorcelainFileStatuses(line: string): ParsedPorcelainFileStatuses | null {
+  if (line.startsWith("? ")) {
+    const path = line.slice(2).trim();
+    return path.length > 0 ? { unstaged: { path, status: "untracked" } } : null;
   }
 
-  const parts = line.trim().split(/\s+/g);
-  const filePath = parts.at(-1) ?? "";
-  return filePath.length > 0 ? filePath : null;
+  if (line.startsWith("u ")) {
+    const path = parsePorcelainPathAfterFieldCount(line, 10);
+    return path ? { unstaged: { path, status: "conflicted" } } : null;
+  }
+
+  if (line.startsWith("1 ")) {
+    const x = line.slice(2, 3);
+    const y = line.slice(3, 4);
+    const path = parsePorcelainPathAfterFieldCount(line, 8);
+    if (!path) return null;
+    const stagedStatus = statusFromPorcelainCode(x);
+    const unstagedStatus = statusFromPorcelainCode(y);
+    return {
+      ...(stagedStatus ? { staged: { path, status: stagedStatus } } : {}),
+      ...(unstagedStatus ? { unstaged: { path, status: unstagedStatus } } : {}),
+    };
+  }
+
+  if (line.startsWith("2 ")) {
+    const x = line.slice(2, 3);
+    const y = line.slice(3, 4);
+    const path = parsePorcelainPathAfterFieldCount(line, 9);
+    if (!path) return null;
+    const stagedStatus = statusFromPorcelainCode(x);
+    const unstagedStatus = statusFromPorcelainCode(y);
+    return {
+      ...(stagedStatus ? { staged: { path, status: stagedStatus } } : {}),
+      ...(unstagedStatus ? { unstaged: { path, status: unstagedStatus } } : {}),
+    };
+  }
+
+  return null;
+}
+
+type WorkingTreeFile = GitVcsDriver.GitStatusDetails["workingTree"]["files"][number];
+type WorkingTreeChangeSet = GitVcsDriver.GitStatusDetails["workingTree"]["staged"];
+
+function buildWorkingTreeChangeSet(
+  statusesByPath: ReadonlyMap<string, VcsWorkingTreeFileStatus>,
+  stats: ReadonlyArray<{ path: string; insertions: number; deletions: number }>,
+): WorkingTreeChangeSet {
+  const statByPath = new Map<string, { insertions: number; deletions: number }>();
+  for (const entry of stats) {
+    const existing = statByPath.get(entry.path) ?? { insertions: 0, deletions: 0 };
+    existing.insertions += entry.insertions;
+    existing.deletions += entry.deletions;
+    statByPath.set(entry.path, existing);
+  }
+
+  let insertions = 0;
+  let deletions = 0;
+  const files: WorkingTreeFile[] = [];
+  const allPaths = new Set<string>([...statusesByPath.keys(), ...statByPath.keys()]);
+  for (const filePath of allPaths) {
+    const stat = statByPath.get(filePath) ?? { insertions: 0, deletions: 0 };
+    insertions += stat.insertions;
+    deletions += stat.deletions;
+    files.push({
+      path: filePath,
+      status: statusesByPath.get(filePath) ?? "modified",
+      insertions: stat.insertions,
+      deletions: stat.deletions,
+    });
+  }
+
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  return { files, insertions, deletions };
+}
+
+function mergeWorkingTreeChangeSets(
+  stagedStatusesByPath: ReadonlyMap<string, VcsWorkingTreeFileStatus>,
+  unstagedStatusesByPath: ReadonlyMap<string, VcsWorkingTreeFileStatus>,
+  stagedEntries: ReadonlyArray<{ path: string; insertions: number; deletions: number }>,
+  unstagedEntries: ReadonlyArray<{ path: string; insertions: number; deletions: number }>,
+): WorkingTreeChangeSet {
+  const statusesByPath = new Map<string, VcsWorkingTreeFileStatus>(unstagedStatusesByPath);
+  for (const [filePath, status] of stagedStatusesByPath) {
+    statusesByPath.set(filePath, status);
+  }
+  return buildWorkingTreeChangeSet(statusesByPath, [...stagedEntries, ...unstagedEntries]);
 }
 
 function parseBranchLine(line: string): { name: string; current: boolean } | null {
@@ -1164,7 +1366,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const statusResult = yield* executeGit(
       "GitVcsDriver.statusDetails.status",
       cwd,
-      ["status", "--porcelain=2", "--branch"],
+      ["status", "--porcelain=2", "--branch", "--untracked-files=all"],
       {
         allowNonZeroExit: true,
       },
@@ -1179,7 +1381,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       return yield* createGitCommandError(
         "GitVcsDriver.statusDetails.status",
         cwd,
-        ["status", "--porcelain=2", "--branch"],
+        ["status", "--porcelain=2", "--branch", "--untracked-files=all"],
         stderr || "git status failed",
       );
     }
@@ -1217,7 +1419,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     let behindCount = 0;
     let aheadOfDefaultCount = 0;
     let hasWorkingTreeChanges = false;
-    const changedFilesWithoutNumstat = new Set<string>();
+    const stagedStatusByPath = new Map<string, VcsWorkingTreeFileStatus>();
+    const unstagedStatusByPath = new Map<string, VcsWorkingTreeFileStatus>();
 
     for (const line of statusStdout.split(/\r?\n/g)) {
       if (line.startsWith("# branch.head ")) {
@@ -1239,8 +1442,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
       if (line.trim().length > 0 && !line.startsWith("#")) {
         hasWorkingTreeChanges = true;
-        const pathValue = parsePorcelainPath(line);
-        if (pathValue) changedFilesWithoutNumstat.add(pathValue);
+        const parsedStatuses = parsePorcelainFileStatuses(line);
+        if (parsedStatuses?.staged) {
+          stagedStatusByPath.set(parsedStatuses.staged.path, parsedStatuses.staged.status);
+        }
+        if (parsedStatuses?.unstaged) {
+          unstagedStatusByPath.set(parsedStatuses.unstaged.path, parsedStatuses.unstaged.status);
+        }
       }
     }
 
@@ -1271,29 +1479,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
     const stagedEntries = parseNumstatEntries(stagedNumstatStdout);
     const unstagedEntries = parseNumstatEntries(unstagedNumstatStdout);
-    const fileStatMap = new Map<string, { insertions: number; deletions: number }>();
-    for (const entry of [...stagedEntries, ...unstagedEntries]) {
-      const existing = fileStatMap.get(entry.path) ?? { insertions: 0, deletions: 0 };
-      existing.insertions += entry.insertions;
-      existing.deletions += entry.deletions;
-      fileStatMap.set(entry.path, existing);
-    }
-
-    let insertions = 0;
-    let deletions = 0;
-    const files = Array.from(fileStatMap.entries())
-      .map(([filePath, stat]) => {
-        insertions += stat.insertions;
-        deletions += stat.deletions;
-        return { path: filePath, insertions: stat.insertions, deletions: stat.deletions };
-      })
-      .toSorted((a, b) => a.path.localeCompare(b.path));
-
-    for (const filePath of changedFilesWithoutNumstat) {
-      if (fileStatMap.has(filePath)) continue;
-      files.push({ path: filePath, insertions: 0, deletions: 0 });
-    }
-    files.sort((a, b) => a.path.localeCompare(b.path));
+    const staged = buildWorkingTreeChangeSet(stagedStatusByPath, stagedEntries);
+    const unstaged = buildWorkingTreeChangeSet(unstagedStatusByPath, unstagedEntries);
+    const combined = mergeWorkingTreeChangeSets(
+      stagedStatusByPath,
+      unstagedStatusByPath,
+      stagedEntries,
+      unstagedEntries,
+    );
 
     return {
       isRepo: true,
@@ -1303,9 +1496,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       upstreamRef,
       hasWorkingTreeChanges,
       workingTree: {
-        files,
-        insertions,
-        deletions,
+        files: combined.files,
+        insertions: combined.insertions,
+        deletions: combined.deletions,
+        staged,
+        unstaged,
       },
       hasUpstream: upstreamRef !== null,
       aheadCount,
@@ -1347,6 +1542,315 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       })),
     );
 
+  const readWorkingTreeDiff: GitVcsDriver.GitVcsDriverShape["readWorkingTreeDiff"] = Effect.fn(
+    "readWorkingTreeDiff",
+  )(function* (input) {
+    const commonDiffArgs = [
+      "--patch",
+      "--minimal",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
+    ];
+    const pathspecArgs =
+      input.filePaths && input.filePaths.length > 0 ? ["--", ...input.filePaths] : [];
+    const diffOptions = {
+      maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
+      appendTruncationMarker: true,
+    } satisfies ExecuteGitOptions;
+
+    if (input.target === "staged") {
+      const diff = yield* runGitStdoutWithOptions(
+        "GitVcsDriver.readWorkingTreeDiff.staged",
+        input.cwd,
+        ["diff", "--cached", ...commonDiffArgs, ...pathspecArgs],
+        diffOptions,
+      );
+      return { diff };
+    }
+
+    const realIndexPathRaw = yield* runGitStdout(
+      "GitVcsDriver.readWorkingTreeDiff.resolveIndex",
+      input.cwd,
+      ["rev-parse", "--git-path", "index"],
+    ).pipe(Effect.map((stdout) => stdout.trim()));
+    const realIndexPath = path.isAbsolute(realIndexPathRaw)
+      ? realIndexPathRaw
+      : path.resolve(input.cwd, realIndexPathRaw);
+    const tempIndexPath = path.join(
+      path.dirname(realIndexPath),
+      `t3-working-tree-diff-index-${randomUUID()}`,
+    );
+    const tempIndexEnv: NodeJS.ProcessEnv = {
+      GIT_INDEX_FILE: tempIndexPath,
+    };
+    const cleanupTempIndex = Effect.all(
+      [
+        fileSystem.remove(tempIndexPath, { force: true }),
+        fileSystem.remove(`${tempIndexPath}.lock`, { force: true }),
+      ],
+      { discard: true },
+    ).pipe(Effect.ignore);
+
+    const copyCurrentIndex = Effect.gen(function* () {
+      const indexExists = yield* fileSystem
+        .exists(realIndexPath)
+        .pipe(Effect.orElseSucceed(() => false));
+      if (!indexExists) {
+        return;
+      }
+      yield* fileSystem
+        .copyFile(realIndexPath, tempIndexPath)
+        .pipe(
+          Effect.mapError((cause) =>
+            createGitCommandError(
+              "GitVcsDriver.readWorkingTreeDiff.copyIndex",
+              input.cwd,
+              ["rev-parse", "--git-path", "index"],
+              "Failed to copy git index for working tree diff.",
+              cause,
+            ),
+          ),
+        );
+    });
+
+    const readUntrackedPaths = executeGit(
+      "GitVcsDriver.readWorkingTreeDiff.untracked",
+      input.cwd,
+      ["ls-files", "--others", "--exclude-standard", "-z"],
+      {
+        allowNonZeroExit: false,
+        maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
+      },
+    ).pipe(Effect.map((result) => splitNullSeparatedPaths(result.stdout, result.stdoutTruncated)));
+
+    const shouldIncludeUntrackedPath = (untrackedPath: string) => {
+      if (!input.filePaths || input.filePaths.length === 0) {
+        return true;
+      }
+      return input.filePaths.some((filePath) => {
+        const normalizedFilePath = filePath.replace(/\/+$/g, "");
+        return (
+          untrackedPath === normalizedFilePath || untrackedPath.startsWith(`${normalizedFilePath}/`)
+        );
+      });
+    };
+
+    const addUntrackedIntentToAdd = (untrackedPaths: ReadonlyArray<string>) =>
+      Effect.forEach(
+        chunkPathsForGitArgs(untrackedPaths),
+        (chunk) =>
+          executeGit(
+            "GitVcsDriver.readWorkingTreeDiff.intentToAdd",
+            input.cwd,
+            ["add", "--intent-to-add", "--", ...chunk],
+            { env: tempIndexEnv },
+          ).pipe(Effect.asVoid),
+        { discard: true },
+      );
+
+    const resolveAllDiffBaseRef = Effect.fn("GitVcsDriver.readWorkingTreeDiff.resolveAllBase")(
+      function* () {
+        const result = yield* executeGit(
+          "GitVcsDriver.readWorkingTreeDiff.resolveHead",
+          input.cwd,
+          ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+          {
+            allowNonZeroExit: true,
+            maxOutputBytes: 4_096,
+          },
+        );
+        const headCommit = result.stdout.trim();
+        return result.exitCode === 0 && headCommit.length > 0
+          ? headCommit
+          : GIT_EMPTY_TREE_OBJECT_ID;
+      },
+    );
+
+    const program = Effect.gen(function* () {
+      yield* copyCurrentIndex;
+      const untrackedPaths = (yield* readUntrackedPaths).filter(shouldIncludeUntrackedPath);
+      if (untrackedPaths.length > 0) {
+        yield* addUntrackedIntentToAdd(untrackedPaths);
+      }
+      const allDiffBaseRef = input.target === "all" ? yield* resolveAllDiffBaseRef() : null;
+      const diffArgs =
+        allDiffBaseRef !== null
+          ? ["diff", ...commonDiffArgs, allDiffBaseRef, ...pathspecArgs]
+          : ["diff", ...commonDiffArgs, ...pathspecArgs];
+      const diff = yield* runGitStdoutWithOptions(
+        input.target === "all"
+          ? "GitVcsDriver.readWorkingTreeDiff.all"
+          : "GitVcsDriver.readWorkingTreeDiff.unstaged",
+        input.cwd,
+        diffArgs,
+        {
+          ...diffOptions,
+          env: tempIndexEnv,
+        },
+      );
+      return { diff };
+    });
+
+    return yield* program.pipe(Effect.ensuring(cleanupTempIndex));
+  });
+
+  const stageFiles: GitVcsDriver.GitVcsDriverShape["stageFiles"] = Effect.fn("stageFiles")(
+    function* (input) {
+      yield* Effect.forEach(
+        chunkPathsForGitArgs(input.filePaths),
+        (chunk) => runGit("GitVcsDriver.stageFiles.add", input.cwd, ["add", "-A", "--", ...chunk]),
+        { discard: true },
+      );
+    },
+  );
+
+  const hasHeadCommit = Effect.fn("GitVcsDriver.hasHeadCommit")(function* (cwd: string) {
+    const result = yield* executeGit(
+      "GitVcsDriver.hasHeadCommit",
+      cwd,
+      ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+      { allowNonZeroExit: true, maxOutputBytes: 4_096 },
+    );
+    return result.exitCode === 0 && result.stdout.trim().length > 0;
+  });
+
+  const unstageFiles: GitVcsDriver.GitVcsDriverShape["unstageFiles"] = Effect.fn("unstageFiles")(
+    function* (input) {
+      const headExists = yield* hasHeadCommit(input.cwd);
+      yield* Effect.forEach(
+        chunkPathsForGitArgs(input.filePaths),
+        (chunk) =>
+          headExists
+            ? runGit("GitVcsDriver.unstageFiles.reset", input.cwd, ["reset", "-q", "--", ...chunk])
+            : runGit("GitVcsDriver.unstageFiles.rmCached", input.cwd, [
+                "rm",
+                "--cached",
+                "-r",
+                "--ignore-unmatch",
+                "--",
+                ...chunk,
+              ]),
+        { discard: true },
+      );
+    },
+  );
+
+  const resolveRequestedUnstagedFiles = Effect.fn("resolveRequestedUnstagedFiles")(function* (
+    cwd: string,
+    requestedPaths: ReadonlyArray<string>,
+  ) {
+    const status = yield* statusDetailsLocal(cwd);
+    const seenPaths = new Set<string>();
+    const matchedFiles: WorkingTreeFile[] = [];
+    for (const file of status.workingTree.unstaged.files) {
+      if (
+        !requestedPaths.some((requestedPath) =>
+          gitStatusPathMatchesRequest(file.path, requestedPath),
+        )
+      ) {
+        continue;
+      }
+      const normalizedPath = normalizeGitStatusPath(file.path);
+      if (seenPaths.has(normalizedPath)) {
+        continue;
+      }
+      seenPaths.add(normalizedPath);
+      matchedFiles.push(file);
+    }
+    return matchedFiles;
+  });
+
+  const revertUnstagedFiles: GitVcsDriver.GitVcsDriverShape["revertUnstagedFiles"] = Effect.fn(
+    "revertUnstagedFiles",
+  )(function* (input) {
+    const files = yield* resolveRequestedUnstagedFiles(input.cwd, input.filePaths);
+    const trackedPaths = files
+      .filter((file) => file.status !== "untracked")
+      .map((file) => file.path);
+    const untrackedPaths = files
+      .filter((file) => file.status === "untracked")
+      .map((file) => file.path);
+
+    yield* Effect.forEach(
+      chunkPathsForGitArgs(trackedPaths),
+      (chunk) =>
+        runGit("GitVcsDriver.revertUnstagedFiles.restore", input.cwd, [
+          "restore",
+          "--worktree",
+          "--",
+          ...chunk,
+        ]),
+      { discard: true },
+    );
+    yield* Effect.forEach(
+      chunkPathsForGitArgs(untrackedPaths),
+      (chunk) =>
+        runGit("GitVcsDriver.revertUnstagedFiles.clean", input.cwd, [
+          "clean",
+          "-fd",
+          "--",
+          ...chunk,
+        ]),
+      { discard: true },
+    );
+  });
+
+  const readStagedCommitContext: GitVcsDriver.GitVcsDriverShape["readStagedCommitContext"] =
+    Effect.fn("readStagedCommitContext")(function* (cwd) {
+      const stagedSummary = yield* runGitStdout(
+        "GitVcsDriver.readStagedCommitContext.stagedSummary",
+        cwd,
+        ["diff", "--cached", "--name-status"],
+      ).pipe(Effect.map((stdout) => stdout.trim()));
+      if (stagedSummary.length === 0) {
+        return null;
+      }
+
+      const stagedPatch = yield* runGitStdoutWithOptions(
+        "GitVcsDriver.readStagedCommitContext.stagedPatch",
+        cwd,
+        ["diff", "--cached", "--patch", "--minimal"],
+        {
+          maxOutputBytes: PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES,
+          appendTruncationMarker: true,
+        },
+      );
+
+      return {
+        stagedSummary,
+        stagedPatch,
+      };
+    });
+
+  const readCommitPreviewContext: GitVcsDriver.GitVcsDriverShape["readCommitPreviewContext"] =
+    Effect.fn("readCommitPreviewContext")(function* (cwd) {
+      const stagedContext = yield* readStagedCommitContext(cwd);
+      if (stagedContext) {
+        return stagedContext;
+      }
+
+      const details = yield* readStatusDetailsLocal(cwd);
+      if (!details.hasWorkingTreeChanges || details.workingTree.files.length === 0) {
+        return null;
+      }
+
+      const stagedSummary = details.workingTree.files
+        .map((file) => `${statusToNameStatus(file.status)}\t${file.path}`)
+        .join("\n");
+      const { diff: stagedPatch } = yield* readWorkingTreeDiff({
+        cwd,
+        target: "all",
+        ignoreWhitespace: false,
+      });
+
+      return {
+        stagedSummary,
+        stagedPatch,
+      };
+    });
+
   const prepareCommitContext: GitVcsDriver.GitVcsDriverShape["prepareCommitContext"] = Effect.fn(
     "prepareCommitContext",
   )(function* (cwd, filePaths) {
@@ -1361,32 +1865,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ...filePaths,
       ]);
     } else {
+      const stagedContext = yield* readStagedCommitContext(cwd);
+      if (stagedContext) {
+        return stagedContext;
+      }
       yield* runGit("GitVcsDriver.prepareCommitContext.addAll", cwd, ["add", "-A"]);
     }
 
-    const stagedSummary = yield* runGitStdout(
-      "GitVcsDriver.prepareCommitContext.stagedSummary",
-      cwd,
-      ["diff", "--cached", "--name-status"],
-    ).pipe(Effect.map((stdout) => stdout.trim()));
-    if (stagedSummary.length === 0) {
-      return null;
-    }
-
-    const stagedPatch = yield* runGitStdoutWithOptions(
-      "GitVcsDriver.prepareCommitContext.stagedPatch",
-      cwd,
-      ["diff", "--cached", "--patch", "--minimal"],
-      {
-        maxOutputBytes: PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES,
-        appendTruncationMarker: true,
-      },
-    );
-
-    return {
-      stagedSummary,
-      stagedPatch,
-    };
+    return yield* readStagedCommitContext(cwd);
   });
 
   const commit: GitVcsDriver.GitVcsDriverShape["commit"] = Effect.fn("commit")(function* (
@@ -1425,6 +1911,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const pushCurrentBranch: GitVcsDriver.GitVcsDriverShape["pushCurrentBranch"] = Effect.fn(
     "pushCurrentBranch",
   )(function* (cwd, fallbackBranch, options) {
+    const runPush = (
+      operation: string,
+      args: readonly string[],
+    ): Effect.Effect<void, GitCommandError> =>
+      executeGit(operation, cwd, args, { env: NON_INTERACTIVE_GIT_AUTH_ENV }).pipe(Effect.asVoid);
+
     const details = yield* statusDetails(cwd);
     const branch = details.branch ?? fallbackBranch;
     if (!branch) {
@@ -1439,7 +1931,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const requestedRemoteName = options?.remoteName?.trim() || null;
     if (requestedRemoteName) {
       const publishBranch = yield* resolvePublishBranchName(cwd, branch);
-      yield* runGit("GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote", cwd, [
+      yield* runPush("GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote", [
         "push",
         "-u",
         requestedRemoteName,
@@ -1500,7 +1992,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         );
       }
       const publishBranch = yield* resolvePublishBranchName(cwd, branch);
-      yield* runGit("GitVcsDriver.pushCurrentBranch.pushWithUpstream", cwd, [
+      yield* runPush("GitVcsDriver.pushCurrentBranch.pushWithUpstream", [
         "push",
         "-u",
         publishRemoteName,
@@ -1518,7 +2010,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       Effect.catch(() => Effect.succeed(null)),
     );
     if (currentUpstream) {
-      yield* runGit("GitVcsDriver.pushCurrentBranch.pushUpstream", cwd, [
+      yield* runPush("GitVcsDriver.pushCurrentBranch.pushUpstream", [
         "push",
         currentUpstream.remoteName,
         `HEAD:refs/heads/${currentUpstream.branchName}`,
@@ -1531,7 +2023,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    yield* runGit("GitVcsDriver.pushCurrentBranch.push", cwd, ["push"]);
+    yield* runPush("GitVcsDriver.pushCurrentBranch.push", ["push"]);
     return {
       status: "pushed" as const,
       branch,
@@ -1793,61 +2285,60 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         }
       }
 
-      const localBranches = localBranchResult.stdout
-        .split("\n")
-        .map(parseBranchLine)
-        .filter((refName): refName is { name: string; current: boolean } => refName !== null)
-        .map((refName) => ({
-          name: refName.name,
-          current: refName.current,
-          isRemote: false,
-          isDefault: refName.name === defaultBranch,
-          worktreePath: worktreeMap.get(refName.name) ?? null,
-        }))
-        .toSorted((a, b) => {
-          const aPriority = a.current ? 0 : a.isDefault ? 1 : 2;
-          const bPriority = b.current ? 0 : b.isDefault ? 1 : 2;
-          if (aPriority !== bPriority) return aPriority - bPriority;
+      const localBranches = Arr.filterMap(localBranchResult.stdout.split("\n"), (line) => {
+        const refName = parseBranchLine(line);
+        return refName === null
+          ? Result.failVoid
+          : Result.succeed({
+              name: refName.name,
+              current: refName.current,
+              isRemote: false,
+              isDefault: refName.name === defaultBranch,
+              worktreePath: worktreeMap.get(refName.name) ?? null,
+            });
+      }).toSorted((a, b) => {
+        const aPriority = a.current ? 0 : a.isDefault ? 1 : 2;
+        const bPriority = b.current ? 0 : b.isDefault ? 1 : 2;
+        if (aPriority !== bPriority) return aPriority - bPriority;
 
-          const aLastCommit = branchLastCommit.get(a.name) ?? 0;
-          const bLastCommit = branchLastCommit.get(b.name) ?? 0;
-          if (aLastCommit !== bLastCommit) return bLastCommit - aLastCommit;
-          return a.name.localeCompare(b.name);
-        });
+        const aLastCommit = branchLastCommit.get(a.name) ?? 0;
+        const bLastCommit = branchLastCommit.get(b.name) ?? 0;
+        if (aLastCommit !== bLastCommit) return bLastCommit - aLastCommit;
+        return a.name.localeCompare(b.name);
+      });
 
       const remoteBranches =
         remoteBranchResult.exitCode === 0
-          ? remoteBranchResult.stdout
-              .split("\n")
-              .map(parseBranchLine)
-              .filter((refName): refName is { name: string; current: boolean } => refName !== null)
-              .map((refName) => {
-                const parsedRemoteRef = parseRemoteRefWithRemoteNames(refName.name, remoteNames);
-                const remoteBranch: {
-                  name: string;
-                  current: boolean;
-                  isRemote: boolean;
-                  remoteName?: string;
-                  isDefault: boolean;
-                  worktreePath: string | null;
-                } = {
-                  name: refName.name,
-                  current: false,
-                  isRemote: true,
-                  isDefault: false,
-                  worktreePath: null,
-                };
-                if (parsedRemoteRef) {
-                  remoteBranch.remoteName = parsedRemoteRef.remoteName;
-                }
-                return remoteBranch;
-              })
-              .toSorted((a, b) => {
-                const aLastCommit = branchLastCommit.get(a.name) ?? 0;
-                const bLastCommit = branchLastCommit.get(b.name) ?? 0;
-                if (aLastCommit !== bLastCommit) return bLastCommit - aLastCommit;
-                return a.name.localeCompare(b.name);
-              })
+          ? Arr.filterMap(remoteBranchResult.stdout.split("\n"), (line) => {
+              const refName = parseBranchLine(line);
+              if (refName === null) {
+                return Result.failVoid;
+              }
+              const parsedRemoteRef = parseRemoteRefWithRemoteNames(refName.name, remoteNames);
+              const remoteBranch: {
+                name: string;
+                current: boolean;
+                isRemote: boolean;
+                remoteName?: string;
+                isDefault: boolean;
+                worktreePath: string | null;
+              } = {
+                name: refName.name,
+                current: false,
+                isRemote: true,
+                isDefault: false,
+                worktreePath: null,
+              };
+              if (parsedRemoteRef) {
+                remoteBranch.remoteName = parsedRemoteRef.remoteName;
+              }
+              return Result.succeed(remoteBranch);
+            }).toSorted((a, b) => {
+              const aLastCommit = branchLastCommit.get(a.name) ?? 0;
+              const bLastCommit = branchLastCommit.get(b.name) ?? 0;
+              if (aLastCommit !== bLastCommit) return bLastCommit - aLastCommit;
+              return a.name.localeCompare(b.name);
+            })
           : [];
 
       const refs = paginateBranches({
@@ -2106,12 +2597,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       "--no-column",
       "--format=%(refname:short)",
     ]).pipe(
-      Effect.map((stdout) =>
-        stdout
-          .split("\n")
-          .map((line) => line.trim())
-          .filter((line) => line.length > 0),
-      ),
+      Effect.map((stdout) => {
+        const branchNames: Array<string> = [];
+        for (const line of stdout.split("\n")) {
+          const branchName = line.trim();
+          if (branchName.length > 0) {
+            branchNames.push(branchName);
+          }
+        }
+        return branchNames;
+      }),
     );
 
   return GitVcsDriver.GitVcsDriver.of({
@@ -2119,6 +2614,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     status,
     statusDetails,
     statusDetailsLocal,
+    readWorkingTreeDiff,
+    stageFiles,
+    unstageFiles,
+    revertUnstagedFiles,
+    readStagedCommitContext,
+    readCommitPreviewContext,
     prepareCommitContext,
     commit,
     pushCurrentBranch,

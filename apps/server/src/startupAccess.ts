@@ -1,6 +1,7 @@
 import { networkInterfaces } from "node:os";
 
 import { QrCode } from "@t3tools/shared/qrCode";
+import { resolveTailscaleHttpsBaseUrl } from "@t3tools/tailscale";
 import * as Effect from "effect/Effect";
 import { HttpServer } from "effect/unstable/http";
 
@@ -121,7 +122,7 @@ export const renderTerminalQrCode = (value: string, margin = 2): string => {
 
 export const formatHeadlessServeOutput = (accessInfo: HeadlessServeAccessInfo): string =>
   [
-    "T3 Code server is ready.",
+    "Salchi server is ready.",
     `Connection string: ${accessInfo.connectionString}`,
     `Token: ${accessInfo.token}`,
     `Pairing URL: ${accessInfo.pairingUrl}`,
@@ -134,10 +135,20 @@ export const issueHeadlessServeAccessInfo = Effect.fn("issueHeadlessServeAccessI
   const serverConfig = yield* ServerConfig;
   const httpServer = yield* HttpServer.HttpServer;
   const serverAuth = yield* ServerAuth;
-  const connectionString = resolveHeadlessConnectionString(
+  const fallbackConnectionString = resolveHeadlessConnectionString(
     serverConfig.host,
     resolveListeningPort(httpServer.address, serverConfig.port),
   );
+  const connectionString = serverConfig.tailscaleServeEnabled
+    ? yield* resolveTailscaleHttpsBaseUrl({ servePort: serverConfig.tailscaleServePort }).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("failed to resolve Tailscale MagicDNS pairing URL", { cause }).pipe(
+            Effect.as(null),
+          ),
+        ),
+        Effect.map((tailscaleUrl) => tailscaleUrl ?? fallbackConnectionString),
+      )
+    : fallbackConnectionString;
   const issued = yield* serverAuth.issuePairingCredential({ role: "owner" });
 
   return {

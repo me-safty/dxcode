@@ -3,7 +3,6 @@ import {
   Outlet,
   createFileRoute,
   redirect,
-  useCanGoBack,
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
@@ -33,24 +32,19 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
 function SettingsContentLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const canGoBack = useCanGoBack();
   const [restoreSignal, setRestoreSignal] = useState(0);
   const showRestoreDefaults = location.pathname === "/settings/general";
   const handleRestored = () => setRestoreSignal((value) => value + 1);
-  const navigateBackWithinApp = useCallback(() => {
-    if (canGoBack) {
-      window.history.back();
-      return;
-    }
-    void navigate({ to: "/" });
-  }, [canGoBack, navigate]);
+  const navigateOutOfSettings = useCallback(() => {
+    void navigate({ to: "/", replace: true });
+  }, [navigate]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       if (event.key === "Escape") {
         event.preventDefault();
-        navigateBackWithinApp();
+        navigateOutOfSettings();
       }
     };
 
@@ -58,10 +52,10 @@ function SettingsContentLayout() {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [navigateBackWithinApp]);
+  }, [navigateOutOfSettings]);
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
+    <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate md:h-dvh">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         {!isElectron && (
           <header className="border-b border-border px-3 py-2 sm:px-5">

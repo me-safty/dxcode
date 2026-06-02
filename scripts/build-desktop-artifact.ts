@@ -278,7 +278,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
 ) {
   const path = yield* Path.Path;
   const repoRoot = yield* RepoRoot;
-  const env = yield* BuildEnvConfig.asEffect();
+  const env = yield* BuildEnvConfig;
 
   const platform = mergeOptions(
     input.platform,
@@ -484,7 +484,7 @@ function validateBundledClientAssets(clientDir: string) {
   });
 }
 
-function resolveDesktopRuntimeDependencies(
+export function resolveDesktopRuntimeDependencies(
   dependencies: Record<string, string> | undefined,
   catalog: Record<string, string>,
 ): Record<string, string> {
@@ -493,7 +493,10 @@ function resolveDesktopRuntimeDependencies(
   }
 
   const runtimeDependencies = Object.fromEntries(
-    Object.entries(dependencies).filter(([dependencyName]) => dependencyName !== "electron"),
+    Object.entries(dependencies).filter(
+      ([dependencyName, dependencySpec]) =>
+        dependencyName !== "electron" && !dependencySpec.startsWith("workspace:"),
+    ),
   );
 
   return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop");
@@ -552,8 +555,8 @@ export function resolveMockUpdateServerUrl(mockUpdateServerPort: number | undefi
 
 export function resolveDesktopProductName(version: string): string {
   return resolveDesktopUpdateChannel(version) === "nightly"
-    ? "T3 Code (Nightly)"
-    : (desktopPackageJson.productName ?? "T3 Code");
+    ? "Salchi (Nightly)"
+    : (desktopPackageJson.productName ?? "Salchi");
 }
 
 const createBuildConfig = Effect.fn("createBuildConfig")(function* (
@@ -781,7 +784,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
     private: true,
-    description: "T3 Code desktop build",
+    description: "Salchi desktop build",
     author: "T3 Tools",
     main: "apps/desktop/dist-electron/main.cjs",
     build: yield* createBuildConfig(
@@ -940,7 +943,7 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Build a desktop artifact for T3 Code."),
+  Command.withDescription("Build a desktop artifact for Salchi."),
   Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
 );
 

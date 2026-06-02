@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
 import {
+  resolveDesktopRuntimeDependencies,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
   resolveDesktopProductName,
@@ -21,8 +22,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("switches desktop packaging product names to nightly for nightly builds", () => {
-    assert.equal(resolveDesktopProductName("0.0.17"), "T3 Code (Alpha)");
-    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code (Nightly)");
+    assert.equal(resolveDesktopProductName("0.0.17"), "Salchi (Alpha)");
+    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "Salchi (Nightly)");
   });
 
   it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {
@@ -37,6 +38,30 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
       windowsIconIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
     });
+  });
+
+  it("omits bundled workspace packages from staged desktop dependencies", () => {
+    assert.deepStrictEqual(
+      resolveDesktopRuntimeDependencies(
+        {
+          "@effect/platform-node": "catalog:",
+          "@t3tools/contracts": "workspace:*",
+          "@t3tools/shared": "workspace:*",
+          "@t3tools/ssh": "workspace:*",
+          "@t3tools/tailscale": "workspace:*",
+          effect: "catalog:",
+          electron: "41.5.0",
+        },
+        {
+          "@effect/platform-node": "4.0.0-beta.73",
+          effect: "4.0.0-beta.73",
+        },
+      ),
+      {
+        "@effect/platform-node": "4.0.0-beta.73",
+        effect: "4.0.0-beta.73",
+      },
+    );
   });
 
   it("falls back to the default mock update port when the configured port is blank", () => {

@@ -538,7 +538,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (!instanceInfo.enabled) {
           return yield* toValidationError(
             "ProviderService.startSession",
-            `Provider instance '${resolvedInstanceId}' is disabled in T3 Code settings.`,
+            `Provider instance '${resolvedInstanceId}' is disabled in Salchi settings.`,
           );
         }
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
@@ -976,6 +976,64 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  const refreshUsage: ProviderServiceShape["refreshUsage"] = Effect.fn("refreshUsage")(
+    function* () {
+      const entries = yield* getAdapterEntries;
+      yield* Effect.forEach(
+        entries,
+        ([instanceId, adapter]) => {
+          const refresh = adapter.refreshUsage;
+          if (!refresh) {
+            return Effect.void;
+          }
+          return refresh().pipe(
+            Effect.catchCause((cause) =>
+              Effect.logDebug("provider.usage.refresh-failed", {
+                instanceId,
+                provider: adapter.provider,
+                cause,
+              }),
+            ),
+          );
+        },
+        { concurrency: "unbounded", discard: true },
+      );
+
+      const accountRateLimits = yield* Effect.forEach(
+        entries,
+        ([instanceId, adapter]) =>
+          Effect.gen(function* () {
+            const getAccountRateLimits = adapter.getAccountRateLimits;
+            if (!getAccountRateLimits) {
+              return [];
+            }
+            const rateLimits = yield* getAccountRateLimits().pipe(
+              Effect.catchCause((cause) =>
+                Effect.logDebug("provider.account-rate-limits.failed", {
+                  instanceId,
+                  provider: adapter.provider,
+                  cause,
+                }).pipe(Effect.as(undefined)),
+              ),
+            );
+            if (rateLimits === undefined) {
+              return [];
+            }
+            return [
+              {
+                providerInstanceId: instanceId,
+                provider: adapter.provider,
+                rateLimits,
+              },
+            ];
+          }),
+        { concurrency: "unbounded" },
+      ).pipe(Effect.map((results) => results.flat()));
+
+      return { accountRateLimits };
+    },
+  );
+
   const runStopAll = Effect.fn("runStopAll")(function* () {
     const threadIds = yield* directory.listThreadIds();
     const currentAdapters = yield* getAdapterEntries;
@@ -1043,6 +1101,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     getCapabilities,
     getInstanceInfo,
     rollbackConversation,
+    refreshUsage,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
     // independently receive all runtime events.

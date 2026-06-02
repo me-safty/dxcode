@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 
 import type { ChatAttachment } from "@t3tools/contracts";
@@ -40,6 +40,29 @@ export function createAttachmentId(threadId: string): string | null {
     return null;
   }
   return `${threadSegment}-${randomUUID()}`;
+}
+
+function uuidFromStableKey(stableKey: string): string {
+  const bytes = createHash("sha256").update(stableKey).digest().subarray(0, 16);
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join("-");
+}
+
+export function createStableAttachmentId(threadId: string, stableKey: string): string | null {
+  const threadSegment = toSafeThreadAttachmentSegment(threadId);
+  const trimmedStableKey = stableKey.trim();
+  if (!threadSegment || trimmedStableKey.length === 0) {
+    return null;
+  }
+  return `${threadSegment}-${uuidFromStableKey(`${threadSegment}:${trimmedStableKey}`)}`;
 }
 
 export function parseThreadSegmentFromAttachmentId(attachmentId: string): string | null {

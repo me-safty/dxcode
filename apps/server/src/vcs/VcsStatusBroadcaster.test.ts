@@ -20,6 +20,14 @@ import type {
 import * as VcsStatusBroadcaster from "./VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 
+const emptyWorkingTree: VcsStatusLocalResult["workingTree"] = {
+  files: [],
+  insertions: 0,
+  deletions: 0,
+  staged: { files: [], insertions: 0, deletions: 0 },
+  unstaged: { files: [], insertions: 0, deletions: 0 },
+};
+
 const baseLocalStatus: VcsStatusLocalResult = {
   isRepo: true,
   sourceControlProvider: {
@@ -31,7 +39,7 @@ const baseLocalStatus: VcsStatusLocalResult = {
   isDefaultRef: false,
   refName: "feature/status-broadcast",
   hasWorkingTreeChanges: false,
-  workingTree: { files: [], insertions: 0, deletions: 0 },
+  workingTree: emptyWorkingTree,
 };
 
 const baseRemoteStatus: VcsStatusRemoteResult = {
@@ -308,6 +316,29 @@ describe("VcsStatusBroadcaster", () => {
       assert.equal(state.remoteStatusCalls, 0);
       assert.equal(state.remoteInvalidationCalls, 0);
     }).pipe(Effect.provide(makeTestLayer(state)));
+  });
+
+  it("backs off remote refresh failures exponentially and honors larger configured intervals", () => {
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(1, Duration.seconds(1))),
+      30_000,
+    );
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(2, Duration.seconds(1))),
+      60_000,
+    );
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(3, Duration.seconds(1))),
+      120_000,
+    );
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(1, Duration.minutes(5))),
+      300_000,
+    );
+    assert.equal(
+      Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(20, Duration.seconds(1))),
+      900_000,
+    );
   });
 
   it.effect("stops the remote poller after the last stream subscriber disconnects", () => {

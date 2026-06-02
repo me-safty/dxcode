@@ -2,6 +2,7 @@ import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3to
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
+  OrchestrationQueuedTurn,
   OrchestrationSession,
   OrchestrationThread,
 } from "@t3tools/contracts";
@@ -21,7 +22,10 @@ import {
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
+  ThreadQueuedTurnCancelledPayload,
+  ThreadQueuedTurnDispatchedPayload,
   ThreadRuntimeModeSetPayload,
+  ThreadTurnQueuedPayload,
   ThreadUnarchivedPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
@@ -265,6 +269,7 @@ export function projectEvent(
             archivedAt: null,
             deletedAt: null,
             messages: [],
+            queuedTurns: [],
             activities: [],
             checkpoints: [],
             session: null,
@@ -417,6 +422,91 @@ export function projectEvent(
           }),
         };
       });
+
+    case "thread.turn-queued":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadTurnQueuedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return nextBase;
+        }
+
+        const queuedTurn: OrchestrationQueuedTurn = yield* decodeForEvent(
+          OrchestrationQueuedTurn,
+          payload,
+          event.type,
+          "queuedTurn",
+        );
+        const queuedTurns = [
+          ...thread.queuedTurns.filter((entry) => entry.messageId !== queuedTurn.messageId),
+          queuedTurn,
+        ].toSorted(
+          (left, right) =>
+            left.createdAt.localeCompare(right.createdAt) ||
+            left.messageId.localeCompare(right.messageId),
+        );
+
+        return {
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            queuedTurns,
+            updatedAt: event.occurredAt,
+          }),
+        };
+      });
+
+    case "thread.queued-turn-cancelled":
+      return decodeForEvent(
+        ThreadQueuedTurnCancelledPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              queuedTurns: thread.queuedTurns.filter(
+                (entry) => entry.messageId !== payload.messageId,
+              ),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.queued-turn-dispatched":
+      return decodeForEvent(
+        ThreadQueuedTurnDispatchedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              queuedTurns: thread.queuedTurns.filter(
+                (entry) => entry.messageId !== payload.messageId,
+              ),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
 
     case "thread.session-set":
       return Effect.gen(function* () {

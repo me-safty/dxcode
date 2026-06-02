@@ -29,12 +29,12 @@ export type AcpIncomingNotification =
   | {
       readonly _tag: "SessionUpdate";
       readonly method: typeof CLIENT_METHODS.session_update;
-      readonly params: typeof AcpSchema.SessionNotification.Type;
+      readonly params: AcpSchema.SessionNotification;
     }
   | {
       readonly _tag: "ElicitationComplete";
       readonly method: typeof CLIENT_METHODS.session_elicitation_complete;
-      readonly params: typeof AcpSchema.ElicitationCompleteNotification.Type;
+      readonly params: AcpSchema.ElicitationCompleteNotification;
     }
   | {
       readonly _tag: "ExtNotification";
@@ -71,6 +71,7 @@ const decodeSessionUpdate = Schema.decodeUnknownEffect(AcpSchema.SessionNotifica
 const decodeElicitationComplete = Schema.decodeUnknownEffect(
   AcpSchema.ElicitationCompleteNotification,
 );
+const encodeUnknownJsonString = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString);
 const parserFactory = RpcSerialization.ndJsonRpc();
 
 export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(function* (
@@ -466,13 +467,35 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     method: string,
     payload: unknown,
   ) {
-    yield* offerOutgoing({
-      _tag: "Request",
-      id: "",
-      tag: method,
-      payload,
-      headers: [],
+    yield* logProtocol({
+      direction: "outgoing",
+      stage: "decoded",
+      payload: {
+        _tag: "Notification",
+        method,
+        params: payload,
+      },
     });
+    const encoded = yield* encodeUnknownJsonString({
+      jsonrpc: "2.0",
+      method,
+      params: payload,
+    }).pipe(
+      Effect.map((message) => `${message}\n`),
+      Effect.mapError(
+        (cause) =>
+          new AcpError.AcpProtocolParseError({
+            detail: "Failed to encode ACP message",
+            cause,
+          }),
+      ),
+    );
+    yield* logProtocol({
+      direction: "outgoing",
+      stage: "raw",
+      payload: encoded,
+    });
+    yield* Queue.offer(outgoing, encoded).pipe(Effect.asVoid);
   });
 
   const sendRequest = Effect.fn("sendRequest")(function* (method: string, payload: unknown) {

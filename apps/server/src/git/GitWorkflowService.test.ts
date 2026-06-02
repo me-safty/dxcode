@@ -19,6 +19,16 @@ function makeLayer(input: { readonly detect: VcsDriverRegistry.VcsDriverRegistry
   );
 }
 
+function emptyWorkingTree() {
+  return {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  };
+}
+
 describe("GitWorkflowService", () => {
   it.effect("returns an empty local status when no VCS repository is detected", () =>
     Effect.gen(function* () {
@@ -31,11 +41,7 @@ describe("GitWorkflowService", () => {
         isDefaultRef: false,
         refName: null,
         hasWorkingTreeChanges: false,
-        workingTree: {
-          files: [],
-          insertions: 0,
-          deletions: 0,
-        },
+        workingTree: emptyWorkingTree(),
       });
     }).pipe(
       Effect.provide(
@@ -57,11 +63,7 @@ describe("GitWorkflowService", () => {
         isDefaultRef: false,
         refName: null,
         hasWorkingTreeChanges: false,
-        workingTree: {
-          files: [],
-          insertions: 0,
-          deletions: 0,
-        },
+        workingTree: emptyWorkingTree(),
         hasUpstream: false,
         aheadCount: 0,
         behindCount: 0,

@@ -1,6 +1,7 @@
 import {
   type ProviderInstanceId,
   type ProviderDriverKind,
+  type ProviderOptionSelection,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { memo, useEffect, useMemo, useState } from "react";
@@ -16,9 +17,28 @@ import {
   ModelEsque,
   getTriggerDisplayModelLabel,
   getTriggerDisplayModelName,
+  stripCompanyPrefix,
 } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../modelPickerOpenState";
+import { useMediaQuery } from "~/hooks/useMediaQuery";
 import type { ProviderInstanceEntry } from "../../providerInstances";
+
+const REASONING_MODEL_OPTION_IDS = new Set(["reasoningEffort", "reasoning", "effort"]);
+
+function getReasoningLevelValue(
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+): string | null {
+  for (const selection of selections ?? []) {
+    if (!REASONING_MODEL_OPTION_IDS.has(selection.id) || typeof selection.value !== "string") {
+      continue;
+    }
+    const trimmed = selection.value.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+  return null;
+}
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -33,6 +53,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
+  modelOptionSelections?: ReadonlyArray<ProviderOptionSelection> | null | undefined;
   activeProviderIconClassName?: string;
   compact?: boolean;
   disabled?: boolean;
@@ -45,6 +66,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
+  // On phones the picker is a full-screen modal. Make it modal so body
+  // scroll is locked, and ignore incidental dismissals (soft-keyboard
+  // blur / stray taps) — it should only close on an explicit selection,
+  // the close button, or toggling the composer trigger.
+  const isMobile = useMediaQuery({ max: "sm", pointer: "coarse" });
 
   // Resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
@@ -64,9 +90,21 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const selectedModel =
     selectedInstanceOptions.find((option) => option.slug === props.model) ??
     selectedInstanceOptions[0];
-  const triggerTitle = selectedModel ? getTriggerDisplayModelName(selectedModel) : props.model;
+  const triggerTitle = selectedModel
+    ? stripCompanyPrefix(getTriggerDisplayModelName(selectedModel))
+    : props.model;
   const triggerSubtitle = selectedModel?.subProvider;
-  const triggerLabel = selectedModel ? getTriggerDisplayModelLabel(selectedModel) : props.model;
+  // The compact composer surfaces reasoning effort in its own dedicated picker,
+  // so it is omitted from the model trigger text there to avoid duplication.
+  const triggerReasoningLevel = props.compact
+    ? null
+    : getReasoningLevelValue(props.modelOptionSelections);
+  const triggerBaseLabel = selectedModel
+    ? stripCompanyPrefix(getTriggerDisplayModelLabel(selectedModel))
+    : props.model;
+  const triggerLabel = triggerReasoningLevel
+    ? `${triggerBaseLabel} ${triggerReasoningLevel}`
+    : triggerBaseLabel;
   const duplicateDriverCount = props.instanceEntries.filter(
     (entry) => activeEntry !== null && entry.driverKind === activeEntry.driverKind,
   ).length;
@@ -95,9 +133,19 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   return (
     <Popover
       open={isMenuOpen}
-      onOpenChange={(open) => {
+      modal={isMobile}
+      onOpenChange={(open, eventDetails) => {
         if (props.disabled) {
           setIsMenuOpen(false);
+          return;
+        }
+        // Keep the full-screen mobile modal open when the soft keyboard is
+        // dismissed or a stray touch lands outside the floating element.
+        if (
+          !open &&
+          isMobile &&
+          (eventDetails.reason === "outside-press" || eventDetails.reason === "focus-out")
+        ) {
           return;
         }
         setIsMenuOpen(open);
@@ -111,7 +159,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             data-chat-provider-model-picker="true"
             className={cn(
               "min-w-0 justify-start overflow-hidden whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 [&_svg]:mx-0",
-              props.compact ? "max-w-42 shrink-0" : "max-w-48 shrink sm:max-w-56 sm:px-3",
+              props.compact ? "max-w-56 shrink-0" : "max-w-64 shrink sm:max-w-72 sm:px-3",
               props.triggerClassName,
             )}
             disabled={props.disabled}
@@ -121,7 +169,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         <span
           className={cn(
             "flex min-w-0 w-full box-border items-center gap-2 overflow-hidden",
-            props.compact ? "max-w-36 sm:pl-1" : undefined,
+            props.compact ? "sm:pl-1" : undefined,
           )}
         >
           {activeEntry ? (
@@ -142,8 +190,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                   className={cn(
                     "min-w-0 flex-1 overflow-hidden",
                     triggerSubtitle
-                      ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1"
-                      : "truncate",
+                      ? triggerReasoningLevel
+                        ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-1"
+                        : "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1"
+                      : "flex items-center gap-1",
                   )}
                 />
               }
@@ -155,9 +205,21 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                     ·
                   </span>
                   <span className="min-w-0 truncate">{triggerTitle}</span>
+                  {triggerReasoningLevel ? (
+                    <span className="shrink-0 text-muted-foreground/60">
+                      {triggerReasoningLevel}
+                    </span>
+                  ) : null}
                 </>
               ) : (
-                triggerTitle
+                <>
+                  <span className="min-w-0 truncate">{triggerTitle}</span>
+                  {triggerReasoningLevel ? (
+                    <span className="shrink-0 text-muted-foreground/60">
+                      {triggerReasoningLevel}
+                    </span>
+                  ) : null}
+                </>
               )}
             </TooltipTrigger>
             <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
@@ -167,7 +229,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       </PopoverTrigger>
       <PopoverPopup
         align="start"
-        className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0] *:data-[slot=popover-viewport]:p-0"
+        positionerClassName="max-sm:fixed! max-sm:inset-0! max-sm:z-50 max-sm:h-auto! max-sm:w-auto! max-sm:max-w-none! max-sm:transform-none! max-sm:transition-none!"
+        className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0] *:data-[slot=popover-viewport]:p-0 max-sm:h-dvh! max-sm:w-screen! max-sm:max-w-none! max-sm:rounded-none! max-sm:border-0! max-sm:*:data-[slot=popover-viewport]:max-h-none!"
       >
         <ModelPickerContent
           activeInstanceId={activeInstanceId}

@@ -7,6 +7,12 @@ import {
   GitRunStackedActionResult,
   GitRunStackedActionInput,
   GitResolvePullRequestResult,
+  GenerateCommitMessageInput,
+  VcsRevertUnstagedFilesInput,
+  VcsStageFilesInput,
+  VcsStatusResult,
+  VcsUnstageFilesInput,
+  VcsWorkingTreeDiffInput,
 } from "./git.ts";
 
 const decodeCreateWorktreeInput = Schema.decodeUnknownSync(VcsCreateWorktreeInput);
@@ -16,6 +22,12 @@ const decodePreparePullRequestThreadInput = Schema.decodeUnknownSync(
 const decodeRunStackedActionInput = Schema.decodeUnknownSync(GitRunStackedActionInput);
 const decodeRunStackedActionResult = Schema.decodeUnknownSync(GitRunStackedActionResult);
 const decodeResolvePullRequestResult = Schema.decodeUnknownSync(GitResolvePullRequestResult);
+const decodeGenerateCommitMessageInput = Schema.decodeUnknownSync(GenerateCommitMessageInput);
+const decodeRevertUnstagedFilesInput = Schema.decodeUnknownSync(VcsRevertUnstagedFilesInput);
+const decodeStageFilesInput = Schema.decodeUnknownSync(VcsStageFilesInput);
+const decodeStatusResult = Schema.decodeUnknownSync(VcsStatusResult);
+const decodeUnstageFilesInput = Schema.decodeUnknownSync(VcsUnstageFilesInput);
+const decodeWorkingTreeDiffInput = Schema.decodeUnknownSync(VcsWorkingTreeDiffInput);
 
 describe("VcsCreateWorktreeInput", () => {
   it("accepts omitted newRefName for existing-refName worktrees", () => {
@@ -40,6 +52,53 @@ describe("GitPreparePullRequestThreadInput", () => {
 
     expect(parsed.reference).toBe("#42");
     expect(parsed.mode).toBe("worktree");
+  });
+});
+
+describe("VcsWorkingTreeDiffInput", () => {
+  it("accepts staged, unstaged, and all working tree diff targets", () => {
+    expect(
+      decodeWorkingTreeDiffInput({
+        cwd: "/repo",
+        target: "unstaged",
+        ignoreWhitespace: true,
+      }),
+    ).toEqual({
+      cwd: "/repo",
+      target: "unstaged",
+      ignoreWhitespace: true,
+    });
+
+    expect(
+      decodeWorkingTreeDiffInput({
+        cwd: "/repo",
+        target: "staged",
+      }),
+    ).toEqual({
+      cwd: "/repo",
+      target: "staged",
+    });
+
+    expect(
+      decodeWorkingTreeDiffInput({
+        cwd: "/repo",
+        target: "all",
+        filePaths: ["src/app.ts"],
+      }),
+    ).toEqual({
+      cwd: "/repo",
+      target: "all",
+      filePaths: ["src/app.ts"],
+    });
+  });
+
+  it("rejects invalid working tree diff targets", () => {
+    expect(() =>
+      decodeWorkingTreeDiffInput({
+        cwd: "/repo",
+        target: "committed",
+      }),
+    ).toThrow();
   });
 });
 
@@ -71,6 +130,76 @@ describe("GitRunStackedActionInput", () => {
 
     expect(parsed.actionId).toBe("action-1");
     expect(parsed.action).toBe("create_pr");
+  });
+});
+
+describe("VcsStatusResult", () => {
+  it("accepts combined, staged, and unstaged working tree changes", () => {
+    const parsed = decodeStatusResult({
+      isRepo: true,
+      hasPrimaryRemote: true,
+      isDefaultRef: false,
+      refName: "feature/staging",
+      hasWorkingTreeChanges: true,
+      workingTree: {
+        files: [{ path: "src/app.ts", status: "modified", insertions: 2, deletions: 1 }],
+        insertions: 2,
+        deletions: 1,
+        staged: {
+          files: [{ path: "src/app.ts", status: "modified", insertions: 1, deletions: 0 }],
+          insertions: 1,
+          deletions: 0,
+        },
+        unstaged: {
+          files: [{ path: "src/app.ts", status: "modified", insertions: 1, deletions: 1 }],
+          insertions: 1,
+          deletions: 1,
+        },
+      },
+      hasUpstream: false,
+      aheadCount: 0,
+      behindCount: 0,
+      pr: null,
+    });
+
+    expect(parsed.workingTree.staged.files[0]?.path).toBe("src/app.ts");
+    expect(parsed.workingTree.unstaged.deletions).toBe(1);
+  });
+});
+
+describe("VcsStageFilesInput", () => {
+  it("accepts non-empty file paths for file mutation operations", () => {
+    expect(decodeStageFilesInput({ cwd: "/repo", filePaths: ["src/app.ts"] })).toEqual({
+      cwd: "/repo",
+      filePaths: ["src/app.ts"],
+    });
+    expect(decodeUnstageFilesInput({ cwd: "/repo", filePaths: ["src/app.ts"] })).toEqual({
+      cwd: "/repo",
+      filePaths: ["src/app.ts"],
+    });
+    expect(decodeRevertUnstagedFilesInput({ cwd: "/repo", filePaths: ["src/app.ts"] })).toEqual({
+      cwd: "/repo",
+      filePaths: ["src/app.ts"],
+    });
+  });
+
+  it("rejects empty file path lists", () => {
+    expect(() => decodeStageFilesInput({ cwd: "/repo", filePaths: [] })).toThrow();
+    expect(() => decodeUnstageFilesInput({ cwd: "/repo", filePaths: [] })).toThrow();
+    expect(() => decodeRevertUnstagedFilesInput({ cwd: "/repo", filePaths: [] })).toThrow();
+  });
+});
+
+describe("GenerateCommitMessageInput", () => {
+  it("accepts commit-message context targets", () => {
+    expect(decodeGenerateCommitMessageInput({ cwd: "/repo", target: "commit" })).toEqual({
+      cwd: "/repo",
+      target: "commit",
+    });
+    expect(decodeGenerateCommitMessageInput({ cwd: "/repo", target: "staged" })).toEqual({
+      cwd: "/repo",
+      target: "staged",
+    });
   });
 });
 

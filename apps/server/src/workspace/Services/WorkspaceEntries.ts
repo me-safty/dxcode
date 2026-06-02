@@ -13,6 +13,8 @@ import type * as Effect from "effect/Effect";
 import type {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
+  ProjectListDirectoryEntriesInput,
+  ProjectListDirectoryEntriesResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
 } from "@t3tools/contracts";
@@ -51,6 +53,13 @@ export interface WorkspaceEntriesShape {
   ) => Effect.Effect<FilesystemBrowseResult, WorkspaceEntriesBrowseError>;
 
   /**
+   * List immediate children for a workspace-root-relative directory.
+   */
+  readonly listDirectory: (
+    input: ProjectListDirectoryEntriesInput,
+  ) => Effect.Effect<ProjectListDirectoryEntriesResult, WorkspaceEntriesError>;
+
+  /**
    * Search indexed workspace entries for files and directories matching the
    * provided query.
    */
@@ -68,5 +77,5 @@ export interface WorkspaceEntriesShape {
  * WorkspaceEntries - Service tag for cached workspace entry search.
  */
 export class WorkspaceEntries extends Context.Service<WorkspaceEntries, WorkspaceEntriesShape>()(
-  "t3/workspace/Services/WorkspaceEntries",
+  "salchi/workspace/Services/WorkspaceEntries",
 ) {}

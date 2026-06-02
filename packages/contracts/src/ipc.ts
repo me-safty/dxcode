@@ -12,23 +12,35 @@ import type {
   VcsListRefsResult,
   VcsPullInput,
   VcsPullResult,
+  VcsRevertUnstagedFilesInput,
   VcsRemoveWorktreeInput,
+  VcsStageFilesInput,
+  VcsWorkingTreeDiffInput,
+  VcsWorkingTreeDiffResult,
   GitResolvePullRequestResult,
   VcsStatusInput,
+  VcsStatusLocalResult,
   VcsStatusResult,
+  VcsUnstageFilesInput,
   VcsCreateRefResult,
 } from "./git.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type {
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectListDirectoryEntriesInput,
+  ProjectListDirectoryEntriesResult,
+  ProjectReadFileInput,
+  ProjectReadFileResult,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project.ts";
-import type { ProviderInstanceId } from "./providerInstance.ts";
+import type { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import type {
   ServerConfig,
   ServerProcessDiagnosticsResult,
+  ServerProcessResourceHistoryInput,
+  ServerProcessResourceHistoryResult,
   ServerProviderUpdateInput,
   ServerProviderUpdatedPayload,
   ServerRemoveKeybindingResult,
@@ -37,6 +49,14 @@ import type {
   ServerTraceDiagnosticsResult,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
+import type {
+  ServerPushConfig,
+  ServerPushSendResult,
+  ServerPushSubscriptionStatus,
+  ServerRegisterPushSubscriptionInput,
+  ServerSendTestPushNotificationInput,
+  ServerUnregisterPushSubscriptionInput,
+} from "./push.ts";
 import type {
   TerminalClearInput,
   TerminalCloseInput,
@@ -51,8 +71,12 @@ import type { ServerRemoveKeybindingInput, ServerUpsertKeybindingInput } from ".
 import * as Schema from "effect/Schema";
 import type {
   ClientOrchestrationCommand,
+  OrchestrationGetThreadDetailPageInput,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationReconcileThreadDetailInput,
+  OrchestrationReconcileThreadDetailResult,
+  OrchestrationThreadDetailSnapshot,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationShellSnapshot,
@@ -412,6 +436,7 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
+  forceReload: () => Promise<void>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
@@ -467,6 +492,13 @@ export interface LocalApi {
     refreshProviders: (input?: {
       readonly instanceId?: ProviderInstanceId;
     }) => Promise<ServerProviderUpdatedPayload>;
+    refreshUsageLimits: () => Promise<{
+      readonly accountRateLimits: ReadonlyArray<{
+        readonly providerInstanceId: ProviderInstanceId;
+        readonly provider: ProviderDriverKind;
+        readonly rateLimits: unknown;
+      }>;
+    }>;
     updateProvider: (input: ServerProviderUpdateInput) => Promise<ServerProviderUpdatedPayload>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     removeKeybinding: (input: ServerRemoveKeybindingInput) => Promise<ServerRemoveKeybindingResult>;
@@ -475,7 +507,20 @@ export interface LocalApi {
     discoverSourceControl: () => Promise<SourceControlDiscoveryResult>;
     getTraceDiagnostics: () => Promise<ServerTraceDiagnosticsResult>;
     getProcessDiagnostics: () => Promise<ServerProcessDiagnosticsResult>;
+    getProcessResourceHistory: (
+      input: ServerProcessResourceHistoryInput,
+    ) => Promise<ServerProcessResourceHistoryResult>;
     signalProcess: (input: ServerSignalProcessInput) => Promise<ServerSignalProcessResult>;
+    getPushConfig: () => Promise<ServerPushConfig>;
+    registerPushSubscription: (
+      input: ServerRegisterPushSubscriptionInput,
+    ) => Promise<ServerPushSubscriptionStatus>;
+    unregisterPushSubscription: (
+      input: ServerUnregisterPushSubscriptionInput,
+    ) => Promise<ServerPushSubscriptionStatus>;
+    sendTestPushNotification: (
+      input: ServerSendTestPushNotificationInput,
+    ) => Promise<ServerPushSendResult>;
   };
 }
 
@@ -500,6 +545,10 @@ export interface EnvironmentApi {
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
+    listDirectoryEntries: (
+      input: ProjectListDirectoryEntriesInput,
+    ) => Promise<ProjectListDirectoryEntriesResult>;
+    readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };
   filesystem: {
@@ -524,6 +573,10 @@ export interface EnvironmentApi {
     switchRef: (input: VcsSwitchRefInput) => Promise<VcsSwitchRefResult>;
     init: (input: VcsInitInput) => Promise<void>;
     pull: (input: VcsPullInput) => Promise<VcsPullResult>;
+    stageFiles: (input: VcsStageFilesInput) => Promise<VcsStatusLocalResult>;
+    unstageFiles: (input: VcsUnstageFilesInput) => Promise<VcsStatusLocalResult>;
+    revertUnstagedFiles: (input: VcsRevertUnstagedFilesInput) => Promise<VcsStatusLocalResult>;
+    getWorkingTreeDiff: (input: VcsWorkingTreeDiffInput) => Promise<VcsWorkingTreeDiffResult>;
     refreshStatus: (input: VcsStatusInput) => Promise<VcsStatusResult>;
     onStatus: (
       input: VcsStatusInput,
@@ -545,6 +598,12 @@ export interface EnvironmentApi {
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;
+    getThreadDetailPage: (
+      input: OrchestrationGetThreadDetailPageInput,
+    ) => Promise<OrchestrationThreadDetailSnapshot>;
+    reconcileThreadDetail: (
+      input: OrchestrationReconcileThreadDetailInput,
+    ) => Promise<OrchestrationReconcileThreadDetailResult>;
     getArchivedShellSnapshot: () => Promise<OrchestrationShellSnapshot>;
     subscribeShell: (
       callback: (event: OrchestrationShellStreamItem) => void,

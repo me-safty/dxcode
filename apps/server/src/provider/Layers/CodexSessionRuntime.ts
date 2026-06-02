@@ -17,15 +17,17 @@ import {
   TurnId,
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
-import * as Random from "effect/Random";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SchemaIssue from "effect/SchemaIssue";
@@ -54,6 +56,8 @@ const BENIGN_ERROR_LOG_SNIPPETS = [
   "state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back",
 ];
 const CODEX_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
+const CODEX_USAGE_REFRESH_INTERVAL = Duration.seconds(30);
+export const CODEX_USAGE_REFRESH_TIMEOUT = Duration.seconds(10);
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "not found",
   "missing thread",
@@ -102,6 +106,7 @@ export interface CodexSessionRuntimeOptions {
   readonly runtimeMode: RuntimeMode;
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
+  readonly approvalsReviewer?: EffectCodexSchema.V2ThreadStartParams__ApprovalsReviewer | undefined;
   readonly resumeCursor?: CodexResumeCursor;
 }
 
@@ -114,6 +119,7 @@ export interface CodexSessionRuntimeSendTurnInput {
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort | undefined;
+  readonly approvalsReviewer?: EffectCodexSchema.V2TurnStartParams__ApprovalsReviewer | undefined;
   readonly interactionMode?: ProviderInteractionMode;
 }
 
@@ -138,6 +144,7 @@ export interface CodexSessionRuntimeShape {
   readonly rollbackThread: (
     numTurns: number,
   ) => Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
+  readonly refreshUsage: Effect.Effect<void, CodexSessionRuntimeError>;
   readonly respondToRequest: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
@@ -287,6 +294,7 @@ function buildThreadStartParams(input: {
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
+  readonly approvalsReviewer: EffectCodexSchema.V2ThreadStartParams__ApprovalsReviewer | undefined;
 }): EffectCodexSchema.V2ThreadStartParams {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
   return {
@@ -295,6 +303,7 @@ function buildThreadStartParams(input: {
     sandbox: config.sandbox,
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
+    ...(input.approvalsReviewer ? { approvalsReviewer: input.approvalsReviewer } : {}),
   };
 }
 
@@ -351,6 +360,7 @@ export function buildTurnStartParams(input: {
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
+  readonly approvalsReviewer?: EffectCodexSchema.V2TurnStartParams__ApprovalsReviewer;
   readonly interactionMode?: ProviderInteractionMode;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
@@ -382,6 +392,7 @@ export function buildTurnStartParams(input: {
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
+    ...(input.approvalsReviewer ? { approvalsReviewer: input.approvalsReviewer } : {}),
     ...(collaborationMode ? { collaborationMode } : {}),
   }).pipe(
     Effect.mapError((error) => toProtocolParseError("Invalid turn/start request payload", error)),
@@ -436,6 +447,7 @@ export const openCodexThread = (input: {
   readonly cwd: string;
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
+  readonly approvalsReviewer: EffectCodexSchema.V2ThreadStartParams__ApprovalsReviewer | undefined;
   readonly resumeThreadId: string | undefined;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
@@ -444,6 +456,7 @@ export const openCodexThread = (input: {
     runtimeMode: input.runtimeMode,
     model: input.requestedModel,
     serviceTier: input.serviceTier,
+    approvalsReviewer: input.approvalsReviewer,
   });
 
   if (resumeThreadId === undefined) {
@@ -548,6 +561,16 @@ function readRouteFields(notification: CodexServerNotification): {
         turnId: undefined,
         itemId: undefined,
       };
+    case "rawResponseItem/completed": {
+      const rawItemId =
+        "id" in notification.params.item && typeof notification.params.item.id === "string"
+          ? notification.params.item.id
+          : undefined;
+      return {
+        turnId: TurnId.make(notification.params.turnId),
+        itemId: rawItemId ? ProviderItemId.make(rawItemId) : undefined,
+      };
+    }
     case "item/started":
     case "item/completed":
       return {
@@ -692,26 +715,29 @@ function parseThreadSnapshot(
   };
 }
 
-export const makeCodexSessionRuntime = (
-  options: CodexSessionRuntimeOptions,
+export interface MakeCodexAppServerClientOptions {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly cwd: string;
+  readonly environment?: NodeJS.ProcessEnv;
+}
+
+export interface CodexAppServerClientHandle {
+  readonly client: CodexClient.CodexAppServerClientShape;
+  readonly child: ChildProcessSpawner.ChildProcessHandle;
+}
+
+export const makeCodexAppServerClient = (
+  options: MakeCodexAppServerClientOptions,
 ): Effect.Effect<
-  CodexSessionRuntimeShape,
+  CodexAppServerClientHandle,
   CodexErrors.CodexAppServerError,
   ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
 > =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const runtimeScope = yield* Scope.Scope;
-    const events = yield* Queue.unbounded<ProviderEvent>();
-    const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
-    const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
-    const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
-    const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>());
-    const closedRef = yield* Ref.make(false);
+    const clientScope = yield* Scope.Scope;
 
-    // `~` is not shell-expanded when env vars are set via
-    // `child_process.spawn`; `expandHomePath` lets a configured
-    // `CODEX_HOME=~/.codex_work` reach codex as an absolute path.
     const resolvedHomePath = options.homePath ? expandHomePath(options.homePath) : undefined;
     const env = {
       ...(options.environment ?? process.env),
@@ -727,7 +753,7 @@ export const makeCodexSessionRuntime = (
         }),
       )
       .pipe(
-        Effect.provideService(Scope.Scope, runtimeScope),
+        Effect.provideService(Scope.Scope, clientScope),
         Effect.mapError(
           (cause) =>
             new CodexErrors.CodexAppServerSpawnError({
@@ -739,13 +765,51 @@ export const makeCodexSessionRuntime = (
 
     const clientContext = yield* CodexClient.layerChildProcess(child).pipe(
       Layer.build,
-      Effect.provideService(Scope.Scope, runtimeScope),
+      Effect.provideService(Scope.Scope, clientScope),
     );
     const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
       Effect.provide(clientContext),
     );
+
+    yield* client.request("initialize", buildCodexInitializeParams());
+    yield* client.notify("initialized", undefined);
+    return { client, child } satisfies CodexAppServerClientHandle;
+  });
+
+export const makeCodexSessionRuntime = (
+  options: CodexSessionRuntimeOptions,
+): Effect.Effect<
+  CodexSessionRuntimeShape,
+  CodexErrors.CodexAppServerError,
+  ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
+> =>
+  Effect.gen(function* () {
+    const runtimeScope = yield* Scope.Scope;
+    const crypto = yield* Crypto.Crypto;
+    const events = yield* Queue.unbounded<ProviderEvent>();
+    const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
+    const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
+    const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
+    const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>());
+    const closedRef = yield* Ref.make(false);
+
+    const { client, child } = yield* makeCodexAppServerClient({
+      binaryPath: options.binaryPath,
+      ...(options.homePath ? { homePath: options.homePath } : {}),
+      cwd: options.cwd,
+      ...(options.environment ? { environment: options.environment } : {}),
+    });
     const serverNotifications = yield* Queue.unbounded<CodexServerNotification>();
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+    const randomUUIDv4 = crypto.randomUUIDv4.pipe(
+      Effect.mapError(
+        (cause) =>
+          new CodexErrors.CodexAppServerTransportError({
+            detail: "Failed to generate Codex runtime identifier.",
+            cause,
+          }),
+      ),
+    );
 
     const sessionCreatedAt = yield* nowIso;
     const initialSession = {
@@ -765,7 +829,7 @@ export const makeCodexSessionRuntime = (
 
     const emitEvent = (event: Omit<ProviderEvent, "id" | "provider" | "createdAt">) =>
       Effect.gen(function* () {
-        const id = yield* Random.nextUUIDv4;
+        const id = yield* randomUUIDv4;
         return yield* offerEvent({
           id: EventId.make(id),
           provider: PROVIDER,
@@ -781,6 +845,51 @@ export const makeCodexSessionRuntime = (
         method,
         message,
       });
+
+    const refreshAccountRateLimits = Effect.gen(function* () {
+      const response = yield* client.request("account/rateLimits/read", undefined).pipe(
+        Effect.timeoutOption(CODEX_USAGE_REFRESH_TIMEOUT),
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.fail(
+                CodexErrors.CodexAppServerRequestError.internalError(
+                  "Codex account rate-limit refresh timed out.",
+                ),
+              ),
+            onSome: (value) => Effect.succeed(value),
+          }),
+        ),
+      );
+
+      yield* emitEvent({
+        kind: "notification",
+        threadId: options.threadId,
+        method: "account/rateLimits/updated",
+        message: "Codex usage limits refreshed.",
+        payload: response,
+      });
+    });
+
+    const refreshAccountRateLimitsBestEffort = refreshAccountRateLimits.pipe(
+      Effect.catch((error) =>
+        Effect.logDebug("codex.usage.refresh.failed", {
+          threadId: options.threadId,
+          detail: error instanceof Error ? error.message : String(error),
+        }),
+      ),
+    );
+
+    const startUsageRefreshLoop = refreshAccountRateLimitsBestEffort.pipe(
+      Effect.andThen(
+        Effect.forever(
+          Effect.sleep(CODEX_USAGE_REFRESH_INTERVAL).pipe(
+            Effect.andThen(refreshAccountRateLimitsBestEffort),
+          ),
+        ),
+      ),
+      Effect.forkIn(runtimeScope),
+    );
 
     const settlePendingApprovals = (decision: ProviderApprovalDecision) =>
       Ref.get(pendingApprovalsRef).pipe(
@@ -933,7 +1042,7 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/commandExecution/requestApproval", (payload) =>
       Effect.gen(function* () {
-        const requestId = ApprovalRequestId.make(yield* Random.nextUUIDv4);
+        const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);
         const decision = yield* Deferred.make<ProviderApprovalDecision>();
@@ -989,7 +1098,7 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/fileChange/requestApproval", (payload) =>
       Effect.gen(function* () {
-        const requestId = ApprovalRequestId.make(yield* Random.nextUUIDv4);
+        const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);
         const decision = yield* Deferred.make<ProviderApprovalDecision>();
@@ -1045,7 +1154,7 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/tool/requestUserInput", (payload) =>
       Effect.gen(function* () {
-        const requestId = ApprovalRequestId.make(yield* Random.nextUUIDv4);
+        const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);
         const answers = yield* Deferred.make<ProviderUserInputAnswers>();
@@ -1179,8 +1288,6 @@ export const makeCodexSessionRuntime = (
 
     const start = Effect.fn("CodexSessionRuntime.start")(function* () {
       yield* emitSessionEvent("session/connecting", "Starting Codex App Server session.");
-      yield* client.request("initialize", buildCodexInitializeParams());
-      yield* client.notify("initialized", undefined);
 
       const requestedModel = normalizeCodexModelSlug(options.model);
 
@@ -1191,6 +1298,7 @@ export const makeCodexSessionRuntime = (
         cwd: options.cwd,
         requestedModel,
         serviceTier: options.serviceTier,
+        approvalsReviewer: options.approvalsReviewer,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
       });
 
@@ -1205,6 +1313,7 @@ export const makeCodexSessionRuntime = (
       } satisfies ProviderSession;
       yield* Ref.set(sessionRef, session);
       yield* emitSessionEvent("session/ready", "Codex App Server session ready.");
+      yield* startUsageRefreshLoop;
       return session;
     });
 
@@ -1229,7 +1338,11 @@ export const makeCodexSessionRuntime = (
         status: "closed",
         activeTurnId: undefined,
       });
-      yield* emitSessionEvent("session/closed", "Session stopped");
+      yield* emitSessionEvent("session/closed", "Session stopped").pipe(
+        Effect.catch((cause) =>
+          Effect.logError("Failed to emit Codex session closed event.", { cause }),
+        ),
+      );
       yield* Scope.close(runtimeScope, Exit.void);
       yield* Queue.shutdown(serverNotifications);
       yield* Queue.shutdown(events);
@@ -1252,6 +1365,7 @@ export const makeCodexSessionRuntime = (
             ...(normalizedModel ? { model: normalizedModel } : {}),
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
             ...(input.effort ? { effort: input.effort } : {}),
+            ...(input.approvalsReviewer ? { approvalsReviewer: input.approvalsReviewer } : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
@@ -1309,6 +1423,7 @@ export const makeCodexSessionRuntime = (
           });
           return parseThreadSnapshot(response);
         }),
+      refreshUsage: refreshAccountRateLimits,
       respondToRequest: (requestId, decision) =>
         Effect.gen(function* () {
           const pending = (yield* Ref.get(pendingApprovalsRef)).get(requestId);

@@ -210,6 +210,9 @@ export const resolveServerConfig = (
   options?: {
     readonly startupPresentation?: StartupPresentation;
     readonly forceAutoBootstrapProjectFromCwd?: boolean;
+    readonly defaultHost?: string;
+    readonly defaultTailscaleServeEnabled?: boolean;
+    readonly defaultTailscaleServePort?: number;
   },
 ) =>
   Effect.gen(function* () {
@@ -318,6 +321,7 @@ export const resolveServerConfig = (
       resolveOptionPrecedence(
         normalizedFlags.tailscaleServeEnabled,
         Option.fromUndefinedOr(env.tailscaleServeEnabled),
+        Option.fromUndefinedOr(options?.defaultTailscaleServeEnabled),
         Option.fromUndefinedOr(bootstrap?.tailscaleServeEnabled),
       ),
       () => false,
@@ -326,6 +330,7 @@ export const resolveServerConfig = (
       resolveOptionPrecedence(
         normalizedFlags.tailscaleServePort,
         Option.fromUndefinedOr(env.tailscaleServePort),
+        Option.fromUndefinedOr(options?.defaultTailscaleServePort),
         Option.fromUndefinedOr(bootstrap?.tailscaleServePort),
       ),
       () => 443,
@@ -335,6 +340,8 @@ export const resolveServerConfig = (
       resolveOptionPrecedence(
         normalizedFlags.host,
         Option.fromUndefinedOr(env.host),
+        Option.fromUndefinedOr(options?.defaultHost),
+        Option.fromUndefinedOr(tailscaleServeEnabled ? "127.0.0.1" : undefined),
         Option.fromUndefinedOr(bootstrap?.host),
       ),
       () => (mode === "desktop" ? "127.0.0.1" : undefined),

@@ -12,6 +12,7 @@
  * @module ProviderService
  */
 import type {
+  ProviderDriverKind,
   ProviderInterruptTurnInput,
   ProviderInstanceId,
   ProviderRespondToRequestInput,
@@ -106,6 +107,17 @@ export interface ProviderServiceShape {
   }) => Effect.Effect<void, ProviderServiceError>;
 
   /**
+   * Best-effort refresh for usage/rate-limit telemetry on active sessions.
+   */
+  readonly refreshUsage: () => Effect.Effect<{
+    readonly accountRateLimits: ReadonlyArray<{
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly provider: ProviderDriverKind;
+      readonly rateLimits: unknown;
+    }>;
+  }>;
+
+  /**
    * Canonical provider runtime event stream.
    *
    * Fan-out is owned by ProviderService (not by a standalone event-bus service).
@@ -117,5 +129,5 @@ export interface ProviderServiceShape {
  * ProviderService - Service tag for provider orchestration.
  */
 export class ProviderService extends Context.Service<ProviderService, ProviderServiceShape>()(
-  "t3/provider/Services/ProviderService",
+  "salchi/provider/Services/ProviderService",
 ) {}

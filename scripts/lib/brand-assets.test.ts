@@ -4,6 +4,7 @@ import {
   BRAND_ASSET_PATHS,
   DEVELOPMENT_ICON_OVERRIDES,
   PUBLISH_ICON_OVERRIDES,
+  resolveWebAssetBrandForConfiguredChannel,
   resolveWebAssetBrandForChannel,
   resolveWebIconOverrides,
 } from "./brand-assets.ts";
@@ -27,6 +28,14 @@ describe("brand-assets", () => {
         sourceRelativePath: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
         targetRelativePath: "dist/client/apple-touch-icon.png",
       },
+      {
+        sourceRelativePath: BRAND_ASSET_PATHS.productionWebPwa192Png,
+        targetRelativePath: "dist/client/pwa-192.png",
+      },
+      {
+        sourceRelativePath: BRAND_ASSET_PATHS.productionWebPwa512Png,
+        targetRelativePath: "dist/client/pwa-512.png",
+      },
     ]);
   });
 
@@ -42,6 +51,10 @@ describe("brand-assets", () => {
       sourceRelativePath: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
       targetRelativePath: "apps/web/dist/apple-touch-icon.png",
     });
+    expect(resolveWebIconOverrides("production", "apps/web/dist")).toContainEqual({
+      sourceRelativePath: BRAND_ASSET_PATHS.productionWebPwa512Png,
+      targetRelativePath: "apps/web/dist/pwa-512.png",
+    });
   });
 
   it("maps hosted nightly web assets to nightly icons", () => {
@@ -54,5 +67,12 @@ describe("brand-assets", () => {
   it("maps hosted release channels to web asset brands", () => {
     expect(resolveWebAssetBrandForChannel("latest")).toBe("production");
     expect(resolveWebAssetBrandForChannel("nightly")).toBe("nightly");
+  });
+
+  it("defaults configured web asset channels to production", () => {
+    expect(resolveWebAssetBrandForConfiguredChannel(undefined)).toBe("production");
+    expect(resolveWebAssetBrandForConfiguredChannel("latest")).toBe("production");
+    expect(resolveWebAssetBrandForConfiguredChannel("preview")).toBe("production");
+    expect(resolveWebAssetBrandForConfiguredChannel(" nightly ")).toBe("nightly");
   });
 });

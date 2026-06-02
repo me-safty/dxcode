@@ -275,8 +275,8 @@ export const makePendingOpenCodeProvider = (
           auth: { status: "unknown" },
           message:
             openCodeSettings.serverUrl.trim().length > 0
-              ? "OpenCode is disabled in T3 Code settings. A server URL is configured."
-              : "OpenCode is disabled in T3 Code settings.",
+              ? "OpenCode is disabled in Salchi settings. A server URL is configured."
+              : "OpenCode is disabled in Salchi settings.",
         },
       });
     }
@@ -349,8 +349,8 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
         status: "warning",
         auth: { status: "unknown" },
         message: isExternalServer
-          ? "OpenCode is disabled in T3 Code settings. A server URL is configured."
-          : "OpenCode is disabled in T3 Code settings.",
+          ? "OpenCode is disabled in Salchi settings. A server URL is configured."
+          : "OpenCode is disabled in Salchi settings.",
       },
     });
   }
@@ -378,7 +378,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     if (!version) {
       return fallback(
         new Error(
-          `Unable to determine OpenCode version from \`opencode --version\` output. T3 Code requires OpenCode v${MINIMUM_OPENCODE_VERSION} or newer.`,
+          `Unable to determine OpenCode version from \`opencode --version\` output. Salchi requires OpenCode v${MINIMUM_OPENCODE_VERSION} or newer.`,
         ),
         null,
       );
@@ -408,35 +408,25 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   const inventoryExit = yield* Effect.exit(
     Effect.scoped(
       Effect.gen(function* () {
-        const server = yield* openCodeRuntime
-          .connectToOpenCodeServer({
-            binaryPath: openCodeSettings.binaryPath,
-            serverUrl: openCodeSettings.serverUrl,
-            environment,
-          })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
-            ),
-          );
-        return yield* openCodeRuntime
-          .loadOpenCodeInventory(
-            openCodeRuntime.createOpenCodeSdkClient({
-              baseUrl: server.url,
-              directory: cwd,
-              ...(isExternalServer && openCodeSettings.serverPassword
-                ? { serverPassword: openCodeSettings.serverPassword }
-                : {}),
-            }),
-          )
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
-            ),
-          );
-      }),
+        const server = yield* openCodeRuntime.connectToOpenCodeServer({
+          binaryPath: openCodeSettings.binaryPath,
+          serverUrl: openCodeSettings.serverUrl,
+          environment,
+        });
+        return yield* openCodeRuntime.loadOpenCodeInventory(
+          openCodeRuntime.createOpenCodeSdkClient({
+            baseUrl: server.url,
+            directory: cwd,
+            ...(isExternalServer && openCodeSettings.serverPassword
+              ? { serverPassword: openCodeSettings.serverPassword }
+              : {}),
+          }),
+        );
+      }).pipe(
+        Effect.mapError(
+          (cause) => new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
+        ),
+      ),
     ),
   );
   if (inventoryExit._tag === "Failure") {

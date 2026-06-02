@@ -21,6 +21,7 @@ import type {
   ThreadSession,
   TurnDiffSummary,
 } from "./types";
+import { compareThreadActivitiesByOrder } from "./threadActivityOrdering";
 
 export type ProviderPickerKind = ProviderDriverKind;
 
@@ -142,8 +143,30 @@ export function formatElapsed(startIso: string, endIso: string | undefined): str
   return formatDuration(endedAt - startedAt);
 }
 
-type LatestTurnTiming = Pick<OrchestrationLatestTurn, "turnId" | "startedAt" | "completedAt">;
+type LatestTurnTiming = Pick<OrchestrationLatestTurn, "turnId" | "startedAt" | "completedAt"> &
+  Partial<Pick<OrchestrationLatestTurn, "state">>;
 type SessionActivityState = Pick<ThreadSession, "orchestrationStatus" | "activeTurnId">;
+
+export function hasActiveSessionWork(
+  latestTurn: LatestTurnTiming | null,
+  session: SessionActivityState | null,
+): boolean {
+  if (session?.orchestrationStatus !== "running") {
+    // Detail events can project a streaming assistant turn before the matching
+    // session-set event reaches the client. If the previous session snapshot is
+    // otherwise ready, treat that latest-turn state as active work so controls
+    // stay interruptible during the projection race.
+    return (
+      session?.orchestrationStatus === "ready" &&
+      latestTurn?.state === "running" &&
+      latestTurn.completedAt === null
+    );
+  }
+  if (session.activeTurnId !== undefined && session.activeTurnId !== null) {
+    return true;
+  }
+  return latestTurn !== null && !latestTurn.completedAt;
+}
 
 export function isLatestTurnSettled(
   latestTurn: LatestTurnTiming | null,
@@ -151,9 +174,7 @@ export function isLatestTurnSettled(
 ): boolean {
   if (!latestTurn?.startedAt) return false;
   if (!latestTurn.completedAt) return false;
-  if (!session) return true;
-  if (session.orchestrationStatus === "running") return false;
-  return true;
+  return !hasActiveSessionWork(latestTurn, session);
 }
 
 export function deriveActiveWorkStartedAt(
@@ -161,8 +182,9 @@ export function deriveActiveWorkStartedAt(
   session: SessionActivityState | null,
   sendStartedAt: string | null,
 ): string | null {
-  const runningTurnId =
-    session?.orchestrationStatus === "running" ? (session.activeTurnId ?? null) : null;
+  const runningTurnId = hasActiveSessionWork(latestTurn, session)
+    ? (session?.activeTurnId ?? null)
+    : null;
   if (runningTurnId !== null) {
     if (latestTurn?.turnId === runningTurnId) {
       return latestTurn.startedAt ?? sendStartedAt;
@@ -209,7 +231,7 @@ export function derivePendingApprovals(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): PendingApproval[] {
   const openByRequestId = new Map<ApprovalRequestId, PendingApproval>();
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = [...activities].toSorted(compareThreadActivitiesByOrder);
 
   for (const activity of ordered) {
     const payload =
@@ -315,7 +337,7 @@ export function derivePendingUserInputs(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): PendingUserInput[] {
   const openByRequestId = new Map<ApprovalRequestId, PendingUserInput>();
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = [...activities].toSorted(compareThreadActivitiesByOrder);
 
   for (const activity of ordered) {
     const payload =
@@ -364,7 +386,7 @@ export function deriveActivePlanState(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
 ): ActivePlanState | null {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = [...activities].toSorted(compareThreadActivitiesByOrder);
   const allPlanActivities = ordered.filter((activity) => activity.kind === "turn.plan.updated");
   // Prefer plan from the current turn; fall back to the most recent plan from any turn
   // so that TodoWrite tasks persist across follow-up messages.
@@ -385,28 +407,25 @@ export function deriveActivePlanState(
   if (!Array.isArray(rawPlan)) {
     return null;
   }
-  const steps = rawPlan
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") return null;
-      const record = entry as Record<string, unknown>;
-      if (typeof record.step !== "string") {
-        return null;
-      }
-      const status =
-        record.status === "completed" || record.status === "inProgress" ? record.status : "pending";
-      return {
-        step: record.step,
-        status,
-      };
-    })
-    .filter(
-      (
-        step,
-      ): step is {
-        step: string;
-        status: "pending" | "inProgress" | "completed";
-      } => step !== null,
-    );
+  const steps: Array<{
+    step: string;
+    status: "pending" | "inProgress" | "completed";
+  }> = [];
+  for (const entry of rawPlan) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (typeof record.step !== "string") {
+      continue;
+    }
+    const status =
+      record.status === "completed" || record.status === "inProgress" ? record.status : "pending";
+    steps.push({
+      step: record.step,
+      status,
+    });
+  }
   if (steps.length === 0) {
     return null;
   }
@@ -484,18 +503,31 @@ export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
 ): WorkLogEntry[] {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const entries = ordered
-    .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
-    .filter((activity) => activity.kind !== "tool.started")
-    .filter((activity) => activity.kind !== "task.started")
-    .filter((activity) => activity.kind !== "context-window.updated")
-    .filter((activity) => activity.summary !== "Checkpoint captured")
-    .filter((activity) => !isPlanBoundaryToolActivity(activity))
-    .map(toDerivedWorkLogEntry);
+  const ordered = [...activities].toSorted(compareThreadActivitiesByOrder);
+  const entries: DerivedWorkLogEntry[] = [];
+  for (const activity of ordered) {
+    if (!shouldIncludeWorkLogActivity(activity, latestTurnId)) continue;
+    if (activity.kind === "tool.started") continue;
+    if (activity.kind === "task.started") continue;
+    if (activity.kind === "context-window.updated") continue;
+    if (activity.kind === "account.rate-limits.updated") continue;
+    if (activity.summary === "Checkpoint captured") continue;
+    if (isPlanBoundaryToolActivity(activity)) continue;
+    entries.push(toDerivedWorkLogEntry(activity));
+  }
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
   );
+}
+
+function shouldIncludeWorkLogActivity(
+  activity: OrchestrationThreadActivity,
+  latestTurnId: TurnId | undefined,
+): boolean {
+  if (!latestTurnId) {
+    return true;
+  }
+  return activity.turnId === latestTurnId || activity.kind === "runtime.warning";
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {
@@ -531,6 +563,8 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? payload.detail
       : null;
   const taskLabel = taskSummary || taskDetailAsLabel;
+  const runtimeWarningMessage =
+    activity.kind === "runtime.warning" ? asTrimmedString(payload?.message) : null;
   const detail = isTaskActivity
     ? !taskDetailAsLabel &&
       payload &&
@@ -538,12 +572,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       payload.detail.length > 0
       ? stripTrailingExitCode(payload.detail).output
       : null
-    : extractToolDetail(payload, title ?? activity.summary);
+    : (runtimeWarningMessage ?? extractToolDetail(payload, title ?? activity.summary));
   const toolCallId = isTaskActivity ? null : extractToolCallId(payload);
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
-    label: taskLabel || activity.summary,
+    label: activity.kind === "runtime.warning" ? "Provider warning" : taskLabel || activity.summary,
     tone:
       activity.kind === "task.progress"
         ? "thinking"
@@ -834,9 +868,13 @@ function formatCommandValue(value: unknown): string | null {
   if (!Array.isArray(value)) {
     return null;
   }
-  const parts = value
-    .map((entry) => asTrimmedString(entry))
-    .filter((entry): entry is string => entry !== null);
+  const parts: Array<string> = [];
+  for (const entry of value) {
+    const part = asTrimmedString(entry);
+    if (part !== null) {
+      parts.push(part);
+    }
+  }
   if (parts.length === 0) {
     return null;
   }
@@ -920,10 +958,13 @@ function normalizePreviewForComparison(value: string | null | undefined): string
 }
 
 function summarizeToolTextOutput(value: string): string | null {
-  const lines = value
-    .split(/\r?\n/u)
-    .map((line) => normalizeInlinePreview(line))
-    .filter((line) => line.length > 0);
+  const lines: Array<string> = [];
+  for (const rawLine of value.split(/\r?\n/u)) {
+    const line = normalizeInlinePreview(rawLine);
+    if (line.length > 0) {
+      lines.push(line);
+    }
+  }
   const firstLine = lines.find((line) => line !== "```");
   if (firstLine) {
     return truncateInlinePreview(firstLine);
@@ -1107,47 +1148,6 @@ function extractChangedFiles(payload: Record<string, unknown> | null): string[] 
   return changedFiles;
 }
 
-function compareActivitiesByOrder(
-  left: OrchestrationThreadActivity,
-  right: OrchestrationThreadActivity,
-): number {
-  if (left.sequence !== undefined && right.sequence !== undefined) {
-    if (left.sequence !== right.sequence) {
-      return left.sequence - right.sequence;
-    }
-  } else if (left.sequence !== undefined) {
-    return 1;
-  } else if (right.sequence !== undefined) {
-    return -1;
-  }
-
-  const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
-  if (createdAtComparison !== 0) {
-    return createdAtComparison;
-  }
-
-  const lifecycleRankComparison =
-    compareActivityLifecycleRank(left.kind) - compareActivityLifecycleRank(right.kind);
-  if (lifecycleRankComparison !== 0) {
-    return lifecycleRankComparison;
-  }
-
-  return left.id.localeCompare(right.id);
-}
-
-function compareActivityLifecycleRank(kind: string): number {
-  if (kind.endsWith(".started") || kind === "tool.started") {
-    return 0;
-  }
-  if (kind.endsWith(".progress") || kind.endsWith(".updated")) {
-    return 1;
-  }
-  if (kind.endsWith(".completed") || kind.endsWith(".resolved")) {
-    return 2;
-  }
-  return 1;
-}
-
 export function hasToolActivityForTurn(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   turnId: TurnId | null | undefined,
@@ -1244,9 +1244,14 @@ export function inferCheckpointTurnCountByTurnId(
   return result;
 }
 
-export function derivePhase(session: ThreadSession | null): SessionPhase {
+export function derivePhase(
+  session: ThreadSession | null,
+  latestTurn: LatestTurnTiming | null = null,
+): SessionPhase {
   if (!session || session.status === "closed") return "disconnected";
   if (session.status === "connecting") return "connecting";
-  if (session.status === "running") return "running";
+  if (hasActiveSessionWork(latestTurn, session)) {
+    return "running";
+  }
   return "ready";
 }
