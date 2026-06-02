@@ -7,7 +7,7 @@ import { DEFAULT_GIT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from "./m
 import { ModelSelection } from "./orchestration.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
 
-// ── Client Settings (local-only) ───────────────────────────────
+// ── Synced User Settings ───────────────────────────────────────
 
 export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"]);
 export type TimestampFormat = typeof TimestampFormat.Type;
@@ -49,7 +49,7 @@ export const SidebarThreadPreviewCount = Schema.Int.check(
 export type SidebarThreadPreviewCount = typeof SidebarThreadPreviewCount.Type;
 export const DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT: SidebarThreadPreviewCount = 6;
 
-export const ClientSettingsSchema = Schema.Struct({
+export const SyncedClientSettingsFields = {
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
@@ -96,6 +96,12 @@ export const ClientSettingsSchema = Schema.Struct({
   sidebarProjectFolders: Schema.Array(SidebarProjectFolder).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  sidebarProjectExpandedById: Schema.Record(TrimmedNonEmptyString, Schema.Boolean).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  sidebarProjectOrder: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_SORT_ORDER)),
   ),
@@ -108,7 +114,16 @@ export const ClientSettingsSchema = Schema.Struct({
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
   ),
-});
+};
+
+export type SyncedClientSettingKey = keyof typeof SyncedClientSettingsFields;
+export const SYNCED_CLIENT_SETTING_KEYS = Object.keys(
+  SyncedClientSettingsFields,
+) as SyncedClientSettingKey[];
+
+// ── Legacy Client Settings (local compatibility cache) ─────────
+
+export const ClientSettingsSchema = Schema.Struct(SyncedClientSettingsFields);
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
 export const DEFAULT_CLIENT_SETTINGS: ClientSettings = Schema.decodeSync(ClientSettingsSchema)({});
@@ -384,6 +399,8 @@ export type OpenRouterSettings = typeof OpenRouterSettings.Type;
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 
 export const ServerSettings = Schema.Struct({
+  ...SyncedClientSettingsFields,
+
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   automaticGitFetchInterval: Schema.DurationFromMillis.pipe(
     Schema.withDecodingDefault(
@@ -490,7 +507,53 @@ const OpenCodeSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const SyncedClientSettingsPatchFields = {
+  autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
+  confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
+  confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
+  diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
+  diffWordWrap: Schema.optionalKey(Schema.Boolean),
+  dismissedProviderUpdateNotificationKeys: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  favorites: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        provider: ProviderInstanceId,
+        model: TrimmedNonEmptyString,
+      }),
+    ),
+  ),
+  providerModelPreferences: Schema.optionalKey(
+    Schema.Record(
+      ProviderInstanceId,
+      Schema.Struct({
+        hiddenModels: Schema.Array(Schema.String).pipe(
+          Schema.withDecodingDefault(Effect.succeed([])),
+        ),
+        modelOrder: Schema.Array(Schema.String).pipe(
+          Schema.withDecodingDefault(Effect.succeed([])),
+        ),
+      }),
+    ),
+  ),
+  runningMessageDeliveryMode: Schema.optionalKey(RunningMessageDeliveryMode),
+  sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
+  sidebarProjectGroupingOverrides: Schema.optionalKey(
+    Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),
+  ),
+  sidebarProjectFolders: Schema.optionalKey(Schema.Array(SidebarProjectFolder)),
+  sidebarProjectExpandedById: Schema.optionalKey(
+    Schema.Record(TrimmedNonEmptyString, Schema.Boolean),
+  ),
+  sidebarProjectOrder: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  sidebarProjectSortOrder: Schema.optionalKey(SidebarProjectSortOrder),
+  sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
+  sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
+  timestampFormat: Schema.optionalKey(TimestampFormat),
+};
+
 export const ServerSettingsPatch = Schema.Struct({
+  ...SyncedClientSettingsPatchFields,
+
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   automaticGitFetchInterval: Schema.optionalKey(Schema.DurationFromMillis),
@@ -530,42 +593,5 @@ export const ServerSettingsPatch = Schema.Struct({
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
-export const ClientSettingsPatch = Schema.Struct({
-  autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
-  confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
-  confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
-  diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
-  diffWordWrap: Schema.optionalKey(Schema.Boolean),
-  favorites: Schema.optionalKey(
-    Schema.Array(
-      Schema.Struct({
-        provider: ProviderInstanceId,
-        model: TrimmedNonEmptyString,
-      }),
-    ),
-  ),
-  providerModelPreferences: Schema.optionalKey(
-    Schema.Record(
-      ProviderInstanceId,
-      Schema.Struct({
-        hiddenModels: Schema.Array(Schema.String).pipe(
-          Schema.withDecodingDefault(Effect.succeed([])),
-        ),
-        modelOrder: Schema.Array(Schema.String).pipe(
-          Schema.withDecodingDefault(Effect.succeed([])),
-        ),
-      }),
-    ),
-  ),
-  runningMessageDeliveryMode: Schema.optionalKey(RunningMessageDeliveryMode),
-  sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
-  sidebarProjectGroupingOverrides: Schema.optionalKey(
-    Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),
-  ),
-  sidebarProjectFolders: Schema.optionalKey(Schema.Array(SidebarProjectFolder)),
-  sidebarProjectSortOrder: Schema.optionalKey(SidebarProjectSortOrder),
-  sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
-  sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
-  timestampFormat: Schema.optionalKey(TimestampFormat),
-});
+export const ClientSettingsPatch = Schema.Struct(SyncedClientSettingsPatchFields);
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;
