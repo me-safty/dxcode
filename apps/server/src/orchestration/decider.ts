@@ -125,7 +125,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           title: command.title,
           workspaceRoot: command.workspaceRoot,
           defaultModelSelection: command.defaultModelSelection ?? null,
-          scripts: [],
+          scripts: command.scripts ?? [],
+          browserPreviewUrl: command.browserPreviewUrl ?? null,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -155,6 +156,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ? { defaultModelSelection: command.defaultModelSelection }
             : {}),
           ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
+          ...(command.browserPreviewUrl !== undefined
+            ? { browserPreviewUrl: command.browserPreviewUrl }
+            : {}),
           updatedAt: occurredAt,
         },
       };
@@ -222,6 +226,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const tabGroupId = command.tabGroupId ?? command.threadId;
+      if (tabGroupId !== command.threadId) {
+        const tabGroupThread = yield* requireThread({
+          readModel,
+          command,
+          threadId: tabGroupId,
+        });
+        if (tabGroupThread.projectId !== command.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Tab group thread '${tabGroupId}' belongs to a different project.`,
+          });
+        }
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -233,6 +251,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           projectId: command.projectId,
+          tabGroupId,
+          tabType: command.tabType ?? "chat",
           title: command.title,
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
@@ -313,11 +333,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.meta.update": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      if (command.tabGroupId !== undefined && command.tabGroupId !== command.threadId) {
+        const tabGroupThread = yield* requireThread({
+          readModel,
+          command,
+          threadId: command.tabGroupId,
+        });
+        if (tabGroupThread.projectId !== thread.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Tab group thread '${command.tabGroupId}' belongs to a different project.`,
+          });
+        }
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -329,6 +362,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "thread.meta-updated",
         payload: {
           threadId: command.threadId,
+          ...(command.tabGroupId !== undefined ? { tabGroupId: command.tabGroupId } : {}),
           ...(command.title !== undefined ? { title: command.title } : {}),
           ...(command.modelSelection !== undefined
             ? { modelSelection: command.modelSelection }
@@ -454,6 +488,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
           runtimeMode: targetThread.runtimeMode,
           interactionMode: targetThread.interactionMode,
+          ...(command.deliveryMode !== undefined ? { deliveryMode: command.deliveryMode } : {}),
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
           createdAt: command.createdAt,
         },

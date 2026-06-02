@@ -8,6 +8,10 @@ import {
   type TerminalOpenInput,
   type TerminalRestartInput,
 } from "@t3tools/contracts";
+import {
+  PROJECT_SCRIPT_ID_ENV,
+  PROJECT_SCRIPT_PROJECT_ID_ENV,
+} from "@t3tools/shared/projectScripts";
 import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -23,6 +27,7 @@ import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
+import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { expect } from "vitest";
 
 import * as ProcessRunner from "../../processRunner.ts";
@@ -225,7 +230,11 @@ const createManager = (
 ): Effect.Effect<
   ManagerFixture,
   PlatformError.PlatformError,
-  FileSystem.FileSystem | Path.Path | Scope.Scope | ProcessRunner.ProcessRunner
+  | FileSystem.FileSystem
+  | Path.Path
+  | Scope.Scope
+  | ProcessRunner.ProcessRunner
+  | HttpClient.HttpClient
 > =>
   Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) =>
     Effect.gen(function* () {
@@ -270,7 +279,11 @@ const createManager = (
   );
 
 it.layer(
-  Layer.merge(NodeServices.layer, ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer))),
+  Layer.mergeAll(
+    NodeServices.layer,
+    ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer)),
+    FetchHttpClient.layer,
+  ),
   { excludeTestServices: true },
 )("TerminalManager", (it) => {
   const itEffectSkipOnWindows = process.platform === "win32" ? it.effect.skip : it.effect;
@@ -1344,6 +1357,41 @@ it.layer(
         ),
         "1200 millis",
       );
+    }),
+  );
+
+  it.effect("includes project script context in terminal metadata", () =>
+    Effect.gen(function* () {
+      const { manager } = yield* createManager();
+      yield* manager.open(
+        openInput({
+          env: {
+            [PROJECT_SCRIPT_PROJECT_ID_ENV]: "project-1",
+            [PROJECT_SCRIPT_ID_ENV]: "lint",
+          },
+        }),
+      );
+
+      const metadataEvents = yield* Ref.make<ReadonlyArray<TerminalMetadataStreamEvent>>([]);
+      const unsubscribe = yield* manager.subscribeMetadata((event) =>
+        Ref.update(metadataEvents, (events) => [...events, event]),
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+
+      const initialEvents = yield* Ref.get(metadataEvents);
+      expect(initialEvents[0]).toMatchObject({
+        type: "snapshot",
+        terminals: [
+          {
+            threadId: "thread-1",
+            terminalId: DEFAULT_TERMINAL_ID,
+            projectScript: {
+              projectId: "project-1",
+              scriptId: "lint",
+            },
+          },
+        ],
+      });
     }),
   );
 

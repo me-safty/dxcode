@@ -13,6 +13,8 @@ import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
   type AuthAccessStreamEvent,
   AuthSessionId,
+  BrowserAgentCommandError,
+  type BrowserAgentStreamEvent,
   CommandId,
   EventId,
   type OrchestrationCommand,
@@ -26,6 +28,7 @@ import {
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   ProjectSearchEntriesError,
+  ProjectReadFileError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
   FilesystemBrowseError,
@@ -93,6 +96,8 @@ import {
   type SessionCredentialChange,
 } from "./auth/Services/SessionCredentialService.ts";
 import { respondToAuthError } from "./auth/http.ts";
+import { browserAgentRegistry } from "./browserAgents/registry.ts";
+import { makeOpenRouterAudioTranscription } from "./audioTranscription/OpenRouterAudioTranscription.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 const isWorkspacePathOutsideRootError = Schema.is(WorkspacePathOutsideRootError);
 
@@ -202,6 +207,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const sessions = yield* SessionCredentialService;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
+      const audioTranscription = makeOpenRouterAudioTranscription(serverSettings);
       const toDispatchCommandError = (cause: unknown, fallbackMessage: string) =>
         isOrchestrationDispatchCommandError(cause)
           ? cause
@@ -524,6 +530,12 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 commandId: yield* serverCommandId("bootstrap-thread-create"),
                 threadId: command.threadId,
                 projectId: bootstrap.createThread.projectId,
+                ...(bootstrap.createThread.tabGroupId !== undefined
+                  ? { tabGroupId: bootstrap.createThread.tabGroupId }
+                  : {}),
+                ...(bootstrap.createThread.tabType !== undefined
+                  ? { tabType: bootstrap.createThread.tabType }
+                  : {}),
                 title: bootstrap.createThread.title,
                 modelSelection: bootstrap.createThread.modelSelection,
                 runtimeMode: bootstrap.createThread.runtimeMode,
@@ -855,6 +867,62 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             }),
             { "rpc.aggregate": "orchestration" },
           ),
+        [WS_METHODS.browserAgentsList]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.browserAgentsList,
+            Effect.sync(() => browserAgentRegistry.snapshot()),
+            { "rpc.aggregate": "browser-agent" },
+          ),
+        [WS_METHODS.browserAgentsOpenOrFocusPreview]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.browserAgentsOpenOrFocusPreview,
+            sessions.issueBearerTokenForSession(currentSessionId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new BrowserAgentCommandError({
+                    code: "command-failed",
+                    message: "Failed to prepare browser sidebar session.",
+                    cause,
+                  }),
+              ),
+              Effect.flatMap((issued) =>
+                browserAgentRegistry.openOrFocusPreview(input, {
+                  sidebarSessionToken: issued.token,
+                  preferredSessionId: currentSessionId,
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "browser-agent" },
+          ),
+        [WS_METHODS.browserAgentsActivateAnnotation]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.browserAgentsActivateAnnotation,
+            browserAgentRegistry.activateAnnotation(input, {
+              preferredSessionId: currentSessionId,
+            }),
+            { "rpc.aggregate": "browser-agent" },
+          ),
+        [WS_METHODS.subscribeBrowserAgents]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeBrowserAgents,
+            Stream.concat(
+              Stream.make({
+                type: "snapshot" as const,
+                snapshot: browserAgentRegistry.snapshot(),
+              }),
+              Stream.callback<BrowserAgentStreamEvent>((queue) =>
+                Effect.acquireRelease(
+                  Effect.sync(() =>
+                    browserAgentRegistry.subscribe((event) => {
+                      Effect.runFork(Queue.offer(queue, event));
+                    }),
+                  ),
+                  (unsubscribe) => Effect.sync(unsubscribe),
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "browser-agent" },
+          ),
         [WS_METHODS.serverGetConfig]: (_input) =>
           observeRpcEffect(WS_METHODS.serverGetConfig, loadServerConfig, {
             "rpc.aggregate": "server",
@@ -910,6 +978,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.serverTranscribeAudio]: (input) =>
+          observeRpcEffect(WS_METHODS.serverTranscribeAudio, audioTranscription.transcribe(input), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>
           observeRpcEffect(
             WS_METHODS.serverDiscoverSourceControl,
@@ -985,6 +1057,22 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "workspace" },
           ),
+        [WS_METHODS.projectsReadFile]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsReadFile,
+            workspaceFileSystem.readFile(input).pipe(
+              Effect.mapError((cause) => {
+                const message = isWorkspacePathOutsideRootError(cause)
+                  ? "Workspace file path must stay within the project root."
+                  : "Failed to read workspace file";
+                return new ProjectReadFileError({
+                  message,
+                  cause,
+                });
+              }),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
         [WS_METHODS.projectsWriteFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsWriteFile,
@@ -1041,6 +1129,18 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(
             WS_METHODS.vcsPull,
             gitWorkflow.pullCurrentBranch(input.cwd).pipe(
+              Effect.matchCauseEffect({
+                onFailure: (cause) => Effect.failCause(cause),
+                onSuccess: (result) =>
+                  refreshGitStatus(input.cwd).pipe(Effect.ignore({ log: true }), Effect.as(result)),
+              }),
+            ),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.vcsSyncBase]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsSyncBase,
+            gitWorkflow.syncCurrentBranchWithBase(input.cwd).pipe(
               Effect.matchCauseEffect({
                 onFailure: (cause) => Effect.failCause(cause),
                 onSuccess: (result) =>
@@ -1128,6 +1228,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.reviewGetDiffPreview, review.getDiffPreview(input), {
             "rpc.aggregate": "review",
           }),
+        [WS_METHODS.reviewListPullRequestComments]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.reviewListPullRequestComments,
+            review.listPullRequestComments(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
         [WS_METHODS.terminalOpen]: (input) =>
           observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {
             "rpc.aggregate": "terminal",
@@ -1163,6 +1271,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.terminalClose, terminalManager.close(input), {
             "rpc.aggregate": "terminal",
           }),
+        [WS_METHODS.terminalDetectWebServers]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.terminalDetectWebServers,
+            terminalManager.detectWebServers(input),
+            {
+              "rpc.aggregate": "terminal",
+            },
+          ),
         [WS_METHODS.subscribeTerminalEvents]: (_input) =>
           observeRpcStream(
             WS_METHODS.subscribeTerminalEvents,

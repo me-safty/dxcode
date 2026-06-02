@@ -185,6 +185,7 @@ export function projectEvent(
             workspaceRoot: payload.workspaceRoot,
             defaultModelSelection: payload.defaultModelSelection,
             scripts: payload.scripts,
+            browserPreviewUrl: payload.browserPreviewUrl ?? null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -217,6 +218,9 @@ export function projectEvent(
                     ? { defaultModelSelection: payload.defaultModelSelection }
                     : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
+                  ...(payload.browserPreviewUrl !== undefined
+                    ? { browserPreviewUrl: payload.browserPreviewUrl }
+                    : {}),
                   updatedAt: payload.updatedAt,
                 }
               : project,
@@ -253,6 +257,8 @@ export function projectEvent(
           {
             id: payload.threadId,
             projectId: payload.projectId,
+            tabGroupId: payload.tabGroupId ?? payload.threadId,
+            tabType: payload.tabType ?? "chat",
             title: payload.title,
             modelSelection: payload.modelSelection,
             runtimeMode: payload.runtimeMode,
@@ -319,6 +325,7 @@ export function projectEvent(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
+            ...(payload.tabGroupId !== undefined ? { tabGroupId: payload.tabGroupId } : {}),
             ...(payload.title !== undefined ? { title: payload.title } : {}),
             ...(payload.modelSelection !== undefined
               ? { modelSelection: payload.modelSelection }

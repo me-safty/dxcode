@@ -44,6 +44,20 @@ describe("GitHubCli.layer", () => {
               headRefName: "feature/pr-threads",
               state: "OPEN",
               mergedAt: null,
+              isDraft: false,
+              mergeable: "MERGEABLE",
+              mergeStateStatus: "CLEAN",
+              statusCheckRollup: [
+                {
+                  __typename: "CheckRun",
+                  status: "COMPLETED",
+                  conclusion: "SUCCESS",
+                },
+                {
+                  __typename: "StatusContext",
+                  state: "PENDING",
+                },
+              ],
               isCrossRepository: true,
               headRepository: {
                 nameWithOwner: "octocat/codething-mvp",
@@ -72,6 +86,14 @@ describe("GitHubCli.layer", () => {
         isCrossRepository: true,
         headRepositoryNameWithOwner: "octocat/codething-mvp",
         headRepositoryOwnerLogin: "octocat",
+        mergeStatus: "mergeable",
+        checks: {
+          total: 2,
+          completed: 1,
+          successful: 1,
+          failed: 0,
+          pending: 1,
+        },
       });
       expect(mockRun).toHaveBeenCalledWith({
         operation: "GitHubCli.execute",
@@ -81,7 +103,7 @@ describe("GitHubCli.layer", () => {
           "view",
           "#42",
           "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+          "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isDraft,mergeable,mergeStateStatus,statusCheckRollup,isCrossRepository,headRepository,headRepositoryOwner",
         ],
         cwd: "/repo",
         timeoutMs: 30_000,
@@ -242,6 +264,45 @@ describe("GitHubCli.layer", () => {
         operation: "GitHubCli.execute",
         command: "gh",
         args: ["repo", "create", "octocat/codething-mvp", "--private"],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("creates pull requests against an explicit repository", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(
+        Effect.succeed(processOutput("https://github.com/Bl4ckBl1zZ/t3code/pull/3\n")),
+      );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      yield* gh.createPullRequest({
+        cwd: "/repo",
+        repository: "Bl4ckBl1zZ/t3code",
+        baseBranch: "main",
+        headSelector: "t3code/b1853599",
+        title: "Fix PR repo",
+        bodyFile: "/tmp/body.md",
+      });
+
+      expect(mockRun).toHaveBeenCalledWith({
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: [
+          "pr",
+          "create",
+          "--repo",
+          "Bl4ckBl1zZ/t3code",
+          "--base",
+          "main",
+          "--head",
+          "t3code/b1853599",
+          "--title",
+          "Fix PR repo",
+          "--body-file",
+          "/tmp/body.md",
+        ],
         cwd: "/repo",
         timeoutMs: 30_000,
       });

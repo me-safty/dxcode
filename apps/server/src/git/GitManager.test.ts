@@ -31,6 +31,10 @@ import { type TextGenerationShape, TextGeneration } from "../textGeneration/Text
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubSourceControlProvider from "../sourceControl/GitHubSourceControlProvider.ts";
+import type {
+  SourceControlProviderContext,
+  SourceControlProviderShape,
+} from "../sourceControl/SourceControlProvider.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import { makeGitManager } from "./GitManager.ts";
 import { ServerConfig } from "../config.ts";
@@ -107,6 +111,10 @@ interface FakeGitTextGeneration {
 }
 
 type FakePullRequest = NonNullable<FakeGhScenario["pullRequest"]>;
+
+function repoArgs(repository: string | undefined): string[] {
+  return repository ? ["--repo", repository] : [];
+}
 
 function normalizeFakePullRequestSummary(raw: unknown): GitHubPullRequestSummary | null {
   if (!raw || typeof raw !== "object") {
@@ -539,6 +547,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
           args: [
             "pr",
             "list",
+            ...repoArgs(input.repository),
             "--head",
             input.headSelector,
             "--state",
@@ -546,7 +555,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             "--limit",
             String(input.limit ?? 1),
             "--json",
-            "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+            "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isDraft,mergeable,mergeStateStatus,statusCheckRollup,isCrossRepository,headRepository,headRepositoryOwner",
           ],
         }).pipe(
           Effect.map((result) => JSON.parse(result.stdout) as unknown[]),
@@ -562,6 +571,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
           args: [
             "pr",
             "create",
+            ...repoArgs(input.repository),
             "--base",
             input.baseBranch,
             "--head",
@@ -575,7 +585,15 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
       getDefaultBranch: (input) =>
         execute({
           cwd: input.cwd,
-          args: ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+          args: [
+            "repo",
+            "view",
+            ...(input.repository ? [input.repository] : []),
+            "--json",
+            "defaultBranchRef",
+            "--jq",
+            ".defaultBranchRef.name",
+          ],
         }).pipe(
           Effect.map((result) => {
             const value = result.stdout.trim();
@@ -589,8 +607,9 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             "pr",
             "view",
             input.reference,
+            ...repoArgs(input.repository),
             "--json",
-            "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+            "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isDraft,mergeable,mergeStateStatus,statusCheckRollup,isCrossRepository,headRepository,headRepositoryOwner",
           ],
         }).pipe(Effect.map((result) => JSON.parse(result.stdout) as GitHubPullRequestSummary)),
       getRepositoryCloneUrls: (input) =>
@@ -608,7 +627,13 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
       checkoutPullRequest: (input) =>
         execute({
           cwd: input.cwd,
-          args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
+          args: [
+            "pr",
+            "checkout",
+            input.reference,
+            ...repoArgs(input.repository),
+            ...(input.force ? ["--force"] : []),
+          ],
         }).pipe(Effect.asVoid),
     },
     ghCalls,
@@ -651,6 +676,8 @@ function makeManager(input?: {
   ghScenario?: FakeGhScenario;
   textGeneration?: Partial<FakeGitTextGeneration>;
   setupScriptRunner?: ProjectSetupScriptRunnerShape;
+  sourceControlRegistry?: SourceControlProviderRegistry.SourceControlProviderRegistryShape;
+  sourceControlContext?: SourceControlProviderContext | null;
 }) {
   const { service: gitHubCli, ghCalls } = createGitHubCliWithFakeGh(input?.ghScenario);
   const textGeneration = createTextGeneration(input?.textGeneration);
@@ -665,20 +692,34 @@ function makeManager(input?: {
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(ServerConfigLayer),
   );
-  const sourceControlRegistryLayer = Layer.effect(
-    SourceControlProviderRegistry.SourceControlProviderRegistry,
-    GitHubSourceControlProvider.make().pipe(
-      Effect.map((provider) =>
-        SourceControlProviderRegistry.SourceControlProviderRegistry.of({
-          get: () => Effect.succeed(provider),
-          resolveHandle: () => Effect.succeed({ provider, context: null }),
-          resolve: () => Effect.succeed(provider),
-          discover: Effect.succeed([]),
-        }),
-      ),
-      Effect.provide(Layer.succeed(GitHubCli, gitHubCli)),
-    ),
-  );
+  const sourceControlRegistryLayer = input?.sourceControlRegistry
+    ? Layer.succeed(
+        SourceControlProviderRegistry.SourceControlProviderRegistry,
+        SourceControlProviderRegistry.SourceControlProviderRegistry.of(input.sourceControlRegistry),
+      )
+    : Layer.effect(
+        SourceControlProviderRegistry.SourceControlProviderRegistry,
+        GitHubSourceControlProvider.make().pipe(
+          Effect.map((provider) => {
+            const context = input?.sourceControlContext ?? null;
+            const resolvedProvider = SourceControlProviderRegistry.bindProviderContext(
+              provider,
+              context,
+            );
+            return SourceControlProviderRegistry.SourceControlProviderRegistry.of({
+              get: () => Effect.succeed(provider),
+              resolveHandle: () =>
+                Effect.succeed({
+                  provider: resolvedProvider,
+                  context,
+                }),
+              resolve: () => Effect.succeed(resolvedProvider),
+              discover: Effect.succeed([]),
+            });
+          }),
+          Effect.provide(Layer.succeed(GitHubCli, gitHubCli)),
+        ),
+      );
 
   const managerLayer = Layer.mergeAll(
     Layer.succeed(TextGeneration, textGeneration),
@@ -912,6 +953,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         aheadCount: 0,
         behindCount: 0,
         aheadOfDefaultCount: 0,
+        behindOfDefaultCount: 0,
         pr: null,
       });
     }),
@@ -942,8 +984,48 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         aheadCount: 0,
         behindCount: 0,
         aheadOfDefaultCount: 0,
+        behindOfDefaultCount: 0,
         pr: null,
       });
+    }),
+  );
+
+  it.effect("status skips PR lookup when the source control provider is unknown", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-unknown-provider-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/unknown-provider"]);
+      let listChangeRequestCalls = 0;
+      const unknownProvider: SourceControlProviderShape = {
+        kind: "unknown",
+        listChangeRequests: () =>
+          Effect.sync(() => {
+            listChangeRequestCalls += 1;
+            return [];
+          }),
+        getChangeRequest: () => Effect.die("unexpected getChangeRequest"),
+        createChangeRequest: () => Effect.die("unexpected createChangeRequest"),
+        getRepositoryCloneUrls: () => Effect.die("unexpected getRepositoryCloneUrls"),
+        createRepository: () => Effect.die("unexpected createRepository"),
+        getDefaultBranch: () => Effect.die("unexpected getDefaultBranch"),
+        checkoutChangeRequest: () => Effect.die("unexpected checkoutChangeRequest"),
+      };
+      const { manager } = yield* makeManager({
+        sourceControlRegistry: {
+          get: () => Effect.succeed(unknownProvider),
+          resolveHandle: () => Effect.succeed({ provider: unknownProvider, context: null }),
+          resolve: () => Effect.succeed(unknownProvider),
+          discover: Effect.succeed([]),
+        },
+      });
+
+      const status = yield* manager.status({ cwd: repoDir });
+
+      expect(status.isRepo).toBe(true);
+      expect(status.hasPrimaryRemote).toBe(false);
+      expect(status.refName).toBe("feature/unknown-provider");
+      expect(status.pr).toBeNull();
+      expect(listChangeRequestCalls).toBe(0);
     }),
   );
 
@@ -1084,7 +1166,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           state: "open",
         });
         expect(ghCalls).toContain(
-          "pr list --head jasonLaster:statemachine --state all --limit 20 --json number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
+          "pr list --head jasonLaster:statemachine --state all --limit 20 --json number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isDraft,mergeable,mergeStateStatus,statusCheckRollup,isCrossRepository,headRepository,headRepositoryOwner",
         );
       }),
     20_000,
@@ -2241,6 +2323,90 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       ).toBe(true);
       expect(ghCalls.some((call) => call.startsWith("pr view "))).toBe(false);
     }),
+  );
+
+  it.effect(
+    "creates fork-clone PRs against origin even when the branch tracks upstream",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        const originDir = yield* createBareRemote();
+        const upstreamDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", originDir]);
+        yield* runGit(repoDir, ["remote", "add", "upstream", upstreamDir]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+        yield* runGit(repoDir, ["push", "upstream", "main"]);
+        yield* runGit(repoDir, ["checkout", "-b", "feature/fork-clone-pr"]);
+        fs.writeFileSync(path.join(repoDir, "fork-clone.txt"), "fork clone\n");
+        yield* runGit(repoDir, ["add", "fork-clone.txt"]);
+        yield* runGit(repoDir, ["commit", "-m", "Fork clone branch"]);
+        yield* runGit(repoDir, ["push", "-u", "upstream", "feature/fork-clone-pr"]);
+        yield* configureVisibleRemoteUrlWithLocalRewrite(
+          repoDir,
+          "origin",
+          "git@github.com:me/t3code.git",
+          originDir,
+        );
+        yield* configureVisibleRemoteUrlWithLocalRewrite(
+          repoDir,
+          "upstream",
+          "git@github.com:parent/t3code.git",
+          upstreamDir,
+        );
+
+        const { manager, ghCalls } = yield* makeManager({
+          sourceControlContext: {
+            provider: {
+              kind: "github",
+              name: "GitHub",
+              baseUrl: "https://github.com",
+            },
+            remoteName: "origin",
+            remoteUrl: "git@github.com:me/t3code.git",
+          },
+          ghScenario: {
+            prListSequence: [
+              "[]",
+              // @effect-diagnostics-next-line preferSchemaOverJson:off
+              JSON.stringify([
+                {
+                  number: 89,
+                  title: "Add fork-clone PR flow",
+                  url: "https://github.com/me/t3code/pull/89",
+                  baseRefName: "main",
+                  headRefName: "feature/fork-clone-pr",
+                  state: "OPEN",
+                },
+              ]),
+            ],
+          },
+        });
+
+        const result = yield* runStackedAction(manager, {
+          cwd: repoDir,
+          action: "create_pr",
+        });
+
+        expect(result.push.status).toBe("pushed");
+        expect(result.push.upstreamBranch).toBe("origin/feature/fork-clone-pr");
+        expect(result.pr.status).toBe("created");
+        expect(result.pr.number).toBe(89);
+        expect(
+          yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"]).pipe(
+            Effect.map((output) => output.stdout.trim()),
+          ),
+        ).toBe("origin/feature/fork-clone-pr");
+        const createCall = ghCalls.find((call) => call.startsWith("pr create"));
+        expect(createCall).toContain("--repo me/t3code");
+        expect(createCall).toContain("--base main");
+        expect(createCall).toContain("--head feature/fork-clone-pr");
+        expect(ghCalls.some((call) => call.includes("pr create --repo parent/t3code"))).toBe(false);
+        expect(ghCalls.some((call) => call.includes("--head parent:feature/fork-clone-pr"))).toBe(
+          false,
+        );
+      }),
+    20_000,
   );
 
   it.effect(

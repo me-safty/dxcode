@@ -37,6 +37,14 @@ it.effect("maps GitHub PR summaries into provider-neutral change requests", () =
           isCrossRepository: true,
           headRepositoryNameWithOwner: "fork/t3code",
           headRepositoryOwnerLogin: "fork",
+          mergeStatus: "mergeable",
+          checks: {
+            total: 1,
+            completed: 1,
+            successful: 1,
+            failed: 0,
+            pending: 0,
+          },
         }),
     });
 
@@ -57,6 +65,14 @@ it.effect("maps GitHub PR summaries into provider-neutral change requests", () =
       isCrossRepository: true,
       headRepositoryNameWithOwner: "fork/t3code",
       headRepositoryOwnerLogin: "fork",
+      mergeStatus: "mergeable",
+      checks: {
+        total: 1,
+        completed: 1,
+        successful: 1,
+        failed: 0,
+        pending: 0,
+      },
     });
   }),
 );
@@ -102,7 +118,7 @@ it.effect("uses gh json listing for non-open change request state queries", () =
       "--limit",
       "10",
       "--json",
-      "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
+      "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isDraft,mergeable,mergeStateStatus,statusCheckRollup,isCrossRepository,headRepository,headRepositoryOwner",
     ]);
     assert.strictEqual(changeRequests[0]?.provider, "github");
     assert.strictEqual(changeRequests[0]?.state, "merged");
@@ -130,6 +146,41 @@ it.effect("treats empty non-open change request listing output as no results", (
   }),
 );
 
+it.effect("lists GitHub PRs against the repository from the selected remote context", () =>
+  Effect.gen(function* () {
+    let listInput: Parameters<GitHubCli.GitHubCliShape["listOpenPullRequests"]>[0] | null = null;
+    const provider = yield* makeProvider({
+      listOpenPullRequests: (input) => {
+        listInput = input;
+        return Effect.succeed([]);
+      },
+    });
+
+    yield* provider.listChangeRequests({
+      cwd: "/repo",
+      context: {
+        provider: {
+          kind: "github",
+          name: "GitHub",
+          baseUrl: "https://github.com",
+        },
+        remoteName: "origin",
+        remoteUrl: "git@github.com:Bl4ckBl1zZ/t3code.git",
+      },
+      headSelector: "t3code/b1853599",
+      state: "open",
+      limit: 1,
+    });
+
+    assert.deepStrictEqual(listInput, {
+      cwd: "/repo",
+      repository: "Bl4ckBl1zZ/t3code",
+      headSelector: "t3code/b1853599",
+      limit: 1,
+    });
+  }),
+);
+
 it.effect("creates GitHub PRs through provider-neutral input names", () =>
   Effect.gen(function* () {
     let createInput: Parameters<GitHubCli.GitHubCliShape["createPullRequest"]>[0] | null = null;
@@ -152,6 +203,44 @@ it.effect("creates GitHub PRs through provider-neutral input names", () =>
       cwd: "/repo",
       baseBranch: "main",
       headSelector: "owner:feature/provider",
+      title: "Provider PR",
+      bodyFile: "/tmp/body.md",
+    });
+  }),
+);
+
+it.effect("creates GitHub PRs against the repository from the selected remote context", () =>
+  Effect.gen(function* () {
+    let createInput: Parameters<GitHubCli.GitHubCliShape["createPullRequest"]>[0] | null = null;
+    const provider = yield* makeProvider({
+      createPullRequest: (input) => {
+        createInput = input;
+        return Effect.void;
+      },
+    });
+
+    yield* provider.createChangeRequest({
+      cwd: "/repo",
+      context: {
+        provider: {
+          kind: "github",
+          name: "GitHub",
+          baseUrl: "https://github.com",
+        },
+        remoteName: "origin",
+        remoteUrl: "https://github.com/Bl4ckBl1zZ/t3code.git",
+      },
+      baseRefName: "main",
+      headSelector: "t3code/b1853599",
+      title: "Provider PR",
+      bodyFile: "/tmp/body.md",
+    });
+
+    assert.deepStrictEqual(createInput, {
+      cwd: "/repo",
+      repository: "Bl4ckBl1zZ/t3code",
+      baseBranch: "main",
+      headSelector: "t3code/b1853599",
       title: "Provider PR",
       bodyFile: "/tmp/body.md",
     });

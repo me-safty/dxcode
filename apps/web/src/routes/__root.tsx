@@ -58,6 +58,7 @@ import { configureClientTracing } from "../observability/clientTracing";
 import {
   ensurePrimaryEnvironmentReady,
   getPrimaryKnownEnvironment,
+  isBrowserAgentSidebarMode,
   resolveInitialServerAuthGateState,
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
@@ -67,7 +68,9 @@ export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
   beforeLoad: async ({ location }) => {
-    if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
+    const currentUrl = new URL(window.location.href);
+
+    if (location.pathname === "/pair" && hasHostedPairingRequest(currentUrl)) {
       return {
         authGateState: {
           status: "hosted-pairing",
@@ -75,7 +78,7 @@ export const Route = createRootRouteWithContext<{
       };
     }
 
-    if (isHostedStaticApp(new URL(window.location.href))) {
+    if (isHostedStaticApp(currentUrl)) {
       await waitForSavedEnvironmentRegistryHydration();
       return {
         authGateState: {
@@ -114,7 +117,13 @@ function RootRouteView() {
   }, [pathname]);
 
   if (pathname === "/pair") {
-    return <Outlet />;
+    return (
+      <ToastProvider>
+        <AnchoredToastProvider>
+          <Outlet />
+        </AnchoredToastProvider>
+      </ToastProvider>
+    );
   }
 
   if (authGateState.status !== "authenticated" && authGateState.status !== "hosted-static") {
@@ -137,6 +146,7 @@ function RootRouteView() {
         <EnvironmentConnectionManagerBootstrap />
         <SshPasswordPromptDialog />
         <HostedStaticEnvironmentBootstrap />
+        <BrowserAgentSidebarEscapeRelay />
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
         {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
         {primaryEnvironmentAuthenticated ? <WebSocketConnectionCoordinator /> : null}
@@ -149,6 +159,29 @@ function RootRouteView() {
       </AnchoredToastProvider>
     </ToastProvider>
   );
+}
+
+function BrowserAgentSidebarEscapeRelay() {
+  useEffect(() => {
+    if (!isBrowserAgentSidebarMode() || window.parent === window) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      window.parent.postMessage({ type: "t3code.browserAgent.cancelAnnotation" }, "*");
+    };
+
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, { capture: true });
+    };
+  }, []);
+
+  return null;
 }
 
 function HostedStaticEnvironmentBootstrap() {

@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
  * Client-side id for the first shell opened on a thread. Ids are uniformly
@@ -90,8 +90,34 @@ export const TerminalCloseInput = Schema.Struct({
 });
 export type TerminalCloseInput = typeof TerminalCloseInput.Type;
 
+export const TerminalDetectWebServersInput = TerminalSessionInput;
+export type TerminalDetectWebServersInput = Schema.Codec.Encoded<
+  typeof TerminalDetectWebServersInput
+>;
+
+export const TerminalDetectedWebServer = Schema.Struct({
+  url: Schema.String.check(Schema.isNonEmpty()),
+  host: Schema.String.check(Schema.isNonEmpty()),
+  port: Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(65_535)),
+  pid: Schema.Int.check(Schema.isGreaterThan(0)),
+  verified: Schema.Boolean,
+  source: Schema.Literal("listening-port"),
+});
+export type TerminalDetectedWebServer = typeof TerminalDetectedWebServer.Type;
+
+export const TerminalDetectWebServersResult = Schema.Struct({
+  servers: Schema.Array(TerminalDetectedWebServer),
+});
+export type TerminalDetectWebServersResult = typeof TerminalDetectWebServersResult.Type;
+
 export const TerminalSessionStatus = Schema.Literals(["starting", "running", "exited", "error"]);
 export type TerminalSessionStatus = typeof TerminalSessionStatus.Type;
+
+export const TerminalProjectScriptContext = Schema.Struct({
+  projectId: ProjectId,
+  scriptId: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(128)),
+});
+export type TerminalProjectScriptContext = typeof TerminalProjectScriptContext.Type;
 
 export const TerminalSessionSnapshot = Schema.Struct({
   threadId: Schema.String.check(Schema.isNonEmpty()),
@@ -120,6 +146,7 @@ export const TerminalSummary = Schema.Struct({
   exitCode: Schema.NullOr(Schema.Int),
   exitSignal: Schema.NullOr(Schema.Int),
   hasRunningSubprocess: Schema.Boolean,
+  projectScript: Schema.optional(TerminalProjectScriptContext),
   /** Server-computed display title (idle shell vs subprocess command). */
   label: Schema.String.check(Schema.isMaxLength(128)),
   updatedAt: Schema.String,

@@ -74,11 +74,13 @@ export interface WsRpcClient {
     readonly clear: RpcUnaryMethod<typeof WS_METHODS.terminalClear>;
     readonly restart: RpcUnaryMethod<typeof WS_METHODS.terminalRestart>;
     readonly close: RpcUnaryMethod<typeof WS_METHODS.terminalClose>;
+    readonly detectWebServers: RpcUnaryMethod<typeof WS_METHODS.terminalDetectWebServers>;
     readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
     readonly onMetadata: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalMetadata>;
   };
   readonly projects: {
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
+    readonly readFile: RpcUnaryMethod<typeof WS_METHODS.projectsReadFile>;
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
   };
   readonly filesystem: {
@@ -97,6 +99,7 @@ export interface WsRpcClient {
   };
   readonly vcs: {
     readonly pull: RpcUnaryMethod<typeof WS_METHODS.vcsPull>;
+    readonly syncBase: RpcUnaryMethod<typeof WS_METHODS.vcsSyncBase>;
     readonly refreshStatus: RpcUnaryMethod<typeof WS_METHODS.vcsRefreshStatus>;
     readonly onStatus: (
       input: RpcInput<typeof WS_METHODS.subscribeVcsStatus>,
@@ -122,6 +125,15 @@ export interface WsRpcClient {
   };
   readonly review: {
     readonly getDiffPreview: RpcUnaryMethod<typeof WS_METHODS.reviewGetDiffPreview>;
+    readonly listPullRequestComments: RpcUnaryMethod<
+      typeof WS_METHODS.reviewListPullRequestComments
+    >;
+  };
+  readonly browserAgents: {
+    readonly list: RpcUnaryNoArgMethod<typeof WS_METHODS.browserAgentsList>;
+    readonly openOrFocusPreview: RpcUnaryMethod<typeof WS_METHODS.browserAgentsOpenOrFocusPreview>;
+    readonly activateAnnotation: RpcUnaryMethod<typeof WS_METHODS.browserAgentsActivateAnnotation>;
+    readonly subscribe: RpcStreamMethod<typeof WS_METHODS.subscribeBrowserAgents>;
   };
   readonly server: {
     readonly getConfig: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetConfig>;
@@ -149,6 +161,7 @@ export interface WsRpcClient {
       typeof WS_METHODS.serverGetProcessResourceHistory
     >;
     readonly signalProcess: RpcUnaryMethod<typeof WS_METHODS.serverSignalProcess>;
+    readonly transcribeAudio: RpcUnaryMethod<typeof WS_METHODS.serverTranscribeAudio>;
   };
   readonly orchestration: {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
@@ -191,6 +204,8 @@ export function createWsRpcClient(
       clear: (input) => transport.request((client) => client[WS_METHODS.terminalClear](input)),
       restart: (input) => transport.request((client) => client[WS_METHODS.terminalRestart](input)),
       close: (input) => transport.request((client) => client[WS_METHODS.terminalClose](input)),
+      detectWebServers: (input) =>
+        transport.request((client) => client[WS_METHODS.terminalDetectWebServers](input)),
       onEvent: (listener, options) =>
         transport.subscribe(
           (client) => client[WS_METHODS.subscribeTerminalEvents]({}),
@@ -207,6 +222,8 @@ export function createWsRpcClient(
     projects: {
       searchEntries: (input) =>
         transport.request((client) => client[WS_METHODS.projectsSearchEntries](input)),
+      readFile: (input) =>
+        transport.request((client) => client[WS_METHODS.projectsReadFile](input)),
       writeFile: (input) =>
         transport.request((client) => client[WS_METHODS.projectsWriteFile](input)),
     },
@@ -227,6 +244,7 @@ export function createWsRpcClient(
     },
     vcs: {
       pull: (input) => transport.request((client) => client[WS_METHODS.vcsPull](input)),
+      syncBase: (input) => transport.request((client) => client[WS_METHODS.vcsSyncBase](input)),
       refreshStatus: (input) =>
         transport.request((client) => client[WS_METHODS.vcsRefreshStatus](input)),
       onStatus: (input, listener, options) => {
@@ -277,6 +295,21 @@ export function createWsRpcClient(
     review: {
       getDiffPreview: (input) =>
         transport.request((client) => client[WS_METHODS.reviewGetDiffPreview](input)),
+      listPullRequestComments: (input) =>
+        transport.request((client) => client[WS_METHODS.reviewListPullRequestComments](input)),
+    },
+    browserAgents: {
+      list: () => transport.request((client) => client[WS_METHODS.browserAgentsList]({})),
+      openOrFocusPreview: (input) =>
+        transport.request((client) => client[WS_METHODS.browserAgentsOpenOrFocusPreview](input)),
+      activateAnnotation: (input) =>
+        transport.request((client) => client[WS_METHODS.browserAgentsActivateAnnotation](input)),
+      subscribe: (listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeBrowserAgents]({}),
+          listener,
+          subscriptionOptions(options, WS_METHODS.subscribeBrowserAgents),
+        ),
     },
     server: {
       getConfig: () => transport.request((client) => client[WS_METHODS.serverGetConfig]({})),
@@ -319,6 +352,8 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.serverGetProcessResourceHistory](input)),
       signalProcess: (input) =>
         transport.request((client) => client[WS_METHODS.serverSignalProcess](input)),
+      transcribeAudio: (input) =>
+        transport.request((client) => client[WS_METHODS.serverTranscribeAudio](input)),
     },
     orchestration: {
       dispatchCommand: (input) =>

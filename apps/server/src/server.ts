@@ -5,6 +5,9 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import { ServerConfig } from "./config.ts";
 import {
   attachmentsRouteLayer,
+  audioTranscriptionRouteLayer,
+  browserAgentAutoPairRouteLayer,
+  browserAgentExtensionDownloadRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
@@ -13,6 +16,7 @@ import {
 } from "./http.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
+import { browserAgentRouteLayer } from "./browserAgents/ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
@@ -71,6 +75,7 @@ import {
   authPairingLinksRevokeRouteLayer,
   authPairingLinksRouteLayer,
   authPairingCredentialRouteLayer,
+  authSessionBearerTokenRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
 } from "./auth/http.ts";
@@ -79,6 +84,7 @@ import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
+import { layer as ProcessRunnerLive } from "./processRunner.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -202,6 +208,8 @@ const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.l
 
 const ReviewLayerLive = ReviewService.layer.pipe(
   Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(SourceControlProviderRegistryLayerLive),
+  Layer.provideMerge(GitHubCli.layer),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
 );
 
@@ -281,6 +289,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLive),
   Layer.provideMerge(RepositoryIdentityResolverLive),
+  Layer.provideMerge(ProcessRunnerLive),
   Layer.provideMerge(ServerEnvironmentLive),
   Layer.provideMerge(AuthLayerLive),
 );
@@ -309,15 +318,20 @@ export const makeRoutesLayer = Layer.mergeAll(
   authPairingLinksRevokeRouteLayer,
   authPairingLinksRouteLayer,
   authPairingCredentialRouteLayer,
+  authSessionBearerTokenRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
+  audioTranscriptionRouteLayer,
   attachmentsRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
+  browserAgentAutoPairRouteLayer,
+  browserAgentExtensionDownloadRouteLayer,
   staticAndDevRouteLayer,
+  browserAgentRouteLayer,
   websocketRpcRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));
 

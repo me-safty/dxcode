@@ -16,15 +16,26 @@ type TestWindow = {
   history: {
     replaceState: (_data: unknown, _unused: string, url: string) => void;
   };
+  sessionStorage: {
+    getItem: (key: string) => string | null;
+    setItem: (key: string, value: string) => void;
+  };
   desktopBridge?: DesktopBridge;
 };
 
 function installTestBrowser(url: string) {
+  const sessionStorage = new Map<string, string>();
   const testWindow: TestWindow = {
     location: new URL(url),
     history: {
       replaceState: (_data, _unused, nextUrl) => {
         testWindow.location = new URL(nextUrl, testWindow.location.href);
+      },
+    },
+    sessionStorage: {
+      getItem: (key) => sessionStorage.get(key) ?? null,
+      setItem: (key, value) => {
+        sessionStorage.set(key, value);
       },
     },
   };
@@ -239,6 +250,147 @@ describe("resolveInitialServerAuthGateState", () => {
         bootstrapMethods: ["one-time-token"],
         sessionMethods: ["browser-session-cookie"],
         sessionCookieName: "t3_session",
+      },
+    });
+  });
+
+  it("uses a browser transfer pairing token before route redirects can drop it", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        sessionResponse({
+          authenticated: false,
+          auth: {
+            policy: "loopback-browser",
+            bootstrapMethods: ["one-time-token"],
+            sessionMethods: ["browser-session-cookie"],
+            sessionCookieName: "t3_session",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          authenticated: true,
+          sessionMethod: "browser-session-cookie",
+          expiresAt: "2026-04-05T00:00:00.000Z",
+        }),
+      )
+      .mockResolvedValueOnce(
+        sessionResponse({
+          authenticated: true,
+          auth: {
+            policy: "loopback-browser",
+            bootstrapMethods: ["one-time-token"],
+            sessionMethods: ["browser-session-cookie"],
+            sessionCookieName: "t3_session",
+          },
+          sessionMethod: "browser-session-cookie",
+          expiresAt: "2026-04-05T00:00:00.000Z",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const testWindow = installTestBrowser(
+      "http://localhost/_chat/environment-1/thread-1?t3BrowserTransfer=1#token=pairing-token",
+    );
+
+    const { resolveInitialServerAuthGateState } = await import("./environments/primary");
+
+    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
+      status: "authenticated",
+    });
+    expect(testWindow.location.hash).toBe("");
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost/api/auth/bootstrap", {
+      body: JSON.stringify({ credential: "pairing-token" }),
+      credentials: "include",
+      headers: {
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+  });
+
+  it("accepts same-session bearer tokens for browser-agent sidebar chat frames", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      sessionResponse({
+        authenticated: true,
+        auth: {
+          policy: "loopback-browser",
+          bootstrapMethods: ["one-time-token"],
+          sessionMethods: ["browser-session-cookie", "bearer-session-token"],
+          sessionCookieName: "t3_session",
+        },
+        role: "client",
+        sessionMethod: "bearer-session-token",
+        expiresAt: "2026-04-05T00:00:00.000Z",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const testWindow = installTestBrowser(
+      "http://localhost/environment-1/thread-1?browserAgentSidebar=1#token=sidebar-session-token",
+    );
+
+    const { readPrimaryBrowserAgentSidebarSessionToken, resolveInitialServerAuthGateState } =
+      await import("./environments/primary");
+
+    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
+      status: "authenticated",
+    });
+    expect(testWindow.location.hash).toBe("");
+    expect(readPrimaryBrowserAgentSidebarSessionToken()).toBe("sidebar-session-token");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost/api/auth/session", {
+      credentials: "include",
+      headers: {
+        authorization: "Bearer sidebar-session-token",
+      },
+    });
+  });
+
+  it("prioritizes browser-agent sidebar bearer tokens over existing cookie sessions", async () => {
+    const auth = {
+      policy: "loopback-browser",
+      bootstrapMethods: ["one-time-token"],
+      sessionMethods: ["browser-session-cookie", "bearer-session-token"],
+      sessionCookieName: "t3_session",
+    } as const;
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+      const headers = init?.headers as Record<string, string> | undefined;
+      if (headers?.authorization === "Bearer sidebar-session-token") {
+        return sessionResponse({
+          authenticated: true,
+          auth,
+          role: "client",
+          sessionMethod: "bearer-session-token",
+          expiresAt: "2026-04-05T00:00:00.000Z",
+        });
+      }
+
+      return sessionResponse({
+        authenticated: true,
+        auth,
+        role: "owner",
+        sessionMethod: "browser-session-cookie",
+        expiresAt: "2026-04-05T00:00:00.000Z",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const testWindow = installTestBrowser(
+      "http://localhost/environment-1/thread-1?browserAgentSidebar=1#token=sidebar-session-token",
+    );
+
+    const { readPrimaryBrowserAgentSidebarSessionToken, resolveInitialServerAuthGateState } =
+      await import("./environments/primary");
+
+    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
+      status: "authenticated",
+    });
+    expect(testWindow.location.hash).toBe("");
+    expect(readPrimaryBrowserAgentSidebarSessionToken()).toBe("sidebar-session-token");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost/api/auth/session", {
+      credentials: "include",
+      headers: {
+        authorization: "Bearer sidebar-session-token",
       },
     });
   });
@@ -517,6 +669,33 @@ describe("resolveInitialServerAuthGateState", () => {
       headers: {
         "content-type": "application/json",
       },
+      method: "POST",
+    });
+  });
+
+  it("creates a same-session bearer token from the authenticated auth endpoint", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      jsonResponse({
+        authenticated: true,
+        role: "client",
+        sessionMethod: "bearer-session-token",
+        sessionToken: "session-token",
+        expiresAt: "2026-04-05T00:00:00.000Z",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { createServerSessionBearerToken } = await import("./environments/primary");
+
+    await expect(createServerSessionBearerToken()).resolves.toEqual({
+      authenticated: true,
+      role: "client",
+      sessionMethod: "bearer-session-token",
+      sessionToken: "session-token",
+      expiresAt: "2026-04-05T00:00:00.000Z",
+    });
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost/api/auth/session/bearer-token", {
+      credentials: "include",
       method: "POST",
     });
   });

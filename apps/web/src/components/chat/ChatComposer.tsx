@@ -84,11 +84,14 @@ import { toastManager } from "../ui/toast";
 import {
   BotIcon,
   CircleAlertIcon,
+  LoaderCircleIcon,
   ListTodoIcon,
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
+  MicIcon,
   PenLineIcon,
+  SquareIcon,
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -108,6 +111,20 @@ import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { ensureLocalApi } from "../../localApi";
+import {
+  appendTranscriptionToPrompt,
+  audioMimeTypeToTranscriptionFormat,
+  blobToBase64,
+  MAX_AUDIO_TRANSCRIPTION_BYTES,
+  MAX_AUDIO_TRANSCRIPTION_SIZE_LABEL,
+} from "../../audioTranscription";
+import {
+  type BrowserAudioRecorder,
+  createAudioRecorder,
+  getAudioRecordingUnavailableReason,
+  isAudioRecordingSupported,
+} from "../../audioRecording";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -297,6 +314,9 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isConnecting: boolean;
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
+  allowSendWhileRunning: boolean;
+  runningSendLabel: string;
+  runningSendAriaLabel: string;
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
@@ -319,6 +339,9 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
+        allowSendWhileRunning={props.allowSendWhileRunning}
+        runningSendLabel={props.runningSendLabel}
+        runningSendAriaLabel={props.runningSendAriaLabel}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
@@ -796,6 +819,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const [voiceTranscriptionState, setVoiceTranscriptionState] = useState<
+    "idle" | "recording" | "transcribing"
+  >("idle");
   const isMobileViewport = useMediaQuery("max-sm");
   const isComposerCollapsedMobile = isMobileViewport && !isComposerFocused;
 
@@ -815,6 +841,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
   const mobileComposerExpandInFlightRef = useRef(false);
   const dragDepthRef = useRef(0);
+  const voiceRecorderRef = useRef<BrowserAudioRecorder | null>(null);
+  const voiceRecorderStreamRef = useRef<MediaStream | null>(null);
 
   // ------------------------------------------------------------------
   // Derived: composer send state
@@ -948,15 +976,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (showPlanFollowUpPrompt && activeProposedPlan !== null);
   const showCollapsedMobilePromptRow =
     isComposerCollapsedMobile && !isComposerApprovalState && pendingUserInputs.length === 0;
+  const canSubmitWhileRunning =
+    phase === "running" &&
+    !isComposerApprovalState &&
+    pendingUserInputs.length === 0 &&
+    composerSendState.hasSendableContent;
+  const runningSendLabel = settings.runningMessageDeliveryMode === "queue" ? "Queue" : "Send";
+  const runningSendAriaLabel =
+    settings.runningMessageDeliveryMode === "queue"
+      ? "Queue message for next turn"
+      : "Send message to running agent";
 
-  const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
+  const composerFooterHasWideActions =
+    showPlanFollowUpPrompt || activePendingProgress !== null || canSubmitWhileRunning;
   const showPlanSidebarToggle = Boolean(activePlan || sidebarProposedPlan || planSidebarOpen);
   const composerFooterActionLayoutKey = useMemo(() => {
     if (activePendingProgress) {
       return `pending:${activePendingProgress.questionIndex}:${activePendingProgress.isLastQuestion}:${activePendingIsResponding}`;
     }
     if (phase === "running") {
-      return "running";
+      return `running:${settings.runningMessageDeliveryMode}:${composerSendState.hasSendableContent}:${isSendBusy}:${isConnecting}`;
     }
     if (showPlanFollowUpPrompt) {
       return prompt.trim().length > 0 ? "plan:refine" : "plan:implement";
@@ -971,6 +1010,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isSendBusy,
     phase,
     prompt,
+    settings.runningMessageDeliveryMode,
     showPlanFollowUpPrompt,
   ]);
 
@@ -1039,11 +1079,43 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : null,
     [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
   );
-  const collapsedComposerPrimaryActionDisabled =
-    phase === "running" || isSendBusy || isConnecting || !composerSendState.hasSendableContent;
-  const collapsedComposerPrimaryActionLabel = "Send message";
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
+  const openRouterAudioTranscriptionSettings = settings.openRouter.audioTranscription;
+  const hasOpenRouterAudioTranscriptionApiKey =
+    openRouterAudioTranscriptionSettings.apiKey.trim().length > 0 ||
+    openRouterAudioTranscriptionSettings.apiKeyRedacted;
+  const audioRecordingUnavailableReason = getAudioRecordingUnavailableReason();
+  const voiceTranscriptionDisabledReason = !hasOpenRouterAudioTranscriptionApiKey
+    ? "Set an OpenRouter API key in Settings > Connections"
+    : isComposerApprovalState
+      ? "Resolve the approval request before dictating"
+      : isConnecting
+        ? "Wait for the backend connection"
+        : environmentUnavailable !== null && activePendingProgress === null
+          ? `${environmentUnavailable.label} is disconnected`
+          : audioRecordingUnavailableReason;
+  const isVoiceTranscriptionButtonDisabled =
+    voiceTranscriptionState === "recording"
+      ? false
+      : voiceTranscriptionState === "transcribing" || voiceTranscriptionDisabledReason !== null;
+  const voiceTranscriptionButtonLabel =
+    voiceTranscriptionState === "recording"
+      ? "Stop voice recording"
+      : voiceTranscriptionState === "transcribing"
+        ? "Transcribing voice"
+        : "Record voice";
+  const collapsedComposerPrimaryActionIsVoice =
+    showCollapsedMobilePromptRow && phase !== "running" && !composerSendState.hasSendableContent;
+  const collapsedComposerPrimaryActionDisabled = collapsedComposerPrimaryActionIsVoice
+    ? isVoiceTranscriptionButtonDisabled
+    : (phase === "running" && !canSubmitWhileRunning) ||
+      isSendBusy ||
+      isConnecting ||
+      !composerSendState.hasSendableContent;
+  const collapsedComposerPrimaryActionLabel = collapsedComposerPrimaryActionIsVoice
+    ? voiceTranscriptionButtonLabel
+    : "Send message";
 
   // ------------------------------------------------------------------
   // Prompt helpers
@@ -1053,6 +1125,40 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setComposerDraftPrompt(composerDraftTarget, nextPrompt);
     },
     [composerDraftTarget, setComposerDraftPrompt],
+  );
+
+  const commitPromptText = useCallback(
+    (nextPrompt: string, options?: { focusAtEnd?: boolean }) => {
+      const nextCursor = collapseExpandedComposerCursor(nextPrompt, nextPrompt.length);
+      const nextExpandedCursor = expandCollapsedComposerCursor(nextPrompt, nextCursor);
+      promptRef.current = nextPrompt;
+      const activePendingQuestion = activePendingProgress?.activeQuestion;
+      if (activePendingQuestion && activePendingUserInput) {
+        onChangeActivePendingUserInputCustomAnswer(
+          activePendingQuestion.id,
+          nextPrompt,
+          nextCursor,
+          nextExpandedCursor,
+          false,
+        );
+      } else {
+        setPrompt(nextPrompt);
+      }
+      setComposerCursor(nextCursor);
+      setComposerTrigger(detectComposerTrigger(nextPrompt, nextExpandedCursor));
+      if (options?.focusAtEnd) {
+        window.requestAnimationFrame(() => {
+          composerEditorRef.current?.focusAt(nextCursor);
+        });
+      }
+    },
+    [
+      activePendingProgress?.activeQuestion,
+      activePendingUserInput,
+      onChangeActivePendingUserInputCustomAnswer,
+      promptRef,
+      setPrompt,
+    ],
   );
 
   const addComposerImage = useCallback(
@@ -1589,7 +1695,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const shouldBlurMobileComposerOnSubmit = useCallback(() => {
     if (!isMobileViewport) return false;
-    if (isSendBusy || isConnecting || phase === "running") return false;
+    if (isSendBusy || isConnecting) return false;
+    if (phase === "running") return canSubmitWhileRunning;
     if (activePendingProgress) {
       return activePendingProgress.isLastQuestion && Boolean(activePendingResolvedAnswers);
     }
@@ -1597,6 +1704,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [
     activePendingProgress,
     activePendingResolvedAnswers,
+    canSubmitWhileRunning,
     composerSendState.hasSendableContent,
     isConnecting,
     isMobileViewport,
@@ -1614,6 +1722,130 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     [blurMobileComposerAfterSend, onSend, shouldBlurMobileComposerOnSubmit],
   );
+
+  const stopVoiceRecorderTracks = useCallback(() => {
+    voiceRecorderStreamRef.current?.getTracks().forEach((track) => track.stop());
+    voiceRecorderStreamRef.current = null;
+  }, []);
+
+  const finishVoiceRecording = useCallback(
+    async (blob: Blob) => {
+      stopVoiceRecorderTracks();
+      voiceRecorderRef.current = null;
+
+      if (blob.size === 0) {
+        setVoiceTranscriptionState("idle");
+        toastManager.add({
+          type: "error",
+          title: "No audio captured",
+          description: "Try recording again.",
+        });
+        return;
+      }
+      if (blob.size > MAX_AUDIO_TRANSCRIPTION_BYTES) {
+        setVoiceTranscriptionState("idle");
+        toastManager.add({
+          type: "error",
+          title: "Recording is too large",
+          description: `Recordings must be ${MAX_AUDIO_TRANSCRIPTION_SIZE_LABEL} or smaller.`,
+        });
+        return;
+      }
+
+      setVoiceTranscriptionState("transcribing");
+      try {
+        const snapshot = readComposerSnapshot();
+        const result = await ensureLocalApi().server.transcribeAudio({
+          audioBase64: await blobToBase64(blob),
+          existingText: snapshot.value,
+          format: audioMimeTypeToTranscriptionFormat(blob.type),
+          mimeType: blob.type,
+        });
+        const nextPrompt = appendTranscriptionToPrompt(snapshot.value, result.text);
+        commitPromptText(nextPrompt, { focusAtEnd: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Audio transcription failed.";
+        toastManager.add({
+          type: "error",
+          title: "Could not transcribe audio",
+          description: message,
+        });
+      } finally {
+        setVoiceTranscriptionState("idle");
+      }
+    },
+    [commitPromptText, readComposerSnapshot, stopVoiceRecorderTracks],
+  );
+
+  const stopVoiceRecording = useCallback(() => {
+    const recorder = voiceRecorderRef.current;
+    if (!recorder) {
+      return;
+    }
+    setVoiceTranscriptionState("transcribing");
+    void recorder.stop().then(finishVoiceRecording, (error: unknown) => {
+      stopVoiceRecorderTracks();
+      voiceRecorderRef.current = null;
+      setVoiceTranscriptionState("idle");
+      toastManager.add({
+        type: "error",
+        title: "Voice recording stopped",
+        description:
+          error instanceof Error
+            ? error.message
+            : "The browser could not continue recording from the microphone.",
+      });
+    });
+  }, [finishVoiceRecording, stopVoiceRecorderTracks]);
+
+  const startVoiceRecording = useCallback(async () => {
+    if (!isAudioRecordingSupported()) {
+      toastManager.add({
+        type: "error",
+        title: "Voice recording is unavailable",
+        description:
+          getAudioRecordingUnavailableReason() ??
+          "Your browser does not expose a compatible microphone recorder.",
+      });
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+      voiceRecorderStreamRef.current = stream;
+      const recorder = await createAudioRecorder(stream);
+      voiceRecorderRef.current = recorder;
+
+      recorder.start();
+      setVoiceTranscriptionState("recording");
+    } catch (error) {
+      stopVoiceRecorderTracks();
+      const message = error instanceof Error ? error.message : "Microphone access was denied.";
+      toastManager.add({
+        type: "error",
+        title: "Could not start voice recording",
+        description: message,
+      });
+      setVoiceTranscriptionState("idle");
+    }
+  }, [stopVoiceRecorderTracks]);
+
+  const handleVoiceTranscriptionClick = useCallback(() => {
+    if (voiceTranscriptionState === "recording") {
+      stopVoiceRecording();
+      return;
+    }
+    if (voiceTranscriptionState === "transcribing") {
+      return;
+    }
+    void startVoiceRecording();
+  }, [startVoiceRecording, stopVoiceRecording, voiceTranscriptionState]);
+
   const expandMobileComposer = useCallback(() => {
     if (composerBlurFrameRef.current !== null) {
       window.cancelAnimationFrame(composerBlurFrameRef.current);
@@ -1810,6 +2042,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   useEffect(() => {
     return () => {
+      const recorder = voiceRecorderRef.current;
+      if (recorder) {
+        recorder.cancel();
+      }
+      stopVoiceRecorderTracks();
       if (composerBlurFrameRef.current !== null) {
         window.cancelAnimationFrame(composerBlurFrameRef.current);
       }
@@ -1820,7 +2057,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         window.cancelAnimationFrame(mobileComposerExpandReleaseFrameRef.current);
       }
     };
-  }, []);
+  }, [stopVoiceRecorderTracks]);
 
   // ------------------------------------------------------------------
   // Imperative handle
@@ -2101,24 +2338,43 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               </button>
               <button
                 type="button"
-                className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/90 text-primary-foreground disabled:opacity-30"
+                className={cn(
+                  "flex size-8 shrink-0 items-center justify-center rounded-full text-primary-foreground disabled:opacity-30",
+                  collapsedComposerPrimaryActionIsVoice && voiceTranscriptionState === "recording"
+                    ? "bg-rose-500/90"
+                    : "bg-primary/90",
+                )}
                 disabled={collapsedComposerPrimaryActionDisabled}
                 aria-label={collapsedComposerPrimaryActionLabel}
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
+                  if (collapsedComposerPrimaryActionIsVoice) {
+                    handleVoiceTranscriptionClick();
+                    return;
+                  }
                   submitComposer();
                 }}
               >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <path
-                    d="M8 3L8 13M8 3L4 7M8 3L12 7"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
+                {collapsedComposerPrimaryActionIsVoice ? (
+                  voiceTranscriptionState === "transcribing" ? (
+                    <LoaderCircleIcon className="size-4 animate-spin" />
+                  ) : voiceTranscriptionState === "recording" ? (
+                    <SquareIcon className="size-3.5 fill-current" />
+                  ) : (
+                    <MicIcon className="size-4" />
+                  )
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path
+                      d="M8 3L8 13M8 3L4 7M8 3L12 7"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
               </button>
             </div>
           ) : null}
@@ -2374,6 +2630,43 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
               >
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span className="inline-flex">
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant={
+                            voiceTranscriptionState === "recording" ? "destructive" : "ghost"
+                          }
+                          className={cn(
+                            "rounded-full text-muted-foreground hover:text-foreground",
+                            voiceTranscriptionState === "recording" &&
+                              "text-white hover:text-white",
+                          )}
+                          disabled={isVoiceTranscriptionButtonDisabled}
+                          aria-label={voiceTranscriptionButtonLabel}
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                          }}
+                          onClick={handleVoiceTranscriptionClick}
+                        >
+                          {voiceTranscriptionState === "transcribing" ? (
+                            <LoaderCircleIcon className="size-4 animate-spin" />
+                          ) : voiceTranscriptionState === "recording" ? (
+                            <SquareIcon className="size-3.5 fill-current" />
+                          ) : (
+                            <MicIcon className="size-4" />
+                          )}
+                        </Button>
+                      </span>
+                    }
+                  />
+                  <TooltipPopup side="top" align="end">
+                    {voiceTranscriptionDisabledReason ?? voiceTranscriptionButtonLabel}
+                  </TooltipPopup>
+                </Tooltip>
                 <ComposerFooterPrimaryActions
                   compact={isComposerPrimaryActionsCompact}
                   activeContextWindow={activeContextWindow}
@@ -2386,6 +2679,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   isEnvironmentUnavailable={environmentUnavailable !== null}
                   isPreparingWorktree={isPreparingWorktree}
                   hasSendableContent={composerSendState.hasSendableContent}
+                  allowSendWhileRunning={canSubmitWhileRunning}
+                  runningSendLabel={runningSendLabel}
+                  runningSendAriaLabel={runningSendAriaLabel}
                   preserveComposerFocusOnPointerDown={isMobileViewport}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                   onInterrupt={handleInterruptPrimaryAction}

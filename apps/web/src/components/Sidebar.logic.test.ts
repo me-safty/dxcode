@@ -2,8 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderDriverKind } from "@t3tools/contracts";
 
 import {
+  buildSidebarProjectFolderEntries,
   createThreadJumpHintVisibilityController,
+  findSidebarProjectFolderForProject,
+  getSidebarTopLevelThreadId,
   getSidebarThreadIdsToPrewarm,
+  getSidebarProjectPhysicalKeys,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
@@ -11,7 +15,10 @@ import {
   getProjectSortTimestamp,
   hasUnseenCompletion,
   isContextMenuPointerDown,
+  isSidebarTopLevelThread,
+  moveSidebarProjectToFolder,
   orderItemsByPreferredIds,
+  removeSidebarProjectFromFolders,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
@@ -143,6 +150,81 @@ describe("getSidebarThreadIdsToPrewarm", () => {
   });
 });
 
+describe("sidebar project folders", () => {
+  const projectAlpha = {
+    projectKey: "repo:alpha",
+    memberProjects: [{ physicalProjectKey: "local:/work/alpha" }],
+    label: "Alpha",
+  };
+  const projectBeta = {
+    projectKey: "repo:beta",
+    memberProjects: [{ physicalProjectKey: "local:/work/beta" }],
+    label: "Beta",
+  };
+  const projectGamma = {
+    projectKey: "repo:gamma",
+    memberProjects: [{ physicalProjectKey: "local:/work/gamma" }],
+    label: "Gamma",
+  };
+
+  it("builds folder entries at the first contained project and keeps first-added order", () => {
+    const entries = buildSidebarProjectFolderEntries(
+      [projectAlpha, projectBeta, projectGamma],
+      [
+        {
+          id: "folder-1",
+          name: "Core",
+          projectKeys: ["local:/work/beta", "local:/work/alpha"],
+        },
+      ],
+    );
+
+    expect(entries.map((entry) => entry.kind)).toEqual(["folder", "project"]);
+    const folderEntry = entries[0];
+    expect(folderEntry?.kind).toBe("folder");
+    if (folderEntry?.kind !== "folder") return;
+    expect(folderEntry.iconProject).toBe(projectBeta);
+    expect(folderEntry.projects.map((project) => project.label)).toEqual(["Beta", "Alpha"]);
+    expect(entries[1]).toEqual({ kind: "project", project: projectGamma });
+  });
+
+  it("moves project physical keys between folders without duplicating membership", () => {
+    const moved = moveSidebarProjectToFolder({
+      folders: [
+        { id: "folder-1", name: "One", projectKeys: ["local:/work/alpha"] },
+        { id: "folder-2", name: "Two", projectKeys: ["local:/work/beta"] },
+      ],
+      folderId: "folder-2",
+      projectKeys: getSidebarProjectPhysicalKeys(projectAlpha),
+    });
+
+    expect(moved).toEqual([
+      { id: "folder-1", name: "One", projectKeys: [] },
+      {
+        id: "folder-2",
+        name: "Two",
+        projectKeys: ["local:/work/beta", "local:/work/alpha"],
+      },
+    ]);
+    expect(findSidebarProjectFolderForProject(moved, projectAlpha)?.id).toBe("folder-2");
+  });
+
+  it("removes a project from every folder", () => {
+    expect(
+      removeSidebarProjectFromFolders({
+        folders: [
+          { id: "folder-1", name: "One", projectKeys: ["local:/work/alpha"] },
+          { id: "folder-2", name: "Two", projectKeys: ["local:/work/alpha", "local:/work/beta"] },
+        ],
+        projectKeys: getSidebarProjectPhysicalKeys(projectAlpha),
+      }),
+    ).toEqual([
+      { id: "folder-1", name: "One", projectKeys: [] },
+      { id: "folder-2", name: "Two", projectKeys: ["local:/work/beta"] },
+    ]);
+  });
+});
+
 describe("shouldClearThreadSelectionOnMouseDown", () => {
   it("preserves selection for thread items", () => {
     const child = {
@@ -271,6 +353,26 @@ describe("resolveSidebarNewThreadSeedContext", () => {
     ).toEqual({
       envMode: "worktree",
     });
+  });
+});
+
+describe("isSidebarTopLevelThread", () => {
+  it("treats threads without a separate tab group as sidebar-visible top-level threads", () => {
+    const threadId = ThreadId.make("thread-root");
+
+    expect(isSidebarTopLevelThread({ id: threadId })).toBe(true);
+    expect(isSidebarTopLevelThread({ id: threadId, tabGroupId: threadId })).toBe(true);
+    expect(getSidebarTopLevelThreadId({ id: threadId, tabGroupId: threadId })).toBe(threadId);
+  });
+
+  it("treats grouped child chat tabs as non-top-level sidebar rows", () => {
+    const rootThreadId = ThreadId.make("thread-root");
+    const childThreadId = ThreadId.make("thread-child");
+
+    expect(isSidebarTopLevelThread({ id: childThreadId, tabGroupId: rootThreadId })).toBe(false);
+    expect(getSidebarTopLevelThreadId({ id: childThreadId, tabGroupId: rootThreadId })).toBe(
+      rootThreadId,
+    );
   });
 });
 

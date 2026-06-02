@@ -9,9 +9,11 @@ import {
   FlaskConicalIcon,
   HammerIcon,
   ListChecksIcon,
+  MonitorUpIcon,
   PlayIcon,
   PlusIcon,
   SettingsIcon,
+  SquareIcon,
   WrenchIcon,
 } from "lucide-react";
 import React, { type FormEvent, type KeyboardEvent, useCallback, useMemo, useState } from "react";
@@ -20,11 +22,13 @@ import {
   keybindingValueForCommand,
   decodeProjectScriptKeybindingRule,
 } from "~/lib/projectScriptKeybindings";
+import { cn } from "~/lib/utils";
 import { keybindingFromKeyboardEvent } from "~/components/settings/KeybindingsSettings.logic";
 import {
   commandForProjectScript,
   nextProjectScriptId,
-  primaryProjectScript,
+  pinnedTopBarProjectScripts,
+  topBarMainProjectScript,
 } from "~/projectScripts";
 import { shortcutLabelForCommand } from "~/keybindings";
 import {
@@ -37,6 +41,7 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog";
 import { Button } from "./ui/button";
+import { DraftInput } from "./ui/draft-input";
 import {
   Dialog,
   DialogDescription,
@@ -49,10 +54,11 @@ import {
 import { Group, GroupSeparator } from "./ui/group";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "./ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 const SCRIPT_ICONS: Array<{ id: ProjectScriptIcon; label: string }> = [
   { id: "play", label: "Play" },
@@ -62,6 +68,9 @@ const SCRIPT_ICONS: Array<{ id: ProjectScriptIcon; label: string }> = [
   { id: "build", label: "Build" },
   { id: "debug", label: "Debug" },
 ];
+const EMPTY_RUNNING_SCRIPT_IDS = new Set<string>() as ReadonlySet<string>;
+const RUNNING_SCRIPT_BUTTON_CLASS_NAME =
+  "border-emerald-500/45 bg-emerald-500/12 text-emerald-700 hover:bg-emerald-500/18 dark:text-emerald-300";
 
 function ScriptIcon({
   icon,
@@ -83,47 +92,66 @@ export interface NewProjectScriptInput {
   command: string;
   icon: ProjectScriptIcon;
   runOnWorktreeCreate: boolean;
+  pinnedToTopBar: boolean;
   keybinding: string | null;
+}
+
+export interface RunProjectScriptOptions {
+  rememberAsLastInvoked?: boolean;
 }
 
 interface ProjectScriptsControlProps {
   scripts: ProjectScript[];
+  previewUrl: string | null | undefined;
   keybindings: ResolvedKeybindingsConfig;
   preferredScriptId?: string | null;
-  onRunScript: (script: ProjectScript) => void;
+  runningScriptIds?: ReadonlySet<string>;
+  onRunScript: (script: ProjectScript, options?: RunProjectScriptOptions) => void;
   onAddScript: (input: NewProjectScriptInput) => Promise<void> | void;
   onUpdateScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void> | void;
   onDeleteScript: (scriptId: string) => Promise<void> | void;
+  onUpdatePreviewUrl: (previewUrl: string) => Promise<void> | void;
 }
 
 export default function ProjectScriptsControl({
   scripts,
+  previewUrl,
   keybindings,
   preferredScriptId = null,
+  runningScriptIds = EMPTY_RUNNING_SCRIPT_IDS,
   onRunScript,
   onAddScript,
   onUpdateScript,
   onDeleteScript,
+  onUpdatePreviewUrl,
 }: ProjectScriptsControlProps) {
   const addScriptFormId = React.useId();
+  const projectSettingsFormId = React.useId();
+  const previewUrlInputId = React.useId();
   const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
   const [icon, setIcon] = useState<ProjectScriptIcon>("play");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
+  const [pinnedToTopBar, setPinnedToTopBar] = useState(false);
   const [keybinding, setKeybinding] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [projectSettingsError, setProjectSettingsError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const primaryScript = useMemo(() => {
-    if (preferredScriptId) {
-      const preferred = scripts.find((script) => script.id === preferredScriptId);
-      if (preferred) return preferred;
-    }
-    return primaryProjectScript(scripts);
+    return topBarMainProjectScript(scripts, preferredScriptId);
   }, [preferredScriptId, scripts]);
+  const pinnedScripts = useMemo(
+    () => pinnedTopBarProjectScripts(scripts, primaryScript?.id ?? null),
+    [primaryScript?.id, scripts],
+  );
+  const primaryScriptRunning = primaryScript ? runningScriptIds.has(primaryScript.id) : false;
+  const hasTopBarRunningScript =
+    primaryScriptRunning || pinnedScripts.some((script) => runningScriptIds.has(script.id));
   const isEditing = editingScriptId !== null;
   const dropdownItemClassName =
     "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
@@ -170,6 +198,7 @@ export default function ProjectScriptsControl({
         command: trimmedCommand,
         icon,
         runOnWorktreeCreate,
+        pinnedToTopBar,
         keybinding: keybindingRule?.key ?? null,
       } satisfies NewProjectScriptInput;
       if (editingScriptId) {
@@ -191,9 +220,15 @@ export default function ProjectScriptsControl({
     setIcon("play");
     setIconPickerOpen(false);
     setRunOnWorktreeCreate(false);
+    setPinnedToTopBar(false);
     setKeybinding("");
     setValidationError(null);
     setDialogOpen(true);
+  };
+
+  const openProjectSettings = () => {
+    setProjectSettingsError(null);
+    setProjectSettingsOpen(true);
   };
 
   const openEditDialog = (script: ProjectScript) => {
@@ -203,6 +238,7 @@ export default function ProjectScriptsControl({
     setIcon(script.icon);
     setIconPickerOpen(false);
     setRunOnWorktreeCreate(script.runOnWorktreeCreate);
+    setPinnedToTopBar(script.pinnedToTopBar === true);
     setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
     setValidationError(null);
     setDialogOpen(true);
@@ -215,6 +251,18 @@ export default function ProjectScriptsControl({
     void onDeleteScript(editingScriptId);
   }, [editingScriptId, onDeleteScript]);
 
+  const commitPreviewUrl = useCallback(
+    (nextPreviewUrl: string) => {
+      setProjectSettingsError(null);
+      void Promise.resolve(onUpdatePreviewUrl(nextPreviewUrl)).catch((error) => {
+        setProjectSettingsError(
+          error instanceof Error ? error.message : "Failed to save preview URL.",
+        );
+      });
+    },
+    [onUpdatePreviewUrl],
+  );
+
   return (
     <>
       {primaryScript ? (
@@ -222,18 +270,68 @@ export default function ProjectScriptsControl({
           <Button
             size="xs"
             variant="outline"
+            className={cn(
+              "min-w-0 max-w-44",
+              primaryScriptRunning && RUNNING_SCRIPT_BUTTON_CLASS_NAME,
+            )}
             onClick={() => onRunScript(primaryScript)}
-            title={`Run ${primaryScript.name}`}
+            aria-label={
+              primaryScriptRunning ? `Stop ${primaryScript.name}` : `Run ${primaryScript.name}`
+            }
+            title={
+              primaryScriptRunning ? `Stop ${primaryScript.name}` : `Run ${primaryScript.name}`
+            }
           >
-            <ScriptIcon icon={primaryScript.icon} />
-            <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-              {primaryScript.name}
-            </span>
+            {primaryScriptRunning ? (
+              <SquareIcon className="size-3.5 fill-current" />
+            ) : (
+              <ScriptIcon icon={primaryScript.icon} />
+            )}
+            <span className="ml-0.5 min-w-0 truncate">{primaryScript.name}</span>
           </Button>
+          {pinnedScripts.length > 0 && (
+            <>
+              <GroupSeparator className="hidden @3xl/header-actions:block" />
+              {pinnedScripts.map((script) => {
+                const scriptRunning = runningScriptIds.has(script.id);
+                const label = scriptRunning ? `Stop ${script.name}` : `Run ${script.name}`;
+                return (
+                  <Tooltip key={script.id}>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          size="icon-xs"
+                          variant="outline"
+                          className={cn(scriptRunning && RUNNING_SCRIPT_BUTTON_CLASS_NAME)}
+                          onClick={() => onRunScript(script, { rememberAsLastInvoked: false })}
+                          aria-label={label}
+                          title={label}
+                        />
+                      }
+                    >
+                      {scriptRunning ? (
+                        <SquareIcon className="size-3.5 fill-current" />
+                      ) : (
+                        <ScriptIcon icon={script.icon} />
+                      )}
+                    </TooltipTrigger>
+                    <TooltipPopup side="bottom">{label}</TooltipPopup>
+                  </Tooltip>
+                );
+              })}
+            </>
+          )}
           <GroupSeparator className="hidden @3xl/header-actions:block" />
           <Menu highlightItemOnHover={false}>
             <MenuTrigger
-              render={<Button size="icon-xs" variant="outline" aria-label="Script actions" />}
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="outline"
+                  className={cn(hasTopBarRunningScript && RUNNING_SCRIPT_BUTTON_CLASS_NAME)}
+                  aria-label="Script actions"
+                />
+              }
             >
               <ChevronDownIcon className="size-4" />
             </MenuTrigger>
@@ -243,13 +341,22 @@ export default function ProjectScriptsControl({
                   keybindings,
                   commandForProjectScript(script.id),
                 );
+                const scriptRunning = runningScriptIds.has(script.id);
                 return (
                   <MenuItem
                     key={script.id}
-                    className={`group ${dropdownItemClassName}`}
+                    className={cn(
+                      "group",
+                      dropdownItemClassName,
+                      scriptRunning && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                    )}
                     onClick={() => onRunScript(script)}
                   >
-                    <ScriptIcon icon={script.icon} className="size-4" />
+                    {scriptRunning ? (
+                      <SquareIcon className="size-4 fill-current" />
+                    ) : (
+                      <ScriptIcon icon={script.icon} className="size-4" />
+                    )}
                     <span className="truncate">
                       {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
                     </span>
@@ -281,6 +388,11 @@ export default function ProjectScriptsControl({
                   </MenuItem>
                 );
               })}
+              <MenuSeparator />
+              <MenuItem className={dropdownItemClassName} onClick={openProjectSettings}>
+                <SettingsIcon className="size-4" />
+                Project settings
+              </MenuItem>
               <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
                 <PlusIcon className="size-4" />
                 Add action
@@ -289,13 +401,70 @@ export default function ProjectScriptsControl({
           </Menu>
         </Group>
       ) : (
-        <Button size="xs" variant="outline" onClick={openAddDialog} title="Add action">
-          <PlusIcon className="size-3.5" />
-          <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-            Add action
-          </span>
-        </Button>
+        <Group aria-label="Project actions">
+          <Button size="xs" variant="outline" onClick={openAddDialog} title="Add action">
+            <PlusIcon className="size-3.5" />
+            <span className="ml-0.5">Add action</span>
+          </Button>
+          <GroupSeparator className="hidden @3xl/header-actions:block" />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="outline"
+                  onClick={openProjectSettings}
+                  aria-label="Project settings"
+                  title="Project settings"
+                />
+              }
+            >
+              <SettingsIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">Project settings</TooltipPopup>
+          </Tooltip>
+        </Group>
       )}
+
+      <Dialog open={projectSettingsOpen} onOpenChange={setProjectSettingsOpen}>
+        <DialogPopup className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Project Settings</DialogTitle>
+            <DialogDescription>Stored in .t3code/project.json.</DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            <form id={projectSettingsFormId} className="space-y-2">
+              <Label htmlFor={previewUrlInputId} className="flex items-center gap-2">
+                <MonitorUpIcon className="size-4 text-muted-foreground" />
+                Preview URL
+              </Label>
+              <DraftInput
+                id={previewUrlInputId}
+                value={previewUrl ?? ""}
+                onCommit={commitPreviewUrl}
+                placeholder="http://localhost:3000/"
+                spellCheck={false}
+                inputMode="url"
+                type="url"
+                aria-label="Preview URL"
+              />
+              <p className="text-xs leading-5 text-muted-foreground">
+                Leave empty to use the detected or inferred project dev-server URL.
+              </p>
+              {projectSettingsError ? (
+                <p className="text-xs leading-5 text-destructive" role="alert">
+                  {projectSettingsError}
+                </p>
+              ) : null}
+            </form>
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProjectSettingsOpen(false)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
 
       <Dialog
         onOpenChange={(open) => {
@@ -311,6 +480,7 @@ export default function ProjectScriptsControl({
           setCommand("");
           setIcon("play");
           setRunOnWorktreeCreate(false);
+          setPinnedToTopBar(false);
           setKeybinding("");
           setValidationError(null);
         }}
@@ -403,6 +573,13 @@ export default function ProjectScriptsControl({
                 <Switch
                   checked={runOnWorktreeCreate}
                   onCheckedChange={(checked) => setRunOnWorktreeCreate(Boolean(checked))}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
+                <span>Pin to top bar</span>
+                <Switch
+                  checked={pinnedToTopBar}
+                  onCheckedChange={(checked) => setPinnedToTopBar(Boolean(checked))}
                 />
               </label>
               {validationError && <p className="text-sm text-destructive">{validationError}</p>}

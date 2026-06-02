@@ -21,6 +21,10 @@ export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
+export const RunningMessageDeliveryMode = Schema.Literals(["queue", "steer"]);
+export type RunningMessageDeliveryMode = typeof RunningMessageDeliveryMode.Type;
+export const DEFAULT_RUNNING_MESSAGE_DELIVERY_MODE: RunningMessageDeliveryMode = "queue";
+
 export const SidebarProjectGroupingMode = Schema.Literals([
   "repository",
   "repository_path",
@@ -28,6 +32,12 @@ export const SidebarProjectGroupingMode = Schema.Literals([
 ]);
 export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
 export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
+export const SidebarProjectFolder = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  projectKeys: Schema.Array(TrimmedNonEmptyString),
+});
+export type SidebarProjectFolder = typeof SidebarProjectFolder.Type;
 export const MIN_SIDEBAR_THREAD_PREVIEW_COUNT = 1;
 export const MAX_SIDEBAR_THREAD_PREVIEW_COUNT = 15;
 export const SidebarThreadPreviewCount = Schema.Int.check(
@@ -73,6 +83,9 @@ export const ClientSettingsSchema = Schema.Struct({
       modelOrder: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
     }),
   ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  runningMessageDeliveryMode: RunningMessageDeliveryMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNNING_MESSAGE_DELIVERY_MODE)),
+  ),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -80,6 +93,9 @@ export const ClientSettingsSchema = Schema.Struct({
     TrimmedNonEmptyString,
     SidebarProjectGroupingMode,
   ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  sidebarProjectFolders: Schema.Array(SidebarProjectFolder).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_SORT_ORDER)),
   ),
@@ -337,6 +353,34 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+export const DEFAULT_OPENROUTER_AUDIO_TRANSCRIPTION_MODEL = "google/gemini-3.1-flash-lite";
+
+const makeTrimmedStringSetting = (fallback: string) =>
+  TrimmedString.pipe(
+    Schema.decodeTo(
+      Schema.String,
+      SchemaTransformation.transformOrFail({
+        decode: (value) => Effect.succeed(value || fallback),
+        encode: (value) => Effect.succeed(value),
+      }),
+    ),
+    Schema.withDecodingDefault(Effect.succeed(fallback)),
+  );
+
+export const OpenRouterAudioTranscriptionSettings = Schema.Struct({
+  apiKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  apiKeyRedacted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  model: makeTrimmedStringSetting(DEFAULT_OPENROUTER_AUDIO_TRANSCRIPTION_MODEL),
+});
+export type OpenRouterAudioTranscriptionSettings = typeof OpenRouterAudioTranscriptionSettings.Type;
+
+export const OpenRouterSettings = Schema.Struct({
+  audioTranscription: OpenRouterAudioTranscriptionSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+}).pipe(Schema.withDecodingDefault(Effect.succeed({})));
+export type OpenRouterSettings = typeof OpenRouterSettings.Type;
+
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 
 export const ServerSettings = Schema.Struct({
@@ -380,6 +424,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  openRouter: OpenRouterSettings,
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -458,6 +503,17 @@ export const ServerSettingsPatch = Schema.Struct({
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
     }),
   ),
+  openRouter: Schema.optionalKey(
+    Schema.Struct({
+      audioTranscription: Schema.optionalKey(
+        Schema.Struct({
+          apiKey: Schema.optionalKey(TrimmedString),
+          apiKeyRedacted: Schema.optionalKey(Schema.Boolean),
+          model: Schema.optionalKey(TrimmedString),
+        }),
+      ),
+    }),
+  ),
   providers: Schema.optionalKey(
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
@@ -501,10 +557,12 @@ export const ClientSettingsPatch = Schema.Struct({
       }),
     ),
   ),
+  runningMessageDeliveryMode: Schema.optionalKey(RunningMessageDeliveryMode),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),
   ),
+  sidebarProjectFolders: Schema.optionalKey(Schema.Array(SidebarProjectFolder)),
   sidebarProjectSortOrder: Schema.optionalKey(SidebarProjectSortOrder),
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),

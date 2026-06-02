@@ -7,6 +7,8 @@ import {
   GitRunStackedActionResult,
   GitRunStackedActionInput,
   GitResolvePullRequestResult,
+  VcsStatusResult,
+  VcsSyncBaseResult,
 } from "./git.ts";
 
 const decodeCreateWorktreeInput = Schema.decodeUnknownSync(VcsCreateWorktreeInput);
@@ -16,6 +18,8 @@ const decodePreparePullRequestThreadInput = Schema.decodeUnknownSync(
 const decodeRunStackedActionInput = Schema.decodeUnknownSync(GitRunStackedActionInput);
 const decodeRunStackedActionResult = Schema.decodeUnknownSync(GitRunStackedActionResult);
 const decodeResolvePullRequestResult = Schema.decodeUnknownSync(GitResolvePullRequestResult);
+const decodeVcsStatusResult = Schema.decodeUnknownSync(VcsStatusResult);
+const decodeVcsSyncBaseResult = Schema.decodeUnknownSync(VcsSyncBaseResult);
 
 describe("VcsCreateWorktreeInput", () => {
   it("accepts omitted newRefName for existing-refName worktrees", () => {
@@ -71,6 +75,55 @@ describe("GitRunStackedActionInput", () => {
 
     expect(parsed.actionId).toBe("action-1");
     expect(parsed.action).toBe("create_pr");
+  });
+});
+
+describe("VcsStatusResult", () => {
+  it("accepts pull request merge and check metadata", () => {
+    const parsed = decodeVcsStatusResult({
+      isRepo: true,
+      hasPrimaryRemote: true,
+      isDefaultRef: false,
+      refName: "feature/status-button",
+      hasWorkingTreeChanges: false,
+      workingTree: { files: [], insertions: 0, deletions: 0 },
+      hasUpstream: true,
+      aheadCount: 0,
+      behindCount: 0,
+      behindOfDefaultCount: 1,
+      pr: {
+        number: 42,
+        title: "Status button",
+        url: "https://github.com/pingdotgg/t3code/pull/42",
+        baseRef: "main",
+        headRef: "feature/status-button",
+        state: "open",
+        mergeStatus: "mergeable",
+        checks: {
+          total: 3,
+          completed: 2,
+          successful: 2,
+          failed: 0,
+          pending: 1,
+        },
+      },
+    });
+
+    expect(parsed.pr?.mergeStatus).toBe("mergeable");
+    expect(parsed.pr?.checks?.pending).toBe(1);
+    expect(parsed.behindOfDefaultCount).toBe(1);
+  });
+});
+
+describe("VcsSyncBaseResult", () => {
+  it("decodes base sync results", () => {
+    const parsed = decodeVcsSyncBaseResult({
+      status: "rebased",
+      refName: "feature/worktree",
+      baseRef: "origin/main",
+    });
+
+    expect(parsed.baseRef).toBe("origin/main");
   });
 });
 

@@ -7,6 +7,8 @@ import * as SchemaIssue from "effect/SchemaIssue";
 
 import {
   TrimmedNonEmptyString,
+  type ChangeRequestCheckSummary,
+  type ChangeRequestMergeStatus,
   type SourceControlRepositoryVisibility,
   type VcsError,
 } from "@t3tools/contracts";
@@ -15,6 +17,8 @@ import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubPullRequests from "./gitHubPullRequests.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const PULL_REQUEST_JSON_FIELDS =
+  "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isDraft,mergeable,mergeStateStatus,statusCheckRollup,isCrossRepository,headRepository,headRepositoryOwner";
 
 export class GitHubCliError extends Schema.TaggedErrorClass<GitHubCliError>()("GitHubCliError", {
   operation: Schema.String,
@@ -36,6 +40,8 @@ export interface GitHubPullRequestSummary {
   readonly isCrossRepository?: boolean;
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
+  readonly mergeStatus?: ChangeRequestMergeStatus;
+  readonly checks?: ChangeRequestCheckSummary;
 }
 
 export interface GitHubRepositoryCloneUrls {
@@ -53,12 +59,14 @@ export interface GitHubCliShape {
 
   readonly listOpenPullRequests: (input: {
     readonly cwd: string;
+    readonly repository?: string;
     readonly headSelector: string;
     readonly limit?: number;
   }) => Effect.Effect<ReadonlyArray<GitHubPullRequestSummary>, GitHubCliError>;
 
   readonly getPullRequest: (input: {
     readonly cwd: string;
+    readonly repository?: string;
     readonly reference: string;
   }) => Effect.Effect<GitHubPullRequestSummary, GitHubCliError>;
 
@@ -75,6 +83,7 @@ export interface GitHubCliShape {
 
   readonly createPullRequest: (input: {
     readonly cwd: string;
+    readonly repository?: string;
     readonly baseBranch: string;
     readonly headSelector: string;
     readonly title: string;
@@ -83,10 +92,12 @@ export interface GitHubCliShape {
 
   readonly getDefaultBranch: (input: {
     readonly cwd: string;
+    readonly repository?: string;
   }) => Effect.Effect<string | null, GitHubCliError>;
 
   readonly checkoutPullRequest: (input: {
     readonly cwd: string;
+    readonly repository?: string;
     readonly reference: string;
     readonly force?: boolean;
   }) => Effect.Effect<void, GitHubCliError>;
@@ -226,6 +237,10 @@ function decodeGitHubJson<S extends Schema.Top>(
   );
 }
 
+function repoArgs(repository: string | undefined): ReadonlyArray<string> {
+  return repository ? ["--repo", repository] : [];
+}
+
 export const make = Effect.fn("makeGitHubCli")(function* () {
   const process = yield* VcsProcess.VcsProcess;
 
@@ -248,6 +263,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         args: [
           "pr",
           "list",
+          ...repoArgs(input.repository),
           "--head",
           input.headSelector,
           "--state",
@@ -255,7 +271,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "--limit",
           String(input.limit ?? 1),
           "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+          PULL_REQUEST_JSON_FIELDS,
         ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
@@ -288,8 +304,9 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "pr",
           "view",
           input.reference,
+          ...repoArgs(input.repository),
           "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+          PULL_REQUEST_JSON_FIELDS,
         ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
@@ -344,6 +361,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         args: [
           "pr",
           "create",
+          ...repoArgs(input.repository),
           "--base",
           input.baseBranch,
           "--head",
@@ -357,7 +375,15 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
     getDefaultBranch: (input) =>
       execute({
         cwd: input.cwd,
-        args: ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+        args: [
+          "repo",
+          "view",
+          ...(input.repository ? [input.repository] : []),
+          "--json",
+          "defaultBranchRef",
+          "--jq",
+          ".defaultBranchRef.name",
+        ],
       }).pipe(
         Effect.map((value) => {
           const trimmed = value.stdout.trim();
@@ -367,7 +393,13 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
     checkoutPullRequest: (input) =>
       execute({
         cwd: input.cwd,
-        args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
+        args: [
+          "pr",
+          "checkout",
+          input.reference,
+          ...repoArgs(input.repository),
+          ...(input.force ? ["--force"] : []),
+        ],
       }).pipe(Effect.asVoid),
   });
 });

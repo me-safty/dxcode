@@ -50,6 +50,7 @@ const rpcClientMock = {
     clear: vi.fn(),
     restart: vi.fn(),
     close: vi.fn(),
+    detectWebServers: vi.fn(async () => ({ servers: [] })),
     onMetadata: vi.fn((listener: (event: TerminalMetadataStreamEvent) => void) =>
       registerListener(terminalMetadataListeners, listener),
     ),
@@ -71,6 +72,7 @@ const rpcClientMock = {
   },
   vcs: {
     pull: vi.fn(),
+    syncBase: vi.fn(),
     refreshStatus: vi.fn(),
     onStatus: vi.fn((input: { cwd: string }, listener: (event: VcsStatusResult) => void) =>
       registerListener(gitStatusListeners, listener),
@@ -89,6 +91,7 @@ const rpcClientMock = {
   },
   review: {
     getDiffPreview: vi.fn(),
+    listPullRequestComments: vi.fn(),
   },
   server: {
     getConfig: vi.fn(),
@@ -637,10 +640,12 @@ describe("wsApi", () => {
       diffWordWrap: true,
       favorites: [],
       providerModelPreferences: {},
+      runningMessageDeliveryMode: "queue" as const,
       sidebarProjectGroupingMode: "repository_path" as const,
       sidebarProjectGroupingOverrides: {
         "environment-local:/tmp/project": "separate" as const,
       },
+      sidebarProjectFolders: [],
       sidebarProjectSortOrder: "manual" as const,
       sidebarThreadSortOrder: "created_at" as const,
       sidebarThreadPreviewCount: 6,
@@ -700,10 +705,12 @@ describe("wsApi", () => {
       diffWordWrap: true,
       favorites: [],
       providerModelPreferences: {},
+      runningMessageDeliveryMode: "queue" as const,
       sidebarProjectGroupingMode: "repository_path" as const,
       sidebarProjectGroupingOverrides: {
         "environment-local:/tmp/project": "separate" as const,
       },
+      sidebarProjectFolders: [],
       sidebarProjectSortOrder: "manual" as const,
       sidebarThreadSortOrder: "created_at" as const,
       sidebarThreadPreviewCount: 6,

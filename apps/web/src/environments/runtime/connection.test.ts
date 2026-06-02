@@ -34,6 +34,7 @@ function createTestClient(config?: { readonly emitInitialSnapshot?: boolean }) {
       upsertKeybinding: vi.fn(async () => undefined),
       getSettings: vi.fn(async () => undefined),
       updateSettings: vi.fn(async () => undefined),
+      transcribeAudio: vi.fn(),
     },
     orchestration: {
       dispatchCommand: vi.fn(async () => undefined),
@@ -74,6 +75,7 @@ function createTestClient(config?: { readonly emitInitialSnapshot?: boolean }) {
       clear: vi.fn(async () => undefined),
       restart: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
+      detectWebServers: vi.fn(async () => ({ servers: [] })),
       onEvent: vi.fn(() => () => undefined),
       onMetadata: vi.fn(() => () => undefined),
     },

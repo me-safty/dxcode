@@ -16,6 +16,10 @@ import {
   PUBLISH_ICON_OVERRIDES,
 } from "../../../scripts/lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
+import {
+  BROWSER_AGENT_EXTENSION_REPO_SOURCE_RELATIVE_PATH,
+  BROWSER_AGENT_EXTENSION_SOURCE_DIR_NAME,
+} from "@t3tools/shared/browserAgent";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import rootPackageJson from "../../../package.json" with { type: "json" };
 import serverPackageJson from "../package.json" with { type: "json" };
@@ -138,6 +142,24 @@ const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")
   yield* Effect.log("[cli] Applied development icon overrides to dist/client");
 });
 
+const copyBrowserAgentExtensionSource = Effect.fn("copyBrowserAgentExtensionSource")(function* (
+  repoRoot: string,
+  serverDistTarget: string,
+) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const sourceDir = path.join(repoRoot, BROWSER_AGENT_EXTENSION_REPO_SOURCE_RELATIVE_PATH);
+  if (!(yield* fs.exists(sourceDir))) {
+    yield* Effect.logWarning("[cli] Browser agent extension source folder not found.");
+    return;
+  }
+
+  const targetDir = path.join(serverDistTarget, BROWSER_AGENT_EXTENSION_SOURCE_DIR_NAME);
+  yield* fs.remove(targetDir, { recursive: true, force: true }).pipe(Effect.ignore);
+  yield* fs.copy(sourceDir, targetDir);
+  yield* Effect.log("[cli] Staged browser agent extension source folder into server dist");
+});
+
 // ---------------------------------------------------------------------------
 // build subcommand
 // ---------------------------------------------------------------------------
@@ -167,6 +189,9 @@ const buildCmd = Command.make(
 
       const webDist = path.join(repoRoot, "apps/web/dist");
       const clientTarget = path.join(serverDir, "dist/client");
+      const serverDistTarget = path.join(serverDir, "dist");
+
+      yield* copyBrowserAgentExtensionSource(repoRoot, serverDistTarget);
 
       if (yield* fs.exists(webDist)) {
         yield* fs.copy(webDist, clientTarget);

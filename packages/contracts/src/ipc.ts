@@ -8,6 +8,8 @@ import type {
   VcsListRefsResult,
   VcsPullInput,
   VcsPullResult,
+  VcsSyncBaseInput,
+  VcsSyncBaseResult,
   VcsRemoveWorktreeInput,
   VcsSwitchRefInput,
   VcsSwitchRefResult,
@@ -18,11 +20,18 @@ import type {
   VcsStatusInput,
   VcsStatusResult,
 } from "./git.ts";
-import type { ReviewDiffPreviewInput, ReviewDiffPreviewResult } from "./review.ts";
+import type {
+  ReviewDiffPreviewInput,
+  ReviewDiffPreviewResult,
+  ReviewPullRequestCommentsInput,
+  ReviewPullRequestCommentsResult,
+} from "./review.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type {
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectReadFileInput,
+  ProjectReadFileResult,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project.ts";
@@ -45,6 +54,8 @@ import type {
   TerminalAttachStreamEvent,
   TerminalClearInput,
   TerminalCloseInput,
+  TerminalDetectWebServersInput,
+  TerminalDetectWebServersResult,
   TerminalMetadataStreamEvent,
   TerminalOpenInput,
   TerminalResizeInput,
@@ -80,6 +91,7 @@ import type {
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
+import type { AudioTranscriptionInput, AudioTranscriptionResult } from "./audioTranscription.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -417,6 +429,7 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
+  openInChrome?: (url: string) => Promise<boolean>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
@@ -484,6 +497,7 @@ export interface LocalApi {
       input: ServerProcessResourceHistoryInput,
     ) => Promise<ServerProcessResourceHistoryResult>;
     signalProcess: (input: ServerSignalProcessInput) => Promise<ServerSignalProcessResult>;
+    transcribeAudio: (input: AudioTranscriptionInput) => Promise<AudioTranscriptionResult>;
   };
 }
 
@@ -511,6 +525,9 @@ export interface EnvironmentApi {
     clear: (input: typeof TerminalClearInput.Encoded) => Promise<void>;
     restart: (input: typeof TerminalRestartInput.Encoded) => Promise<TerminalSessionSnapshot>;
     close: (input: typeof TerminalCloseInput.Encoded) => Promise<void>;
+    detectWebServers?: (
+      input: typeof TerminalDetectWebServersInput.Encoded,
+    ) => Promise<TerminalDetectWebServersResult>;
     onMetadata: (
       callback: (event: TerminalMetadataStreamEvent) => void,
       options?: {
@@ -520,6 +537,7 @@ export interface EnvironmentApi {
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
+    readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };
   filesystem: {
@@ -544,6 +562,7 @@ export interface EnvironmentApi {
     switchRef: (input: VcsSwitchRefInput) => Promise<VcsSwitchRefResult>;
     init: (input: VcsInitInput) => Promise<void>;
     pull: (input: VcsPullInput) => Promise<VcsPullResult>;
+    syncBase: (input: VcsSyncBaseInput) => Promise<VcsSyncBaseResult>;
     refreshStatus: (input: VcsStatusInput) => Promise<VcsStatusResult>;
     onStatus: (
       input: VcsStatusInput,
@@ -561,6 +580,9 @@ export interface EnvironmentApi {
   };
   review: {
     getDiffPreview: (input: ReviewDiffPreviewInput) => Promise<ReviewDiffPreviewResult>;
+    listPullRequestComments: (
+      input: ReviewPullRequestCommentsInput,
+    ) => Promise<ReviewPullRequestCommentsResult>;
   };
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;

@@ -230,6 +230,7 @@ function mapProject(
     defaultModelSelection: project.defaultModelSelection
       ? normalizeModelSelection(project.defaultModelSelection)
       : null,
+    browserPreviewUrl: project.browserPreviewUrl ?? null,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     scripts: mapProjectScripts(project.scripts),
@@ -242,6 +243,8 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     environmentId,
     codexThreadId: null,
     projectId: thread.projectId,
+    tabGroupId: thread.tabGroupId ?? thread.id,
+    tabType: thread.tabType ?? "chat",
     title: thread.title,
     modelSelection: normalizeModelSelection(thread.modelSelection),
     runtimeMode: thread.runtimeMode,
@@ -276,6 +279,8 @@ function mapThreadShell(
     environmentId,
     codexThreadId: null,
     projectId: thread.projectId,
+    tabGroupId: thread.tabGroupId ?? thread.id,
+    tabType: thread.tabType ?? "chat",
     title: thread.title,
     modelSelection: normalizeModelSelection(thread.modelSelection),
     runtimeMode: thread.runtimeMode,
@@ -296,6 +301,8 @@ function mapThreadShell(
     id: thread.id,
     environmentId,
     projectId: thread.projectId,
+    tabGroupId: thread.tabGroupId ?? thread.id,
+    tabType: thread.tabType ?? "chat",
     title: thread.title,
     interactionMode: thread.interactionMode,
     session,
@@ -324,6 +331,8 @@ function toThreadShell(thread: Thread): ThreadShell {
     environmentId: thread.environmentId,
     codexThreadId: thread.codexThreadId,
     projectId: thread.projectId,
+    tabGroupId: thread.tabGroupId ?? thread.id,
+    tabType: thread.tabType ?? "chat",
     title: thread.title,
     modelSelection: thread.modelSelection,
     runtimeMode: thread.runtimeMode,
@@ -397,6 +406,8 @@ function sidebarThreadSummariesEqual(
     left !== undefined &&
     left.id === right.id &&
     left.projectId === right.projectId &&
+    left.tabGroupId === right.tabGroupId &&
+    left.tabType === right.tabType &&
     left.title === right.title &&
     left.interactionMode === right.interactionMode &&
     threadSessionsEqual(left.session, right.session) &&
@@ -420,6 +431,8 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.environmentId === right.environmentId &&
     left.codexThreadId === right.codexThreadId &&
     left.projectId === right.projectId &&
+    left.tabGroupId === right.tabGroupId &&
+    left.tabType === right.tabType &&
     left.title === right.title &&
     left.modelSelection === right.modelSelection &&
     left.runtimeMode === right.runtimeMode &&
@@ -1236,6 +1249,9 @@ function applyEnvironmentOrchestrationEvent(
         ...(event.payload.scripts !== undefined
           ? { scripts: mapProjectScripts(event.payload.scripts) }
           : {}),
+        ...(event.payload.browserPreviewUrl !== undefined
+          ? { browserPreviewUrl: event.payload.browserPreviewUrl }
+          : {}),
         updatedAt: event.payload.updatedAt,
       };
       return {
@@ -1265,6 +1281,8 @@ function applyEnvironmentOrchestrationEvent(
         {
           id: event.payload.threadId,
           projectId: event.payload.projectId,
+          tabGroupId: event.payload.tabGroupId ?? event.payload.threadId,
+          tabType: event.payload.tabType ?? "chat",
           title: event.payload.title,
           modelSelection: event.payload.modelSelection,
           runtimeMode: event.payload.runtimeMode,
@@ -1307,6 +1325,7 @@ function applyEnvironmentOrchestrationEvent(
     case "thread.meta-updated":
       return updateThreadState(state, event.payload.threadId, (thread) => ({
         ...thread,
+        ...(event.payload.tabGroupId !== undefined ? { tabGroupId: event.payload.tabGroupId } : {}),
         ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
         ...(event.payload.modelSelection !== undefined
           ? { modelSelection: normalizeModelSelection(event.payload.modelSelection) }

@@ -2,11 +2,92 @@ import { describe, expect, it } from "vitest";
 import * as Schema from "effect/Schema";
 
 import { ProviderInstanceId } from "./providerInstance.ts";
-import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import {
+  ClientSettingsPatch,
+  ClientSettingsSchema,
+  DEFAULT_CLIENT_SETTINGS,
+  DEFAULT_SERVER_SETTINGS,
+  ServerSettings,
+  ServerSettingsPatch,
+} from "./settings.ts";
 
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
+const decodeClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);
+
+describe("ClientSettings running message delivery", () => {
+  it("ignores legacy global preview URL settings", () => {
+    const decoded = decodeClientSettings({
+      browserAgentPreviewUrl: "http://localhost:5173/",
+      runningMessageDeliveryMode: "steer",
+    });
+
+    expect(decoded).not.toHaveProperty("browserAgentPreviewUrl");
+    expect(decoded.runningMessageDeliveryMode).toBe("steer");
+  });
+
+  it("queues messages sent while an agent is working by default", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.runningMessageDeliveryMode).toBe("queue");
+    expect(decodeClientSettings({}).runningMessageDeliveryMode).toBe("queue");
+  });
+
+  it("accepts immediate steering as a client settings patch", () => {
+    const patch = decodeClientSettingsPatch({
+      runningMessageDeliveryMode: "steer",
+    });
+
+    expect(patch.runningMessageDeliveryMode).toBe("steer");
+  });
+});
+
+describe("ClientSettings sidebar project folders", () => {
+  it("defaults project folders to an empty list", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.sidebarProjectFolders).toEqual([]);
+    expect(decodeClientSettings({}).sidebarProjectFolders).toEqual([]);
+  });
+
+  it("decodes project folders and trims persisted values", () => {
+    const decoded = decodeClientSettings({
+      sidebarProjectFolders: [
+        {
+          id: " folder-1 ",
+          name: " Work ",
+          projectKeys: [" local:/repo-a ", "local:/repo-b"],
+        },
+      ],
+    });
+
+    expect(decoded.sidebarProjectFolders).toEqual([
+      {
+        id: "folder-1",
+        name: "Work",
+        projectKeys: ["local:/repo-a", "local:/repo-b"],
+      },
+    ]);
+  });
+
+  it("accepts project folders as a client settings patch", () => {
+    const patch = decodeClientSettingsPatch({
+      sidebarProjectFolders: [
+        {
+          id: "folder-1",
+          name: "Work",
+          projectKeys: ["local:/repo-a"],
+        },
+      ],
+    });
+
+    expect(patch.sidebarProjectFolders).toEqual([
+      {
+        id: "folder-1",
+        name: "Work",
+        projectKeys: ["local:/repo-a"],
+      },
+    ]);
+  });
+});
 
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults to an empty record so legacy configs without the key still decode", () => {

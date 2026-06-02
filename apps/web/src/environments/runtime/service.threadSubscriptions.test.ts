@@ -32,6 +32,7 @@ function MockWsTransport() {
 
 vi.mock("../primary", () => ({
   getPrimaryKnownEnvironment: mockGetPrimaryKnownEnvironment,
+  readPrimaryBrowserAgentSidebarSessionToken: vi.fn(() => null),
 }));
 
 vi.mock("../../lib/runtime", () => ({
@@ -94,11 +95,13 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
       clear: vi.fn(),
       restart: vi.fn(),
       close: vi.fn(),
+      detectWebServers: vi.fn(async () => ({ servers: [] })),
       onEvent: vi.fn(() => () => undefined),
       onMetadata: vi.fn(() => () => undefined),
     },
     projects: {
       searchEntries: vi.fn(),
+      readFile: vi.fn(),
       writeFile: vi.fn(),
     },
     filesystem: {
@@ -114,6 +117,7 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
     },
     vcs: {
       pull: vi.fn(),
+      syncBase: vi.fn(),
       refreshStatus: vi.fn(),
       onStatus: vi.fn(() => () => undefined),
       listRefs: vi.fn(),
@@ -130,6 +134,13 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
     },
     review: {
       getDiffPreview: vi.fn(),
+      listPullRequestComments: vi.fn(),
+    },
+    browserAgents: {
+      list: vi.fn(),
+      openOrFocusPreview: vi.fn(),
+      activateAnnotation: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
     },
     server: {
       getConfig: vi.fn(),
@@ -140,6 +151,7 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
       removeKeybinding: vi.fn(),
       getSettings: vi.fn(),
       updateSettings: vi.fn(),
+      transcribeAudio: vi.fn(),
       subscribeConfig: vi.fn(() => () => undefined),
       subscribeLifecycle: vi.fn(() => () => undefined),
       subscribeAuthAccess: vi.fn(() => () => undefined),

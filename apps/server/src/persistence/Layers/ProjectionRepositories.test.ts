@@ -34,6 +34,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
           model: "gpt-5.4",
         },
         scripts: [],
+        browserPreviewUrl: null,
         createdAt: "2026-03-24T00:00:00.000Z",
         updatedAt: "2026-03-24T00:00:00.000Z",
         deletedAt: null,
@@ -78,6 +79,8 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       yield* threads.upsert({
         threadId: ThreadId.make("thread-null-options"),
         projectId: ProjectId.make("project-null-options"),
+        tabGroupId: ThreadId.make("thread-null-options"),
+        tabType: "chat",
         title: "Null options thread",
         modelSelection: {
           instanceId: ProviderInstanceId.make("claudeAgent"),

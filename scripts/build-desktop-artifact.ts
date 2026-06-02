@@ -574,6 +574,12 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     directories: {
       buildResources: "apps/desktop/resources",
     },
+    extraResources: [
+      {
+        from: "apps/chrome-extension",
+        to: "chrome-extension",
+      },
+    ],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
   const publishConfig = resolveGitHubPublishConfig(updateChannel);
@@ -726,6 +732,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     desktopResources: path.join(repoRoot, "apps/desktop/resources"),
     serverDist: path.join(repoRoot, "apps/server/dist"),
   };
+  const chromeExtensionDir = path.join(repoRoot, "apps/chrome-extension");
   const bundledClientEntry = path.join(distDirs.serverDist, "client/index.html");
 
   if (!options.skipBuild) {
@@ -763,6 +770,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+  yield* fs.copy(chromeExtensionDir, path.join(stageAppDir, "apps/chrome-extension"));
 
   yield* assertPlatformBuildResources(
     options.platform,
@@ -872,11 +880,37 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   for (const entry of stageEntries) {
     const from = path.join(stageDistDir, entry);
     const stat = yield* fs.stat(from).pipe(Effect.catch(() => Effect.succeed(null)));
-    if (!stat || stat.type !== "File") continue;
+    if (!stat) continue;
 
-    const to = path.join(options.outputDir, entry);
-    yield* fs.copyFile(from, to);
-    copiedArtifacts.push(to);
+    if (stat.type === "File") {
+      const to = path.join(options.outputDir, entry);
+      yield* fs.copyFile(from, to);
+      copiedArtifacts.push(to);
+      continue;
+    }
+
+    if (stat.type !== "Directory") continue;
+
+    const macAppEntries =
+      options.platform === "mac"
+        ? entry.endsWith(".app")
+          ? [entry]
+          : (yield* fs.readDirectory(from)).filter((childEntry) => childEntry.endsWith(".app"))
+        : [];
+
+    for (const appEntry of macAppEntries) {
+      const appFrom = entry.endsWith(".app") ? from : path.join(from, appEntry);
+      const appTo = path.join(options.outputDir, appEntry);
+      if (yield* fs.exists(appTo)) {
+        yield* fs.remove(appTo, { recursive: true });
+      }
+      yield* runCommand(
+        ChildProcess.make("ditto", ["--rsrc", "--extattr", appFrom, appTo], {
+          ...commandOutputOptions(options.verbose),
+        }),
+      );
+      copiedArtifacts.push(appTo);
+    }
   }
 
   if (copiedArtifacts.length === 0) {
