@@ -28,7 +28,7 @@ The VS Code extension does not start or own a T3 backend. The desktop app is a h
 
 The desktop backend writes a short-lived local advertisement under `<T3 home>/desktop-backends/advertisements/<backend-id>.json` after its HTTP readiness check passes. The advertisement includes the loopback HTTP endpoint, a short-lived one-time desktop bootstrap ticket, heartbeat/expiry timestamps, and a protocol version. Writers update only their own file by atomic replace, refresh every 10 seconds, expire after 30 seconds, remove the file on normal stop, and clean stale files opportunistically after a 15 minute grace period.
 
-The desktop process keeps the private startup desktop bootstrap token out of the advertisement. After readiness, desktop exchanges that private seed once for a desktop control bearer session, then mints short-lived one-time VS Code tickets through `POST /api/auth/desktop-bootstrap-ticket`. The VS Code extension reads the advertisement, validates that the endpoint is loopback HTTP, waits briefly for `/.well-known/t3/environment`, exchanges the advertised one-time ticket for a bearer session through `/api/auth/bootstrap/bearer`, and injects the resulting bearer token through `window.t3HostBridge`. If a stale advertised ticket has already been consumed, the extension waits for the advertisement to refresh and retries with the next ticket. If no live desktop advertisement exists, the VS Code extension fails instead of starting a fallback backend and shows a fallback webview with a reconnect button; launching the desktop app remains a manual user action.
+The desktop process keeps the private startup desktop bootstrap token out of the advertisement. After readiness, desktop exchanges that private seed once for a desktop-control bearer session, then mints short-lived one-time VS Code tickets through `POST /api/auth/desktop-bootstrap-ticket`. Only desktop-control owner sessions can mint those tickets; VS Code bearer sessions created from advertised tickets cannot re-mint new tickets. The VS Code extension reads the advertisement, validates that the endpoint is loopback HTTP, waits briefly for `/.well-known/t3/environment`, exchanges the advertised one-time ticket for a bearer session through `/api/auth/bootstrap/bearer`, and injects the resulting bearer token through `window.t3HostBridge`. If a stale advertised ticket has already been consumed, the extension waits for the advertisement to refresh and retries with the next ticket. Reconnects and stops abort in-flight readiness, ticket-exchange, retry-sleep, and workspace-bootstrap work. If no live desktop advertisement exists, the VS Code extension fails instead of starting a fallback backend and shows a fallback webview with a reconnect button; launching the desktop app remains a manual user action.
 
 The web app then sends authenticated HTTP requests with an `Authorization: Bearer ...` header and requests short-lived WebSocket tokens before opening `/ws`. This avoids relying on cross-origin cookie behavior between the VS Code webview origin and the loopback backend.
 
@@ -113,13 +113,14 @@ Implemented architecture:
 - The desktop backend writes desktop backend presence advertisements after readiness. Each advertisement includes a backend id, loopback HTTP endpoint, one-time desktop bootstrap ticket, heartbeat/expiry timestamps, and a protocol version.
 - Advertisement files live under `<T3 home>/desktop-backends/advertisements/<backend-id>.json`. Writers update only their own file by atomic replace, heartbeat it every 10 seconds, expire it after 30 seconds, best-effort remove it on backend stop, and opportunistically clean stale files after a 15 minute grace period.
 - The VS Code extension discovers the desktop backend from those advertisements, rejects non-loopback endpoints, exchanges the advertised one-time ticket for a bearer session, retries after stale-ticket `401` responses until the advertisement refreshes, and renders the web app against the desktop backend.
+- Desktop-control owner sessions are the only sessions allowed to call `POST /api/auth/desktop-bootstrap-ticket`. Tickets minted for VS Code are `desktop-bootstrap` one-time pairing credentials; expired `desktop-bootstrap` pairing links are cleaned during ticket issuance so repeated desktop heartbeats do not leave an unbounded table behind.
 - The VS Code extension writes host MCP advertisements for its editor-owned MCP socket. Desktop provider startup discovers those advertisements by workspace root and injects the matching endpoint into provider-native MCP config.
 - The public LAN/local-connection API remains the only remote-client surface. Remote clients continue to connect to desktop normally and must not call VS Code MCP sockets directly.
 
 Security boundaries:
 
 - Remote clients authenticate only to the desktop backend. They should not receive VS Code MCP socket details as normal state or connect to VS Code extension loopback endpoints directly.
-- VS Code-to-desktop trust uses short-lived one-time tickets stored in short-lived local advertisement files. The private desktop startup bootstrap token is exchanged by the desktop process for a control bearer session and is not written to the advertisement file.
+- VS Code-to-desktop trust uses short-lived one-time tickets stored in short-lived local advertisement files. The private desktop startup bootstrap token is exchanged by the desktop process for a desktop-control bearer session and is not written to the advertisement file. VS Code bearer sessions are not desktop-control sessions and cannot mint more advertised tickets.
 - The VS Code extension remains the trust boundary for VS Code API access. Remote control must not bypass `t3code.mcp.allowedRunCommands`, `t3code.mcp.allowedActivateExtensions`, command registration checks, or result bounding.
 - Advertisement records must be treated as hints, not authority. Consumers should ignore expired, malformed, unreachable, non-loopback, or scope-mismatched advertisements.
 
@@ -188,7 +189,7 @@ The VS Code webview can also customize chat width with:
 
 The first four settings default to `false`; `t3code.ui.threadConversationMaxWidth` defaults to an empty value, which keeps the React app's normal conversation and prompt input widths. Values are passed to the React app through `window.t3HostBridge.getDisplayPreferences()` at startup and through `window.t3HostBridge.onDisplayPreferencesChanged(...)` while the webview is open, so changes apply without reopening the T3 Code view. When `t3code.ui.enableTerminal` is `false`, the embedded T3 terminal drawer is disabled, terminal keybindings are ignored, terminal-backed project actions are hidden, and any open terminal drawer is closed.
 
-Project management chrome is not configurable in the VS Code extension. The extension sends the full VS Code workspace folder list to the desktop backend through `POST /api/vscode/workspace-bootstrap`, and the backend ensures a T3 project/thread bootstrap for those folders. The React app treats the VS Code surface as a workspace-scoped view: it filters the sidebar to the bootstrapped workspace projects, hides the add-project button, hides redundant project labels only when there is a single visible project, and renders only those projects' threads. This avoids showing unrelated desktop-app projects inside an editor-scoped surface while still supporting multi-root workspaces.
+Project management chrome is not configurable in the VS Code extension. The extension sends the full VS Code workspace folder list to the desktop backend through `POST /api/vscode/workspace-bootstrap`, and the backend ensures a T3 project/thread bootstrap for those folders. The backend validates `activeWorkspaceFolderKey` against the submitted folder keys and falls back to the first folder when the active key is missing or stale. For each bootstrapped project it reuses the latest active thread, creating a startup thread only when no active thread exists. The React app treats the VS Code surface as a workspace-scoped view: it filters the sidebar to the bootstrapped workspace projects, hides the add-project button, hides redundant project labels only when there is a single visible project, and renders only those projects' threads. This avoids showing unrelated desktop-app projects inside an editor-scoped surface while still supporting multi-root workspaces.
 
 The thread-history sidebar still shows the "Sidebar options" button when VS Code hides project chrome. In that project-scoped mode, the menu keeps thread controls such as thread sort order and visible thread count, but hides project controls such as project sort order and project grouping. Multi-root VS Code workspaces that show project chrome retain the full sidebar options menu.
 
@@ -250,6 +251,8 @@ Implemented so far:
   - exchanges the advertised one-time desktop ticket for a VS Code bearer session after desktop backend readiness
   - retries stale consumed tickets after `401` until the desktop advertisement refreshes
   - calls `POST /api/vscode/workspace-bootstrap` so the desktop backend ensures and selects the current workspace projects/threads
+  - aborts in-flight readiness polling, stale-ticket retry sleeps, bearer exchange, and workspace bootstrap when stopped or reconnected
+  - revokes minted bearer sessions if post-auth workspace bootstrap fails before the connection is committed
   - injects the desktop backend HTTP URL, WebSocket URL, advertised one-time ticket, and bearer token into the VS Code webview host bridge
   - records T3-owned virtual workspace clone metadata
   - prunes inactive virtual workspace clones not used for 15 days after successful desktop connection
@@ -363,7 +366,7 @@ Implemented so far:
   - `bun lint` (passes with existing unrelated warnings)
   - `bun typecheck`
   - `bun run --filter t3code-vscode package`
-  - manual bundled-backend readiness smoke test
+  - manual desktop-required fallback/reconnect smoke test
 
 Deferred until there is a concrete UX need:
 
