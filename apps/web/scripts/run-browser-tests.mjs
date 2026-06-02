@@ -1,5 +1,8 @@
 import { spawnSync } from "node:child_process";
 
+// Keep browser tests split until Vite+ can run this suite through native Vitest
+// projects or one browser-mode process. Both approaches currently stall after
+// launching Chromium in this workspace.
 const chunks = [
   {
     name: "chat view",
