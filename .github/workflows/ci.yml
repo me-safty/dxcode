@@ -91,7 +91,8 @@ jobs:
         run: vp run --filter @t3tools/web test:browser:install
 
       - name: Browser test
-        run: vp run --filter @t3tools/web test:browser
+        working-directory: apps/web
+        run: vp test run --config vitest.browser.config.ts src/components
 
       - name: Build desktop pipeline
         run: vp run build:desktop

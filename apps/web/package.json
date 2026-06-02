@@ -9,7 +9,7 @@
     "preview": "vp preview",
     "typecheck": "tsgo --noEmit",
     "test": "vp test run --passWithNoTests",
-    "test:browser": "vp test run --config vitest.browser.config.ts",
+    "test:browser": "vp test run --config vitest.browser.config.ts src/components",
     "test:browser:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
