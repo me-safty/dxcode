@@ -20,8 +20,9 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const path = yield* Path.Path;
+      const peerCwd = path.join(import.meta.dirname, "..");
       const command = ChildProcess.make("bun", ["run", yield* mockPeerPath], {
-        cwd: path.join(import.meta.dirname, ".."),
+        cwd: peerCwd,
         shell: process.platform === "win32",
       });
       return yield* spawner.spawn(command);
@@ -78,11 +79,11 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
           planType: "plus",
         });
 
-        const skills = yield* client.request("skills/list", {
-          cwds: [process.cwd()],
-        });
+        const path = yield* Path.Path;
+        const peerCwd = path.join(import.meta.dirname, "..");
+        const skills = yield* client.request("skills/list", { cwds: [peerCwd] });
         assert.equal(skills.data.length, 1);
-        assert.equal(skills.data[0]?.cwd, process.cwd());
+        assert.equal(skills.data[0]?.cwd, peerCwd);
 
         return {
           account,

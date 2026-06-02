@@ -2,7 +2,8 @@ import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
-import { defineConfig } from "vite";
+import "vite-plus/test/config";
+import { defineConfig } from "vite-plus";
 import pkg from "./package.json" with { type: "json" };
 
 const port = Number(process.env.PORT ?? 5733);
@@ -122,5 +123,12 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: buildSourcemap,
+  },
+  test: {
+    // The web runtime suite exercises auth bootstrap, saved environments,
+    // and websocket subscription lifecycles. Under the full monorepo test
+    // run, those async tests can exceed Vitest's default 5s budget.
+    hookTimeout: 15_000,
+    testTimeout: 15_000,
   },
 });

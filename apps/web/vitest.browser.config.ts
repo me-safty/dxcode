@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
-import { playwright } from "@vitest/browser-playwright";
-import { defineConfig, mergeConfig } from "vitest/config";
+import { playwright } from "vite-plus/test/browser-playwright";
+import { defineConfig } from "vite-plus/test/config";
+import { mergeConfig, type UserConfig } from "vite-plus";
 
 import viteConfig from "./vite.config";
 
@@ -23,7 +24,7 @@ export default mergeConfig(
       include: ["src/components/**/*.browser.tsx"],
       browser: {
         enabled: true,
-        provider: playwright(),
+        provider: playwright() as never,
         instances: [{ browser: "chromium" }],
         headless: true,
         api: {
@@ -33,5 +34,5 @@ export default mergeConfig(
       testTimeout: 30_000,
       hookTimeout: 30_000,
     },
-  }),
+  }) as UserConfig,
 );
