@@ -1,5 +1,6 @@
 import {
   CommandId,
+  DEFAULT_CLIENT_SETTINGS,
   DEFAULT_SERVER_SETTINGS,
   type DesktopBridge,
   EnvironmentId,
@@ -591,9 +592,15 @@ describe("wsApi", () => {
     });
   });
 
-  it("forwards context menu metadata to the desktop bridge", async () => {
+  it("forwards context menu metadata to the desktop bridge for native menus", async () => {
     const showContextMenu = vi.fn().mockResolvedValue("delete");
-    getWindowForTest().desktopBridge = makeDesktopBridge({ showContextMenu });
+    getWindowForTest().desktopBridge = makeDesktopBridge({
+      getClientSettings: async () => ({
+        ...DEFAULT_CLIENT_SETTINGS,
+        contextMenuStyle: "native",
+      }),
+      showContextMenu,
+    });
 
     const { createLocalApi } = await import("./localApi");
     const api = createLocalApi(rpcClientMock as never);
@@ -632,6 +639,7 @@ describe("wsApi", () => {
       autoOpenPlanSidebar: false,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
+      contextMenuStyle: "default" as const,
       dismissedProviderUpdateNotificationKeys: [],
       diffIgnoreWhitespace: true,
       diffWordWrap: true,
@@ -695,6 +703,7 @@ describe("wsApi", () => {
       autoOpenPlanSidebar: false,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
+      contextMenuStyle: "default" as const,
       dismissedProviderUpdateNotificationKeys: [],
       diffIgnoreWhitespace: true,
       diffWordWrap: true,
