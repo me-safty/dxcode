@@ -129,8 +129,8 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       const path = yield* Path.Path;
       const scope = yield* Scope.make();
       const clientLayer = CodexClient.layerCommand({
-        command: "bun",
-        args: ["run", yield* mockPeerPath],
+        command: "node",
+        args: mockPeerArgs(yield* mockPeerPath),
         cwd: path.join(import.meta.dirname, ".."),
       });
       const context = yield* Layer.buildWithScope(clientLayer, scope);
