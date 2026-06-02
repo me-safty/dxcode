@@ -177,6 +177,16 @@ function assertExists(path: string, message: string): void {
   }
 }
 
+function assertPackageVersion(path: string, version: string): void {
+  const packageJson = JSON.parse(readFileSync(path, "utf8")) as {
+    readonly version?: unknown;
+  };
+
+  if (packageJson.version !== version) {
+    throw new Error(`Expected ${path} to have version ${version}.`);
+  }
+}
+
 function assertMissing(path: string, message: string): void {
   if (existsSync(path)) {
     throw new Error(message);
@@ -210,11 +220,16 @@ try {
   });
 
   const lockfile = readFileSync(resolve(tempRoot, "pnpm-lock.yaml"), "utf8");
-  assertContains(
-    lockfile,
-    "version: 9.9.9-smoke.0",
-    "Expected pnpm-lock.yaml to contain the smoke version.",
-  );
+  assertContains(lockfile, "lockfileVersion:", "Expected pnpm-lock.yaml to be regenerated.");
+
+  for (const relativePath of [
+    "apps/server/package.json",
+    "apps/desktop/package.json",
+    "apps/web/package.json",
+    "packages/contracts/package.json",
+  ]) {
+    assertPackageVersion(resolve(tempRoot, relativePath), "9.9.9-smoke.0");
+  }
 
   const nightlyReleaseMetadata = execFileSync(
     process.execPath,
