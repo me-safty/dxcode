@@ -415,14 +415,10 @@ describe("BackendManager", () => {
     let bearerSessionCount = 0;
     let workspaceBootstrapCount = 0;
     let resolveFirstWorkspaceBootstrapStarted!: () => void;
-    let releaseFirstWorkspaceBootstrap!: () => void;
     const firstWorkspaceBootstrapStarted = new Promise<void>((resolve) => {
       resolveFirstWorkspaceBootstrapStarted = resolve;
     });
-    const releasePromise = new Promise<void>((resolve) => {
-      releaseFirstWorkspaceBootstrap = resolve;
-    });
-    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(input.toString());
       if (url.pathname === "/.well-known/t3/environment") {
         return new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
@@ -444,7 +440,14 @@ describe("BackendManager", () => {
         workspaceBootstrapCount += 1;
         if (workspaceBootstrapCount === 1) {
           resolveFirstWorkspaceBootstrapStarted();
-          await releasePromise;
+          await new Promise<Response>((_resolve, reject) => {
+            const abort = () => reject(new Error("aborted"));
+            if (init?.signal?.aborted) {
+              abort();
+              return;
+            }
+            init?.signal?.addEventListener("abort", abort, { once: true });
+          });
         }
         return new Response(
           JSON.stringify({
@@ -479,7 +482,6 @@ describe("BackendManager", () => {
     const firstStart = manager.ensureStarted();
     await firstWorkspaceBootstrapStarted;
     await manager.stop();
-    releaseFirstWorkspaceBootstrap();
     await expect(firstStart).rejects.toThrow("Desktop backend startup was cancelled.");
 
     await expect(manager.ensureStarted()).resolves.toMatchObject({

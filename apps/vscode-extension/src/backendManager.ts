@@ -111,6 +111,7 @@ class BackendStartupCancelledError extends Error {
 
 interface BackendStartupToken {
   cancelled: boolean;
+  readonly abortController: AbortController;
 }
 
 export interface BackendManagerDependencies {
@@ -172,7 +173,10 @@ export class BackendManager {
       return this.#starting;
     }
 
-    const startupToken: BackendStartupToken = { cancelled: false };
+    const startupToken: BackendStartupToken = {
+      abortController: new AbortController(),
+      cancelled: false,
+    };
     this.#startupToken = startupToken;
     this.#starting = this.#connect(startupToken);
     try {
@@ -199,6 +203,7 @@ export class BackendManager {
     const connection = this.#connection;
     if (this.#startupToken) {
       this.#startupToken.cancelled = true;
+      this.#startupToken.abortController.abort();
       this.#startupToken = null;
     }
     this.#starting = null;
@@ -245,7 +250,11 @@ export class BackendManager {
     this.#assertStartupActive(startupToken);
 
     const { desktopBackend, environment, bearerToken } =
-      await this.#connectToDesktopBackendWithFreshTicket(t3Home, startupToken);
+      await this.#connectToDesktopBackendWithFreshTicket(
+        t3Home,
+        startupToken,
+        startupToken.abortController.signal,
+      );
     try {
       this.#assertStartupActive(startupToken);
       const workspaceBootstrap = await ensureWorkspaceBootstrap({
@@ -254,6 +263,7 @@ export class BackendManager {
         workspaceFolders,
         activeWorkspaceFolder,
         fetchFn: this.#dependencies.fetch,
+        signal: startupToken.abortController.signal,
       });
       this.#assertStartupActive(startupToken);
 
@@ -287,6 +297,7 @@ export class BackendManager {
           `[backend] Failed to revoke failed startup bearer session: ${errorMessage(revokeError)}`,
         );
       });
+      this.#assertStartupActive(startupToken);
       throw error;
     }
 
@@ -324,7 +335,11 @@ export class BackendManager {
   }
 
   #assertStartupActive(startupToken: BackendStartupToken): void {
-    if (startupToken.cancelled || this.#startupToken !== startupToken) {
+    if (
+      startupToken.cancelled ||
+      startupToken.abortController.signal.aborted ||
+      this.#startupToken !== startupToken
+    ) {
       throw new BackendStartupCancelledError();
     }
   }
@@ -360,6 +375,7 @@ export class BackendManager {
   async #connectToDesktopBackendWithFreshTicket(
     t3Home: string,
     startupToken: BackendStartupToken,
+    signal: AbortSignal,
   ): Promise<{
     readonly desktopBackend: {
       readonly backendId: string;
@@ -377,7 +393,9 @@ export class BackendManager {
       this.#assertStartupActive(startupToken);
       const desktopBackend = this.#resolveDesktopBackendAdvertisement(t3Home);
       if (desktopBackend.bootstrapToken === rejectedTicket && Date.now() < deadline) {
-        await sleep(DESKTOP_BOOTSTRAP_TICKET_RETRY_INTERVAL_MS);
+        await sleep(DESKTOP_BOOTSTRAP_TICKET_RETRY_INTERVAL_MS, undefined, { signal }).catch(() => {
+          this.#assertStartupActive(startupToken);
+        });
         this.#assertStartupActive(startupToken);
         continue;
       }
@@ -385,12 +403,14 @@ export class BackendManager {
       const environment = await waitForBackendReady(
         desktopBackend.httpBaseUrl,
         this.#dependencies.fetch,
+        signal,
       );
       try {
         const bearerToken = await exchangeBootstrapBearerSession(
           desktopBackend.httpBaseUrl,
           desktopBackend.bootstrapToken,
           this.#dependencies.fetch,
+          signal,
         );
         return { desktopBackend, environment, bearerToken };
       } catch (error) {
@@ -401,10 +421,15 @@ export class BackendManager {
         ) {
           rejectedTicket = desktopBackend.bootstrapToken;
           lastRejection = error;
-          await sleep(DESKTOP_BOOTSTRAP_TICKET_RETRY_INTERVAL_MS);
+          await sleep(DESKTOP_BOOTSTRAP_TICKET_RETRY_INTERVAL_MS, undefined, { signal }).catch(
+            () => {
+              this.#assertStartupActive(startupToken);
+            },
+          );
           this.#assertStartupActive(startupToken);
           continue;
         }
+        this.#assertStartupActive(startupToken);
         throw error;
       }
     }
@@ -627,13 +652,16 @@ function runCommand(
 async function waitForBackendReady(
   httpBaseUrl: string,
   fetchFn: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<{ readonly environmentId: string }> {
   const deadline = Date.now() + 10_000;
   const readinessUrl = new URL(READINESS_PATH, httpBaseUrl);
 
   while (Date.now() < deadline) {
+    throwIfAborted(signal);
+    const timeout = createAbortTimeout(1_000, signal);
     try {
-      const response = await fetchFn(readinessUrl, { signal: AbortSignal.timeout(1_000) });
+      const response = await fetchFn(readinessUrl, { signal: timeout.signal });
       if (response.ok) {
         const body = (await response.json()) as { readonly environmentId?: unknown };
         if (typeof body.environmentId !== "string" || body.environmentId.length === 0) {
@@ -642,9 +670,14 @@ async function waitForBackendReady(
         return { environmentId: body.environmentId };
       }
     } catch {
+      throwIfAborted(signal);
       // Retry until the desktop backend is ready or its advertisement expires.
+    } finally {
+      timeout.clear();
     }
-    await sleep(100);
+    await sleep(100, undefined, { signal }).catch(() => {
+      throwIfAborted(signal);
+    });
   }
 
   throw new Error(`Timed out waiting for T3 desktop backend readiness at ${readinessUrl}.`);
@@ -656,6 +689,7 @@ async function ensureWorkspaceBootstrap(input: {
   readonly workspaceFolders: readonly BootstrapWorkspaceFolder[];
   readonly activeWorkspaceFolder?: BootstrapWorkspaceFolder | undefined;
   readonly fetchFn: typeof fetch;
+  readonly signal?: AbortSignal;
 }): Promise<{
   readonly bootstrapProjects: readonly BackendWorkspaceBootstrapProject[];
   readonly activeThreadId?: string | undefined;
@@ -665,6 +699,7 @@ async function ensureWorkspaceBootstrap(input: {
   }
 
   const bootstrapUrl = new URL(VSCODE_WORKSPACE_BOOTSTRAP_PATH, input.httpBaseUrl);
+  const timeout = createAbortTimeout(5_000, input.signal);
   const response = await input
     .fetchFn(bootstrapUrl, {
       body: JSON.stringify({
@@ -678,14 +713,16 @@ async function ensureWorkspaceBootstrap(input: {
         "content-type": "application/json",
       },
       method: "POST",
-      signal: AbortSignal.timeout(5_000),
+      signal: timeout.signal,
     })
     .catch((error) => {
+      throwIfAborted(input.signal);
       throw new Error(
         `Failed to bootstrap VS Code workspace on desktop backend: ${errorMessage(error)}.`,
         { cause: error },
       );
-    });
+    })
+    .finally(timeout.clear);
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
     throw new Error(
@@ -713,6 +750,7 @@ async function exchangeBootstrapBearerSession(
   httpBaseUrl: string,
   bootstrapToken: string,
   fetchFn: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<string> {
   const bootstrapUrl = new URL("/api/auth/bootstrap/bearer", httpBaseUrl);
   const response = await fetchFn(bootstrapUrl, {
@@ -721,6 +759,7 @@ async function exchangeBootstrapBearerSession(
       "content-type": "application/json",
     },
     method: "POST",
+    signal: signal ?? null,
   });
 
   if (!response.ok) {
@@ -781,21 +820,32 @@ function isLoopbackHttpBaseUrl(value: string): boolean {
   return net.isIP(hostname) === 4 && hostname.startsWith("127.");
 }
 
-function createAbortTimeout(timeoutMs: number): {
+function createAbortTimeout(
+  timeoutMs: number,
+  parentSignal?: AbortSignal,
+): {
   readonly signal: AbortSignal;
   readonly clear: () => void;
 } {
-  if (typeof AbortSignal.timeout === "function") {
-    return {
-      signal: AbortSignal.timeout(timeoutMs),
-      clear: () => {},
-    };
-  }
-
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (parentSignal?.aborted) {
+    abort();
+  } else {
+    parentSignal?.addEventListener("abort", abort, { once: true });
+  }
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
   return {
     signal: controller.signal,
-    clear: () => globalThis.clearTimeout(timer),
+    clear: () => {
+      globalThis.clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", abort);
+    },
   };
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new BackendStartupCancelledError();
+  }
 }
