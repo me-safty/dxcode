@@ -1,0 +1,93 @@
+name: Windows ARM64 App
+
+on:
+  workflow_dispatch:
+    inputs:
+      sync_upstream:
+        description: "Merge upstream main before building"
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    - cron: "25 */6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-arm64-app
+  cancel-in-progress: false
+
+jobs:
+  build_release:
+    name: Build and publish Windows ARM64 installer
+    runs-on: windows-11-arm
+    timeout-minutes: 60
+    steps:
+      - name: Checkout fork branch
+        uses: actions/checkout@v6
+        with:
+          ref: windows-arm64-support
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge upstream main
+        if: github.event_name == 'schedule' || github.event.inputs.sync_upstream != 'false'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/pingdotgg/t3code.git
+          git fetch upstream main --tags
+          git merge --no-edit upstream/main
+          git push origin HEAD:windows-arm64-support
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build Windows ARM64 installer
+        shell: pwsh
+        env:
+          T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          bun run dist:desktop:win:arm64 -- --verbose
+
+      - name: Resolve release metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pkg = Get-Content apps/server/package.json | ConvertFrom-Json
+          $version = [string]$pkg.version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version-windows-arm64" >> $env:GITHUB_OUTPUT
+          "name=T3 Code Windows ARM64 v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Publish fork release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: windows-arm64-support
+          name: ${{ steps.meta.outputs.name }}
+          body: |
+            Windows ARM64 fork build.
+
+            Built from `${{ github.repository }}@${{ github.sha }}`.
+            Upstream sync source: `pingdotgg/t3code@main`.
+          make_latest: true
+          files: |
+            release/*.exe
+            release/*.blockmap
+            release/*.yml
