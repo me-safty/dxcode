@@ -56,7 +56,7 @@ const config: ExpoConfig = {
   scheme: variant.scheme,
   version: "0.1.0",
   runtimeVersion: {
-    policy: "appVersion",
+    policy: process.env.MOBILE_VERSION_POLICY ?? "appVersion",
   },
   orientation: "portrait",
   icon: "./assets/icon.png",

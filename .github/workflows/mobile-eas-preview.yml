@@ -1,0 +1,77 @@
+name: Mobile EAS Preview
+
+on:
+  pull_request:
+    paths:
+      - "apps/mobile/**"
+
+jobs:
+  preview:
+    name: EAS Preview
+    if: |
+      github.event.pull_request.user.login == 'Yash-Singh1' ||
+      github.event.pull_request.user.login == 'juliusmarminge'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      APP_VARIANT: preview
+      NODE_OPTIONS: --max-old-space-size=8192
+      MOBILE_VERSION_POLICY: fingerprint
+    steps:
+      - name: Check for EXPO_TOKEN
+        run: |
+          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "You must provide an EXPO_TOKEN secret linked to this project's Expo account in this repo's secrets. Learn more: https://docs.expo.dev/eas-update/github-actions"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Cache Bun and Turbo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            .turbo
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+          packager: bun
+
+      - name: Pull preview environment variables
+        working-directory: apps/mobile
+        run: eas env:pull preview --non-interactive
+
+      - name: Deploy with fingerprint check
+        uses: expo/expo-github-action/continuous-deploy-fingerprint@main
+        with:
+          profile: preview:dev
+          branch: pr-${{ github.event.pull_request.number }}
+          platform: all
+          environment: preview
+          working-directory: apps/mobile
+          github-token: ${{ secrets.GITHUB_TOKEN }}
