@@ -49,6 +49,8 @@ import {
 } from "../codeHighlighting";
 import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 
+const CHAT_MARKDOWN_REMARK_PLUGINS = [remarkGfm];
+
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
   { hasError: boolean }
@@ -750,7 +752,7 @@ function ChatMarkdown({
   return (
     <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={CHAT_MARKDOWN_REMARK_PLUGINS}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >

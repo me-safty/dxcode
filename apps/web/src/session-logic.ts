@@ -506,7 +506,7 @@ export function deriveWorkLogEntries(
   const ordered = [...activities].toSorted(compareThreadActivitiesByOrder);
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of ordered) {
-    if (latestTurnId && activity.turnId !== latestTurnId) continue;
+    if (!shouldIncludeWorkLogActivity(activity, latestTurnId)) continue;
     if (activity.kind === "tool.started") continue;
     if (activity.kind === "task.started") continue;
     if (activity.kind === "context-window.updated") continue;
@@ -518,6 +518,16 @@ export function deriveWorkLogEntries(
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
   );
+}
+
+function shouldIncludeWorkLogActivity(
+  activity: OrchestrationThreadActivity,
+  latestTurnId: TurnId | undefined,
+): boolean {
+  if (!latestTurnId) {
+    return true;
+  }
+  return activity.turnId === latestTurnId || activity.kind === "runtime.warning";
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {
@@ -553,6 +563,8 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? payload.detail
       : null;
   const taskLabel = taskSummary || taskDetailAsLabel;
+  const runtimeWarningMessage =
+    activity.kind === "runtime.warning" ? asTrimmedString(payload?.message) : null;
   const detail = isTaskActivity
     ? !taskDetailAsLabel &&
       payload &&
@@ -560,12 +572,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       payload.detail.length > 0
       ? stripTrailingExitCode(payload.detail).output
       : null
-    : extractToolDetail(payload, title ?? activity.summary);
+    : (runtimeWarningMessage ?? extractToolDetail(payload, title ?? activity.summary));
   const toolCallId = isTaskActivity ? null : extractToolCallId(payload);
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
-    label: taskLabel || activity.summary,
+    label: activity.kind === "runtime.warning" ? "Provider warning" : taskLabel || activity.summary,
     tone:
       activity.kind === "task.progress"
         ? "thinking"

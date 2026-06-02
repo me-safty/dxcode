@@ -674,6 +674,42 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["turn-2"]);
   });
 
+  it("keeps runtime warnings visible across latest-turn filtering", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "old-warning",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        turnId: "turn-1",
+        kind: "runtime.warning",
+        summary: "Runtime warning",
+        tone: "info",
+        payload: { message: "Reconnecting... 2/5" },
+      }),
+      makeActivity({
+        id: "old-tool",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-1",
+        summary: "Ran command",
+        kind: "tool.completed",
+      }),
+      makeActivity({
+        id: "current-tool",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        turnId: "turn-2",
+        summary: "Ran command",
+        kind: "tool.completed",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-2"));
+    expect(entries.map((entry) => entry.id)).toEqual(["old-warning", "current-tool"]);
+    expect(entries[0]).toMatchObject({
+      label: "Provider warning",
+      detail: "Reconnecting... 2/5",
+      tone: "info",
+    });
+  });
+
   it("omits checkpoint captured info entries", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

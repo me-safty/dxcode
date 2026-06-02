@@ -318,8 +318,7 @@ function ChatThreadRouteView() {
   // from the store regardless, so only keep it mounted-while-closed inline.
   const shouldRenderFilePanelContent =
     filePanelOpen ||
-    (!shouldUseDiffSheet &&
-      (filePanel.target !== null || filePanel.explorerContext !== null));
+    (!shouldUseDiffSheet && (filePanel.target !== null || filePanel.explorerContext !== null));
 
   return (
     <>

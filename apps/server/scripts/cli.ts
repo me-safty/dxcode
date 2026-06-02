@@ -20,6 +20,7 @@ import serverPackageJson from "../package.json" with { type: "json" };
 interface PackageJson {
   name: string;
   description: string;
+  license: string;
   repository: {
     type: string;
     url: string;
@@ -69,12 +70,15 @@ const applyPublishIconOverrides = Effect.fn("applyPublishIconOverrides")(functio
 ) {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
+  const backupDirectory = yield* fs.makeTempDirectoryScoped({
+    prefix: "salchi-publish-icons-",
+  });
   const backups: PublishIconBackup[] = [];
 
   for (const override of PUBLISH_ICON_OVERRIDES) {
     const sourcePath = path.join(repoRoot, override.sourceRelativePath);
     const targetPath = path.join(serverDir, override.targetRelativePath);
-    const backupPath = `${targetPath}.publish-bak`;
+    const backupPath = path.join(backupDirectory, `${backups.length}-${path.basename(targetPath)}`);
 
     if (!(yield* fs.exists(sourcePath))) {
       return yield* new CliError({
@@ -216,6 +220,7 @@ const publishCmd = Command.make(
           const pkg: PackageJson = {
             name: serverPackageJson.name,
             description: serverPackageJson.description,
+            license: serverPackageJson.license,
             repository: serverPackageJson.repository,
             bin: serverPackageJson.bin,
             type: serverPackageJson.type,

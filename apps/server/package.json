@@ -5,11 +5,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pingdotgg/t3code",
+    "url": "git+https://github.com/JoseRFelix/salchi.git",
     "directory": "apps/server"
   },
   "bin": {
-    "salchi": "./dist/bin.mjs"
+    "salchi": "dist/bin.mjs"
   },
   "files": [
     "dist"
