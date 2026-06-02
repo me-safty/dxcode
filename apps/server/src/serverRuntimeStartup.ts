@@ -39,6 +39,7 @@ import {
   formatHostForUrl,
   isWildcardHost,
   issueHeadlessServeAccessInfo,
+  resolveAdvertisedStartupBaseUrl,
 } from "./startupAccess.ts";
 
 export class ServerRuntimeStartupError extends Data.TaggedError("ServerRuntimeStartupError")<{
@@ -250,7 +251,13 @@ const resolveStartupBrowserTarget = Effect.gen(function* () {
     serverConfig.host && !isWildcardHost(serverConfig.host)
       ? `http://${formatHostForUrl(serverConfig.host)}:${serverConfig.port}`
       : localUrl;
-  const baseTarget = serverConfig.devUrl?.toString() ?? bindUrl;
+  const httpBaseTarget = serverConfig.devUrl?.toString() ?? bindUrl;
+  const baseTarget = yield* resolveAdvertisedStartupBaseUrl({
+    httpBaseUrl: httpBaseTarget,
+    tailscaleServeEnabled: serverConfig.tailscaleServeEnabled,
+    tailscaleServePort: serverConfig.tailscaleServePort,
+    tailscaleServeHost: serverConfig.tailscaleServeHost,
+  });
   return yield* Effect.succeed(serverConfig.mode === "desktop" ? baseTarget : undefined).pipe(
     Effect.flatMap((target) =>
       target ? Effect.succeed(target) : serverAuth.issueStartupPairingUrl(baseTarget),
