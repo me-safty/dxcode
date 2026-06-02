@@ -17,22 +17,38 @@ jobs:
       NODE_OPTIONS: --max-old-space-size=8192
       MOBILE_VERSION_POLICY: fingerprint
     steps:
+      - id: expo-token
+        name: Check for EXPO_TOKEN
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -n "$EXPO_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "EXPO_TOKEN is not available; skipping EAS preview."
+          fi
+
       - name: Checkout
+        if: steps.expo-token.outputs.present == 'true'
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Bun
+        if: steps.expo-token.outputs.present == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
 
       - name: Setup Node
+        if: steps.expo-token.outputs.present == 'true'
         uses: actions/setup-node@v6
         with:
           node-version-file: package.json
 
       - name: Cache Bun and Turbo
+        if: steps.expo-token.outputs.present == 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -43,9 +59,11 @@ jobs:
             ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}-
 
       - name: Install dependencies
+        if: steps.expo-token.outputs.present == 'true'
         run: bun install --frozen-lockfile
 
       - name: Setup EAS
+        if: steps.expo-token.outputs.present == 'true'
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
@@ -53,10 +71,12 @@ jobs:
           packager: bun
 
       - name: Pull preview environment variables
+        if: steps.expo-token.outputs.present == 'true'
         working-directory: apps/mobile
         run: eas env:pull preview --non-interactive
 
       - name: Deploy with fingerprint check
+        if: steps.expo-token.outputs.present == 'true'
         uses: expo/expo-github-action/continuous-deploy-fingerprint@main
         with:
           profile: preview:dev
