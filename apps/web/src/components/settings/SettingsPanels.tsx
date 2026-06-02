@@ -1,7 +1,7 @@
 import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   defaultInstanceIdForDriver,
   type DesktopUpdateChannel,
@@ -10,10 +10,16 @@ import {
   type ProviderInstanceConfig,
   type ProviderInstanceId,
   type ScopedThreadRef,
+  type WorktreeLocationMode,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
+import {
+  createWorktreeLocationTemplateContext,
+  renderWorktreeLocationPreview,
+  WORKTREE_LOCATION_TEMPLATE_VARIABLES,
+} from "@t3tools/shared/worktreeLocation";
 import * as Arr from "effect/Array";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
@@ -52,6 +58,7 @@ import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
+import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -78,7 +85,7 @@ import {
   useRelativeTimeTick,
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
-import { useServerObservability, useServerProviders } from "../../rpc/serverState";
+import { useServerConfig, useServerObservability, useServerProviders } from "../../rpc/serverState";
 
 const THEME_OPTIONS = [
   {
@@ -100,6 +107,17 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
+
+const WORKTREE_LOCATION_MODE_LABELS: Record<WorktreeLocationMode, string> = {
+  default: "Default",
+  "project-subdirectory": "Project-subdirectory",
+  "project-sibling": "Project-sibling",
+  custom: "Custom",
+};
+
+const PREVIEW_T3_HOME = "~/.t3";
+const PREVIEW_WORKTREE_NAME = "feature-branch";
+const PREVIEW_PROJECT_CWD_FALLBACK = "/code/my-project";
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 
@@ -417,6 +435,12 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
         : []),
+      ...(settings.worktreeLocation.mode !== DEFAULT_UNIFIED_SETTINGS.worktreeLocation.mode
+        ? ["Worktree location"]
+        : []),
+      ...(settings.worktreeLocation.template !== DEFAULT_UNIFIED_SETTINGS.worktreeLocation.template
+        ? ["Custom worktree template"]
+        : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add project base directory"]
         : []),
@@ -441,6 +465,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.enableAssistantStreaming,
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
+      settings.worktreeLocation.mode,
+      settings.worktreeLocation.template,
       theme,
     ],
   );
@@ -465,6 +491,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
+      worktreeLocation: DEFAULT_UNIFIED_SETTINGS.worktreeLocation,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
@@ -483,6 +510,7 @@ export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
+  const serverConfig = useServerConfig();
   const observability = useServerObservability();
   const serverProviders = useServerProviders();
   const diagnosticsDescription = formatDiagnosticsDescription({
@@ -515,6 +543,59 @@ export function GeneralSettingsPanel() {
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
+  const worktreeLocation = settings.worktreeLocation;
+  const defaultWorktreeLocation = DEFAULT_UNIFIED_SETTINGS.worktreeLocation;
+  const [worktreeLocationTemplateDraft, setWorktreeLocationTemplateDraft] = useState(
+    worktreeLocation.template,
+  );
+  const previewContext = useMemo(
+    () =>
+      createWorktreeLocationTemplateContext({
+        t3Home: PREVIEW_T3_HOME,
+        projectRoot: serverConfig?.cwd ?? PREVIEW_PROJECT_CWD_FALLBACK,
+        worktreeName: PREVIEW_WORKTREE_NAME,
+      }),
+    [serverConfig?.cwd],
+  );
+  const worktreeLocationPreview = useMemo(
+    () =>
+      renderWorktreeLocationPreview({
+        mode: worktreeLocation.mode,
+        template:
+          worktreeLocation.mode === "custom"
+            ? worktreeLocationTemplateDraft
+            : worktreeLocation.template,
+        context: previewContext,
+      }),
+    [
+      previewContext,
+      worktreeLocation.mode,
+      worktreeLocation.template,
+      worktreeLocationTemplateDraft,
+    ],
+  );
+  const isWorktreeLocationDirty = !Equal.equals(worktreeLocation, defaultWorktreeLocation);
+
+  useEffect(() => {
+    setWorktreeLocationTemplateDraft(worktreeLocation.template);
+  }, [worktreeLocation.template]);
+
+  const updateWorktreeLocation = useCallback(
+    (patch: Partial<typeof worktreeLocation>) => {
+      updateSettings({
+        worktreeLocation: {
+          ...worktreeLocation,
+          ...patch,
+        },
+      });
+    },
+    [updateSettings, worktreeLocation],
+  );
+
+  const commitWorktreeLocationTemplateDraft = useCallback(() => {
+    if (worktreeLocationTemplateDraft === worktreeLocation.template) return;
+    updateWorktreeLocation({ template: worktreeLocationTemplateDraft });
+  }, [updateWorktreeLocation, worktreeLocation.template, worktreeLocationTemplateDraft]);
 
   return (
     <SettingsPageContainer>
@@ -737,6 +818,120 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        <SettingsRow
+          title="Worktree location"
+          description="Controls where T3 Code creates worktrees when New worktree threads and PR worktree preparation let the server choose the path."
+          status={
+            worktreeLocation.mode !== "custom" && worktreeLocationPreview.preview ? (
+              <span>
+                Preview:{" "}
+                <code className="text-[11px] text-foreground/80">
+                  {worktreeLocationPreview.preview}
+                </code>
+              </span>
+            ) : null
+          }
+          resetAction={
+            isWorktreeLocationDirty ? (
+              <SettingResetButton
+                label="worktree location"
+                onClick={() => updateWorktreeLocation(defaultWorktreeLocation)}
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={worktreeLocation.mode}
+              onValueChange={(value) => {
+                if (
+                  value === "default" ||
+                  value === "project-subdirectory" ||
+                  value === "project-sibling" ||
+                  value === "custom"
+                ) {
+                  const nextTemplate =
+                    value === "custom" && worktreeLocation.template.trim().length === 0
+                      ? defaultWorktreeLocation.template
+                      : worktreeLocation.template;
+                  setWorktreeLocationTemplateDraft(nextTemplate);
+                  updateWorktreeLocation({
+                    mode: value,
+                    ...(nextTemplate !== worktreeLocation.template
+                      ? { template: nextTemplate }
+                      : {}),
+                  });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-52" aria-label="Worktree location mode">
+                <SelectValue>{WORKTREE_LOCATION_MODE_LABELS[worktreeLocation.mode]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {(
+                  [
+                    "default",
+                    "project-subdirectory",
+                    "project-sibling",
+                    "custom",
+                  ] as const satisfies readonly WorktreeLocationMode[]
+                ).map((mode) => (
+                  <SelectItem hideIndicator key={mode} value={mode}>
+                    {WORKTREE_LOCATION_MODE_LABELS[mode]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        >
+          {worktreeLocation.mode === "custom" ? (
+            <div className="mt-4 space-y-3 border-t border-border/60 px-0 pb-4 pt-4">
+              <label htmlFor="worktree-location-template" className="block">
+                <span className="text-xs font-medium text-foreground">
+                  Custom worktree template
+                </span>
+                <Input
+                  id="worktree-location-template"
+                  className="mt-1.5"
+                  value={worktreeLocationTemplateDraft}
+                  onChange={(event) => setWorktreeLocationTemplateDraft(event.target.value)}
+                  onBlur={commitWorktreeLocationTemplateDraft}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      commitWorktreeLocationTemplateDraft();
+                    }
+                  }}
+                  placeholder={defaultWorktreeLocation.template}
+                  spellCheck={false}
+                />
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {WORKTREE_LOCATION_TEMPLATE_VARIABLES.map((variable) => (
+                  <span
+                    key={variable.token}
+                    title={variable.description}
+                    className="rounded-full border border-border/60 bg-muted/40 px-2 py-1 text-[10px] font-medium text-muted-foreground"
+                  >
+                    {variable.token}
+                  </span>
+                ))}
+              </div>
+              {worktreeLocationPreview.preview ? (
+                <p className="break-all text-xs text-muted-foreground">
+                  Preview:{" "}
+                  <code className="text-foreground/80">{worktreeLocationPreview.preview}</code>
+                </p>
+              ) : null}
+              {worktreeLocationPreview.error ? (
+                <p className="text-xs text-destructive">{worktreeLocationPreview.error}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Literal substitution only. Include $WORKTREE_NAME in the final path template.
+                </p>
+              )}
+            </div>
+          ) : null}
+        </SettingsRow>
 
         <SettingsRow
           title="Add project starts in"

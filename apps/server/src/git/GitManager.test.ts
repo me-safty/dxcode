@@ -41,6 +41,7 @@ import {
   type ProjectSetupScriptRunnerInput,
   type ProjectSetupScriptRunnerShape,
 } from "../project/Services/ProjectSetupScriptRunner.ts";
+import { WorktreeLocationResolver } from "../project/Services/WorktreeLocationResolver.ts";
 
 interface FakeGhScenario {
   prListSequence?: string[];
@@ -690,6 +691,7 @@ function makeManager(input?: {
     ),
     vcsDriverLayer,
     serverSettingsLayer,
+    WorktreeLocationResolver.layerTest(),
   ).pipe(Layer.provideMerge(sourceControlRegistryLayer), Layer.provideMerge(NodeServices.layer));
 
   return makeGitManager().pipe(
@@ -702,6 +704,7 @@ const asThreadId = (threadId: string) => threadId as ThreadId;
 
 const GitManagerTestLayer = GitVcsDriver.layer.pipe(
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-git-manager-test-" })),
+  Layer.provideMerge(WorktreeLocationResolver.layerTest()),
   Layer.provideMerge(VcsProcess.layer),
   Layer.provideMerge(NodeServices.layer),
 );

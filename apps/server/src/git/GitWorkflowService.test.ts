@@ -4,6 +4,7 @@ import * as Layer from "effect/Layer";
 
 import * as GitManager from "./GitManager.ts";
 import * as GitWorkflowService from "./GitWorkflowService.ts";
+import { WorktreeLocationResolver } from "../project/Services/WorktreeLocationResolver.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
@@ -16,6 +17,7 @@ function makeLayer(input: { readonly detect: VcsDriverRegistry.VcsDriverRegistry
     ),
     Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
     Layer.provide(Layer.mock(GitManager.GitManager)({})),
+    Layer.provide(WorktreeLocationResolver.layerTest()),
   );
 }
 
@@ -96,6 +98,7 @@ describe("GitWorkflowService", () => {
           status,
         }),
       ),
+      Layer.provide(WorktreeLocationResolver.layerTest()),
     );
 
     return Effect.gen(function* () {

@@ -44,6 +44,7 @@ import {
 import { GitManagerError } from "@t3tools/contracts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScriptRunner.ts";
+import { WorktreeLocationResolver } from "../project/Services/WorktreeLocationResolver.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import type { GitManagerServiceError } from "@t3tools/contracts";
@@ -531,6 +532,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   const sourceControlProviders = yield* SourceControlProviderRegistry;
   const textGeneration = yield* TextGeneration;
   const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
+  const worktreeLocationResolver = yield* WorktreeLocationResolver;
   const crypto = yield* Crypto.Crypto;
 
   const sourceControlProvider = (cwd: string) => sourceControlProviders.resolve({ cwd });
@@ -564,6 +566,15 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         };
       }),
     );
+
+  const resolveCreateWorktreePath = Effect.fn("GitManager.resolveCreateWorktreePath")(
+    function* (input: { readonly projectRoot: string; readonly refName: string }) {
+      return yield* worktreeLocationResolver.resolveCreateWorktreePath({
+        projectRoot: input.projectRoot,
+        name: input.refName,
+      });
+    },
+  );
 
   const configurePullRequestHeadUpstreamBase = Effect.fn("configurePullRequestHeadUpstream")(
     function* (
@@ -1543,10 +1554,14 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         );
       }
 
+      const worktreePath = yield* resolveCreateWorktreePath({
+        projectRoot: input.cwd,
+        refName: localPullRequestBranch,
+      });
       const worktree = yield* gitCore.createWorktree({
         cwd: input.cwd,
         refName: localPullRequestBranch,
-        path: null,
+        path: worktreePath,
       });
       yield* ensureExistingWorktreeUpstream(worktree.worktree.path);
       yield* maybeRunSetupScript(worktree.worktree.path);

@@ -28,6 +28,7 @@ import {
   GitPullRequestRefInput,
   VcsPullResult,
   VcsRemoveWorktreeInput,
+  WorktreeLocationResolverError,
   GitResolvePullRequestResult,
   GitRunStackedActionInput,
   VcsStatusInput,
@@ -347,7 +348,7 @@ export const WsVcsListRefsRpc = Rpc.make(WS_METHODS.vcsListRefs, {
 export const WsVcsCreateWorktreeRpc = Rpc.make(WS_METHODS.vcsCreateWorktree, {
   payload: VcsCreateWorktreeInput,
   success: VcsCreateWorktreeResult,
-  error: GitCommandError,
+  error: Schema.Union([GitCommandError, WorktreeLocationResolverError]),
 });
 
 export const WsVcsRemoveWorktreeRpc = Rpc.make(WS_METHODS.vcsRemoveWorktree, {

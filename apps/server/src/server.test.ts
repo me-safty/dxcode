@@ -95,6 +95,7 @@ import {
   ProjectSetupScriptRunnerError,
   type ProjectSetupScriptRunnerShape,
 } from "./project/Services/ProjectSetupScriptRunner.ts";
+import { WorktreeLocationResolver } from "./project/Services/WorktreeLocationResolver.ts";
 import {
   RepositoryIdentityResolver,
   type RepositoryIdentityResolverShape,
@@ -495,6 +496,7 @@ const buildAppUnderTest = (options?: {
       Layer.provideMerge(vcsDriverRegistryLayer),
       Layer.provideMerge(gitVcsDriverLayer),
       Layer.provideMerge(gitManagerLayer),
+      Layer.provideMerge(WorktreeLocationResolver.layerTest()),
     );
     const vcsProvisioningLayer = VcsProvisioningService.layer.pipe(
       Layer.provide(vcsDriverRegistryLayer),
@@ -3917,7 +3919,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cwd: "/tmp/project",
           refName: "main",
           newRefName: "t3code/bootstrap-refName",
-          path: null,
+          path: "/tmp/project/.mock-worktrees/t3code-bootstrap-refName",
         });
         assert.deepEqual(runForThread.mock.calls[0]?.[0], {
           threadId: ThreadId.make("thread-bootstrap"),

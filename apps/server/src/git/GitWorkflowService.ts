@@ -26,9 +26,11 @@ import {
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
   type VcsStatusResult,
+  type WorktreeLocationResolverError,
 } from "@t3tools/contracts";
 
 import { GitManager, type GitRunStackedActionOptions } from "./GitManager.ts";
+import { WorktreeLocationResolver } from "../project/Services/WorktreeLocationResolver.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
 
@@ -59,7 +61,7 @@ export interface GitWorkflowServiceShape {
   readonly listRefs: (input: VcsListRefsInput) => Effect.Effect<VcsListRefsResult, GitCommandError>;
   readonly createWorktree: (
     input: VcsCreateWorktreeInput,
-  ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
+  ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError | WorktreeLocationResolverError>;
   readonly removeWorktree: (input: VcsRemoveWorktreeInput) => Effect.Effect<void, GitCommandError>;
   readonly createRef: (
     input: VcsCreateRefInput,
@@ -133,6 +135,7 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
   const registry = yield* VcsDriverRegistry;
   const git = yield* GitVcsDriver;
   const gitManager = yield* GitManager;
+  const worktreeLocationResolver = yield* WorktreeLocationResolver;
 
   const ensureGit = Effect.fn("GitWorkflowService.ensureGit")(function* (
     operation: string,
@@ -292,7 +295,17 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
       ),
     createWorktree: (input) =>
       ensureGitCommand("GitWorkflowService.createWorktree", input.cwd).pipe(
-        Effect.andThen(git.createWorktree(input)),
+        Effect.andThen(
+          Effect.gen(function* () {
+            const worktreePath =
+              input.path ??
+              (yield* worktreeLocationResolver.resolveCreateWorktreePath({
+                projectRoot: input.cwd,
+                name: input.newRefName ?? input.refName,
+              }));
+            return yield* git.createWorktree({ ...input, path: worktreePath });
+          }),
+        ),
       ),
     removeWorktree: (input) =>
       ensureGitCommand("GitWorkflowService.removeWorktree", input.cwd).pipe(
