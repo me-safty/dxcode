@@ -168,6 +168,7 @@ describe("BackendManager", () => {
 
   afterEach(() => {
     fs.rmSync(extensionRoot, { force: true, recursive: true });
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
@@ -495,6 +496,87 @@ describe("BackendManager", () => {
         method: "POST",
       }),
     );
+  });
+
+  it("does not timeout an active slow workspace bootstrap", async () => {
+    vi.useFakeTimers();
+
+    let resolveWorkspaceBootstrapStarted!: () => void;
+    const workspaceBootstrapStarted = new Promise<void>((resolve) => {
+      resolveWorkspaceBootstrapStarted = resolve;
+    });
+    let resolveWorkspaceBootstrap!: (response: Response) => void;
+    let rejectWorkspaceBootstrap!: (error: Error) => void;
+    let workspaceBootstrapSignal: AbortSignal | undefined;
+    const workspaceBootstrapResponse = new Promise<Response>((resolve, reject) => {
+      resolveWorkspaceBootstrap = resolve;
+      rejectWorkspaceBootstrap = reject;
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(input.toString());
+      if (url.pathname === "/.well-known/t3/environment") {
+        return new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      if (url.pathname === "/api/auth/bootstrap/bearer") {
+        return new Response(JSON.stringify({ sessionToken: "desktop-bearer-token" }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      if (url.pathname === "/api/vscode/workspace-bootstrap") {
+        workspaceBootstrapSignal = init?.signal ?? undefined;
+        const abort = () => rejectWorkspaceBootstrap(new Error("aborted"));
+        if (workspaceBootstrapSignal?.aborted) {
+          abort();
+        } else {
+          workspaceBootstrapSignal?.addEventListener("abort", abort, { once: true });
+        }
+        resolveWorkspaceBootstrapStarted();
+        return workspaceBootstrapResponse;
+      }
+      if (url.pathname === "/api/auth/session/revoke") {
+        return new Response(JSON.stringify({ revoked: true }), { status: 200 });
+      }
+      throw new Error(`Unexpected request URL: ${url.href}`);
+    });
+    const manager = new BackendManager(
+      { extensionPath: extensionRoot } as never,
+      makeOutputChannel() as never,
+      makeDependencies({ fetch: fetchMock }),
+    );
+    const started = manager.ensureStarted();
+
+    await workspaceBootstrapStarted;
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(workspaceBootstrapSignal?.aborted).toBe(false);
+    resolveWorkspaceBootstrap(
+      new Response(
+        JSON.stringify({
+          bootstrapProjects: [
+            {
+              workspaceFolderKey: "file::/workspace",
+              workspaceFolderName: "workspace",
+              cwd: "/workspace",
+              projectId: "project-workspace",
+              bootstrapThreadId: "thread-slow",
+              isActive: true,
+            },
+          ],
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        },
+      ),
+    );
+
+    await expect(started).resolves.toMatchObject({
+      bearerToken: "desktop-bearer-token",
+      initialThreadRoute: "/_chat/environment-desktop/thread-slow",
+    });
   });
 
   it("fails when no desktop backend advertisement is available", async () => {

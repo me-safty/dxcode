@@ -699,7 +699,6 @@ async function ensureWorkspaceBootstrap(input: {
   }
 
   const bootstrapUrl = new URL(VSCODE_WORKSPACE_BOOTSTRAP_PATH, input.httpBaseUrl);
-  const timeout = createAbortTimeout(5_000, input.signal);
   const response = await input
     .fetchFn(bootstrapUrl, {
       body: JSON.stringify({
@@ -713,7 +712,7 @@ async function ensureWorkspaceBootstrap(input: {
         "content-type": "application/json",
       },
       method: "POST",
-      signal: timeout.signal,
+      signal: input.signal ?? null,
     })
     .catch((error) => {
       throwIfAborted(input.signal);
@@ -721,8 +720,7 @@ async function ensureWorkspaceBootstrap(input: {
         `Failed to bootstrap VS Code workspace on desktop backend: ${errorMessage(error)}.`,
         { cause: error },
       );
-    })
-    .finally(timeout.clear);
+    });
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
     throw new Error(
