@@ -9,6 +9,7 @@ import {
   XIcon,
 } from "lucide-react";
 import {
+  type ContextMenuItem,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type TerminalAttachStreamEvent,
@@ -65,6 +66,14 @@ import { openDiscoveredPort } from "./preview/openDiscoveredPort";
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
 const MULTI_CLICK_SELECTION_ACTION_DELAY_MS = 260;
+
+type TerminalSelectionActionId = "add-to-chat" | "copy";
+
+export const TERMINAL_SELECTION_ACTION_MENU_ITEMS: readonly ContextMenuItem<TerminalSelectionActionId>[] =
+  [
+    { id: "add-to-chat", label: "Add to chat" },
+    { id: "copy", label: "Copy" },
+  ];
 
 function maxDrawerHeight(): number {
   if (typeof window === "undefined") return DEFAULT_THREAD_TERMINAL_HEIGHT;
@@ -264,6 +273,13 @@ export function shouldHandleTerminalSelectionMouseUp(
   return selectionGestureActive && button === 0;
 }
 
+export async function copyTerminalSelectionTextToClipboard(text: string): Promise<void> {
+  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    throw new Error("Clipboard API unavailable.");
+  }
+  await navigator.clipboard.writeText(text);
+}
+
 interface TerminalViewportProps {
   threadRef: ScopedThreadRef;
   threadId: ThreadId;
@@ -418,15 +434,33 @@ export function TerminalViewport({
       selectionActionOpenRef.current = true;
       try {
         const clicked = await localApi.contextMenu.show(
-          [{ id: "add-to-chat", label: "Add to chat" }],
+          TERMINAL_SELECTION_ACTION_MENU_ITEMS,
           nextAction.position,
         );
-        if (requestId !== selectionActionRequestIdRef.current || clicked !== "add-to-chat") {
+        if (requestId !== selectionActionRequestIdRef.current || clicked === null) {
           return;
         }
-        handleAddTerminalContext(nextAction.selection);
-        terminalRef.current?.clearSelection();
-        terminalRef.current?.focus();
+        switch (clicked) {
+          case "add-to-chat":
+            handleAddTerminalContext(nextAction.selection);
+            terminalRef.current?.clearSelection();
+            terminalRef.current?.focus();
+            return;
+          case "copy":
+            try {
+              await copyTerminalSelectionTextToClipboard(nextAction.selection.text);
+            } catch (error) {
+              const activeTerminal = terminalRef.current;
+              if (activeTerminal) {
+                writeSystemMessage(
+                  activeTerminal,
+                  error instanceof Error ? error.message : "Unable to copy terminal selection",
+                );
+              }
+            }
+            terminalRef.current?.focus();
+            return;
+        }
       } finally {
         selectionActionOpenRef.current = false;
       }
