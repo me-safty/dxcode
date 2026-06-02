@@ -77,6 +77,7 @@ export interface EnvironmentState {
   // ---------------------------------------------------------------------------
   messageIdsByThreadId: Record<ThreadId, MessageId[]>;
   messageByThreadId: Record<ThreadId, Record<MessageId, ChatMessage>>;
+  queuedTurnMessageOrderByThreadId?: Record<ThreadId, MessageId[]>;
   activityIdsByThreadId: Record<ThreadId, string[]>;
   activityByThreadId: Record<ThreadId, Record<string, OrchestrationThreadActivity>>;
   proposedPlanIdsByThreadId: Record<ThreadId, string[]>;
@@ -111,6 +112,7 @@ const initialEnvironmentState: EnvironmentState = {
   threadTurnStateById: {},
   messageIdsByThreadId: {},
   messageByThreadId: {},
+  queuedTurnMessageOrderByThreadId: {},
   activityIdsByThreadId: {},
   activityByThreadId: {},
   proposedPlanIdsByThreadId: {},
@@ -248,6 +250,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     interactionMode: thread.interactionMode,
     session: thread.session ? mapSession(thread.session) : null,
     messages: thread.messages.map((message) => mapMessage(environmentId, message)),
+    queuedTurnMessageOrder: [],
     proposedPlans: thread.proposedPlans.map(mapProposedPlan),
     error: sanitizeThreadErrorMessage(thread.session?.lastError),
     createdAt: thread.createdAt,
@@ -449,6 +452,29 @@ function removeId<T extends string>(ids: readonly T[], id: T): T[] {
   return ids.filter((value) => value !== id);
 }
 
+function appendUniqueId<T extends string>(ids: readonly T[], id: T): T[] {
+  return ids.includes(id) ? [...ids] : [...ids, id];
+}
+
+function normalizeOrderedMessageIds(
+  orderedMessageIds: ReadonlyArray<MessageId>,
+  messages: ReadonlyArray<ChatMessage>,
+): MessageId[] {
+  const knownUserMessageIds = new Set(
+    messages.filter((message) => message.role === "user").map((message) => message.id),
+  );
+  const result: MessageId[] = [];
+  const seen = new Set<string>();
+  for (const messageId of orderedMessageIds) {
+    if (!knownUserMessageIds.has(messageId) || seen.has(messageId)) {
+      continue;
+    }
+    result.push(messageId);
+    seen.add(messageId);
+  }
+  return result;
+}
+
 function buildMessageSlice(thread: Thread): {
   ids: MessageId[];
   byId: Record<MessageId, ChatMessage>;
@@ -638,6 +664,16 @@ function writeThreadState(
     };
   }
 
+  if (previousThread?.queuedTurnMessageOrder !== nextThread.queuedTurnMessageOrder) {
+    nextState = {
+      ...nextState,
+      queuedTurnMessageOrderByThreadId: {
+        ...nextState.queuedTurnMessageOrderByThreadId,
+        [nextThread.id]: nextThread.queuedTurnMessageOrder,
+      },
+    };
+  }
+
   if (previousThread?.activities !== nextThread.activities) {
     const nextActivitySlice = buildActivitySlice(nextThread);
     nextState = {
@@ -803,6 +839,10 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
   const { [threadId]: _removedTurnState, ...threadTurnStateById } = state.threadTurnStateById;
   const { [threadId]: _removedMessageIds, ...messageIdsByThreadId } = state.messageIdsByThreadId;
   const { [threadId]: _removedMessages, ...messageByThreadId } = state.messageByThreadId;
+  const {
+    [threadId]: _removedQueuedTurnMessageOrder,
+    ...queuedTurnMessageOrderByThreadId
+  } = state.queuedTurnMessageOrderByThreadId ?? {};
   const { [threadId]: _removedActivityIds, ...activityIdsByThreadId } = state.activityIdsByThreadId;
   const { [threadId]: _removedActivities, ...activityByThreadId } = state.activityByThreadId;
   const { [threadId]: _removedPlanIds, ...proposedPlanIdsByThreadId } =
@@ -823,6 +863,10 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
     threadTurnStateById,
     messageIdsByThreadId,
     messageByThreadId,
+    queuedTurnMessageOrderByThreadId: queuedTurnMessageOrderByThreadId as Record<
+      ThreadId,
+      MessageId[]
+    >,
     activityIdsByThreadId,
     activityByThreadId,
     proposedPlanIdsByThreadId,
@@ -1099,6 +1143,10 @@ function syncEnvironmentShellSnapshot(
     sidebarThreadSummaryById: {},
     messageIdsByThreadId: retainThreadScopedRecord(state.messageIdsByThreadId, nextThreadIds),
     messageByThreadId: retainThreadScopedRecord(state.messageByThreadId, nextThreadIds),
+    queuedTurnMessageOrderByThreadId: retainThreadScopedRecord(
+      state.queuedTurnMessageOrderByThreadId ?? {},
+      nextThreadIds,
+    ),
     activityIdsByThreadId: retainThreadScopedRecord(state.activityIdsByThreadId, nextThreadIds),
     activityByThreadId: retainThreadScopedRecord(state.activityByThreadId, nextThreadIds),
     proposedPlanIdsByThreadId: retainThreadScopedRecord(
@@ -1341,6 +1389,10 @@ function applyEnvironmentOrchestrationEvent(
         runtimeMode: event.payload.runtimeMode,
         interactionMode: event.payload.interactionMode,
         pendingSourceProposedPlan: event.payload.sourceProposedPlan,
+        queuedTurnMessageOrder:
+          thread.latestTurn?.state === "running"
+            ? appendUniqueId(thread.queuedTurnMessageOrder ?? [], event.payload.messageId)
+            : (thread.queuedTurnMessageOrder ?? []),
         updatedAt: event.occurredAt,
       }));
 
@@ -1368,6 +1420,16 @@ function applyEnvironmentOrchestrationEvent(
         };
       });
     }
+
+    case "thread.turn-queue-reordered":
+      return updateThreadState(state, event.payload.threadId, (thread) => ({
+        ...thread,
+        queuedTurnMessageOrder: normalizeOrderedMessageIds(
+          event.payload.orderedMessageIds,
+          thread.messages,
+        ),
+        updatedAt: event.occurredAt,
+      }));
 
     case "thread.message-sent":
       return updateThreadState(state, event.payload.threadId, (thread) => {

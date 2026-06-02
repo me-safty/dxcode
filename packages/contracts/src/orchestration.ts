@@ -612,6 +612,14 @@ const ThreadTurnInterruptCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadTurnQueueReorderCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.queue.reorder"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  orderedMessageIds: Schema.Array(MessageId),
+  createdAt: IsoDateTime,
+});
+
 const ThreadApprovalRespondCommand = Schema.Struct({
   type: Schema.Literal("thread.approval.respond"),
   commandId: CommandId,
@@ -658,6 +666,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
+  ThreadTurnQueueReorderCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
@@ -679,6 +688,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
+  ThreadTurnQueueReorderCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
@@ -782,6 +792,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.message-sent",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
+  "thread.turn-queue-reordered",
   "thread.approval-response-requested",
   "thread.user-input-response-requested",
   "thread.checkpoint-revert-requested",
@@ -906,6 +917,12 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
 export const ThreadTurnInterruptRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnId: Schema.optional(TurnId),
+  createdAt: IsoDateTime,
+});
+
+export const ThreadTurnQueueReorderedPayload = Schema.Struct({
+  threadId: ThreadId,
+  orderedMessageIds: Schema.Array(MessageId),
   createdAt: IsoDateTime,
 });
 
@@ -1051,6 +1068,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.turn-interrupt-requested"),
     payload: ThreadTurnInterruptRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-queue-reordered"),
+    payload: ThreadTurnQueueReorderedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

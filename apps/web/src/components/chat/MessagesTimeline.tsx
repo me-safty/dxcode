@@ -29,7 +29,10 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   CircleAlertIcon,
+  CornerDownRightIcon,
   EyeIcon,
   GlobeIcon,
   HammerIcon,
@@ -95,6 +98,7 @@ interface TimelineRowSharedState {
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onMoveQueuedUserMessage: (messageId: MessageId, direction: "up" | "down") => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }
@@ -118,6 +122,8 @@ interface MessagesTimelineProps {
   isWorking: boolean;
   activeTurnInProgress: boolean;
   activeTurnId?: TurnId | null;
+  activeTurnRequestedAt?: string | null;
+  queuedUserMessageOrder?: ReadonlyArray<MessageId>;
   activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
@@ -128,6 +134,7 @@ interface MessagesTimelineProps {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onMoveQueuedUserMessage?: (messageId: MessageId, direction: "up" | "down") => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   activeThreadEnvironmentId: EnvironmentId;
@@ -147,6 +154,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   isWorking,
   activeTurnInProgress,
   activeTurnId,
+  activeTurnRequestedAt,
+  queuedUserMessageOrder,
   activeTurnStartedAt,
   listRef,
   timelineEntries,
@@ -157,6 +166,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
+  onMoveQueuedUserMessage,
   isRevertingCheckpoint,
   onImageExpand,
   activeThreadEnvironmentId,
@@ -167,6 +177,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
 }: MessagesTimelineProps) {
+  const moveQueuedUserMessage = onMoveQueuedUserMessage ?? noopMoveQueuedUserMessage;
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
@@ -176,6 +187,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         isWorking,
         activeTurnInProgress,
         activeTurnId: activeTurnId ?? null,
+        activeTurnRequestedAt: activeTurnRequestedAt ?? null,
+        queuedUserMessageOrder: queuedUserMessageOrder ?? [],
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
@@ -187,6 +200,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isWorking,
       activeTurnInProgress,
       activeTurnId,
+      activeTurnRequestedAt,
+      queuedUserMessageOrder,
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
@@ -229,6 +244,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      onMoveQueuedUserMessage: moveQueuedUserMessage,
       onImageExpand,
       onOpenTurnDiff,
     }),
@@ -241,6 +257,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      moveQueuedUserMessage,
       onImageExpand,
       onOpenTurnDiff,
     ],
@@ -296,6 +313,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     </TimelineRowCtx>
   );
 });
+
+function noopMoveQueuedUserMessage(_messageId: MessageId, _direction: "up" | "down") {}
 
 function keyExtractor(item: MessagesTimelineRow) {
   return item.id;
@@ -386,15 +405,58 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                 {displayedUserMessage.copyText && (
                   <MessageCopyButton text={displayedUserMessage.copyText} />
                 )}
+                {row.isQueuedUserMessage ? <QueuedUserMessageControls row={row} /> : null}
                 {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
               </div>
-              <p className="text-right text-xs text-muted-foreground/50">
-                {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
-              </p>
+              <div className="flex items-center gap-1.5 text-right text-xs text-muted-foreground/50">
+                {row.isQueuedUserMessage ? (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/45 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground/70"
+                    title="Queued for the next turn"
+                  >
+                    <CornerDownRightIcon className="size-3" />
+                    Queued
+                  </span>
+                ) : null}
+                <span>{formatTimestamp(row.message.createdAt, ctx.timestampFormat)}</span>
+              </div>
             </>
           }
         />
       </div>
+    </div>
+  );
+}
+
+function QueuedUserMessageControls({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
+  const ctx = use(TimelineRowCtx);
+  const index = row.queuedUserMessageIndex ?? 0;
+  const count = row.queuedUserMessageCount ?? 0;
+  const canMoveUp = count > 1 && index > 0;
+  const canMoveDown = count > 1 && index < count - 1;
+
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        type="button"
+        size="icon-xs"
+        variant="outline"
+        disabled={!canMoveUp}
+        onClick={() => ctx.onMoveQueuedUserMessage(row.message.id, "up")}
+        title="Move queued message earlier"
+      >
+        <ChevronUpIcon className="size-3" />
+      </Button>
+      <Button
+        type="button"
+        size="icon-xs"
+        variant="outline"
+        disabled={!canMoveDown}
+        onClick={() => ctx.onMoveQueuedUserMessage(row.message.id, "down")}
+        title="Move queued message later"
+      >
+        <ChevronDownIcon className="size-3" />
+      </Button>
     </div>
   );
 }

@@ -13,22 +13,30 @@ import { postableReplyBody } from "./postableReply.ts";
 
 type AssistantMessageEvent = Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
 type ThreadSessionSetEvent = Extract<OrchestrationEvent, { type: "thread.session-set" }>;
+type OrchestrationSessionStatus = ThreadSessionSetEvent["payload"]["session"]["status"];
 
+interface AssistantRelayEntry {
+  readonly messageId: string;
+  readonly text: string;
+}
+
+// Tracks the assistant messages emitted within a single turn so we can relay only
+// the first and last of them to Slack, mirroring the old Convex orchestrator behavior.
+// `thread.message-sent` events arrive as streaming deltas (partial text, accumulated
+// per messageId) followed by a `streaming: false` completion marker (empty text), and a
+// single turn can contain multiple distinct assistant messages (segments) sharing a turnId.
 interface AssistantTurnRelayState {
   readonly threadId: ThreadId;
   readonly turnId: string | null;
-  firstRelayedText: string | null;
-  finalRelayedText: string | null;
-  lastMessageId: string | null;
   readonly messageTextById: Map<string, string>;
+  readonly orderedMessageIds: string[];
+  readonly completedMessageIds: Set<string>;
+  firstRelay: AssistantRelayEntry | null;
+  finalRelay: AssistantRelayEntry | null;
 }
 
 function nowIso() {
   return DateTime.formatIso(DateTime.toUtc(DateTime.nowUnsafe()));
-}
-
-function shouldRelayAssistantMessage(event: AssistantMessageEvent) {
-  return event.payload.role === "assistant" && event.payload.text.trim().length > 0;
 }
 
 function normalizedAssistantText(text: string) {
@@ -42,6 +50,51 @@ function relayTurnKey(input: {
   readonly messageId: string;
 }) {
   return `${String(input.threadId)}:${input.turnId ?? `message:${input.messageId}`}`;
+}
+
+// A turn ends once its session leaves the running/transitional states. We relay the final
+// assistant message at that point, regardless of whether the turn completed, was stopped,
+// interrupted, or errored, so the last thing the assistant said still reaches Slack.
+function isTerminalSessionStatus(status: OrchestrationSessionStatus) {
+  return (
+    status === "ready" || status === "stopped" || status === "interrupted" || status === "error"
+  );
+}
+
+function relayEntryForMessage(
+  state: AssistantTurnRelayState,
+  messageId: string,
+): AssistantRelayEntry | null {
+  const text = normalizedAssistantText(state.messageTextById.get(messageId) ?? "");
+  return text === null ? null : { messageId, text };
+}
+
+function lastAssistantMessageEntry(state: AssistantTurnRelayState) {
+  const messageId = state.orderedMessageIds.at(-1);
+  return messageId === undefined ? null : relayEntryForMessage(state, messageId);
+}
+
+// Decides whether the turn's final assistant message should be relayed. Returns false when
+// the turn produced only the message already relayed as "first" (same text), so a
+// single-message turn is never sent twice. Mirrors the execution bridge's tested predicate.
+export function shouldRelayFinalAssistantMessage(input: {
+  readonly firstRelay?: AssistantRelayEntry;
+  readonly finalRelay?: AssistantRelayEntry;
+  readonly finalResponse?: AssistantRelayEntry;
+}) {
+  if (input.finalResponse === undefined) {
+    return false;
+  }
+  if (input.finalRelay !== undefined) {
+    return false;
+  }
+  if (input.firstRelay === undefined) {
+    return true;
+  }
+  if (input.firstRelay.text === input.finalResponse.text) {
+    return false;
+  }
+  return true;
 }
 
 const make = Effect.gen(function* () {
@@ -129,44 +182,77 @@ const make = Effect.gen(function* () {
       }
     });
 
-  const relayFirstAssistantMessage = (state: AssistantTurnRelayState, text: string) =>
+  const recordPullRequestsForMessage = (state: AssistantTurnRelayState, messageId: string) =>
     Effect.gen(function* () {
-      if (state.firstRelayedText !== null || state.lastMessageId === null) {
+      const text = normalizedAssistantText(state.messageTextById.get(messageId) ?? "");
+      if (text === null) {
+        return;
+      }
+      yield* recordPullRequests({ threadId: state.threadId, text });
+    });
+
+  // Relays the first assistant message of the turn, once. We wait until that first message is
+  // "settled" — its completion marker arrived, a later message started, or the turn ended —
+  // so we relay its full text rather than a partial streaming delta.
+  const relayFirstAssistantMessage = (
+    state: AssistantTurnRelayState,
+    options: { readonly force: boolean },
+  ) =>
+    Effect.gen(function* () {
+      if (state.firstRelay !== null) {
+        return;
+      }
+      const firstMessageId = state.orderedMessageIds[0];
+      if (firstMessageId === undefined) {
+        return;
+      }
+      const settled =
+        options.force ||
+        state.completedMessageIds.has(firstMessageId) ||
+        state.orderedMessageIds.length >= 2;
+      if (!settled) {
+        return;
+      }
+      const entry = relayEntryForMessage(state, firstMessageId);
+      if (entry === null) {
         return;
       }
       yield* postAssistantRelayToSlack({
         threadId: state.threadId,
         turnId: state.turnId,
-        messageId: state.lastMessageId,
-        text,
+        messageId: entry.messageId,
+        text: entry.text,
         phase: "first",
       });
-      state.firstRelayedText = text;
+      state.firstRelay = entry;
     });
 
   const relayFinalAssistantMessage = (state: AssistantTurnRelayState) =>
     Effect.gen(function* () {
-      if (state.lastMessageId === null || state.finalRelayedText !== null) {
+      // Ensure the first message was relayed (e.g. a single-message turn that never reached
+      // the mid-turn trigger) before deciding on the final one.
+      yield* relayFirstAssistantMessage(state, { force: true });
+      const finalResponse = lastAssistantMessageEntry(state);
+      const shouldRelay = shouldRelayFinalAssistantMessage({
+        ...(state.firstRelay !== null ? { firstRelay: state.firstRelay } : {}),
+        ...(state.finalRelay !== null ? { finalRelay: state.finalRelay } : {}),
+        ...(finalResponse !== null ? { finalResponse } : {}),
+      });
+      if (!shouldRelay || finalResponse === null) {
         return;
       }
-      const finalText = normalizedAssistantText(
-        state.messageTextById.get(state.lastMessageId) ?? "",
-      );
-      if (finalText === null || finalText === state.firstRelayedText) {
-        return;
-      }
-      yield* recordPullRequests({ threadId: state.threadId, text: finalText });
+      yield* recordPullRequests({ threadId: state.threadId, text: finalResponse.text });
       yield* postAssistantRelayToSlack({
         threadId: state.threadId,
         turnId: state.turnId,
-        messageId: state.lastMessageId,
-        text: finalText,
+        messageId: finalResponse.messageId,
+        text: finalResponse.text,
         phase: "final",
       });
-      state.finalRelayedText = finalText;
+      state.finalRelay = finalResponse;
     });
 
-  const relayAssistantMessageToSlack = (event: AssistantMessageEvent) =>
+  const ingestAssistantMessageEvent = (event: AssistantMessageEvent) =>
     Effect.gen(function* () {
       if (event.payload.role !== "assistant") {
         return;
@@ -174,39 +260,44 @@ const make = Effect.gen(function* () {
 
       const messageId = String(event.payload.messageId);
       const turnId = event.payload.turnId === null ? null : String(event.payload.turnId);
-      const key = relayTurnKey({
-        threadId: event.payload.threadId,
-        turnId,
-        messageId,
-      });
+      const key = relayTurnKey({ threadId: event.payload.threadId, turnId, messageId });
       const state =
         assistantRelayStateByTurn.get(key) ??
         ({
           threadId: event.payload.threadId as ThreadId,
           turnId,
-          firstRelayedText: null,
-          finalRelayedText: null,
-          lastMessageId: null,
           messageTextById: new Map<string, string>(),
+          orderedMessageIds: [],
+          completedMessageIds: new Set<string>(),
+          firstRelay: null,
+          finalRelay: null,
         } satisfies AssistantTurnRelayState);
       assistantRelayStateByTurn.set(key, state);
 
+      // Streaming deltas carry partial text that must be accumulated per messageId; the
+      // completion marker (streaming: false) carries empty text and only signals "done".
       const text = event.payload.text;
       if (text.length > 0) {
+        if (!state.messageTextById.has(messageId)) {
+          state.orderedMessageIds.push(messageId);
+        }
         state.messageTextById.set(
           messageId,
           `${state.messageTextById.get(messageId) ?? ""}${text}`,
         );
-        state.lastMessageId = messageId;
-        const firstText = normalizedAssistantText(text);
-        if (firstText !== null) {
-          yield* relayFirstAssistantMessage(state, firstText);
-        }
-      } else if (event.payload.streaming === false && state.lastMessageId === null) {
-        state.lastMessageId = messageId;
+      }
+      if (event.payload.streaming === false) {
+        state.completedMessageIds.add(messageId);
+        // Extract PR links from every completed message (including suppressed intermediates)
+        // so artifact tracking is not limited to the first/last relayed messages.
+        yield* recordPullRequestsForMessage(state, messageId);
       }
 
-      if (event.payload.streaming === false && turnId === null) {
+      yield* relayFirstAssistantMessage(state, { force: false });
+
+      // Messages without a turn never receive a turn-ending session-set keyed to them, so we
+      // finalize them as their own single-message turn as soon as they complete.
+      if (turnId === null && event.payload.streaming === false) {
         yield* relayFinalAssistantMessage(state);
         assistantRelayStateByTurn.delete(key);
       }
@@ -214,14 +305,14 @@ const make = Effect.gen(function* () {
 
   const finalizeAssistantTurnsForThread = (event: ThreadSessionSetEvent) =>
     Effect.gen(function* () {
-      if (event.payload.session.status === "running") {
+      if (!isTerminalSessionStatus(event.payload.session.status)) {
         return;
       }
       const threadId = String(event.payload.threadId);
-      const matchingEntries = [...assistantRelayStateByTurn.entries()].filter(
-        ([, state]) => String(state.threadId) === threadId,
-      );
-      for (const [key, state] of matchingEntries) {
+      for (const [key, state] of assistantRelayStateByTurn) {
+        if (String(state.threadId) !== threadId) {
+          continue;
+        }
         yield* relayFinalAssistantMessage(state);
         assistantRelayStateByTurn.delete(key);
       }
@@ -244,20 +335,7 @@ const make = Effect.gen(function* () {
       if (event.type !== "thread.message-sent" || event.payload.role !== "assistant") {
         return Effect.void;
       }
-      return Effect.all(
-        [
-          shouldRelayAssistantMessage(event)
-            ? recordPullRequests({
-                threadId: event.payload.threadId as ThreadId,
-                text: event.payload.text,
-              })
-            : Effect.void,
-          relayAssistantMessageToSlack(event),
-        ],
-        {
-          concurrency: 2,
-        },
-      ).pipe(
+      return ingestAssistantMessageEvent(event).pipe(
         Effect.catch((error) =>
           Effect.logWarning("external intake reactor failed to process assistant message", {
             eventId: String(event.eventId),

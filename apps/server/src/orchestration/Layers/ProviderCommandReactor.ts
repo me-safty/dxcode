@@ -4,6 +4,7 @@ import {
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  type ProviderRuntimeEvent,
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
@@ -50,10 +51,17 @@ type ProviderIntentEvent = Extract<
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
+      | "thread.turn-queue-reordered"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
       | "thread.session-stop-requested";
   }
+>;
+
+type ProviderTurnCompletedEvent = Extract<ProviderRuntimeEvent, { type: "turn.completed" }>;
+type ProviderTurnStartRequestedEvent = Extract<
+  ProviderIntentEvent,
+  { type: "thread.turn-start-requested" }
 >;
 
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
@@ -152,6 +160,14 @@ function stalePendingRequestDetail(
   return `Stale pending ${requestKind} request: ${requestId}. Provider callback state does not survive app restarts or recovered sessions. Restart the turn to continue.`;
 }
 
+function hasActiveProviderTurn(thread: { readonly session: OrchestrationSession | null }): boolean {
+  return (
+    thread.session !== null &&
+    thread.session.status === "running" &&
+    thread.session.activeTurnId !== null
+  );
+}
+
 function buildGeneratedWorktreeBranchName(raw: string): string {
   const normalized = raw
     .trim()
@@ -201,6 +217,7 @@ const make = Effect.gen(function* () {
     );
 
   const threadModelSelections = new Map<string, ModelSelection>();
+  const pendingTurnStartByThreadId = new Map<string, ProviderTurnStartRequestedEvent[]>();
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -686,16 +703,71 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const enqueuePendingTurnStart = (
+    event: ProviderTurnStartRequestedEvent,
+  ) => {
+    const key = event.payload.threadId;
+    const existing = pendingTurnStartByThreadId.get(key) ?? [];
+    pendingTurnStartByThreadId.set(key, [...existing, event]);
+  };
+
+  const takeNextPendingTurnStart = (threadId: ThreadId) => {
+    const key = threadId;
+    const existing = pendingTurnStartByThreadId.get(key) ?? [];
+    const [next, ...remaining] = existing;
+    if (remaining.length > 0) {
+      pendingTurnStartByThreadId.set(key, remaining);
+    } else {
+      pendingTurnStartByThreadId.delete(key);
+    }
+    return next;
+  };
+
+  const reorderPendingTurnStarts = (
+    event: Extract<ProviderIntentEvent, { type: "thread.turn-queue-reordered" }>,
+  ) => {
+    const key = event.payload.threadId;
+    const existing = pendingTurnStartByThreadId.get(key);
+    if (!existing || existing.length <= 1) {
+      return;
+    }
+
+    const pendingByMessageId = new Map(existing.map((entry) => [entry.payload.messageId, entry]));
+    const reordered: typeof existing = [];
+    const consumed = new Set<string>();
+    for (const messageId of event.payload.orderedMessageIds) {
+      const pending = pendingByMessageId.get(messageId);
+      if (!pending || consumed.has(messageId)) {
+        continue;
+      }
+      reordered.push(pending);
+      consumed.add(messageId);
+    }
+
+    for (const pending of existing) {
+      if (!consumed.has(pending.payload.messageId)) {
+        reordered.push(pending);
+      }
+    }
+    pendingTurnStartByThreadId.set(key, reordered);
+  };
+
   const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
-    event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
+    event: ProviderTurnStartRequestedEvent,
+    options?: { readonly fromQueue?: boolean },
   ) {
     const key = turnStartKeyForEvent(event);
-    if (yield* hasHandledTurnStartRecently(key)) {
+    if (!options?.fromQueue && (yield* hasHandledTurnStartRecently(key))) {
       return;
     }
 
     const thread = yield* resolveThread(event.payload.threadId);
     if (!thread) {
+      return;
+    }
+
+    if (!options?.fromQueue && hasActiveProviderTurn(thread)) {
+      enqueuePendingTurnStart(event);
       return;
     }
 
@@ -800,6 +872,16 @@ const make = Effect.gen(function* () {
     yield* providerService
       .sendTurn(sendTurnRequest.value)
       .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+  });
+
+  const processProviderTurnCompleted = Effect.fn("processProviderTurnCompleted")(function* (
+    event: ProviderTurnCompletedEvent,
+  ) {
+    const nextTurnStart = takeNextPendingTurnStart(event.threadId);
+    if (!nextTurnStart) {
+      return;
+    }
+    yield* processTurnStartRequested(nextTurnStart, { fromQueue: true });
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
@@ -975,6 +1057,9 @@ const make = Effect.gen(function* () {
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);
         return;
+      case "thread.turn-queue-reordered":
+        reorderPendingTurnStarts(event);
+        return;
       case "thread.approval-response-requested":
         yield* processApprovalResponseRequested(event);
         return;
@@ -1001,6 +1086,20 @@ const make = Effect.gen(function* () {
     );
 
   const worker = yield* makeDrainableWorker(processDomainEventSafely);
+  const runtimeWorker = yield* makeDrainableWorker((event: ProviderTurnCompletedEvent) =>
+    processProviderTurnCompleted(event).pipe(
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.failCause(cause);
+        }
+        return Effect.logWarning("provider command reactor failed to process runtime event", {
+          eventType: event.type,
+          threadId: event.threadId,
+          cause: Cause.pretty(cause),
+        });
+      }),
+    ),
+  );
 
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
@@ -1008,6 +1107,7 @@ const make = Effect.gen(function* () {
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
+        event.type === "thread.turn-queue-reordered" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
         event.type === "thread.session-stop-requested"
@@ -1019,11 +1119,16 @@ const make = Effect.gen(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent),
     );
+    yield* Effect.forkScoped(
+      Stream.runForEach(providerService.streamEvents, (event) =>
+        event.type === "turn.completed" ? runtimeWorker.enqueue(event) : Effect.void,
+      ),
+    );
   });
 
   return {
     start,
-    drain: worker.drain,
+    drain: Effect.all([worker.drain, runtimeWorker.drain]).pipe(Effect.asVoid),
   } satisfies ProviderCommandReactorShape;
 });
 

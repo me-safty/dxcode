@@ -104,6 +104,7 @@ export interface Thread {
   interactionMode: ProviderInteractionMode;
   session: ThreadSession | null;
   messages: ChatMessage[];
+  queuedTurnMessageOrder?: MessageId[];
   proposedPlans: ProposedPlan[];
   error: string | null;
   createdAt: string;

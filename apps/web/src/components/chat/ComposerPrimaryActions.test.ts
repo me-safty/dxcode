@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { formatPendingPrimaryActionLabel } from "./ComposerPrimaryActions";
+import {
+  formatPendingPrimaryActionLabel,
+  resolveComposerPrimaryActionMode,
+} from "./ComposerPrimaryActions.logic";
 
 describe("formatPendingPrimaryActionLabel", () => {
   it("returns 'Submitting...' while responding", () => {
@@ -89,5 +92,29 @@ describe("formatPendingPrimaryActionLabel", () => {
         questionIndex: 5,
       }),
     ).toBe("Submit answers");
+  });
+});
+
+describe("resolveComposerPrimaryActionMode", () => {
+  it("uses stop while running with an empty composer", () => {
+    expect(
+      resolveComposerPrimaryActionMode({
+        pendingAction: null,
+        isRunning: true,
+        hasSendableContent: false,
+        showPlanFollowUpPrompt: false,
+      }),
+    ).toBe("stop");
+  });
+
+  it("uses send while running with composer content so the message can queue", () => {
+    expect(
+      resolveComposerPrimaryActionMode({
+        pendingAction: null,
+        isRunning: true,
+        hasSendableContent: true,
+        showPlanFollowUpPrompt: false,
+      }),
+    ).toBe("send");
   });
 });

@@ -398,6 +398,8 @@ describe("ProviderCommandReactor", () => {
     return {
       engine,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
+      emitRuntime: (event: ProviderRuntimeEvent) =>
+        Effect.runPromise(PubSub.publish(runtimeEventPubSub, event)),
       startSession,
       sendTurn,
       interruptTurn,
@@ -1547,6 +1549,298 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.interruptTurn.mock.calls.length === 1);
     expect(harness.interruptTurn.mock.calls[0]?.[0]).toEqual({
       threadId: "thread-1",
+    });
+  });
+
+  it("queues thread.turn.start while a provider turn is active", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.runtimeSessions.push({
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      status: "running",
+      runtimeMode: "approval-required",
+      threadId: ThreadId.make("thread-1"),
+      cwd: "/tmp/provider-project",
+      resumeCursor: { opaque: "resume-active" },
+      createdAt: now,
+      updatedAt: now,
+    });
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-active"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-active"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-queued"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-queued"),
+          role: "user",
+          text: "queued follow-up",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+    await harness.drain();
+
+    expect(harness.sendTurn.mock.calls.length).toBe(0);
+  });
+
+  it("starts a queued thread.turn.start after the active provider turn completes", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.runtimeSessions.push({
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      status: "running",
+      runtimeMode: "approval-required",
+      threadId: ThreadId.make("thread-1"),
+      cwd: "/tmp/provider-project",
+      resumeCursor: { opaque: "resume-active" },
+      createdAt: now,
+      updatedAt: now,
+    });
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-active-for-flush"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-active"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-queued-flush"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-queued-flush"),
+          role: "user",
+          text: "queued follow-up",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+    await harness.drain();
+
+    expect(harness.sendTurn.mock.calls.length).toBe(0);
+
+    await harness.emitRuntime({
+      type: "turn.completed",
+      eventId: EventId.make("evt-turn-completed-active"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("turn-active"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.make("thread-1"),
+      input: "queued follow-up",
+    });
+  });
+
+  it("starts multiple queued thread.turn.start requests in FIFO order", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.runtimeSessions.push({
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      status: "running",
+      runtimeMode: "approval-required",
+      threadId: ThreadId.make("thread-1"),
+      cwd: "/tmp/provider-project",
+      resumeCursor: { opaque: "resume-active" },
+      createdAt: now,
+      updatedAt: now,
+    });
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-active-for-fifo"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-active"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    for (const [index, text] of ["queued one", "queued two", "queued three"].entries()) {
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`cmd-turn-start-fifo-${index}`),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId(`user-message-fifo-${index}`),
+            role: "user",
+            text,
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        }),
+      );
+    }
+    await harness.drain();
+    expect(harness.sendTurn.mock.calls.length).toBe(0);
+
+    for (const [index, turnId] of ["turn-active", "turn-queued-1", "turn-queued-2"].entries()) {
+      await harness.emitRuntime({
+        type: "turn.completed",
+        eventId: EventId.make(`evt-turn-completed-fifo-${index}`),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: now,
+        threadId: ThreadId.make("thread-1"),
+        turnId: asTurnId(turnId),
+        payload: { state: "completed" },
+      });
+      await waitFor(() => harness.sendTurn.mock.calls.length === index + 1);
+    }
+
+    expect(
+      harness.sendTurn.mock.calls.map(
+        (call) => (call[0] as { readonly input?: string } | undefined)?.input,
+      ),
+    ).toEqual([
+      "queued one",
+      "queued two",
+      "queued three",
+    ]);
+  });
+
+  it("starts queued thread.turn.start requests in reordered queue order", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.runtimeSessions.push({
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      status: "running",
+      runtimeMode: "approval-required",
+      threadId: ThreadId.make("thread-1"),
+      cwd: "/tmp/provider-project",
+      resumeCursor: { opaque: "resume-active" },
+      createdAt: now,
+      updatedAt: now,
+    });
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-active-for-reorder"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-active"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    const messages = [
+      { id: asMessageId("user-message-reorder-1"), text: "queued one" },
+      { id: asMessageId("user-message-reorder-2"), text: "queued two" },
+      { id: asMessageId("user-message-reorder-3"), text: "queued three" },
+    ];
+    for (const [index, message] of messages.entries()) {
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`cmd-turn-start-reorder-${index}`),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: message.id,
+            role: "user",
+            text: message.text,
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        }),
+      );
+    }
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.queue.reorder",
+        commandId: CommandId.make("cmd-turn-queue-reorder"),
+        threadId: ThreadId.make("thread-1"),
+        orderedMessageIds: [messages[2]!.id, messages[0]!.id, messages[1]!.id],
+        createdAt: now,
+      }),
+    );
+    await harness.drain();
+
+    await harness.emitRuntime({
+      type: "turn.completed",
+      eventId: EventId.make("evt-turn-completed-reorder-active"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("turn-active"),
+      payload: { state: "completed" },
+    });
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.make("thread-1"),
+      input: "queued three",
     });
   });
 

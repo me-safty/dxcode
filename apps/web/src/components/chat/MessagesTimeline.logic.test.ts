@@ -321,6 +321,125 @@ describe("deriveMessagesTimelineRows", () => {
     expect(assistantRows[1]?.completionSummary).toBe("done");
   });
 
+  it("marks user messages after the active turn request as queued", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "active-user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "active-user" as never,
+            role: "user",
+            text: "Start working",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "queued-user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:10Z",
+          message: {
+            id: "queued-user" as never,
+            role: "user",
+            text: "One more thing",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:10Z",
+            streaming: false,
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: true,
+      activeTurnInProgress: true,
+      activeTurnId: "turn-1" as never,
+      activeTurnRequestedAt: "2026-01-01T00:00:00Z",
+      activeTurnStartedAt: "2026-01-01T00:00:03Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const messageRows = rows.filter(
+      (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
+        row.kind === "message",
+    );
+
+    expect(messageRows[0]?.isQueuedUserMessage).toBe(false);
+    expect(messageRows[1]?.isQueuedUserMessage).toBe(true);
+  });
+
+  it("orders queued user messages by explicit queue order and exposes queue positions", () => {
+    const firstQueuedMessage = {
+      id: "queued-user-1" as never,
+      role: "user" as const,
+      text: "First queued",
+      turnId: null,
+      createdAt: "2026-01-01T00:00:10Z",
+      streaming: false,
+    };
+    const secondQueuedMessage = {
+      id: "queued-user-2" as never,
+      role: "user" as const,
+      text: "Second queued",
+      turnId: null,
+      createdAt: "2026-01-01T00:00:20Z",
+      streaming: false,
+    };
+
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "active-user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "active-user" as never,
+            role: "user",
+            text: "Start working",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "queued-user-1-entry",
+          kind: "message",
+          createdAt: firstQueuedMessage.createdAt,
+          message: firstQueuedMessage,
+        },
+        {
+          id: "queued-user-2-entry",
+          kind: "message",
+          createdAt: secondQueuedMessage.createdAt,
+          message: secondQueuedMessage,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: true,
+      activeTurnInProgress: true,
+      activeTurnId: "turn-1" as never,
+      activeTurnRequestedAt: "2026-01-01T00:00:00Z",
+      queuedUserMessageOrder: [secondQueuedMessage.id, firstQueuedMessage.id],
+      activeTurnStartedAt: "2026-01-01T00:00:03Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const queuedRows = rows.filter(
+      (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
+        row.kind === "message" && row.isQueuedUserMessage === true,
+    );
+
+    expect(queuedRows.map((row) => row.message.id)).toEqual([
+      secondQueuedMessage.id,
+      firstQueuedMessage.id,
+    ]);
+    expect(queuedRows.map((row) => row.queuedUserMessageIndex)).toEqual([0, 1]);
+    expect(queuedRows.map((row) => row.queuedUserMessageCount)).toEqual([2, 2]);
+  });
+
   it("projects assistant diff summaries and user revert counts onto the affected rows", () => {
     const assistantTurnDiffSummary = {
       turnId: "turn-1" as never,
