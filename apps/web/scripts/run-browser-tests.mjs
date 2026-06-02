@@ -27,7 +27,7 @@ for (const chunk of chunks) {
   console.log(`\nRunning browser tests: ${chunk.name}`);
   const result = spawnSync(
     "vp",
-    ["test", "run", "--config", "vitest.browser.config.ts", ...chunk.files],
+    ["test", "run", "--mode", "browser", "--browser=chromium", ...chunk.files],
     {
       stdio: "inherit",
       env: {

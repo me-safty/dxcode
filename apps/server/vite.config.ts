@@ -24,9 +24,9 @@ export default mergeConfig(
       // runtimes heavily. Running files in parallel introduces load-sensitive flakes.
       fileParallelism: false,
       // Server integration tests exercise sqlite, git, and orchestration together.
-      // Under package-wide parallel runs they regularly exceed the default 15s budget.
-      hookTimeout: 60_000,
-      testTimeout: 60_000,
+      // Under package-wide runs they can exceed the default budget on loaded CI hosts.
+      hookTimeout: 120_000,
+      testTimeout: 120_000,
     },
   }),
 );

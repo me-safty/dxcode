@@ -1,5 +1,5 @@
-import { fileURLToPath } from "node:url";
 import "vite-plus/test/config";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite-plus";
 
 const webSrcPath = fileURLToPath(new URL("./apps/web/src", import.meta.url));
@@ -9,7 +9,6 @@ const contractsSrcPath = fileURLToPath(
 const vitePlusRunnerPath = fileURLToPath(
   new URL("./node_modules/vitest/dist/@vitest/runner/index.js", import.meta.url),
 );
-const rootBuildEntryPath = fileURLToPath(new URL("./vite-root-build-entry.ts", import.meta.url));
 
 export default defineConfig({
   resolve: {
@@ -32,13 +31,6 @@ export default defineConfig({
     environment: "node",
     hookTimeout: 60_000,
     testTimeout: 60_000,
-  },
-  build: {
-    lib: {
-      entry: rootBuildEntryPath,
-      fileName: "index",
-      formats: ["es"],
-    },
   },
   staged: {
     "*": "vp check --fix",
