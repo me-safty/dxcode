@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ProviderDriverKind } from "@t3tools/contracts";
 
 import {
   createThreadJumpHintVisibilityController,
+  getSidebarThreadIdsToPrewarm,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
@@ -19,7 +21,13 @@ import {
   sortProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
-import { EnvironmentId, OrchestrationLatestTurn, ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  OrchestrationLatestTurn,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -121,6 +129,20 @@ describe("createThreadJumpHintVisibilityController", () => {
   });
 });
 
+describe("getSidebarThreadIdsToPrewarm", () => {
+  it("returns only the first visible thread ids up to the prewarm limit", () => {
+    expect(getSidebarThreadIdsToPrewarm(["t1", "t2", "t3"], 2)).toEqual(["t1", "t2"]);
+  });
+
+  it("returns all visible thread ids when they fit within the limit", () => {
+    expect(getSidebarThreadIdsToPrewarm(["t1", "t2"], 10)).toEqual(["t1", "t2"]);
+  });
+
+  it("returns no thread ids when the limit is zero", () => {
+    expect(getSidebarThreadIdsToPrewarm(["t1", "t2"], 0)).toEqual([]);
+  });
+});
+
 describe("shouldClearThreadSelectionOnMouseDown", () => {
   it("preserves selection for thread items", () => {
     const child = {
@@ -169,6 +191,28 @@ describe("resolveSidebarNewThreadEnvMode", () => {
 });
 
 describe("resolveSidebarNewThreadSeedContext", () => {
+  it("prefers the default worktree mode over active thread context", () => {
+    expect(
+      resolveSidebarNewThreadSeedContext({
+        projectId: "project-1",
+        defaultEnvMode: "worktree",
+        activeThread: {
+          projectId: "project-1",
+          branch: "feature/existing",
+          worktreePath: "/repo/.t3/worktrees/existing",
+        },
+        activeDraftThread: {
+          projectId: "project-1",
+          branch: "feature/draft",
+          worktreePath: "/repo/.t3/worktrees/draft",
+          envMode: "worktree",
+        },
+      }),
+    ).toEqual({
+      envMode: "worktree",
+    });
+  });
+
   it("inherits the active server thread context when creating a new thread in the same project", () => {
     expect(
       resolveSidebarNewThreadSeedContext({
@@ -270,6 +314,42 @@ describe("orderItemsByPreferredIds", () => {
     expect(ordered.map((project) => project.id)).toEqual([
       ProjectId.make("project-2"),
       ProjectId.make("project-1"),
+    ]);
+  });
+
+  it("honors projectOrder physical keys via getProjectOrderKey", async () => {
+    // Regression guard for #1904 / the regression introduced by #2055:
+    // `projectOrder` is populated with physical keys (envId + cwd-derived)
+    // by the store and by drag-end handlers. Readers must identify projects
+    // with the same key format, or manual sort silently snaps back.
+    const { getProjectOrderKey } = await import("../logicalProject");
+    const projects = [
+      {
+        environmentId: EnvironmentId.make("environment-local"),
+        id: ProjectId.make("id-alpha"),
+        cwd: "/work/alpha",
+      },
+      {
+        environmentId: EnvironmentId.make("environment-local"),
+        id: ProjectId.make("id-beta"),
+        cwd: "/work/beta",
+      },
+      {
+        environmentId: EnvironmentId.make("environment-local"),
+        id: ProjectId.make("id-gamma"),
+        cwd: "/work/gamma",
+      },
+    ];
+    const ordered = orderItemsByPreferredIds({
+      items: projects,
+      preferredIds: [getProjectOrderKey(projects[2]!), getProjectOrderKey(projects[0]!)],
+      getId: getProjectOrderKey,
+    });
+
+    expect(ordered.map((project) => project.cwd)).toEqual([
+      "/work/gamma",
+      "/work/alpha",
+      "/work/beta",
     ]);
   });
 });
@@ -401,7 +481,7 @@ describe("resolveThreadStatusPill", () => {
     latestTurn: null,
     lastVisitedAt: undefined,
     session: {
-      provider: "codex" as const,
+      provider: ProviderDriverKind.make("codex"),
       status: "running" as const,
       createdAt: "2026-03-09T10:00:00.000Z",
       updatedAt: "2026-03-09T10:00:00.000Z",
@@ -625,7 +705,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     name: "Project",
     cwd: "/tmp/project",
     defaultModelSelection: {
-      provider: "codex",
+      instanceId: ProviderInstanceId.make("codex"),
       model: "gpt-5.4",
       ...defaultModelSelection,
     },
@@ -644,7 +724,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     projectId: ProjectId.make("project-1"),
     title: "Thread",
     modelSelection: {
-      provider: "codex",
+      instanceId: ProviderInstanceId.make("codex"),
       model: "gpt-5.4",
       ...overrides?.modelSelection,
     },

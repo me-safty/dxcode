@@ -1,5 +1,7 @@
-import { type KeybindingCommand } from "@t3tools/contracts";
+import { type KeybindingCommand, type FilesystemBrowseEntry } from "@t3tools/contracts";
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+import * as Arr from "effect/Array";
+import * as Result from "effect/Result";
 import { type ReactNode } from "react";
 import { sortThreads } from "../lib/threadSort";
 import { formatRelativeTimeLabel } from "../timestampFormat";
@@ -17,6 +19,11 @@ export interface CommandPaletteItem {
   readonly description?: string;
   readonly timestamp?: string;
   readonly icon: ReactNode;
+  readonly disabled?: boolean;
+  /** Optional content rendered inline before the title text. */
+  readonly titleLeadingContent?: ReactNode;
+  /** Optional content rendered inline after the title text (before the timestamp). */
+  readonly titleTrailingContent?: ReactNode;
   readonly shortcutCommand?: KeybindingCommand;
 }
 
@@ -45,7 +52,39 @@ export interface CommandPaletteView {
   readonly initialQuery?: string;
 }
 
-export type CommandPaletteMode = "root" | "submenu";
+export type CommandPaletteMode = "root" | "root-browse" | "submenu" | "submenu-browse";
+
+export function filterBrowseEntries(input: {
+  browseEntries: ReadonlyArray<FilesystemBrowseEntry>;
+  browseFilterQuery: string;
+  highlightedItemValue: string | null;
+}): {
+  filteredEntries: FilesystemBrowseEntry[];
+  highlightedEntry: FilesystemBrowseEntry | null;
+  exactEntry: FilesystemBrowseEntry | null;
+} {
+  const lowerFilter = input.browseFilterQuery.toLowerCase();
+  const showHidden = input.browseFilterQuery.startsWith(".");
+
+  const filteredEntries = input.browseEntries.filter(
+    (entry) =>
+      entry.name.toLowerCase().startsWith(lowerFilter) &&
+      (showHidden || !entry.name.startsWith(".")),
+  );
+
+  let highlightedEntry: FilesystemBrowseEntry | null = null;
+  if (input.highlightedItemValue?.startsWith("browse:")) {
+    const highlightedPath = input.highlightedItemValue.slice("browse:".length);
+    highlightedEntry = filteredEntries.find((entry) => entry.fullPath === highlightedPath) ?? null;
+  }
+
+  const exactEntry =
+    input.browseFilterQuery.length > 0
+      ? (filteredEntries.find((entry) => entry.name === input.browseFilterQuery) ?? null)
+      : null;
+
+  return { filteredEntries, highlightedEntry, exactEntry };
+}
 
 export function normalizeSearchText(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -70,20 +109,24 @@ export function buildProjectActionItems(input: {
   }));
 }
 
-export function buildThreadActionItems(input: {
-  threads: ReadonlyArray<
-    Pick<
-      SidebarThreadSummary,
-      "archivedAt" | "branch" | "createdAt" | "environmentId" | "id" | "projectId" | "title"
-    > & {
-      updatedAt?: string | undefined;
-      latestUserMessageAt?: string | null;
-    }
-  >;
+export type BuildThreadActionItemsThread = Pick<
+  SidebarThreadSummary,
+  "archivedAt" | "branch" | "createdAt" | "environmentId" | "id" | "projectId" | "title"
+> & {
+  updatedAt?: string | undefined;
+  latestUserMessageAt?: string | null;
+};
+
+export function buildThreadActionItems<TThread extends BuildThreadActionItemsThread>(input: {
+  threads: ReadonlyArray<TThread>;
   activeThreadId?: Thread["id"];
   projectTitleById: ReadonlyMap<Project["id"], string>;
   sortOrder: SidebarThreadSortOrder;
   icon: ReactNode;
+  /** Optional content rendered inline before the title text per-thread. */
+  renderLeadingContent?: (thread: TThread) => ReactNode;
+  /** Optional content rendered inline after the title text per-thread. */
+  renderTrailingContent?: (thread: TThread) => ReactNode;
   runThread: (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) => Promise<void>;
   limit?: number;
 }): CommandPaletteActionItem[] {
@@ -108,18 +151,29 @@ export function buildThreadActionItems(input: {
       descriptionParts.push("Current thread");
     }
 
-    return {
-      kind: "action",
-      value: `thread:${thread.id}`,
-      searchTerms: [thread.title, projectTitle ?? "", thread.branch ?? ""],
-      title: thread.title,
-      description: descriptionParts.join(" · "),
-      timestamp: formatRelativeTimeLabel(thread.updatedAt ?? thread.createdAt),
-      icon: input.icon,
-      run: async () => {
-        await input.runThread(thread);
+    const leadingContent = input.renderLeadingContent?.(thread);
+    const trailingContent = input.renderTrailingContent?.(thread);
+
+    return Object.assign(
+      {
+        kind: "action" as const,
+        value: `thread:${thread.id}`,
+        searchTerms: [thread.title, projectTitle ?? ``, thread.branch ?? ``],
+        title: thread.title,
+        description: descriptionParts.join(` · `),
+        timestamp: formatRelativeTimeLabel(
+          thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
+        ),
+        icon: input.icon,
       },
-    };
+      leadingContent ? { titleLeadingContent: leadingContent } : {},
+      trailingContent ? { titleTrailingContent: trailingContent } : {},
+      {
+        run: async () => {
+          await input.runThread(thread);
+        },
+      },
+    );
   });
 }
 
@@ -200,23 +254,18 @@ export function filterCommandPaletteGroups(input: {
   }
 
   return searchableGroups.flatMap((group) => {
-    const items = group.items
-      .map((item, index) => {
-        const haystack = normalizeSearchText(item.searchTerms.join(" "));
-        if (!haystack.includes(normalizedQuery)) {
-          return null;
-        }
+    const items = Arr.filterMap(group.items, (item, index) => {
+      const haystack = normalizeSearchText(item.searchTerms.join(" "));
+      if (!haystack.includes(normalizedQuery)) {
+        return Result.failVoid;
+      }
 
-        return {
-          item,
-          index,
-          rank: rankCommandPaletteItemMatch(item, normalizedQuery),
-        };
-      })
-      .filter(
-        (entry): entry is { item: (typeof group.items)[number]; index: number; rank: number } =>
-          entry !== null,
-      )
+      return Result.succeed({
+        item,
+        index,
+        rank: rankCommandPaletteItemMatch(item, normalizedQuery),
+      });
+    })
       .toSorted((left, right) => right.rank - left.rank || left.index - right.index)
       .map((entry) => entry.item);
 
@@ -228,10 +277,56 @@ export function filterCommandPaletteGroups(input: {
   });
 }
 
+export function buildBrowseGroups(input: {
+  browseEntries: ReadonlyArray<FilesystemBrowseEntry>;
+  browseQuery: string;
+  canBrowseUp: boolean;
+  upIcon: ReactNode;
+  directoryIcon: ReactNode;
+  browseUp: () => void;
+  browseTo: (name: string) => void;
+}): CommandPaletteGroup[] {
+  const items: CommandPaletteActionItem[] = [];
+
+  if (input.canBrowseUp) {
+    items.push({
+      kind: "action",
+      value: "browse:up",
+      searchTerms: [input.browseQuery, ".."],
+      title: "..",
+      icon: input.upIcon,
+      keepOpen: true,
+      run: async () => {
+        input.browseUp();
+      },
+    });
+  }
+
+  for (const entry of input.browseEntries) {
+    items.push({
+      kind: "action",
+      value: `browse:${entry.fullPath}`,
+      searchTerms: [input.browseQuery, entry.fullPath, entry.name],
+      title: entry.name,
+      icon: input.directoryIcon,
+      keepOpen: true,
+      run: async () => {
+        input.browseTo(entry.name);
+      },
+    });
+  }
+
+  return [{ value: "directories", label: "Directories", items }];
+}
+
 export function getCommandPaletteMode(input: {
   currentView: CommandPaletteView | null;
+  isBrowsing: boolean;
 }): CommandPaletteMode {
-  return input.currentView ? "submenu" : "root";
+  if (input.currentView) {
+    return input.isBrowsing ? "submenu-browse" : "submenu";
+  }
+  return input.isBrowsing ? "root-browse" : "root";
 }
 
 export function buildRootGroups(input: {
@@ -256,7 +351,11 @@ export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): str
   switch (mode) {
     case "root":
       return "Search commands, projects, and threads...";
+    case "root-browse":
+      return "Enter project path (e.g. ~/projects/my-app)";
     case "submenu":
       return "Search...";
+    case "submenu-browse":
+      return "Enter path (e.g. ~/projects/my-app)";
   }
 }

@@ -12,6 +12,9 @@ import { isLatestTurnSettled } from "../session-logic";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
+// Visible sidebar rows are prewarmed into the thread-detail cache so opening a
+// nearby thread usually reuses an already-hot subscription.
+export const SIDEBAR_THREAD_PREWARM_LIMIT = 10;
 export type SidebarNewThreadEnvMode = "local" | "worktree";
 type SidebarProject = {
   id: string;
@@ -183,6 +186,12 @@ export function resolveSidebarNewThreadSeedContext(input: {
   worktreePath?: string | null;
   envMode: SidebarNewThreadEnvMode;
 } {
+  if (input.defaultEnvMode === "worktree") {
+    return {
+      envMode: "worktree",
+    };
+  }
+
   if (input.activeDraftThread?.projectId === input.projectId) {
     return {
       branch: input.activeDraftThread.branch,
@@ -243,6 +252,13 @@ export function getVisibleSidebarThreadIds<TThreadId>(
   );
 }
 
+export function getSidebarThreadIdsToPrewarm<TThreadId>(
+  visibleThreadIds: readonly TThreadId[],
+  limit = SIDEBAR_THREAD_PREWARM_LIMIT,
+): TThreadId[] {
+  return visibleThreadIds.slice(0, Math.max(0, limit));
+}
+
 export function resolveAdjacentThreadId<T>(input: {
   threadIds: readonly T[];
   currentThreadId: T | null;
@@ -284,7 +300,7 @@ export function resolveThreadRowClassName(input: {
   isSelected: boolean;
 }): string {
   const baseClassName =
-    "h-7 w-full translate-x-0 cursor-pointer justify-start px-2 text-left select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
+    "h-6 w-full translate-x-0 cursor-pointer justify-start px-2 text-left select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring sm:h-7";
 
   if (input.isSelected && input.isActive) {
     return cn(

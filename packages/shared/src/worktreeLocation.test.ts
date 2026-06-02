@@ -7,7 +7,7 @@ import {
   resolveWorktreeLocation,
   substituteWorktreeLocationTemplate,
   validateWorktreeLocationTemplate,
-} from "./worktreeLocation";
+} from "./worktreeLocation.ts";
 
 describe("worktreeLocation helpers", () => {
   it("validates start-of-path and $WORKTREE_NAME requirements", () => {
