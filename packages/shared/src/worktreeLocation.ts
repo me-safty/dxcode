@@ -48,8 +48,7 @@ export type ResolvedWorktreeLocation =
 
 const TRAILING_SEPARATOR_PATTERN = /[\\/]+$/;
 const LEADING_SEPARATOR_PATTERN = /^[\\/]+/;
-const ABSOLUTE_TEMPLATE_VARIABLE_PREFIXES = ["$T3_HOME", "$PROJECT_DIRNAME"] as const;
-const ABSOLUTE_TEMPLATE_VARIABLES = ["$T3_HOME", "$PROJECT_DIRNAME"] as const;
+const ABSOLUTE_PATH_TEMPLATE_VARIABLES = ["$T3_HOME", "$PROJECT_DIRNAME"] as const;
 
 function trimTrailingSeparators(input: string): string {
   if (input === "/" || /^[A-Za-z]:[\\/]?$/.test(input)) {
@@ -80,6 +79,9 @@ function getPathDirname(input: string): string {
   }
 
   const separatorIndex = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  if (separatorIndex === 2 && /^[A-Za-z]:[\\/]/.test(trimmed)) {
+    return trimmed.slice(0, 3);
+  }
   if (separatorIndex <= 0) {
     if (/^[A-Za-z]:[^\\/]+$/.test(trimmed)) {
       return `${trimmed.slice(0, 2)}\\`;
@@ -113,7 +115,7 @@ function startsWithAbsoluteTemplatePrefix(input: string): boolean {
   if (input.startsWith("/") || input.startsWith("\\")) {
     return true;
   }
-  return ABSOLUTE_TEMPLATE_VARIABLE_PREFIXES.some((variable) => {
+  return ABSOLUTE_PATH_TEMPLATE_VARIABLES.some((variable) => {
     if (!input.startsWith(variable)) {
       return false;
     }
@@ -152,7 +154,7 @@ export function validateWorktreeLocationTemplate(template: string): string | nul
     return "Custom worktree templates must start with $T3_HOME, $PROJECT_DIRNAME, /, or \\.";
   }
   if (
-    ABSOLUTE_TEMPLATE_VARIABLES.some((variable) => {
+    ABSOLUTE_PATH_TEMPLATE_VARIABLES.some((variable) => {
       const firstIndex = normalized.indexOf(variable);
       return firstIndex > 0 || normalized.indexOf(variable, variable.length) >= 0;
     })

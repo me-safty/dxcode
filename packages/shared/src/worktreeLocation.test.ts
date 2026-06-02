@@ -45,6 +45,23 @@ describe("worktreeLocation helpers", () => {
     ).toBe("/home/dev/.t3|/code|my-project|feature-branch");
   });
 
+  it("uses the drive root as dirname for Windows projects at drive root", () => {
+    expect(
+      createWorktreeLocationTemplateContext({
+        t3Home: "C:\\Users\\dev\\.t3",
+        projectRoot: "C:\\project",
+        worktreeName: "feature-branch",
+      }).$PROJECT_DIRNAME,
+    ).toBe("C:\\");
+    expect(
+      createWorktreeLocationTemplateContext({
+        t3Home: "C:/Users/dev/.t3",
+        projectRoot: "C:/project",
+        worktreeName: "feature-branch",
+      }).$PROJECT_DIRNAME,
+    ).toBe("C:/");
+  });
+
   it("resolves custom templates through one shared helper", () => {
     const context = createWorktreeLocationTemplateContext({
       t3Home: "~/.t3",
