@@ -1,6 +1,7 @@
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
+  DownloadIcon,
   ChevronRightIcon,
   CloudIcon,
   FolderPlusIcon,
@@ -64,7 +65,7 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isMacPlatform, newCommandId, randomUUID } from "../lib/utils";
+import { cn, isMacPlatform, newCommandId, randomUUID } from "../lib/utils";
 import {
   selectProjectByRef,
   selectProjectsAcrossEnvironments,
@@ -87,6 +88,7 @@ import {
 import { useModelPickerOpen } from "../modelPickerOpenState";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { useVcsStatus } from "../lib/vcsStatusState";
+import { useVcsPullAction, useVcsSyncBaseAction } from "../lib/sourceControlActions";
 import { readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -98,7 +100,7 @@ import {
   resolveThreadRouteRef,
   resolveThreadRouteTarget,
 } from "../threadRoutes";
-import { stackedThreadToast, toastManager } from "./ui/toast";
+import { stackedThreadToast, toastManager, type ThreadToastData } from "./ui/toast";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { Kbd } from "./ui/kbd";
@@ -960,6 +962,16 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const sidebarThreadPreviewCount = useSettings<SidebarThreadPreviewCount>(
     (settings) => settings.sidebarThreadPreviewCount,
   );
+  const projectSourceControlScope = useMemo(
+    () => ({
+      environmentId: project.environmentId,
+      cwd: project.cwd,
+    }),
+    [project.cwd, project.environmentId],
+  );
+  const projectGitStatus = useVcsStatus(projectSourceControlScope);
+  const pullAction = useVcsPullAction(projectSourceControlScope);
+  const syncBaseAction = useVcsSyncBaseAction(projectSourceControlScope);
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const markThreadUnread = useUiStateStore((state) => state.markThreadUnread);
@@ -1891,6 +1903,87 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     },
     [createThreadForProjectMember, project.groupedProjectCount, project.memberProjects],
   );
+  const projectRepoUpdateAction = useMemo(() => {
+    const gitStatus = projectGitStatus.data;
+    if (!gitStatus?.isRepo || gitStatus.refName === null) {
+      return null;
+    }
+    if (gitStatus.behindCount > 0) {
+      return {
+        kind: "pull" as const,
+        label: "Pull",
+        ariaLabel: `Pull ${project.displayName}`,
+        tooltip: "Pull before starting a new thread",
+      };
+    }
+    if (
+      !gitStatus.isDefaultRef &&
+      !gitStatus.hasWorkingTreeChanges &&
+      (gitStatus.behindOfDefaultCount ?? 0) > 0
+    ) {
+      return {
+        kind: "rebase" as const,
+        label: "Rebase",
+        ariaLabel: `Rebase ${project.displayName}`,
+        tooltip: "Rebase before starting a new thread",
+      };
+    }
+    return null;
+  }, [project.displayName, projectGitStatus.data]);
+  const isProjectRepoUpdatePending = pullAction.isPending || syncBaseAction.isPending;
+  const handleProjectRepoUpdateClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!projectRepoUpdateAction || isProjectRepoUpdatePending) {
+        return;
+      }
+
+      if (projectRepoUpdateAction.kind === "pull") {
+        const promise = pullAction.run();
+        void toastManager.promise<Awaited<ReturnType<typeof pullAction.run>>, ThreadToastData>(
+          promise,
+          {
+            loading: { title: "Pulling..." },
+            success: (result) => ({
+              title: result.status === "pulled" ? "Pulled" : "Already up to date",
+              description:
+                result.status === "pulled"
+                  ? `Updated ${result.refName} from ${result.upstreamRef ?? "upstream"}.`
+                  : `${result.refName} is already synchronized.`,
+            }),
+            error: (err) => ({
+              title: "Pull failed",
+              description: err instanceof Error ? err.message : "An error occurred.",
+            }),
+          },
+        );
+        void promise.catch(() => undefined);
+        return;
+      }
+
+      const promise = syncBaseAction.run();
+      void toastManager.promise<Awaited<ReturnType<typeof syncBaseAction.run>>, ThreadToastData>(
+        promise,
+        {
+          loading: { title: "Rebasing..." },
+          success: (result) => ({
+            title: result.status === "rebased" ? "Rebased" : "Already up to date",
+            description:
+              result.status === "rebased"
+                ? `Rebased ${result.refName} onto ${result.baseRef}.`
+                : `${result.refName} already includes ${result.baseRef}.`,
+          }),
+          error: (err) => ({
+            title: "Rebase failed",
+            description: err instanceof Error ? err.message : "An error occurred.",
+          }),
+        },
+      );
+      void promise.catch(() => undefined);
+    },
+    [isProjectRepoUpdatePending, projectRepoUpdateAction, pullAction, syncBaseAction],
+  );
 
   const attemptArchiveThread = useCallback(
     async (threadRef: ScopedThreadRef) => {
@@ -2132,9 +2225,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
           size="sm"
-          className={`gap-2 px-2 py-1.5 pr-8 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground max-sm:pr-14 ${
-            isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
-          }`}
+          className={cn(
+            "gap-2 px-2 py-1.5 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground",
+            projectRepoUpdateAction ? "pr-16 max-sm:pr-24" : "pr-8 max-sm:pr-14",
+            isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+          )}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.listeners : {})}
           onPointerDownCapture={handleProjectButtonPointerDownCapture}
@@ -2204,20 +2299,38 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           <TooltipTrigger
             render={
               <div className="pointer-events-none absolute top-1 right-1.5 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
-                <button
-                  type="button"
-                  aria-label={`Create new thread in ${project.displayName}`}
-                  data-testid="new-thread-button"
-                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                  onClick={handleCreateThreadClick}
-                >
-                  <SquarePenIcon className="size-3.5" />
-                </button>
+                {projectRepoUpdateAction ? (
+                  <button
+                    type="button"
+                    aria-label={projectRepoUpdateAction.ariaLabel}
+                    data-testid="project-repo-update-button"
+                    className="inline-flex h-5 min-w-12 cursor-pointer items-center justify-center gap-1 rounded-md border border-yellow-500/75 bg-yellow-500/10 px-1.5 text-[10px] font-medium text-yellow-700 transition-colors hover:border-yellow-500 hover:bg-yellow-500/15 hover:text-yellow-800 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-yellow-500/70 disabled:cursor-wait disabled:opacity-70 dark:border-yellow-400/65 dark:bg-yellow-400/10 dark:text-yellow-300 dark:hover:border-yellow-300 dark:hover:bg-yellow-400/15 dark:hover:text-yellow-200"
+                    disabled={isProjectRepoUpdatePending}
+                    onClick={handleProjectRepoUpdateClick}
+                  >
+                    <DownloadIcon className="size-3" />
+                    <span>{projectRepoUpdateAction.label}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label={`Create new thread in ${project.displayName}`}
+                    data-testid="new-thread-button"
+                    className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                    onClick={handleCreateThreadClick}
+                  >
+                    <SquarePenIcon className="size-3.5" />
+                  </button>
+                )}
               </div>
             }
           />
           <TooltipPopup side="top">
-            {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+            {projectRepoUpdateAction
+              ? projectRepoUpdateAction.tooltip
+              : newThreadShortcutLabel
+                ? `New thread (${newThreadShortcutLabel})`
+                : "New thread"}
           </TooltipPopup>
         </Tooltip>
       </div>
