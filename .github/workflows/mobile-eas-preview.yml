@@ -66,22 +66,12 @@ jobs:
         working-directory: apps/mobile
         run: eas env:pull preview --non-interactive
 
-      - name: Deploy iOS with fingerprint check
+      - name: Deploy with fingerprint check
         uses: expo/expo-github-action/continuous-deploy-fingerprint@main
         with:
           profile: preview:dev
           branch: pr-${{ github.event.pull_request.number }}
-          platform: ios
-          environment: preview
-          working-directory: apps/mobile
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Deploy Android with fingerprint check
-        uses: expo/expo-github-action/continuous-deploy-fingerprint@main
-        with:
-          profile: preview:dev
-          branch: pr-${{ github.event.pull_request.number }}
-          platform: android
+          platform: all
           environment: preview
           working-directory: apps/mobile
           github-token: ${{ secrets.GITHUB_TOKEN }}
