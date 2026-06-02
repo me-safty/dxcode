@@ -608,7 +608,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           title="Context menus"
-          description="Default uses native desktop menus when available and custom menus in the browser."
+          description="Default uses native desktop menus on macOS and custom menus elsewhere."
           resetAction={
             settings.contextMenuStyle !== DEFAULT_UNIFIED_SETTINGS.contextMenuStyle ? (
               <SettingResetButton

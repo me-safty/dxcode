@@ -30,6 +30,7 @@ import {
   writeBrowserSavedEnvironmentRegistry,
   writeBrowserSavedEnvironmentSecret,
 } from "./clientPersistenceStorage";
+import { isMacPlatform } from "./lib/utils";
 
 let cachedApi: LocalApi | undefined;
 
@@ -55,7 +56,8 @@ function shouldUseNativeContextMenu(style: ContextMenuStyle): boolean {
   if (style === "native") {
     return true;
   }
-  return Boolean(window.desktopBridge);
+  const platform = typeof navigator === "undefined" ? "" : navigator.platform;
+  return Boolean(window.desktopBridge) && isMacPlatform(platform);
 }
 
 function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
