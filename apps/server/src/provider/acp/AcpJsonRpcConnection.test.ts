@@ -16,7 +16,7 @@ import type * as EffectAcpProtocol from "effect-acp/protocol";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const mockAgentPath = path.join(__dirname, "../../../scripts/acp-mock-agent.ts");
 const mockAgentCommand = "node";
-const mockAgentArgs = ["--experimental-strip-types", mockAgentPath];
+const mockAgentArgs = [mockAgentPath];
 
 describe("AcpSessionRuntime", () => {
   it.effect("merges custom initialize client capabilities into the ACP handshake", () => {

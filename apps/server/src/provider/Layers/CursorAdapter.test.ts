@@ -38,7 +38,7 @@ class CursorAdapter extends Context.Service<CursorAdapter, CursorAdapterShape>()
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const mockAgentPath = path.join(__dirname, "../../../scripts/acp-mock-agent.ts");
 const mockAgentCommand = "node";
-const mockAgentArgs = ["--experimental-strip-types", mockAgentPath] as const;
+const mockAgentArgs = [mockAgentPath] as const;
 
 async function makeMockAgentWrapper(
   extraEnv?: Record<string, string>,

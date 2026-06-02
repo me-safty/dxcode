@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --experimental-strip-types
+#!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off
 import { appendFileSync } from "node:fs";
 

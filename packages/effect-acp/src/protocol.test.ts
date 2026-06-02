@@ -51,7 +51,7 @@ const decodeRequestPermissionResponse = Schema.decodeEffect(
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/acp-mock-peer.ts"),
 );
-const mockPeerArgs = (path: string) => ["--experimental-strip-types", path];
+const mockPeerArgs = (path: string) => [path];
 
 const makeHandle = (env?: Record<string, string>) =>
   Effect.gen(function* () {
