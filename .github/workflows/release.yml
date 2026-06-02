@@ -99,8 +99,24 @@ jobs:
         run: |
           unset ELECTRON_SKIP_BINARY_DOWNLOAD
           electron_dir="$(dirname "$(node -p "require.resolve('./apps/desktop/node_modules/electron/package.json')")")"
+          electron_version="$(node -p "require('./apps/desktop/node_modules/electron/package.json').version")"
+          electron_platform="$(node -p "process.platform")"
+          electron_arch="$(node -p "process.arch")"
+          electron_zip="${RUNNER_TEMP:-/tmp}/electron-v${electron_version}-${electron_platform}-${electron_arch}.zip"
           rm -rf "$electron_dir/dist" "$electron_dir/path.txt"
-          env -u ELECTRON_SKIP_BINARY_DOWNLOAD force_no_cache=true node "$electron_dir/install.js"
+          curl -fsSL \
+            "https://github.com/electron/electron/releases/download/v${electron_version}/electron-v${electron_version}-${electron_platform}-${electron_arch}.zip" \
+            -o "$electron_zip"
+          python3 - "$electron_zip" "$electron_dir/dist" <<'PY'
+          import os
+          import sys
+          import zipfile
+
+          zip_path, destination = sys.argv[1], sys.argv[2]
+          os.makedirs(destination, exist_ok=True)
+          with zipfile.ZipFile(zip_path) as archive:
+              archive.extractall(destination)
+          PY
           node - "$electron_dir" <<'NODE'
           const fs = require("node:fs");
           const path = require("node:path");
@@ -118,6 +134,7 @@ jobs:
             throw new Error(`Missing Electron executable at ${electronPath}`);
           }
 
+          fs.chmodSync(electronPath, 0o755);
           fs.writeFileSync(path.join(electronDir, "path.txt"), platformPath);
           NODE
           electron_path="$(node -p "require('./apps/desktop/node_modules/electron')")"
