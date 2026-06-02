@@ -177,6 +177,7 @@ import {
   resolveThreadStatusPill,
   removeSidebarProjectFromFolders,
   orderItemsByPreferredIds,
+  sidebarProjectFolderKey,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   useThreadJumpHintVisibility,
@@ -2589,16 +2590,13 @@ type SidebarProjectFolderView = Extract<
 
 interface SidebarProjectFolderRowProps extends Omit<
   SidebarProjectItemProps,
-  | "project"
-  | "isThreadListExpanded"
-  | "activeRouteThreadKey"
-  | "dragHandleProps"
-  | "isManualProjectSorting"
+  "project" | "isThreadListExpanded" | "activeRouteThreadKey"
 > {
   folderEntry: SidebarProjectFolderView;
   expandedThreadListsByProject: ReadonlySet<string>;
   activeRouteProjectKey: string | null;
   routeThreadKey: string | null;
+  renderContainer?: boolean;
 }
 
 const SidebarProjectFolderRow = memo(function SidebarProjectFolderRow(
@@ -2609,6 +2607,9 @@ const SidebarProjectFolderRow = memo(function SidebarProjectFolderRow(
     expandedThreadListsByProject,
     activeRouteProjectKey,
     routeThreadKey,
+    isManualProjectSorting,
+    dragHandleProps,
+    renderContainer = true,
     ...projectItemProps
   } = props;
   const sidebarProjectFolders = useSettings((settings) => settings.sidebarProjectFolders);
@@ -2684,23 +2685,79 @@ const SidebarProjectFolderRow = memo(function SidebarProjectFolderRow(
     [deleteFolder],
   );
 
-  const handleFolderClick = useCallback(() => {
-    const nextExpanded = !folderExpanded;
-    useUiStateStore.getState().setProjectExpanded(folderEntry.folderKey, nextExpanded);
-    updateSettings({
-      sidebarProjectExpandedById: setSidebarProjectExpandedValue(
-        sidebarProjectExpandedById,
-        folderEntry.folderKey,
-        nextExpanded,
-      ),
-    });
-  }, [folderEntry.folderKey, folderExpanded, sidebarProjectExpandedById, updateSettings]);
+  const handleFolderClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      if (projectItemProps.suppressProjectClickForContextMenuRef.current) {
+        projectItemProps.suppressProjectClickForContextMenuRef.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (projectItemProps.dragInProgressRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (projectItemProps.suppressProjectClickAfterDragRef.current) {
+        projectItemProps.suppressProjectClickAfterDragRef.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const nextExpanded = !folderExpanded;
+      useUiStateStore.getState().setProjectExpanded(folderEntry.folderKey, nextExpanded);
+      updateSettings({
+        sidebarProjectExpandedById: setSidebarProjectExpandedValue(
+          sidebarProjectExpandedById,
+          folderEntry.folderKey,
+          nextExpanded,
+        ),
+      });
+    },
+    [
+      folderEntry.folderKey,
+      folderExpanded,
+      projectItemProps.dragInProgressRef,
+      projectItemProps.suppressProjectClickAfterDragRef,
+      projectItemProps.suppressProjectClickForContextMenuRef,
+      sidebarProjectExpandedById,
+      updateSettings,
+    ],
+  );
 
-  return (
-    <SidebarMenuItem className="rounded-md">
+  const handleFolderPointerDownCapture = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      projectItemProps.suppressProjectClickForContextMenuRef.current = false;
+      if (
+        isContextMenuPointerDown({
+          button: event.button,
+          ctrlKey: event.ctrlKey,
+          isMac: isMacPlatform(navigator.platform),
+        })
+      ) {
+        event.stopPropagation();
+      }
+
+      projectItemProps.suppressProjectClickAfterDragRef.current = false;
+    },
+    [
+      projectItemProps.suppressProjectClickAfterDragRef,
+      projectItemProps.suppressProjectClickForContextMenuRef,
+    ],
+  );
+
+  const content = (
+    <>
       <SidebarMenuButton
+        ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
         size="sm"
-        className="gap-2 px-2 py-1.5 pr-8 text-left hover:bg-accent"
+        className={cn(
+          "gap-2 px-2 py-1.5 pr-8 text-left hover:bg-accent",
+          isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+        )}
+        {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
+        {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.listeners : {})}
+        onPointerDownCapture={handleFolderPointerDownCapture}
         onClick={handleFolderClick}
         onContextMenu={handleFolderContextMenu}
       >
@@ -2779,7 +2836,13 @@ const SidebarProjectFolderRow = memo(function SidebarProjectFolderRow(
           </DialogFooter>
         </DialogPopup>
       </Dialog>
-    </SidebarMenuItem>
+    </>
+  );
+
+  return renderContainer ? (
+    <SidebarMenuItem className="rounded-md">{content}</SidebarMenuItem>
+  ) : (
+    content
   );
 });
 
@@ -3083,7 +3146,6 @@ interface SidebarProjectsContentProps {
   handleNewThread: ReturnType<typeof useNewThreadHandler>["handleNewThread"];
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
-  sortedProjects: readonly SidebarProjectSnapshot[];
   sortedProjectEntries: readonly SidebarProjectFolderEntry<SidebarProjectSnapshot>[];
   expandedThreadListsByProject: ReadonlySet<string>;
   activeRouteProjectKey: string | null;
@@ -3125,7 +3187,6 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     handleNewThread,
     archiveThread,
     deleteThread,
-    sortedProjects,
     sortedProjectEntries,
     expandedThreadListsByProject,
     activeRouteProjectKey,
@@ -3142,8 +3203,6 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     attachProjectListAutoAnimateRef,
     projectsLength,
   } = props;
-  const hasProjectFolders = sortedProjectEntries.some((entry) => entry.kind === "folder");
-
   const handleProjectSortOrderChange = useCallback(
     (sortOrder: SidebarProjectSortOrder) => {
       updateSettings({ sidebarProjectSortOrder: sortOrder });
@@ -3252,7 +3311,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           </div>
         </div>
 
-        {isManualProjectSorting && !hasProjectFolders ? (
+        {isManualProjectSorting ? (
           <DndContext
             sensors={projectDnDSensors}
             collisionDetection={projectCollisionDetection}
@@ -3263,37 +3322,72 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           >
             <SidebarMenu>
               <SortableContext
-                items={sortedProjects.map((project) => project.projectKey)}
+                items={sortedProjectEntries.map((entry) =>
+                  entry.kind === "folder" ? entry.folderKey : entry.project.projectKey,
+                )}
                 strategy={verticalListSortingStrategy}
               >
-                {sortedProjects.map((project) => (
-                  <SortableProjectItem key={project.projectKey} projectId={project.projectKey}>
-                    {(dragHandleProps) => (
-                      <SidebarProjectItem
-                        project={project}
-                        isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
-                        activeRouteThreadKey={
-                          activeRouteProjectKey === project.projectKey ? routeThreadKey : null
-                        }
-                        newThreadShortcutLabel={newThreadShortcutLabel}
-                        handleNewThread={handleNewThread}
-                        archiveThread={archiveThread}
-                        deleteThread={deleteThread}
-                        threadJumpLabelByKey={threadJumpLabelByKey}
-                        attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
-                        expandThreadListForProject={expandThreadListForProject}
-                        collapseThreadListForProject={collapseThreadListForProject}
-                        dragInProgressRef={dragInProgressRef}
-                        suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
-                        suppressProjectClickForContextMenuRef={
-                          suppressProjectClickForContextMenuRef
-                        }
-                        isManualProjectSorting={isManualProjectSorting}
-                        dragHandleProps={dragHandleProps}
-                      />
-                    )}
-                  </SortableProjectItem>
-                ))}
+                {sortedProjectEntries.map((entry) => {
+                  const entryKey =
+                    entry.kind === "folder" ? entry.folderKey : entry.project.projectKey;
+                  return (
+                    <SortableProjectItem key={entryKey} projectId={entryKey}>
+                      {(dragHandleProps) =>
+                        entry.kind === "folder" ? (
+                          <SidebarProjectFolderRow
+                            folderEntry={entry}
+                            expandedThreadListsByProject={expandedThreadListsByProject}
+                            activeRouteProjectKey={activeRouteProjectKey}
+                            routeThreadKey={routeThreadKey}
+                            newThreadShortcutLabel={newThreadShortcutLabel}
+                            handleNewThread={handleNewThread}
+                            archiveThread={archiveThread}
+                            deleteThread={deleteThread}
+                            threadJumpLabelByKey={threadJumpLabelByKey}
+                            attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+                            expandThreadListForProject={expandThreadListForProject}
+                            collapseThreadListForProject={collapseThreadListForProject}
+                            dragInProgressRef={dragInProgressRef}
+                            suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
+                            suppressProjectClickForContextMenuRef={
+                              suppressProjectClickForContextMenuRef
+                            }
+                            isManualProjectSorting={isManualProjectSorting}
+                            dragHandleProps={dragHandleProps}
+                            renderContainer={false}
+                          />
+                        ) : (
+                          <SidebarProjectItem
+                            project={entry.project}
+                            isThreadListExpanded={expandedThreadListsByProject.has(
+                              entry.project.projectKey,
+                            )}
+                            activeRouteThreadKey={
+                              activeRouteProjectKey === entry.project.projectKey
+                                ? routeThreadKey
+                                : null
+                            }
+                            newThreadShortcutLabel={newThreadShortcutLabel}
+                            handleNewThread={handleNewThread}
+                            archiveThread={archiveThread}
+                            deleteThread={deleteThread}
+                            threadJumpLabelByKey={threadJumpLabelByKey}
+                            attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+                            expandThreadListForProject={expandThreadListForProject}
+                            collapseThreadListForProject={collapseThreadListForProject}
+                            dragInProgressRef={dragInProgressRef}
+                            suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
+                            suppressProjectClickForContextMenuRef={
+                              suppressProjectClickForContextMenuRef
+                            }
+                            isManualProjectSorting={isManualProjectSorting}
+                            dragHandleProps={dragHandleProps}
+                          />
+                        )
+                      }
+                    </SortableProjectItem>
+                  );
+                })}
               </SortableContext>
             </SidebarMenu>
           </DndContext>
@@ -3318,6 +3412,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                   dragInProgressRef={dragInProgressRef}
                   suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
                   suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
+                  isManualProjectSorting={false}
+                  dragHandleProps={null}
                 />
               ) : (
                 <SidebarProjectListRow
@@ -3603,17 +3699,29 @@ export default function Sidebar() {
       dragInProgressRef.current = false;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      const activeProject = sidebarProjects.find((project) => project.projectKey === active.id);
-      const overProject = sidebarProjects.find((project) => project.projectKey === over.id);
-      if (!activeProject || !overProject) return;
-      const activeMemberKeys = activeProject.memberProjects.map(
-        (member) => member.physicalProjectKey,
-      );
-      const overMemberKeys = overProject.memberProjects.map((member) => member.physicalProjectKey);
+      const getProjectOrderKeys = (entryId: string): readonly string[] => {
+        const project = sidebarProjects.find((candidate) => candidate.projectKey === entryId);
+        if (project) {
+          return project.memberProjects.map((member) => member.physicalProjectKey);
+        }
+        const folder = sidebarProjectFolders.find(
+          (candidate) => sidebarProjectFolderKey(candidate.id) === entryId,
+        );
+        return folder?.projectKeys ?? [];
+      };
+      const activeMemberKeys = getProjectOrderKeys(String(active.id));
+      const overMemberKeys = getProjectOrderKeys(String(over.id));
+      if (activeMemberKeys.length === 0 || overMemberKeys.length === 0) return;
       reorderProjects(activeMemberKeys, overMemberKeys);
       updateSettings({ sidebarProjectOrder: useUiStateStore.getState().projectOrder });
     },
-    [sidebarProjectSortOrder, reorderProjects, sidebarProjects, updateSettings],
+    [
+      sidebarProjectFolders,
+      sidebarProjectSortOrder,
+      reorderProjects,
+      sidebarProjects,
+      updateSettings,
+    ],
   );
 
   const handleProjectDragStart = useCallback(
@@ -4069,7 +4177,6 @@ export default function Sidebar() {
             handleNewThread={handleNewThread}
             archiveThread={archiveThread}
             deleteThread={deleteThread}
-            sortedProjects={sortedProjects}
             sortedProjectEntries={sortedProjectEntries}
             expandedThreadListsByProject={expandedThreadListsByProject}
             activeRouteProjectKey={activeRouteProjectKey}
