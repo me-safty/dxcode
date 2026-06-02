@@ -33,7 +33,9 @@ export function SidebarUpdatePill() {
 
   const showArm64Warning = isElectron && shouldShowArm64IntelBuildWarning(state);
   const arm64Description =
-    state && showArm64Warning ? getArm64IntelBuildWarningDescription(state) : null;
+    state && showArm64Warning
+      ? getArm64IntelBuildWarningDescription(state, navigator.platform.startsWith("Win") ? "win32" : "darwin")
+      : null;
 
   const handleAction = useCallback(() => {
     const bridge = window.desktopBridge;
@@ -112,7 +114,11 @@ export function SidebarUpdatePill() {
       {showArm64Warning && arm64Description && (
         <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8 text-xs">
           <TriangleAlertIcon />
-          <AlertTitle>Intel build on Apple Silicon</AlertTitle>
+          <AlertTitle>
+            {state?.hostArch === "arm64" && navigator.platform.startsWith("Win")
+              ? "x64 build on ARM64"
+              : "Intel build on Apple Silicon"}
+          </AlertTitle>
           <AlertDescription>{arm64Description}</AlertDescription>
         </Alert>
       )}

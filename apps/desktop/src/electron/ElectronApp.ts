@@ -11,6 +11,7 @@ export interface ElectronAppMetadata {
   readonly isPackaged: boolean;
   readonly resourcesPath: string;
   readonly runningUnderArm64Translation: boolean;
+  readonly windowsProcessorArchitectures: ReadonlyArray<string>;
 }
 
 export interface ElectronAppShape {
@@ -63,6 +64,10 @@ const make = ElectronApp.of({
     isPackaged: Electron.app.isPackaged,
     resourcesPath: process.resourcesPath,
     runningUnderArm64Translation: Electron.app.runningUnderARM64Translation === true,
+    windowsProcessorArchitectures: [
+      process.env.PROCESSOR_ARCHITEW6432 ?? "",
+      process.env.PROCESSOR_ARCHITECTURE ?? "",
+    ].filter((v) => v.length > 0),
   })),
   name: Effect.sync(() => Electron.app.name),
   whenReady: Effect.promise(() => Electron.app.whenReady()).pipe(Effect.asVoid),

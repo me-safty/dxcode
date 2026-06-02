@@ -29,6 +29,7 @@ const environmentInput = {
   isPackaged: false,
   resourcesPath: "/repo/resources",
   runningUnderArm64Translation: false,
+  windowsProcessorArchitectures: [],
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
 function makeFakeBrowserWindow() {

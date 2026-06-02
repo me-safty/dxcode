@@ -23,6 +23,7 @@ const defaultEnvironmentInput = {
   isPackaged: true,
   resourcesPath: "/Applications/T3 Code.app/Contents/Resources",
   runningUnderArm64Translation: false,
+  windowsProcessorArchitectures: [],
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
 type TestEnvironmentInput = Partial<DesktopEnvironment.MakeDesktopEnvironmentInput> & {

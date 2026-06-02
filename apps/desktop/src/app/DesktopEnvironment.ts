@@ -28,6 +28,7 @@ export interface MakeDesktopEnvironmentInput {
   readonly isPackaged: boolean;
   readonly resourcesPath: string;
   readonly runningUnderArm64Translation: boolean;
+  readonly windowsProcessorArchitectures: ReadonlyArray<string>;
 }
 
 export interface DesktopEnvironmentShape {
@@ -111,27 +112,59 @@ function normalizeDesktopArch(arch: string): DesktopRuntimeArch {
   return "other";
 }
 
+function normalizeWindowsArch(value: string | undefined): DesktopRuntimeArch | undefined {
+  const normalized = value?.trim().toUpperCase();
+  if (!normalized) return undefined;
+  if (normalized.includes("ARM64")) return "arm64";
+  if (normalized.includes("AMD64") || normalized.includes("X64")) return "x64";
+  return undefined;
+}
+
+function resolveWindowsHostArch(
+  processArch: string,
+  windowsProcessorArchitectures: ReadonlyArray<string>,
+): DesktopRuntimeArch | undefined {
+  const appArch = normalizeDesktopArch(processArch);
+  if (appArch === "arm64") return "arm64";
+  for (const envValue of windowsProcessorArchitectures) {
+    const resolved = normalizeWindowsArch(envValue);
+    if (resolved !== undefined) return resolved;
+  }
+  return undefined;
+}
+
 function resolveDesktopRuntimeInfo(input: {
   readonly platform: NodeJS.Platform;
   readonly processArch: string;
   readonly runningUnderArm64Translation: boolean;
+  readonly windowsProcessorArchitectures: ReadonlyArray<string>;
 }): DesktopRuntimeInfo {
   const appArch = normalizeDesktopArch(input.processArch);
 
-  if (input.platform !== "darwin") {
+  if (input.platform === "win32") {
+    const hostArch =
+      resolveWindowsHostArch(input.processArch, input.windowsProcessorArchitectures) ?? appArch;
+    const runningUnderArm64Translation = hostArch === "arm64" && appArch === "x64";
     return {
-      hostArch: appArch,
+      hostArch,
       appArch,
-      runningUnderArm64Translation: false,
+      runningUnderArm64Translation,
     };
   }
 
-  const hostArch = appArch === "arm64" || input.runningUnderArm64Translation ? "arm64" : appArch;
+  if (input.platform === "darwin") {
+    const hostArch = appArch === "arm64" || input.runningUnderArm64Translation ? "arm64" : appArch;
+    return {
+      hostArch,
+      appArch,
+      runningUnderArm64Translation: input.runningUnderArm64Translation,
+    };
+  }
 
   return {
-    hostArch,
+    hostArch: appArch,
     appArch,
-    runningUnderArm64Translation: input.runningUnderArm64Translation,
+    runningUnderArm64Translation: false,
   };
 }
 
@@ -209,6 +242,7 @@ const makeDesktopEnvironment = Effect.fn("desktop.environment.make")(function* (
       platform: input.platform,
       processArch: input.processArch,
       runningUnderArm64Translation: input.runningUnderArm64Translation,
+      windowsProcessorArchitectures: input.windowsProcessorArchitectures,
     }),
     resolvePickFolderDefaultPath: (rawOptions) => {
       if (typeof rawOptions !== "object" || rawOptions === null) {

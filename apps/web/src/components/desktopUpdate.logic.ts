@@ -37,19 +37,28 @@ export function isDesktopUpdateButtonDisabled(state: DesktopUpdateState | null):
   return state?.status === "downloading";
 }
 
-export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState): string {
+export function getArm64IntelBuildWarningDescription(
+  state: DesktopUpdateState,
+  platform: NodeJS.Platform | null = null,
+): string {
   if (!shouldShowArm64IntelBuildWarning(state)) {
     return "This install is using the correct architecture.";
   }
 
+  const isMac = platform === "darwin";
+  const hostLabel = isMac ? "This Mac has Apple Silicon" : "This device has an ARM64 processor";
+  const emulationLabel = isMac ? "under Rosetta" : "under emulation";
+  const nativeLabel = isMac ? "Apple Silicon" : "ARM64";
+  const intelLabel = isMac ? "Intel" : "x64";
+
   const action = resolveDesktopUpdateButtonAction(state);
   if (action === "download") {
-    return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.";
+    return `${hostLabel}, but T3 Code is still running the ${intelLabel} build ${emulationLabel}. Download the available update to switch to the native ${nativeLabel} build.`;
   }
   if (action === "install") {
-    return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
+    return `${hostLabel}, but T3 Code is still running the ${intelLabel} build ${emulationLabel}. Restart to install the downloaded ${nativeLabel} build.`;
   }
-  return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.";
+  return `${hostLabel}, but T3 Code is still running the ${intelLabel} build ${emulationLabel}. The next app update will replace it with the native ${nativeLabel} build.`;
 }
 
 export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string {

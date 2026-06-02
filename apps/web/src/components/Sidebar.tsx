@@ -2650,7 +2650,11 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
         <SidebarGroup className="px-2 pt-2 pb-0">
           <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8">
             <TriangleAlertIcon />
-            <AlertTitle>Intel build on Apple Silicon</AlertTitle>
+            <AlertTitle>
+              {desktopUpdateState?.hostArch === "arm64" && navigator.platform.startsWith("Win")
+                ? "x64 build on ARM64"
+                : "Intel build on Apple Silicon"}
+            </AlertTitle>
             <AlertDescription>{arm64IntelBuildWarningDescription}</AlertDescription>
             {desktopUpdateButtonAction !== "none" ? (
               <AlertAction>
@@ -3318,7 +3322,7 @@ export default function Sidebar() {
     isElectron && shouldShowArm64IntelBuildWarning(desktopUpdateState);
   const arm64IntelBuildWarningDescription =
     desktopUpdateState && showArm64IntelBuildWarning
-      ? getArm64IntelBuildWarningDescription(desktopUpdateState)
+      ? getArm64IntelBuildWarningDescription(desktopUpdateState, navigator.platform.startsWith("Win") ? "win32" : "darwin")
       : null;
   const commandPaletteShortcutLabel = shortcutLabelForCommand(
     keybindings,

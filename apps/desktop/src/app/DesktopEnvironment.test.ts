@@ -17,6 +17,7 @@ const defaultInput = {
   isPackaged: false,
   resourcesPath: "/Applications/T3 Code.app/Contents/Resources",
   runningUnderArm64Translation: false,
+  windowsProcessorArchitectures: [],
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
 const makeEnvironmentLayer = (
@@ -71,7 +72,7 @@ describe("DesktopEnvironment", () => {
       );
       assert.deepEqual(environment.devRemoteT3ServerEntryPath, Option.some("/remote/server.mjs"));
       assert.deepEqual(environment.configuredBackendPort, Option.some(4949));
-      assert.deepEqual(environment.commitHashOverride, Option.some("0123456789abcdef"));
+      assert.deepEqual(environment.commitHashOverride, Option.some("0123456789abc"));
       assert.deepEqual(environment.otlpTracesUrl, Option.some("http://127.0.0.1:4318/v1/traces"));
       assert.equal(environment.otlpExportIntervalMs, 2500);
     }),
@@ -110,6 +111,107 @@ describe("DesktopEnvironment", () => {
         environment.resolvePickFolderDefaultPath({ initialPath: "~/project" }),
         Option.some("/Users/alice/project"),
       );
+    }),
+  );
+
+  it.effect("detects macOS arm64 host running x64 build under Rosetta", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        platform: "darwin",
+        processArch: "x64",
+        runningUnderArm64Translation: true,
+      });
+
+      assert.deepEqual(environment.runtimeInfo, {
+        hostArch: "arm64",
+        appArch: "x64",
+        runningUnderArm64Translation: true,
+      });
+    }),
+  );
+
+  it.effect("detects Windows arm64 host via PROCESSOR_ARCHITECTURE env var", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        platform: "win32",
+        processArch: "x64",
+        runningUnderArm64Translation: false,
+        windowsProcessorArchitectures: ["ARM64"],
+      });
+
+      assert.deepEqual(environment.runtimeInfo, {
+        hostArch: "arm64",
+        appArch: "x64",
+        runningUnderArm64Translation: true,
+      });
+    }),
+  );
+
+  it.effect("detects Windows arm64 host via PROCESSOR_ARCHITEW6432 env var", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        platform: "win32",
+        processArch: "x64",
+        runningUnderArm64Translation: false,
+        windowsProcessorArchitectures: ["AMD64", "ARM64"],
+      });
+
+      assert.deepEqual(environment.runtimeInfo, {
+        hostArch: "arm64",
+        appArch: "x64",
+        runningUnderArm64Translation: true,
+      });
+    }),
+  );
+
+  it.effect("reports x64 host on Windows x64 with x64 process", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        platform: "win32",
+        processArch: "x64",
+        runningUnderArm64Translation: false,
+        windowsProcessorArchitectures: ["AMD64"],
+      });
+
+      assert.deepEqual(environment.runtimeInfo, {
+        hostArch: "x64",
+        appArch: "x64",
+        runningUnderArm64Translation: false,
+      });
+    }),
+  );
+
+  it.effect("reports arm64 host and app on Windows arm64 native build", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        platform: "win32",
+        processArch: "arm64",
+        runningUnderArm64Translation: false,
+        windowsProcessorArchitectures: ["ARM64"],
+      });
+
+      assert.deepEqual(environment.runtimeInfo, {
+        hostArch: "arm64",
+        appArch: "arm64",
+        runningUnderArm64Translation: false,
+      });
+    }),
+  );
+
+  it.effect("reports no ARM64 translation on Linux", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        platform: "linux",
+        processArch: "x64",
+        runningUnderArm64Translation: false,
+        windowsProcessorArchitectures: [],
+      });
+
+      assert.deepEqual(environment.runtimeInfo, {
+        hostArch: "x64",
+        appArch: "x64",
+        runningUnderArm64Translation: false,
+      });
     }),
   );
 });

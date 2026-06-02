@@ -46,6 +46,7 @@ function makeLayer(baseDir: string) {
     isPackaged: true,
     resourcesPath: "/missing/resources",
     runningUnderArm64Translation: false,
+    windowsProcessorArchitectures: [],
   }).pipe(
     Layer.provide(
       Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({ T3CODE_HOME: baseDir })),

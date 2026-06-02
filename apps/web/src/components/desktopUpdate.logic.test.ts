@@ -190,8 +190,57 @@ describe("desktop update UI helpers", () => {
     };
 
     expect(shouldShowArm64IntelBuildWarning(state)).toBe(true);
-    expect(getArm64IntelBuildWarningDescription(state)).toContain("Apple Silicon");
-    expect(getArm64IntelBuildWarningDescription(state)).toContain("Intel build");
+    expect(getArm64IntelBuildWarningDescription(state, "darwin")).toContain("Apple Silicon");
+    expect(getArm64IntelBuildWarningDescription(state, "darwin")).toContain("Intel build");
+  });
+
+  it("shows a Windows ARM64 warning for x64 builds under emulation", () => {
+    const state: DesktopUpdateState = {
+      ...baseState,
+      hostArch: "arm64",
+      appArch: "x64",
+      runningUnderArm64Translation: true,
+    };
+
+    expect(shouldShowArm64IntelBuildWarning(state)).toBe(true);
+    expect(getArm64IntelBuildWarningDescription(state, "win32")).toContain("ARM64 processor");
+    expect(getArm64IntelBuildWarningDescription(state, "win32")).toContain("x64 build");
+    expect(getArm64IntelBuildWarningDescription(state, "win32")).toContain("under emulation");
+  });
+
+  it("shows platform-correct download prompt for Windows ARM64", () => {
+    const state: DesktopUpdateState = {
+      ...baseState,
+      hostArch: "arm64",
+      appArch: "x64",
+      runningUnderArm64Translation: true,
+      status: "available",
+      availableVersion: "1.1.0",
+    };
+
+    const macDesc = getArm64IntelBuildWarningDescription(state, "darwin");
+    const winDesc = getArm64IntelBuildWarningDescription(state, "win32");
+
+    expect(macDesc).toContain("Apple Silicon");
+    expect(macDesc).toContain("Download the available update");
+
+    expect(winDesc).toContain("ARM64 processor");
+    expect(winDesc).toContain("Download the available update");
+  });
+
+  it("shows platform-correct install prompt for Windows ARM64", () => {
+    const state: DesktopUpdateState = {
+      ...baseState,
+      hostArch: "arm64",
+      appArch: "x64",
+      runningUnderArm64Translation: true,
+      status: "downloaded",
+      downloadedVersion: "1.1.0",
+      availableVersion: "1.1.0",
+    };
+
+    const winDesc = getArm64IntelBuildWarningDescription(state, "win32");
+    expect(winDesc).toContain("Restart to install the downloaded ARM64 build");
   });
 
   it("changes the warning copy when a native build update is ready to download", () => {
@@ -204,7 +253,7 @@ describe("desktop update UI helpers", () => {
       availableVersion: "1.1.0",
     };
 
-    expect(getArm64IntelBuildWarningDescription(state)).toContain("Download the available update");
+    expect(getArm64IntelBuildWarningDescription(state, "darwin")).toContain("Download the available update");
   });
 
   it("includes the downloaded version in the install confirmation copy", () => {
