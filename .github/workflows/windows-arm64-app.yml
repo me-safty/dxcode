@@ -64,6 +64,16 @@ jobs:
           $ErrorActionPreference = "Stop"
           bun run dist:desktop:win:arm64 -- --verbose
 
+      - name: Ensure update manifest uses standard name
+        shell: pwsh
+        run: |
+          if (Test-Path "release/latest-arm64.yml") {
+            Move-Item -Force "release/latest-arm64.yml" "release/latest.yml"
+          }
+          if (Test-Path "release/nightly-arm64.yml") {
+            Move-Item -Force "release/nightly-arm64.yml" "release/nightly.yml"
+          }
+
       - name: Resolve release metadata
         id: meta
         shell: pwsh
@@ -86,8 +96,9 @@ jobs:
 
             Built from `${{ github.repository }}@${{ github.sha }}`.
             Upstream sync source: `pingdotgg/t3code@main`.
-          make_latest: false
+          make_latest: true
           files: |
             release/*.exe
             release/*.blockmap
-            release/*.yml
+            release/latest*.yml
+            release/nightly*.yml
