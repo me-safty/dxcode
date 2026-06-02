@@ -43,6 +43,7 @@
     "@types/node": "catalog:",
     "@typescript/native-preview": "catalog:",
     "@vitest/runner": "catalog:",
+    "vite": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:",
     "yaml": "catalog:"

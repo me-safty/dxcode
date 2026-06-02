@@ -3,8 +3,9 @@ import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { playwright } from "vite-plus/test/browser-playwright";
+import { defineProject, type TestProjectInlineConfiguration } from "vite-plus/test/config";
 import "vite-plus/test/config";
-import { defineConfig, defineProject } from "vite-plus";
+import { defineConfig } from "vite-plus";
 import pkg from "./package.json" with { type: "json" };
 
 const port = Number(process.env.PORT ?? 5733);
@@ -34,12 +35,42 @@ const buildSourcemap: boolean | "hidden" =
       ? "hidden"
       : true;
 
-type ProjectConfig = Parameters<typeof defineProject>[0];
-type InheritedProjectConfig = ProjectConfig & { extends: true };
+const unitTestProject = {
+  extends: true,
+  test: {
+    name: "unit",
+    include: ["src/**/*.test.{ts,tsx}"],
+    // The web runtime suite exercises auth bootstrap, saved environments,
+    // and websocket subscription lifecycles. Under the full monorepo test
+    // run, those async tests can exceed Vitest's default 5s budget.
+    hookTimeout: 15_000,
+    testTimeout: 15_000,
+  },
+} satisfies TestProjectInlineConfiguration;
 
-function defineInheritedProject(config: InheritedProjectConfig) {
-  return defineProject(config as ProjectConfig);
-}
+const browserTestProject = {
+  extends: true,
+  server: {
+    // Browser tests need concurrent runs to claim the next available port.
+    strictPort: false,
+  },
+  test: {
+    name: "browser",
+    include: ["src/components/**/*.browser.tsx"],
+    hookTimeout: 30_000,
+    testTimeout: 30_000,
+    browser: {
+      enabled: true,
+      provider: playwright() as never,
+      instances: [{ browser: "chromium" }],
+      headless: true,
+      api: {
+        strictPort: false,
+      },
+    },
+    fileParallelism: false,
+  },
+} satisfies TestProjectInlineConfiguration;
 
 function resolveDevProxyTarget(wsUrl: string | undefined): string | undefined {
   if (!wsUrl) {
@@ -134,43 +165,7 @@ export default defineConfig(() => {
       sourcemap: buildSourcemap,
     },
     test: {
-      projects: [
-        defineInheritedProject({
-          extends: true,
-          test: {
-            name: "unit",
-            include: ["src/**/*.test.{ts,tsx}"],
-            // The web runtime suite exercises auth bootstrap, saved environments,
-            // and websocket subscription lifecycles. Under the full monorepo test
-            // run, those async tests can exceed Vitest's default 5s budget.
-            hookTimeout: 15_000,
-            testTimeout: 15_000,
-          },
-        }),
-        defineInheritedProject({
-          extends: true,
-          server: {
-            // Browser tests need concurrent runs to claim the next available port.
-            strictPort: false,
-          },
-          test: {
-            name: "browser",
-            include: ["src/components/**/*.browser.tsx"],
-            hookTimeout: 30_000,
-            testTimeout: 30_000,
-            browser: {
-              enabled: true,
-              provider: playwright() as never,
-              instances: [{ browser: "chromium" }],
-              headless: true,
-              api: {
-                strictPort: false,
-              },
-            },
-            fileParallelism: false,
-          },
-        }),
-      ],
+      projects: [defineProject(unitTestProject), defineProject(browserTestProject)],
     },
   };
 });
