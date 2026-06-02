@@ -11,6 +11,7 @@ import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, ProjectId, ScopedThreadRef } from "@t3tools/contracts";
+import type { T3HostVscodeWorkspaceBootstrap } from "@t3tools/contracts";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
@@ -56,24 +57,37 @@ export function resolveVscodeProjectScope(input: {
       }
     | null
     | undefined;
+  readonly vscodeWorkspaceBootstrap?: T3HostVscodeWorkspaceBootstrap | null | undefined;
   readonly fallbackEnvironmentId?: EnvironmentId | null | undefined;
 }): VscodeProjectScope {
   const bootstrapProjects = input.serverWelcome?.bootstrapProjects ?? null;
+  const vscodeBootstrapProjects = input.vscodeWorkspaceBootstrap?.bootstrapProjects ?? null;
   const bootstrapProjectId = input.serverWelcome?.bootstrapProjectId ?? null;
+  const firstVscodeProjectId = vscodeBootstrapProjects?.[0]?.projectId;
   const activeBootstrapProjectId =
-    bootstrapProjects?.find((project) => project.isActive)?.projectId ?? bootstrapProjectId;
+    bootstrapProjects?.find((project) => project.isActive)?.projectId ??
+    vscodeBootstrapProjects?.find((project) => project.isActive)?.projectId ??
+    bootstrapProjectId ??
+    firstVscodeProjectId;
 
   return {
     environmentId:
       input.serverWelcome?.environment.environmentId ??
       input.serverConfig?.environment.environmentId ??
+      input.vscodeWorkspaceBootstrap?.environmentId ??
       input.fallbackEnvironmentId ??
       null,
-    projectId: bootstrapProjectId,
-    projectIds: bootstrapProjects?.map((project) => project.projectId) ?? null,
+    projectId: bootstrapProjectId ?? firstVscodeProjectId ?? null,
+    projectIds:
+      bootstrapProjects?.map((project) => project.projectId) ??
+      vscodeBootstrapProjects?.map((project) => project.projectId) ??
+      null,
     activeProjectId: activeBootstrapProjectId,
     cwd: input.serverConfig?.cwd ?? input.serverWelcome?.cwd ?? null,
-    cwds: bootstrapProjects?.map((project) => project.cwd) ?? null,
+    cwds:
+      bootstrapProjects?.map((project) => project.cwd) ??
+      vscodeBootstrapProjects?.map((project) => project.cwd) ??
+      null,
   };
 }
 

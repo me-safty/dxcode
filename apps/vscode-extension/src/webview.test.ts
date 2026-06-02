@@ -8,7 +8,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import packageJson from "../package.json" with { type: "json" };
-import { renderT3Webview } from "./webview.ts";
+import { renderDesktopBackendRequiredWebview, renderT3Webview } from "./webview.ts";
 
 vi.mock("vscode", () => ({
   Uri: {
@@ -51,6 +51,27 @@ describe("renderT3Webview", () => {
         bearerToken: "bearer-token",
         cwd: "/workspace",
         t3Home: "/home/user/.t3",
+        environmentId: "environment-desktop",
+        workspaceFolders: [
+          {
+            key: "file::/workspace",
+            name: "workspace",
+            cwd: "/workspace",
+            uriScheme: "file",
+            uriAuthority: "",
+          },
+        ],
+        activeWorkspaceFolderKey: "file::/workspace",
+        bootstrapProjects: [
+          {
+            workspaceFolderKey: "file::/workspace",
+            workspaceFolderName: "workspace",
+            cwd: "/workspace",
+            projectId: "project-workspace",
+            bootstrapThreadId: "thread-workspace",
+            isActive: true,
+          },
+        ],
       },
       initialRoute: "/_chat/",
     });
@@ -89,6 +110,7 @@ describe("renderT3Webview", () => {
     expect(html).toContain('"threadConversationMaxWidthPx":null');
     expect(html).toContain('"themeSource":"default"');
     expect(html).toContain("getClientSettings()");
+    expect(html).toContain("getVscodeWorkspaceBootstrap()");
     expect(html).toContain("setClientSettings(settings)");
     expect(html).toContain("confirm(message)");
     expect(html).toContain('return requestHost("confirm", message)');
@@ -96,6 +118,8 @@ describe("renderT3Webview", () => {
     expect(html).toContain("clearTimeout(pending.timeoutId)");
     expect(html).toContain('"bootstrapToken":"bootstrap-token"');
     expect(html).toContain('"bearerToken":"bearer-token"');
+    expect(html).toContain('"environmentId":"environment-desktop"');
+    expect(html).toContain('"projectId":"project-workspace"');
     expect(html).toContain('window.history.replaceState(null, document.title, "#" + initialRoute)');
     expect(html).not.toContain("!window.location.hash");
   });
@@ -121,6 +145,9 @@ describe("renderT3Webview", () => {
         bearerToken: "bearer-token",
         cwd: "/workspace",
         t3Home: "/home/user/.t3",
+        environmentId: "environment-desktop",
+        workspaceFolders: [],
+        bootstrapProjects: [],
       },
     });
 
@@ -144,6 +171,9 @@ describe("renderT3Webview", () => {
         bearerToken: "bearer-token",
         cwd: "/workspace",
         t3Home: "/home/user/.t3",
+        environmentId: "environment-desktop",
+        workspaceFolders: [],
+        bootstrapProjects: [],
       },
       displayPreferences: {
         showOpenInPicker: true,
@@ -165,6 +195,18 @@ describe("renderT3Webview", () => {
     expect(html).toContain('"threadConversationMaxWidthPx":960');
     expect(html).toContain('"themeSource":"vscode"');
     expect(html).toContain('"colorScheme":"dark"');
+  });
+});
+
+describe("renderDesktopBackendRequiredWebview", () => {
+  it("renders a reconnect button that asks the extension host to retry backend discovery", () => {
+    const html = renderDesktopBackendRequiredWebview();
+
+    expect(html).toContain("Start T3 Code Desktop");
+    expect(html).toContain("Start the desktop app manually, then reconnect.");
+    expect(html).toContain('<button type="button" id="reconnect">Reconnect</button>');
+    expect(html).toContain('vscode.postMessage({ type: "t3.reconnectDesktopBackend" })');
+    expect(html).not.toContain("T3 Code: Reconnect to Desktop Backend");
   });
 });
 

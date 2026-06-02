@@ -90,7 +90,8 @@ export const makeBootstrapCredentialService = Effect.gen(function* () {
     yield* seedGrant(config.desktopBootstrapToken, {
       method: "desktop-bootstrap",
       role: "owner",
-      subject: "desktop-bootstrap",
+      subject: "desktop-control",
+      ...(config.hostIntegration === "vscode" ? { label: "VS Code" } : {}),
       expiresAt: DateTime.add(now, {
         milliseconds: Duration.toMillis(DEFAULT_ONE_TIME_TOKEN_TTL_MINUTES),
       }),
@@ -148,6 +149,9 @@ export const makeBootstrapCredentialService = Effect.gen(function* () {
       const ttl = input?.ttl ?? DEFAULT_ONE_TIME_TOKEN_TTL_MINUTES;
       const now = yield* DateTime.now;
       const expiresAt = DateTime.add(now, { milliseconds: Duration.toMillis(ttl) });
+      if (input?.subject === "desktop-bootstrap") {
+        yield* pairingLinks.deleteExpired({ now, subject: input.subject });
+      }
       const issued: IssuedBootstrapCredential = {
         id,
         credential,

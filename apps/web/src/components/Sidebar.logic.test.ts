@@ -18,6 +18,7 @@ import {
   resolveSidebarNewThreadEnvMode,
   resolveSidebarOptionsMenuVisibility,
   resolveThreadListClassName,
+  resolveVscodeProjectScope,
   resolveVscodeInitialThreadRef,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
@@ -245,6 +246,53 @@ describe("filterProjectsForVscodeScope", () => {
         cwds: ["/repo/api", "/repo/web"],
       }),
     ).toEqual([project1, project2]);
+  });
+});
+
+describe("resolveVscodeProjectScope", () => {
+  it("uses the VS Code host bridge workspace bootstrap when desktop welcome has no VS Code projects", () => {
+    expect(
+      resolveVscodeProjectScope({
+        serverWelcome: {
+          environment: { environmentId: localEnvironmentId },
+          cwd: "/desktop",
+        },
+        serverConfig: {
+          environment: { environmentId: localEnvironmentId },
+          cwd: "/desktop",
+        },
+        vscodeWorkspaceBootstrap: {
+          environmentId: localEnvironmentId,
+          workspaceFolders: [
+            {
+              key: "file::/workspace",
+              name: "workspace",
+              cwd: "/workspace",
+              uriScheme: "file",
+              uriAuthority: "",
+            },
+          ],
+          activeWorkspaceFolderKey: "file::/workspace",
+          bootstrapProjects: [
+            {
+              workspaceFolderKey: "file::/workspace",
+              workspaceFolderName: "workspace",
+              cwd: "/workspace",
+              projectId: ProjectId.make("project-workspace"),
+              bootstrapThreadId: ThreadId.make("thread-workspace"),
+              isActive: true,
+            },
+          ],
+        },
+      }),
+    ).toEqual({
+      environmentId: localEnvironmentId,
+      projectId: ProjectId.make("project-workspace"),
+      projectIds: [ProjectId.make("project-workspace")],
+      activeProjectId: ProjectId.make("project-workspace"),
+      cwd: "/desktop",
+      cwds: ["/workspace"],
+    });
   });
 });
 

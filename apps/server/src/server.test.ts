@@ -808,6 +808,7 @@ const bootstrapBrowserSession = (
     });
     const body = (yield* response.json) as {
       readonly authenticated: boolean;
+      readonly role?: string;
       readonly sessionMethod: string;
       readonly expiresAt: string;
     };
@@ -831,6 +832,7 @@ const bootstrapBearerSession = (
     });
     const body = (yield* response.json) as {
       readonly authenticated: boolean;
+      readonly role?: string;
       readonly sessionMethod: string;
       readonly expiresAt: string;
       readonly sessionToken?: string;
@@ -1194,7 +1196,69 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(sessionResponse.status, 200);
         assert.equal(sessionBody.authenticated, true);
         assert.equal(sessionBody.sessionMethod, "bearer-session-token");
+
+        const pairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
+          headers: {
+            authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
+          },
+        });
+        const pairingBody = (yield* pairingResponse.json) as {
+          readonly credential: string;
+        };
+        const { cookie: setCookie } = yield* bootstrapBrowserSession(pairingBody.credential);
+
+        const revokeResponse = yield* HttpClient.post("/api/auth/session/revoke", {
+          headers: {
+            cookie: setCookie?.split(";")[0] ?? "",
+            authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
+          },
+        });
+        const revokeBody = (yield* revokeResponse.json) as {
+          readonly revoked: boolean;
+        };
+        const revokedSessionResponse = yield* HttpClient.get("/api/auth/session", {
+          headers: {
+            authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
+          },
+        });
+        const revokedSessionBody = (yield* revokedSessionResponse.json) as {
+          readonly authenticated: boolean;
+        };
+
+        assert.equal(revokeResponse.status, 200);
+        assert.equal(revokeBody.revoked, true);
+        assert.equal(revokedSessionResponse.status, 200);
+        assert.equal(revokedSessionBody.authenticated, false);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects cookie-authenticated self session revocation", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const { cookie } = yield* bootstrapBrowserSession();
+      const revokeResponse = yield* HttpClient.post("/api/auth/session/revoke", {
+        headers: {
+          cookie: cookie?.split(";")[0] ?? "",
+        },
+      });
+      const revokeBody = (yield* revokeResponse.json) as {
+        readonly error?: string;
+      };
+      const sessionResponse = yield* HttpClient.get("/api/auth/session", {
+        headers: {
+          cookie: cookie?.split(";")[0] ?? "",
+        },
+      });
+      const sessionBody = (yield* sessionResponse.json) as {
+        readonly authenticated: boolean;
+      };
+
+      assert.equal(revokeResponse.status, 403);
+      assert.equal(revokeBody.error, "Bearer session authentication required.");
+      assert.equal(sessionResponse.status, 200);
+      assert.equal(sessionBody.authenticated, true);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("issues short-lived websocket tokens for authenticated bearer sessions", () =>
@@ -1265,6 +1329,16 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(wsTokenResponse.status, 200);
       assertBrowserApiCorsHeaders(wsTokenResponse.headers);
       assert.equal(typeof wsTokenBody.token, "string");
+
+      const revokeResponse = yield* HttpClient.post("/api/auth/session/revoke", {
+        headers: {
+          authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
+          origin,
+        },
+      });
+
+      assert.equal(revokeResponse.status, 200);
+      assertBrowserApiCorsHeaders(revokeResponse.headers);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -1330,6 +1404,164 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const reusedResult = yield* bootstrapBrowserSession(body.credential);
       assert.equal(reusedResult.response.status, 401);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("issues one-time desktop bootstrap tickets from desktop bearer sessions", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const desktopSession = yield* bootstrapBearerSession();
+      assert.equal(desktopSession.response.status, 200);
+      assert.isDefined(desktopSession.body.sessionToken);
+
+      const ticketResponse = yield* HttpClient.post("/api/auth/desktop-bootstrap-ticket", {
+        headers: {
+          authorization: `Bearer ${desktopSession.body.sessionToken}`,
+        },
+      });
+      const ticketBody = (yield* ticketResponse.json) as {
+        readonly credential: string;
+      };
+
+      assert.equal(ticketResponse.status, 200);
+      assert.equal(typeof ticketBody.credential, "string");
+      assert.isTrue(ticketBody.credential.length > 0);
+
+      const firstBootstrap = yield* bootstrapBearerSession(ticketBody.credential);
+      const secondBootstrap = yield* bootstrapBearerSession(ticketBody.credential);
+      assert.equal(firstBootstrap.response.status, 200);
+      assert.equal(firstBootstrap.body.role, "owner");
+      assert.equal(secondBootstrap.response.status, 401);
+
+      const remintResponse = yield* HttpClient.post("/api/auth/desktop-bootstrap-ticket", {
+        headers: {
+          authorization: `Bearer ${firstBootstrap.body.sessionToken ?? ""}`,
+        },
+      });
+      assert.equal(remintResponse.status, 403);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects desktop bootstrap ticket requests without a desktop bearer session", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const response = yield* HttpClient.post("/api/auth/desktop-bootstrap-ticket", {
+        headers: {
+          cookie: ownerCookie,
+        },
+      });
+
+      assert.equal(response.status, 403);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("falls back to the first VS Code workspace when the active key is unknown", () =>
+    Effect.gen(function* () {
+      const projectOneId = ProjectId.make("project-one");
+      const projectTwoId = ProjectId.make("project-two");
+      const threadOneId = ThreadId.make("thread-one");
+      const threadTwoId = ThreadId.make("thread-two");
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getShellSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 0,
+                updatedAt: "2026-01-01T00:00:00.000Z",
+                projects: [
+                  {
+                    id: projectOneId,
+                    title: "Workspace One",
+                    workspaceRoot: "/workspace/one",
+                    repositoryIdentity: null,
+                    defaultModelSelection,
+                    scripts: [],
+                    createdAt: "2026-01-01T00:00:00.000Z",
+                    updatedAt: "2026-01-01T00:00:00.000Z",
+                  },
+                  {
+                    id: projectTwoId,
+                    title: "Workspace Two",
+                    workspaceRoot: "/workspace/two",
+                    repositoryIdentity: null,
+                    defaultModelSelection,
+                    scripts: [],
+                    createdAt: "2026-01-01T00:00:00.000Z",
+                    updatedAt: "2026-01-01T00:00:00.000Z",
+                  },
+                ],
+                threads: [
+                  makeDefaultOrchestrationThreadShell({
+                    id: threadOneId,
+                    projectId: projectOneId,
+                  }),
+                  makeDefaultOrchestrationThreadShell({
+                    id: threadTwoId,
+                    projectId: projectTwoId,
+                  }),
+                ],
+              }),
+          },
+        },
+      });
+
+      const response = yield* HttpClient.post("/api/vscode/workspace-bootstrap", {
+        headers: {
+          cookie: yield* getAuthenticatedSessionCookieHeader(),
+        },
+        body: yield* HttpBody.json({
+          activeWorkspaceFolderKey: "file::/missing",
+          workspaceFolders: [
+            {
+              key: "file::/workspace/one",
+              name: "one",
+              cwd: "/workspace/one",
+              uriScheme: "file",
+              uriAuthority: "",
+            },
+            {
+              key: "file::/workspace/two",
+              name: "two",
+              cwd: "/workspace/two",
+              uriScheme: "file",
+              uriAuthority: "",
+            },
+          ],
+        }),
+      });
+      const body = (yield* response.json) as {
+        readonly bootstrapProjects: readonly {
+          readonly workspaceFolderKey: string;
+          readonly workspaceFolderName: string;
+          readonly cwd: string;
+          readonly projectId: string;
+          readonly bootstrapThreadId: string;
+          readonly isActive: boolean;
+        }[];
+      };
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(body.bootstrapProjects, [
+        {
+          workspaceFolderKey: "file::/workspace/one",
+          workspaceFolderName: "one",
+          cwd: "/workspace/one",
+          projectId: projectOneId,
+          bootstrapThreadId: threadOneId,
+          isActive: true,
+        },
+        {
+          workspaceFolderKey: "file::/workspace/two",
+          workspaceFolderName: "two",
+          cwd: "/workspace/two",
+          projectId: projectTwoId,
+          bootstrapThreadId: threadTwoId,
+          isActive: false,
+        },
+      ]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -3581,6 +3813,65 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(dispatchResult.sequence, 1);
       assert.deepEqual(effects, [
         "query:thread-shell:active",
+        "dispatch:thread.archive",
+        "query:thread-shell:archived",
+        "dispatch:thread.session.stop",
+        `terminal.close:${threadId}`,
+      ]);
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ["thread.archive", "thread.session.stop"],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("stops the provider session after archive when thread lookup fails", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-archive-lookup-failure");
+      const effects: string[] = [];
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+
+      yield* buildAppUnderTest({
+        layers: {
+          terminalManager: {
+            close: (input) =>
+              Effect.sync(() => {
+                effects.push(`terminal.close:${input.threadId}`);
+              }),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                effects.push(`dispatch:${command.type}`);
+                return { sequence: dispatchedCommands.length };
+              }),
+          },
+          projectionSnapshotQuery: {
+            getThreadShellById: () =>
+              Effect.fail(
+                new PersistenceSqlError({
+                  operation: "ProjectionSnapshotQuery.getThreadShellById:query",
+                  detail: "simulated thread lookup failure",
+                }),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const dispatchResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.archive",
+            commandId: CommandId.make("cmd-thread-archive-lookup-failure"),
+            threadId,
+          }),
+        ),
+      );
+
+      assert.equal(dispatchResult.sequence, 1);
+      assert.deepEqual(effects, [
         "dispatch:thread.archive",
         "dispatch:thread.session.stop",
         `terminal.close:${threadId}`,

@@ -2,11 +2,13 @@ import {
   type AuthBearerBootstrapResult,
   AuthBootstrapInput,
   AuthCreatePairingCredentialInput,
+  type AuthPairingCredentialResult,
   AuthRevokeClientSessionInput,
   AuthRevokePairingLinkInput,
   type AuthWebSocketTokenResult,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
@@ -15,6 +17,10 @@ import { AuthError, ServerAuth } from "./Services/ServerAuth.ts";
 import { SessionCredentialService } from "./Services/SessionCredentialService.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
 import { browserApiCorsHeaders } from "../httpCors.ts";
+
+const DESKTOP_BOOTSTRAP_TICKET_TTL = Duration.seconds(30);
+const DESKTOP_CONTROL_SESSION_SUBJECT = "desktop-control";
+const DESKTOP_BOOTSTRAP_TICKET_SUBJECT = "desktop-bootstrap";
 
 export const respondToAuthError = (error: AuthError) =>
   Effect.gen(function* () {
@@ -44,6 +50,30 @@ export const authSessionRouteLayer = HttpRouter.add(
       headers: browserApiCorsHeaders,
     });
   }),
+);
+
+export const authSessionRevokeRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/auth/session/revoke",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    const sessions = yield* SessionCredentialService;
+    const session = yield* serverAuth.authenticateBearerHttpRequest(request);
+    const revoked = yield* sessions.revoke(session.sessionId).pipe(
+      Effect.mapError(
+        (cause) =>
+          new AuthError({
+            message: "Failed to revoke authenticated session.",
+            cause,
+          }),
+      ),
+    );
+    return HttpServerResponse.jsonUnsafe(
+      { revoked },
+      { status: 200, headers: browserApiCorsHeaders },
+    );
+  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
 );
 
 const PairingCredentialRequestHeaders = Schema.Struct({
@@ -120,6 +150,32 @@ export const authBearerBootstrapRouteLayer = HttpRouter.add(
       deriveAuthClientMetadata({ request }),
     );
     return HttpServerResponse.jsonUnsafe(result satisfies AuthBearerBootstrapResult, {
+      status: 200,
+      headers: browserApiCorsHeaders,
+    });
+  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+);
+
+export const authDesktopBootstrapTicketRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/auth/desktop-bootstrap-ticket",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    const session = yield* serverAuth.authenticateBearerHttpRequest(request);
+    if (session.role !== "owner" || session.subject !== DESKTOP_CONTROL_SESSION_SUBJECT) {
+      return yield* new AuthError({
+        message: "Only desktop control owner sessions can issue desktop bootstrap tickets.",
+        status: 403,
+      });
+    }
+    const result = yield* serverAuth.issuePairingCredential({
+      ttl: DESKTOP_BOOTSTRAP_TICKET_TTL,
+      role: "owner",
+      subject: DESKTOP_BOOTSTRAP_TICKET_SUBJECT,
+      label: "VS Code",
+    });
+    return HttpServerResponse.jsonUnsafe(result satisfies AuthPairingCredentialResult, {
       status: 200,
       headers: browserApiCorsHeaders,
     });

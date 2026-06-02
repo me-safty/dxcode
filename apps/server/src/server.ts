@@ -68,9 +68,11 @@ import {
   authClientsRevokeOthersRouteLayer,
   authClientsRevokeRouteLayer,
   authClientsRouteLayer,
+  authDesktopBootstrapTicketRouteLayer,
   authPairingLinksRevokeRouteLayer,
   authPairingLinksRouteLayer,
   authPairingCredentialRouteLayer,
+  authSessionRevokeRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
 } from "./auth/http.ts";
@@ -89,6 +91,7 @@ import {
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
 } from "./orchestration/http.ts";
+import { vscodeWorkspaceBootstrapRouteLayer } from "./vscodeWorkspaceBootstrap/http.ts";
 import {
   localPeerDescriptorRouteLayer,
   localPeerDispatchRouteLayer,
@@ -313,14 +316,17 @@ export const makeRoutesLayer = Layer.mergeAll(
   authClientsRevokeOthersRouteLayer,
   authClientsRevokeRouteLayer,
   authClientsRouteLayer,
+  authDesktopBootstrapTicketRouteLayer,
   authPairingLinksRevokeRouteLayer,
   authPairingLinksRouteLayer,
   authPairingCredentialRouteLayer,
+  authSessionRevokeRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
   attachmentsRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
+  vscodeWorkspaceBootstrapRouteLayer,
   localPeerDescriptorRouteLayer,
   localPeerDispatchRouteLayer,
   localPeerEventsRouteLayer,

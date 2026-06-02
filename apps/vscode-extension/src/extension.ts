@@ -1,7 +1,7 @@
 import { normalizeThreadConversationMaxWidth } from "@t3tools/shared/displayPreferences";
 import * as vscode from "vscode";
 
-import { BackendManager, resolveT3Home } from "./backendManager.ts";
+import { BackendManager, DesktopBackendUnavailableError, resolveT3Home } from "./backendManager.ts";
 import {
   createClientSettingsPersistence,
   registerClientSettingsHostBridge,
@@ -9,6 +9,8 @@ import {
 } from "./clientSettingsPersistence.ts";
 import { cleanVirtualWorkspaceCache } from "./virtualWorkspaceCache.ts";
 import {
+  renderDesktopBackendConnectionErrorWebview,
+  renderDesktopBackendRequiredWebview,
   renderT3Webview,
   type WebviewBackendConnection,
   type WebviewDisplayPreferences,
@@ -70,7 +72,7 @@ export function activate(context: vscode.ExtensionContext) {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: "Restarting T3 Code backend",
+          title: "Reconnecting to T3 Code desktop backend",
         },
         async () => {
           const connection = await backendManager.restart();
@@ -140,9 +142,46 @@ class T3SidebarProvider implements vscode.WebviewViewProvider {
 
   async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
     configureWebview(webviewView.webview, this.#context.extensionUri);
-    const connection = await this.#backendManager.ensureStarted();
+    const disposables: vscode.Disposable[] = [];
+    let currentConnectedDisposable: vscode.Disposable | null = null;
+    webviewView.onDidDispose(() => {
+      currentConnectedDisposable?.dispose();
+      currentConnectedDisposable = null;
+      disposeAll(disposables);
+    });
+    const renderConnected = async (
+      connection: Awaited<ReturnType<BackendManager["ensureStarted"]>>,
+    ) => {
+      currentConnectedDisposable?.dispose();
+      currentConnectedDisposable = await this.#renderConnectedWebview(
+        webviewView.webview,
+        connection,
+      );
+    };
+    const connection = await resolveBackendConnectionForWebview(
+      this.#backendManager,
+      this.#outputChannel,
+      webviewView.webview,
+      {
+        onReconnect: async (nextConnection) => {
+          this.#backendConnections.broadcast(nextConnection);
+          await renderConnected(nextConnection);
+        },
+        trackDisposable: (disposable) => disposables.push(disposable),
+      },
+    );
+    if (!connection) {
+      return;
+    }
+    await renderConnected(connection);
+  }
+
+  async #renderConnectedWebview(
+    webview: vscode.Webview,
+    connection: Awaited<ReturnType<BackendManager["ensureStarted"]>>,
+  ): Promise<vscode.Disposable> {
     const bridgeDisposable = registerClientSettingsHostBridge({
-      webview: webviewView.webview,
+      webview,
       persistence: createClientSettingsPersistence(
         resolveClientSettingsPath(connection.t3Home),
         this.#outputChannel,
@@ -150,23 +189,23 @@ class T3SidebarProvider implements vscode.WebviewViewProvider {
       outputChannel: this.#outputChannel,
       confirm: showHostConfirmDialog,
     });
-    const displayPreferencesDisposable = this.#displayPreferences.track(webviewView.webview);
-    const hostAppearanceDisposable = this.#hostAppearance.track(webviewView.webview);
-    const backendConnectionDisposable = this.#backendConnections.track(webviewView.webview);
-    webviewView.onDidDispose(() => {
-      bridgeDisposable.dispose();
-      displayPreferencesDisposable.dispose();
-      hostAppearanceDisposable.dispose();
-      backendConnectionDisposable.dispose();
-    });
-    webviewView.webview.html = await renderT3Webview({
-      webview: webviewView.webview,
+    const displayPreferencesDisposable = this.#displayPreferences.track(webview);
+    const hostAppearanceDisposable = this.#hostAppearance.track(webview);
+    const backendConnectionDisposable = this.#backendConnections.track(webview);
+    webview.html = await renderT3Webview({
+      webview,
       extensionUri: this.#context.extensionUri,
       connection,
       displayPreferences: readWebviewDisplayPreferences(),
       hostAppearance: readWebviewHostAppearance(),
-      initialRoute: "/_chat/",
+      initialRoute: connection.initialThreadRoute ?? "/_chat/",
     });
+    return vscode.Disposable.from(
+      bridgeDisposable,
+      displayPreferencesDisposable,
+      hostAppearanceDisposable,
+      backendConnectionDisposable,
+    );
   }
 }
 
@@ -213,9 +252,48 @@ class T3ConversationEditorProvider implements vscode.CustomReadonlyEditorProvide
     webviewPanel: vscode.WebviewPanel,
   ): Promise<void> {
     configureWebview(webviewPanel.webview, this.#context.extensionUri);
-    const connection = await this.#backendManager.ensureStarted();
+    const disposables: vscode.Disposable[] = [];
+    let currentConnectedDisposable: vscode.Disposable | null = null;
+    webviewPanel.onDidDispose(() => {
+      currentConnectedDisposable?.dispose();
+      currentConnectedDisposable = null;
+      disposeAll(disposables);
+    });
+    const renderConnected = async (
+      connection: Awaited<ReturnType<BackendManager["ensureStarted"]>>,
+    ) => {
+      currentConnectedDisposable?.dispose();
+      currentConnectedDisposable = await this.#renderConnectedWebview(
+        webviewPanel.webview,
+        connection,
+        routeFromUri(document.uri),
+      );
+    };
+    const connection = await resolveBackendConnectionForWebview(
+      this.#backendManager,
+      this.#outputChannel,
+      webviewPanel.webview,
+      {
+        onReconnect: async (nextConnection) => {
+          this.#backendConnections.broadcast(nextConnection);
+          await renderConnected(nextConnection);
+        },
+        trackDisposable: (disposable) => disposables.push(disposable),
+      },
+    );
+    if (!connection) {
+      return;
+    }
+    await renderConnected(connection);
+  }
+
+  async #renderConnectedWebview(
+    webview: vscode.Webview,
+    connection: Awaited<ReturnType<BackendManager["ensureStarted"]>>,
+    initialRoute: string,
+  ): Promise<vscode.Disposable> {
     const bridgeDisposable = registerClientSettingsHostBridge({
-      webview: webviewPanel.webview,
+      webview,
       persistence: createClientSettingsPersistence(
         resolveClientSettingsPath(connection.t3Home),
         this.#outputChannel,
@@ -223,23 +301,23 @@ class T3ConversationEditorProvider implements vscode.CustomReadonlyEditorProvide
       outputChannel: this.#outputChannel,
       confirm: showHostConfirmDialog,
     });
-    const displayPreferencesDisposable = this.#displayPreferences.track(webviewPanel.webview);
-    const hostAppearanceDisposable = this.#hostAppearance.track(webviewPanel.webview);
-    const backendConnectionDisposable = this.#backendConnections.track(webviewPanel.webview);
-    webviewPanel.onDidDispose(() => {
-      bridgeDisposable.dispose();
-      displayPreferencesDisposable.dispose();
-      hostAppearanceDisposable.dispose();
-      backendConnectionDisposable.dispose();
-    });
-    webviewPanel.webview.html = await renderT3Webview({
-      webview: webviewPanel.webview,
+    const displayPreferencesDisposable = this.#displayPreferences.track(webview);
+    const hostAppearanceDisposable = this.#hostAppearance.track(webview);
+    const backendConnectionDisposable = this.#backendConnections.track(webview);
+    webview.html = await renderT3Webview({
+      webview,
       extensionUri: this.#context.extensionUri,
       connection,
       displayPreferences: readWebviewDisplayPreferences(),
       hostAppearance: readWebviewHostAppearance(),
-      initialRoute: routeFromUri(document.uri),
+      initialRoute,
     });
+    return vscode.Disposable.from(
+      bridgeDisposable,
+      displayPreferencesDisposable,
+      hostAppearanceDisposable,
+      backendConnectionDisposable,
+    );
   }
 }
 
@@ -397,6 +475,94 @@ function configureWebview(webview: vscode.Webview, extensionUri: vscode.Uri) {
   };
 }
 
+async function resolveBackendConnectionForWebview(
+  backendManager: BackendManager,
+  outputChannel: vscode.OutputChannel,
+  webview: vscode.Webview,
+  options?: {
+    readonly onReconnect?: (
+      connection: Awaited<ReturnType<BackendManager["ensureStarted"]>>,
+    ) => Promise<void>;
+    readonly trackDisposable?: (disposable: vscode.Disposable) => void;
+  },
+) {
+  try {
+    return await backendManager.ensureStarted();
+  } catch (error) {
+    const message = errorMessage(error);
+    outputChannel.appendLine(`[backend] Failed to connect to desktop backend: ${message}`);
+    if (error instanceof DesktopBackendUnavailableError) {
+      webview.html = renderDesktopBackendRequiredWebview();
+      let reconnectDisposed = false;
+      let reconnectDisposable: vscode.Disposable | null = null;
+      const disposeReconnect = () => {
+        if (reconnectDisposed) {
+          return;
+        }
+        reconnectDisposed = true;
+        reconnectDisposable?.dispose();
+        reconnectDisposable = null;
+      };
+      reconnectDisposable = webview.onDidReceiveMessage(async (event: unknown) => {
+        if (!isReconnectDesktopBackendMessage(event)) {
+          return;
+        }
+        outputChannel.appendLine("[backend] Reconnect requested from desktop-required webview.");
+        try {
+          const connection = await backendManager.restart();
+          disposeReconnect();
+          await options?.onReconnect?.(connection);
+        } catch (reconnectError) {
+          const reconnectMessage = errorMessage(reconnectError);
+          outputChannel.appendLine(
+            `[backend] Failed to reconnect to desktop backend: ${reconnectMessage}`,
+          );
+          if (reconnectError instanceof DesktopBackendUnavailableError) {
+            webview.html = renderDesktopBackendRequiredWebview();
+            void vscode.window.showWarningMessage(
+              "T3 Code still cannot find the desktop app. Start T3 Code Desktop, then reconnect.",
+            );
+          } else {
+            webview.html = renderDesktopBackendConnectionErrorWebview(reconnectMessage);
+            void vscode.window.showErrorMessage(
+              `T3 Code could not initialize this workspace: ${reconnectMessage}`,
+            );
+          }
+        }
+      });
+      options?.trackDisposable?.({ dispose: disposeReconnect });
+      void vscode.window.showWarningMessage(
+        "T3 Code requires the desktop app. Start T3 Code Desktop, then reconnect.",
+      );
+    } else {
+      webview.html = renderDesktopBackendConnectionErrorWebview(message);
+      void vscode.window.showErrorMessage(
+        `T3 Code could not initialize this workspace: ${message}`,
+      );
+    }
+    return null;
+  }
+}
+
+function isReconnectDesktopBackendMessage(event: unknown): boolean {
+  return (
+    typeof event === "object" &&
+    event !== null &&
+    "type" in event &&
+    event.type === "t3.reconnectDesktopBackend"
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function disposeAll(disposables: readonly vscode.Disposable[]): void {
+  for (const disposable of disposables) {
+    disposable.dispose();
+  }
+}
+
 async function showHostConfirmDialog(message: string): Promise<boolean> {
   const confirmLabel = "Confirm";
   const result = await vscode.window.showWarningMessage(message, { modal: true }, confirmLabel);
@@ -410,5 +576,5 @@ export function routeFromUri(uri: vscode.Uri): string {
   if (!environmentId || !threadId || threadId === "new") {
     return "/_chat/";
   }
-  return `/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`;
+  return `/_chat/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`;
 }
