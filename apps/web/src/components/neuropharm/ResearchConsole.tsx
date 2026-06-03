@@ -65,7 +65,7 @@ export function ResearchConsole() {
           onValueChange={(value) => setMode(value as NeuropharmAnalysisMode)}
           items={modes}
         >
-          <SelectTrigger className="w-48" aria-label="Analysis type">
+          <SelectTrigger className="w-52" aria-label="Analysis type">
             <ActivityIcon className="size-3.5" />
             <SelectValue />
           </SelectTrigger>
