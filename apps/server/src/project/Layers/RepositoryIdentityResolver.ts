@@ -1,4 +1,4 @@
-import type { ExecutionTarget, RepositoryIdentity } from "@t3tools/contracts";
+import type { RepositoryIdentity } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -10,8 +10,6 @@ import {
 } from "@t3tools/shared/git";
 
 import * as ProcessRunner from "../../processRunner.ts";
-import { buildWslExecArgs } from "../../wsl/WslCli.ts";
-import { isWslTarget } from "../../wsl/WslTarget.ts";
 import {
   RepositoryIdentityResolver,
   type RepositoryIdentityResolveInput,

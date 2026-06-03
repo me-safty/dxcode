@@ -61,12 +61,12 @@ const rpcClientMock = {
   filesystem: {
     browse: vi.fn(),
   },
-    wsl: mockWslApi,
-    sourceControl: {
-      lookupRepository: vi.fn(),
-      cloneRepository: vi.fn(),
-      publishRepository: vi.fn(),
-    },
+  wsl: mockWslApi,
+  sourceControl: {
+    lookupRepository: vi.fn(),
+    cloneRepository: vi.fn(),
+    publishRepository: vi.fn(),
+  },
   shell: {
     openInEditor: vi.fn(),
   },

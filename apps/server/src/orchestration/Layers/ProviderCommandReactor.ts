@@ -330,14 +330,6 @@ const make = Effect.gen(function* () {
         detail: `Thread '${threadId}' is bound to provider '${threadProvider}' and cannot switch to '${requestedModelSelection.provider}'.`,
       });
     }
-    const preferredProvider: ProviderKind = threadProvider;
-    const desiredModelSelection = requestedModelSelection ?? thread.modelSelection;
-    const effectiveCwd = resolveThreadWorkspaceCwd({
-      thread,
-      projects: readModel.projects,
-    });
-    const project = readModel.projects.find((entry) => entry.id === thread.projectId);
-    const effectiveExecutionTarget = project?.executionTarget;
     const resolveActiveSession = (threadId: ThreadId) =>
       providerService
         .listSessions()
@@ -431,6 +423,7 @@ const make = Effect.gen(function* () {
       thread,
       projects: project ? [project] : [],
     });
+    const effectiveExecutionTarget = project?.executionTarget;
 
     const startProviderSession = (input?: {
       readonly resumeCursor?: unknown;

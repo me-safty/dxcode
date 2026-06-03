@@ -504,7 +504,8 @@ function OpenCommandPaletteDialog() {
   const isRemoteProjectCloneFlow = addProjectCloneFlow !== null;
   const isRemoteProjectRepositoryStep = addProjectCloneFlow?.step === "repository";
   const isBrowsing =
-    wslBrowseTarget !== null || (!isRemoteProjectRepositoryStep && isFilesystemBrowseQuery(query, browseEnvironmentPlatform));
+    wslBrowseTarget !== null ||
+    (!isRemoteProjectRepositoryStep && isFilesystemBrowseQuery(query, browseEnvironmentPlatform));
   const paletteMode = getCommandPaletteMode({ currentView, isBrowsing });
   const getAddProjectInitialQueryForEnvironment = useCallback(
     (environmentId: EnvironmentId | null): string => {

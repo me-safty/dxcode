@@ -658,7 +658,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ) {
           continue;
         }
-        }
         return match.instanceId;
       }
     }

@@ -1,13 +1,14 @@
+import * as Duration from "effect/Duration";
+import { Effect, Schema } from "effect";
 import { execFile } from "node:child_process";
 
 import type { WslDistribution } from "@t3tools/contracts";
-import { Effect, Schema } from "effect";
-
-import { runProcess, type ProcessRunResult } from "../processRunner.ts";
+import { ProcessRunner } from "../processRunner.ts";
+import type { ProcessRunOutput } from "../processRunner.ts";
 import type { WslTarget } from "./WslTarget.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_MAX_BUFFER_BYTES = 512 * 1024;
+const DEFAULT_MAX_OUTPUT_BYTES = 512 * 1024;
 
 export class WslCliError extends Schema.TaggedErrorClass<WslCliError>()("WslCliError", {
   operation: Schema.String,
@@ -54,21 +55,26 @@ export function isWslAvailable(): Effect.Effect<boolean> {
   if (process.platform !== "win32") {
     return Effect.succeed(false);
   }
-  return Effect.tryPromise({
-    try: () =>
-      runProcess("wsl.exe", ["--status"], {
-        timeoutMs: 2_500,
-        allowNonZeroExit: true,
-        maxBufferBytes: 32_768,
-        outputMode: "truncate",
-      }),
-    catch: (cause) =>
-      new WslCliError({
-        operation: "wsl.status",
-        message: "Failed to check WSL availability.",
-        cause,
-      }),
-  }).pipe(
+  return Effect.flatMap(ProcessRunner, (runner) =>
+    Effect.tryPromise({
+      try: () =>
+        Effect.runPromise(
+          runner.run({
+            command: "wsl.exe",
+            args: ["--status"],
+            timeout: Duration.millis(2_500),
+            maxOutputBytes: 32_768,
+            outputMode: "truncate",
+          }),
+        ),
+      catch: (cause) =>
+        new WslCliError({
+          operation: "wsl.status",
+          message: "Failed to check WSL availability.",
+          cause,
+        }),
+    }),
+  ).pipe(
     Effect.map(() => true),
     Effect.catch(() => Effect.succeed(false)),
   );
@@ -80,25 +86,30 @@ export function runWsl(
   program: string,
   args: ReadonlyArray<string> = [],
   options?: { readonly timeoutMs?: number; readonly operation?: string },
-): Effect.Effect<ProcessRunResult, WslCliError> {
+): Effect.Effect<ProcessRunOutput, WslCliError> {
   const operation = options?.operation ?? program;
-  return Effect.tryPromise({
-    try: () =>
-      runProcess("wsl.exe", buildWslExecArgs(target, cwd, program, args), {
-        timeoutMs: options?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        allowNonZeroExit: true,
-        maxBufferBytes: DEFAULT_MAX_BUFFER_BYTES,
-        outputMode: "truncate",
-        shell: false,
-      }),
-    catch: (cause) =>
-      new WslCliError({
-        operation,
-        distroName: target.distroName,
-        message: `Failed to run ${operation} in WSL distro '${target.distroName}'.`,
-        cause,
-      }),
-  });
+  return Effect.flatMap(ProcessRunner, (runner) =>
+    Effect.tryPromise({
+      try: () =>
+        Effect.runPromise(
+          runner.run({
+            command: "wsl.exe",
+            args: buildWslExecArgs(target, cwd, program, args),
+            timeout: Duration.millis(options?.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+            maxOutputBytes: DEFAULT_MAX_OUTPUT_BYTES,
+            outputMode: "truncate",
+            shell: false,
+          }),
+        ),
+      catch: (cause) =>
+        new WslCliError({
+          operation,
+          distroName: target.distroName,
+          message: `Failed to run ${operation} in WSL distro '${target.distroName}'.`,
+          cause,
+        }),
+    }),
+  );
 }
 
 export function runWslShell(
@@ -106,7 +117,7 @@ export function runWslShell(
   cwd: string | undefined,
   script: string,
   options?: { readonly timeoutMs?: number; readonly operation?: string },
-): Effect.Effect<ProcessRunResult, WslCliError> {
+): Effect.Effect<ProcessRunOutput, WslCliError> {
   return runWsl(target, cwd, "sh", ["-lc", script], options);
 }
 
@@ -116,7 +127,7 @@ export function runWslShellCommand(
   script: string,
   args: ReadonlyArray<string> = [],
   options?: { readonly timeoutMs?: number; readonly operation?: string },
-): Effect.Effect<ProcessRunResult, WslCliError> {
+): Effect.Effect<ProcessRunOutput, WslCliError> {
   return runWsl(target, cwd, "sh", ["-lc", script, "t3-wsl-shell", ...args], options);
 }
 
