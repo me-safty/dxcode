@@ -5,6 +5,10 @@ import {
   InternalClerkProvider,
 } from "@clerk/react/internal";
 import type { ClerkProviderProps } from "@clerk/react";
+import {
+  clerkFrontendApiHostnameFromPublishableKey,
+  isAllowedClerkFrontendApiHostname,
+} from "@t3tools/shared/relayAuth";
 import React, { useEffect, useState } from "react";
 
 type DesktopClerkUiCtor = NonNullable<Window["__internal_ClerkUICtor"]>;
@@ -54,6 +58,7 @@ interface DesktopClerkProviderProps {
 let desktopClerk: Clerk | null = null;
 let desktopClerkFetchInstalled = false;
 let desktopClerkUiLoad: Promise<DesktopClerkUiCtor> | null = null;
+let desktopClerkFrontendApiHostname: string | null = null;
 
 const isNativeRequestClerk = (value: unknown): value is NativeRequestClerk => {
   if (typeof value !== "object" || value === null) return false;
@@ -82,7 +87,7 @@ const clearStoredClientJwt = (): Promise<void> =>
 
 const isClerkFrontendApiUrl = (url: URL): boolean =>
   url.protocol === "https:" &&
-  (url.hostname.endsWith(".clerk.accounts.dev") || url.hostname.endsWith(".clerk.accounts.com"));
+  isAllowedClerkFrontendApiHostname(url.hostname, desktopClerkFrontendApiHostname);
 
 const headersToRecord = (headers: Headers): Record<string, string> => {
   const record: Record<string, string> = {};
@@ -92,7 +97,8 @@ const headersToRecord = (headers: Headers): Record<string, string> => {
   return record;
 };
 
-function installDesktopClerkFetchProxy(): void {
+function installDesktopClerkFetchProxy(publishableKey: string): void {
+  desktopClerkFrontendApiHostname = clerkFrontendApiHostnameFromPublishableKey(publishableKey);
   if (desktopClerkFetchInstalled) return;
   const bridge = window.desktopBridge;
   if (!bridge) return;
@@ -187,7 +193,7 @@ function loadDesktopClerkUi(publishableKey: string): Promise<DesktopClerkUiCtor>
 }
 
 function getDesktopClerkInstance(publishableKey: string): Clerk {
-  installDesktopClerkFetchProxy();
+  installDesktopClerkFetchProxy(publishableKey);
 
   const hasKeyChanged = desktopClerk !== null && desktopClerk.publishableKey !== publishableKey;
   if (hasKeyChanged) {

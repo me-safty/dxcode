@@ -7,6 +7,21 @@ export function clerkFrontendApiUrlFromPublishableKey(publishableKey: string): s
   return `https://${frontendApi}`;
 }
 
+export function clerkFrontendApiHostnameFromPublishableKey(publishableKey: string): string {
+  return new URL(clerkFrontendApiUrlFromPublishableKey(publishableKey)).hostname;
+}
+
+export function isAllowedClerkFrontendApiHostname(
+  hostname: string,
+  configuredHostname: string | null,
+): boolean {
+  return (
+    hostname.endsWith(".clerk.accounts.dev") ||
+    hostname.endsWith(".clerk.accounts.com") ||
+    hostname === configuredHostname
+  );
+}
+
 export function relayClerkTokenOptions(template: string) {
   return {
     template,
