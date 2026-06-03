@@ -80,7 +80,7 @@ export function ResearchConsole() {
             </SelectGroup>
           </SelectPopup>
         </Select>
-        <div className="min-w-60 flex-1">
+        <div className="min-w-72 flex-1">
           <Input
             nativeInput
             value={query}
