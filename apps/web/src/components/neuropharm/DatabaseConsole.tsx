@@ -193,7 +193,7 @@ export function DatabaseConsole() {
 
   return (
     <div className="rounded-md border border-border bg-background/80 p-4 text-left">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2 text-sm font-medium">
           <DatabaseIcon className="size-4 text-sky-600" />
           Pharmacology database
