@@ -204,7 +204,7 @@ export function DatabaseConsole() {
             {formatBytes(databaseStatus.totalBytes)}
           </Badge>
         ) : null}
-        <div className="min-w-64 flex-1">
+        <div className="min-w-72 flex-1">
           <Input
             nativeInput
             value={compoundText}
