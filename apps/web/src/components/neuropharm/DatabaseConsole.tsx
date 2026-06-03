@@ -257,7 +257,7 @@ export function DatabaseConsole() {
       ) : null}
 
       {databaseStatus ? (
-        <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-4 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
           {databaseStatus.snapshots.map((snapshot) => (
             <div key={snapshot.source} className="rounded-md border border-border/70 p-3">
               <div className="flex items-center justify-between gap-2">
