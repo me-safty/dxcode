@@ -33,7 +33,7 @@ export function NoActiveThreadState() {
         </header>
 
         <Empty className="flex-1">
-          <div className="w-full max-w-6xl px-6 py-8">
+          <div className="w-full max-w-7xl px-6 py-8">
             <EmptyHeader className="max-w-none">
               <EmptyTitle className="text-foreground text-2xl font-semibold">
                 Neuropharm research workspace
