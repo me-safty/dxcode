@@ -5,7 +5,7 @@ import {
   FileTextIcon,
   FlaskConicalIcon,
   NetworkIcon,
-  ShieldAlertIcon,
+  ShieldCheckIcon,
   SigmaIcon,
 } from "lucide-react";
 
@@ -13,42 +13,42 @@ const items = [
   {
     icon: FlaskConicalIcon,
     label: "Compound profiles",
-    text: "Targets, receptor selectivity, PK/PD, interactions, confidence, graphs, and report artifacts.",
+    text: "Analyze receptor binding, pharmacokinetics, drug interactions, and mechanism of action. Generates graphs and confidence-rated summaries.",
   },
   {
     icon: NetworkIcon,
     label: "Receptor atlas",
-    text: "Receptors, transporters, pathways, ligand classes, signaling, and cognition links.",
+    text: "Explore neurotransmitter receptors, transporters, and signaling pathways. Maps connections to cognitive functions.",
   },
   {
-    icon: ShieldAlertIcon,
-    label: "Stack checker",
-    text: "Mechanism overlap, CYP/transporter issues, safety flags, and interaction heatmaps.",
+    icon: ShieldCheckIcon,
+    label: "Interaction checker",
+    text: "Identifies drug-drug interactions, metabolic conflicts, and safety concerns when combining compounds.",
   },
   {
     icon: BrainIcon,
-    label: "Cognitive enhancement",
-    text: "Task domains, inverted-U curves, effect sizes, tolerance, fatigue, and uncertainty labels.",
+    label: "Cognitive effects",
+    text: "Evaluates impact on attention, memory, and executive function. Includes dose-response curves and tolerance patterns.",
   },
   {
     icon: ActivityIcon,
-    label: "PK/PD estimates",
-    text: "Onset, tmax, half-life, accumulation, active metabolites, and source-linked assumptions.",
+    label: "Pharmacokinetics",
+    text: "Estimates onset time, peak concentration, half-life, and active metabolites based on published data.",
   },
   {
     icon: DatabaseIcon,
-    label: "Evidence graph",
-    text: "PubMed, PubChem, ChEMBL, IUPHAR, PDFs, URLs, CSV, notes, claims, and relationships.",
+    label: "Evidence database",
+    text: "Integrates data from PubMed, PubChem, ChEMBL, and IUPHAR. Tracks sources and confidence for all claims.",
   },
   {
     icon: SigmaIcon,
-    label: "Standard figures",
-    text: "Dose-response, radar, timeline, heatmap, forest, inverted-U, ADMET, and network graphs.",
+    label: "Visualizations",
+    text: "Generates receptor selectivity radars, dose-response curves, interaction heatmaps, and pharmacokinetic timelines.",
   },
   {
     icon: FileTextIcon,
-    label: "LaTeX reports",
-    text: "Structured research reports with citations, tables, diagrams, graph specs, and caveats.",
+    label: "Export reports",
+    text: "Creates formatted research documents with citations, figures, and confidence ratings. Exports to LaTeX.",
   },
 ];
 
