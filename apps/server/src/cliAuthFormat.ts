@@ -2,7 +2,7 @@ import type { AuthClientMetadata, AuthClientSession, AuthPairingLink } from "@t3
 import { ROOT_BASE_PATH, type NormalizedBasePath } from "@t3tools/shared/basePath";
 import * as DateTime from "effect/DateTime";
 
-import type { IssuedBearerSession, IssuedPairingLink } from "./auth/Services/AuthControlPlane.ts";
+import type { IssuedBearerSession, IssuedPairingLink } from "./auth/EnvironmentAuth.ts";
 
 const newline = "\n";
 
@@ -50,7 +50,7 @@ export function formatIssuedPairingCredential(
         id: credential.id,
         credential: credential.credential,
         ...(credential.label ? { label: credential.label } : {}),
-        role: credential.role,
+        scopes: credential.scopes,
         expiresAt: toIsoString(credential.expiresAt),
         ...(pairUrl ? { pairUrl } : {}),
       },
@@ -80,7 +80,7 @@ export function formatPairingCredentialList(
       credentials.map((credential) => ({
         id: credential.id,
         ...(credential.label ? { label: credential.label } : {}),
-        role: credential.role,
+        scopes: credential.scopes,
         createdAt: toIsoString(credential.createdAt),
         expiresAt: toIsoString(credential.expiresAt),
       })),
@@ -98,7 +98,7 @@ export function formatPairingCredentialList(
       .map((credential) =>
         [
           `${credential.id}${credential.label ? ` (${credential.label})` : ""}`,
-          `  role: ${credential.role}`,
+          `  scopes: ${credential.scopes.join(" ")}`,
           `  created: ${toIsoString(credential.createdAt)}`,
           `  expires: ${toIsoString(credential.expiresAt)}`,
         ].join(newline),
@@ -124,7 +124,7 @@ export function formatIssuedSession(
         sessionId: session.sessionId,
         token: session.token,
         method: session.method,
-        role: session.role,
+        scopes: session.scopes,
         subject: session.subject,
         client: session.client,
         expiresAt: toIsoString(session.expiresAt),
@@ -136,7 +136,8 @@ export function formatIssuedSession(
 
   return (
     [
-      `Issued ${session.role} bearer session ${session.sessionId}.`,
+      `Issued bearer access token ${session.sessionId}.`,
+      `Scopes: ${session.scopes.join(" ")}`,
       `Token: ${session.token}`,
       `Subject: ${session.subject}`,
       `Client: ${formatClientMetadata(session.client)}`,
@@ -156,7 +157,7 @@ export function formatSessionList(
       sessions.map((session) => ({
         sessionId: session.sessionId,
         method: session.method,
-        role: session.role,
+        scopes: session.scopes,
         subject: session.subject,
         client: session.client,
         connected: session.connected,
@@ -177,7 +178,8 @@ export function formatSessionList(
     sessions
       .map((session) =>
         [
-          `${session.sessionId} [${session.role}]${session.connected ? " connected" : ""}`,
+          `${session.sessionId}${session.connected ? " connected" : ""}`,
+          `  scopes: ${session.scopes.join(" ")}`,
           `  method: ${session.method}`,
           `  subject: ${session.subject}`,
           `  client: ${formatClientMetadata(session.client)}`,
