@@ -58,7 +58,7 @@ export function NeuropharmWorkspacePanel() {
       {items.map((item) => (
         <div key={item.label} className="rounded-md border border-border/70 bg-background/80 p-3">
           <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-            <item.icon className="size-4 text-emerald-600" />
+            <item.icon className="size-4.5 text-emerald-600" />
             {item.label}
           </div>
           <p className="text-xs leading-5 text-muted-foreground">{item.text}</p>
