@@ -2,8 +2,12 @@ import { SmartphoneIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AdvertisedEndpoint } from "@t3tools/contracts";
 
-import { createServerPairingCredential } from "~/environments/primary";
+import {
+  createServerPairingCredential,
+  usePrimaryEnvironmentDescriptor,
+} from "~/environments/primary";
 import { useIsMobile } from "../../hooks/useMediaQuery";
+import { MobileWebClientHint } from "./MobileWebClientHint";
 import { isTailscaleHttpsEndpoint } from "../settings/ConnectionsSettings";
 import { resolveAdvertisedEndpointMobileBootstrapUrl } from "../settings/pairingUrls";
 import { SettingsRow, SettingsSection } from "../settings/settingsLayout";
@@ -27,6 +31,7 @@ export function MobileAccessSection({
   onDisable,
 }: MobileAccessSectionProps) {
   const isMobile = useIsMobile();
+  const environmentDescriptor = usePrimaryEnvironmentDescriptor();
   const tailscaleEndpoint = endpoints.find(isTailscaleHttpsEndpoint) ?? null;
   const isReachable = isTailscaleServeEnabled && tailscaleEndpoint?.status === "available";
 
@@ -93,6 +98,7 @@ export function MobileAccessSection({
           data-testid="mobile-access-reachable-panel"
           className="border-t border-border/60 px-4 py-4 sm:px-5"
         >
+          <MobileWebClientHint webClient={environmentDescriptor?.webClient} />
           {isCreatingLink ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Spinner className="size-3.5" />

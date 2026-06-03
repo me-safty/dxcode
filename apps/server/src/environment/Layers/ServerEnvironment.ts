@@ -75,6 +75,12 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     cwdBaseName,
   });
 
+  const webClient = serverConfig.devUrl
+    ? ("vite-dev-proxy" as const)
+    : serverConfig.staticDir
+      ? ("static-bundle" as const)
+      : undefined;
+
   const descriptor: ExecutionEnvironmentDescriptor = {
     environmentId,
     label,
@@ -86,6 +92,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     capabilities: {
       repositoryIdentity: true,
     },
+    ...(webClient ? { webClient } : {}),
   };
 
   return {

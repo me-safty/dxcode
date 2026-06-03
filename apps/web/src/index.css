@@ -420,7 +420,6 @@ label:has(> select#reasoning-effort) select {
   }
 }
 
-
 @keyframes send-ready-pulse {
   0% {
     transform: scale(1);

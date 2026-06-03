@@ -23,6 +23,11 @@ import {
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
+import {
+  isDevProxyDeniedPath,
+  proxyGetToDevUrl,
+  resolveDevProxyTargetUrl,
+} from "./http/devProxy.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
@@ -54,11 +59,7 @@ export function isLoopbackHostname(hostname: string): boolean {
 }
 
 export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
-  const redirectUrl = new URL(devUrl.toString());
-  redirectUrl.pathname = requestUrl.pathname;
-  redirectUrl.search = requestUrl.search;
-  redirectUrl.hash = requestUrl.hash;
-  return redirectUrl.toString();
+  return resolveDevProxyTargetUrl(devUrl, requestUrl);
 }
 
 const requireAuthenticatedRequest = Effect.gen(function* () {
@@ -244,13 +245,22 @@ export const staticAndDevRouteLayer = HttpRouter.add(
     }
 
     const config = yield* ServerConfig;
-    if (config.devUrl && isLoopbackHostname(url.value.hostname)) {
-      return HttpServerResponse.redirect(resolveDevRedirectUrl(config.devUrl, url.value), {
-        status: 302,
-      });
+    if (config.devUrl) {
+      if (isLoopbackHostname(url.value.hostname)) {
+        return HttpServerResponse.redirect(resolveDevRedirectUrl(config.devUrl, url.value), {
+          status: 302,
+        });
+      }
+
+      if (!isDevProxyDeniedPath(url.value.pathname)) {
+        return yield* proxyGetToDevUrl({
+          devUrl: config.devUrl,
+          requestUrl: url.value,
+        });
+      }
     }
 
-    const staticDir = config.staticDir ?? (config.devUrl ? yield* resolveStaticDir() : undefined);
+    const staticDir = config.staticDir;
     if (!staticDir) {
       return HttpServerResponse.text("No static directory configured and no dev URL set.", {
         status: 503,

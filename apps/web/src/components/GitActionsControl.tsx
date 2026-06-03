@@ -1634,19 +1634,42 @@ export default function GitActionsControl({
           {initMutation.isPending ? "Initializing..." : "Initialize Git"}
         </Button>
       ) : (
-        <Group aria-label="Git actions" className={segmented ? "min-w-0 w-full h-full" : "shrink-0"}>
-          {!segmented && (quickActionDisabledReason ? (
-            <Popover>
-              <PopoverTrigger
-                openOnHover
-                render={
-                  <Button
-                    aria-disabled="true"
-                    className="cursor-not-allowed rounded-e-none border-e-0 opacity-64 before:rounded-e-none"
-                    size="xs"
-                    variant="outline"
+        <Group
+          aria-label="Git actions"
+          className={segmented ? "min-w-0 w-full h-full" : "shrink-0"}
+        >
+          {!segmented &&
+            (quickActionDisabledReason ? (
+              <Popover>
+                <PopoverTrigger
+                  openOnHover
+                  render={
+                    <Button
+                      aria-disabled="true"
+                      className="cursor-not-allowed rounded-e-none border-e-0 opacity-64 before:rounded-e-none"
+                      size="xs"
+                      variant="outline"
+                    />
+                  }
+                >
+                  <GitQuickActionIcon
+                    quickAction={quickAction}
+                    SourceControlIcon={SourceControlIcon}
                   />
-                }
+                  <span className="sr-only max-md:not-sr-only max-md:ml-0.5 max-md:truncate max-md:min-w-0 @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+                    {quickAction.label}
+                  </span>
+                </PopoverTrigger>
+                <PopoverPopup tooltipStyle side="bottom" align="start">
+                  {quickActionDisabledReason}
+                </PopoverPopup>
+              </Popover>
+            ) : (
+              <Button
+                variant="outline"
+                size="xs"
+                disabled={isGitActionRunning || quickAction.disabled}
+                onClick={runQuickAction}
               >
                 <GitQuickActionIcon
                   quickAction={quickAction}
@@ -1655,25 +1678,11 @@ export default function GitActionsControl({
                 <span className="sr-only max-md:not-sr-only max-md:ml-0.5 max-md:truncate max-md:min-w-0 @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
                   {quickAction.label}
                 </span>
-              </PopoverTrigger>
-              <PopoverPopup tooltipStyle side="bottom" align="start">
-                {quickActionDisabledReason}
-              </PopoverPopup>
-            </Popover>
-          ) : (
-            <Button
-              variant="outline"
-              size="xs"
-              disabled={isGitActionRunning || quickAction.disabled}
-              onClick={runQuickAction}
-            >
-              <GitQuickActionIcon quickAction={quickAction} SourceControlIcon={SourceControlIcon} />
-              <span className="sr-only max-md:not-sr-only max-md:ml-0.5 max-md:truncate max-md:min-w-0 @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-                {quickAction.label}
-              </span>
-            </Button>
-          ))}
-          {!segmented && <GroupSeparator className="max-md:block hidden @3xl/header-actions:block" />}
+              </Button>
+            ))}
+          {!segmented && (
+            <GroupSeparator className="max-md:block hidden @3xl/header-actions:block" />
+          )}
           <Menu
             onOpenChange={(open) => {
               if (open) {
@@ -1711,7 +1720,10 @@ export default function GitActionsControl({
                   disabled={isGitActionRunning || quickAction.disabled}
                   onClick={runQuickAction}
                 >
-                  <GitQuickActionIcon quickAction={quickAction} SourceControlIcon={SourceControlIcon} />
+                  <GitQuickActionIcon
+                    quickAction={quickAction}
+                    SourceControlIcon={SourceControlIcon}
+                  />
                   {quickAction.label}
                 </MenuItem>
               )}

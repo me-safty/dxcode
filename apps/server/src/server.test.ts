@@ -975,6 +975,66 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("proxies non-loopback GET requests to the configured dev URL", () =>
+    Effect.gen(function* () {
+      const NodeHttp = yield* Effect.promise(() => import("node:http"));
+      const mockVite = yield* Effect.acquireRelease(
+        Effect.promise(
+          () =>
+            new Promise<{
+              readonly url: string;
+              readonly close: () => Promise<void>;
+            }>((resolve, reject) => {
+              const server = NodeHttp.createServer((_request, response) => {
+                response.statusCode = 200;
+                response.setHeader("content-type", "text/html; charset=utf-8");
+                response.end("<html>vite-dev-proxy-ok</html>");
+              });
+              server.on("error", reject);
+              server.listen(0, "127.0.0.1", () => {
+                const address = server.address();
+                if (!address || typeof address === "string") {
+                  reject(new Error("Expected TCP mock Vite address"));
+                  return;
+                }
+
+                resolve({
+                  url: `http://127.0.0.1:${address.port}`,
+                  close: () =>
+                    new Promise<void>((resolveClose, rejectClose) => {
+                      server.close((error) => {
+                        if (error) {
+                          rejectClose(error);
+                          return;
+                        }
+                        resolveClose();
+                      });
+                    }),
+                });
+              });
+            }),
+        ),
+        (mock) => Effect.promise(() => mock.close()),
+      );
+
+      yield* buildAppUnderTest({
+        config: { devUrl: new URL(`${mockVite.url}/`) },
+      });
+
+      const url = yield* getHttpServerUrl("/m?token=mobile");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          headers: {
+            host: "machine.tail98085b.ts.net",
+          },
+        }),
+      );
+
+      assert.equal(response.status, 200);
+      assert.include(yield* Effect.promise(() => response.text()), "vite-dev-proxy-ok");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("serves project favicon requests before the dev URL redirect", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

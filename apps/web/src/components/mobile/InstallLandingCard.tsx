@@ -19,13 +19,21 @@ type InstallLandingCardProps = {
   onTryOpenApp?: () => void;
 };
 
+function isLiveDevSession(): boolean {
+  return import.meta.env.DEV;
+}
+
 export function InstallLandingCard({ hasToken, onTryOpenApp }: InstallLandingCardProps) {
   const installPromptRef = useRef<BeforeInstallPromptEvent | null>(null);
   const [canInstall, setCanInstall] = useState(false);
   const [installStatus, setInstallStatus] = useState<"idle" | "installing" | "installed">("idle");
   const isIOSDevice = isIOS();
+  const isLiveDev = isLiveDevSession();
 
   useEffect(() => {
+    if (isLiveDev) {
+      return;
+    }
     const handleBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
       installPromptRef.current = event as BeforeInstallPromptEvent;
@@ -42,7 +50,7 @@ export function InstallLandingCard({ hasToken, onTryOpenApp }: InstallLandingCar
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
       window.removeEventListener("appinstalled", handleAppInstalled);
     };
-  }, []);
+  }, [isLiveDev]);
 
   const handleInstallClick = async () => {
     const prompt = installPromptRef.current;
@@ -82,7 +90,9 @@ export function InstallLandingCard({ hasToken, onTryOpenApp }: InstallLandingCar
         ) : null}
       </header>
 
-      {installStatus === "installed" ? (
+      {isLiveDev ? (
+        <LiveDevOpenPanel hasToken={hasToken} onTryOpenApp={onTryOpenApp} />
+      ) : installStatus === "installed" ? (
         <InstalledSuccessPanel onTryOpenApp={onTryOpenApp} />
       ) : isIOSDevice ? (
         <IOSAddToHomeScreenPanel />
@@ -108,6 +118,36 @@ export function InstallLandingCard({ hasToken, onTryOpenApp }: InstallLandingCar
           </p>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function LiveDevOpenPanel({
+  hasToken,
+  onTryOpenApp,
+}: {
+  hasToken: boolean;
+  onTryOpenApp: (() => void) | undefined;
+}) {
+  return (
+    <div
+      data-testid="install-landing-live-dev"
+      className="space-y-3 rounded-2xl border border-border/70 bg-card/60 p-5"
+    >
+      <p className="inline-flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+        <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-primary uppercase">
+          Live dev
+        </span>
+      </p>
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        You are connected to a development session. UI changes appear after you refresh this page.
+        Install the app only when testing a production build.
+      </p>
+      {onTryOpenApp ? (
+        <Button type="button" size="lg" className="w-full" onClick={onTryOpenApp}>
+          {hasToken ? "Continue to T3 Code" : "Open T3 Code in browser"}
+        </Button>
+      ) : null}
     </div>
   );
 }

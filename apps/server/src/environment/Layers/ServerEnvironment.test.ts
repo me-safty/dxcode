@@ -8,7 +8,12 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
 
-import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "../../config.ts";
+import {
+  deriveServerPaths,
+  ensureServerDirectories,
+  ServerConfig,
+  type ServerConfigShape,
+} from "../../config.ts";
 import { ServerEnvironment } from "../Services/ServerEnvironment.ts";
 import { ServerEnvironmentLive } from "./ServerEnvironment.ts";
 
@@ -66,6 +71,35 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
 
       expect(first.environmentId).toBe(second.environmentId);
       expect(second.capabilities.repositoryIdentity).toBe(true);
+    }),
+  );
+
+  it.effect("advertises vite-dev-proxy when a dev URL is configured", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-environment-dev-url-test-",
+      });
+      const devUrl = new URL("http://127.0.0.1:5173");
+      const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
+      yield* ensureServerDirectories(derivedPaths);
+      const layer = ServerEnvironmentLive.pipe(
+        Layer.provide(
+          Layer.succeed(ServerConfig, {
+            ...(yield* makeServerConfig(baseDir)),
+            ...derivedPaths,
+            devUrl,
+            staticDir: undefined,
+          }),
+        ),
+      );
+
+      const descriptor = yield* Effect.gen(function* () {
+        const serverEnvironment = yield* ServerEnvironment;
+        return yield* serverEnvironment.getDescriptor;
+      }).pipe(Effect.provide(layer));
+
+      expect(descriptor.webClient).toBe("vite-dev-proxy");
     }),
   );
 

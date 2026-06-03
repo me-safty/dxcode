@@ -69,6 +69,7 @@ import {
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+import { PwaUpdateBanner } from "../components/mobile/PwaUpdateBanner";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -143,11 +144,21 @@ function RootRouteView() {
   }, [pathname]);
 
   if (pathname === "/pair") {
-    return <Outlet />;
+    return (
+      <>
+        <PwaUpdateBanner />
+        <Outlet />
+      </>
+    );
   }
 
   if (authGateState.status !== "authenticated" && authGateState.status !== "hosted-static") {
-    return <Outlet />;
+    return (
+      <>
+        <PwaUpdateBanner />
+        <Outlet />
+      </>
+    );
   }
 
   const appShell = (
@@ -161,6 +172,7 @@ function RootRouteView() {
   return (
     <ToastProvider>
       <AnchoredToastProvider>
+        <PwaUpdateBanner />
         {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />

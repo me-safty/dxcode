@@ -239,7 +239,14 @@ export default function ProjectScriptsControl({
           <GroupSeparator className="max-md:block hidden @3xl/header-actions:block" />
           <Menu highlightItemOnHover={false}>
             <MenuTrigger
-              render={<Button size="icon-xs" variant={segmented ? "ghost" : "outline"} aria-label="Script actions" className={segmented ? "h-full" : undefined} />}
+              render={
+                <Button
+                  size="icon-xs"
+                  variant={segmented ? "ghost" : "outline"}
+                  aria-label="Script actions"
+                  className={segmented ? "h-full" : undefined}
+                />
+              }
             >
               <ChevronDownIcon className="size-3.5" />
             </MenuTrigger>
@@ -295,7 +302,13 @@ export default function ProjectScriptsControl({
           </Menu>
         </Group>
       ) : (
-        <Button size="xs" variant={segmented ? "ghost" : "outline"} onClick={openAddDialog} title="Action" className={segmented ? "h-full w-full" : undefined}>
+        <Button
+          size="xs"
+          variant={segmented ? "ghost" : "outline"}
+          onClick={openAddDialog}
+          title="Action"
+          className={segmented ? "h-full w-full" : undefined}
+        >
           <PlusIcon className="size-3.5" />
           <span className="sr-only max-md:not-sr-only max-md:ml-0.5 @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
             Action

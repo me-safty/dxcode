@@ -25,12 +25,16 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 
+export const ExecutionEnvironmentWebClient = Schema.Literals(["vite-dev-proxy", "static-bundle"]);
+export type ExecutionEnvironmentWebClient = typeof ExecutionEnvironmentWebClient.Type;
+
 export const ExecutionEnvironmentDescriptor = Schema.Struct({
   environmentId: EnvironmentId,
   label: TrimmedNonEmptyString,
   platform: ExecutionEnvironmentPlatform,
   serverVersion: TrimmedNonEmptyString,
   capabilities: ExecutionEnvironmentCapabilities,
+  webClient: Schema.optionalKey(ExecutionEnvironmentWebClient),
 });
 export type ExecutionEnvironmentDescriptor = typeof ExecutionEnvironmentDescriptor.Type;
 

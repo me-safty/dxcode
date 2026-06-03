@@ -37,8 +37,12 @@ vi.mock("../ui/tooltip", () => ({
 }));
 
 import { MobileActionBar } from "./MobileActionBar";
-import type { EnvironmentId, ProjectScript, ResolvedKeybindingsConfig, ThreadId } from "@t3tools/contracts";
-
+import type {
+  EnvironmentId,
+  ProjectScript,
+  ResolvedKeybindingsConfig,
+  ThreadId,
+} from "@t3tools/contracts";
 
 const baseProps = {
   activeThreadEnvironmentId: "env-1" as EnvironmentId,
@@ -90,9 +94,7 @@ describe("MobileActionBar", () => {
   });
 
   it("renders Terminal cell when terminalOpen is true even if unavailable", () => {
-    const markup = renderToStaticMarkup(
-      <MobileActionBar {...baseProps} terminalOpen={true} />,
-    );
+    const markup = renderToStaticMarkup(<MobileActionBar {...baseProps} terminalOpen={true} />);
     expect(markup).toContain('aria-label="Toggle terminal drawer"');
   });
 

@@ -139,30 +139,30 @@ export const MobileActionBar = memo(function MobileActionBar({
       key: "diff",
       node: (
         <Tooltip>
-            <TooltipTrigger
-              render={
-                <Toggle
-                  variant="default"
-                  size="xs"
-                  pressed={diffOpen}
-                  onPressedChange={onToggleDiff}
-                  aria-label="Toggle diff panel"
-                  className={cn(
-                    "flex-1 h-full rounded-none",
-                    diffOpen &&
-                      "bg-primary/10 text-primary data-pressed:bg-primary/10 data-pressed:text-primary",
-                  )}
-                >
-                  <DiffIcon className="size-4" />
-                </Toggle>
-              }
-            />
-            <TooltipPopup side="bottom">
-              {diffToggleShortcutLabel
-                ? `Toggle diff panel (${diffToggleShortcutLabel})`
-                : "Toggle diff panel"}
-            </TooltipPopup>
-          </Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                variant="default"
+                size="xs"
+                pressed={diffOpen}
+                onPressedChange={onToggleDiff}
+                aria-label="Toggle diff panel"
+                className={cn(
+                  "flex-1 h-full rounded-none",
+                  diffOpen &&
+                    "bg-primary/10 text-primary data-pressed:bg-primary/10 data-pressed:text-primary",
+                )}
+              >
+                <DiffIcon className="size-4" />
+              </Toggle>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {diffToggleShortcutLabel
+              ? `Toggle diff panel (${diffToggleShortcutLabel})`
+              : "Toggle diff panel"}
+          </TooltipPopup>
+        </Tooltip>
       ),
     });
   }

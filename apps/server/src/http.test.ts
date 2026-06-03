@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { isLoopbackHostname, resolveDevRedirectUrl } from "./http.ts";
+import { isDevProxyDeniedPath } from "./http/devProxy.ts";
 
 describe("http dev routing", () => {
   it("treats localhost and loopback addresses as local", () => {
@@ -23,5 +24,13 @@ describe("http dev routing", () => {
     expect(resolveDevRedirectUrl(devUrl, requestUrl)).toBe(
       "http://127.0.0.1:5173/pair?token=test-token",
     );
+  });
+
+  it("does not treat Tailscale hostnames as loopback", () => {
+    expect(isLoopbackHostname("machine.tail98085b.ts.net")).toBe(false);
+  });
+
+  it("does not proxy denied paths", () => {
+    expect(isDevProxyDeniedPath("/api/orchestration/snapshot")).toBe(true);
   });
 });

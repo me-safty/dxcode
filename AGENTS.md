@@ -30,6 +30,10 @@ Long term maintainability is a core priority. If you add new functionality, firs
 - `packages/contracts`: Shared effect/Schema schemas and TypeScript contracts for provider events, WebSocket protocol, and model/session types. Keep this package schema-only — no runtime logic.
 - `packages/shared`: Shared runtime utilities consumed by both server and web. Uses explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.
 
+## Mobile / PWA development
+
+See [docs/mobile-development.md](docs/mobile-development.md). During `bun run dev`, Tailscale mobile URLs are proxied to Vite; refresh the phone browser after UI edits.
+
 ## Codex App Server (Important)
 
 T3 Code is currently Codex-first. The server starts `codex app-server` (JSON-RPC over stdio) per provider session, then streams structured events to the browser through WebSocket push messages.

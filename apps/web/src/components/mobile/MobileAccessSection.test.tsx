@@ -4,12 +4,17 @@ import type { AdvertisedEndpoint } from "@t3tools/contracts";
 
 import { MobileAccessSection } from "./MobileAccessSection";
 
-vi.mock("~/environments/primary", () => ({
-  createServerPairingCredential: vi.fn().mockResolvedValue({
-    credential: "test-credential-abc",
-    expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
-  }),
-}));
+vi.mock("~/environments/primary", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/environments/primary")>();
+  return {
+    ...actual,
+    createServerPairingCredential: vi.fn().mockResolvedValue({
+      credential: "test-credential-abc",
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    }),
+    usePrimaryEnvironmentDescriptor: () => null,
+  };
+});
 
 function makeTailscaleEndpoint(
   status: AdvertisedEndpoint["status"] = "available",

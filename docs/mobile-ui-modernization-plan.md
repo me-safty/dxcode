@@ -54,6 +54,7 @@ Replace `mobile={true}` with a more honest `surface` prop. Two surfaces: `"heade
 Apply distinctive, production-grade treatment. Reference: Mimo composer chip-row, Linear Mobile typography, Meta AI minimal tab bar, Vibecode segmented toolbar.
 
 **4a. Bottom nav** (`apps/web/src/components/mobile/MobileBottomNav.tsx`):
+
 - Touch targets ≥44px (current ~38px). Increase content to `min-h-12`, keep safe-area-inset-bottom.
 - Active tab pill: `rounded-full bg-accent/60` sized to icon+label, `transition-colors duration-150`.
 - Icons `size-[22px]`, labels `text-[10px] tracking-wide uppercase`, inactive fades to `text-foreground/55`.
@@ -62,25 +63,30 @@ Apply distinctive, production-grade treatment. Reference: Mimo composer chip-row
 - "Chat" tab also focuses `data-chat-composer-form` textarea (already used in `ChatComposer.tsx`, `ChatView.browser.tsx`, route file).
 
 **4b. Header** (`apps/web/src/components/chat/ChatHeader.tsx`, mobile branch ~line 93):
+
 - `sticky top-0 z-20 bg-background/80 backdrop-blur-xl pt-safe border-b border-border/40`.
 - Title `text-base font-semibold tracking-tight text-foreground/95` (currently `text-[15px]`).
 
 **4c. Action bar** (`apps/web/src/components/mobile/MobileActionBar.tsx`):
+
 - Height `h-10` → `h-11` for touch compliance.
 - Container `bg-card border-border/60 shadow-xs` (currently `bg-muted/20`) — reads as polished card, not tinted block.
 - Icons `size-3.5` → `size-4`.
 - Cell-staggered fade-in on mount (`@starting-style` CSS or `--cell-delay` CSS var per child, 40ms between). Gated behind `prefers-reduced-motion: no-preference`.
 
 **4d. Composer collapsed state** (`apps/web/src/components/chat/ChatComposer.tsx` ~lines 1996–2169):
+
 - In collapsed mobile mode, render a chip-row (model picker + attach + send) instead of bare textarea — Mimo-style. Reuses existing `ComposerFooterModeControls` and `ComposerFooterPrimaryActions`.
 - Send button: 250ms `scale-[1.02]` pulse when `hasSendableContent` flips true. Define keyframe `send-ready` in `index.css`. Reduced-motion guarded.
 - Insert-newline button at line 2394: `variant="ghost"` → `variant="outline" size="icon-xs"` for visual parity with desktop affordances. Touch target preserved via existing `pointer-coarse:after:min-h-11` in `buttonVariants`.
 
 **4e. Terminal drawer** (`apps/web/src/components/ThreadTerminalDrawer.tsx:1117`):
+
 - Add `pb-safe` to inner content area so terminal text isn't hidden under home indicator.
 - Resize handle: hide on mobile (`md:hidden`). Drag-to-close gesture is a follow-up.
 
 **4f. Tokens** (`apps/web/src/index.css`):
+
 - Add `@utility h-mobile-nav { height: calc(3.5rem + env(safe-area-inset-bottom)); }` to single-source nav height. Update sidebar-inset clearance at line 420 to reuse it.
 
 ### Phase 5 — Cleanup + regression sweep
@@ -116,6 +122,7 @@ Apply distinctive, production-grade treatment. Reference: Mimo composer chip-row
 ## Verification
 
 **Per-phase checks:**
+
 - Phase 1: At 700px viewport, bottom nav appears, composer collapsed when unfocused, no overlap of send button + nav.
 - Phase 2: `bun run test apps/web/src/components/mobile`. Terminal tab in bottom nav shows active state when drawer open. Horizontal scroll inside composer chip strip doesn't trigger sidebar.
 - Phase 3: Desktop ChatHeader visually unchanged. Mobile action bar shows OpenInPicker + Terminal toggle. Each control fires identical events from both surfaces.
@@ -123,6 +130,7 @@ Apply distinctive, production-grade treatment. Reference: Mimo composer chip-row
 - Phase 5: Grep `mobile={` returns zero TSX matches. Visual diff of desktop screenshots = 0 pixel changes.
 
 **End-to-end (browser):**
+
 1. `bun run dev` → open at 375px wide.
 2. Open a thread. Verify sticky blurred header.
 3. Tap each bottom nav tab: Sessions (sidebar opens), Chat (composer focuses + scrolls into view), Terminal (drawer opens, tab shows active pill).
@@ -131,6 +139,7 @@ Apply distinctive, production-grade treatment. Reference: Mimo composer chip-row
 6. Resize to 1200px → desktop UI returns; verify no visual regression.
 
 **Tests to add/update:**
+
 - `apps/web/src/components/mobile/MobileBottomNav.test.tsx` — update breakpoint assertions, add `terminalOpen` active-state test.
 - `apps/web/src/components/mobile/useMobileSidebarSwipe.test.ts` — add `data-swipe-ignore` ancestor case.
 - New: `apps/web/src/components/mobile/MobileActionBar.test.tsx` — render variants with/without scripts + project, assert OpenInPicker + Terminal toggle present.
