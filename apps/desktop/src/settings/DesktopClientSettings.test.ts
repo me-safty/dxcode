@@ -18,6 +18,7 @@ import * as DesktopClientSettings from "./DesktopClientSettings.ts";
 const clientSettings: ClientSettings = {
   appearance: DEFAULT_APPEARANCE_SETTINGS,
   autoOpenPlanSidebar: false,
+  chatContentWidthPx: 800,
   confirmThreadArchive: true,
   confirmThreadDelete: false,
   dismissedProviderUpdateNotificationKeys: [],

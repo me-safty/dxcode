@@ -1937,7 +1937,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     <form
       ref={composerFormRef}
       onSubmit={submitComposer}
-      className="mx-auto w-full min-w-0 max-w-208"
+      className="chat-composer-col mx-auto w-full min-w-0"
       data-chat-composer-form="true"
     >
       <div
@@ -2090,7 +2090,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   "min-w-0 flex-1 truncate bg-transparent p-0 text-left text-[14px] focus:outline-none",
                   (activePendingProgress ? activePendingProgress.customAnswer : prompt.trim())
                     ? "text-foreground"
-                    : "text-muted-foreground/35",
+                    : "text-muted-foreground/80",
                 )}
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={expandMobileComposer}

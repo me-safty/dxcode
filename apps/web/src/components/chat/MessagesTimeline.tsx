@@ -257,7 +257,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div
+        className="chat-content-col mx-auto w-full min-w-0 overflow-x-clip"
+        data-timeline-root="true"
+      >
         <TimelineRowContent row={item} />
       </div>
     ),
@@ -267,9 +270,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   if (rows.length === 0 && !isWorking) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground/30">
-          Send a message to start the conversation.
-        </p>
+        <p className="text-sm text-muted-foreground">Send a message to start the conversation.</p>
       </div>
     );
   }
@@ -388,7 +389,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                 )}
                 {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
               </div>
-              <p className="text-right text-xs text-muted-foreground/50">
+              <p className="text-right text-xs text-muted-foreground/70">
                 {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
               </p>
             </>
@@ -440,7 +441,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
         <div className="mt-1.5 flex items-center gap-2">
-          <p className="text-[10px] text-muted-foreground/30">
+          <p className="text-[10px] text-muted-foreground/70">
             {row.message.streaming ? (
               <LiveMessageMeta
                 createdAt={row.message.createdAt}
@@ -491,7 +492,7 @@ function AssistantCopyButton({ row }: { row: Extract<TimelineRow, { kind: "messa
         text={assistantCopyState.text ?? ""}
         size="icon-xs"
         variant="outline"
-        className="border-border/50 bg-background/35 text-muted-foreground/45 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/70"
+        className="border-border/70 bg-background/35 text-muted-foreground/70 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/90"
       />
     </div>
   );
@@ -625,13 +626,13 @@ const WorkGroupSection = memo(function WorkGroupSection({
     <div className="rounded-xl border border-border/45 bg-card/25 px-2 py-1.5">
       {showHeader && (
         <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
-          <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
+          <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/70">
             {groupLabel} ({groupedEntries.length})
           </p>
           {hasOverflow && (
             <button
               type="button"
-              className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
+              className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/70 transition-colors duration-150 hover:text-foreground/75"
               onClick={() => setIsExpanded((v) => !v)}
             >
               {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
@@ -1220,7 +1221,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                       closeDelay={0}
                       delay={75}
                       render={
-                        <span className="max-w-full cursor-default text-muted-foreground/55 transition-colors hover:text-muted-foreground/75 focus-visible:text-muted-foreground/75">
+                        <span className="max-w-full cursor-default text-muted-foreground/70 transition-colors hover:text-muted-foreground/90 focus-visible:text-muted-foreground/90">
                           {" "}
                           - {preview}
                         </span>
@@ -1256,7 +1257,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                   <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
                     {heading}
                   </span>
-                  {preview && <span className="text-muted-foreground/55"> - {preview}</span>}
+                  {preview && <span className="text-muted-foreground/70"> - {preview}</span>}
                 </p>
               </TooltipTrigger>
               <TooltipPopup className="max-w-[min(720px,calc(100vw-2rem))]">
@@ -1283,7 +1284,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             );
           })}
           {(workEntry.changedFiles?.length ?? 0) > 4 && (
-            <span className="px-1 text-[10px] text-muted-foreground/55">
+            <span className="px-1 text-[10px] text-muted-foreground/70">
               +{(workEntry.changedFiles?.length ?? 0) - 4}
             </span>
           )}

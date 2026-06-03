@@ -74,6 +74,20 @@
   padding-right: max(env(safe-area-inset-right), 0px);
 }
 
+/* Centered chat content column width, driven by the persisted
+   `chatContentWidthPx` client setting via the `--chat-content-width` custom
+   property (set on the chat view root). Falls back to the historical default
+   (max-w-3xl = 48rem) and is clamped to the viewport so it never overflows.
+   The composer stays ~4rem wider than the message column, matching the
+   prior `max-w-208` vs `max-w-3xl` relationship. Fallback is the default
+   width (50rem = 800px) for the rare case the property is unset. */
+@utility chat-content-col {
+  max-width: min(var(--chat-content-width, 50rem), 100%);
+}
+@utility chat-composer-col {
+  max-width: min(calc(var(--chat-content-width, 50rem) + 4rem), 100%);
+}
+
 /* Suppress all transitions during theme changes */
 .no-transitions,
 .no-transitions *,
@@ -104,8 +118,8 @@
   --accent: --alpha(var(--color-black) / 4%);
   --accent-foreground: var(--color-neutral-800);
   --destructive: var(--color-red-500);
-  --border: --alpha(var(--color-black) / 8%);
-  --input: --alpha(var(--color-black) / 10%);
+  --border: --alpha(var(--color-black) / 12%);
+  --input: --alpha(var(--color-black) / 16%);
   --ring: oklch(0.488 0.217 264);
   --destructive-foreground: var(--color-red-700);
   --info: var(--color-blue-500);
