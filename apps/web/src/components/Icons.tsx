@@ -199,6 +199,17 @@ export const CursorIcon: Icon = ({ className, ...props }) => (
   </svg>
 );
 
+export const XAiIcon: Icon = ({ className, ...props }) => (
+  <svg
+    {...props}
+    viewBox="0 0 24 24"
+    fill="none"
+    className={cn("fill-[#111111] dark:fill-[#F5F5F5]", className)}
+  >
+    <path d="M5.46 4h2.71L12 9.12 15.83 4h2.71l-5.18 6.91L18.9 20h-2.72L12 14.08 7.82 20H5.1l5.55-9.09L5.46 4Z" />
+  </svg>
+);
+
 export const TraeIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 24 24" fill="currentColor">
     {/* Back rectangle: left strip + bottom strip drawn separately — empty bottom-left corner is the gap between them */}

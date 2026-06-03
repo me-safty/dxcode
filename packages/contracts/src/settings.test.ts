@@ -21,6 +21,13 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
     expect(decoded.providers.codex.enabled).toBe(true);
   });
 
+  it("hydrates Grok Build legacy settings with defaults", () => {
+    const decoded = decodeServerSettings({});
+
+    expect(decoded.providers.grokBuild.enabled).toBe(false);
+    expect(decoded.providers.grokBuild.binaryPath).toBe("grok");
+  });
+
   it("decodes a multi-instance map mixing first-party and fork drivers", () => {
     const decoded = decodeServerSettings({
       providerInstances: {
@@ -149,5 +156,17 @@ describe("ServerSettingsPatch string normalization", () => {
 
     expect(encoded.addProjectBaseDirectory).toBe("~/Development");
     expect(encoded.providers?.codex?.binaryPath).toBe("/opt/homebrew/bin/codex");
+  });
+
+  it("trims Grok Build patch values while decoding", () => {
+    const patch = decodeServerSettingsPatch({
+      providers: {
+        grokBuild: {
+          binaryPath: "  /opt/homebrew/bin/grok  ",
+        },
+      },
+    });
+
+    expect(patch.providers?.grokBuild?.binaryPath).toBe("/opt/homebrew/bin/grok");
   });
 });

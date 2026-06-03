@@ -10,7 +10,11 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { describe, expect } from "vitest";
 
-import { AcpSessionRuntime, type AcpSessionRequestLogEvent } from "./AcpSessionRuntime.ts";
+import {
+  AcpSessionRuntime,
+  resolveAcpAuthMethodId,
+  type AcpSessionRequestLogEvent,
+} from "./AcpSessionRuntime.ts";
 import type * as EffectAcpProtocol from "effect-acp/protocol";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -18,6 +22,47 @@ const mockAgentPath = path.join(__dirname, "../../../scripts/acp-mock-agent.ts")
 const bunExe = "bun";
 
 describe("AcpSessionRuntime", () => {
+  it("uses the preferred auth method when the agent advertises it", () => {
+    expect(
+      resolveAcpAuthMethodId(
+        {
+          protocolVersion: 1,
+          agentCapabilities: {},
+          authMethods: [
+            { id: "terminal", name: "Terminal" },
+            { id: "cursor_login", name: "Cursor" },
+          ],
+        },
+        "cursor_login",
+      ),
+    ).toBe("cursor_login");
+  });
+
+  it("falls back to the first advertised auth method when the preferred one is absent", () => {
+    expect(
+      resolveAcpAuthMethodId(
+        {
+          protocolVersion: 1,
+          agentCapabilities: {},
+          authMethods: [{ id: "grok", name: "Grok" }],
+        },
+        "grok_login",
+      ),
+    ).toBe("grok");
+  });
+
+  it("keeps the preferred auth method when the agent does not advertise methods", () => {
+    expect(
+      resolveAcpAuthMethodId(
+        {
+          protocolVersion: 1,
+          agentCapabilities: {},
+        },
+        "cursor_login",
+      ),
+    ).toBe("cursor_login");
+  });
+
   it.effect("merges custom initialize client capabilities into the ACP handshake", () => {
     const requestEvents: Array<AcpSessionRequestLogEvent> = [];
     return Effect.gen(function* () {
@@ -249,6 +294,53 @@ describe("AcpSessionRuntime", () => {
           spawn: {
             command: bunExe,
             args: [mockAgentPath],
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          requestLogger: (event) =>
+            Effect.sync(() => {
+              requestEvents.push(event);
+            }),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    );
+  });
+
+  it.effect("uses session/set_model when the session exposes models without config options", () => {
+    const requestEvents: Array<AcpSessionRequestLogEvent> = [];
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime;
+      yield* runtime.start();
+
+      yield* runtime.setModel("grok-build");
+
+      expect(
+        requestEvents.some(
+          (event) => event.method === "session/set_model" && event.status === "started",
+        ),
+      ).toBe(true);
+      expect(
+        requestEvents.some(
+          (event) => event.method === "session/set_model" && event.status === "succeeded",
+        ),
+      ).toBe(true);
+      expect(
+        requestEvents.some(
+          (event) => event.method === "session/set_config_option" && event.status === "started",
+        ),
+      ).toBe(false);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: bunExe,
+            args: [mockAgentPath],
+            env: {
+              T3_ACP_SESSION_MODELS_ONLY: "1",
+            },
           },
           cwd: process.cwd(),
           clientInfo: { name: "t3-test", version: "0.0.0" },

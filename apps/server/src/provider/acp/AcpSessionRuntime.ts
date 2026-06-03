@@ -115,6 +115,20 @@ export interface AcpSessionRuntimeShape {
   ) => Effect.Effect<void, EffectAcpErrors.AcpError>;
 }
 
+export function resolveAcpAuthMethodId(
+  initializeResult: EffectAcpSchema.InitializeResponse,
+  preferredMethodId: string,
+): string {
+  const advertised = initializeResult.authMethods ?? [];
+  if (advertised.length === 0) {
+    return preferredMethodId;
+  }
+  if (advertised.some((method) => method.id === preferredMethodId)) {
+    return preferredMethodId;
+  }
+  return advertised[0]?.id ?? preferredMethodId;
+}
+
 interface AcpStartedState extends AcpSessionRuntimeStartResult {}
 
 type AcpStartState =
@@ -379,7 +393,7 @@ const makeAcpSessionRuntime = (
       );
 
       const authenticatePayload = {
-        methodId: options.authMethodId,
+        methodId: resolveAcpAuthMethodId(initializeResult, options.authMethodId),
       } satisfies EffectAcpSchema.AuthenticateRequest;
 
       yield* runLoggedRequest(
@@ -543,8 +557,20 @@ const makeAcpSessionRuntime = (
       setConfigOption,
       setModel: (model) =>
         getStartedState.pipe(
-          Effect.flatMap((started) => setConfigOption(started.modelConfigId ?? "model", model)),
-          Effect.asVoid,
+          Effect.flatMap((started) => {
+            if (started.modelConfigId) {
+              return setConfigOption(started.modelConfigId, model).pipe(Effect.asVoid);
+            }
+            const payload = {
+              sessionId: started.sessionId,
+              modelId: model,
+            } satisfies EffectAcpSchema.SetSessionModelRequest;
+            return runLoggedRequest(
+              "session/set_model",
+              payload,
+              acp.agent.setSessionModel(payload),
+            ).pipe(Effect.asVoid);
+          }),
         ),
       request: (method, payload) =>
         runLoggedRequest(method, payload, acp.raw.request(method, payload)),

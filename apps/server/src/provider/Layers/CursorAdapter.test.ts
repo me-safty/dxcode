@@ -231,6 +231,110 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
     }),
   );
 
+  it.effect("emits a failed terminal turn event when ACP prompt fails after turn start", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-prompt-failure-terminal-event");
+      const turnCompletedReady = yield* Deferred.make<ProviderRuntimeEvent>();
+
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_FAIL_PROMPT: "1" }),
+      );
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) => {
+        if (String(event.threadId) !== String(threadId) || event.type !== "turn.completed") {
+          return Effect.void;
+        }
+        return Deferred.succeed(turnCompletedReady, event).pipe(Effect.ignore);
+      }).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+
+      const error = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "fail this prompt",
+          attachments: [],
+        })
+        .pipe(Effect.flip);
+      const turnCompleted = yield* Deferred.await(turnCompletedReady);
+      yield* Fiber.interrupt(runtimeEventsFiber);
+
+      assert.equal(error._tag, "ProviderAdapterRequestError");
+      assert.equal(turnCompleted.type, "turn.completed");
+      if (turnCompleted.type === "turn.completed") {
+        assert.equal(turnCompleted.payload.state, "failed");
+        assert.equal(turnCompleted.payload.stopReason, "error");
+        assert.include(turnCompleted.payload.errorMessage ?? "", "Mock prompt failed");
+      }
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("rejects a second turn while an ACP prompt is in flight", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-overlapping-turn-rejected");
+      const turnStartedReady = yield* Deferred.make<void>();
+
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_PROMPT_DELAY_MS: "250" }),
+      );
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) => {
+        if (String(event.threadId) !== String(threadId) || event.type !== "turn.started") {
+          return Effect.void;
+        }
+        return Deferred.succeed(turnStartedReady, undefined).pipe(Effect.ignore);
+      }).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+
+      const firstTurnFiber = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "first delayed turn",
+          attachments: [],
+        })
+        .pipe(Effect.forkChild);
+
+      yield* Deferred.await(turnStartedReady);
+      const secondError = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "second overlapping turn",
+          attachments: [],
+        })
+        .pipe(Effect.flip);
+      yield* Fiber.join(firstTurnFiber);
+      yield* Fiber.interrupt(runtimeEventsFiber);
+
+      assert.equal(secondError._tag, "ProviderAdapterValidationError");
+      if (secondError._tag === "ProviderAdapterValidationError") {
+        assert.include(secondError.issue, "in-flight turn");
+      }
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("closes the ACP child process when a session stops", () =>
     Effect.gen(function* () {
       const adapter = yield* CursorAdapter;

@@ -20,6 +20,9 @@ const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHO
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
+const failPrompt = process.env.T3_ACP_FAIL_PROMPT === "1";
+const promptDelayMs = Number(process.env.T3_ACP_PROMPT_DELAY_MS ?? "0");
+const sessionModelsOnly = process.env.T3_ACP_SESSION_MODELS_ONLY === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
 const sessionId = "mock-session-1";
 
@@ -201,6 +204,17 @@ const availableModes: ReadonlyArray<AcpSchema.SessionMode> = [
   },
 ];
 
+function modelsState(): AcpSchema.SessionModelState {
+  return {
+    currentModelId,
+    availableModels: [
+      { modelId: "default", name: "Auto" },
+      { modelId: "composer-2", name: "Composer 2" },
+      { modelId: "grok-build", name: "Grok Build" },
+    ],
+  };
+}
+
 function modeState(): AcpSchema.SessionModeState {
   return {
     currentModeId,
@@ -225,11 +239,19 @@ const program = Effect.gen(function* () {
   yield* agent.handleAuthenticate(() => Effect.succeed({}));
 
   yield* agent.handleCreateSession(() =>
-    Effect.succeed({
-      sessionId,
-      modes: modeState(),
-      configOptions: configOptions(),
-    }),
+    Effect.succeed(
+      sessionModelsOnly
+        ? {
+            sessionId,
+            modes: modeState(),
+            models: modelsState(),
+          }
+        : {
+            sessionId,
+            modes: modeState(),
+            configOptions: configOptions(),
+          },
+    ),
   );
 
   yield* agent.handleLoadSession((request) =>
@@ -242,11 +264,25 @@ const program = Effect.gen(function* () {
         },
       })
       .pipe(
-        Effect.as({
-          modes: modeState(),
-          configOptions: configOptions(),
-        }),
+        Effect.as(
+          sessionModelsOnly
+            ? {
+                modes: modeState(),
+                models: modelsState(),
+              }
+            : {
+                modes: modeState(),
+                configOptions: configOptions(),
+              },
+        ),
       ),
+  );
+
+  yield* agent.handleSetSessionModel((request) =>
+    Effect.sync(() => {
+      currentModelId = request.modelId;
+      return {};
+    }),
   );
 
   yield* agent.handleSetSessionConfigOption((request) =>
@@ -295,6 +331,15 @@ const program = Effect.gen(function* () {
   yield* agent.handlePrompt((request) =>
     Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
+      if (Number.isFinite(promptDelayMs) && promptDelayMs > 0) {
+        yield* Effect.sleep(`${promptDelayMs} millis`);
+      }
+      if (failPrompt) {
+        return yield* AcpError.AcpRequestError.internalError("Mock prompt failed", {
+          method: "session/prompt",
+          params: request,
+        });
+      }
 
       if (emitInterleavedAssistantToolCalls) {
         const toolCallId = "tool-call-1";

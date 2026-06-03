@@ -21,6 +21,17 @@ export function ProviderIcon(props: ProviderIconProps) {
     );
   }
 
+  if (props.provider === "grokBuild") {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+          fill={isDarkMode ? "#F5F5F5" : "#111111"}
+          d="M5.46 4h2.71L12 9.12 15.83 4h2.71l-5.18 6.91L18.9 20h-2.72L12 14.08 7.82 20H5.1l5.55-9.09L5.46 4Z"
+        />
+      </Svg>
+    );
+  }
+
   return (
     <Svg width={size} height={size} viewBox="0 0 256 260" fill="none">
       <Path

@@ -21,6 +21,15 @@ describe("ProviderSettingsForm helpers", () => {
     ]);
   });
 
+  it("derives Grok Build provider settings from the shared driver metadata", () => {
+    const grokBuild = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("grokBuild")];
+
+    expect(grokBuild).toBeDefined();
+    expect(deriveProviderSettingsFields(grokBuild!).map((field) => field.key)).toEqual([
+      "binaryPath",
+    ]);
+  });
+
   it("sources labels and descriptions from schema annotations", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
     expect(opencode).toBeDefined();
