@@ -19,9 +19,22 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       Effect.sync(() => {
         assert.deepStrictEqual(getDevRunnerModeArgs("dev:desktop"), [
           "run",
-          "dev",
           "--filter=@t3tools/desktop",
           "--filter=@t3tools/web",
+          "dev",
+        ]);
+      }),
+    );
+
+    it.effect("places Vite+ run flags before the task name", () =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(getDevRunnerModeArgs("dev"), [
+          "run",
+          "--filter=@t3tools/contracts",
+          "--filter=@t3tools/web",
+          "--filter=t3",
+          "--parallel",
+          "dev",
         ]);
       }),
     );

@@ -13,8 +13,11 @@ export default mergeConfig(
       outDir: "dist",
       sourcemap: true,
       clean: true,
-      noExternal: (id: string) => internalPackagePrefixes.some((prefix) => id.startsWith(prefix)),
-      inlineOnly: false,
+      deps: {
+        alwaysBundle: (id: string) =>
+          internalPackagePrefixes.some((prefix) => id.startsWith(prefix)),
+        onlyBundle: false,
+      },
       banner: {
         js: "#!/usr/bin/env node\n",
       },

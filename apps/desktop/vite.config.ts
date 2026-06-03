@@ -29,7 +29,9 @@ export default defineConfig({
       outExtensions: () => ({ js: ".cjs" }),
       entry: ["src/main.ts"],
       clean: true,
-      noExternal: (id) => id.startsWith("@t3tools/"),
+      deps: {
+        alwaysBundle: (id) => id.startsWith("@t3tools/"),
+      },
       ...(shouldLaunchElectronAfterPack ? { onSuccess: "node scripts/dev-electron.mjs" } : {}),
     },
     {

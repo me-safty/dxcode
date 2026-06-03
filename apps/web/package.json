@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vp dev",
-    "build": "vite build",
+    "build": "vp build",
     "preview": "vp preview",
     "typecheck": "tsgo --noEmit",
     "test": "vp test run --passWithNoTests --project unit",
