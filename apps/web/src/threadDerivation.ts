@@ -11,7 +11,6 @@ import type {
 } from "./types";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
-const EMPTY_MESSAGE_IDS: MessageId[] = [];
 const EMPTY_ACTIVITIES: Thread["activities"] = [];
 const EMPTY_PROPOSED_PLANS: ProposedPlan[] = [];
 const EMPTY_TURN_DIFF_SUMMARIES: TurnDiffSummary[] = [];
@@ -27,7 +26,6 @@ const threadCache = new WeakMap<
     session: ThreadSession | null;
     turnState: ThreadTurnState | undefined;
     messages: Thread["messages"];
-    queuedTurnMessageOrder: Thread["queuedTurnMessageOrder"];
     activities: Thread["activities"];
     proposedPlans: Thread["proposedPlans"];
     turnDiffSummaries: Thread["turnDiffSummaries"];
@@ -112,8 +110,6 @@ export function getThreadFromEnvironmentState(
   const session = state.threadSessionById[threadId] ?? null;
   const turnState = state.threadTurnStateById[threadId];
   const messages = selectThreadMessages(state, threadId);
-  const queuedTurnMessageOrder =
-    state.queuedTurnMessageOrderByThreadId?.[threadId] ?? EMPTY_MESSAGE_IDS;
   const activities = selectThreadActivities(state, threadId);
   const proposedPlans = selectThreadProposedPlans(state, threadId);
   const turnDiffSummaries = selectThreadTurnDiffSummaries(state, threadId);
@@ -124,7 +120,6 @@ export function getThreadFromEnvironmentState(
     cached.session === session &&
     cached.turnState === turnState &&
     cached.messages === messages &&
-    cached.queuedTurnMessageOrder === queuedTurnMessageOrder &&
     cached.activities === activities &&
     cached.proposedPlans === proposedPlans &&
     cached.turnDiffSummaries === turnDiffSummaries
@@ -138,7 +133,6 @@ export function getThreadFromEnvironmentState(
     latestTurn: turnState?.latestTurn ?? null,
     pendingSourceProposedPlan: turnState?.pendingSourceProposedPlan,
     messages,
-    queuedTurnMessageOrder,
     activities,
     proposedPlans,
     turnDiffSummaries,
@@ -148,7 +142,6 @@ export function getThreadFromEnvironmentState(
     session,
     turnState,
     messages,
-    queuedTurnMessageOrder,
     activities,
     proposedPlans,
     turnDiffSummaries,

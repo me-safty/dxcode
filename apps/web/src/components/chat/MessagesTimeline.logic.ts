@@ -31,9 +31,6 @@ export type MessagesTimelineRow =
       assistantCopyStreaming: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
-      isQueuedUserMessage?: boolean | undefined;
-      queuedUserMessageIndex?: number | undefined;
-      queuedUserMessageCount?: number | undefined;
     }
   | {
       kind: "proposed-plan";
@@ -120,8 +117,6 @@ export function deriveMessagesTimelineRows(input: {
   isWorking: boolean;
   activeTurnInProgress?: boolean;
   activeTurnId?: TurnId | null;
-  activeTurnRequestedAt?: string | null;
-  queuedUserMessageOrder?: ReadonlyArray<MessageId>;
   activeTurnStartedAt: string | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
@@ -131,22 +126,9 @@ export function deriveMessagesTimelineRows(input: {
     input.timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(input.timelineEntries);
-  const queuedUserMessageOrder = deriveQueuedUserMessageOrder({
-    timelineEntries: input.timelineEntries,
-    activeTurnInProgress: input.activeTurnInProgress === true,
-    activeTurnRequestedAt: input.activeTurnRequestedAt ?? null,
-    queuedUserMessageOrder: input.queuedUserMessageOrder ?? [],
-  });
-  const queuedUserMessageIndexById = new Map(
-    queuedUserMessageOrder.map((messageId, index) => [messageId, index]),
-  );
-  const orderedTimelineEntries = orderQueuedTimelineEntries(
-    input.timelineEntries,
-    queuedUserMessageIndexById,
-  );
 
-  for (let index = 0; index < orderedTimelineEntries.length; index += 1) {
-    const timelineEntry = orderedTimelineEntries[index];
+  for (let index = 0; index < input.timelineEntries.length; index += 1) {
+    const timelineEntry = input.timelineEntries[index];
     if (!timelineEntry) {
       continue;
     }
@@ -154,8 +136,8 @@ export function deriveMessagesTimelineRows(input: {
     if (timelineEntry.kind === "work") {
       const groupedEntries = [timelineEntry.entry];
       let cursor = index + 1;
-      while (cursor < orderedTimelineEntries.length) {
-        const nextEntry = orderedTimelineEntries[cursor];
+      while (cursor < input.timelineEntries.length) {
+        const nextEntry = input.timelineEntries[cursor];
         if (!nextEntry || nextEntry.kind !== "work") break;
         groupedEntries.push(nextEntry.entry);
         cursor += 1;
@@ -189,14 +171,6 @@ export function deriveMessagesTimelineRows(input: {
     const showCompletionDivider =
       timelineEntry.message.role === "assistant" &&
       input.completionDividerBeforeEntryId === timelineEntry.id;
-    const isQueuedUserMessage =
-      timelineEntry.message.role === "user" &&
-      input.activeTurnInProgress === true &&
-      input.activeTurnRequestedAt != null &&
-      timelineEntry.message.createdAt > input.activeTurnRequestedAt;
-    const queuedUserMessageIndex = isQueuedUserMessage
-      ? queuedUserMessageIndexById.get(timelineEntry.message.id)
-      : undefined;
 
     nextRows.push({
       kind: "message",
@@ -219,9 +193,6 @@ export function deriveMessagesTimelineRows(input: {
         timelineEntry.message.role === "user"
           ? input.revertTurnCountByUserMessageId.get(timelineEntry.message.id)
           : undefined,
-      isQueuedUserMessage,
-      queuedUserMessageIndex,
-      queuedUserMessageCount: isQueuedUserMessage ? queuedUserMessageOrder.length : undefined,
     });
   }
 
@@ -280,77 +251,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
-        a.revertTurnCount === bm.revertTurnCount &&
-        a.isQueuedUserMessage === bm.isQueuedUserMessage &&
-        a.queuedUserMessageIndex === bm.queuedUserMessageIndex &&
-        a.queuedUserMessageCount === bm.queuedUserMessageCount
+        a.revertTurnCount === bm.revertTurnCount
       );
     }
   }
-}
-
-function isQueuedUserTimelineEntry(input: {
-  timelineEntry: TimelineEntry;
-  activeTurnInProgress: boolean;
-  activeTurnRequestedAt: string | null;
-}): boolean {
-  return (
-    input.timelineEntry.kind === "message" &&
-    input.timelineEntry.message.role === "user" &&
-    input.activeTurnInProgress &&
-    input.activeTurnRequestedAt != null &&
-    input.timelineEntry.message.createdAt > input.activeTurnRequestedAt
-  );
-}
-
-function deriveQueuedUserMessageOrder(input: {
-  timelineEntries: ReadonlyArray<TimelineEntry>;
-  activeTurnInProgress: boolean;
-  activeTurnRequestedAt: string | null;
-  queuedUserMessageOrder: ReadonlyArray<MessageId>;
-}): MessageId[] {
-  const queuedMessages = input.timelineEntries.flatMap((timelineEntry) =>
-    isQueuedUserTimelineEntry({
-      timelineEntry,
-      activeTurnInProgress: input.activeTurnInProgress,
-      activeTurnRequestedAt: input.activeTurnRequestedAt,
-    }) && timelineEntry.kind === "message"
-      ? [timelineEntry.message]
-      : [],
-  );
-  const queuedMessageById = new Map(queuedMessages.map((message) => [message.id, message]));
-  const ordered: MessageId[] = [];
-  const consumed = new Set<string>();
-  for (const messageId of input.queuedUserMessageOrder) {
-    if (!queuedMessageById.has(messageId) || consumed.has(messageId)) {
-      continue;
-    }
-    ordered.push(messageId);
-    consumed.add(messageId);
-  }
-  for (const message of queuedMessages) {
-    if (!consumed.has(message.id)) {
-      ordered.push(message.id);
-    }
-  }
-  return ordered;
-}
-
-function orderQueuedTimelineEntries(
-  timelineEntries: ReadonlyArray<TimelineEntry>,
-  queuedUserMessageIndexById: ReadonlyMap<MessageId, number>,
-): TimelineEntry[] {
-  if (queuedUserMessageIndexById.size <= 1) {
-    return [...timelineEntries];
-  }
-  return [...timelineEntries].sort((left, right) => {
-    const leftIndex =
-      left.kind === "message" ? queuedUserMessageIndexById.get(left.message.id) : undefined;
-    const rightIndex =
-      right.kind === "message" ? queuedUserMessageIndexById.get(right.message.id) : undefined;
-    if (leftIndex === undefined || rightIndex === undefined) {
-      return 0;
-    }
-    return leftIndex - rightIndex;
-  });
 }

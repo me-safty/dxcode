@@ -3,15 +3,18 @@ import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
-import {
-  formatPendingPrimaryActionLabel,
-  resolveComposerPrimaryActionMode,
-  type PendingPrimaryActionState,
-} from "./ComposerPrimaryActions.logic";
+
+interface PendingActionState {
+  questionIndex: number;
+  isLastQuestion: boolean;
+  canAdvance: boolean;
+  isResponding: boolean;
+  isComplete: boolean;
+}
 
 interface ComposerPrimaryActionsProps {
   compact: boolean;
-  pendingAction: PendingPrimaryActionState | null;
+  pendingAction: PendingActionState | null;
   isRunning: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
@@ -25,6 +28,24 @@ interface ComposerPrimaryActionsProps {
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
 }
+
+export const formatPendingPrimaryActionLabel = (input: {
+  compact: boolean;
+  isLastQuestion: boolean;
+  isResponding: boolean;
+  questionIndex: number;
+}) => {
+  if (input.isResponding) {
+    return "Submitting...";
+  }
+  if (input.compact) {
+    return input.isLastQuestion ? "Submit" : "Next";
+  }
+  if (!input.isLastQuestion) {
+    return "Next question";
+  }
+  return input.questionIndex > 0 ? "Submit answers" : "Submit answer";
+};
 
 const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
@@ -50,14 +71,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     ? { onPointerDown: preventPointerFocus }
     : undefined;
 
-  const primaryActionMode = resolveComposerPrimaryActionMode({
-    pendingAction,
-    isRunning,
-    hasSendableContent,
-    showPlanFollowUpPrompt,
-  });
-
-  if (primaryActionMode === "pending" && pendingAction) {
+  if (pendingAction) {
     return (
       <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
         {pendingAction.questionIndex > 0 ? (
@@ -108,7 +122,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  if (primaryActionMode === "stop") {
+  if (isRunning) {
     return (
       <button
         type="button"
@@ -124,7 +138,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  if (primaryActionMode === "plan") {
+  if (showPlanFollowUpPrompt) {
     if (promptHasText) {
       return (
         <Button
@@ -193,8 +207,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
               ? "Preparing worktree"
               : isSendBusy
                 ? "Sending"
-                : isRunning
-                  ? "Queue message"
                 : "Send message"
       }
     >

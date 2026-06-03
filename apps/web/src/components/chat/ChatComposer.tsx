@@ -956,7 +956,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return `pending:${activePendingProgress.questionIndex}:${activePendingProgress.isLastQuestion}:${activePendingIsResponding}`;
     }
     if (phase === "running") {
-      return `running:${composerSendState.hasSendableContent}`;
+      return "running";
     }
     if (showPlanFollowUpPrompt) {
       return prompt.trim().length > 0 ? "plan:refine" : "plan:implement";

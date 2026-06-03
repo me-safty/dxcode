@@ -483,28 +483,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
-    case "thread.turn.queue.reorder": {
-      yield* requireThread({
-        readModel,
-        command,
-        threadId: command.threadId,
-      });
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
-        type: "thread.turn-queue-reordered",
-        payload: {
-          threadId: command.threadId,
-          orderedMessageIds: command.orderedMessageIds,
-          createdAt: command.createdAt,
-        },
-      };
-    }
-
     case "thread.approval.respond": {
       yield* requireThread({
         readModel,

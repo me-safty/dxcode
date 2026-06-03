@@ -1767,40 +1767,6 @@ export default function ChatView(props: ChatViewProps) {
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
     [activeThread?.proposedPlans, timelineMessages, workLogEntries],
   );
-  const queuedUserMessageOrder = useMemo(() => {
-    const activeTurnRequestedAt = activeLatestTurn?.requestedAt ?? null;
-    if (!activeTurnRequestedAt || (latestTurnSettled && !isWorking)) {
-      return [];
-    }
-    const queuedMessages = timelineMessages.filter(
-      (message) => message.role === "user" && message.createdAt > activeTurnRequestedAt,
-    );
-    if (queuedMessages.length === 0) {
-      return [];
-    }
-    const queuedMessageById = new Map(queuedMessages.map((message) => [message.id, message]));
-    const ordered: MessageId[] = [];
-    const consumed = new Set<string>();
-    for (const messageId of activeThread?.queuedTurnMessageOrder ?? []) {
-      if (!queuedMessageById.has(messageId) || consumed.has(messageId)) {
-        continue;
-      }
-      ordered.push(messageId);
-      consumed.add(messageId);
-    }
-    for (const message of queuedMessages) {
-      if (!consumed.has(message.id)) {
-        ordered.push(message.id);
-      }
-    }
-    return ordered;
-  }, [
-    activeLatestTurn?.requestedAt,
-    activeThread?.queuedTurnMessageOrder,
-    isWorking,
-    latestTurnSettled,
-    timelineMessages,
-  ]);
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const turnDiffSummaryByAssistantMessageId = useMemo(() => {
@@ -3180,36 +3146,6 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
 
-  const onMoveQueuedUserMessage = useCallback(
-    async (messageId: MessageId, direction: "up" | "down") => {
-      const api = readEnvironmentApi(environmentId);
-      if (!api || !activeThread || queuedUserMessageOrder.length <= 1) {
-        return;
-      }
-      const index = queuedUserMessageOrder.indexOf(messageId);
-      if (index === -1) {
-        return;
-      }
-      const targetIndex = direction === "up" ? index - 1 : index + 1;
-      if (targetIndex < 0 || targetIndex >= queuedUserMessageOrder.length) {
-        return;
-      }
-      const orderedMessageIds = [...queuedUserMessageOrder];
-      [orderedMessageIds[index], orderedMessageIds[targetIndex]] = [
-        orderedMessageIds[targetIndex]!,
-        orderedMessageIds[index]!,
-      ];
-      await api.orchestration.dispatchCommand({
-        type: "thread.turn.queue.reorder",
-        commandId: newCommandId(),
-        threadId: activeThread.id,
-        orderedMessageIds,
-        createdAt: new Date().toISOString(),
-      });
-    },
-    [activeThread, environmentId, queuedUserMessageOrder],
-  );
-
   const onRespondToApproval = useCallback(
     async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => {
       const api = readEnvironmentApi(environmentId);
@@ -3846,8 +3782,6 @@ export default function ChatView(props: ChatViewProps) {
               isWorking={isWorking}
               activeTurnInProgress={isWorking || !latestTurnSettled}
               activeTurnId={activeLatestTurn?.turnId ?? null}
-              activeTurnRequestedAt={activeLatestTurn?.requestedAt ?? null}
-              queuedUserMessageOrder={queuedUserMessageOrder}
               activeTurnStartedAt={activeWorkStartedAt}
               listRef={legendListRef}
               timelineEntries={timelineEntries}
@@ -3859,7 +3793,6 @@ export default function ChatView(props: ChatViewProps) {
               onOpenTurnDiff={onOpenTurnDiff}
               revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
               onRevertUserMessage={onRevertUserMessage}
-              onMoveQueuedUserMessage={onMoveQueuedUserMessage}
               isRevertingCheckpoint={isRevertingCheckpoint}
               onImageExpand={onExpandTimelineImage}
               markdownCwd={gitCwd ?? undefined}
