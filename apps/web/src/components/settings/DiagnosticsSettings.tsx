@@ -756,7 +756,7 @@ function DiagnosticsLastChecked({ checkedAt }: { checkedAt: DateTime.Utc | null 
   const relative = checkedAt ? formatRelativeTime(DateTime.formatIso(checkedAt)) : null;
 
   if (!relative) {
-    return <span className="text-[11px] text-muted-foreground/50">Checking</span>;
+    return <span className="text-[11px] text-muted-foreground/70">Checking</span>;
   }
 
   return (

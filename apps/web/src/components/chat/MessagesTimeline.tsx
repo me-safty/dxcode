@@ -1103,9 +1103,9 @@ function workToneIcon(tone: TimelineWorkEntry["tone"]): {
 
 function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
   if (tone === "error") return "text-rose-300/50 dark:text-rose-300/50";
-  if (tone === "tool") return "text-muted-foreground/70";
-  if (tone === "thinking") return "text-muted-foreground/50";
-  return "text-muted-foreground/40";
+  if (tone === "tool") return "text-muted-foreground/80";
+  if (tone === "thinking") return "text-muted-foreground/70";
+  return "text-muted-foreground/60";
 }
 
 function workEntryPreview(

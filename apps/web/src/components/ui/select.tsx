@@ -50,11 +50,11 @@ function SelectButton({ className, size, variant, render, children, ...props }: 
   const defaultProps = {
     children: (
       <>
-        <span className="flex-1 truncate in-data-placeholder:text-muted-foreground/72">
+        <span className="flex-1 truncate in-data-placeholder:text-muted-foreground/80">
           {children}
         </span>
         {variant === "ghost" ? (
-          <ChevronDownIcon className="size-3 opacity-50" />
+          <ChevronDownIcon className="size-3 opacity-70" />
         ) : (
           <ChevronsUpDownIcon className={selectTriggerIconClassName} />
         )}
@@ -87,7 +87,7 @@ function SelectTrigger({
     >
       {children}
       <SelectPrimitive.Icon data-slot="select-icon">
-        <ChevronDownIcon className="size-3 opacity-50" />
+        <ChevronDownIcon className="size-3 opacity-70" />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );

@@ -586,7 +586,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 inputClassName="border-0 shadow-none ring-0 focus-visible:ring-0"
                 placeholder="Search models..."
                 showTrigger={false}
-                startAddon={<SearchIcon className="size-4 shrink-0 text-muted-foreground/50" />}
+                startAddon={<SearchIcon className="size-4 shrink-0 text-muted-foreground/70" />}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => {
