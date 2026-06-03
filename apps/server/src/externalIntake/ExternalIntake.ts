@@ -117,7 +117,7 @@ export class ExternalIntake extends Context.Service<ExternalIntake, ExternalInta
 const DEFAULT_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("codex"),
   model: "gpt-5.5",
-  options: [{ id: "fastMode", value: true }],
+  options: [{ id: "fastMode", value: false }],
 } as const satisfies ModelSelection;
 
 const EXTERNAL_INTAKE_AGENT_PROMPT = [
