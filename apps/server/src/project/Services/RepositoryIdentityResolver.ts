@@ -1,7 +1,6 @@
-import type { RepositoryIdentity } from "@t3tools/contracts";
-import type { ExecutionTarget } from "@t3tools/contracts";
-import { Context } from "effect";
-import type { Effect } from "effect";
+import type { ExecutionTarget, RepositoryIdentity } from "@t3tools/contracts";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 
 export interface RepositoryIdentityResolveInput {
   readonly cwd: string;
