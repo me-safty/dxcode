@@ -54,7 +54,7 @@ export function NoActiveThreadState() {
               <DatabaseConsole />
             </div>
             <div className="mt-8">
-              <div className="rounded-md border border-border/60 bg-background/60 p-3 text-xs text-muted-foreground">
+              <div className="rounded-md border border-amber-600/30 bg-amber-50/40 p-4 text-xs text-muted-foreground dark:border-amber-600/20 dark:bg-amber-950/10">
                 Research mode: All pharmacological claims are labeled with evidence strength.
                 Unsupported extrapolations and low-confidence predictions are clearly marked. This
                 tool generates research summaries, not medical advice.
