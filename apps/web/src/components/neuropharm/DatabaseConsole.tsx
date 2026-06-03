@@ -78,7 +78,7 @@ export function DatabaseConsole() {
     setRunning((current) => current ?? "status");
     setError(null);
     try {
-      if (!api) throw new Error("Research API is not connected yet.");
+      if (!api) throw new Error("Neuropharm database not connected.");
       setDatabaseStatus(await api.neuropharm.databaseStatus({}));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Database status failed.");
@@ -96,7 +96,7 @@ export function DatabaseConsole() {
     setRunning("download");
     setError(null);
     try {
-      if (!api) throw new Error("Research API is not connected yet.");
+      if (!api) throw new Error("Neuropharm database not connected.");
       const sources = currentLocalSources();
       const result = await api.neuropharm.downloadDatabases({
         ...(sources.length > 0 ? { sources } : {}),
@@ -116,7 +116,7 @@ export function DatabaseConsole() {
     setRunning("basics");
     setError(null);
     try {
-      if (!api) throw new Error("Research API is not connected yet.");
+      if (!api) throw new Error("Neuropharm database not connected.");
       const result = await api.neuropharm.installBasicsPack({ forceRefresh: false });
       setBasicsPack(result);
       const sources = currentLocalSources();
@@ -138,7 +138,7 @@ export function DatabaseConsole() {
     setRunning("sync");
     setError(null);
     try {
-      if (!api) throw new Error("Research API is not connected yet.");
+      if (!api) throw new Error("Neuropharm database not connected.");
       const result = await api.neuropharm.syncDatabases({
         compounds: parseCompounds(compoundText),
         sources: ["pubchem", "chembl", "iuphar", "pubmed", "bindingdb"],
@@ -155,7 +155,7 @@ export function DatabaseConsole() {
     setRunning("search");
     setError(null);
     try {
-      if (!api) throw new Error("Research API is not connected yet.");
+      if (!api) throw new Error("Neuropharm database not connected.");
       const sources = currentLocalSources();
       setLocalSearch(
         await api.neuropharm.searchLocalInteractions({
@@ -175,7 +175,7 @@ export function DatabaseConsole() {
     setRunning("compare");
     setError(null);
     try {
-      if (!api) throw new Error("Research API is not connected yet.");
+      if (!api) throw new Error("Neuropharm database not connected.");
       const compounds = parseCompounds(compoundText);
       if (compounds.length < 2) throw new Error("Enter at least two compounds.");
       const result = await api.neuropharm.compareCompounds({
@@ -196,7 +196,7 @@ export function DatabaseConsole() {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2 text-sm font-medium">
           <DatabaseIcon className="size-4 text-sky-600" />
-          Local receptor database
+          Pharmacology database
         </div>
         {databaseStatus ? (
           <Badge variant="outline" className="gap-1 text-[10px]">
@@ -210,7 +210,7 @@ export function DatabaseConsole() {
             value={compoundText}
             onChange={(event) => setCompoundText(event.currentTarget.value)}
             aria-label="Compounds to sync and compare"
-            placeholder="AF710B, methylphenidate, CHRM1, DAT"
+            placeholder="Enter compounds to compare (e.g., modafinil, methylphenidate)"
           />
         </div>
         <Button
@@ -220,7 +220,7 @@ export function DatabaseConsole() {
           disabled={running !== null}
         >
           <LibraryIcon className="size-3.5" />
-          {running === "basics" ? "Installing..." : "Install basics"}
+          {running === "basics" ? "Loading data..." : "Load starter data"}
         </Button>
         <Button
           type="button"
@@ -229,7 +229,7 @@ export function DatabaseConsole() {
           disabled={running !== null}
         >
           <DownloadCloudIcon className="size-3.5" />
-          {running === "download" ? "Downloading..." : "Download all"}
+          {running === "download" ? "Downloading..." : "Download databases"}
         </Button>
         <Button
           type="button"
@@ -238,15 +238,15 @@ export function DatabaseConsole() {
           disabled={running !== null}
         >
           <SearchIcon className="size-3.5" />
-          {running === "search" ? "Searching..." : "Search local"}
+          {running === "search" ? "Searching..." : "Search database"}
         </Button>
         <Button type="button" variant="outline" onClick={syncDatabase} disabled={running !== null}>
           <RefreshCwIcon className="size-3.5" />
-          {running === "sync" ? "Syncing..." : "Live sync"}
+          {running === "sync" ? "Fetching..." : "Fetch latest data"}
         </Button>
         <Button type="button" onClick={compareCompounds} disabled={running !== null}>
           <FlaskConicalIcon className="size-3.5" />
-          {running === "compare" ? "Comparing..." : "Compare"}
+          {running === "compare" ? "Analyzing..." : "Compare compounds"}
         </Button>
       </div>
 
@@ -293,7 +293,7 @@ export function DatabaseConsole() {
               ) : null}
               {snapshot.rowCount === 0 && snapshot.status === "downloaded" ? (
                 <div className="mt-1 text-muted-foreground">
-                  Local archive/reference file; full row import is a follow-up.
+                  Archive downloaded. Data import in progress.
                 </div>
               ) : null}
             </div>
@@ -355,9 +355,9 @@ export function DatabaseConsole() {
               <thead className="bg-muted/60 text-muted-foreground">
                 <tr>
                   <th className="w-[22%] px-3 py-2 text-left font-medium">Compound</th>
-                  <th className="w-[30%] px-3 py-2 text-left font-medium">Target</th>
-                  <th className="w-[18%] px-3 py-2 text-left font-medium">Source</th>
-                  <th className="px-3 py-2 text-left font-medium">Value/action</th>
+                  <th className="w-[30%] px-3 py-2 text-left font-medium">Receptor/Target</th>
+                  <th className="w-[18%] px-3 py-2 text-left font-medium">Database</th>
+                  <th className="px-3 py-2 text-left font-medium">Binding affinity</th>
                 </tr>
               </thead>
               <tbody>
@@ -401,7 +401,7 @@ export function DatabaseConsole() {
               <thead className="bg-muted/60 text-muted-foreground">
                 <tr>
                   <th className="w-[18%] px-3 py-2 text-left font-medium">Compound</th>
-                  <th className="w-[28%] px-3 py-2 text-left font-medium">Target</th>
+                  <th className="w-[28%] px-3 py-2 text-left font-medium">Receptor/Target</th>
                   <th className="w-[16%] px-3 py-2 text-left font-medium">Grade</th>
                   <th className="w-[16%] px-3 py-2 text-left font-medium">Value</th>
                   <th className="px-3 py-2 text-left font-medium">Action</th>
@@ -466,7 +466,7 @@ export function DatabaseConsole() {
                   </a>
                 ))}
                 {comparison.publications.length === 0 ? (
-                  <div>No PubMed summaries cached yet.</div>
+                  <div>No publications loaded yet.</div>
                 ) : null}
               </div>
             </div>
