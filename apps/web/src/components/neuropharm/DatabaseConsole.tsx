@@ -308,7 +308,7 @@ export function DatabaseConsole() {
       ) : null}
 
       {basicsPack ? (
-        <div className="mt-3 rounded-md border border-border/70 p-3 text-xs">
+        <div className="mt-4 rounded-md border border-border/70 p-3 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="font-medium">Basics pack installed</div>
             <Badge variant="success">{basicsPack.imported.length} local notes</Badge>
@@ -324,7 +324,7 @@ export function DatabaseConsole() {
       ) : null}
 
       {syncResult ? (
-        <div className="mt-3 grid gap-2 text-xs sm:grid-cols-4">
+        <div className="mt-4 grid gap-2 text-xs sm:grid-cols-4">
           {syncResult.sourceStatus.map((status) => (
             <div
               key={`${status.source}:${status.fetchedAt ?? status.status}`}
