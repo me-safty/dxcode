@@ -6,7 +6,7 @@ export default defineConfig({
   run: {
     tasks: {
       dev: {
-        command: "T3CODE_DESKTOP_DEV=1 vp pack --watch",
+        command: "cross-env T3CODE_DESKTOP_DEV=1 vp pack --watch",
         dependsOn: ["t3#build"],
         cache: false,
       },

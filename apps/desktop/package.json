@@ -26,6 +26,7 @@
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
+    "cross-env": "^10.1.0",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   },
