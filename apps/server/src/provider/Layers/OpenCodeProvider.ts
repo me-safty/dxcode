@@ -3,6 +3,7 @@ import {
   type ModelCapabilities,
   type OpenCodeSettings,
   type ServerProviderModel,
+  type ServerProviderSkill,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
@@ -22,6 +23,7 @@ import {
   OpenCodeRuntime,
   openCodeRuntimeErrorDetail,
   type OpenCodeInventory,
+  type OpenCodeSkill,
 } from "../opencodeRuntime.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 
@@ -252,6 +254,17 @@ function flattenOpenCodeModels(input: OpenCodeInventory): ReadonlyArray<ServerPr
   return models.toSorted((left, right) => left.name.localeCompare(right.name));
 }
 
+function parseOpenCodeSkills(
+  rawSkills: ReadonlyArray<OpenCodeSkill>,
+): ReadonlyArray<ServerProviderSkill> {
+  return rawSkills.map((skill) => ({
+    name: skill.name,
+    path: skill.location,
+    enabled: true,
+    ...(skill.description ? { description: skill.description } : {}),
+  }));
+}
+
 export const makePendingOpenCodeProvider = (
   openCodeSettings: OpenCodeSettings,
 ): Effect.Effect<ServerProviderDraft> =>
@@ -441,12 +454,14 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   );
+  const skills = parseOpenCodeSkills(inventoryExit.value.skills);
   const connectedCount = inventoryExit.value.providerList.connected.length;
   return buildServerProvider({
     presentation: OPENCODE_PRESENTATION,
     enabled: true,
     checkedAt,
     models,
+    skills,
     probe: {
       installed: true,
       version,
@@ -464,3 +479,4 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     },
   });
 });
+
