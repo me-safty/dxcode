@@ -56,7 +56,7 @@ export function NeuropharmWorkspacePanel() {
   return (
     <div className="grid gap-3 text-left sm:grid-cols-2 xl:grid-cols-4">
       {items.map((item) => (
-        <div key={item.label} className="rounded-md border border-border/70 bg-background/80 p-3">
+        <div key={item.label} className="rounded-md border border-border/70 bg-background/80 p-3.5">
           <div className="mb-2 flex items-center gap-2 text-sm font-medium">
             <item.icon className="size-4.5 text-emerald-600" />
             {item.label}
