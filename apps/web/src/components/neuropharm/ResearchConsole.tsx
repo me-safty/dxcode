@@ -89,7 +89,7 @@ export function ResearchConsole() {
             placeholder="Enter compound name or receptor (e.g., modafinil, DAT, 5-HT2A)"
           />
         </div>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground" title="Enables extrapolation with confidence labels">
+        <label className="flex items-center gap-2.5 text-xs text-muted-foreground" title="Enables extrapolation with confidence labels">
           <Switch checked={powerUser} onCheckedChange={setPowerUser} />
           Research mode
         </label>
