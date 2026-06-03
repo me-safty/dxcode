@@ -1927,14 +1927,17 @@ export default function ChatView(props: ChatViewProps) {
       shortcutLabelForCommand(keybindings, "sourceControl.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
+  const openDiffPanelExclusive = useCallback(() => {
+    closeWorkspaceFilePreview();
+    closeSourceControlPanel();
+    onDiffPanelOpen?.();
+  }, [onDiffPanelOpen]);
   const onToggleDiff = useCallback(() => {
     if (routeKind === "server" && !isServerThread) {
       return;
     }
     if (!diffOpen) {
-      closeWorkspaceFilePreview();
-      closeSourceControlPanel();
-      onDiffPanelOpen?.();
+      openDiffPanelExclusive();
     }
 
     const openDiffSource =
@@ -1972,7 +1975,7 @@ export default function ChatView(props: ChatViewProps) {
     environmentId,
     isServerThread,
     navigate,
-    onDiffPanelOpen,
+    openDiffPanelExclusive,
     routeKind,
     threadId,
   ]);
@@ -4119,7 +4122,7 @@ export default function ChatView(props: ChatViewProps) {
       if (!isServerThread) {
         return;
       }
-      onDiffPanelOpen?.();
+      openDiffPanelExclusive();
       void navigate({
         to: "/$environmentId/$threadId",
         params: {
@@ -4134,7 +4137,7 @@ export default function ChatView(props: ChatViewProps) {
         },
       });
     },
-    [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
+    [environmentId, isServerThread, navigate, openDiffPanelExclusive, threadId],
   );
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.

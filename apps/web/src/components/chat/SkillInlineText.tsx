@@ -54,7 +54,10 @@ export function renderSkillInlineMarkdownChildren(
     if (!isValidElement<{ children?: ReactNode }>(child)) {
       return child;
     }
-    if (child.type === "code" || child.type === "a") {
+    if (typeof child.type !== "string") {
+      return child;
+    }
+    if (child.type === "code" || child.type === "pre" || child.type === "a") {
       return child;
     }
     if (!("children" in child.props)) {

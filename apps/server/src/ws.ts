@@ -56,6 +56,7 @@ import {
   observeRpcStream,
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
+import { ignoreCauseUnlessInterrupted } from "./effect/logCauseUnlessInterrupted.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import { ProviderService } from "./provider/Services/ProviderService.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
@@ -1576,9 +1577,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 })),
               );
 
-              yield* providerRegistry
-                .refresh()
-                .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
+              yield* ignoreCauseUnlessInterrupted(providerRegistry.refresh(), {
+                message: "server config subscription provider refresh failed",
+              }).pipe(Effect.forkScoped);
 
               const liveUpdates = Stream.merge(
                 keybindingsUpdates,

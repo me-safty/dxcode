@@ -4,6 +4,7 @@ import { createModelCapabilities } from "@t3tools/shared/model";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Logger from "effect/Logger";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
@@ -101,6 +102,99 @@ const enrichedSnapshotSecond: ServerProvider = {
 };
 
 describe("makeManagedServerProvider", () => {
+  it.effect("does not log interrupt-only initial background refresh cancellation", () => {
+    const messages: string[] = [];
+    const logger = Logger.make(({ message }) => {
+      messages.push(String(message));
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Effect.interrupt,
+          refreshInterval: "1 hour",
+        });
+
+        yield* Effect.yieldNow;
+
+        assert.deepStrictEqual(messages, []);
+        assert.deepStrictEqual(yield* provider.getSnapshot, initialSnapshot);
+      }),
+    ).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+  });
+
+  it.effect("logs non-interrupt initial background refresh failures", () => {
+    const messages: string[] = [];
+    const logger = Logger.make(({ message }) => {
+      messages.push(String(message));
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const releaseRefresh = yield* Deferred.make<void>();
+        yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Deferred.await(releaseRefresh).pipe(
+            Effect.flatMap(() => Effect.die(new Error("simulated background refresh failure"))),
+          ),
+          refreshInterval: "1 hour",
+        });
+
+        yield* Deferred.succeed(releaseRefresh, undefined);
+        yield* Effect.yieldNow;
+
+        assert.isTrue(
+          messages.some((message) => message.includes("initial provider snapshot refresh failed")),
+        );
+      }),
+    ).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+  });
+
+  it.effect("logs non-interrupt enrichment failures", () => {
+    const messages: string[] = [];
+    const logger = Logger.make(({ message }) => {
+      messages.push(String(message));
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Effect.succeed(refreshedSnapshot),
+          enrichSnapshot: () => Effect.die(new Error("simulated enrichment failure")),
+          refreshInterval: "1 hour",
+        });
+
+        yield* provider.refresh;
+        for (
+          let attempt = 0;
+          attempt < 20 &&
+          !messages.some((message) => message.includes("provider snapshot enrichment failed"));
+          attempt += 1
+        ) {
+          yield* Effect.yieldNow;
+        }
+
+        assert.isTrue(
+          messages.some((message) => message.includes("provider snapshot enrichment failed")),
+        );
+      }),
+    ).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+  });
+
   it.effect(
     "runs the initial provider check in the background and streams the refreshed snapshot",
     () =>

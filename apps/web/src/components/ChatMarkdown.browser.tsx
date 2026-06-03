@@ -176,6 +176,35 @@ describe("ChatMarkdown", () => {
     }
   });
 
+  it("renders fenced code text inside markdown list items", async () => {
+    const text = [
+      "1. Update `apps/web/src/components/ChatView.tsx`.",
+      "",
+      "   Add a helper:",
+      "",
+      "   ```ts",
+      "   const openDiffPanelExclusive = useCallback(() => {",
+      "     closeWorkspaceFilePreview();",
+      "   }, [onDiffPanelOpen]);",
+      "   ```",
+    ].join("\n");
+    const screen = await render(<ChatMarkdown text={text} cwd="/repo/project" />);
+
+    try {
+      await vi.waitFor(() => {
+        expect(
+          screen.container.querySelector('[data-code-highlight-state="highlighted"]'),
+        ).not.toBeNull();
+      });
+      expect(screen.container.querySelector(".chat-markdown-codeblock")?.textContent).toContain(
+        "const openDiffPanelExclusive",
+      );
+      await expect.element(page.getByText(/const openDiffPanelExclusive/)).toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("renders explicit workspace markdown images through the workspace image route", async () => {
     const onImageExpand = vi.fn();
     const screen = await render(

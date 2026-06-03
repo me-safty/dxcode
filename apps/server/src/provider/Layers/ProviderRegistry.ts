@@ -41,6 +41,7 @@ import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
 import { ServerConfig } from "../../config.ts";
+import { ignoreCauseUnlessInterrupted } from "../../effect/logCauseUnlessInterrupted.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
 import {
@@ -563,7 +564,10 @@ export const ProviderRegistryLive = Layer.effect(
         yield* Effect.forEach(
           newlyAdded,
           ([, instance]) =>
-            refreshOneSource(buildSnapshotSource(instance)).pipe(Effect.ignoreCause({ log: true })),
+            ignoreCauseUnlessInterrupted(refreshOneSource(buildSnapshotSource(instance)), {
+              message: "provider registry instance refresh failed during sync",
+              fields: { instanceId: instance.instanceId, provider: instance.driverKind },
+            }),
           { concurrency: "unbounded", discard: true },
         );
         yield* upsertProviders(unavailableProviders, {

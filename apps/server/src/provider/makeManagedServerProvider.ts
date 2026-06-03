@@ -11,6 +11,7 @@ import * as Semaphore from "effect/Semaphore";
 
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
 import { ServerSettingsError } from "@t3tools/contracts";
+import { ignoreCauseUnlessInterrupted } from "../effect/logCauseUnlessInterrupted.ts";
 
 interface ProviderSnapshotState {
   readonly snapshot: ServerProvider;
@@ -85,14 +86,17 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       return;
     }
 
-    const fiber = yield* input
-      .enrichSnapshot({
+    const fiber = yield* ignoreCauseUnlessInterrupted(
+      input.enrichSnapshot({
         settings,
         snapshot,
         getSnapshot: Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot)),
         publishSnapshot: (nextSnapshot) => publishEnrichedSnapshot(generation, nextSnapshot),
-      })
-      .pipe(Effect.ignoreCause({ log: true }), Effect.forkIn(scope));
+      }),
+      {
+        message: "provider snapshot enrichment failed",
+      },
+    ).pipe(Effect.forkIn(scope));
 
     yield* Ref.set(enrichmentFiberRef, fiber);
   });
@@ -141,12 +145,18 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   yield* Effect.forever(
     Effect.sleep(input.refreshInterval ?? "60 seconds").pipe(
       Effect.flatMap(() => refreshSnapshot()),
-      Effect.ignoreCause({ log: true }),
+      (effect) =>
+        ignoreCauseUnlessInterrupted(effect, {
+          message: "periodic provider snapshot refresh failed",
+        }),
     ),
   ).pipe(Effect.forkScoped);
 
   yield* applySnapshot(initialSettings, { forceRefresh: true }).pipe(
-    Effect.ignoreCause({ log: true }),
+    (effect) =>
+      ignoreCauseUnlessInterrupted(effect, {
+        message: "initial provider snapshot refresh failed",
+      }),
     Effect.forkScoped,
   );
 

@@ -103,6 +103,8 @@ function DraftChatThreadRouteView() {
     if (!draftSession) {
       return;
     }
+    closeWorkspaceFilePreview();
+    closeSourceControlPanel();
     markDiffOpened();
     void navigate({
       to: "/draft/$draftId",

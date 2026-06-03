@@ -124,7 +124,11 @@ const DiffPanelInlineSidebar = (props: {
           storageKey: DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        {renderDiffContent ? <LazyDiffPanel mode="sidebar" /> : null}
+        {renderDiffContent ? (
+          <DiffWorkerPoolProvider>
+            <LazyDiffPanel mode="sidebar" />
+          </DiffWorkerPoolProvider>
+        ) : null}
         <SidebarRail />
       </Sidebar>
     </SidebarProvider>
@@ -164,7 +168,9 @@ const WorkspaceFilesInlineSidebar = (props: {
         }}
       >
         {renderContent ? (
-          <WorkspaceFilesPanel mode="sidebar" onReturnToDiff={onReturnToDiff} panelOpen={open} />
+          <DiffWorkerPoolProvider>
+            <WorkspaceFilesPanel mode="sidebar" onReturnToDiff={onReturnToDiff} panelOpen={open} />
+          </DiffWorkerPoolProvider>
         ) : null}
         <SidebarRail />
       </Sidebar>
@@ -185,26 +191,41 @@ export function ChatRightPanels(props: {
   readonly useSheet: boolean;
 }) {
   const { diff, fileOpen, onReturnFromFileToDiff, renderFileContent, useSheet } = props;
-  const shouldRenderCodePanelProvider = Boolean(diff?.renderContent) || renderFileContent;
 
-  const panels = useSheet ? (
-    <>
-      {diff ? (
-        <RightPanelSheet open={diff.open} onClose={diff.onClose}>
-          {diff.renderContent ? <LazyDiffPanel mode="sheet" /> : null}
-        </RightPanelSheet>
-      ) : null}
-      <RightPanelSheet open={fileOpen} onClose={closeWorkspaceFilePreview}>
-        {renderFileContent ? (
-          <WorkspaceFilesPanel
-            mode="sheet"
-            onReturnToDiff={onReturnFromFileToDiff}
-            panelOpen={fileOpen}
-          />
+  // The worker-pool provider eagerly allocates WASM workers on mount, so it must
+  // stay gated behind whether any panel content actually renders. It is wrapped
+  // around the panel *content* (not the Sheet/Sidebar shells) so the shells stay
+  // mounted across open/close — otherwise mounting them already-open skips the
+  // enter animation. The pool itself is a refcounted singleton, so the separate
+  // providers below share one underlying pool.
+  if (useSheet) {
+    return (
+      <>
+        {diff ? (
+          <RightPanelSheet open={diff.open} onClose={diff.onClose}>
+            {diff.renderContent ? (
+              <DiffWorkerPoolProvider>
+                <LazyDiffPanel mode="sheet" />
+              </DiffWorkerPoolProvider>
+            ) : null}
+          </RightPanelSheet>
         ) : null}
-      </RightPanelSheet>
-    </>
-  ) : (
+        <RightPanelSheet open={fileOpen} onClose={closeWorkspaceFilePreview}>
+          {renderFileContent ? (
+            <DiffWorkerPoolProvider>
+              <WorkspaceFilesPanel
+                mode="sheet"
+                onReturnToDiff={onReturnFromFileToDiff}
+                panelOpen={fileOpen}
+              />
+            </DiffWorkerPoolProvider>
+          ) : null}
+        </RightPanelSheet>
+      </>
+    );
+  }
+
+  return (
     <>
       {diff ? (
         <DiffPanelInlineSidebar
@@ -220,11 +241,5 @@ export function ChatRightPanels(props: {
         onReturnToDiff={onReturnFromFileToDiff}
       />
     </>
-  );
-
-  return shouldRenderCodePanelProvider ? (
-    <DiffWorkerPoolProvider>{panels}</DiffWorkerPoolProvider>
-  ) : (
-    panels
   );
 }

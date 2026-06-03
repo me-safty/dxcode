@@ -2,6 +2,7 @@
 import "../index.css";
 
 import {
+  CheckpointRef,
   EventId,
   ORCHESTRATION_WS_METHODS,
   EnvironmentId,
@@ -39,7 +40,10 @@ import {
   __resetEnvironmentApiOverridesForTests,
   __setEnvironmentApiOverrideForTests,
 } from "../environmentApi";
-import { __resetWorkspaceFilePanelStateForTests } from "../workspaceFilePreview";
+import {
+  __readWorkspaceFilePanelStateForTests,
+  __resetWorkspaceFilePanelStateForTests,
+} from "../workspaceFilePreview";
 import {
   resetSavedEnvironmentRegistryStoreForTests,
   resetSavedEnvironmentRuntimeStoreForTests,
@@ -116,6 +120,15 @@ const LARGE_NEW_FILE_DIFF = [
     { length: 220 },
     (_, index) => `+newer-file-content-${String(index + 1).padStart(3, "0")}`,
   ),
+].join("\n");
+const README_FILE_DIFF = [
+  "diff --git a/README.md b/README.md",
+  "index 1111111..2222222 100644",
+  "--- a/README.md",
+  "+++ b/README.md",
+  "@@ -1 +1 @@",
+  "-Old README",
+  "+Updated README",
 ].join("\n");
 
 interface TestFixture {
@@ -5299,6 +5312,122 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         activeProvider: "codex",
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("replaces an inline file preview when opening an inline changed-file diff", async () => {
+    const checkpointTurnId = "turn-inline-diff-preview-regression" as TurnId;
+    const assistantMessageId = "msg-assistant-21" as MessageId;
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-inline-diff-preview-regression" as MessageId,
+      targetText: "inline diff preview regression",
+    });
+    const thread = snapshot.threads.find((entry) => entry.id === THREAD_ID);
+    if (!thread) {
+      throw new Error("Expected browser test thread in snapshot.");
+    }
+    Object.assign(thread, {
+      messages: thread.messages.map((message) =>
+        message.id === assistantMessageId
+          ? Object.assign({}, message, {
+              text: "Open [README.md](file:///repo/project/README.md), then view its diff.",
+            })
+          : message,
+      ),
+      checkpoints: [
+        {
+          turnId: checkpointTurnId,
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.make("checkpoint-inline-diff-preview-regression"),
+          status: "ready",
+          files: [
+            {
+              path: "README.md",
+              kind: "modified",
+              additions: 1,
+              deletions: 1,
+            },
+          ],
+          assistantMessageId,
+          completedAt: NOW_ISO,
+        },
+      ],
+    });
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot,
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.projectsReadFile) {
+          return {
+            relativePath: typeof body.relativePath === "string" ? body.relativePath : "README.md",
+            contents: "Old README\n",
+            truncated: false,
+            sizeBytes: 11,
+          };
+        }
+        if (body._tag === ORCHESTRATION_WS_METHODS.getTurnDiff) {
+          return {
+            threadId: THREAD_ID,
+            fromTurnCount: typeof body.fromTurnCount === "number" ? body.fromTurnCount : 0,
+            toTurnCount: typeof body.toTurnCount === "number" ? body.toTurnCount : 1,
+            diff: README_FILE_DIFF,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await scrollTimelineToBottom();
+      const readmeLink = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLAnchorElement>("a")).find((link) =>
+            link.textContent?.includes("README.md"),
+          ) ?? null,
+        "Unable to find README markdown file link.",
+      );
+
+      readmeLink.click();
+
+      await vi.waitFor(
+        () => {
+          expect(__readWorkspaceFilePanelStateForTests()).toMatchObject({
+            open: true,
+            view: "preview",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      await expect.element(page.getByRole("button", { name: "Close file preview" })).toBeVisible();
+
+      const viewDiffButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+            (button) => button.textContent?.trim() === "View diff",
+          ) ?? null,
+        "Unable to find inline changed-files View diff button.",
+      );
+      viewDiffButton.click();
+
+      await vi.waitFor(
+        () => {
+          const search = mounted.router.state.location.search as Record<string, unknown>;
+          expect(search.diff).toBe("1");
+          expect(search.diffTurnId).toBe(checkpointTurnId);
+          expect(search.diffFilePath).toBe("README.md");
+          expect(__readWorkspaceFilePanelStateForTests().open).toBe(false);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      await expect
+        .element(page.getByRole("button", { name: "Close file preview" }))
+        .not.toBeInTheDocument();
+      await waitForElement(
+        () => document.querySelector<HTMLElement>(".diff-render-surface"),
+        "Diff render surface did not mount after replacing the file preview.",
+      );
     } finally {
       await mounted.cleanup();
     }

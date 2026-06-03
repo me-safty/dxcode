@@ -110,6 +110,8 @@ function ChatThreadRouteView() {
     if (!threadRef) {
       return;
     }
+    closeWorkspaceFilePreview();
+    closeSourceControlPanel();
     markRightPanelUsed("diff");
     markDiffOpened();
     void navigate({
