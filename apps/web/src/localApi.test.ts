@@ -38,6 +38,12 @@ const terminalMetadataListeners = new Set<(event: TerminalMetadataStreamEvent) =
 const shellStreamListeners = new Set<(event: OrchestrationShellStreamItem) => void>();
 const gitStatusListeners = new Set<(event: VcsStatusResult) => void>();
 
+const mockWslApi = {
+  listDistributions: vi.fn(),
+  browse: vi.fn(),
+  resolvePath: vi.fn(),
+};
+
 const rpcClientMock = {
   dispose: vi.fn(),
   terminal: {

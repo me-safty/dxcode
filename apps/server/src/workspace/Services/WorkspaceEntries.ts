@@ -9,6 +9,7 @@
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
+import { ProcessRunner } from "../../processRunner.ts";
 
 import type {
   FilesystemBrowseInput,
@@ -56,7 +57,7 @@ export interface WorkspaceEntriesShape {
    */
   readonly search: (
     input: ProjectSearchEntriesInput,
-  ) => Effect.Effect<ProjectSearchEntriesResult, WorkspaceEntriesError>;
+  ) => Effect.Effect<ProjectSearchEntriesResult, WorkspaceEntriesError, ProcessRunner>;
 
   /**
    * Drop any cached workspace entries for the given workspace root.

@@ -319,15 +319,15 @@ const make = Effect.gen(function* () {
 
     const desiredRuntimeMode = thread.runtimeMode;
     const requestedModelSelection = options?.modelSelection;
-    const threadProvider: ProviderKind = currentProvider ?? thread.modelSelection.provider;
+    const threadInstanceId = thread.modelSelection.instanceId;
     if (
       requestedModelSelection !== undefined &&
-      requestedModelSelection.provider !== threadProvider
+      requestedModelSelection.instanceId !== threadInstanceId
     ) {
       return yield* new ProviderAdapterRequestError({
-        provider: threadProvider,
+        provider: threadInstanceId,
         method: "thread.turn.start",
-        detail: `Thread '${threadId}' is bound to provider '${threadProvider}' and cannot switch to '${requestedModelSelection.provider}'.`,
+        detail: `Thread '${threadId}' is bound to provider '${threadInstanceId}' and cannot switch to '${requestedModelSelection.instanceId}'.`,
       });
     }
     const resolveActiveSession = (threadId: ThreadId) =>

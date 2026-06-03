@@ -307,7 +307,7 @@ describe("CheckpointReactor", () => {
       getStatus: () => Effect.die("getStatus should not be called in this test"),
       refreshLocalStatus: (input) =>
         Effect.sync(() => {
-          const cwd = typeof input === "string" ? input : input.cwd;
+          const cwd = input;
           options?.gitStatusRefreshCalls?.push(cwd);
         }).pipe(
           Effect.as({

@@ -322,6 +322,7 @@ export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
 export const WsWslListDistributionsRpc = Rpc.make(WS_METHODS.wslListDistributions, {
   payload: Schema.Struct({}),
   success: WslListDistributionsResult,
+  error: EnvironmentAuthorizationError,
 });
 
 export const WsWslBrowseRpc = Rpc.make(WS_METHODS.wslBrowse, {
@@ -333,6 +334,7 @@ export const WsWslBrowseRpc = Rpc.make(WS_METHODS.wslBrowse, {
 export const WsWslResolvePathRpc = Rpc.make(WS_METHODS.wslResolvePath, {
   payload: WslResolvePathInput,
   success: WslResolvePathResult,
+  error: EnvironmentAuthorizationError,
 });
 
 export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {

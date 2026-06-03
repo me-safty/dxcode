@@ -41,6 +41,7 @@ import {
   type ChangeRequestTerminology,
 } from "@t3tools/shared/sourceControl";
 
+import { ProcessRunner } from "../processRunner.ts";
 import { GitManagerError } from "@t3tools/contracts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScriptRunner.ts";
@@ -78,7 +79,7 @@ export interface GitManagerShape {
   ) => Effect.Effect<GitResolvePullRequestResult, GitManagerServiceError>;
   readonly preparePullRequestThread: (
     input: GitPreparePullRequestThreadInput,
-  ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+  ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError, ProcessRunner>;
   readonly runStackedAction: (
     input: GitRunStackedActionInput,
     options?: GitRunStackedActionOptions,

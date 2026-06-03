@@ -9,6 +9,7 @@
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
+import { ProcessRunner } from "../../processRunner.ts";
 
 import type { ProjectWriteFileInput, ProjectWriteFileResult } from "@t3tools/contracts";
 import { WorkspacePathOutsideRootError } from "./WorkspacePaths.ts";
@@ -38,7 +39,8 @@ export interface WorkspaceFileSystemShape {
     input: ProjectWriteFileInput,
   ) => Effect.Effect<
     ProjectWriteFileResult,
-    WorkspaceFileSystemError | WorkspacePathOutsideRootError
+    WorkspaceFileSystemError | WorkspacePathOutsideRootError,
+    ProcessRunner
   >;
 }
 

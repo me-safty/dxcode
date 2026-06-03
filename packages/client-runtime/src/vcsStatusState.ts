@@ -1,4 +1,9 @@
-import type { EnvironmentId, GitManagerServiceError, VcsStatusResult } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ExecutionTarget,
+  GitManagerServiceError,
+  VcsStatusResult,
+} from "@t3tools/contracts";
 import type * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
@@ -16,6 +21,7 @@ export interface VcsStatusState {
 export interface VcsStatusTarget {
   readonly environmentId: EnvironmentId | null;
   readonly cwd: string | null;
+  readonly executionTarget?: ExecutionTarget | undefined;
 }
 
 export type VcsStatusClient = Pick<WsRpcClient["vcs"], "onStatus" | "refreshStatus">;
@@ -66,7 +72,7 @@ export function getVcsStatusTargetKey(target: VcsStatusTarget): string | null {
   if (target.environmentId === null || target.cwd === null) {
     return null;
   }
-  return `${target.environmentId}:${target.cwd}`;
+  return `${target.environmentId}:${target.executionTarget?.kind === "wsl" ? `wsl:${target.executionTarget.distroName}` : "local"}:${target.cwd}`;
 }
 
 /* ─── Subscription manager ──────────────────────────────────────────── */
@@ -131,11 +137,20 @@ export function createVcsStatusManager(config: VcsStatusManagerConfig) {
 
   /* ── Core subscription ──────────────────────────────────────────── */
 
-  function subscribeStream(targetKey: string, cwd: string, client: VcsStatusClient): () => void {
+  function subscribeStream(
+    targetKey: string,
+    cwd: string,
+    client: VcsStatusClient,
+    executionTarget?: ExecutionTarget | undefined,
+  ): () => void {
     markPending(targetKey);
-    return client.onStatus({ cwd }, (status) => setData(targetKey, status), {
-      onResubscribe: () => markPending(targetKey),
-    });
+    return client.onStatus(
+      { cwd, ...(executionTarget !== undefined ? { executionTarget } : {}) },
+      (status) => setData(targetKey, status),
+      {
+        onResubscribe: () => markPending(targetKey),
+      },
+    );
   }
 
   /* ── Dynamic subscription (handles reconnection) ────────────────── */
@@ -143,6 +158,7 @@ export function createVcsStatusManager(config: VcsStatusManagerConfig) {
   function createDynamicSubscription(targetKey: string, target: VcsStatusTarget): () => void {
     const environmentId = target.environmentId!;
     const cwd = target.cwd!;
+    const executionTarget = target.executionTarget;
     let currentIdentity: string | null = null;
     let currentUnsub = NOOP;
 
@@ -164,7 +180,7 @@ export function createVcsStatusManager(config: VcsStatusManagerConfig) {
 
       currentUnsub();
       currentIdentity = identity;
-      currentUnsub = subscribeStream(targetKey, cwd, client);
+      currentUnsub = subscribeStream(targetKey, cwd, client, executionTarget);
     };
 
     const unsubChanges = config.subscribeClientChanges!(sync);
@@ -213,7 +229,7 @@ export function createVcsStatusManager(config: VcsStatusManagerConfig) {
       // One-shot client resolution.
       const resolved = config.getClient(target.environmentId);
       if (!resolved) return NOOP;
-      teardown = subscribeStream(targetKey, target.cwd, resolved);
+      teardown = subscribeStream(targetKey, target.cwd, resolved, target.executionTarget);
     }
 
     watched.set(targetKey, { refCount: 1, teardown });
@@ -263,7 +279,12 @@ export function createVcsStatusManager(config: VcsStatusManagerConfig) {
 
     lastRefreshAt.set(targetKey, requestedAt);
     const promise = resolved
-      .refreshStatus({ cwd: target.cwd })
+      .refreshStatus({
+        cwd: target.cwd,
+        ...(target.executionTarget !== undefined
+          ? { executionTarget: target.executionTarget }
+          : {}),
+      })
       .finally(() => refreshInFlight.delete(targetKey));
     refreshInFlight.set(targetKey, promise);
     return promise;

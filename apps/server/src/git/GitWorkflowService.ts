@@ -28,6 +28,7 @@ import {
   type VcsStatusResult,
 } from "@t3tools/contracts";
 
+import { ProcessRunner } from "../processRunner.ts";
 import { GitManager, type GitRunStackedActionOptions } from "./GitManager.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
@@ -55,7 +56,7 @@ export interface GitWorkflowServiceShape {
   ) => Effect.Effect<GitResolvePullRequestResult, GitManagerServiceError>;
   readonly preparePullRequestThread: (
     input: GitPreparePullRequestThreadInput,
-  ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+  ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError, ProcessRunner>;
   readonly listRefs: (input: VcsListRefsInput) => Effect.Effect<VcsListRefsResult, GitCommandError>;
   readonly createWorktree: (
     input: VcsCreateWorktreeInput,
@@ -237,9 +238,9 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
   });
 
   const routeGitManager =
-    <Input extends { readonly cwd: string }, Output>(
+    <Input extends { readonly cwd: string }, Output, R = never>(
       operation: string,
-      run: (input: Input) => Effect.Effect<Output, GitManagerServiceError>,
+      run: (input: Input) => Effect.Effect<Output, GitManagerServiceError, R>,
     ) =>
     (input: Input) =>
       ensureGit(operation, input.cwd).pipe(Effect.andThen(run(input)));

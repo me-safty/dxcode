@@ -20,6 +20,7 @@ import {
   type RankedSearchResult,
 } from "@t3tools/shared/searchRanking";
 
+import { ProcessRunner } from "../../processRunner.ts";
 import { runWslShell } from "../../wsl/WslCli.ts";
 import { isWslTarget } from "../../wsl/WslTarget.ts";
 import { VcsDriverRegistry } from "../../vcs/VcsDriverRegistry.ts";

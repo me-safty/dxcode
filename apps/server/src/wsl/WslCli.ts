@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import * as Duration from "effect/Duration";
 import { Effect, Schema } from "effect";
 import { execFile } from "node:child_process";
@@ -51,7 +52,7 @@ export function buildWslShellCommandArgs(
   return buildWslExecArgs(target, cwd, "sh", ["-lc", script, "t3-wsl-shell", ...args]);
 }
 
-export function isWslAvailable(): Effect.Effect<boolean> {
+export function isWslAvailable(): Effect.Effect<boolean, never, ProcessRunner> {
   if (process.platform !== "win32") {
     return Effect.succeed(false);
   }
@@ -86,7 +87,7 @@ export function runWsl(
   program: string,
   args: ReadonlyArray<string> = [],
   options?: { readonly timeoutMs?: number; readonly operation?: string },
-): Effect.Effect<ProcessRunOutput, WslCliError> {
+): Effect.Effect<ProcessRunOutput, WslCliError, ProcessRunner> {
   const operation = options?.operation ?? program;
   return Effect.flatMap(ProcessRunner, (runner) =>
     Effect.tryPromise({
@@ -117,7 +118,7 @@ export function runWslShell(
   cwd: string | undefined,
   script: string,
   options?: { readonly timeoutMs?: number; readonly operation?: string },
-): Effect.Effect<ProcessRunOutput, WslCliError> {
+): Effect.Effect<ProcessRunOutput, WslCliError, ProcessRunner> {
   return runWsl(target, cwd, "sh", ["-lc", script], options);
 }
 
@@ -127,7 +128,7 @@ export function runWslShellCommand(
   script: string,
   args: ReadonlyArray<string> = [],
   options?: { readonly timeoutMs?: number; readonly operation?: string },
-): Effect.Effect<ProcessRunOutput, WslCliError> {
+): Effect.Effect<ProcessRunOutput, WslCliError, ProcessRunner> {
   return runWsl(target, cwd, "sh", ["-lc", script, "t3-wsl-shell", ...args], options);
 }
 

@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import { posix as posixPath } from "node:path";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -9,6 +10,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
@@ -97,10 +99,16 @@ import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
+import {
+  ProcessRunner,
+  layer as processRunnerLayer,
+  type ProcessRunnerShape,
+} from "./processRunner.ts";
 import { isWslAvailable, listWslDistributions, runWsl } from "./wsl/WslCli.ts";
 import { normalizeWslTarget } from "./wsl/WslTarget.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 const isWorkspacePathOutsideRootError = Schema.is(WorkspacePathOutsideRootError);
+const isFilesystemBrowseError = Schema.is(FilesystemBrowseError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -225,6 +233,7 @@ function toAuthAccessStreamEvent(
 const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
+      const processRunner = yield* ProcessRunner.ProcessRunner;
       const currentSessionId = currentSession.sessionId;
       const crypto = yield* Crypto.Crypto;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
@@ -415,23 +424,30 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
               );
           case "project.meta-updated":
             return Effect.gen(function* () {
+              const existingProjectShell = yield* projectionSnapshotQuery.getProjectShellById(
+                event.payload.projectId,
+              );
               const workspaceRoot =
                 event.payload.workspaceRoot ??
-                Option.match(
-                  yield* projectionSnapshotQuery.getProjectShellById(event.payload.projectId),
-                  {
-                    onNone: () => null,
-                    onSome: (project) => project.workspaceRoot,
-                  },
-                ) ??
+                Option.match(existingProjectShell, {
+                  onNone: () => null,
+                  onSome: (p) => p.workspaceRoot,
+                }) ??
                 null;
               if (workspaceRoot === null) {
                 return event;
               }
 
+              const executionTarget =
+                event.payload.executionTarget ??
+                Option.match(existingProjectShell, {
+                  onNone: () => undefined,
+                  onSome: (p) => p.executionTarget,
+                });
+
               const repositoryIdentity = yield* repositoryIdentityResolver.resolve({
                 cwd: workspaceRoot,
-                executionTarget: event.payload.executionTarget ?? project?.executionTarget,
+                executionTarget,
               });
               return {
                 ...event,
@@ -514,6 +530,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
 
       const dispatchBootstrapTurnStart = (
         command: Extract<OrchestrationCommand, { type: "thread.turn.start" }>,
+        processRunner: ProcessRunnerShape,
       ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> =>
         Effect.gen(function* () {
           const bootstrap = command.bootstrap;
@@ -629,6 +646,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                   ...(targetProjectCwd ? { projectCwd: targetProjectCwd } : {}),
                   worktreePath,
                 })
+                .pipe(Effect.provideService(ProcessRunner.ProcessRunner, processRunner))
                 .pipe(
                   Effect.matchEffect({
                     onFailure: (error) =>
@@ -710,7 +728,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
       ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
         const dispatchEffect =
           normalizedCommand.type === "thread.turn.start" && normalizedCommand.bootstrap
-            ? dispatchBootstrapTurnStart(normalizedCommand)
+            ? dispatchBootstrapTurnStart(normalizedCommand, processRunner)
             : orchestrationEngine
                 .dispatch(normalizedCommand)
                 .pipe(
@@ -1271,7 +1289,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
               };
             }).pipe(
               Effect.mapError((cause) =>
-                Schema.is(FilesystemBrowseError)(cause)
+                isFilesystemBrowseError(cause)
                   ? cause
                   : new FilesystemBrowseError({
                       message: cause.message,
@@ -1401,7 +1419,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
             WS_METHODS.gitPreparePullRequestThread,
             gitWorkflow
               .preparePullRequestThread(input)
-              .pipe(Effect.tap(() => refreshGitStatus(input))),
+              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.vcsListRefs]: (input) =>
@@ -1451,11 +1469,12 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
         [WS_METHODS.terminalAttach]: (input) =>
           observeRpcStream(
             WS_METHODS.terminalAttach,
-            Stream.callback<TerminalAttachStreamEvent, TerminalError>((queue) =>
-              Effect.acquireRelease(
-                terminalManager.attachStream(input, (event) => Queue.offer(queue, event)),
-                (unsubscribe) => Effect.sync(unsubscribe),
-              ),
+            Stream.callback<TerminalAttachStreamEvent, TerminalError, ProcessRunner | Scope.Scope>(
+              (queue) =>
+                Effect.acquireRelease(
+                  terminalManager.attachStream(input, (event) => Queue.offer(queue, event)),
+                  (unsubscribe) => Effect.sync(unsubscribe),
+                ),
             ),
             { "rpc.aggregate": "terminal" },
           ),
@@ -1624,6 +1643,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           Effect.provide(
             makeWsRpcLayer(session).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
+              Layer.provideMerge(processRunnerLayer),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(
                 SourceControlDiscoveryLayer.layer.pipe(

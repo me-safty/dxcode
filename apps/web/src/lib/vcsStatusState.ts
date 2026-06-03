@@ -52,8 +52,13 @@ export function resetVcsStatusStateForTests(): void {
 export function useVcsStatus(target: VcsStatusTarget): VcsStatusState {
   const targetKey = getVcsStatusTargetKey(target);
   useEffect(
-    () => manager.watch({ environmentId: target.environmentId, cwd: target.cwd }),
-    [target.environmentId, target.cwd],
+    () =>
+      manager.watch({
+        environmentId: target.environmentId,
+        cwd: target.cwd,
+        executionTarget: target.executionTarget,
+      }),
+    [target.environmentId, target.cwd, target.executionTarget],
   );
 
   const state = useAtomValue(

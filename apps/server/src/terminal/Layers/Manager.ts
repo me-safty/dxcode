@@ -1635,7 +1635,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     const resolveWslShellCandidates = Effect.fn("terminal.resolveWslShellCandidates")(function* (
       target: WslTarget,
       cwd: string,
-    ): Effect.fn.Return<ShellCandidate[]> {
+    ): Effect.fn.Return<ShellCandidate[], never, ProcessRunner.ProcessRunner> {
       const shellResult = yield* runWslShell(target, cwd, 'printf "%s" "${SHELL:-}"', {
         timeoutMs: 3_000,
         operation: "terminal.resolveShell",
@@ -1941,7 +1941,8 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
     const openLocked = Effect.fn("terminal.openLocked")(function* (input: TerminalOpenInput) {
       const terminalId = input.terminalId;
-      yield* assertValidCwd(input.cwd);
+      const openExecutionTarget = input.executionTarget ?? localExecutionTarget();
+      yield* assertValidCwd(input.cwd, openExecutionTarget);
 
       const sessionKey = toSessionKey(input.threadId, terminalId);
       const existing = yield* getSession(input.threadId, terminalId);
@@ -1954,6 +1955,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           threadId: input.threadId,
           terminalId,
           cwd: input.cwd,
+          executionTarget: openExecutionTarget,
           worktreePath: input.worktreePath ?? null,
           status: "starting",
           pid: null,
@@ -1990,6 +1992,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             threadId: input.threadId,
             terminalId,
             cwd: input.cwd,
+            executionTarget: openExecutionTarget,
             ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
             cols,
             rows,
@@ -2042,6 +2045,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             threadId: input.threadId,
             terminalId,
             cwd: input.cwd,
+            executionTarget: liveSession.executionTarget,
             worktreePath: liveSession.worktreePath,
             cols: targetCols,
             rows: targetRows,
@@ -2070,10 +2074,8 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         input.threadId,
         Effect.gen(function* () {
           const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
-          const executionTarget = input.executionTarget ?? localExecutionTarget();
-          yield* assertValidCwd(input.cwd, executionTarget);
+          const executionTarget = localExecutionTarget();
 
-          const sessionKey = toSessionKey(input.threadId, terminalId);
           const existing = yield* getSession(input.threadId, terminalId);
 
           if (Option.isNone(existing)) {
@@ -2083,6 +2085,8 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
                 terminalId,
               });
             }
+
+            yield* assertValidCwd(input.cwd, executionTarget);
 
             return yield* openLocked({
               ...input,
@@ -2099,10 +2103,15 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           const targetRuntimeEnv = normalizedRuntimeEnv(input.env);
           const executionTargetChanged = !Equal.equals(session.executionTarget, executionTarget);
           const runtimeEnvChanged = !Equal.equals(session.runtimeEnv, targetRuntimeEnv);
+          const resolvedCwd = input.cwd ?? session.cwd;
 
-          if (session.cwd !== input.cwd || runtimeEnvChanged || executionTargetChanged) {
+          if (
+            (input.cwd !== undefined && session.cwd !== input.cwd) ||
+            runtimeEnvChanged ||
+            executionTargetChanged
+          ) {
             yield* stopProcess(session);
-            session.cwd = input.cwd;
+            session.cwd = resolvedCwd;
             session.executionTarget = executionTarget;
             session.worktreePath = input.worktreePath ?? null;
             session.runtimeEnv = targetRuntimeEnv;
@@ -2129,7 +2138,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               {
                 threadId: input.threadId,
                 terminalId,
-                cwd: input.cwd,
+                cwd: resolvedCwd,
                 executionTarget,
                 worktreePath: session.worktreePath,
                 cols: targetCols,

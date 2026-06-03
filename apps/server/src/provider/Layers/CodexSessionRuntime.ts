@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import { posix as posixPath } from "node:path";
 import {
   ApprovalRequestId,
@@ -44,6 +45,7 @@ import {
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import { buildWslExecArgs, runWsl, runWslShell, runWslShellCommand } from "../../wsl/WslCli.ts";
+import { ProcessRunner } from "../../processRunner.ts";
 import { isWslTarget, localExecutionTarget, type WslTarget } from "../../wsl/WslTarget.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
 
@@ -748,7 +750,7 @@ const WSL_HOME_PROBE_SCRIPT = [
 function resolveWslHomeDirectory(input: {
   readonly executionTarget: WslTarget;
   readonly command: string;
-}): Effect.Effect<string, CodexErrors.CodexAppServerError> {
+}): Effect.Effect<string, CodexErrors.CodexAppServerError, ProcessRunner> {
   const toSpawnError = (message: string, cause?: unknown) =>
     new CodexErrors.CodexAppServerSpawnError({
       command: input.command,
@@ -782,7 +784,7 @@ function resolveWslHomeDirectory(input: {
 function resolveWslCodexBinary(input: {
   readonly executionTarget: WslTarget;
   readonly requestedBinary: string;
-}): Effect.Effect<string, CodexErrors.CodexAppServerError> {
+}): Effect.Effect<string, CodexErrors.CodexAppServerError, ProcessRunner> {
   const toSpawnError = (message: string, cause?: unknown) =>
     new CodexErrors.CodexAppServerSpawnError({
       command: `${input.requestedBinary} app-server`,
@@ -895,7 +897,7 @@ function resolveWslCodexBinary(input: {
 function resolveWslRuntimeCwd(input: {
   readonly executionTarget: WslTarget;
   readonly cwd: string;
-}): Effect.Effect<string, CodexErrors.CodexAppServerError> {
+}): Effect.Effect<string, CodexErrors.CodexAppServerError, ProcessRunner> {
   const toSpawnError = (message: string, cause?: unknown) =>
     new CodexErrors.CodexAppServerSpawnError({
       command: "codex app-server",
@@ -937,7 +939,7 @@ export const makeCodexSessionRuntime = (
 ): Effect.Effect<
   CodexSessionRuntimeShape,
   CodexErrors.CodexAppServerError,
-  ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
+  ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | ProcessRunner | Scope.Scope
 > =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;

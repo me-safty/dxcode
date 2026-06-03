@@ -4,10 +4,12 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { describe, expect, it, vi } from "vitest";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { TerminalManager } from "../../terminal/Services/Manager.ts";
 import { ProjectSetupScriptRunner } from "../Services/ProjectSetupScriptRunner.ts";
 import { ProjectSetupScriptRunnerLive } from "./ProjectSetupScriptRunner.ts";
+import * as ProcessRunner from "../../processRunner.ts";
 
 const makeProject = (scripts: OrchestrationProject["scripts"]): OrchestrationProject => ({
   id: ProjectId.make("project-1"),
@@ -70,11 +72,13 @@ describe("ProjectSetupScriptRunner", () => {
     );
 
     const result = await Effect.runPromise(
-      runner.runForThread({
-        threadId: "thread-1",
-        projectId: "project-1",
-        worktreePath: "/repo/worktrees/a",
-      }),
+      runner
+        .runForThread({
+          threadId: "thread-1",
+          projectId: "project-1",
+          worktreePath: "/repo/worktrees/a",
+        })
+        .pipe(Effect.provide(ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer)))),
     );
 
     expect(result).toEqual({ status: "no-script" });
@@ -132,11 +136,13 @@ describe("ProjectSetupScriptRunner", () => {
     );
 
     const result = await Effect.runPromise(
-      runner.runForThread({
-        threadId: "thread-1",
-        projectCwd: "/repo/project",
-        worktreePath: "/repo/worktrees/a",
-      }),
+      runner
+        .runForThread({
+          threadId: "thread-1",
+          projectCwd: "/repo/project",
+          worktreePath: "/repo/worktrees/a",
+        })
+        .pipe(Effect.provide(ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer)))),
     );
 
     expect(result).toEqual({

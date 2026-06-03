@@ -1,6 +1,7 @@
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import type * as Effect from "effect/Effect";
+import { ProcessRunner } from "../../processRunner.ts";
 
 export interface ProjectSetupScriptRunnerResultNoScript {
   readonly status: "no-script";
@@ -35,7 +36,7 @@ export class ProjectSetupScriptRunnerError extends Data.TaggedError(
 export interface ProjectSetupScriptRunnerShape {
   readonly runForThread: (
     input: ProjectSetupScriptRunnerInput,
-  ) => Effect.Effect<ProjectSetupScriptRunnerResult, ProjectSetupScriptRunnerError>;
+  ) => Effect.Effect<ProjectSetupScriptRunnerResult, ProjectSetupScriptRunnerError, ProcessRunner>;
 }
 
 export class ProjectSetupScriptRunner extends Context.Service<

@@ -132,7 +132,7 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
       const threadId = ThreadId.make("thread-wsl-runtime");
 
       yield* directory.upsert({
-        provider: "codex",
+        provider: ProviderDriverKind.make("codex"),
         threadId,
         executionTarget: {
           kind: "wsl",
@@ -183,7 +183,9 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
           ${"codex"},
           ${"full-access"},
           ${"running"},
+          // @effect-diagnostics-next-line globalDate:off
           ${new Date().toISOString()},
+          // @effect-diagnostics-next-line preferSchemaOverJson:off
           ${JSON.stringify(JSON.stringify({ kind: "wsl", distroName: "Ubuntu" }))},
           ${null},
           ${null}

@@ -1442,8 +1442,9 @@ it.effect(
     const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
       Layer.provideMerge(
         Layer.succeed(RepositoryIdentityResolver, {
-          resolve: (cwd: string) =>
+          resolve: (input: string | { readonly cwd: string }) =>
             Effect.sync(() => {
+              const cwd = typeof input === "string" ? input : input.cwd;
               resolveCalls.push(cwd);
               return {
                 canonicalKey: `github.com/acme${cwd}`,

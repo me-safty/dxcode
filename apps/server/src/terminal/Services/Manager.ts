@@ -28,6 +28,7 @@ import {
 import type { PtyProcess } from "./PTY.ts";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
+import { ProcessRunner } from "../../processRunner.ts";
 
 export {
   TerminalCwdError,
@@ -80,7 +81,7 @@ export interface TerminalManagerShape {
    */
   readonly open: (
     input: TerminalOpenInput,
-  ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>;
+  ) => Effect.Effect<TerminalSessionSnapshot, TerminalError, ProcessRunner>;
 
   /**
    * Attach to a terminal and stream its initial snapshot followed by live events.
@@ -90,7 +91,7 @@ export interface TerminalManagerShape {
   readonly attachStream: (
     input: TerminalAttachInput,
     listener: (event: TerminalAttachStreamEvent) => Effect.Effect<void>,
-  ) => Effect.Effect<() => void, TerminalError>;
+  ) => Effect.Effect<() => void, TerminalError, ProcessRunner>;
 
   /**
    * Write input bytes to a terminal session.
@@ -114,7 +115,7 @@ export interface TerminalManagerShape {
    */
   readonly restart: (
     input: TerminalRestartInput,
-  ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>;
+  ) => Effect.Effect<TerminalSessionSnapshot, TerminalError, ProcessRunner>;
 
   /**
    * Close an active terminal session.

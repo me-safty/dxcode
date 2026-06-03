@@ -58,15 +58,7 @@ import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 const isModelSelection = Schema.is(ModelSelection);
-
-/**
- * Hook for tests that want to override the canonical event logger pulled
- * from `ProviderEventLoggers`. Production wiring leaves this undefined and
- * reads the logger off the tag.
- */
-export interface ProviderServiceLiveOptions {
-  readonly canonicalEventLogger?: EventNdjsonLogger;
-}
+const isExecutionTarget = Schema.is(ExecutionTarget);
 
 const ProviderRollbackConversationInput = Schema.Struct({
   threadId: ThreadId,
@@ -169,7 +161,7 @@ function readPersistedExecutionTarget(
     return undefined;
   }
   const raw = "executionTarget" in runtimePayload ? runtimePayload.executionTarget : undefined;
-  return Schema.is(ExecutionTarget)(raw) ? raw : undefined;
+  return isExecutionTarget(raw) ? raw : undefined;
 }
 
 const dieOnMissingBindingInstanceId = (
@@ -208,6 +200,10 @@ const correlateRuntimeEventWithInstance = (
   }
   return { ...event, providerInstanceId: source.instanceId };
 };
+
+interface ProviderServiceLiveOptions {
+  readonly canonicalEventLogger?: EventNdjsonLogger | undefined;
+}
 
 const makeProviderService = Effect.fn("makeProviderService")(function* (
   options?: ProviderServiceLiveOptions,
@@ -536,7 +532,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         "provider.instance_id": resolvedInstanceId,
         "provider.thread_id": threadId,
         "provider.runtime_mode": parsed.runtimeMode,
-        "provider.input_execution_target": input.executionTarget?.kind,
+        "provider.input_execution_target": parsed.executionTarget?.kind,
       });
       return yield* Effect.gen(function* () {
         const instanceInfo = yield* registry.getInstanceInfo(resolvedInstanceId);
