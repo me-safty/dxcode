@@ -251,6 +251,28 @@ export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
 export const codexAppServerArgs = (launchArgs?: string) =>
   launchArgs?.trim() ? ["app-server", ...launchArgs.trim().split(/\s+/)] : ["app-server"];
 
+export const codexExecLaunchArgs = (launchArgs?: string) => {
+  const args = launchArgs?.trim().split(/\s+/).filter(Boolean) ?? [];
+  const execArgs: Array<string> = [];
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === undefined) continue;
+    if (arg === "--strict-config" || arg.startsWith("--config=") || arg.startsWith("-c=")) {
+      execArgs.push(arg);
+    } else if (arg === "--config" || arg === "-c" || arg === "--enable" || arg === "--disable") {
+      execArgs.push(arg);
+      const value = args[index + 1];
+      if (value !== undefined) {
+        execArgs.push(value);
+        index++;
+      }
+    } else if (arg.startsWith("--enable=") || arg.startsWith("--disable=")) {
+      execArgs.push(arg);
+    }
+  }
+  return execArgs;
+};
+
 const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (input: {
   readonly binaryPath: string;
   readonly homePath?: string;

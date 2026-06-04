@@ -13,6 +13,7 @@ import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shar
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import { expandHomePath } from "../pathExpansion.ts";
+import { codexExecLaunchArgs } from "../provider/Layers/CodexProvider.ts";
 import { TextGenerationError } from "@t3tools/contracts";
 import {
   type BranchNameGenerationInput,
@@ -187,6 +188,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         codexConfig.binaryPath || "codex",
         [
           "exec",
+          ...codexExecLaunchArgs(codexConfig.launchArgs),
           "--ephemeral",
           "--skip-git-repo-check",
           "-s",
