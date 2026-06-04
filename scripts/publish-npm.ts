@@ -3,21 +3,25 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import process from "node:process";
 
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
-type VersionBump = "major" | "minor" | "patch";
+export type VersionBump = "major" | "minor" | "patch";
 
-interface Options {
-  readonly access: string;
+export interface PublishTargetVersionOptions {
   readonly bump: VersionBump;
+  readonly version: string | null;
+}
+
+interface Options extends PublishTargetVersionOptions {
+  readonly access: string;
   readonly dryRun: boolean;
   readonly otp: string | null;
   readonly provenance: boolean;
   readonly tag: string;
-  readonly version: string | null;
 }
 
 type MutableOptions = { -readonly [Key in keyof Options]: Options[Key] };
@@ -44,7 +48,7 @@ function usage(): string {
     "",
     "Flags:",
     "  --version <version>  Explicit npm package version to publish.",
-    "  --bump <kind>        Version bump when --version is omitted. Defaults to patch.",
+    "  --bump <kind>        Bump kind when the current version is already published. Defaults to patch.",
     "  --tag <tag>          npm dist-tag. Defaults to latest.",
     "  --access <access>    npm access. Defaults to public.",
     "  --provenance         Pass --provenance to npm publish.",
@@ -160,7 +164,7 @@ function parseOptions(args: ReadonlyArray<string>): Options {
   return options;
 }
 
-function normalizeVersion(version: string): string {
+export function normalizeVersion(version: string): string {
   return version.trim().replace(/^v/u, "");
 }
 
@@ -170,7 +174,7 @@ function assertValidVersion(version: string): void {
   }
 }
 
-function bumpVersion(currentVersion: string, bump: VersionBump): string {
+export function bumpVersion(currentVersion: string, bump: VersionBump): string {
   const normalized = normalizeVersion(currentVersion);
   const match = SEMVER_PATTERN.exec(normalized);
   if (!match?.groups) {
@@ -188,6 +192,13 @@ function bumpVersion(currentVersion: string, bump: VersionBump): string {
   if (bump === "major") return `${major + 1}.0.0`;
   if (bump === "minor") return `${major}.${minor + 1}.0`;
   return `${major}.${minor}.${patch + 1}`;
+}
+
+function readCurrentServerPackageName(): string {
+  if (typeof serverPackageJson.name !== "string" || serverPackageJson.name.length === 0) {
+    throw new Error("apps/server/package.json does not contain a string package name.");
+  }
+  return serverPackageJson.name;
 }
 
 function readCurrentServerVersion(): string {
@@ -235,6 +246,142 @@ const runCommand = Effect.fn("runCommand")(function* (
   }
 });
 
+interface CapturedCommandResult {
+  readonly exitCode: ChildProcessSpawner.ExitCode;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+type VersionPublishedLookup = (version: string) => Promise<boolean>;
+
+export interface PublishTargetVersionResolution {
+  readonly targetVersion: string;
+  readonly source: "explicit" | "current-unpublished" | "bumped-current-published";
+}
+
+const collectStreamAsString = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<string, E> =>
+  stream.pipe(
+    Stream.decodeText(),
+    Stream.runFold(
+      () => "",
+      (acc, chunk) => acc + chunk,
+    ),
+  );
+
+const captureCommand = Effect.fn("captureCommand")(function* (
+  command: string,
+  args: ReadonlyArray<string>,
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const child = yield* spawner.spawn(
+    ChildProcess.make(command, [...args], {
+      cwd: process.cwd(),
+      stderr: "pipe",
+      stdout: "pipe",
+      shell: process.platform === "win32",
+    }),
+  );
+
+  const [stdout, stderr, exitCode] = yield* Effect.all(
+    [collectStreamAsString(child.stdout), collectStreamAsString(child.stderr), child.exitCode],
+    { concurrency: "unbounded" },
+  );
+  return { exitCode, stdout, stderr };
+});
+
+export function parseNpmVersionsJson(json: string): ReadonlySet<string> {
+  const trimmed = json.trim();
+  if (trimmed.length === 0) {
+    throw new Error("npm view returned an empty versions response.");
+  }
+
+  const parsed = JSON.parse(trimmed) as unknown;
+  const versions = new Set<string>();
+
+  if (typeof parsed === "string") {
+    versions.add(parsed);
+    return versions;
+  }
+
+  if (Array.isArray(parsed)) {
+    for (const value of parsed) {
+      if (typeof value !== "string") {
+        throw new Error("npm view returned a non-string version value.");
+      }
+      versions.add(value);
+    }
+    return versions;
+  }
+
+  throw new Error("npm view returned an unexpected versions response.");
+}
+
+function isNpmPackageNotFound(result: CapturedCommandResult): boolean {
+  return /\bE404\b/u.test(`${result.stdout}\n${result.stderr}`);
+}
+
+export async function fetchPublishedNpmVersions(packageName: string): Promise<ReadonlySet<string>> {
+  const result = await Effect.runPromise(
+    captureCommand("npm", ["view", packageName, "versions", "--json"]).pipe(
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+  if (result.exitCode === 0) {
+    return parseNpmVersionsJson(result.stdout);
+  }
+
+  if (isNpmPackageNotFound(result)) {
+    return new Set();
+  }
+
+  const output = (result.stderr || result.stdout).trim();
+  throw new Error(
+    `Failed to check published npm versions for ${packageName}.${output ? `\n${output}` : ""}`,
+  );
+}
+
+export async function resolvePublishTargetVersion(
+  packageName: string,
+  currentVersion: string,
+  options: PublishTargetVersionOptions,
+  isVersionPublished: VersionPublishedLookup,
+): Promise<PublishTargetVersionResolution> {
+  const normalizedCurrentVersion = normalizeVersion(currentVersion);
+  assertValidVersion(normalizedCurrentVersion);
+
+  if (options.version !== null) {
+    const explicitVersion = normalizeVersion(options.version);
+    assertValidVersion(explicitVersion);
+    if (await isVersionPublished(explicitVersion)) {
+      throw new Error(
+        `${packageName}@${explicitVersion} is already published. Pass an unpublished --version value.`,
+      );
+    }
+    return { targetVersion: explicitVersion, source: "explicit" };
+  }
+
+  if (!(await isVersionPublished(normalizedCurrentVersion))) {
+    return { targetVersion: normalizedCurrentVersion, source: "current-unpublished" };
+  }
+
+  const bumpedVersion = bumpVersion(normalizedCurrentVersion, options.bump);
+  if (await isVersionPublished(bumpedVersion)) {
+    throw new Error(
+      `${packageName}@${bumpedVersion} is already published. Update apps/server/package.json or pass an unpublished --version value.`,
+    );
+  }
+
+  return { targetVersion: bumpedVersion, source: "bumped-current-published" };
+}
+
+async function createNpmVersionPublishedLookup(
+  packageName: string,
+): Promise<VersionPublishedLookup> {
+  const publishedVersions = await fetchPublishedNpmVersions(packageName);
+  return async (version) => publishedVersions.has(version);
+}
+
 async function run(
   command: string,
   args: ReadonlyArray<string>,
@@ -277,12 +424,16 @@ function promptHidden(prompt: string): Promise<string> {
           resolve(value.trim());
           return;
         }
-        if (char === "\u007f") {
-          value = value.slice(0, -1);
+        if (char === "\u007f" || char === "\b") {
+          if (value.length > 0) {
+            value = value.slice(0, -1);
+            stdout.write("\b \b");
+          }
           continue;
         }
         if (char >= " " && char !== "\u007f") {
           value += char;
+          stdout.write("*");
         }
       }
     };
@@ -296,14 +447,31 @@ function promptHidden(prompt: string): Promise<string> {
 
 async function main() {
   const options = parseOptions(process.argv.slice(2));
+  const packageName = readCurrentServerPackageName();
   const currentVersion = readCurrentServerVersion();
-  const targetVersion = normalizeVersion(
-    options.version ?? bumpVersion(currentVersion, options.bump),
+  const versionPublishedLookup = await createNpmVersionPublishedLookup(packageName);
+  const resolution = await resolvePublishTargetVersion(
+    packageName,
+    currentVersion,
+    options,
+    versionPublishedLookup,
   );
-  assertValidVersion(targetVersion);
+  const targetVersion = resolution.targetVersion;
+
+  if (resolution.source === "current-unpublished") {
+    process.stdout.write(
+      `${packageName}@${targetVersion} is not published yet; using current package version.\n`,
+    );
+  } else if (resolution.source === "bumped-current-published") {
+    process.stdout.write(
+      `${packageName}@${normalizeVersion(
+        currentVersion,
+      )} is already published; bumping to ${targetVersion}.\n`,
+    );
+  }
 
   process.stdout.write(
-    `Preparing salchi@${targetVersion} from current version ${currentVersion}.\n`,
+    `Preparing ${packageName}@${targetVersion} from current version ${currentVersion}.\n`,
   );
 
   await run("node", ["scripts/update-release-package-versions.ts", targetVersion]);
@@ -333,7 +501,9 @@ async function main() {
   await run("node", publishArgs, { redact: true });
 }
 
-main().catch((error: unknown) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((error: unknown) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  });
+}
