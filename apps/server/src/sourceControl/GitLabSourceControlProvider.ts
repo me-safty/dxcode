@@ -80,7 +80,7 @@ function parseGitLabAuth(input: SourceControlProviderDiscovery.SourceControlAuth
 function refineUnknownGitLabRemote(
   input: SourceControlProviderDiscovery.SourceControlUnknownRemoteRefinementInput,
 ) {
-  const host = input.context.provider.name;
+  const host = input.context.provider.name.toLowerCase();
   const authenticated = parseGitLabAuthStatusHosts(
     SourceControlProviderDiscovery.combinedAuthOutput(input.auth),
   ).some((entry) => entry.account !== null && entry.host === host);

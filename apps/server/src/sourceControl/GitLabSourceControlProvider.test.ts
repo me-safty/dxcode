@@ -137,6 +137,35 @@ self-hosted.example.test
   );
 });
 
+it("refines unknown GitLab remotes with mixed-case provider hosts", () => {
+  const provider = GitLabSourceControlProvider.discovery.refineUnknownRemote?.({
+    cwd: "/repo",
+    context: {
+      provider: {
+        kind: "unknown",
+        name: "Self-Hosted.Example.Test",
+        baseUrl: "https://Self-Hosted.Example.Test",
+      },
+      remoteName: "origin",
+      remoteUrl: "https://Self-Hosted.Example.Test/group/project.git",
+    },
+    auth: {
+      exitCode: ChildProcessSpawner.ExitCode(0),
+      stdout: `self-hosted.example.test
+  ✓ Logged in to self-hosted.example.test as gitlab-user
+  ✓ Token found: ******
+`,
+      stderr: "",
+    },
+  });
+
+  assert.deepStrictEqual(provider, {
+    kind: "gitlab",
+    name: "GitLab Self-Hosted",
+    baseUrl: "https://Self-Hosted.Example.Test",
+  });
+});
+
 it("parses authenticated GitLab auth status hosts with ports and single-label names", () => {
   assert.deepStrictEqual(
     parseGitLabAuthStatusHosts(`localhost:8080
