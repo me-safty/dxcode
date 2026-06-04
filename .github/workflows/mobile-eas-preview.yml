@@ -41,22 +41,21 @@ jobs:
           cache: true
           run-install: true
 
-      - name: Install EAS CLI
+      - name: Expose pnpm
         if: steps.expo-token.outputs.present == 'true'
         run: |
-          eas_cli_dir="$RUNNER_TEMP/eas-cli"
-          mkdir -p "$eas_cli_dir"
-          node --print "JSON.stringify({ packageManager: require('./package.json').packageManager }, null, 2)" > "$eas_cli_dir/package.json"
-          (
-            cd "$eas_cli_dir"
-            vp add eas-cli@latest --allow-build dtrace-provider
-          )
-          echo "$eas_cli_dir/node_modules/.bin" >> "$GITHUB_PATH"
-          "$eas_cli_dir/node_modules/.bin/eas" --version
           pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
           vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
           echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
           "$vp_pnpm_bin/pnpm" --version
+
+      - name: Setup EAS
+        if: steps.expo-token.outputs.present == 'true'
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+          packager: pnpm
 
       - name: Pull preview environment variables
         if: steps.expo-token.outputs.present == 'true'
@@ -66,10 +65,8 @@ jobs:
         run: eas env:pull preview --non-interactive
 
       - name: Deploy with fingerprint check
-        id: deploy
         if: steps.expo-token.outputs.present == 'true'
         uses: expo/expo-github-action/continuous-deploy-fingerprint@main
-        continue-on-error: true
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         with:
@@ -79,10 +76,3 @@ jobs:
           environment: preview
           working-directory: apps/mobile
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Deploy update without bytecode
-        if: steps.deploy.outcome == 'failure'
-        working-directory: apps/mobile
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas update --no-bytecode --auto --branch pr-${{ github.event.pull_request.number }} --platform all --non-interactive --json --environment preview

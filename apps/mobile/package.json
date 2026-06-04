@@ -96,7 +96,6 @@
     "uniwind": "^1.6.2"
   },
   "devDependencies": {
-    "@expo/cli": "56.1.13",
     "@types/react": "~19.2.0",
     "babel-preset-expo": "~56.0.0",
     "tailwindcss": "^4.0.0",
