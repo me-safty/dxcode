@@ -5,7 +5,7 @@ Experimental VS Code shell for T3 Code. It requires the T3 Code desktop app on t
 Build a local VSIX from the repository root:
 
 ```sh
-bun run --filter t3code-vscode package
+pnpm --filter t3code-vscode package
 ```
 
 Install the generated `.vsix` with VS Code's "Install from VSIX..." command, or from the repository root:
@@ -17,7 +17,7 @@ code --install-extension $(ls -t apps/vscode-extension/*.vsix | head -1)
 Build a platform-targeted VSIX:
 
 ```sh
-bun run --filter t3code-vscode package -- --target darwin-arm64 --out release-publish/t3code-vscode-darwin-arm64.vsix
+pnpm --filter t3code-vscode package -- --target darwin-arm64 --out release-publish/t3code-vscode-darwin-arm64.vsix
 ```
 
 Local packages use the temporary publisher id `t3tools` when `VSCE_PUBLISHER` is not set. For Marketplace publishing, the release workflow uses `@vscode/vsce` with a Visual Studio Marketplace Personal Access Token. Configure the GitHub repository variable `VSCE_PUBLISHER` with the Marketplace publisher id and the GitHub secret `VSCE_PAT` with a token that can publish for that publisher. Stable releases publish normal VSIX packages, and nightly/prerelease releases publish with `--pre-release`.
@@ -28,7 +28,7 @@ The VS Code extension does not start or own a T3 backend. The desktop app is a h
 
 The desktop backend writes a short-lived local advertisement under `<T3 home>/desktop-backends/advertisements/<backend-id>.json` after its HTTP readiness check passes. The advertisement includes the loopback HTTP endpoint, a short-lived one-time desktop bootstrap ticket, heartbeat/expiry timestamps, and a protocol version. Writers update only their own file by atomic replace, refresh every 10 seconds, expire after 30 seconds, remove the file on normal stop, and clean stale files opportunistically after a 15 minute grace period.
 
-The desktop process keeps the private startup desktop bootstrap token out of the advertisement. After readiness, desktop exchanges that private seed once for a desktop-control bearer session, then mints short-lived one-time VS Code tickets through `POST /api/auth/desktop-bootstrap-ticket`. Only desktop-control owner sessions can mint those tickets; VS Code bearer sessions created from advertised tickets cannot re-mint new tickets. The VS Code extension reads the advertisement, validates that the endpoint is loopback HTTP, waits briefly for `/.well-known/t3/environment`, exchanges the advertised one-time ticket for a bearer session through `/api/auth/bootstrap/bearer`, and injects the resulting bearer token through `window.t3HostBridge`. If a stale advertised ticket has already been consumed, the extension waits for the advertisement to refresh and retries with the next ticket. Reconnects and stops abort in-flight readiness, ticket-exchange, retry-sleep, and workspace-bootstrap work. If no live desktop advertisement exists, the VS Code extension fails instead of starting a fallback backend and shows a fallback webview with a reconnect button; launching the desktop app remains a manual user action.
+The desktop process keeps the private startup desktop bootstrap token out of the advertisement. After readiness, desktop exchanges that private seed once for a desktop-control bearer access token, then mints short-lived one-time VS Code tickets through `POST /api/auth/desktop-bootstrap-ticket`. Only bearer access token sessions for the `desktop-bootstrap` subject with `access:write` scope can mint those tickets; VS Code bearer sessions created from advertised tickets cannot re-mint new tickets. The VS Code extension reads the advertisement, validates that the endpoint is loopback HTTP, waits briefly for `/.well-known/t3/environment`, exchanges the advertised one-time ticket for a bearer session through `/api/auth/bootstrap/bearer`, and injects the resulting bearer token through `window.t3HostBridge`. If a stale advertised ticket has already been consumed, the extension waits for the advertisement to refresh and retries with the next ticket. Reconnects and stops abort in-flight readiness, ticket-exchange, retry-sleep, and workspace-bootstrap work. If no live desktop advertisement exists, the VS Code extension fails instead of starting a fallback backend and shows a fallback webview with a reconnect button; launching the desktop app remains a manual user action.
 
 The web app then sends authenticated HTTP requests with an `Authorization: Bearer ...` header and requests short-lived WebSocket tokens before opening `/ws`. This avoids relying on cross-origin cookie behavior between the VS Code webview origin and the loopback backend.
 
@@ -113,7 +113,7 @@ Implemented architecture:
 - The desktop backend writes desktop backend presence advertisements after readiness. Each advertisement includes a backend id, loopback HTTP endpoint, one-time desktop bootstrap ticket, heartbeat/expiry timestamps, and a protocol version.
 - Advertisement files live under `<T3 home>/desktop-backends/advertisements/<backend-id>.json`. Writers update only their own file by atomic replace, heartbeat it every 10 seconds, expire it after 30 seconds, best-effort remove it on backend stop, and opportunistically clean stale files after a 15 minute grace period.
 - The VS Code extension discovers the desktop backend from those advertisements, rejects non-loopback endpoints, exchanges the advertised one-time ticket for a bearer session, retries after stale-ticket `401` responses until the advertisement refreshes, and renders the web app against the desktop backend.
-- Desktop-control owner sessions are the only sessions allowed to call `POST /api/auth/desktop-bootstrap-ticket`. Tickets minted for VS Code are `desktop-bootstrap` one-time pairing credentials; expired `desktop-bootstrap` pairing links are cleaned during ticket issuance so repeated desktop heartbeats do not leave an unbounded table behind.
+- Desktop-control bearer access token sessions for the `desktop-bootstrap` subject with `access:write` scope are the only sessions allowed to call `POST /api/auth/desktop-bootstrap-ticket`. Tickets minted for VS Code are `desktop-bootstrap` one-time pairing credentials; expired `desktop-bootstrap` pairing links are cleaned during ticket issuance so repeated desktop heartbeats do not leave an unbounded table behind.
 - The VS Code extension writes host MCP advertisements for its editor-owned MCP socket. Desktop provider startup discovers those advertisements by workspace root and injects the matching endpoint into provider-native MCP config.
 - The public LAN/local-connection API remains the only remote-client surface. Remote clients continue to connect to desktop normally and must not call VS Code MCP sockets directly.
 
@@ -362,10 +362,10 @@ Implemented so far:
   - uses `VSCE_PUBLISHER` as the required GitHub repository variable for the Marketplace publisher id
   - uses `VSCE_PAT` as the required GitHub secret for Marketplace auth
 - Verified:
-  - `bun fmt`
-  - `bun lint` (passes with existing unrelated warnings)
-  - `bun typecheck`
-  - `bun run --filter t3code-vscode package`
+  - `pnpm exec vp check`
+  - `pnpm exec vp run typecheck`
+  - `pnpm run test`
+  - `pnpm --filter t3code-vscode package`
   - manual desktop-required fallback/reconnect smoke test
 
 Deferred until there is a concrete UX need:
@@ -873,7 +873,7 @@ Decision: ignore extension VSIX files and extension build outputs.
 Reasoning:
 
 - The VSIX and `dist` content are generated artifacts.
-- The package can be rebuilt from source with `bun run --filter t3code-vscode package`.
+- The package can be rebuilt from source with `pnpm --filter t3code-vscode package`.
 - Keeping generated assets out of git keeps the extension source package reviewable.
 
 ### 2026-05-14: Share T3 Code Client Settings Through T3 Home
