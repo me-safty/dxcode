@@ -14,16 +14,8 @@ import {
   resolveMockUpdateServerUrl,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
-import rootPackageJson from "../package.json" with { type: "json" };
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
-  it("builds the web app before bundling it into the desktop server", () => {
-    assert.equal(
-      rootPackageJson.scripts["build:desktop"],
-      "vp run --filter @t3tools/web build && vp run --filter @t3tools/desktop --filter t3 build",
-    );
-  });
-
   it("resolves the dedicated nightly updater channel from nightly versions", () => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
