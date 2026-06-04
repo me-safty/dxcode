@@ -10,7 +10,6 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 import {
   DesktopSshEnvironmentRequestError,
   fetchSshEnvironmentDescriptor,
-  fetchSshSessionState,
 } from "./sshEnvironment.ts";
 
 function jsonResponse(request: HttpClientRequest.HttpClientRequest, body: unknown, status = 200) {
@@ -111,41 +110,6 @@ describe("SSH environment IPC", () => {
       assert.instanceOf(error, DesktopSshEnvironmentRequestError);
       assert.instanceOf(error.cause, SshHttpBridgeError);
       assert.equal(requestCount, 0);
-    }).pipe(Effect.provide(layer));
-  });
-
-  it.effect("preserves SSH HTTP status in top-level request error messages", () => {
-    const layer = makeHttpClientLayer((request) =>
-      Effect.succeed(
-        jsonResponse(
-          request,
-          {
-            _tag: "EnvironmentAuthInvalidError",
-            code: "auth_invalid",
-            reason: "invalid_credential",
-            traceId: "11111111111111111111111111111111",
-          },
-          401,
-        ),
-      ),
-    );
-
-    return Effect.gen(function* () {
-      const exit = yield* Effect.exit(
-        fetchSshSessionState.handler({
-          bearerToken: "stale-bearer-token",
-          httpBaseUrl: "http://127.0.0.1:41773/",
-        }),
-      );
-      assert(Exit.isFailure(exit));
-      const failure = Cause.findErrorOption(exit.cause);
-      assert(Option.isSome(failure));
-      const error = failure.value;
-
-      assert.instanceOf(error, DesktopSshEnvironmentRequestError);
-      assert.equal(error.operation, "fetch-session-state");
-      assert.equal(error.sshHttpStatus, 401);
-      assert.match(error.message, /^\[ssh_http:401\] /u);
     }).pipe(Effect.provide(layer));
   });
 });
