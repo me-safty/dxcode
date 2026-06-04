@@ -1,4 +1,7 @@
-import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
+import {
+  serializeComposerMentionPath,
+  splitPromptIntoComposerSegments,
+} from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "skill";
@@ -54,7 +57,7 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
 
   for (const segment of segments) {
     if (segment.type === "mention") {
-      const expandedLength = segment.path.length + 1;
+      const expandedLength = serializeComposerMentionPath(segment.path).length + 1;
       if (remaining <= 1) {
         return expandedCursor + (remaining === 0 ? 0 : expandedLength);
       }
@@ -142,7 +145,7 @@ export function collapseExpandedComposerCursor(text: string, cursorInput: number
 
   for (const segment of segments) {
     if (segment.type === "mention") {
-      const expandedLength = segment.path.length + 1;
+      const expandedLength = serializeComposerMentionPath(segment.path).length + 1;
       if (remaining === 0) {
         return collapsedCursor;
       }
@@ -299,7 +302,7 @@ export function resolvePathMentionInsertion(
 
   const cursor = clampCursor(text, cursorInput);
   const needsLeadingSpace = cursor > 0 && !isWhitespace(text[cursor - 1] ?? "");
-  const replacement = `${needsLeadingSpace ? " " : ""}@${mentionPath} `;
+  const replacement = `${needsLeadingSpace ? " " : ""}@${serializeComposerMentionPath(mentionPath)} `;
   const rangeEnd = text[cursor] === " " ? cursor + 1 : cursor;
   const next = replaceTextRange(text, cursor, rangeEnd, replacement);
   return {

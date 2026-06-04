@@ -69,6 +69,7 @@ import {
 import { $shouldUseNativeComposerBackspace, canUseBeforeInput } from "~/composerIosBackspace";
 import {
   selectionTouchesMentionBoundary,
+  serializeComposerMentionPath,
   splitPromptIntoComposerSegments,
 } from "~/composer-editor-mentions";
 import { isIosWebkit } from "~/env";
@@ -214,7 +215,7 @@ class ComposerMentionNode extends DecoratorNode<React.ReactElement> {
   }
 
   override getTextContent(): string {
-    return `@${this.__path}`;
+    return `@${serializeComposerMentionPath(this.__path)}`;
   }
 
   override isInline(): true {

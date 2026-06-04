@@ -47,6 +47,7 @@ import {
   resolvePathMentionInsertion,
   replaceTextRange,
 } from "../../composer-logic";
+import { serializeComposerMentionPath } from "../../composer-editor-mentions";
 import {
   COMPOSER_NATIVE_INPUT_SETTLE_MS,
   type ComposerNativeInputChangeMetadata,
@@ -1633,7 +1634,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
       if (item.type === "path") {
-        const replacement = `@${item.path} `;
+        const replacement = `@${serializeComposerMentionPath(item.path)} `;
         const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
           snapshot.value,
           trigger.rangeEnd,
