@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { parsePullRequestReference } from "./pullRequestReference";
 
@@ -55,6 +55,10 @@ describe("parsePullRequestReference", () => {
 
   it("accepts az repos pr checkout commands with raw numbers", () => {
     expect(parsePullRequestReference("az repos pr checkout --id 42")).toBe("42");
+  });
+
+  it("accepts az repos pr checkout commands with equals-style ids", () => {
+    expect(parsePullRequestReference("az repos pr checkout --id=42")).toBe("42");
   });
 
   it("accepts az repos pr checkout commands with extra flags", () => {
