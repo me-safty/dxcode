@@ -67,3 +67,18 @@ agents.
   `.repos/` matches the installed dependency version.
 - When writing Effect code, read `.repos/effect-smol/LLMS.md` first and inspect `.repos/effect-smol/` for
   examples of idiomatic usage, tests, module structure, and API design.
+
+## This Fork's Scope
+
+This repository is a fork of T3 Code. The upstream product is still the base web UI and provider runtime for coding agents, but our work in this fork is primarily an orchestration layer built on top of it.
+
+The main owned surface area is the external intake system: Slack intake, support-email intake, external thread linking, task worktree setup, assistant-message relay, and orchestration that starts or continues T3 threads from outside the web UI.
+
+Prefer building new behavior at the orchestrator/external-intake boundary instead of changing core T3 Code internals. Treat upstream T3 internals as a platform dependency: touch them only when needed to expose a clean hook, fix a boundary bug, or keep the orchestrator integration reliable. Keep changes scoped so future upstream syncs stay manageable.
+
+Key areas for this fork:
+
+- `apps/server/src/externalIntake`: Slack/email intake, external-thread mapping, relay rules, and intake-specific agent prompts.
+- `apps/server/src/orchestration`: domain commands/events/projections that connect intake, provider runtime, and UI state.
+- `apps/server/src/provider`: provider adapters and session runtime boundaries; change these carefully and only when orchestration requires it.
+- `apps/web`: UI surfaces for observing and steering orchestrated threads; avoid moving orchestration policy into client-only state.
