@@ -139,7 +139,14 @@ export function listWslDistributions(): Effect.Effect<WslDistribution[], WslCliE
         execFile(
           "wsl.exe",
           ["--list", "--verbose"],
-          { timeout: DEFAULT_TIMEOUT_MS },
+          {
+            timeout: DEFAULT_TIMEOUT_MS,
+            // `wsl.exe` writes stdout as UTF-16 LE on Windows. Without this
+            // hint Node returns a Buffer and the parser sees garbage
+            // (NUL-stripped multibyte), causing the RPC to return an empty
+            // distribution list even when distros are installed.
+            encoding: "utf16le",
+          },
           (error, stdout) => {
             if (error) {
               reject(error);
