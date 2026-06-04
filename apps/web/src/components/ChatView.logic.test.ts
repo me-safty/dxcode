@@ -81,6 +81,7 @@ describe("resolveProviderRefreshTarget", () => {
   it("uses the active provider instance when it matches the target driver", () => {
     expect(
       resolveProviderRefreshTarget({
+        activeProviderInstanceId: ProviderInstanceId.make("codex_work"),
         activeProviderStatus: {
           driver: codexDriver,
           instanceId: ProviderInstanceId.make("codex_work"),
@@ -94,9 +95,25 @@ describe("resolveProviderRefreshTarget", () => {
     });
   });
 
-  it("falls back to the selected provider default instance when active status is stale", () => {
+  it("uses the active instance with a default fallback when active status is stale", () => {
     expect(
       resolveProviderRefreshTarget({
+        activeProviderInstanceId: ProviderInstanceId.make("codex_deleted"),
+        activeProviderStatus: null,
+        selectedProvider: codexDriver,
+        targetDriver: codexDriver,
+      }),
+    ).toEqual({
+      driver: codexDriver,
+      fallbackInstanceId: ProviderInstanceId.make("codex"),
+      instanceId: ProviderInstanceId.make("codex_deleted"),
+    });
+  });
+
+  it("uses the selected provider default instance when no active instance is known", () => {
+    expect(
+      resolveProviderRefreshTarget({
+        activeProviderInstanceId: null,
         activeProviderStatus: null,
         selectedProvider: codexDriver,
         targetDriver: codexDriver,
@@ -110,6 +127,7 @@ describe("resolveProviderRefreshTarget", () => {
   it("does not target non-matching providers", () => {
     expect(
       resolveProviderRefreshTarget({
+        activeProviderInstanceId: null,
         activeProviderStatus: null,
         selectedProvider: claudeDriver,
         targetDriver: codexDriver,

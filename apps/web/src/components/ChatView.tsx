@@ -1865,6 +1865,7 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     if (!activeWorkspaceRoot) return;
     const refreshTarget = resolveProviderRefreshTarget({
+      activeProviderInstanceId,
       activeProviderStatus,
       selectedProvider,
       targetDriver: CODEX_PROVIDER_DRIVER,
@@ -1877,18 +1878,40 @@ export default function ChatView(props: ChatViewProps) {
     const api = readLocalApi();
     if (!api) return;
     codexWorkspaceProviderRefreshKeyRef.current = refreshKey;
-    void api.server
-      .refreshProviders({
-        instanceId: refreshTarget.instanceId,
-        cwd: activeWorkspaceRoot,
-      })
-      .catch((error: unknown) => {
+    void (async () => {
+      try {
+        const result = await api.server.refreshProviders({
+          instanceId: refreshTarget.instanceId,
+          cwd: activeWorkspaceRoot,
+        });
+        if (!refreshTarget.fallbackInstanceId) return;
+        if (result.providers.some((provider) => provider.instanceId === refreshTarget.instanceId)) {
+          return;
+        }
+        if (codexWorkspaceProviderRefreshKeyRef.current !== refreshKey) return;
+
+        const fallbackRefreshKey = `${environmentId}\u0000${refreshTarget.fallbackInstanceId}\u0000${activeWorkspaceRoot}`;
+        codexWorkspaceProviderRefreshKeyRef.current = fallbackRefreshKey;
+        try {
+          await api.server.refreshProviders({
+            instanceId: refreshTarget.fallbackInstanceId,
+            cwd: activeWorkspaceRoot,
+          });
+        } catch (fallbackError: unknown) {
+          if (codexWorkspaceProviderRefreshKeyRef.current === fallbackRefreshKey) {
+            codexWorkspaceProviderRefreshKeyRef.current = null;
+          }
+          console.warn("Failed to refresh Codex provider for active workspace", fallbackError);
+        }
+      } catch (error: unknown) {
         if (codexWorkspaceProviderRefreshKeyRef.current === refreshKey) {
           codexWorkspaceProviderRefreshKeyRef.current = null;
         }
         console.warn("Failed to refresh Codex provider for active workspace", error);
-      });
+      }
+    })();
   }, [
+    activeProviderInstanceId,
     activeProviderStatus?.driver,
     activeProviderStatus?.instanceId,
     activeWorkspaceRoot,

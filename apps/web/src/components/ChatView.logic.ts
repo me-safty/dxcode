@@ -75,18 +75,41 @@ export function shouldWriteThreadErrorToCurrentServerThread(input: {
   );
 }
 
+export type ProviderRefreshTarget = {
+  readonly instanceId: ProviderInstanceId;
+  readonly driver: ProviderDriverKind;
+  readonly fallbackInstanceId?: ProviderInstanceId;
+};
+
 export function resolveProviderRefreshTarget(input: {
+  activeProviderInstanceId: ProviderInstanceId | null | undefined;
   activeProviderStatus: Pick<ServerProvider, "driver" | "instanceId"> | null | undefined;
   selectedProvider: ProviderDriverKind;
   targetDriver: ProviderDriverKind;
-}): { readonly instanceId: ProviderInstanceId; readonly driver: ProviderDriverKind } | null {
+}): ProviderRefreshTarget | null {
   const driver = input.activeProviderStatus?.driver ?? input.selectedProvider;
   if (driver !== input.targetDriver) {
     return null;
   }
+  const defaultInstanceId = defaultInstanceIdForDriver(driver);
+  if (input.activeProviderStatus) {
+    return {
+      driver,
+      instanceId: input.activeProviderStatus.instanceId,
+    };
+  }
+  if (input.activeProviderInstanceId) {
+    return {
+      driver,
+      instanceId: input.activeProviderInstanceId,
+      ...(input.activeProviderInstanceId !== defaultInstanceId
+        ? { fallbackInstanceId: defaultInstanceId }
+        : {}),
+    };
+  }
   return {
     driver,
-    instanceId: input.activeProviderStatus?.instanceId ?? defaultInstanceIdForDriver(driver),
+    instanceId: defaultInstanceId,
   };
 }
 
