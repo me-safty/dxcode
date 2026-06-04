@@ -5,6 +5,7 @@ import {
   type ProviderApprovalDecision,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  type ProviderUserInputAnswers,
   ProviderDriverKind,
   ProviderInstanceId,
   RuntimeRequestId,
@@ -56,6 +57,14 @@ import {
   makeGrokAcpRuntime,
   resolveGrokAcpBaseModelId,
 } from "../acp/GrokAcpSupport.ts";
+import {
+  extractXAiAskUserQuestions,
+  extractXAiExitPlanMarkdown,
+  makeXAiAskUserQuestionResponse,
+  makeXAiExitPlanModeResponse,
+  XAiAskUserQuestionRequest,
+  XAiExitPlanModeRequest,
+} from "../acp/XAiAcpExtension.ts";
 import { type GrokAdapterShape } from "../Services/GrokAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
@@ -73,11 +82,15 @@ export interface GrokAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
-  readonly instanceId?: typeof ProviderInstanceId.Type;
+  readonly instanceId?: ProviderInstanceId;
 }
 
 interface PendingApproval {
   readonly decision: Deferred.Deferred<ProviderApprovalDecision>;
+}
+
+interface PendingUserInput {
+  readonly answers: Deferred.Deferred<ProviderUserInputAnswers>;
 }
 
 interface GrokSessionContext {
@@ -88,6 +101,7 @@ interface GrokSessionContext {
   readonly acp: AcpSessionRuntimeShape;
   notificationFiber: Fiber.Fiber<void, never> | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
+  readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
@@ -101,6 +115,16 @@ function settlePendingApprovalsAsCancelled(
   return Effect.forEach(
     Array.from(pendingApprovals.values()),
     (pending) => Deferred.succeed(pending.decision, "cancel").pipe(Effect.ignore),
+    { discard: true },
+  );
+}
+
+function settlePendingUserInputsAsEmptyAnswers(
+  pendingUserInputs: ReadonlyMap<ApprovalRequestId, PendingUserInput>,
+): Effect.Effect<void> {
+  return Effect.forEach(
+    Array.from(pendingUserInputs.values()),
+    (pending) => Deferred.succeed(pending.answers, {}).pipe(Effect.ignore),
     { discard: true },
   );
 }
@@ -287,6 +311,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         if (ctx.stopped) return;
         ctx.stopped = true;
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
+        yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
         if (ctx.notificationFiber) {
           yield* Fiber.interrupt(ctx.notificationFiber);
         }
@@ -329,6 +354,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           }
 
           const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
+          const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
           const sessionScope = yield* Scope.make("sequential");
           let sessionScopeTransferred = false;
           yield* Effect.addFinalizer(() =>
@@ -363,6 +389,82 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             ),
           );
           const started = yield* Effect.gen(function* () {
+            yield* Effect.forEach(
+              ["x.ai/ask_user_question", "_x.ai/ask_user_question"] as const,
+              (method) =>
+                acp.handleExtRequest(method, XAiAskUserQuestionRequest, (params) =>
+                  mapAcpCallbackFailure(
+                    Effect.gen(function* () {
+                      yield* logNative(input.threadId, method, params);
+                      const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
+                      const runtimeRequestId = RuntimeRequestId.make(requestId);
+                      const answers = yield* Deferred.make<ProviderUserInputAnswers>();
+                      pendingUserInputs.set(requestId, { answers });
+                      yield* offerRuntimeEvent({
+                        type: "user-input.requested",
+                        ...(yield* makeEventStamp()),
+                        provider: PROVIDER,
+                        threadId: input.threadId,
+                        turnId: sessions.get(input.threadId)?.activeTurnId,
+                        requestId: runtimeRequestId,
+                        payload: { questions: extractXAiAskUserQuestions(params) },
+                        raw: {
+                          source: "acp.grok.extension",
+                          method,
+                          payload: params,
+                        },
+                      });
+                      const resolved = yield* Deferred.await(answers);
+                      pendingUserInputs.delete(requestId);
+                      yield* offerRuntimeEvent({
+                        type: "user-input.resolved",
+                        ...(yield* makeEventStamp()),
+                        provider: PROVIDER,
+                        threadId: input.threadId,
+                        turnId: sessions.get(input.threadId)?.activeTurnId,
+                        requestId: runtimeRequestId,
+                        payload: { answers: resolved },
+                        raw: {
+                          source: "acp.grok.extension",
+                          method,
+                          payload: params,
+                        },
+                      });
+                      return makeXAiAskUserQuestionResponse(resolved);
+                    }),
+                  ),
+                ),
+              { discard: true },
+            );
+            yield* Effect.forEach(
+              ["x.ai/exit_plan_mode", "_x.ai/exit_plan_mode"] as const,
+              (method) =>
+                acp.handleExtRequest(method, XAiExitPlanModeRequest, (params) =>
+                  mapAcpCallbackFailure(
+                    Effect.gen(function* () {
+                      yield* logNative(input.threadId, method, params);
+                      const planMarkdown = extractXAiExitPlanMarkdown(params)?.trim();
+                      if (planMarkdown) {
+                        yield* offerRuntimeEvent({
+                          type: "turn.proposed.completed",
+                          ...(yield* makeEventStamp()),
+                          provider: PROVIDER,
+                          threadId: input.threadId,
+                          turnId: sessions.get(input.threadId)?.activeTurnId,
+                          payload: { planMarkdown },
+                          raw: {
+                            source: "acp.grok.extension",
+                            method,
+                            payload: params,
+                          },
+                        });
+                      }
+                      return makeXAiExitPlanModeResponse();
+                    }),
+                  ),
+                ),
+              { discard: true },
+            );
             yield* acp.handleRequestPermission((params) =>
               mapAcpCallbackFailure(
                 Effect.gen(function* () {
@@ -470,6 +572,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             acp,
             notificationFiber: undefined,
             pendingApprovals,
+            pendingUserInputs,
             turns: [],
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
@@ -733,6 +836,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
+        yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
         yield* Effect.ignore(
           ctx.acp.cancel.pipe(
             Effect.mapError((error) =>
@@ -760,14 +864,22 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         yield* Deferred.succeed(pending.decision, decision);
       });
 
-    const respondToUserInput: GrokAdapterShape["respondToUserInput"] = (threadId, requestId) =>
+    const respondToUserInput: GrokAdapterShape["respondToUserInput"] = (
+      threadId,
+      requestId,
+      answers,
+    ) =>
       Effect.gen(function* () {
-        yield* requireSession(threadId);
-        return yield* new ProviderAdapterRequestError({
-          provider: PROVIDER,
-          method: "user-input/respond",
-          detail: `Grok has no pending user-input request: ${requestId}`,
-        });
+        const ctx = yield* requireSession(threadId);
+        const pending = ctx.pendingUserInputs.get(requestId);
+        if (!pending) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "_x.ai/ask_user_question",
+            detail: `Unknown pending user-input request: ${requestId}`,
+          });
+        }
+        yield* Deferred.succeed(pending.answers, answers);
       });
 
     const readThread: GrokAdapterShape["readThread"] = (threadId) =>

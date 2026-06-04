@@ -274,6 +274,108 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
     }),
   );
 
+  it.effect("handles xAI ask_user_question extension requests", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-xai-ask-user-question");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ T3_ACP_EMIT_XAI_ASK_USER_QUESTION: "1" }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const requested =
+        yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "user-input.requested" }>>();
+      const resolved =
+        yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "user-input.resolved" }>>();
+
+      const eventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) => {
+        if (String(event.threadId) !== String(threadId)) {
+          return Effect.void;
+        }
+        if (event.type === "user-input.requested") {
+          return Deferred.succeed(requested, event).pipe(Effect.ignore);
+        }
+        if (event.type === "user-input.resolved") {
+          return Deferred.succeed(resolved, event).pipe(Effect.ignore);
+        }
+        return Effect.void;
+      }).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+
+      const sendTurnFiber = yield* adapter
+        .sendTurn({ threadId, input: "ask before continuing", attachments: [] })
+        .pipe(Effect.forkChild);
+
+      const requestedEvent = yield* Deferred.await(requested);
+      assert.equal(requestedEvent.payload.questions.length, 1);
+      assert.equal(requestedEvent.payload.questions[0]?.id, "Which scope should Grok use?");
+      assert.equal(requestedEvent.payload.questions[0]?.question, "Which scope should Grok use?");
+      assert.equal(requestedEvent.raw?.method, "_x.ai/ask_user_question");
+
+      yield* adapter.respondToUserInput(
+        threadId,
+        ApprovalRequestId.make(String(requestedEvent.requestId)),
+        {
+          "Which scope should Grok use?": "Workspace",
+        },
+      );
+
+      const resolvedEvent = yield* Deferred.await(resolved);
+      assert.deepEqual(resolvedEvent.payload.answers, {
+        "Which scope should Grok use?": "Workspace",
+      });
+      yield* Fiber.join(sendTurnFiber);
+
+      yield* Fiber.interrupt(eventsFiber);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("handles xAI exit_plan_mode extension requests", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-xai-exit-plan-mode");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ T3_ACP_EMIT_XAI_EXIT_PLAN_MODE: "1" }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const proposedPlan =
+        yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "turn.proposed.completed" }>>();
+
+      const eventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) => {
+        if (
+          String(event.threadId) !== String(threadId) ||
+          event.type !== "turn.proposed.completed"
+        ) {
+          return Effect.void;
+        }
+        return Deferred.succeed(proposedPlan, event).pipe(Effect.ignore);
+      }).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({ threadId, input: "propose a plan", attachments: [] });
+
+      const event = yield* Deferred.await(proposedPlan);
+      assert.equal(
+        event.payload.planMarkdown,
+        "# Grok plan\n\n- Inspect the workspace\n- Apply the fix",
+      );
+      assert.equal(event.raw?.method, "_x.ai/exit_plan_mode");
+
+      yield* Fiber.interrupt(eventsFiber);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("continues streaming events when native notification logging fails", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-native-log-failure");
