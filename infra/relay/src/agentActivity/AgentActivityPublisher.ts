@@ -14,9 +14,11 @@ import * as AgentActivityRows from "./AgentActivityRows.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as LiveActivities from "./LiveActivities.ts";
 import * as ApnsDeliveries from "./ApnsDeliveries.ts";
+import * as ResourceLimits from "../resourceLimits.ts";
 
 export type AgentActivityPublishError =
   | AgentActivityRows.AgentActivityRowUpsertPersistenceError
+  | ResourceLimits.ResourceQuotaExceeded
   | AgentActivityRows.AgentActivityRowDeletePersistenceError
   | AgentActivityRows.AgentActivityRowListPersistenceError
   | EnvironmentLinks.EnvironmentLinkUserListPersistenceError
