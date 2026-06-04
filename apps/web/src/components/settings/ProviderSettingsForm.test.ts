@@ -36,6 +36,24 @@ describe("ProviderSettingsForm helpers", () => {
     });
   });
 
+  it("derives DeepSeek settings fields including the secret API key", () => {
+    const deepseek = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("deepseek")];
+    expect(deepseek).toBeDefined();
+    expect(deepseek?.label).toBe("DeepSeek");
+
+    expect(deriveProviderSettingsFields(deepseek!).map((field) => field.key)).toEqual([
+      "apiKey",
+      "binaryPath",
+      "homePath",
+      "launchArgs",
+    ]);
+    expect(deriveProviderSettingsFields(deepseek!)[0]).toMatchObject({
+      key: "apiKey",
+      label: "API key",
+      control: "password",
+    });
+  });
+
   it("preserves unknown config keys while omitting empty configurable fields", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
     expect(opencode).toBeDefined();
@@ -52,6 +70,36 @@ describe("ProviderSettingsForm helpers", () => {
     );
 
     expect(next).toEqual({ forkOwned: 1 });
+  });
+
+  it("submits replacement password values as unredacted secrets", () => {
+    const deepseek = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("deepseek")];
+    expect(deepseek).toBeDefined();
+    const apiKey = deriveProviderSettingsFields(deepseek!).find((field) => field.key === "apiKey");
+    expect(apiKey).toBeDefined();
+
+    const next = nextProviderConfigWithFieldValue(
+      { apiKey: "", apiKeyRedacted: true, binaryPath: "claude" },
+      apiKey!,
+      "sk-new-secret",
+    );
+
+    expect(next).toEqual({ apiKey: "sk-new-secret", binaryPath: "claude" });
+  });
+
+  it("submits empty saved password values as explicit clears", () => {
+    const deepseek = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("deepseek")];
+    expect(deepseek).toBeDefined();
+    const apiKey = deriveProviderSettingsFields(deepseek!).find((field) => field.key === "apiKey");
+    expect(apiKey).toBeDefined();
+
+    const next = nextProviderConfigWithFieldValue(
+      { apiKey: "", apiKeyRedacted: true, binaryPath: "claude" },
+      apiKey!,
+      "",
+    );
+
+    expect(next).toEqual({ apiKey: "", apiKeyRedacted: false, binaryPath: "claude" });
   });
 
   it("reads non-string config values as blank strings", () => {

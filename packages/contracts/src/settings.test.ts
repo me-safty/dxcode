@@ -2,10 +2,16 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
 import { ProviderInstanceId } from "./providerInstance.ts";
-import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import {
+  DeepSeekSettings,
+  DEFAULT_SERVER_SETTINGS,
+  ServerSettings,
+  ServerSettingsPatch,
+} from "./settings.ts";
 
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+const decodeDeepSeekSettings = Schema.decodeSync(DeepSeekSettings);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
@@ -61,6 +67,30 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
         providerInstances: { "1bad": { driver: "codex" } },
       }),
     ).toThrow();
+  });
+});
+
+describe("DeepSeekSettings", () => {
+  it("decodes with Claude harness defaults", () => {
+    expect(decodeDeepSeekSettings({})).toEqual({
+      enabled: true,
+      apiKey: "",
+      binaryPath: "claude",
+      homePath: "",
+      customModels: [],
+      launchArgs: "",
+    });
+  });
+
+  it("is included in legacy server provider defaults", () => {
+    expect(decodeServerSettings({}).providers.deepseek).toEqual({
+      enabled: true,
+      apiKey: "",
+      binaryPath: "claude",
+      homePath: "",
+      customModels: [],
+      launchArgs: "",
+    });
   });
 });
 
