@@ -111,6 +111,16 @@ Relevant tests live in:
 
 - `apps/web/src/components/chat/ThreadConversationWidth.test.tsx`
 
+## VS Code Extension Work
+
+This branch also carries the VS Code extension work that is not assumed to exist on `main`. Treat the VS Code extension, its desktop-backed integration model, workspace-scoped webview behavior, host MCP bridge, release packaging, and related tests as part of this branch's customization set during upstream merges.
+
+The implementation details are intentionally kept in `apps/vscode-extension/IMPLEMENTATION.md` instead of being duplicated here. Unlike the other sections in this file, `CUSTOMIZED.md` should only preserve the merge-maintenance rule for this area: keep the extension work unless `main` has gained an equivalent VS Code extension architecture, then reconcile against the detailed implementation note.
+
+Primary reference:
+
+- `apps/vscode-extension/IMPLEMENTATION.md`
+
 ## Merge Guidance
 
 When merging from upstream, keep these local behaviors unless upstream has an equivalent implementation:
@@ -121,6 +131,7 @@ When merging from upstream, keep these local behaviors unless upstream has an eq
 4. Prompt and output display stays deduplicated in expanded subagent details.
 5. Empty subagent placeholder activities stay hidden.
 6. Chat conversation and composer surfaces default to no maximum width across all host types.
+7. VS Code extension work remains preserved as a local customization unless `main` has an equivalent implementation; use `apps/vscode-extension/IMPLEMENTATION.md` as the detailed source of truth.
 
 ## Retirement Criteria
 
