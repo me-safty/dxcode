@@ -200,7 +200,7 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
     .spawn(
       ChildProcess.make("ssh", args, {
         env: environment,
-        shell: process.platform === "win32",
+        shell: false,
         stdin: {
           stream: stdinStream(input.stdin),
           endOnDone: true,
