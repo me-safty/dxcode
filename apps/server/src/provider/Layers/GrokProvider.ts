@@ -35,6 +35,7 @@ const GROK_PRESENTATION = {
   displayName: "Grok",
   badgeLabel: "Early Access",
   showInteractionModeToggle: false,
+  requiresNewThreadForModelChange: true,
 } as const;
 const PROVIDER = ProviderDriverKind.make("grok");
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
