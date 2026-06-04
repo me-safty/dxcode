@@ -134,6 +134,40 @@ function verifyGitHubWebhookSignature(input: {
   }
 }
 
+function getHeaderValue(
+  headers: Readonly<Record<string, string | undefined>>,
+  target: string,
+) {
+  const normalizedTarget = target.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === normalizedTarget) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function parseResendSignatures(signatureHeader: string) {
+  const tokens = signatureHeader.split(/[\s,]+/).map((token) => token.trim()).filter(Boolean);
+  const signatures: string[] = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token === "v1" && i + 1 < tokens.length) {
+      signatures.push(tokens[i + 1] ?? "");
+      i += 1;
+      continue;
+    }
+    if (token.startsWith("v1=")) {
+      signatures.push(token.slice("v1=".length));
+      continue;
+    }
+    if (token.startsWith("v1,")) {
+      signatures.push(token.slice("v1,".length));
+    }
+  }
+  return signatures.filter(Boolean);
+}
+
 function secretBytes(secret: string) {
   return Buffer.from(
     secret.startsWith("whsec_") ? secret.slice("whsec_".length) : secret,
@@ -149,23 +183,16 @@ function verifyResendWebhookSignature(input: {
   if (secret === undefined) {
     return;
   }
-  const id = input.headers["svix-id"];
-  const timestamp = input.headers["svix-timestamp"];
-  const signatureHeader = input.headers["svix-signature"];
+  const id = getHeaderValue(input.headers, "svix-id");
+  const timestamp = getHeaderValue(input.headers, "svix-timestamp");
+  const signatureHeader = getHeaderValue(input.headers, "svix-signature");
   if (id === undefined || timestamp === undefined || signatureHeader === undefined) {
     throw new Error("Missing Resend webhook signature headers.");
   }
   const expected = createHmac("sha256", secretBytes(secret))
     .update(`${id}.${timestamp}.${input.body}`)
     .digest();
-  const signatures = signatureHeader
-    .split(" ")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .flatMap((part) => {
-      const [version, signature] = part.split(",");
-      return version === "v1" && signature ? [signature] : [];
-    });
+  const signatures = parseResendSignatures(signatureHeader);
   for (const signature of signatures) {
     const actual = Buffer.from(signature, "base64");
     if (actual.byteLength === expected.byteLength && timingSafeEqual(actual, expected)) {
