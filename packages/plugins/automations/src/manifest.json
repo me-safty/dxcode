@@ -1,0 +1,44 @@
+{
+  "id": "t3.automations",
+  "name": "Automations",
+  "version": "0.1.0",
+  "routes": [
+    {
+      "id": "main",
+      "label": "Automations"
+    }
+  ],
+  "nav": [
+    {
+      "id": "main",
+      "label": "Automations",
+      "routeId": "main"
+    }
+  ],
+  "commands": [
+    {
+      "name": "automations.rules.list",
+      "label": "List automation rules"
+    },
+    {
+      "name": "automations.rules.create",
+      "label": "Create automation rule"
+    },
+    {
+      "name": "automations.rules.update",
+      "label": "Update automation rule"
+    },
+    {
+      "name": "automations.rules.delete",
+      "label": "Delete automation rule"
+    },
+    {
+      "name": "automations.rules.runNow",
+      "label": "Run automation rule now"
+    },
+    {
+      "name": "automations.runs.listRecent",
+      "label": "List automation runs"
+    }
+  ]
+}

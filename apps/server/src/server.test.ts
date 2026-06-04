@@ -80,6 +80,7 @@ import {
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
+import { PluginRegistryLive } from "./plugins/PluginRegistry.ts";
 import {
   ProviderRegistry,
   type ProviderRegistryShape,
@@ -703,6 +704,7 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.checkpointDiffQuery,
         }),
       ),
+      Layer.provide(PluginRegistryLive),
     );
 
     const appLayer = servedRoutesLayer.pipe(

@@ -253,6 +253,15 @@ function createMockEnvironmentApi(input: {
     vcs: {} as EnvironmentApi["vcs"],
     git: {} as EnvironmentApi["git"],
     review: {} as EnvironmentApi["review"],
+    plugins: {
+      list: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["plugins"]["list"],
+      invoke: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["plugins"]["invoke"],
+      subscribe: (() => () => undefined) as EnvironmentApi["plugins"]["subscribe"],
+    },
     orchestration: {
       dispatchCommand: input.dispatchCommand,
       getTurnDiff: (() => {

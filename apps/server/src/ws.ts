@@ -96,6 +96,8 @@ import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
+import { PluginRegistry } from "./plugins/PluginRegistry.ts";
+import { pluginInvoke, pluginList, pluginSubscribe } from "./plugins/PluginRpc.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 const isWorkspacePathOutsideRootError = Schema.is(WorkspacePathOutsideRootError);
 
@@ -177,6 +179,9 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.subscribeServerConfig, AuthOrchestrationReadScope],
   [WS_METHODS.subscribeServerLifecycle, AuthOrchestrationReadScope],
   [WS_METHODS.subscribeAuthAccess, AuthAccessReadScope],
+  [WS_METHODS.pluginsList, AuthOrchestrationReadScope],
+  [WS_METHODS.pluginsInvoke, AuthOrchestrationOperateScope],
+  [WS_METHODS.pluginsSubscribe, AuthOrchestrationReadScope],
 ]);
 
 function toAuthAccessStreamEvent(
@@ -260,6 +265,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
+      const pluginRegistry = yield* PluginRegistry;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -1027,6 +1033,21 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.pluginsList]: (_input) =>
+          observeRpcEffect(WS_METHODS.pluginsList, pluginList(pluginRegistry), {
+            "rpc.aggregate": "plugins",
+          }),
+        [WS_METHODS.pluginsInvoke]: (input) =>
+          observeRpcEffect(WS_METHODS.pluginsInvoke, pluginInvoke(pluginRegistry, input), {
+            "rpc.aggregate": "plugins",
+            "plugin.id": input.pluginId,
+            "plugin.command": input.command,
+          }),
+        [WS_METHODS.pluginsSubscribe]: (input) =>
+          observeRpcStream(WS_METHODS.pluginsSubscribe, pluginSubscribe(pluginRegistry, input), {
+            "rpc.aggregate": "plugins",
+            ...(input.pluginId !== undefined ? { "plugin.id": input.pluginId } : {}),
+          }),
         [WS_METHODS.serverUpdateSettings]: ({ patch }) =>
           observeRpcEffect(
             WS_METHODS.serverUpdateSettings,

@@ -149,6 +149,10 @@ export default defineConfig(() => {
                 target: devProxyTarget,
                 changeOrigin: true,
               },
+              "/plugins": {
+                target: devProxyTarget,
+                changeOrigin: true,
+              },
             },
           }
         : {}),

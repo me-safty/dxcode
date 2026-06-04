@@ -110,6 +110,15 @@ import {
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
+import {
+  PluginRpcError,
+  PluginsInvokeInput,
+  PluginsInvokeResult,
+  PluginsListInput,
+  PluginsListResult,
+  PluginsSubscribeInput,
+  PluginSubscriptionEvent,
+} from "./plugins.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -165,6 +174,11 @@ export const WS_METHODS = {
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
+
+  // Plugin host methods
+  pluginsList: "plugins.list",
+  pluginsInvoke: "plugins.invoke",
+  pluginsSubscribe: "plugins.subscribe",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -261,6 +275,25 @@ export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess,
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
   error: EnvironmentAuthorizationError,
+});
+
+export const WsPluginsListRpc = Rpc.make(WS_METHODS.pluginsList, {
+  payload: PluginsListInput,
+  success: PluginsListResult,
+  error: Schema.Union([PluginRpcError, EnvironmentAuthorizationError]),
+});
+
+export const WsPluginsInvokeRpc = Rpc.make(WS_METHODS.pluginsInvoke, {
+  payload: PluginsInvokeInput,
+  success: PluginsInvokeResult,
+  error: Schema.Union([PluginRpcError, EnvironmentAuthorizationError]),
+});
+
+export const WsPluginsSubscribeRpc = Rpc.make(WS_METHODS.pluginsSubscribe, {
+  payload: PluginsSubscribeInput,
+  success: PluginSubscriptionEvent,
+  error: Schema.Union([PluginRpcError, EnvironmentAuthorizationError]),
+  stream: true,
 });
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(
@@ -536,6 +569,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetProcessDiagnosticsRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
+  WsPluginsListRpc,
+  WsPluginsInvokeRpc,
+  WsPluginsSubscribeRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,

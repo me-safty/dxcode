@@ -80,6 +80,13 @@ import type {
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
+import type {
+  PluginsInvokeInput,
+  PluginsInvokeResult,
+  PluginsListResult,
+  PluginsSubscribeInput,
+  PluginSubscriptionEvent,
+} from "./plugins.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -578,6 +585,17 @@ export interface EnvironmentApi {
     subscribeThread: (
       input: OrchestrationSubscribeThreadInput,
       callback: (event: OrchestrationThreadStreamItem) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
+  };
+  plugins: {
+    list: () => Promise<PluginsListResult>;
+    invoke: (input: PluginsInvokeInput) => Promise<PluginsInvokeResult>;
+    subscribe: (
+      input: PluginsSubscribeInput,
+      callback: (event: PluginSubscriptionEvent) => void,
       options?: {
         onResubscribe?: () => void;
       },

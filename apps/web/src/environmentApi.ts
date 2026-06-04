@@ -58,6 +58,12 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       subscribeThread: (input, callback, options) =>
         rpcClient.orchestration.subscribeThread(input, callback, options),
     },
+    plugins: {
+      list: rpcClient.plugins.list,
+      invoke: rpcClient.plugins.invoke,
+      subscribe: (input, callback, options) =>
+        rpcClient.plugins.subscribe(input, callback, options),
+    },
   };
 }
 

@@ -8,6 +8,7 @@ import { ServerConfig } from "./config.ts";
 import {
   attachmentsRouteLayer,
   otlpTracesProxyRouteLayer,
+  pluginAssetsRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentHttpApiLayer,
   staticAndDevRouteLayer,
@@ -64,6 +65,10 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts";
+import { PluginHostLive, PluginHostStartupLive } from "./plugins/PluginHost.ts";
+import { PluginPackageResolverLive } from "./plugins/PluginPackageResolver.ts";
+import { PluginRegistryLive } from "./plugins/PluginRegistry.ts";
+import { PluginStoreLive } from "./plugins/PluginStore.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
@@ -236,7 +241,7 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+const RuntimeCoreBaseDependenciesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
@@ -273,6 +278,15 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(AuthLayerLive),
 );
 
+const PluginLayerLive = PluginHostLive.pipe(
+  Layer.provideMerge(PluginPackageResolverLive),
+  Layer.provideMerge(PluginRegistryLive),
+  Layer.provideMerge(PluginStoreLive),
+  Layer.provideMerge(RuntimeCoreBaseDependenciesLive),
+);
+
+const RuntimeCoreDependenciesLive = PluginLayerLive;
+
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // Misc.
   Layer.provideMerge(ProcessDiagnostics.layer),
@@ -284,7 +298,7 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provide(NetService.layer),
 );
 
-const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
+const RuntimeServicesLive = Layer.mergeAll(ServerRuntimeStartupLive, PluginHostStartupLive).pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
 );
 
@@ -298,6 +312,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   attachmentsRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
+  pluginAssetsRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));
