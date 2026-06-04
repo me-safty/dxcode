@@ -292,6 +292,49 @@ describe("createEnvironmentConnection", () => {
     }
   });
 
+  it("applies the default shell bootstrap timeout when reconnect has no explicit timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const environmentId = EnvironmentId.make("env-1");
+      const { client } = createTestClient();
+      const syncShellSnapshot = vi.fn();
+
+      const connection = createEnvironmentConnection({
+        kind: "saved",
+        knownEnvironment: {
+          id: "env-1",
+          label: "Remote env",
+          source: "manual",
+          target: {
+            httpBaseUrl: "http://example.test",
+            wsBaseUrl: "ws://example.test",
+          },
+          environmentId,
+        },
+        client,
+        applyShellEvent: vi.fn(),
+        syncShellSnapshot,
+        applyTerminalEvent: vi.fn(),
+      });
+
+      await connection.ensureBootstrapped();
+
+      const reconnectPromise = connection.reconnect({ reason: "test-default-timeout" });
+      const expectation = expect(reconnectPromise).rejects.toMatchObject({
+        timeoutMs: 30_000,
+      });
+
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(client.reconnect).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expectation;
+
+      await connection.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("opens future bootstrap waiters when a late shell snapshot arrives after timeout", async () => {
     vi.useFakeTimers();
     try {
@@ -344,6 +387,61 @@ describe("createEnvironmentConnection", () => {
     }
   });
 
+  it("keeps in-flight bootstrap waiters pending when reconnect bootstrap times out", async () => {
+    vi.useFakeTimers();
+    try {
+      const environmentId = EnvironmentId.make("env-1");
+      const { client, emitShellSnapshot } = createTestClient();
+      const syncShellSnapshot = vi.fn();
+
+      const connection = createEnvironmentConnection({
+        kind: "saved",
+        knownEnvironment: {
+          id: "env-1",
+          label: "Remote env",
+          source: "manual",
+          target: {
+            httpBaseUrl: "http://example.test",
+            wsBaseUrl: "ws://example.test",
+          },
+          environmentId,
+        },
+        client,
+        applyShellEvent: vi.fn(),
+        syncShellSnapshot,
+        applyTerminalEvent: vi.fn(),
+      });
+
+      await connection.ensureBootstrapped();
+
+      const reconnectPromise = connection.reconnect({
+        shellBootstrapTimeoutMs: 12_000,
+      });
+      const ensurePromise = connection.ensureBootstrapped();
+      const ensureRejected = vi.fn();
+      void ensurePromise.catch(ensureRejected);
+      const reconnectExpectation = expect(reconnectPromise).rejects.toBeInstanceOf(
+        EnvironmentShellBootstrapTimeoutError,
+      );
+
+      await vi.advanceTimersByTimeAsync(12_000);
+      await reconnectExpectation;
+      expect(ensureRejected).not.toHaveBeenCalled();
+
+      emitShellSnapshot(2);
+      await ensurePromise;
+      expect(ensureRejected).not.toHaveBeenCalled();
+      expect(syncShellSnapshot).toHaveBeenLastCalledWith(
+        expect.objectContaining({ snapshotSequence: 2 }),
+        environmentId,
+      );
+
+      await connection.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps pending reconnect waiters across repeated bootstrap resets", async () => {
     const environmentId = EnvironmentId.make("env-1");
     const { client, emitShellSnapshot } = createTestClient();
@@ -383,6 +481,87 @@ describe("createEnvironmentConnection", () => {
       expect.objectContaining({ snapshotSequence: 2 }),
       environmentId,
     );
+
+    await connection.dispose();
+  });
+
+  it("starts projection catch-up after reconnect without gating shell bootstrap", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, emitShellSnapshot } = createTestClient();
+    const catchUpProjection = vi.fn(() => new Promise<void>(() => undefined));
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot: vi.fn(),
+      applyTerminalEvent: vi.fn(),
+      catchUpProjection,
+    });
+
+    await connection.ensureBootstrapped();
+
+    const reconnectPromise = connection.reconnect();
+    await vi.waitFor(() => {
+      expect(catchUpProjection).toHaveBeenCalledTimes(1);
+    });
+
+    emitShellSnapshot(2);
+    await reconnectPromise;
+
+    expect(client.reconnect).toHaveBeenCalledTimes(1);
+    expect(catchUpProjection).toHaveBeenCalledTimes(1);
+
+    await connection.dispose();
+  });
+
+  it("swallows projection catch-up errors during reconnect", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, emitShellSnapshot } = createTestClient();
+    const catchUpProjection = vi.fn(async () => {
+      throw new Error("catch-up failed");
+    });
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot: vi.fn(),
+      applyTerminalEvent: vi.fn(),
+      catchUpProjection,
+    });
+
+    await connection.ensureBootstrapped();
+
+    const reconnectPromise = connection.reconnect();
+    await vi.waitFor(() => {
+      expect(catchUpProjection).toHaveBeenCalledTimes(1);
+    });
+
+    emitShellSnapshot(2);
+    await reconnectPromise;
+
+    expect(client.reconnect).toHaveBeenCalledTimes(1);
 
     await connection.dispose();
   });

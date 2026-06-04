@@ -988,18 +988,28 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeShell,
             Effect.gen(function* () {
-              const snapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
-                Effect.tapError((cause) =>
-                  Effect.logError("orchestration shell snapshot load failed", { cause }),
-                ),
-                Effect.mapError(
-                  (cause) =>
-                    new OrchestrationGetSnapshotError({
-                      message: "Failed to load orchestration shell snapshot",
-                      cause,
-                    }),
-                ),
-              );
+              const [snapshotDuration, snapshot] = yield* projectionSnapshotQuery
+                .getShellSnapshot()
+                .pipe(
+                  Effect.withSpan("orchestration.getShellSnapshot"),
+                  Effect.timed,
+                  Effect.tapError((cause) =>
+                    Effect.logError("orchestration shell snapshot load failed", { cause }),
+                  ),
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: "Failed to load orchestration shell snapshot",
+                        cause,
+                      }),
+                  ),
+                );
+              const snapshotDurationMs = Duration.toMillis(snapshotDuration);
+              if (snapshotDurationMs > 2_000) {
+                yield* Effect.logWarning("slow orchestration shell snapshot", {
+                  durationMs: snapshotDurationMs,
+                });
+              }
 
               const toShellItemStream = <E, R>(events: Stream.Stream<OrchestrationEvent, E, R>) =>
                 events.pipe(

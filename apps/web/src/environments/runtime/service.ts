@@ -60,7 +60,9 @@ import {
   createEnvironmentConnection,
   isEnvironmentShellBootstrapTimeoutError,
   type EnvironmentConnection,
+  type EnvironmentProjectionCatchUpResult,
 } from "./connection";
+import { withTimeout } from "./withTimeout";
 import {
   useStore,
   selectProjectsAcrossEnvironments,
@@ -192,13 +194,16 @@ interface BrowserResumeShellBootstrapTimeoutState {
   readonly failedAt: number;
   readonly reconnectRetryCount: number;
   readonly timeoutMs: number;
+  selfHealAttemptCount: number;
+  nextSelfHealAt: number;
 }
 
 type BrowserResumeShellBootstrapTimeoutClearReason =
   | "heartbeat-probe-current"
   | "heartbeat-replay-recovered"
   | "thread-detail-reconcile"
-  | "forced-reconnect-success";
+  | "forced-reconnect-success"
+  | "self-heal-given-up";
 
 interface RecoveredEventBatchOptions {
   readonly preserveShellFields?: boolean;
@@ -276,9 +281,14 @@ const BROWSER_RESUME_RECONCILE_COOLDOWN_MS = 2_000;
 const BROWSER_RESUME_RECONCILE_TIMEOUT_MS = 1_500;
 const BROWSER_RESUME_HEARTBEAT_TICK_MS = 15_000;
 const BROWSER_RESUME_LONG_BACKGROUND_MS = 5_000;
-const BROWSER_RESUME_RECONNECT_BOOTSTRAP_TIMEOUT_MS = 12_000;
-const BROWSER_RESUME_RECONNECT_RETRY_DELAY_MS = 500;
-const BROWSER_RESUME_RECONNECT_MAX_RETRY_COUNT = 1;
+const BROWSER_RESUME_RECONNECT_BOOTSTRAP_TIMEOUT_MS = 20_000;
+const BROWSER_RESUME_RECONNECT_RETRY_BASE_DELAY_MS = 1_000;
+const BROWSER_RESUME_RECONNECT_RETRY_MAX_DELAY_MS = 8_000;
+const BROWSER_RESUME_RECONNECT_MAX_RETRY_COUNT = 3;
+const BROWSER_RESUME_SELF_HEAL_BASE_DELAY_MS = 15_000;
+const BROWSER_RESUME_SELF_HEAL_MAX_DELAY_MS = 60_000;
+const BROWSER_RESUME_SELF_HEAL_MAX_ATTEMPTS = 5;
+const BROWSER_RESUME_SELF_HEAL_MAX_AGE_MS = 4 * 60_000;
 const RECENT_BROWSER_RESUME_CONTEXT_TTL_MS = 30_000;
 const PENDING_NOTIFICATION_THREAD_RECONCILE_STORAGE_KEY =
   "t3.pending-notification-thread-reconciles";
@@ -301,39 +311,6 @@ function createDeferredPromise<T>() {
       resolve = null;
     },
   };
-}
-
-function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  createError: () => Error,
-): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-  return new Promise<T>((resolve, reject) => {
-    const clear = () => {
-      if (timeoutId !== null) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-    };
-
-    timeoutId = setTimeout(() => {
-      timeoutId = null;
-      reject(createError());
-    }, timeoutMs);
-
-    promise.then(
-      (value) => {
-        clear();
-        resolve(value);
-      },
-      (error) => {
-        clear();
-        reject(error);
-      },
-    );
-  });
 }
 
 function getBrowserHiddenDuration(now: number): number | null {
@@ -834,6 +811,103 @@ function selectContiguousReplayEvents(
   return contiguousEvents;
 }
 
+type ProjectionReplayResult =
+  | {
+      readonly status: "complete";
+      readonly eventCount: number;
+      readonly recoveredSequence: number;
+      readonly highestReplayedSequence: number;
+    }
+  | {
+      readonly status: "stale-connection";
+      readonly eventCount: number;
+    };
+
+async function replayProjectionEventsFromSequence(
+  connection: EnvironmentConnection,
+  fromSequenceExclusive: number,
+  options: {
+    readonly timeoutMs: number;
+    readonly createTimeoutError: () => Error;
+    readonly highestKnownSequence?: number;
+    readonly onReplay?: (metadata: {
+      readonly elapsedMs: number;
+      readonly fromSequenceExclusive: number;
+      readonly eventCount: number;
+    }) => void;
+  },
+): Promise<ProjectionReplayResult> {
+  const environmentId = connection.environmentId;
+  const replayStartedAt = Date.now();
+  const replayedEvents = await withTimeout(
+    connection.client.orchestration.replayEvents({
+      fromSequenceExclusive,
+    }),
+    options.timeoutMs,
+    options.createTimeoutError,
+  );
+  options.onReplay?.({
+    elapsedMs: Date.now() - replayStartedAt,
+    fromSequenceExclusive,
+    eventCount: replayedEvents.length,
+  });
+  if (readEnvironmentConnection(environmentId) !== connection) {
+    return {
+      status: "stale-connection",
+      eventCount: replayedEvents.length,
+    };
+  }
+
+  const latestSequence =
+    readLastAppliedProjectionVersion(environmentId)?.sequence ?? fromSequenceExclusive;
+  const contiguousEvents = selectContiguousReplayEvents(replayedEvents, latestSequence);
+  applyRecoveredProjectionEventBatch(contiguousEvents, environmentId);
+
+  const recoveredSequence =
+    readLastAppliedProjectionVersion(environmentId)?.sequence ?? latestSequence;
+  const highestReplayedSequence = replayedEvents.reduce(
+    (highest, event) => Math.max(highest, event.sequence),
+    options.highestKnownSequence ?? fromSequenceExclusive,
+  );
+  if (highestReplayedSequence > recoveredSequence) {
+    queueProjectionRecovery(environmentId, highestReplayedSequence);
+  }
+
+  return {
+    status: "complete",
+    eventCount: replayedEvents.length,
+    recoveredSequence,
+    highestReplayedSequence,
+  };
+}
+
+async function catchUpProjectionViaReplay(
+  connection: EnvironmentConnection,
+): Promise<EnvironmentProjectionCatchUpResult> {
+  const environmentId = connection.environmentId;
+  const currentSequence = readLastAppliedProjectionVersion(environmentId)?.sequence;
+  if (currentSequence === undefined) {
+    return {
+      status: "skipped",
+      reason: "no-local-sequence",
+    };
+  }
+
+  const result = await replayProjectionEventsFromSequence(connection, currentSequence, {
+    timeoutMs: BROWSER_RESUME_RECONCILE_TIMEOUT_MS,
+    createTimeoutError: () => new Error("Projection catch-up replay timed out."),
+  });
+  if (result.status === "stale-connection") {
+    return {
+      status: "skipped",
+      reason: "stale-connection",
+      eventCount: result.eventCount,
+    };
+  }
+
+  return result;
+}
+
 function getOrchestrationEventThreadId(event: OrchestrationEvent): ThreadId | null {
   return "threadId" in event.payload ? event.payload.threadId : null;
 }
@@ -963,6 +1037,20 @@ function getConnectionHealthRecoveryBackoffMs(failureCount: number): number {
   return Math.min(
     CONNECTION_HEALTH_RECOVERY_BACKOFF_BASE_MS * 2 ** Math.max(0, failureCount - 1),
     CONNECTION_HEALTH_RECOVERY_BACKOFF_MAX_MS,
+  );
+}
+
+function getBrowserResumeReconnectRetryDelayMs(retryCount: number): number {
+  return Math.min(
+    BROWSER_RESUME_RECONNECT_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, retryCount - 1),
+    BROWSER_RESUME_RECONNECT_RETRY_MAX_DELAY_MS,
+  );
+}
+
+function getBrowserResumeSelfHealDelayMs(attempt: number): number {
+  return Math.min(
+    BROWSER_RESUME_SELF_HEAL_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1),
+    BROWSER_RESUME_SELF_HEAL_MAX_DELAY_MS,
   );
 }
 
@@ -2710,14 +2798,15 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
 
   hydrateEnvironmentFromStartupCache(knownEnvironment.environmentId);
 
-  return registerConnection(
-    createEnvironmentConnection({
-      kind: "primary",
-      knownEnvironment,
-      client: createPrimaryEnvironmentClient(knownEnvironment),
-      ...createEnvironmentConnectionHandlers(),
-    }),
-  );
+  let connection: EnvironmentConnection;
+  connection = createEnvironmentConnection({
+    kind: "primary",
+    knownEnvironment,
+    client: createPrimaryEnvironmentClient(knownEnvironment),
+    catchUpProjection: () => catchUpProjectionViaReplay(connection),
+    ...createEnvironmentConnectionHandlers(),
+  });
+  return registerConnection(connection);
 }
 
 function maybeCreatePrimaryEnvironmentConnection(): EnvironmentConnection | null {
@@ -2787,7 +2876,8 @@ async function ensureSavedEnvironmentConnection(
           wsBaseUrl: activeRecord.wsBaseUrl,
         },
       });
-      const connection = createEnvironmentConnection({
+      let connection: EnvironmentConnection;
+      connection = createEnvironmentConnection({
         kind: "saved",
         knownEnvironment: {
           ...knownEnvironment,
@@ -2801,6 +2891,7 @@ async function ensureSavedEnvironmentConnection(
             client,
           );
         },
+        catchUpProjection: () => catchUpProjectionViaReplay(connection),
         onConfigSnapshot: (config) => {
           initialConfigSnapshot.resolve(config);
           useSavedEnvironmentRuntimeStore.getState().patch(activeRecord.environmentId, {
@@ -2993,11 +3084,9 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
     }
   };
 
-  // Fast path: if the heartbeat pong is stale, the underlying socket is
-  // almost certainly dead (common on iOS PWA after backgrounding, where
-  // the JS `WebSocket` may still report OPEN even though TCP is gone).
-  // Skip the probe round-trip and reconnect immediately so thread detail
-  // subscriptions re-attach on the new session.
+  // Fast path: forced browser-resume reconnects deliberately skip the probe
+  // round-trip. On iOS PWA the JS `WebSocket` can still report OPEN/fresh while
+  // the underlying TCP socket is dead.
   if (options.forceReconnect) {
     console.warn("Environment resumed after a long browser background; reconnecting", {
       environmentId,
@@ -3024,6 +3113,7 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
       env: environmentId,
       data: {
         branch: "no-local-sequence",
+        forceReconnect: options.forceReconnect,
         elapsedMs: Date.now() - startedAt,
       },
     });
@@ -3092,23 +3182,23 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
 
     step = "replayEvents";
     stepStartedAt = Date.now();
-    const replayedEvents = await withTimeout(
-      connection.client.orchestration.replayEvents({
-        fromSequenceExclusive: latestSequenceAfterProbe,
-      }),
-      BROWSER_RESUME_RECONCILE_TIMEOUT_MS,
-      () => new Error("Browser resume replay timed out."),
-    );
-    recordResumeDiagnostic("browser-resume-replay", {
-      reason,
-      env: environmentId,
-      data: {
-        elapsedMs: Date.now() - stepStartedAt,
-        fromSequenceExclusive: latestSequenceAfterProbe,
-        eventCount: replayedEvents.length,
+    const replayResult = await replayProjectionEventsFromSequence(
+      connection,
+      latestSequenceAfterProbe,
+      {
+        timeoutMs: BROWSER_RESUME_RECONCILE_TIMEOUT_MS,
+        createTimeoutError: () => new Error("Browser resume replay timed out."),
+        highestKnownSequence: syncProbe.serverSequence,
+        onReplay: (metadata) => {
+          recordResumeDiagnostic("browser-resume-replay", {
+            reason,
+            env: environmentId,
+            data: metadata,
+          });
+        },
       },
-    });
-    if (readEnvironmentConnection(environmentId) !== connection) {
+    );
+    if (replayResult.status === "stale-connection") {
       recordResumeDiagnostic("browser-resume-reconcile-branch", {
         reason,
         env: environmentId,
@@ -3119,30 +3209,15 @@ async function reconcileEnvironmentConnectionAfterBrowserResume(
       });
       return;
     }
-
-    const latestSequence =
-      readLastAppliedProjectionVersion(environmentId)?.sequence ?? latestSequenceAfterProbe;
-    const contiguousEvents = selectContiguousReplayEvents(replayedEvents, latestSequence);
-    applyRecoveredProjectionEventBatch(contiguousEvents, environmentId);
-
-    const recoveredSequence =
-      readLastAppliedProjectionVersion(environmentId)?.sequence ?? latestSequence;
-    const highestReplayedSequence = replayedEvents.reduce(
-      (highest, event) => Math.max(highest, event.sequence),
-      syncProbe.serverSequence,
-    );
-    if (highestReplayedSequence > recoveredSequence) {
-      queueProjectionRecovery(environmentId, highestReplayedSequence);
-    }
     recordResumeDiagnostic("browser-resume-reconcile-branch", {
       reason,
       env: environmentId,
       data: {
         branch: "replay",
         elapsedMs: Date.now() - startedAt,
-        recoveredSequence,
-        highestReplayedSequence,
-        eventCount: replayedEvents.length,
+        recoveredSequence: replayResult.recoveredSequence,
+        highestReplayedSequence: replayResult.highestReplayedSequence,
+        eventCount: replayResult.eventCount,
       },
     });
     refreshPendingNotificationThreadDetailsAfterHealthyBrowserResume(
@@ -3316,7 +3391,7 @@ function scheduleBrowserResumeReconnectRetry(
   environmentId: EnvironmentId,
   followUp: BrowserResumeQueuedFollowUp,
 ): void {
-  browserResumeShellBootstrapTimeoutByEnvironment.delete(environmentId);
+  const retryDelayMs = getBrowserResumeReconnectRetryDelayMs(followUp.options.reconnectRetryCount);
   browserResumeReconnectRetryByEnvironment.set(environmentId, followUp);
   recordResumeDiagnostic("browser-resume-queue", {
     reason: followUp.reason,
@@ -3326,7 +3401,7 @@ function scheduleBrowserResumeReconnectRetry(
       forceReconnect: followUp.options.forceReconnect,
       hiddenDurationMs: followUp.options.hiddenDurationMs,
       reconnectRetryCount: followUp.options.reconnectRetryCount,
-      retryDelayMs: BROWSER_RESUME_RECONNECT_RETRY_DELAY_MS,
+      retryDelayMs,
     },
   });
 
@@ -3356,8 +3431,70 @@ function scheduleBrowserResumeReconnectRetry(
       followUp.reason,
       followUp.options,
     );
-  }, BROWSER_RESUME_RECONNECT_RETRY_DELAY_MS);
+  }, retryDelayMs);
   browserResumeReconnectRetryTimeoutIds.add(timeoutId);
+}
+
+function driveStuckShellBootstrapSelfHeal(): void {
+  const now = Date.now();
+
+  for (const [environmentId, timeoutState] of browserResumeShellBootstrapTimeoutByEnvironment) {
+    if (now < timeoutState.nextSelfHealAt) {
+      continue;
+    }
+    if (
+      browserResumeReconciliationByEnvironment.has(environmentId) ||
+      browserResumeReconnectRetryByEnvironment.has(environmentId)
+    ) {
+      continue;
+    }
+
+    const connection = readEnvironmentConnection(environmentId);
+    if (!connection) {
+      browserResumeShellBootstrapTimeoutByEnvironment.delete(environmentId);
+      continue;
+    }
+
+    const timeoutAgeMs = now - timeoutState.failedAt;
+    if (
+      timeoutState.selfHealAttemptCount >= BROWSER_RESUME_SELF_HEAL_MAX_ATTEMPTS ||
+      timeoutAgeMs > BROWSER_RESUME_SELF_HEAL_MAX_AGE_MS
+    ) {
+      recordResumeDiagnostic("browser-resume-shell-bootstrap-self-heal", {
+        reason: "self-heal-given-up",
+        env: environmentId,
+        data: {
+          timeoutAgeMs,
+          selfHealAttemptCount: timeoutState.selfHealAttemptCount,
+          reconnectRetryCount: timeoutState.reconnectRetryCount,
+          timeoutMs: timeoutState.timeoutMs,
+        },
+      });
+      clearBrowserResumeShellBootstrapTimeout(environmentId, "self-heal-given-up");
+      continue;
+    }
+
+    const selfHealAttemptCount = timeoutState.selfHealAttemptCount + 1;
+    const nextSelfHealDelayMs = getBrowserResumeSelfHealDelayMs(selfHealAttemptCount + 1);
+    timeoutState.selfHealAttemptCount = selfHealAttemptCount;
+    timeoutState.nextSelfHealAt = now + nextSelfHealDelayMs;
+    recordResumeDiagnostic("browser-resume-shell-bootstrap-self-heal", {
+      reason: "self-heal-forced-reconnect",
+      env: environmentId,
+      data: {
+        timeoutAgeMs,
+        selfHealAttemptCount,
+        reconnectRetryCount: timeoutState.reconnectRetryCount,
+        timeoutMs: timeoutState.timeoutMs,
+        nextSelfHealDelayMs,
+      },
+    });
+    queueEnvironmentBrowserResumeReconciliation(connection, "self-heal", {
+      hiddenDurationMs: null,
+      forceReconnect: true,
+      reconnectRetryCount: 0,
+    });
+  }
 }
 
 function queueEnvironmentBrowserResumeReconciliation(
@@ -3458,10 +3595,19 @@ function queueEnvironmentBrowserResumeReconciliation(
       return;
     }
     if (isEnvironmentShellBootstrapTimeoutError(failure) && options.forceReconnect) {
+      const now = Date.now();
+      const existingTimeoutState =
+        browserResumeShellBootstrapTimeoutByEnvironment.get(environmentId);
+      const selfHealAttemptCount = existingTimeoutState?.selfHealAttemptCount ?? 0;
       browserResumeShellBootstrapTimeoutByEnvironment.set(environmentId, {
-        failedAt: Date.now(),
+        failedAt: existingTimeoutState?.failedAt ?? now,
         reconnectRetryCount: options.reconnectRetryCount,
         timeoutMs: failure.timeoutMs,
+        selfHealAttemptCount,
+        nextSelfHealAt:
+          existingTimeoutState !== undefined && selfHealAttemptCount > 0
+            ? existingTimeoutState.nextSelfHealAt
+            : now + getBrowserResumeSelfHealDelayMs(selfHealAttemptCount + 1),
       });
       recordResumeDiagnostic("browser-resume-queue", {
         reason,
@@ -3472,6 +3618,7 @@ function queueEnvironmentBrowserResumeReconciliation(
           hiddenDurationMs: options.hiddenDurationMs,
           reconnectRetryCount: options.reconnectRetryCount,
           timeoutMs: failure.timeoutMs,
+          selfHealAttemptCount,
         },
       });
     }
@@ -3584,7 +3731,23 @@ export function reconcileAfterNotificationClick(
     recentResumeReason,
     recentResumeForceReconnect,
   } = resolveNotificationClickHiddenDuration(now);
-  const options = makeBrowserResumeReconcileOptions("notification-click", hiddenDurationMs);
+  const baseOptions = makeBrowserResumeReconcileOptions("notification-click", hiddenDurationMs);
+  const shellBootstrapTimeoutState =
+    target.kind === "thread"
+      ? browserResumeShellBootstrapTimeoutByEnvironment.get(target.environmentId)
+      : undefined;
+  if (shellBootstrapTimeoutState !== undefined) {
+    shellBootstrapTimeoutState.selfHealAttemptCount = 0;
+    shellBootstrapTimeoutState.nextSelfHealAt = now;
+  }
+  const options =
+    shellBootstrapTimeoutState === undefined
+      ? baseOptions
+      : {
+          ...baseOptions,
+          forceReconnect: true,
+          reconnectRetryCount: 0,
+        };
   recordResumeDiagnostic("notification-click", {
     reason: "notification-click",
     ...(target.kind === "thread" ? { env: target.environmentId } : {}),
@@ -3739,6 +3902,11 @@ function subscribeBrowserResumeReconnects(): () => void {
       "heartbeat-tick",
       makeBrowserResumeReconcileOptions("heartbeat-tick", null),
     );
+    // Let quick heartbeat probes/no-op reconciles clear their in-flight marker
+    // before the backstop checks whether anything is already driving the env.
+    void Promise.resolve().then(() => {
+      void Promise.resolve().then(driveStuckShellBootstrapSelfHeal);
+    });
   };
 
   // Top-level liveness tick. Visibility/pageshow/focus only fire on

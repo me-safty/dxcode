@@ -390,7 +390,12 @@ function EventRouter() {
         replace: true,
       });
       handledBootstrapThreadIdRef.current = bootstrapThreadId;
-    })().catch(() => undefined);
+    })().catch((error: unknown) => {
+      console.warn("Unable to bootstrap environment before startup navigation", {
+        environmentId: payload.environment.environmentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   });
 
   const handleServerConfigUpdated = useEffectEvent(

@@ -548,10 +548,16 @@ async function exhaustNotificationReconnectTimeout(input: {
 }): Promise<void> {
   mockConnectionReconnects[0]
     ?.mockRejectedValueOnce(
-      new MockEnvironmentShellBootstrapTimeoutError(input.environmentId, 12_000),
+      new MockEnvironmentShellBootstrapTimeoutError(input.environmentId, 20_000),
     )
     .mockRejectedValueOnce(
-      new MockEnvironmentShellBootstrapTimeoutError(input.environmentId, 12_000),
+      new MockEnvironmentShellBootstrapTimeoutError(input.environmentId, 20_000),
+    )
+    .mockRejectedValueOnce(
+      new MockEnvironmentShellBootstrapTimeoutError(input.environmentId, 20_000),
+    )
+    .mockRejectedValueOnce(
+      new MockEnvironmentShellBootstrapTimeoutError(input.environmentId, 20_000),
     );
 
   input.browser.setVisibilityState("hidden");
@@ -567,9 +573,19 @@ async function exhaustNotificationReconnectTimeout(input: {
     expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
   });
   await vi.advanceTimersByTimeAsync(0);
-  await vi.advanceTimersByTimeAsync(500);
+  await vi.advanceTimersByTimeAsync(1_000);
   await vi.waitFor(() => {
     expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(2);
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(2_000);
+  await vi.waitFor(() => {
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(3);
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(4_000);
+  await vi.waitFor(() => {
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(4);
   });
   await vi.advanceTimersByTimeAsync(0);
 }
@@ -4687,6 +4703,105 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("replays projection catch-up during a forced long-background reconnect before the shell snapshot resolves", async () => {
+    const browser = stubBrowserVisibility();
+    let resolveReconnect: (() => void) | null = null;
+    let reconnectSettled = false;
+    mockCreateEnvironmentConnection.mockImplementation((input) => {
+      const reconnect = vi.fn(() => {
+        void input.catchUpProjection?.();
+        return new Promise<void>((resolve) => {
+          resolveReconnect = resolve;
+        }).finally(() => {
+          reconnectSettled = true;
+        });
+      });
+      mockConnectionReconnects.push(reconnect);
+      return {
+        kind: input.kind,
+        environmentId: input.knownEnvironment.environmentId,
+        knownEnvironment: input.knownEnvironment,
+        client: input.client,
+        ensureBootstrapped: vi.fn(async () => undefined),
+        reconnect,
+        dispose: vi.fn(async () => undefined),
+      };
+    });
+
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectSidebarThreadSummaryByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-long-background-catch-up");
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      {
+        snapshotSequence: 1,
+        projects: [],
+        threads: [],
+        updatedAt: "2026-04-13T00:00:01.000Z",
+      },
+      environmentId,
+    );
+    mockReplayEvents.mockResolvedValueOnce([
+      makeThreadCreatedEvent({ sequence: 2, threadId }),
+      makeThreadSessionSetEvent({ sequence: 3, threadId, status: "running" }),
+    ]);
+
+    browser.setVisibilityState("hidden");
+    browser.documentTarget.dispatchEvent(new Event("visibilitychange"));
+    vi.setSystemTime(Date.now() + 6_000);
+    browser.setVisibilityState("visible");
+    browser.documentTarget.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+      expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
+      expect(
+        selectSidebarThreadSummaryByRef(
+          useStore.getState(),
+          scopeThreadRef(environmentId, threadId),
+        )?.session?.orchestrationStatus,
+      ).toBe("running");
+    });
+
+    expect(mockProbeSync).not.toHaveBeenCalled();
+    expect(reconnectSettled).toBe(false);
+    const resolvePendingReconnect = resolveReconnect as (() => void) | null;
+    expect(resolvePendingReconnect).not.toBeNull();
+
+    resolvePendingReconnect?.();
+    await vi.waitFor(() => {
+      expect(reconnectSettled).toBe(true);
+    });
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("skips projection catch-up replay when no local projection sequence exists", async () => {
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    await expect(connectionInput.catchUpProjection?.()).resolves.toMatchObject({
+      status: "skipped",
+      reason: "no-local-sequence",
+    });
+    expect(mockReplayEvents).not.toHaveBeenCalled();
+    expect(mockProbeSync).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
   it("reuses recent browser resume duration for notification clicks after focus", async () => {
     const browser = stubBrowserVisibility();
 
@@ -4964,7 +5079,7 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
     );
     mockConnectionReconnects[0]?.mockRejectedValueOnce(
-      new MockEnvironmentShellBootstrapTimeoutError(environmentId, 12_000),
+      new MockEnvironmentShellBootstrapTimeoutError(environmentId, 20_000),
     );
 
     browser.setVisibilityState("hidden");
@@ -4985,12 +5100,193 @@ describe("retainThreadDetailSubscription", () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
       expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(2);
     });
 
     release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("backs off browser resume reconnect retries after shell bootstrap timeouts", async () => {
+    const browser = stubBrowserVisibility();
+    const resumeDiagnostics = await import("./resumeDiagnostics");
+    const recordSpy = vi.spyOn(resumeDiagnostics, "recordResumeDiagnostic");
+
+    const {
+      reconcileAfterNotificationClick,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-retry-backoff");
+    mockConnectionReconnects[0]?.mockRejectedValue(
+      new MockEnvironmentShellBootstrapTimeoutError(environmentId, 20_000),
+    );
+
+    browser.setVisibilityState("hidden");
+    browser.documentTarget.dispatchEvent(new Event("visibilitychange"));
+    vi.setSystemTime(Date.now() + 6_000);
+    reconcileAfterNotificationClick({
+      kind: "thread",
+      environmentId,
+      threadId,
+    });
+
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(2);
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(3);
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(4);
+    });
+
+    const retryDelayMs = recordSpy.mock.calls
+      .filter(
+        ([kind, payload]) =>
+          kind === "browser-resume-queue" &&
+          payload?.env === environmentId &&
+          payload.data?.action === "queued-timeout-retry",
+      )
+      .map(([, payload]) => payload?.data?.retryDelayMs);
+    expect(retryDelayMs).toEqual([1_000, 2_000, 4_000]);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("self-heals a stuck shell bootstrap timeout on the visible heartbeat tick", async () => {
+    const browser = stubBrowserVisibility();
+    const resumeDiagnostics = await import("./resumeDiagnostics");
+    const recordSpy = vi.spyOn(resumeDiagnostics, "recordResumeDiagnostic");
+
+    const {
+      reconcileAfterNotificationClick,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-self-heal-success");
+
+    await exhaustNotificationReconnectTimeout({
+      browser,
+      reconcileAfterNotificationClick,
+      environmentId,
+      threadId,
+    });
+
+    browser.setVisibilityState("visible");
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(5);
+    });
+
+    expect(
+      recordSpy.mock.calls.some(
+        ([kind, payload]) =>
+          kind === "browser-resume-shell-bootstrap-self-heal" &&
+          payload?.env === environmentId &&
+          payload.reason === "self-heal-forced-reconnect" &&
+          payload.data?.selfHealAttemptCount === 1,
+      ),
+    ).toBe(true);
+    expect(
+      recordSpy.mock.calls.some(
+        ([kind, payload]) =>
+          kind === "browser-resume-shell-bootstrap-timeout-cleared" &&
+          payload?.env === environmentId &&
+          payload.reason === "forced-reconnect-success",
+      ),
+    ).toBe(true);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("stops shell bootstrap self-heal after the attempt budget is exhausted", async () => {
+    const browser = stubBrowserVisibility();
+    const resumeDiagnostics = await import("./resumeDiagnostics");
+    const recordSpy = vi.spyOn(resumeDiagnostics, "recordResumeDiagnostic");
+
+    const {
+      reconcileAfterNotificationClick,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-notification-self-heal-give-up");
+
+    await exhaustNotificationReconnectTimeout({
+      browser,
+      reconcileAfterNotificationClick,
+      environmentId,
+      threadId,
+    });
+    mockConnectionReconnects[0]?.mockRejectedValue(
+      new MockEnvironmentShellBootstrapTimeoutError(environmentId, 20_000),
+    );
+
+    browser.setVisibilityState("visible");
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(8);
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(12);
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(16);
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(20);
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.waitFor(() => {
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(24);
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(24);
+
+    expect(
+      recordSpy.mock.calls.some(
+        ([kind, payload]) =>
+          kind === "browser-resume-shell-bootstrap-self-heal" &&
+          payload?.env === environmentId &&
+          payload.reason === "self-heal-given-up" &&
+          payload.data?.selfHealAttemptCount === 5,
+      ),
+    ).toBe(true);
+    expect(
+      recordSpy.mock.calls.some(
+        ([kind, payload]) =>
+          kind === "browser-resume-shell-bootstrap-timeout-cleared" &&
+          payload?.env === environmentId &&
+          payload.reason === "self-heal-given-up",
+      ),
+    ).toBe(true);
+
     stop();
     await resetEnvironmentServiceForTests();
   });
@@ -5017,7 +5313,7 @@ describe("retainThreadDetailSubscription", () => {
       notificationThreadId,
     );
     mockConnectionReconnects[0]?.mockRejectedValueOnce(
-      new MockEnvironmentShellBootstrapTimeoutError(environmentId, 12_000),
+      new MockEnvironmentShellBootstrapTimeoutError(environmentId, 20_000),
     );
 
     browser.setVisibilityState("hidden");
@@ -5077,7 +5373,7 @@ describe("retainThreadDetailSubscription", () => {
       environmentId,
     );
     mockConnectionReconnects[0]
-      ?.mockRejectedValueOnce(new MockEnvironmentShellBootstrapTimeoutError(environmentId, 12_000))
+      ?.mockRejectedValueOnce(new MockEnvironmentShellBootstrapTimeoutError(environmentId, 20_000))
       .mockResolvedValueOnce(undefined);
 
     browser.setVisibilityState("hidden");
@@ -5096,7 +5392,7 @@ describe("retainThreadDetailSubscription", () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(mockReconcileThreadDetail).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
       expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(2);
     });
@@ -5128,28 +5424,12 @@ describe("retainThreadDetailSubscription", () => {
       makeThreadShellSnapshot({ threadId, sessionStatus: "running" }),
       environmentId,
     );
-    mockConnectionReconnects[0]
-      ?.mockRejectedValueOnce(new MockEnvironmentShellBootstrapTimeoutError(environmentId, 12_000))
-      .mockRejectedValueOnce(new MockEnvironmentShellBootstrapTimeoutError(environmentId, 12_000));
-
-    browser.setVisibilityState("hidden");
-    browser.documentTarget.dispatchEvent(new Event("visibilitychange"));
-    vi.setSystemTime(Date.now() + 6_000);
-    reconcileAfterNotificationClick({
-      kind: "thread",
+    await exhaustNotificationReconnectTimeout({
+      browser,
+      reconcileAfterNotificationClick,
       environmentId,
       threadId,
     });
-
-    await vi.waitFor(() => {
-      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
-    });
-    await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(500);
-    await vi.waitFor(() => {
-      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(2);
-    });
-    await vi.advanceTimersByTimeAsync(0);
 
     const release = retainActiveThreadDetailSubscription(environmentId, threadId);
     await vi.advanceTimersByTimeAsync(300);
@@ -5359,7 +5639,7 @@ describe("retainThreadDetailSubscription", () => {
     await vi.advanceTimersByTimeAsync(15_000);
     await vi.waitFor(() => {
       expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
-      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(3);
+      expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(5);
     });
     await vi.advanceTimersByTimeAsync(300);
     expect(mockReconcileThreadDetail).not.toHaveBeenCalled();

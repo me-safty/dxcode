@@ -10,6 +10,7 @@ import type { KnownEnvironment } from "@t3tools/client-runtime";
 
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
 import { recordResumeDiagnostic } from "./resumeDiagnostics";
+import { withTimeout } from "./withTimeout";
 
 export interface EnvironmentConnection {
   readonly kind: "primary" | "saved";
@@ -24,6 +25,14 @@ export interface EnvironmentConnection {
 export interface EnvironmentReconnectOptions {
   readonly shellBootstrapTimeoutMs?: number;
   readonly reason?: string;
+}
+
+export interface EnvironmentProjectionCatchUpResult {
+  readonly status: "complete" | "skipped";
+  readonly reason?: string;
+  readonly eventCount?: number;
+  readonly recoveredSequence?: number;
+  readonly highestReplayedSequence?: number;
 }
 
 export class EnvironmentShellBootstrapTimeoutError extends Error {
@@ -46,6 +55,8 @@ export function isEnvironmentShellBootstrapTimeoutError(
   return error instanceof EnvironmentShellBootstrapTimeoutError;
 }
 
+const DEFAULT_SHELL_BOOTSTRAP_TIMEOUT_MS = 30_000;
+
 interface OrchestrationHandlers {
   readonly applyShellEvent: (
     event: OrchestrationShellStreamEvent,
@@ -63,6 +74,7 @@ interface EnvironmentConnectionInput extends OrchestrationHandlers {
   readonly knownEnvironment: KnownEnvironment;
   readonly client: WsRpcClient;
   readonly refreshMetadata?: () => Promise<void>;
+  readonly catchUpProjection?: () => Promise<EnvironmentProjectionCatchUpResult | void>;
   readonly onConfigSnapshot?: (config: ServerConfig) => void;
   readonly onWelcome?: (payload: ServerLifecycleWelcomePayload) => void;
 }
@@ -110,39 +122,6 @@ function formatReconnectDiagnosticError(error: unknown): string {
     return error.message;
   }
   return String(error);
-}
-
-function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  createError: () => Error,
-): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-  return new Promise<T>((resolve, reject) => {
-    const clear = () => {
-      if (timeoutId !== null) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-    };
-
-    timeoutId = setTimeout(() => {
-      timeoutId = null;
-      reject(createError());
-    }, timeoutMs);
-
-    promise.then(
-      (value) => {
-        clear();
-        resolve(value);
-      },
-      (error) => {
-        clear();
-        reject(error);
-      },
-    );
-  });
 }
 
 export function createEnvironmentConnection(
@@ -240,12 +219,14 @@ export function createEnvironmentConnection(
     ensureBootstrapped: () => bootstrapGate.wait(),
     reconnect: async (options) => {
       const startedAt = Date.now();
-      let phase:
+      type ReconnectPhase =
         | "transport-reconnect"
         | "metadata-refresh"
         | "metadata-refresh:skipped"
-        | "shell-bootstrap-wait" = "transport-reconnect";
-      const recordPhaseStart = (nextPhase: typeof phase) => {
+        | "projection-catch-up"
+        | "shell-bootstrap-wait";
+      let phase: ReconnectPhase = "transport-reconnect";
+      const recordPhaseStart = (nextPhase: ReconnectPhase) => {
         phase = nextPhase;
         recordResumeDiagnostic("environment-reconnect-phase", {
           reason: `${nextPhase}:start`,
@@ -257,7 +238,11 @@ export function createEnvironmentConnection(
         });
         return Date.now();
       };
-      const recordPhaseComplete = (completedPhase: typeof phase, phaseStartedAt: number) => {
+      const recordPhaseComplete = (
+        completedPhase: ReconnectPhase,
+        phaseStartedAt: number,
+        data?: Record<string, unknown>,
+      ) => {
         recordResumeDiagnostic("environment-reconnect-phase", {
           reason: `${completedPhase}:complete`,
           env: environmentId,
@@ -265,6 +250,39 @@ export function createEnvironmentConnection(
             phase: completedPhase,
             elapsedMs: Date.now() - phaseStartedAt,
             totalElapsedMs: Date.now() - startedAt,
+            ...data,
+          },
+        });
+      };
+      const recordPhaseSkipped = (
+        skippedPhase: ReconnectPhase,
+        phaseStartedAt: number,
+        data?: Record<string, unknown>,
+      ) => {
+        recordResumeDiagnostic("environment-reconnect-phase", {
+          reason: `${skippedPhase}:skipped`,
+          env: environmentId,
+          data: {
+            phase: skippedPhase,
+            elapsedMs: Date.now() - phaseStartedAt,
+            totalElapsedMs: Date.now() - startedAt,
+            ...data,
+          },
+        });
+      };
+      const recordPhaseError = (
+        failedPhase: ReconnectPhase,
+        phaseStartedAt: number,
+        error: unknown,
+      ) => {
+        recordResumeDiagnostic("environment-reconnect-phase", {
+          reason: `${failedPhase}:error`,
+          env: environmentId,
+          data: {
+            phase: failedPhase,
+            elapsedMs: Date.now() - phaseStartedAt,
+            totalElapsedMs: Date.now() - startedAt,
+            error: formatReconnectDiagnosticError(error),
           },
         });
       };
@@ -291,21 +309,45 @@ export function createEnvironmentConnection(
           });
         }
 
+        if (input.catchUpProjection) {
+          const catchUpStartedAt = recordPhaseStart("projection-catch-up");
+          void Promise.resolve()
+            .then(() => input.catchUpProjection?.())
+            .then((result) => {
+              if (result?.status === "skipped") {
+                recordPhaseSkipped("projection-catch-up", catchUpStartedAt, {
+                  reason: result.reason ?? null,
+                });
+                return;
+              }
+              recordPhaseComplete("projection-catch-up", catchUpStartedAt, {
+                eventCount: result?.eventCount ?? null,
+                recoveredSequence: result?.recoveredSequence ?? null,
+                highestReplayedSequence: result?.highestReplayedSequence ?? null,
+              });
+            })
+            .catch((error: unknown) => {
+              recordPhaseError("projection-catch-up", catchUpStartedAt, error);
+            });
+        } else {
+          const catchUpStartedAt = recordPhaseStart("projection-catch-up");
+          recordPhaseSkipped("projection-catch-up", catchUpStartedAt, {
+            reason: "no-hook",
+          });
+        }
+
         phaseStartedAt = recordPhaseStart("shell-bootstrap-wait");
-        const shellBootstrapTimeoutMs = options?.shellBootstrapTimeoutMs;
-        const shellBootstrapWait =
-          shellBootstrapTimeoutMs === undefined
-            ? bootstrapGate.wait()
-            : withTimeout(
-                bootstrapGate.wait(),
-                shellBootstrapTimeoutMs,
-                () =>
-                  new EnvironmentShellBootstrapTimeoutError(environmentId, shellBootstrapTimeoutMs),
-              );
-        await shellBootstrapWait;
+        const shellBootstrapTimeoutMs =
+          options?.shellBootstrapTimeoutMs ?? DEFAULT_SHELL_BOOTSTRAP_TIMEOUT_MS;
+        await withTimeout(
+          bootstrapGate.wait(),
+          shellBootstrapTimeoutMs,
+          () => new EnvironmentShellBootstrapTimeoutError(environmentId, shellBootstrapTimeoutMs),
+        );
         recordPhaseComplete("shell-bootstrap-wait", phaseStartedAt);
       } catch (error) {
-        if (isEnvironmentShellBootstrapTimeoutError(error)) {
+        const isShellBootstrapTimeout = isEnvironmentShellBootstrapTimeoutError(error);
+        if (isShellBootstrapTimeout) {
           recordResumeDiagnostic("environment-reconnect-phase", {
             reason: "shell-bootstrap-wait:timeout",
             env: environmentId,
@@ -326,7 +368,9 @@ export function createEnvironmentConnection(
             error: formatReconnectDiagnosticError(error),
           },
         });
-        bootstrapGate.reject(error);
+        if (!isShellBootstrapTimeout) {
+          bootstrapGate.reject(error);
+        }
         throw error;
       }
     },
