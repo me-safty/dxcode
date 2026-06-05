@@ -167,6 +167,7 @@ export function listWslDistributions(): Effect.Effect<WslDistribution[], WslCliE
 
 export function parseWslListVerbose(output: string): WslDistribution[] {
   return output
+    .replaceAll("\uFEFF", "")
     .replaceAll("\u0000", "")
     .split(/\r?\n/g)
     .slice(1)
@@ -175,7 +176,7 @@ export function parseWslListVerbose(output: string): WslDistribution[] {
     .map((line): WslDistribution | null => {
       const isDefault = line.startsWith("*");
       const cleaned = isDefault ? line.slice(1).trim() : line;
-      const match = cleaned.match(/^(.+?)\s+(Running|Stopped)\s+(\d+)\s*$/i);
+      const match = cleaned.match(/^(.+?)\s+(Running|Stopped)\s+(\d+)/i);
       if (!match) return null;
       return {
         name: match[1]!.trim(),

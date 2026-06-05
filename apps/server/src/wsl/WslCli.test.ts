@@ -71,4 +71,16 @@ describe("WslCli", () => {
       { name: "Debian", default: false, running: false, version: 2 },
     ]);
   });
+
+  it("parses verbose distribution output with BOM, CR, LF, and trailing whitespace", () => {
+    expect(
+      parseWslListVerbose(`\uFEFF  NAME                   STATE           VERSION\r
+* Ubuntu                 Running         2\r
+  Debian                 Stopped         2 \r
+`),
+    ).toEqual([
+      { name: "Ubuntu", default: true, running: true, version: 2 },
+      { name: "Debian", default: false, running: false, version: 2 },
+    ]);
+  });
 });
