@@ -576,16 +576,19 @@ const program = Effect.gen(function* () {
             mode: "default",
           },
         });
+        if (typeof result !== "object" || result === null || !("outcome" in result)) {
+          throw new Error("Expected _x.ai/ask_user_question response outcome.");
+        }
+        if (result.outcome === "cancelled") {
+          return { stopReason: "end_turn" };
+        }
         if (
-          typeof result !== "object" ||
-          result === null ||
-          !("outcome" in result) ||
           result.outcome !== "accepted" ||
           !("answers" in result) ||
           typeof result.answers !== "object" ||
           result.answers === null
         ) {
-          throw new Error("Expected _x.ai/ask_user_question response outcome.");
+          throw new Error("Expected accepted _x.ai/ask_user_question response answers.");
         }
 
         return { stopReason: "end_turn" };
