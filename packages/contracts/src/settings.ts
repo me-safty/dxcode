@@ -40,9 +40,30 @@ export const SidebarThreadPreviewCount = Schema.Int.check(
 export type SidebarThreadPreviewCount = typeof SidebarThreadPreviewCount.Type;
 export const DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT: SidebarThreadPreviewCount = 6;
 
+// Max width (in px) of the centered chat content column (messages + composer).
+// Min is the historical default (max-w-3xl = 768px); the applied width is
+// further clamped to the available viewport via `min(value, 100%)`, so the
+// upper bound just needs to be wide enough to reach "full" on large displays.
+export const MIN_CHAT_CONTENT_WIDTH_PX = 800;
+export const CHAT_CONTENT_WIDTH_STEP_PX = 50;
+// 800 + 36 * 50 — every slider stop is a round multiple of 50 (800, 850, …,
+// 2600) and the rightmost lands exactly on the max (reads as "Full").
+export const MAX_CHAT_CONTENT_WIDTH_PX = 2600;
+export const ChatContentWidthPx = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_CHAT_CONTENT_WIDTH_PX,
+    maximum: MAX_CHAT_CONTENT_WIDTH_PX,
+  }),
+);
+export type ChatContentWidthPx = typeof ChatContentWidthPx.Type;
+export const DEFAULT_CHAT_CONTENT_WIDTH_PX: ChatContentWidthPx = MIN_CHAT_CONTENT_WIDTH_PX;
+
 export const ClientSettingsSchema = Schema.Struct({
   appearance: AppearanceSettingsSchema.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_APPEARANCE_SETTINGS)),
+  ),
+  chatContentWidthPx: ChatContentWidthPx.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_CHAT_CONTENT_WIDTH_PX)),
   ),
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -516,6 +537,7 @@ export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 export const ClientSettingsPatch = Schema.Struct({
   appearance: Schema.optionalKey(AppearanceSettingsSchema),
   autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
+  chatContentWidthPx: Schema.optionalKey(ChatContentWidthPx),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),

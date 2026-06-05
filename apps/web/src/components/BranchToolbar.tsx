@@ -127,7 +127,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
         className="min-w-0 max-w-[48%] flex-1 justify-start text-muted-foreground/70 hover:text-foreground/80 md:hidden"
       >
         {triggerContent}
-        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+        <ChevronDownIcon className="size-3 shrink-0 opacity-70" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-64">
         {showEnvironmentPicker && availableEnvironments && onEnvironmentChange ? (
@@ -241,7 +241,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   if (!hasActiveThread || !activeProject) return null;
 
   return (
-    <div className="mx-auto flex w-full max-w-208 items-center gap-2 px-2.5 pb-3 pt-1 sm:px-3">
+    <div className="chat-composer-col mx-auto flex w-full items-center gap-2 px-2.5 pb-3 pt-1 sm:px-3">
       {isMobile ? (
         <MobileRunContextSelector
           envLocked={envLocked}

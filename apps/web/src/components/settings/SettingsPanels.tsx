@@ -1,7 +1,7 @@
 import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   defaultInstanceIdForDriver,
   type DesktopUpdateChannel,
@@ -12,7 +12,12 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import {
+  CHAT_CONTENT_WIDTH_STEP_PX,
+  DEFAULT_UNIFIED_SETTINGS,
+  MAX_CHAT_CONTENT_WIDTH_PX,
+  MIN_CHAT_CONTENT_WIDTH_PX,
+} from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
 import * as Arr from "effect/Array";
 import * as Duration from "effect/Duration";
@@ -52,6 +57,7 @@ import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampForm
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Slider } from "../ui/slider";
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -386,6 +392,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
         ? ["Visible threads"]
         : []),
+      ...(settings.chatContentWidthPx !== DEFAULT_UNIFIED_SETTINGS.chatContentWidthPx
+        ? ["Chat width"]
+        : []),
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
@@ -429,6 +438,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.automaticGitFetchInterval,
       settings.enableAssistantStreaming,
       settings.sidebarThreadPreviewCount,
+      settings.chatContentWidthPx,
       settings.timestampFormat,
     ],
   );
@@ -449,6 +459,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
+      chatContentWidthPx: DEFAULT_UNIFIED_SETTINGS.chatContentWidthPx,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
@@ -465,6 +476,57 @@ export function useSettingsRestore(onRestored?: () => void) {
     changedSettingLabels,
     restoreDefaults,
   };
+}
+
+function ChatWidthSettingsRow() {
+  const chatContentWidthPx = useSettings((s) => s.chatContentWidthPx);
+  const { updateSettings } = useUpdateSettings();
+  // Local draft so the thumb tracks the pointer smoothly while dragging; the
+  // persisted value is only written on commit (pointer up / keyboard change).
+  const [draft, setDraft] = useState(chatContentWidthPx);
+
+  // Re-sync when the persisted value changes elsewhere (e.g. Restore defaults).
+  useEffect(() => {
+    setDraft(chatContentWidthPx);
+  }, [chatContentWidthPx]);
+
+  const isDefault = chatContentWidthPx === DEFAULT_UNIFIED_SETTINGS.chatContentWidthPx;
+  const atFullWidth = draft >= MAX_CHAT_CONTENT_WIDTH_PX;
+
+  return (
+    <SettingsRow
+      title="Chat width"
+      description="Set the maximum width of the message and composer column."
+      resetAction={
+        !isDefault ? (
+          <SettingResetButton
+            label="chat width"
+            onClick={() =>
+              updateSettings({ chatContentWidthPx: DEFAULT_UNIFIED_SETTINGS.chatContentWidthPx })
+            }
+          />
+        ) : null
+      }
+      control={
+        <div className="flex w-full items-center gap-3 sm:w-64">
+          <Slider
+            aria-label="Chat width"
+            min={MIN_CHAT_CONTENT_WIDTH_PX}
+            max={MAX_CHAT_CONTENT_WIDTH_PX}
+            step={CHAT_CONTENT_WIDTH_STEP_PX}
+            value={draft}
+            onValueChange={(value) => setDraft(Array.isArray(value) ? value[0] : value)}
+            onValueCommitted={(value) =>
+              updateSettings({ chatContentWidthPx: Array.isArray(value) ? value[0] : value })
+            }
+          />
+          <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+            {atFullWidth ? "Full" : `${draft}px`}
+          </span>
+        </div>
+      }
+    />
+  );
 }
 
 export function GeneralSettingsPanel() {
@@ -549,6 +611,8 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        <ChatWidthSettingsRow />
 
         <SettingsRow
           title="Diff line wrapping"
