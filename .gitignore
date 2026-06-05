@@ -32,3 +32,8 @@ node_modules/
 *.log
 .env*
 !.env.example
+.backlog/
+.agents/
+.agents
+.claude/
+.playwright-cli/
