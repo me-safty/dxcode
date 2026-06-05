@@ -114,7 +114,7 @@ try {
   delete packagedPackageJson.private;
   writeFileSync(packageJsonPath, `${JSON.stringify(packagedPackageJson, null, 2)}\n`);
   run("pnpm", ["run", "build"]);
-  const vsceArgs = ["x", "vsce", "package", "--no-dependencies", "--out", vsixPath];
+  const vsceArgs = ["exec", "vsce", "package", "--no-dependencies", "--out", vsixPath];
   if (packageOptions.target) {
     vsceArgs.push("--target", packageOptions.target);
   }

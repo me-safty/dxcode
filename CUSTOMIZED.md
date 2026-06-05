@@ -1,5 +1,50 @@
 # Custom Branch Changes
 
+## Installable Build Commands
+
+Use these commands from the repository root when producing local installable artifacts for this customized branch.
+
+### VS Code Extension
+
+Build a local VSIX and install the newest generated package into VS Code:
+
+```sh
+pnpm --filter t3code-vscode package
+code --install-extension "$(ls -t apps/vscode-extension/*.vsix | head -1)"
+```
+
+### Desktop App
+
+Build a macOS arm64 DMG using the same desktop artifact path used for this branch:
+
+```sh
+pnpm run dist:desktop:dmg:arm64
+open "$(ls -t release/T3-Code-*-arm64.dmg | head -1)"
+```
+
+### Mobile App
+
+Build the installable Android preview APK locally, avoiding the EAS cloud worker queue, then install it directly over USB:
+
+```sh
+cd apps/mobile
+JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ANDROID_HOME=/opt/homebrew/share/android-commandlinetools ANDROID_SDK_ROOT=/opt/homebrew/share/android-commandlinetools PATH="/opt/homebrew/opt/openjdk@17/bin:/opt/homebrew/share/android-commandlinetools/platform-tools:$PATH" EAS_SKIP_AUTO_FINGERPRINT=1 pnpm dlx eas-cli@latest build --profile preview -p android --local --output ./build/android/t3-code-preview.apk
+adb install -r ./build/android/t3-code-preview.apk
+```
+
+Upload the local APK to EAS when a shareable install link is needed:
+
+```sh
+cd apps/mobile
+pnpm dlx eas-cli@latest upload -p android --build-path ./build/android/t3-code-preview.apk --non-interactive
+```
+
+Sometimes it may be needed to disable the expo doctor step, we're not interested in fixing unrelated Expo environment issues when the goal is just to get a local build installed:
+
+```sh
+EAS_BUILD_DISABLE_EXPO_DOCTOR_STEP=1
+```
+
 This branch carries local conversation-rendering changes that are not assumed to exist upstream. Keep this file current when changing local behavior so future merges can preserve the intended UX, and so these patches can be removed when upstream covers the same behavior.
 
 ## Conversation Tool Activity Rendering
@@ -121,6 +166,23 @@ Primary reference:
 
 - `apps/vscode-extension/IMPLEMENTATION.md`
 
+## Mobile EAS Project Ownership
+
+This branch points the mobile Expo/EAS project at the local `quicksaver` owner instead of upstream's `pingdotgg` owner so installable internal mobile builds can be produced without requiring access to the upstream Expo organization.
+
+Expected behavior:
+
+- `apps/mobile/app.config.ts` uses `owner: "quicksaver"` for EAS project ownership.
+- `apps/mobile/app.config.ts` uses EAS project id `c65ac46d-6488-49af-b61e-ab9bef78f96e`.
+
+Important merge rule:
+
+If upstream changes the mobile EAS project metadata, preserve the local `quicksaver` owner and project id unless this branch intentionally switches back to the upstream Expo organization or to a new local EAS project. Re-check this before resolving conflicts in `apps/mobile/app.config.ts`, because accepting upstream's `pingdotgg` owner can make local `eas build --profile preview` fail with Expo authorization errors.
+
+Primary file:
+
+- `apps/mobile/app.config.ts`
+
 ## Merge Guidance
 
 When merging from upstream, keep these local behaviors unless upstream has an equivalent implementation:
@@ -132,6 +194,7 @@ When merging from upstream, keep these local behaviors unless upstream has an eq
 5. Empty subagent placeholder activities stay hidden.
 6. Chat conversation and composer surfaces default to no maximum width across all host types.
 7. VS Code extension work remains preserved as a local customization unless `main` has an equivalent implementation; use `apps/vscode-extension/IMPLEMENTATION.md` as the detailed source of truth.
+8. Mobile EAS project ownership remains pointed at the local Expo project used for installable preview builds unless deliberately changed.
 
 ## Retirement Criteria
 
