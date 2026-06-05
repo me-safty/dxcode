@@ -365,6 +365,14 @@ function buildSlackInitialPromptContext(input: { readonly slackThreadContext?: s
   ].join("\n");
 }
 
+function buildSlackProjectHintText(input: {
+  readonly currentText: string;
+  readonly slackThreadContext?: string | undefined;
+}) {
+  const parts = [input.currentText, input.slackThreadContext ?? ""].map((part) => part.trim());
+  return parts.filter(Boolean).join("\n\n");
+}
+
 function optionCreatedAt<T extends { readonly createdAt: string }>(
   option: Option.Option<T>,
   fallback: string,
@@ -440,7 +448,10 @@ const makeExternalChat = Effect.gen(function* () {
         ...(uploadAttachments.length > 0 ? { attachments: uploadAttachments } : {}),
         url: ref.url,
         receivedAt: input.message.metadata.dateSent.toISOString(),
-        projectHintText: ref.raw.text ?? input.message.text,
+        projectHintText: buildSlackProjectHintText({
+          currentText: ref.raw.text ?? input.message.text,
+          slackThreadContext,
+        }),
         slack: {
           rawText: ref.raw.text ?? input.message.text,
           isMention: input.message.isMention,
