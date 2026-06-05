@@ -56,13 +56,13 @@ export function validateClerkFrontendApiUrl(rawUrl: string): URL {
 
 function executeCloudAuthFetch(url: URL, input: typeof DesktopCloudAuthFetchInputSchema.Type) {
   return Effect.gen(function* () {
-    const response = yield* HttpClientRequest.make((input.method ?? "GET") as "GET" | "POST")(
-      url,
-    ).pipe(
-      HttpClientRequest.setHeaders(input.headers),
+    const method = (input.method ?? "GET") as "GET" | "POST";
+    const headers = new Headers(input.headers);
+    const response = yield* HttpClientRequest.make(method)(url).pipe(
+      HttpClientRequest.setHeaders(headers),
       input.body === undefined
         ? identity
-        : HttpClientRequest.bodyText(input.body, input.headers["content-type"]),
+        : HttpClientRequest.bodyText(input.body, headers.get("content-type") ?? undefined),
       HttpClient.execute,
       Effect.mapError(
         (cause) =>
