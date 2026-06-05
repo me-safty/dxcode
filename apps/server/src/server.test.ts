@@ -929,6 +929,28 @@ const withExecutionBridgeSecret = <A, E, R>(
       }),
   );
 
+const withEnvVar = <A, E, R>(name: string, value: string | null, effect: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = process.env[name];
+      if (value === null) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+      return previous;
+    }),
+    () => effect,
+    (previous) =>
+      Effect.sync(() => {
+        if (previous === undefined) {
+          delete process.env[name];
+        } else {
+          process.env[name] = previous;
+        }
+      }),
+  );
+
 const getHttpServerUrl = (pathname = "") =>
   Effect.gen(function* () {
     const server = yield* HttpServer.HttpServer;
@@ -1417,6 +1439,157 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertBrowserApiCorsResponseHeaders(response.headers);
       assert.deepEqual(body, testEnvironmentDescriptor);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("reacts to the initial Slack request when a linked GitHub pull request is merged", () =>
+    withEnvVar(
+      "GITHUB_WEBHOOK_SECRET",
+      "github-webhook-test-secret",
+      Effect.gen(function* () {
+        const now = "2026-01-01T00:00:00.000Z";
+        const reactions: Array<Parameters<ExternalChatShape["addReaction"]>[0]> = [];
+        const threadPosts: Array<Parameters<ExternalChatShape["postToThread"]>[0]> = [];
+        const deliveryReceipts: Array<
+          Parameters<ExternalIntegrationRepositoryShape["upsertDeliveryReceipt"]>[0]
+        > = [];
+        const eventReceipts: Array<
+          Parameters<ExternalIntegrationRepositoryShape["upsertEventReceipt"]>[0]
+        > = [];
+
+        yield* buildAppUnderTest({
+          layers: {
+            externalChat: {
+              addReaction: (input) =>
+                Effect.sync(() => {
+                  reactions.push(input);
+                }),
+              postToThread: (input) =>
+                Effect.sync(() => {
+                  threadPosts.push(input);
+                  return { externalMessageId: "slack-merged-card-message" };
+                }),
+            },
+            externalIntegrationRepository: {
+              getEventReceipt: () => Effect.succeed(Option.none()),
+              getArtifactLink: (input) =>
+                Effect.succeed(
+                  input.kind === "github_pr" && input.externalId === "affil-ai/t3code#123"
+                    ? Option.some({
+                        kind: "github_pr" as const,
+                        externalId: "affil-ai/t3code#123",
+                        t3ThreadId: defaultThreadId,
+                        url: "https://github.com/affil-ai/t3code/pull/123",
+                        metadata: {},
+                        createdAt: now,
+                        updatedAt: now,
+                      })
+                    : Option.none(),
+                ),
+              listThreadLinksByThread: (threadId) =>
+                Effect.succeed(
+                  String(threadId) === String(defaultThreadId)
+                    ? [
+                        {
+                          source: "slack" as const,
+                          externalThreadId: "C_TEST:1710000000.000000",
+                          t3ThreadId: defaultThreadId,
+                          projectId: defaultProjectId,
+                          primaryExternalMessageId: "1710000000.123456",
+                          url: "https://example.slack.com/archives/C_TEST/p1710000000000000",
+                          muted: false,
+                          metadata: {},
+                          createdAt: now,
+                          updatedAt: now,
+                        },
+                      ]
+                    : [],
+                ),
+              getDeliveryReceipt: () => Effect.succeed(Option.none()),
+              upsertDeliveryReceipt: (receipt) =>
+                Effect.sync(() => {
+                  deliveryReceipts.push(receipt);
+                }),
+              upsertEventReceipt: (receipt) =>
+                Effect.sync(() => {
+                  eventReceipts.push(receipt);
+                }),
+            },
+          },
+        });
+
+        const payload = {
+          repository: {
+            name: "t3code",
+            owner: { login: "affil-ai" },
+          },
+          pull_request: {
+            number: 123,
+            html_url: "https://github.com/affil-ai/t3code/pull/123",
+            merged: true,
+            merged_at: "2026-06-05T18:00:00Z",
+            title: "Finish Slack completion reaction",
+            head: {
+              ref: "t3code/slack-completion-reaction",
+              sha: "abc123",
+            },
+          },
+        };
+        const body = jsonRequestBody(payload);
+        const signature = `sha256=${NodeCrypto.createHmac("sha256", "github-webhook-test-secret").update(body).digest("hex")}`;
+        const url = yield* getHttpServerUrl("/github/webhook");
+        const response = yield* fetchEffect(url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-github-event": "pull_request",
+            "x-github-delivery": "delivery-merged-123",
+            "x-hub-signature-256": signature,
+          },
+          body,
+        });
+        const responseBody = yield* responseJsonEffect<{
+          readonly accepted: boolean;
+          readonly delivered: number;
+        }>(response);
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(responseBody, { accepted: true, delivered: 1 });
+        assert.deepEqual(reactions, [
+          {
+            source: "slack",
+            externalThreadId: "C_TEST:1710000000.000000",
+            externalMessageId: "1710000000.123456",
+            name: "white_check_mark",
+          },
+        ]);
+        assert.equal(threadPosts.length, 1);
+        assert.equal(threadPosts[0]?.externalThreadId, "C_TEST:1710000000.000000");
+        assert.deepEqual(
+          deliveryReceipts.map((receipt) => ({
+            source: receipt.source,
+            deliveryKey: receipt.deliveryKey,
+            status: receipt.status,
+            externalMessageId: receipt.externalMessageId,
+          })),
+          [
+            {
+              source: "github",
+              deliveryKey: "github-pr-merged:affil-ai/t3code#123:C_TEST:1710000000.000000",
+              status: "completed",
+              externalMessageId: "slack-merged-card-message",
+            },
+          ],
+        );
+        assert.deepEqual(
+          eventReceipts.map((receipt) => ({
+            source: receipt.source,
+            eventId: receipt.eventId,
+            status: receipt.status,
+          })),
+          [{ source: "github", eventId: "delivery-merged-123", status: "completed" }],
+        );
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    ),
   );
 
   it.effect("rejects bridge requests when the shared secret is not configured", () =>
