@@ -1,4 +1,4 @@
-import { useClerk } from "@clerk/react";
+import { useWaitlist } from "@clerk/react";
 import { useState } from "react";
 
 import {
@@ -27,27 +27,31 @@ export function DesktopClerkWaitlist() {
 }
 
 function DesktopClerkWaitlistForm({ onSignIn }: { onSignIn: () => void }) {
-  const clerk = useClerk();
+  const { errors, fetchStatus, waitlist } = useWaitlist();
   const [emailAddress, setEmailAddress] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [didJoin, setDidJoin] = useState(false);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const isSubmitting = fetchStatus === "fetching";
+  const fieldError = errors.fields.emailAddress?.longMessage;
 
   const submitWaitlist = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setError(null);
-    setIsSubmitting(true);
+    const normalizedEmailAddress = emailAddress.trim();
+    if (!normalizedEmailAddress || isSubmitting) {
+      return;
+    }
+
+    setRequestError(null);
     try {
-      await clerk.joinWaitlist({ emailAddress });
-      setDidJoin(true);
+      const { error } = await waitlist.join({ emailAddress: normalizedEmailAddress });
+      if (error) {
+        setRequestError(getClerkErrorMessage(error));
+      }
     } catch (cause) {
-      setError(getClerkErrorMessage(cause));
-    } finally {
-      setIsSubmitting(false);
+      setRequestError(getClerkErrorMessage(cause));
     }
   };
 
-  if (didJoin) {
+  if (waitlist.id) {
     return (
       <DesktopClerkCard>
         <DesktopClerkHeader
@@ -70,7 +74,7 @@ function DesktopClerkWaitlistForm({ onSignIn }: { onSignIn: () => void }) {
         title="Join the waitlist"
         subtitle="Enter your email address and we’ll let you know when your spot is ready"
       />
-      <DesktopClerkAlert>{error}</DesktopClerkAlert>
+      <DesktopClerkAlert>{fieldError ?? requestError}</DesktopClerkAlert>
       <form className="space-y-8 text-left" onSubmit={submitWaitlist}>
         <label className="block space-y-2" htmlFor="desktop-clerk-waitlist-email">
           <span className="text-sm font-semibold text-foreground">Email address</span>
@@ -82,10 +86,14 @@ function DesktopClerkWaitlistForm({ onSignIn }: { onSignIn: () => void }) {
             placeholder="Enter your email address"
             type="email"
             value={emailAddress}
-            onChange={(event) => setEmailAddress(event.currentTarget.value)}
+            onChange={(event) => {
+              setEmailAddress(event.currentTarget.value);
+              setRequestError(null);
+            }}
           />
         </label>
-        <DesktopClerkPrimaryButton disabled={isSubmitting}>
+        <div id="clerk-captcha" data-cl-size="flexible" />
+        <DesktopClerkPrimaryButton disabled={isSubmitting || emailAddress.trim().length === 0}>
           {isSubmitting ? "Joining the waitlist…" : "Join the waitlist"}
         </DesktopClerkPrimaryButton>
       </form>
