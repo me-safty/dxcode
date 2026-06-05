@@ -28,11 +28,9 @@ import {
 
 const READINESS_PATH = "/.well-known/t3/environment";
 const REVOKE_BEARER_SESSION_TIMEOUT_MS = 5_000;
-const DESKTOP_BOOTSTRAP_TICKET_RETRY_TIMEOUT_MS = 15_000;
-const DESKTOP_BOOTSTRAP_TICKET_RETRY_INTERVAL_MS = 250;
 const VSCODE_WORKSPACE_BOOTSTRAP_PATH = "/api/vscode/workspace-bootstrap";
 
-interface BootstrapWorkspaceFolder {
+export interface BootstrapWorkspaceFolder {
   readonly key: string;
   readonly name: string;
   readonly cwd: string;
@@ -43,7 +41,6 @@ interface BootstrapWorkspaceFolder {
 export interface BackendConnection {
   readonly httpBaseUrl: string;
   readonly wsBaseUrl: string;
-  readonly bootstrapToken: string;
   readonly bearerToken: string;
   readonly cwd: string;
   readonly t3Home: string;
@@ -83,22 +80,18 @@ export type BackendRunCommand = (
   options?: BackendRunCommandOptions,
 ) => Promise<void>;
 
+export type BackendPairingTokenPrompt = (input: {
+  readonly httpBaseUrl: string;
+  readonly t3Home: string;
+  readonly workspaceFolders: readonly BootstrapWorkspaceFolder[];
+}) => Promise<string | null>;
+
 export class DesktopBackendUnavailableError extends Error {
   constructor(
     message = "T3 Code for VS Code requires the T3 Code desktop app to be running on this machine.",
   ) {
     super(message);
     this.name = "DesktopBackendUnavailableError";
-  }
-}
-
-class DesktopBootstrapTicketRejectedError extends Error {
-  readonly status: number;
-
-  constructor(status: number) {
-    super(`Desktop bootstrap ticket was rejected (${status}).`);
-    this.name = "DesktopBootstrapTicketRejectedError";
-    this.status = status;
   }
 }
 
@@ -125,6 +118,7 @@ export interface BackendManagerDependencies {
   readonly writeHostMcpAdvertisement: typeof writeHostMcpAdvertisement;
   readonly removeHostMcpAdvertisement: typeof removeHostMcpAdvertisement;
   readonly cleanupHostMcpAdvertisements: typeof cleanupHostMcpAdvertisements;
+  readonly promptForPairingToken: BackendPairingTokenPrompt;
 }
 
 const defaultBackendManagerDependencies: BackendManagerDependencies = {
@@ -138,6 +132,7 @@ const defaultBackendManagerDependencies: BackendManagerDependencies = {
   writeHostMcpAdvertisement,
   removeHostMcpAdvertisement,
   cleanupHostMcpAdvertisements,
+  promptForPairingToken: defaultPromptForPairingToken,
 };
 
 export class BackendManager {
@@ -150,16 +145,18 @@ export class BackendManager {
     readonly interval: NodeJS.Timeout;
   } | null = null;
   #outputChannel: vscode.OutputChannel;
+  readonly #secrets: vscode.SecretStorage;
   readonly #dependencies: BackendManagerDependencies;
   readonly #mcpBridge: BackendMcpBridge | null;
 
   constructor(
-    _context: vscode.ExtensionContext,
+    context: vscode.ExtensionContext,
     outputChannel: vscode.OutputChannel,
     dependencies: BackendManagerDependencies = defaultBackendManagerDependencies,
     mcpBridge: BackendMcpBridge | null = null,
   ) {
     this.#outputChannel = outputChannel;
+    this.#secrets = context.secrets;
     this.#dependencies = dependencies;
     this.#mcpBridge = mcpBridge;
   }
@@ -200,7 +197,6 @@ export class BackendManager {
 
   async stop(): Promise<void> {
     this.#stopHostMcpAdvertisement();
-    const connection = this.#connection;
     if (this.#startupToken) {
       this.#startupToken.cancelled = true;
       this.#startupToken.abortController.abort();
@@ -208,22 +204,6 @@ export class BackendManager {
     }
     this.#starting = null;
     this.#connection = null;
-
-    if (!connection) {
-      return;
-    }
-
-    try {
-      await revokeBearerSession(
-        connection.httpBaseUrl,
-        connection.bearerToken,
-        this.#dependencies.fetch,
-      );
-    } catch (error) {
-      this.#outputChannel.appendLine(
-        `[backend] Failed to revoke desktop bearer session: ${errorMessage(error)}`,
-      );
-    }
   }
 
   async #connect(startupToken: BackendStartupToken): Promise<BackendConnection> {
@@ -249,29 +229,40 @@ export class BackendManager {
     });
     this.#assertStartupActive(startupToken);
 
-    const { desktopBackend, environment, bearerToken } =
-      await this.#connectToDesktopBackendWithFreshTicket(
-        t3Home,
-        startupToken,
-        startupToken.abortController.signal,
-      );
+    const desktopBackend = this.#resolveDesktopBackendAdvertisement(t3Home);
+    const environment = await waitForBackendReady(
+      desktopBackend.httpBaseUrl,
+      this.#dependencies.fetch,
+      startupToken.abortController.signal,
+    );
+    const bearerToken = await this.#resolveDesktopBearerToken({
+      t3Home,
+      httpBaseUrl: desktopBackend.httpBaseUrl,
+      workspaceFolders,
+      startupToken,
+      signal: startupToken.abortController.signal,
+    });
+    let shouldRevokeStartupBearer = bearerToken.source === "pairing";
     try {
       this.#assertStartupActive(startupToken);
       const workspaceBootstrap = await ensureWorkspaceBootstrap({
         httpBaseUrl: desktopBackend.httpBaseUrl,
-        bearerToken,
+        bearerToken: bearerToken.token,
         workspaceFolders,
         activeWorkspaceFolder,
         fetchFn: this.#dependencies.fetch,
         signal: startupToken.abortController.signal,
       });
       this.#assertStartupActive(startupToken);
+      if (bearerToken.source === "pairing") {
+        await this.#secrets.store(bearerToken.secretKey, bearerToken.token);
+        shouldRevokeStartupBearer = false;
+      }
 
       this.#connection = {
         httpBaseUrl: desktopBackend.httpBaseUrl,
         wsBaseUrl: toWebSocketBaseUrl(desktopBackend.httpBaseUrl),
-        bootstrapToken: desktopBackend.bootstrapToken,
-        bearerToken,
+        bearerToken: bearerToken.token,
         cwd,
         t3Home,
         environmentId: environment.environmentId,
@@ -288,15 +279,17 @@ export class BackendManager {
           : {}),
       };
     } catch (error) {
-      await revokeBearerSession(
-        desktopBackend.httpBaseUrl,
-        bearerToken,
-        this.#dependencies.fetch,
-      ).catch((revokeError) => {
-        this.#outputChannel.appendLine(
-          `[backend] Failed to revoke failed startup bearer session: ${errorMessage(revokeError)}`,
-        );
-      });
+      if (shouldRevokeStartupBearer) {
+        await revokeBearerSession(
+          desktopBackend.httpBaseUrl,
+          bearerToken.token,
+          this.#dependencies.fetch,
+        ).catch((revokeError) => {
+          this.#outputChannel.appendLine(
+            `[backend] Failed to revoke failed startup bearer session: ${errorMessage(revokeError)}`,
+          );
+        });
+      }
       this.#assertStartupActive(startupToken);
       throw error;
     }
@@ -347,7 +340,6 @@ export class BackendManager {
   #resolveDesktopBackendAdvertisement(t3Home: string): {
     readonly backendId: string;
     readonly httpBaseUrl: string;
-    readonly bootstrapToken: string;
   } {
     try {
       this.#dependencies.cleanupDesktopBackendAdvertisements({ t3Home });
@@ -359,7 +351,6 @@ export class BackendManager {
         return {
           backendId: advertisement.backendId,
           httpBaseUrl: advertisement.httpBaseUrl,
-          bootstrapToken: advertisement.bootstrapToken,
         };
       }
     } catch (error) {
@@ -372,69 +363,52 @@ export class BackendManager {
     throw new DesktopBackendUnavailableError();
   }
 
-  async #connectToDesktopBackendWithFreshTicket(
-    t3Home: string,
-    startupToken: BackendStartupToken,
-    signal: AbortSignal,
-  ): Promise<{
-    readonly desktopBackend: {
-      readonly backendId: string;
-      readonly httpBaseUrl: string;
-      readonly bootstrapToken: string;
-    };
-    readonly environment: { readonly environmentId: string };
-    readonly bearerToken: string;
-  }> {
-    const deadline = Date.now() + DESKTOP_BOOTSTRAP_TICKET_RETRY_TIMEOUT_MS;
-    let rejectedTicket: string | null = null;
-    let lastRejection: DesktopBootstrapTicketRejectedError | null = null;
-
-    while (Date.now() < deadline) {
-      this.#assertStartupActive(startupToken);
-      const desktopBackend = this.#resolveDesktopBackendAdvertisement(t3Home);
-      if (desktopBackend.bootstrapToken === rejectedTicket && Date.now() < deadline) {
-        await sleep(DESKTOP_BOOTSTRAP_TICKET_RETRY_INTERVAL_MS, undefined, { signal }).catch(() => {
-          this.#assertStartupActive(startupToken);
-        });
-        this.#assertStartupActive(startupToken);
-        continue;
+  async #resolveDesktopBearerToken(input: {
+    readonly t3Home: string;
+    readonly httpBaseUrl: string;
+    readonly workspaceFolders: readonly BootstrapWorkspaceFolder[];
+    readonly startupToken: BackendStartupToken;
+    readonly signal: AbortSignal;
+  }): Promise<
+    | { readonly source: "stored"; readonly token: string; readonly secretKey: string }
+    | { readonly source: "pairing"; readonly token: string; readonly secretKey: string }
+  > {
+    const secretKey = resolveStoredBearerTokenSecretKey(input);
+    const storedBearerToken = (await this.#secrets.get(secretKey))?.trim();
+    if (storedBearerToken) {
+      const authenticated = await fetchBearerSessionAuthenticated({
+        httpBaseUrl: input.httpBaseUrl,
+        bearerToken: storedBearerToken,
+        fetchFn: this.#dependencies.fetch,
+        signal: input.signal,
+      });
+      this.#assertStartupActive(input.startupToken);
+      if (authenticated) {
+        return { source: "stored", token: storedBearerToken, secretKey };
       }
-
-      const environment = await waitForBackendReady(
-        desktopBackend.httpBaseUrl,
-        this.#dependencies.fetch,
-        signal,
-      );
-      try {
-        const bearerToken = await exchangeBootstrapBearerSession(
-          desktopBackend.httpBaseUrl,
-          desktopBackend.bootstrapToken,
-          this.#dependencies.fetch,
-          signal,
-        );
-        return { desktopBackend, environment, bearerToken };
-      } catch (error) {
-        if (
-          error instanceof DesktopBootstrapTicketRejectedError &&
-          error.status === 401 &&
-          Date.now() < deadline
-        ) {
-          rejectedTicket = desktopBackend.bootstrapToken;
-          lastRejection = error;
-          await sleep(DESKTOP_BOOTSTRAP_TICKET_RETRY_INTERVAL_MS, undefined, { signal }).catch(
-            () => {
-              this.#assertStartupActive(startupToken);
-            },
-          );
-          this.#assertStartupActive(startupToken);
-          continue;
-        }
-        this.#assertStartupActive(startupToken);
-        throw error;
-      }
+      await this.#secrets.delete(secretKey);
     }
 
-    throw lastRejection ?? new Error("Timed out waiting for a fresh desktop bootstrap ticket.");
+    const pairingToken = (
+      await this.#dependencies.promptForPairingToken({
+        httpBaseUrl: input.httpBaseUrl,
+        t3Home: input.t3Home,
+        workspaceFolders: input.workspaceFolders,
+      })
+    )?.trim();
+    this.#assertStartupActive(input.startupToken);
+    if (!pairingToken) {
+      throw new Error("T3 Code VS Code pairing was cancelled.");
+    }
+
+    const token = await exchangeBootstrapBearerSession(
+      input.httpBaseUrl,
+      pairingToken,
+      this.#dependencies.fetch,
+      input.signal,
+    );
+    this.#assertStartupActive(input.startupToken);
+    return { source: "pairing", token, secretKey };
   }
 
   #refreshHostMcpAdvertisement(input: {
@@ -649,6 +623,42 @@ function runCommand(
   });
 }
 
+async function defaultPromptForPairingToken(): Promise<string | null> {
+  const value = await vscode.window.showInputBox({
+    title: "Pair T3 Code with VS Code",
+    prompt: "Enter a pairing token from T3 Code Desktop.",
+    placeHolder: "Pairing token",
+    password: true,
+    ignoreFocusOut: true,
+  });
+  return value ?? null;
+}
+
+export function resolveStoredBearerTokenSecretKey(input: {
+  readonly t3Home: string;
+  readonly httpBaseUrl: string;
+  readonly workspaceFolders: readonly BootstrapWorkspaceFolder[];
+}): string {
+  const digest = crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        t3Home: input.t3Home,
+        httpBaseUrl: new URL(input.httpBaseUrl).href,
+        workspaceFolders: input.workspaceFolders
+          .map((folder) => ({
+            key: folder.key,
+            cwd: folder.cwd,
+            uriScheme: folder.uriScheme,
+            uriAuthority: folder.uriAuthority,
+          }))
+          .toSorted((left, right) => left.key.localeCompare(right.key)),
+      }),
+    )
+    .digest("hex");
+  return `t3code.vscode.bearer.v1:${digest}`;
+}
+
 async function waitForBackendReady(
   httpBaseUrl: string,
   fetchFn: typeof fetch = fetch,
@@ -744,6 +754,29 @@ function makeThreadRoute(environmentId: string, threadId: string): string {
   return `/_chat/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`;
 }
 
+async function fetchBearerSessionAuthenticated(input: {
+  readonly httpBaseUrl: string;
+  readonly bearerToken: string;
+  readonly fetchFn: typeof fetch;
+  readonly signal?: AbortSignal;
+}): Promise<boolean> {
+  const sessionUrl = new URL("/api/auth/session", input.httpBaseUrl);
+  const response = await input.fetchFn(sessionUrl, {
+    headers: {
+      authorization: `Bearer ${input.bearerToken}`,
+    },
+    signal: input.signal ?? null,
+  });
+  if (response.status === 401 || response.status === 403) {
+    return false;
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to validate stored desktop bearer session (${response.status}).`);
+  }
+  const body = (await response.json()) as { readonly authenticated?: unknown };
+  return body.authenticated === true;
+}
+
 async function exchangeBootstrapBearerSession(
   httpBaseUrl: string,
   bootstrapToken: string,
@@ -762,7 +795,7 @@ async function exchangeBootstrapBearerSession(
 
   if (!response.ok) {
     if (response.status === 401) {
-      throw new DesktopBootstrapTicketRejectedError(response.status);
+      throw new Error("Pairing token was rejected by T3 Code Desktop.");
     }
     throw new Error(`Failed to create desktop bearer session (${response.status}).`);
   }

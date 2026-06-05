@@ -26,7 +26,6 @@ const BACKEND_ID_PATTERN = /^[a-zA-Z0-9._-]+$/u;
 export interface CreateDesktopBackendAdvertisementInput {
   readonly backendId: string;
   readonly httpBaseUrl: string;
-  readonly bootstrapToken: string;
   readonly nowMs?: number;
   readonly ttlMs?: number;
 }
@@ -77,7 +76,6 @@ export function createDesktopBackendAdvertisement(
     updatedAt: new Date(nowMs).toISOString(),
     expiresAt: new Date(expiresAtMs).toISOString(),
     httpBaseUrl: input.httpBaseUrl,
-    bootstrapToken: input.bootstrapToken,
   };
 }
 

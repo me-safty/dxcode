@@ -381,7 +381,6 @@ class WebviewBackendConnectionBroadcaster {
     const webviewConnection: WebviewBackendConnection = {
       httpBaseUrl: connection.httpBaseUrl,
       wsBaseUrl: connection.wsBaseUrl,
-      bootstrapToken: connection.bootstrapToken,
       bearerToken: connection.bearerToken,
     };
     for (const webview of this.#webviews) {

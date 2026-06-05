@@ -25,7 +25,6 @@ export interface WebviewHostAppearance {
 export interface WebviewBackendConnection {
   readonly httpBaseUrl: string;
   readonly wsBaseUrl: string;
-  readonly bootstrapToken: string;
   readonly bearerToken: string;
 }
 
@@ -83,7 +82,6 @@ export async function renderT3Webview(input: WebviewRenderInput): Promise<string
       label: "Local VS Code",
       httpBaseUrl: input.connection.httpBaseUrl,
       wsBaseUrl: input.connection.wsBaseUrl,
-      bootstrapToken: input.connection.bootstrapToken,
       bearerToken: input.connection.bearerToken,
     },
     displayPreferences: input.displayPreferences ?? DEFAULT_DISPLAY_PREFERENCES,

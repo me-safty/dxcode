@@ -68,7 +68,6 @@ import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts";
 import {
   authBearerBootstrapCompatibilityRouteLayer,
-  authDesktopBootstrapTicketRouteLayer,
   authHttpApiLayer,
   authSessionRevokeCompatibilityRouteLayer,
   environmentAuthenticatedAuthLayer,
@@ -335,7 +334,6 @@ export const makeRoutesLayer = Layer.mergeAll(
   ),
   attachmentsRouteLayer,
   authBearerBootstrapCompatibilityRouteLayer,
-  authDesktopBootstrapTicketRouteLayer,
   authSessionRevokeCompatibilityRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,

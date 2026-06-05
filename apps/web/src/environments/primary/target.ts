@@ -1,5 +1,6 @@
-import type { DesktopEnvironmentBootstrap } from "@t3tools/contracts";
 import type { KnownEnvironment } from "@t3tools/client-runtime";
+
+import { getHostLocalEnvironmentBootstrap } from "./hostBootstrap";
 
 export interface PrimaryEnvironmentTarget {
   readonly source: KnownEnvironment["source"];
@@ -7,14 +8,6 @@ export interface PrimaryEnvironmentTarget {
 }
 
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
-
-function getHostLocalEnvironmentBootstrap(): DesktopEnvironmentBootstrap | null {
-  return (
-    window.t3HostBridge?.getLocalEnvironmentBootstrap() ??
-    window.desktopBridge?.getLocalEnvironmentBootstrap() ??
-    null
-  );
-}
 
 function normalizeBaseUrl(rawValue: string): string {
   return new URL(rawValue, window.location.origin).toString();

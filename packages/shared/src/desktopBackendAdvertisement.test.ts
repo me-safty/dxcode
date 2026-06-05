@@ -29,7 +29,6 @@ describe("desktop backend advertisements", () => {
       advertisement: createDesktopBackendAdvertisement({
         backendId: "desktop-backend-1",
         httpBaseUrl: "http://127.0.0.1:3773/",
-        bootstrapToken: "bootstrap-token",
         nowMs: 1_000,
       }),
     });
@@ -39,7 +38,6 @@ describe("desktop backend advertisements", () => {
         expect.objectContaining({
           backendId: "desktop-backend-1",
           httpBaseUrl: "http://127.0.0.1:3773/",
-          bootstrapToken: "bootstrap-token",
         }),
       ],
       malformed: 0,
@@ -52,7 +50,6 @@ describe("desktop backend advertisements", () => {
       advertisement: createDesktopBackendAdvertisement({
         backendId: "expired",
         httpBaseUrl: "http://127.0.0.1:3773/",
-        bootstrapToken: "bootstrap-token",
         nowMs: 1_000,
         ttlMs: 100,
       }),
@@ -71,7 +68,6 @@ describe("desktop backend advertisements", () => {
       advertisement: createDesktopBackendAdvertisement({
         backendId: "expired",
         httpBaseUrl: "http://127.0.0.1:3773/",
-        bootstrapToken: "bootstrap-token",
         nowMs: 1_000,
         ttlMs: 100,
       }),

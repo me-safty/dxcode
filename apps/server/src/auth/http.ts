@@ -26,7 +26,6 @@ import type { AuthEnvironmentScope } from "@t3tools/contracts";
 import { parseAllowedOAuthScope } from "@t3tools/shared/oauthScope";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import * as DateTime from "effect/DateTime";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -64,10 +63,6 @@ const appendDpopChallengeOnUnauthorized = (error: EnvironmentAuthInvalidError) =
     }
     return yield* error;
   });
-
-const DESKTOP_BOOTSTRAP_TICKET_TTL = Duration.seconds(30);
-const DESKTOP_CONTROL_SESSION_SUBJECT = "desktop-bootstrap";
-const VSCODE_BOOTSTRAP_TICKET_SUBJECT = "vscode-bootstrap";
 
 const LegacyAuthBootstrapInput = Schema.Struct({
   credential: TrimmedNonEmptyString,
@@ -279,41 +274,6 @@ export const authBearerBootstrapCompatibilityRouteLayer = HttpRouter.add(
         expiresAt,
         sessionToken: result.access_token,
       } satisfies AuthBearerBootstrapResult,
-      { status: 200 },
-    );
-  }).pipe(catchLegacyAuthErrors),
-);
-
-export const authDesktopBootstrapTicketRouteLayer = HttpRouter.add(
-  "POST",
-  "/api/auth/desktop-bootstrap-ticket",
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-    const session = yield* serverAuth.authenticateHttpRequest(request);
-    if (
-      session.method !== "bearer-access-token" ||
-      session.subject !== DESKTOP_CONTROL_SESSION_SUBJECT ||
-      !session.scopes.includes(AuthAccessWriteScope)
-    ) {
-      return yield* respondToLegacyAuthError({
-        status: 403,
-        message: "Only desktop control bearer sessions can issue desktop bootstrap tickets.",
-      });
-    }
-    const result = yield* serverAuth.createPairingLink({
-      ttl: DESKTOP_BOOTSTRAP_TICKET_TTL,
-      scopes: AuthStandardClientScopes,
-      subject: VSCODE_BOOTSTRAP_TICKET_SUBJECT,
-      label: "VS Code",
-    });
-    return HttpServerResponse.jsonUnsafe(
-      {
-        id: result.id,
-        credential: result.credential,
-        ...(result.label ? { label: result.label } : {}),
-        expiresAt: result.expiresAt,
-      },
       { status: 200 },
     );
   }).pipe(catchLegacyAuthErrors),

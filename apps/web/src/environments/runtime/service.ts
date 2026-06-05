@@ -29,6 +29,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   createKnownEnvironment,
+  getKnownEnvironmentHttpBaseUrl,
   getKnownEnvironmentWsBaseUrl,
   scopedThreadKey,
   scopeProjectRef,
@@ -44,6 +45,7 @@ import { ensureLocalApi } from "~/localApi";
 import { collectActiveTerminalUiThreadKeys } from "~/lib/terminalUiStateCleanup";
 import { deriveOrchestrationBatchEffects } from "~/orchestrationEventEffects";
 import { getPrimaryKnownEnvironment } from "../primary";
+import { getHostBearerToken } from "../primary/hostBootstrap";
 import { webRuntime } from "../../lib/runtime";
 import { connectManagedCloudEnvironment } from "../../cloud/linkEnvironment";
 import { readManagedRelayClerkToken } from "../../cloud/managedAuth";
@@ -1324,6 +1326,7 @@ function createPrimaryEnvironmentClient(
   knownEnvironment: ReturnType<typeof getPrimaryKnownEnvironment>,
 ) {
   const wsBaseUrl = getKnownEnvironmentWsBaseUrl(knownEnvironment);
+  const httpBaseUrl = getKnownEnvironmentHttpBaseUrl(knownEnvironment);
   if (!wsBaseUrl) {
     throw new Error(
       `Unable to resolve websocket URL for ${knownEnvironment?.label ?? "primary environment"}.`,
@@ -1332,11 +1335,31 @@ function createPrimaryEnvironmentClient(
   const connectionLabel = knownEnvironment?.label ?? null;
 
   return createWsRpcClient(
-    new WsTransport(wsBaseUrl, {
-      getConnectionLabel: () => connectionLabel,
-      getVersionMismatchHint: () =>
-        resolveServerConfigVersionMismatch(getServerConfig())?.hint ?? null,
-    }),
+    new WsTransport(
+      async () => {
+        const bearerToken = getHostBearerToken();
+        if (!bearerToken) {
+          return wsBaseUrl;
+        }
+        if (!httpBaseUrl) {
+          throw new Error(
+            `Unable to resolve HTTP URL for ${knownEnvironment?.label ?? "primary environment"}.`,
+          );
+        }
+        return await webRuntime.runPromise(
+          resolveRemoteWebSocketConnectionUrl({
+            wsBaseUrl,
+            httpBaseUrl,
+            bearerToken,
+          }),
+        );
+      },
+      {
+        getConnectionLabel: () => connectionLabel,
+        getVersionMismatchHint: () =>
+          resolveServerConfigVersionMismatch(getServerConfig())?.hint ?? null,
+      },
+    ),
   );
 }
 

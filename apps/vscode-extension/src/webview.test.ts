@@ -48,7 +48,6 @@ describe("renderT3Webview", () => {
       connection: {
         httpBaseUrl: "http://127.0.0.1:49111",
         wsBaseUrl: "ws://127.0.0.1:49111",
-        bootstrapToken: "bootstrap-token",
         bearerToken: "bearer-token",
         cwd: "/workspace",
         t3Home: "/home/user/.t3",
@@ -117,7 +116,7 @@ describe("renderT3Webview", () => {
     expect(html).toContain('return requestHost("confirm", message)');
     expect(html).toContain('reject(new Error("T3 host bridge request timed out."))');
     expect(html).toContain("clearTimeout(pending.timeoutId)");
-    expect(html).toContain('"bootstrapToken":"bootstrap-token"');
+    expect(html).not.toContain('"bootstrapToken"');
     expect(html).toContain('"bearerToken":"bearer-token"');
     expect(html).toContain('"environmentId":"environment-desktop"');
     expect(html).toContain('"projectId":"project-workspace"');
@@ -142,7 +141,6 @@ describe("renderT3Webview", () => {
       connection: {
         httpBaseUrl: "http://127.0.0.1:49111",
         wsBaseUrl: "ws://127.0.0.1:49111",
-        bootstrapToken: "bootstrap-token",
         bearerToken: "bearer-token",
         cwd: "/workspace",
         t3Home: "/home/user/.t3",
@@ -168,7 +166,6 @@ describe("renderT3Webview", () => {
       connection: {
         httpBaseUrl: "http://127.0.0.1:49111",
         wsBaseUrl: "ws://127.0.0.1:49111",
-        bootstrapToken: "bootstrap-token",
         bearerToken: "bearer-token",
         cwd: "/workspace",
         t3Home: "/home/user/.t3",

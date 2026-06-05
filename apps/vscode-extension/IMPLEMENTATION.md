@@ -26,11 +26,11 @@ Local packages use the temporary publisher id `t3tools` when `VSCE_PUBLISHER` is
 
 The VS Code extension does not start or own a T3 backend. The desktop app is a hard dependency and is the single local command point for VS Code webviews, normal desktop renderer windows, browser clients connected to the desktop backend, and remote clients paired through desktop local connections.
 
-The desktop backend writes a short-lived local advertisement under `<T3 home>/desktop-backends/advertisements/<backend-id>.json` after its HTTP readiness check passes. The advertisement includes the loopback HTTP endpoint, a short-lived one-time desktop bootstrap ticket, heartbeat/expiry timestamps, and a protocol version. Writers update only their own file by atomic replace, refresh every 10 seconds, expire after 30 seconds, remove the file on normal stop, and clean stale files opportunistically after a 15 minute grace period.
+The desktop backend writes a short-lived local advertisement under `<T3 home>/desktop-backends/advertisements/<backend-id>.json` after its HTTP readiness check passes. The advertisement includes the loopback HTTP endpoint, heartbeat/expiry timestamps, and a protocol version. Writers update only their own file by atomic replace, refresh every 10 seconds, expire after 30 seconds, remove the file on normal stop, and clean stale files opportunistically after a 15 minute grace period.
 
-The desktop process keeps the private startup desktop bootstrap token out of the advertisement. After readiness, desktop exchanges that private seed once for a desktop-control bearer access token, then mints short-lived one-time VS Code tickets through `POST /api/auth/desktop-bootstrap-ticket`. Only bearer access token sessions for the `desktop-bootstrap` subject with `access:write` scope can mint those tickets; VS Code bearer sessions created from advertised tickets cannot re-mint new tickets. The VS Code extension reads the advertisement, validates that the endpoint is loopback HTTP, waits briefly for `/.well-known/t3/environment`, exchanges the advertised one-time ticket for a bearer session through `/api/auth/bootstrap/bearer`, and injects the resulting bearer token through `window.t3HostBridge`. If a stale advertised ticket has already been consumed, the extension waits for the advertisement to refresh and retries with the next ticket. Reconnects and stops abort in-flight readiness, ticket-exchange, retry-sleep, and workspace-bootstrap work. If no live desktop advertisement exists, the VS Code extension fails instead of starting a fallback backend and shows a fallback webview with a reconnect button; launching the desktop app remains a manual user action.
+The desktop process keeps the private startup desktop bootstrap token out of the advertisement and does not mint VS Code-specific advertised pairing tickets. The VS Code extension reads the advertisement, validates that the endpoint is loopback HTTP, waits briefly for `/.well-known/t3/environment`, and looks for a previously paired bearer token in VS Code `SecretStorage`. Stored bearer tokens are keyed by T3 home, loopback backend URL, and the resolved VS Code workspace folder identities. If the stored bearer token is still accepted by `/api/auth/session`, the extension reuses it and connects without asking the user to pair again. If no stored token exists, or the stored token is rejected, the extension prompts for a normal desktop pairing token, exchanges that one-time pairing token for a bearer session through `/api/auth/bootstrap/bearer`, stores only the resulting bearer token after workspace bootstrap succeeds, and injects that bearer token through `window.t3HostBridge`. Reconnects and stops abort in-flight readiness, bearer validation/exchange, and workspace-bootstrap work. Normal extension shutdown does not revoke the stored bearer token; desktop-side session revocation causes the next VS Code startup to delete the stale secret and prompt again. If no live desktop advertisement exists, the VS Code extension fails instead of starting a fallback backend and shows a fallback webview with a reconnect button; launching the desktop app remains a manual user action.
 
-The web app then sends authenticated HTTP requests with an `Authorization: Bearer ...` header and requests short-lived WebSocket tokens before opening `/ws`. This avoids relying on cross-origin cookie behavior between the VS Code webview origin and the loopback backend.
+The web app then treats a host-injected bearer token as an already-established session. It leaves the public `/.well-known/t3/environment` descriptor request unauthenticated, sends other authenticated HTTP requests with `Authorization: Bearer ...` and `credentials: "omit"`, and requests short-lived WebSocket tickets before opening `/ws`. This avoids relying on cross-origin cookie behavior between the VS Code webview origin and the loopback backend.
 
 ## VS Code MCP Bridge
 
@@ -110,17 +110,17 @@ Relationship to live state:
 
 Implemented architecture:
 
-- The desktop backend writes desktop backend presence advertisements after readiness. Each advertisement includes a backend id, loopback HTTP endpoint, one-time desktop bootstrap ticket, heartbeat/expiry timestamps, and a protocol version.
+- The desktop backend writes desktop backend presence advertisements after readiness. Each advertisement includes a backend id, loopback HTTP endpoint, heartbeat/expiry timestamps, and a protocol version.
 - Advertisement files live under `<T3 home>/desktop-backends/advertisements/<backend-id>.json`. Writers update only their own file by atomic replace, heartbeat it every 10 seconds, expire it after 30 seconds, best-effort remove it on backend stop, and opportunistically clean stale files after a 15 minute grace period.
-- The VS Code extension discovers the desktop backend from those advertisements, rejects non-loopback endpoints, exchanges the advertised one-time ticket for a bearer session, retries after stale-ticket `401` responses until the advertisement refreshes, and renders the web app against the desktop backend.
-- Desktop-control bearer access token sessions for the `desktop-bootstrap` subject with `access:write` scope are the only sessions allowed to call `POST /api/auth/desktop-bootstrap-ticket`. Tickets minted for VS Code are `desktop-bootstrap` one-time pairing credentials; expired `desktop-bootstrap` pairing links are cleaned during ticket issuance so repeated desktop heartbeats do not leave an unbounded table behind.
+- The VS Code extension discovers the desktop backend from those advertisements, rejects non-loopback endpoints, validates a workspace-scoped stored bearer token from VS Code `SecretStorage`, prompts for a normal desktop pairing token only when no valid stored bearer exists, and renders the web app against the desktop backend.
+- Pairing tokens are still one-time bootstrap credentials handled by the normal desktop pairing flow. The VS Code extension never stores a pairing token; it stores only the exchanged bearer access token after `POST /api/vscode/workspace-bootstrap` succeeds.
 - The VS Code extension writes host MCP advertisements for its editor-owned MCP socket. Desktop provider startup discovers those advertisements by workspace root and injects the matching endpoint into provider-native MCP config.
 - The public LAN/local-connection API remains the only remote-client surface. Remote clients continue to connect to desktop normally and must not call VS Code MCP sockets directly.
 
 Security boundaries:
 
 - Remote clients authenticate only to the desktop backend. They should not receive VS Code MCP socket details as normal state or connect to VS Code extension loopback endpoints directly.
-- VS Code-to-desktop trust uses short-lived one-time tickets stored in short-lived local advertisement files. The private desktop startup bootstrap token is exchanged by the desktop process for a desktop-control bearer session and is not written to the advertisement file. VS Code bearer sessions are not desktop-control sessions and cannot mint more advertised tickets.
+- VS Code-to-desktop trust uses normal one-time desktop pairing tokens for first pairing and VS Code `SecretStorage` for the exchanged bearer token after that. The private desktop startup bootstrap token is not written to advertisement files, and desktop backend advertisements no longer carry any bootstrap credential.
 - The VS Code extension remains the trust boundary for VS Code API access. Remote control must not bypass `t3code.mcp.allowedRunCommands`, `t3code.mcp.allowedActivateExtensions`, command registration checks, or result bounding.
 - Advertisement records must be treated as hints, not authority. Consumers should ignore expired, malformed, unreachable, non-loopback, or scope-mismatched advertisements.
 
@@ -248,12 +248,12 @@ Implemented so far:
   - discovers the required desktop-owned backend from `<T3 home>/desktop-backends/advertisements`
   - rejects non-loopback desktop backend advertisements
   - polls `/.well-known/t3/environment` with a per-request timeout
-  - exchanges the advertised one-time desktop ticket for a VS Code bearer session after desktop backend readiness
-  - retries stale consumed tickets after `401` until the desktop advertisement refreshes
+  - validates a workspace-scoped stored bearer token after desktop backend readiness
+  - prompts for a normal desktop pairing token and exchanges it for a VS Code bearer session when no valid stored bearer exists
   - calls `POST /api/vscode/workspace-bootstrap` so the desktop backend ensures and selects the current workspace projects/threads
-  - aborts in-flight readiness polling, stale-ticket retry sleeps, bearer exchange, and workspace bootstrap when stopped or reconnected
-  - revokes minted bearer sessions if post-auth workspace bootstrap fails before the connection is committed
-  - injects the desktop backend HTTP URL, WebSocket URL, advertised one-time ticket, and bearer token into the VS Code webview host bridge
+  - aborts in-flight readiness polling, bearer validation/exchange, and workspace bootstrap when stopped or reconnected
+  - revokes newly exchanged bearer sessions if post-auth workspace bootstrap fails before the bearer token is stored
+  - injects the desktop backend HTTP URL, WebSocket URL, and bearer token into the VS Code webview host bridge
   - records T3-owned virtual workspace clone metadata
   - prunes inactive virtual workspace clones not used for 15 days after successful desktop connection
   - supports user-configurable T3 home
@@ -288,8 +288,9 @@ Implemented so far:
   - fall back to `window.desktopBridge.getLocalEnvironmentBootstrap()`
   - use hash history in VS Code webviews
   - identify VS Code webviews only through the explicit `window.__T3_IS_VSCODE_WEBVIEW` marker
-  - read bootstrap credentials from either bridge
-  - use host-injected bearer auth for VS Code webview HTTP and WebSocket startup
+  - resolve host bootstrap data through shared helpers so desktop and VS Code bridge paths stay consistent
+  - treat a host-injected bearer token as an already-authenticated local session instead of trying to run a second bootstrap flow in the webview
+  - keep the public environment descriptor request unauthenticated, use host-injected bearer auth with `credentials: "omit"` for VS Code webview HTTP requests, and resolve bearer-authenticated WebSocket startup through short-lived WebSocket tickets
   - hide VS Code-duplicated controls by default based on host display preferences
   - match VS Code theme colors and font variables by default
   - restore the normal T3 Code theme when `t3code.ui.restoreDefaultTheme` is enabled
@@ -304,11 +305,12 @@ Implemented so far:
   - suppress resolved terminal and project-script shortcuts when VS Code host preferences disable the embedded terminal
   - choose only a visible VS Code workspace thread during first-load navigation, preferring the active workspace project
   - read and write `ClientSettings` through `window.t3HostBridge` when no desktop bridge is present
-  - support `VITE_BASE_URL` so extension-local web assets can be built with relative paths
+  - package extension-local web assets with Vite's relative `--base ./` output and normalize remaining root-absolute local asset references
 - Added webview rendering that:
   - reads extension-local `dist/webview/index.html`
   - injects a `<base>` tag using `webview.asWebviewUri(...)`
   - injects `window.t3HostBridge`
+  - injects the exchanged or restored bearer session token for app HTTP/WebSocket auth; VS Code host bridge bootstrap metadata no longer carries a pairing credential
   - injects VS Code display preferences from extension configuration
   - broadcasts display preference changes to open T3 Code webviews
   - injects VS Code host appearance and broadcasts theme/default-theme toggle changes to open T3 Code webviews
@@ -325,7 +327,7 @@ Implemented so far:
   - versioned desktop backend advertisement contracts in `packages/contracts`
   - runtime advertisement helpers in `packages/shared/desktopBackendAdvertisement`
   - desktop-side advertisement writes after backend readiness
-  - VS Code-side advertisement discovery, loopback validation, readiness polling, and bearer-session exchange
+  - VS Code-side advertisement discovery, loopback validation, readiness polling, stored-bearer validation, manual pairing, and bearer-session exchange
 - Added extension settings for restoring VS Code-hidden T3 Code controls:
   - `t3code.ui.showOpenInPicker`
   - `t3code.ui.showCheckoutModeIndicator`
@@ -365,6 +367,7 @@ Implemented so far:
   - `pnpm exec vp check`
   - `pnpm exec vp run typecheck`
   - `pnpm run test`
+  - `pnpm --filter t3code-vscode test`
   - `pnpm --filter t3code-vscode package`
   - manual desktop-required fallback/reconnect smoke test
 
@@ -785,7 +788,7 @@ Implemented as planned:
 
 ### 2026-05-14: Reuse Desktop Bootstrap Transport
 
-Status: superseded on 2026-06-02 by the hard desktop-dependency model. The extension no longer starts a backend with `--bootstrap-fd 3`; it discovers the desktop backend and exchanges an advertised one-time desktop ticket for a bearer session.
+Status: superseded on 2026-06-02 by the hard desktop-dependency model, then revised on 2026-06-05 to remove advertised VS Code tickets. The extension no longer starts a backend with `--bootstrap-fd 3`; it discovers the desktop backend, reuses a workspace-scoped stored bearer token when possible, and otherwise prompts for a normal desktop pairing token.
 
 Decision at the time: start the T3 backend with `--bootstrap-fd 3` and pass a desktop-compatible bootstrap envelope.
 
@@ -793,13 +796,13 @@ Reasoning:
 
 - The server already supports this flow.
 - It avoids a parallel auth/bootstrap design.
-- The existing auth routes provide the exchange surface; current VS Code webviews use the bearer session produced by exchanging an advertised one-time ticket.
+- The existing auth routes provide the exchange surface; current VS Code webviews use the bearer session produced by exchanging a manual pairing token or reusing a stored bearer token.
 
 Current behavior:
 
 - The desktop app generates and owns the private startup bootstrap token.
-- The desktop app writes a short-lived desktop backend advertisement with a one-time VS Code ticket after readiness.
-- The extension reads the advertisement, validates loopback transport, and exchanges the advertised ticket for a bearer session.
+- The desktop app writes a short-lived desktop backend advertisement with endpoint metadata after readiness.
+- The extension reads the advertisement, validates loopback transport, reuses a stored bearer token when it remains authenticated, and otherwise exchanges a user-provided pairing token for a bearer session.
 - The webview injects the bearer session through `window.t3HostBridge.getLocalEnvironmentBootstrap()`.
 
 ### 2026-05-14: Start One Backend for the Active Workspace
@@ -940,11 +943,13 @@ Deferred work:
 - Investigate whether a generated manifest or build-time command list can keep curated keybindings maintainable without one-off handlers scattered across the extension and web app.
 - Avoid runtime edits to VS Code user keybindings unless the user explicitly opts in.
 
-## Plan
+## Historical Plan
+
+This section is retained as design history. The current implementation above is authoritative after the 2026-06 upstream merges: the VS Code extension does not start or own a backend, does not currently ship native Chat Sessions integration, and depends on the desktop-owned backend plus extension-local webview/custom-editor surfaces.
 
 ## Goal
 
-Create a VS Code extension for T3 Code that adds a "T3 Code" experience to VS Code's chat/session surface and renders the existing T3 Code UI there instead of building a separate native chat interface.
+Create a VS Code extension for T3 Code that adds a "T3 Code" experience to VS Code and renders the existing T3 Code UI there instead of building a separate native chat interface.
 
 The intended reference implementation is the installed Codex extension at:
 
@@ -952,7 +957,7 @@ The intended reference implementation is the installed Codex extension at:
 ~/.vscode/extensions/openai.chatgpt-26.506.31421-darwin-arm64
 ```
 
-The chosen plan is to follow the first strategy from the research: build a Codex-like VS Code extension shell that contributes a T3 Code chat session type, starts/manages the existing T3 backend, and hosts the existing React web UI in VS Code webviews/custom editors.
+The original chosen plan was to follow the first strategy from the research: build a Codex-like VS Code extension shell that could eventually contribute a T3 Code chat session type while hosting the existing React web UI in VS Code webviews/custom editors. The shipped implementation narrowed that plan to stable sidebar/custom-editor webviews and a desktop-owned backend.
 
 ## Key Findings
 
@@ -1022,23 +1027,16 @@ Relevant T3 references:
   - The web app can use configured `VITE_HTTP_URL` / `VITE_WS_URL`.
 - `apps/web/src/environments/primary/target.ts:112`
   - The web app can use `window.desktopBridge.getLocalEnvironmentBootstrap()` to get local backend URLs.
-- `apps/web/src/environments/primary/auth.ts:87`
-  - The web app reads `bootstrapToken` from `window.desktopBridge.getLocalEnvironmentBootstrap()`.
-- `apps/web/src/environments/primary/auth.ts:148`
-  - The web app exchanges a bootstrap credential through `/api/auth/bootstrap`.
-- `packages/contracts/src/desktopBootstrap.ts:5`
-  - Existing bootstrap envelope schema includes:
-    - `mode`
-    - `noBrowser`
-    - `port`
-    - `t3Home`
-    - `host`
-    - `desktopBootstrapToken`
-    - Tailscale/observability settings
-- `apps/server/src/cli/config.ts:234`
-  - Server can read the bootstrap envelope from `--bootstrap-fd`.
-- `apps/server/src/auth/http.ts:68`
-  - `/api/auth/bootstrap` exchanges the bootstrap credential and sets the session cookie.
+- `apps/web/src/environments/primary/hostBootstrap.ts`
+  - The web app reads host bootstrap data from `window.t3HostBridge` first and falls back to `window.desktopBridge`.
+- `apps/web/src/environments/primary/requestInit.ts`
+  - Host bearer requests use `Authorization: Bearer ...` with `credentials: "omit"` and leave the public descriptor unauthenticated.
+- `apps/web/src/environments/runtime/service.ts`
+  - Host bearer WebSocket startup resolves a short-lived `/api/auth/websocket-ticket` URL before opening `/ws`.
+- `packages/contracts/src/desktopBootstrap.ts`
+  - Current desktop-backend advertisement schemas include the loopback desktop endpoint, heartbeat/expiry timestamps, and protocol version.
+- `apps/server/src/auth/http.ts`
+  - `/api/auth/bootstrap/bearer` exchanges normal pairing/bootstrap credentials for bearer sessions.
 - `apps/server/src/http.ts:246`
   - Server serves the built web app and falls back to `index.html` for SPA routes.
 - `apps/web/vite.config.ts:81`
@@ -1095,11 +1093,11 @@ t3code:client-settings:v1
 
 ### Why a Host Bridge Is Needed
 
-Today the web app only knows how to receive host-provided local backend info from `window.desktopBridge`.
+Historically, the web app only knew how to receive host-provided local backend info from `window.desktopBridge`. Current code also reads `window.t3HostBridge` first and falls back to `window.desktopBridge` for desktop compatibility.
 
 In Electron, the preload script injects that bridge. In a VS Code webview, there is no Electron preload and no `window.desktopBridge` unless the extension provides one.
 
-The VS Code extension needs to provide equivalent information:
+The VS Code extension provides equivalent information:
 
 - The local T3 backend HTTP URL.
 - The local T3 backend WebSocket URL.
@@ -1117,13 +1115,13 @@ There are two viable bridge designs:
    - Both Electron and VS Code implement shared host capabilities.
    - Keep `window.desktopBridge` only for Electron-specific APIs.
 
-The preferred design is to generalize host bootstrap behind a neutral bridge while retaining backward compatibility with `desktopBridge` during migration.
+The preferred design is implemented for VS Code: host bootstrap reads `window.t3HostBridge` first while retaining backward compatibility with `desktopBridge`.
 
 ## Viable Strategies Considered
 
 ### Strategy 1: Codex-Like Extension Shell
 
-This is the chosen plan.
+This was the chosen research direction, narrowed in implementation to the stable webview/custom-editor shell plus desktop backend dependency.
 
 Create a new workspace package, likely:
 
@@ -1153,7 +1151,7 @@ The extension would contribute:
 The extension runtime would:
 
 - Discover a live desktop backend advertisement for the current workstation.
-- Exchange the advertised one-time desktop ticket for a VS Code bearer session.
+- Reuse a stored VS Code bearer session or prompt for a normal desktop pairing token and exchange it for a VS Code bearer session.
 - Call `POST /api/vscode/workspace-bootstrap` with the current workspace folders.
 - Create a VS Code webview/custom editor.
 - Inject host/bootstrap metadata, including the desktop backend URLs and bearer session, into the webview.
@@ -1173,7 +1171,7 @@ Pros:
 
 - Closest to Codex.
 - Reuses the real T3 Code UI rather than building a second UI.
-- Allows VS Code chat-session integration.
+- Leaves room for future VS Code chat-session integration.
 - Keeps T3's server/web architecture intact.
 - Can support rich T3 features that native VS Code Chat primitives cannot represent well.
 
@@ -1181,7 +1179,7 @@ Cons:
 
 - `chatSessionsProvider` is a proposed VS Code API and may be unstable.
 - Publishing to the Marketplace may be constrained if proposed APIs are required.
-- Requires a robust extension-side process manager.
+- Requires robust desktop-backend discovery, stored-token validation, manual pairing, and reconnect handling.
 - Requires webview-specific auth/bootstrap and routing hardening.
 
 ### Strategy 2: Stable Webview View Only
@@ -1193,7 +1191,7 @@ Use only stable VS Code APIs:
 - `WebviewViewProvider`
 - commands
 
-The extension would still launch the backend and host the T3 UI, but it would not integrate deeply with VS Code's Chat Sessions surface.
+The extension hosts the T3 UI through stable webview APIs and connects to the desktop-owned backend, but it does not integrate deeply with VS Code's Chat Sessions surface.
 
 Pros:
 
@@ -1250,7 +1248,7 @@ The implementation should still include the stable webview view from Strategy 2 
 Confirmed product direction:
 
 - The target UX is Codex-like. It does not need to literally replace VS Code's built-in Chat panel DOM.
-- A T3 Code chat-session entry plus webview/custom-editor backed T3 UI is acceptable and is the plan.
+- A future T3 Code chat-session entry plus webview/custom-editor backed T3 UI remains acceptable, but the current shipped extension uses the stable sidebar/custom-editor path.
 - Desktop is a hard dependency and owns the backend process/provider sessions; VS Code does not start an extension-owned T3 backend.
 - Scope the VS Code UI to the current workspace by sending workspace-folder metadata to `POST /api/vscode/workspace-bootstrap`.
 - Use the same T3 home as desktop for now. Reassess after experimenting.
@@ -1284,16 +1282,16 @@ Contribution points:
 
 Do this first with stable APIs only.
 
-### Phase 2: Backend Process Manager
+### Phase 2: Desktop Connection Manager
 
 Add an extension-side desktop connection service that:
 
 - Resolves workspace folder and cwd.
 - Reads desktop backend advertisements from the shared T3 home.
 - Validates loopback desktop backend URLs.
-- Exchanges the advertised one-time ticket for a bearer session after desktop readiness.
+- Reuses a workspace-scoped stored bearer token after desktop readiness when `/api/auth/session` accepts it.
+- Prompts for a normal desktop pairing token and exchanges it for a bearer session when no valid stored bearer exists.
 - Calls `POST /api/vscode/workspace-bootstrap` with workspace folders and active folder metadata.
-- Retries when a consumed advertised ticket returns `401`, waiting for desktop to refresh the advertisement with a new one-time ticket.
 - Shows a manual-start fallback webview when no live desktop advertisement exists.
 - Reconnects on command or fallback button click without launching the desktop app.
 
@@ -1346,9 +1344,9 @@ Auth/bootstrap decision:
 
 - Reuse the existing bootstrap flow where practical.
 - The VS Code extension discovers local backend URLs from desktop backend advertisements.
-- The advertised bootstrap credential is a short-lived one-time desktop ticket; the extension exchanges it for a bearer session before creating the webview.
+- A first-time VS Code extension instance prompts for a normal desktop pairing token; the extension exchanges it for a bearer session before creating the webview and stores only the bearer token in VS Code `SecretStorage`.
 - The web app receives the bearer token through `window.t3HostBridge`, so it can authenticate without depending on VS Code webview cookies.
-- Implementers should treat `window.t3HostBridge.bearerToken` as the post-exchange bearer session token, not as the advertised one-time bootstrap ticket.
+- Implementers should treat `window.t3HostBridge.bearerToken` as the post-exchange bearer session token. `window.t3HostBridge.bootstrapToken` is compatibility metadata and is empty for the current VS Code path.
 - Avoid a host-mediated RPC auth proxy unless needed; it would add more extension-specific logic than the current codebase appears to require.
 
 ### Phase 4: Bundle and Load Existing UI
@@ -1466,7 +1464,7 @@ Preferred:
 
 - Do not build or include `apps/server` in the VSIX.
 - Require the desktop app/backend to be running on the same machine.
-- Connect through the desktop backend advertisement, one-time desktop ticket, and bearer-session exchange.
+- Connect through the desktop backend advertisement plus a stored bearer session, or a manual pairing-token exchange when no valid stored bearer exists.
 
 Concerns:
 

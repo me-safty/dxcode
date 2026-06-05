@@ -8,6 +8,7 @@ import {
   BackendManager,
   type BackendManagerDependencies,
   resolveMcpToolTimeoutSec,
+  resolveStoredBearerTokenSecretKey,
 } from "./backendManager.ts";
 
 const vscodeState = vi.hoisted(() => ({
@@ -25,6 +26,7 @@ const vscodeState = vi.hoisted(() => ({
     },
   ],
   settings: {} as Record<string, unknown>,
+  showInputBox: vi.fn(),
 }));
 
 vi.mock("vscode", () => ({
@@ -41,6 +43,7 @@ vi.mock("vscode", () => ({
         },
       },
     },
+    showInputBox: vscodeState.showInputBox,
   },
   workspace: {
     getConfiguration: () => ({
@@ -62,6 +65,49 @@ function makeOutputChannel() {
   };
 }
 
+function makeSecretStorage(initialValues: Record<string, string> = {}) {
+  const values = new Map(Object.entries(initialValues));
+  return {
+    values,
+    secrets: {
+      get: vi.fn((key: string) => Promise.resolve(values.get(key))),
+      store: vi.fn((key: string, value: string) => {
+        values.set(key, value);
+        return Promise.resolve();
+      }),
+      delete: vi.fn((key: string) => {
+        values.delete(key);
+        return Promise.resolve();
+      }),
+    },
+  };
+}
+
+function makeContext(secretStorage = makeSecretStorage()) {
+  return {
+    extensionPath: "/extension",
+    secrets: secretStorage.secrets,
+  } as never;
+}
+
+const workspaceFolders = [
+  {
+    key: "file::/workspace",
+    name: "workspace",
+    cwd: "/workspace",
+    uriScheme: "file",
+    uriAuthority: "",
+  },
+] as const;
+
+function makeStoredBearerSecretKey() {
+  return resolveStoredBearerTokenSecretKey({
+    t3Home: path.join(os.homedir(), ".t3"),
+    httpBaseUrl: "http://127.0.0.1:3773/",
+    workspaceFolders,
+  });
+}
+
 function makeDependencies(
   input: Partial<BackendManagerDependencies> = {},
 ): BackendManagerDependencies {
@@ -74,6 +120,12 @@ function makeDependencies(
         );
         if (url.pathname === "/.well-known/t3/environment") {
           return new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          });
+        }
+        if (url.pathname === "/api/auth/session") {
+          return new Response(JSON.stringify({ authenticated: true }), {
             headers: { "content-type": "application/json" },
             status: 200,
           });
@@ -134,7 +186,6 @@ function makeDependencies(
             updatedAt: new Date().toISOString(),
             expiresAt: new Date(Date.now() + 30_000).toISOString(),
             httpBaseUrl: "http://127.0.0.1:3773/",
-            bootstrapToken: "desktop-bootstrap-token",
           },
         ],
         malformed: 0,
@@ -144,6 +195,7 @@ function makeDependencies(
     removeHostMcpAdvertisement: input.removeHostMcpAdvertisement ?? vi.fn(),
     cleanupHostMcpAdvertisements:
       input.cleanupHostMcpAdvertisements ?? vi.fn(() => ({ deleted: 0, errors: 0 })),
+    promptForPairingToken: input.promptForPairingToken ?? vi.fn().mockResolvedValue("manual-token"),
   };
 }
 
@@ -165,6 +217,7 @@ describe("BackendManager", () => {
       },
     ];
     vscodeState.activeEditorPath = "/workspace/src/file.ts";
+    vscodeState.showInputBox.mockReset();
   });
 
   afterEach(() => {
@@ -174,25 +227,25 @@ describe("BackendManager", () => {
     vi.unstubAllEnvs();
   });
 
-  it("connects to the advertised desktop backend and advertises VS Code MCP", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
+  it("pairs manually, stores the bearer token, and advertises VS Code MCP", async () => {
+    const secretStorage = makeSecretStorage();
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(input.toString());
+      if (url.pathname === "/.well-known/t3/environment") {
+        return new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
           headers: { "content-type": "application/json" },
           status: 200,
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ sessionToken: "desktop-bearer-token" }), {
+        });
+      }
+      if (url.pathname === "/api/auth/bootstrap/bearer") {
+        return new Response(JSON.stringify({ sessionToken: "desktop-bearer-token" }), {
           headers: { "content-type": "application/json" },
           status: 200,
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(
+        });
+      }
+      if (url.pathname === "/api/vscode/workspace-bootstrap") {
+        return new Response(
           JSON.stringify({
-            environmentId: "environment-desktop",
             bootstrapProjects: [
               {
                 workspaceFolderKey: "file::/workspace",
@@ -208,15 +261,18 @@ describe("BackendManager", () => {
             headers: { "content-type": "application/json" },
             status: 200,
           },
-        ),
-      )
-      .mockResolvedValue(new Response(JSON.stringify({ revoked: true }), { status: 200 }));
+        );
+      }
+      throw new Error(`Unexpected request URL: ${url.href}`);
+    });
+    const promptForPairingToken = vi.fn().mockResolvedValue("manual-token");
     const writeHostMcpAdvertisementMock = vi.fn();
     const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
+      makeContext(secretStorage),
       makeOutputChannel() as never,
       makeDependencies({
         fetch: fetchMock,
+        promptForPairingToken,
         writeHostMcpAdvertisement: writeHostMcpAdvertisementMock,
       }),
       {
@@ -230,20 +286,11 @@ describe("BackendManager", () => {
     await expect(manager.ensureStarted()).resolves.toEqual({
       httpBaseUrl: "http://127.0.0.1:3773/",
       wsBaseUrl: "ws://127.0.0.1:3773/",
-      bootstrapToken: "desktop-bootstrap-token",
       bearerToken: "desktop-bearer-token",
       cwd: "/workspace",
       t3Home: path.join(os.homedir(), ".t3"),
       environmentId: "environment-desktop",
-      workspaceFolders: [
-        {
-          key: "file::/workspace",
-          name: "workspace",
-          cwd: "/workspace",
-          uriScheme: "file",
-          uriAuthority: "",
-        },
-      ],
+      workspaceFolders,
       activeWorkspaceFolderKey: "file::/workspace",
       bootstrapProjects: [
         {
@@ -258,18 +305,21 @@ describe("BackendManager", () => {
       initialThreadRoute: "/_chat/environment-desktop/thread-latest",
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("http://127.0.0.1:3773/.well-known/t3/environment"),
-      expect.objectContaining({
-        signal: expect.any(AbortSignal),
-      }),
-    );
+    expect(promptForPairingToken).toHaveBeenCalledWith({
+      httpBaseUrl: "http://127.0.0.1:3773/",
+      t3Home: path.join(os.homedir(), ".t3"),
+      workspaceFolders,
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       new URL("http://127.0.0.1:3773/api/auth/bootstrap/bearer"),
       expect.objectContaining({
-        body: JSON.stringify({ credential: "desktop-bootstrap-token" }),
+        body: JSON.stringify({ credential: "manual-token" }),
         method: "POST",
       }),
+    );
+    expect(secretStorage.secrets.store).toHaveBeenCalledWith(
+      makeStoredBearerSecretKey(),
+      "desktop-bearer-token",
     );
     expect(writeHostMcpAdvertisementMock).toHaveBeenCalledWith({
       t3Home: path.join(os.homedir(), ".t3"),
@@ -280,146 +330,125 @@ describe("BackendManager", () => {
           socketPath: "/tmp/t3code-vscode.sock",
           toolTimeoutSec: 120,
         },
-        workspaceFolders: [
-          {
-            key: "file::/workspace",
-            name: "workspace",
-            cwd: "/workspace",
-            uriScheme: "file",
-            uriAuthority: "",
-          },
-        ],
+        workspaceFolders,
         activeWorkspaceFolderKey: "file::/workspace",
       }),
     });
 
     await manager.stop();
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("http://127.0.0.1:3773/api/vscode/workspace-bootstrap"),
-      expect.objectContaining({
-        body: JSON.stringify({
-          workspaceFolders: [
-            {
-              key: "file::/workspace",
-              name: "workspace",
-              cwd: "/workspace",
-              uriScheme: "file",
-              uriAuthority: "",
-            },
-          ],
-          activeWorkspaceFolderKey: "file::/workspace",
-        }),
-        headers: {
-          authorization: "Bearer desktop-bearer-token",
-          "content-type": "application/json",
-        },
-        method: "POST",
-      }),
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).not.toHaveBeenCalledWith(
       new URL("http://127.0.0.1:3773/api/auth/session/revoke"),
-      expect.objectContaining({
-        headers: {
-          authorization: "Bearer desktop-bearer-token",
-        },
-        method: "POST",
-      }),
+      expect.anything(),
     );
   });
 
-  it("waits for a refreshed desktop bootstrap ticket after a stale ticket is rejected", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
+  it("reuses a valid stored bearer token without prompting or exchanging a pairing token", async () => {
+    const secretStorage = makeSecretStorage({
+      [makeStoredBearerSecretKey()]: "stored-bearer-token",
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(input.toString());
+      if (url.pathname === "/.well-known/t3/environment") {
+        return new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
           headers: { "content-type": "application/json" },
           status: 200,
-        }),
-      )
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "stale" }), { status: 401 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
+        });
+      }
+      if (url.pathname === "/api/auth/session") {
+        return new Response(JSON.stringify({ authenticated: true }), {
           headers: { "content-type": "application/json" },
           status: 200,
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ sessionToken: "desktop-bearer-token" }), {
+        });
+      }
+      if (url.pathname === "/api/vscode/workspace-bootstrap") {
+        return new Response(JSON.stringify({ bootstrapProjects: [] }), {
           headers: { "content-type": "application/json" },
           status: 200,
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ bootstrapProjects: [] }), {
-          headers: { "content-type": "application/json" },
-          status: 200,
-        }),
-      );
-    const readDesktopBackendAdvertisements = vi
-      .fn()
-      .mockReturnValueOnce({
-        advertisements: [
-          {
-            version: 1 as const,
-            backendId: "desktop-backend-1",
-            updatedAt: new Date().toISOString(),
-            expiresAt: new Date(Date.now() + 30_000).toISOString(),
-            httpBaseUrl: "http://127.0.0.1:3773/",
-            bootstrapToken: "stale-ticket",
-          },
-        ],
-        malformed: 0,
-      })
-      .mockReturnValue({
-        advertisements: [
-          {
-            version: 1 as const,
-            backendId: "desktop-backend-1",
-            updatedAt: new Date().toISOString(),
-            expiresAt: new Date(Date.now() + 30_000).toISOString(),
-            httpBaseUrl: "http://127.0.0.1:3773/",
-            bootstrapToken: "fresh-ticket",
-          },
-        ],
-        malformed: 0,
-      });
+        });
+      }
+      throw new Error(`Unexpected request URL: ${url.href}`);
+    });
+    const promptForPairingToken = vi.fn().mockResolvedValue("manual-token");
     const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
+      makeContext(secretStorage),
+      makeOutputChannel() as never,
+      makeDependencies({ fetch: fetchMock, promptForPairingToken }),
+    );
+
+    await expect(manager.ensureStarted()).resolves.toMatchObject({
+      bearerToken: "stored-bearer-token",
+    });
+
+    expect(promptForPairingToken).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:3773/api/auth/session"),
+      expect.objectContaining({
+        headers: { authorization: "Bearer stored-bearer-token" },
+      }),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:3773/api/auth/bootstrap/bearer"),
+      expect.anything(),
+    );
+  });
+
+  it("deletes an invalid stored bearer token before prompting for a new pairing token", async () => {
+    const secretStorage = makeSecretStorage({
+      [makeStoredBearerSecretKey()]: "stale-bearer-token",
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(input.toString());
+      if (url.pathname === "/.well-known/t3/environment") {
+        return new Response(JSON.stringify({ environmentId: "environment-desktop" }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      if (url.pathname === "/api/auth/session") {
+        return new Response(JSON.stringify({ authenticated: false }), { status: 401 });
+      }
+      if (url.pathname === "/api/auth/bootstrap/bearer") {
+        return new Response(JSON.stringify({ sessionToken: "fresh-bearer-token" }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      if (url.pathname === "/api/vscode/workspace-bootstrap") {
+        return new Response(JSON.stringify({ bootstrapProjects: [] }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected request URL: ${url.href}`);
+    });
+    const manager = new BackendManager(
+      makeContext(secretStorage),
       makeOutputChannel() as never,
       makeDependencies({
         fetch: fetchMock,
-        readDesktopBackendAdvertisements,
+        promptForPairingToken: vi.fn().mockResolvedValue("manual-token"),
       }),
     );
 
     await expect(manager.ensureStarted()).resolves.toMatchObject({
-      bootstrapToken: "fresh-ticket",
-      bearerToken: "desktop-bearer-token",
+      bearerToken: "fresh-bearer-token",
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("http://127.0.0.1:3773/api/auth/bootstrap/bearer"),
-      expect.objectContaining({
-        body: JSON.stringify({ credential: "stale-ticket" }),
-        method: "POST",
-      }),
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("http://127.0.0.1:3773/api/auth/bootstrap/bearer"),
-      expect.objectContaining({
-        body: JSON.stringify({ credential: "fresh-ticket" }),
-        method: "POST",
-      }),
+    expect(secretStorage.secrets.delete).toHaveBeenCalledWith(makeStoredBearerSecretKey());
+    expect(secretStorage.secrets.store).toHaveBeenCalledWith(
+      makeStoredBearerSecretKey(),
+      "fresh-bearer-token",
     );
   });
 
-  it("revokes a bearer session when stopped during workspace bootstrap", async () => {
+  it("revokes a newly exchanged bearer session when stopped during workspace bootstrap", async () => {
     let bearerSessionCount = 0;
     let workspaceBootstrapCount = 0;
     let resolveFirstWorkspaceBootstrapStarted!: () => void;
     const firstWorkspaceBootstrapStarted = new Promise<void>((resolve) => {
       resolveFirstWorkspaceBootstrapStarted = resolve;
     });
+    const secretStorage = makeSecretStorage();
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(input.toString());
       if (url.pathname === "/.well-known/t3/environment") {
@@ -476,7 +505,7 @@ describe("BackendManager", () => {
       throw new Error(`Unexpected request URL: ${url.href}`);
     });
     const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
+      makeContext(secretStorage),
       makeOutputChannel() as never,
       makeDependencies({ fetch: fetchMock }),
     );
@@ -538,13 +567,10 @@ describe("BackendManager", () => {
         resolveWorkspaceBootstrapStarted();
         return workspaceBootstrapResponse;
       }
-      if (url.pathname === "/api/auth/session/revoke") {
-        return new Response(JSON.stringify({ revoked: true }), { status: 200 });
-      }
       throw new Error(`Unexpected request URL: ${url.href}`);
     });
     const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
+      makeContext(makeSecretStorage()),
       makeOutputChannel() as never,
       makeDependencies({ fetch: fetchMock }),
     );
@@ -582,7 +608,7 @@ describe("BackendManager", () => {
 
   it("fails when no desktop backend advertisement is available", async () => {
     const manager = new BackendManager(
-      { extensionPath: extensionRoot } as never,
+      makeContext(makeSecretStorage()),
       makeOutputChannel() as never,
       makeDependencies({
         readDesktopBackendAdvertisements: vi.fn(() => ({

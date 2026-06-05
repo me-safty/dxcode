@@ -1,4 +1,4 @@
-import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -22,20 +22,49 @@ function run(command, args, options = {}) {
   }
 }
 
+function rewriteWebviewBundleAssetPaths(rootDir) {
+  for (const entry of readdirSync(rootDir)) {
+    const entryPath = join(rootDir, entry);
+    const stat = statSync(entryPath);
+    if (stat.isDirectory()) {
+      rewriteWebviewBundleAssetPaths(entryPath);
+      continue;
+    }
+    if (!/\.(?:html|js)$/.test(entryPath)) {
+      continue;
+    }
+
+    const before = readFileSync(entryPath, "utf8");
+    const after = before
+      .replaceAll('"/apple-touch-icon.png"', '"./apple-touch-icon.png"')
+      .replaceAll("'/apple-touch-icon.png'", "'./apple-touch-icon.png'")
+      .replaceAll("`/apple-touch-icon.png`", "`./apple-touch-icon.png`")
+      .replaceAll('"/favicon.ico"', '"./favicon.ico"')
+      .replaceAll("'/favicon.ico'", "'./favicon.ico'")
+      .replaceAll("`/favicon.ico`", "`./favicon.ico`")
+      .replaceAll('"/assets/', '"./assets/')
+      .replaceAll("'/assets/", "'./assets/")
+      .replaceAll("`/assets/", "`./assets/");
+    if (after !== before) {
+      writeFileSync(entryPath, after);
+    }
+  }
+}
+
 const distDir = join(extensionDir, "dist");
 rmSync(join(distDir, "webview"), { force: true, recursive: true });
 rmSync(join(distDir, "server"), { force: true, recursive: true });
 rmSync(join(distDir, "node_modules"), { force: true, recursive: true });
 
-run("pnpm", ["run", "build"], {
+run("pnpm", ["run", "build", "--", "--base", "./"], {
   cwd: join(repoRoot, "apps/web"),
-  env: { VITE_BASE_URL: "./" },
 });
 run("pnpm", ["run", "build:extension"], {
   cwd: extensionDir,
 });
 
 cpSync(join(repoRoot, "apps/web/dist"), join(distDir, "webview"), { recursive: true });
+rewriteWebviewBundleAssetPaths(join(distDir, "webview"));
 
 writeFileSync(
   join(distDir, "package.json"),

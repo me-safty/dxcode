@@ -32,7 +32,6 @@ export const DesktopBackendAdvertisement = Schema.Struct({
   updatedAt: TrimmedNonEmptyString,
   expiresAt: TrimmedNonEmptyString,
   httpBaseUrl: TrimmedNonEmptyString,
-  bootstrapToken: TrimmedNonEmptyString,
 });
 export type DesktopBackendAdvertisement = typeof DesktopBackendAdvertisement.Type;
 
