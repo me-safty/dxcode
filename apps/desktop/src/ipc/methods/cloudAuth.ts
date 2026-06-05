@@ -8,9 +8,11 @@ import {
 } from "@t3tools/shared/relayAuth";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import { identity } from "effect/Function";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { Headers, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 import * as DesktopCloudAuth from "../../app/DesktopCloudAuth.ts";
 import * as DesktopCloudAuthTokenStore from "../../app/DesktopCloudAuthTokenStore.ts";
@@ -51,6 +53,66 @@ export function validateClerkFrontendApiUrl(rawUrl: string): URL {
   }
   return url;
 }
+
+function executeCloudAuthFetch(url: URL, input: typeof DesktopCloudAuthFetchInputSchema.Type) {
+  return Effect.gen(function* () {
+    const response = yield* HttpClientRequest.make((input.method ?? "GET") as "GET" | "POST")(
+      url,
+    ).pipe(
+      HttpClientRequest.setHeaders(input.headers),
+      input.body === undefined
+        ? identity
+        : HttpClientRequest.bodyText(input.body, input.headers["content-type"]),
+      HttpClient.execute,
+      Effect.mapError(
+        (cause) =>
+          new DesktopCloudAuthFetchError({
+            reason: "Desktop cloud auth fetch failed to execute.",
+            cause,
+          }),
+      ),
+    );
+
+    const body = yield* response.text.pipe(
+      Effect.mapError(
+        (cause) =>
+          new DesktopCloudAuthFetchError({
+            reason: "Desktop cloud auth fetch response could not be read.",
+            cause,
+          }),
+      ),
+    );
+
+    return {
+      ok: response.status >= 200 && response.status < 300,
+      status: response.status,
+      statusText: "",
+      headers: response.headers,
+      body,
+    };
+  });
+}
+
+const electronNetFetchLayer = Layer.unwrap(
+  Effect.gen(function* () {
+    const electronFetch = yield* Effect.promise(async () => {
+      try {
+        const electron = (await import("electron")) as {
+          readonly net?: { readonly fetch?: typeof globalThis.fetch };
+        };
+        return typeof electron.net?.fetch === "function"
+          ? electron.net.fetch.bind(electron.net)
+          : null;
+      } catch {
+        return null;
+      }
+    }).pipe(Effect.catchCause(() => Effect.succeed(null)));
+
+    return FetchHttpClient.layer.pipe(
+      Layer.provide(Layer.succeed(FetchHttpClient.Fetch, electronFetch ?? globalThis.fetch)),
+    );
+  }),
+);
 
 export const createCloudAuthRequest = makeIpcMethod({
   channel: IpcChannels.CREATE_CLOUD_AUTH_REQUEST_CHANNEL,
@@ -108,47 +170,6 @@ export const fetchCloudAuth = makeIpcMethod({
             }),
     });
 
-    const requestWithoutBody = HttpClientRequest.make((input.method ?? "GET") as "GET" | "POST")(
-      url,
-      {
-        headers: input.headers,
-      },
-    );
-    const request =
-      input.body === undefined
-        ? requestWithoutBody
-        : HttpClientRequest.bodyText(
-            requestWithoutBody,
-            input.body,
-            Option.getOrUndefined(Headers.get(requestWithoutBody.headers, "content-type")),
-          );
-
-    const response = yield* HttpClient.execute(request).pipe(
-      Effect.mapError(
-        (cause) =>
-          new DesktopCloudAuthFetchError({
-            reason: "Desktop cloud auth fetch failed.",
-            cause,
-          }),
-      ),
-    );
-
-    const body = yield* response.text.pipe(
-      Effect.mapError(
-        (cause) =>
-          new DesktopCloudAuthFetchError({
-            reason: "Desktop cloud auth fetch response could not be read.",
-            cause,
-          }),
-      ),
-    );
-
-    return {
-      ok: response.status >= 200 && response.status < 300,
-      status: response.status,
-      statusText: "",
-      headers: response.headers,
-      body,
-    };
+    return yield* executeCloudAuthFetch(url, input).pipe(Effect.provide(electronNetFetchLayer));
   }),
 });
