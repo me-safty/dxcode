@@ -3,6 +3,7 @@ import {
   PluginId,
   type PluginCatalogEntry,
   type PluginRouteId,
+  type PluginRouteSurface,
 } from "@t3tools/contracts";
 import type {
   PluginUiContext,
@@ -24,7 +25,7 @@ import { resolvePrimaryEnvironmentHttpUrl, usePrimaryEnvironmentId } from "../en
 import { getPrimaryEnvironmentConnection } from "../environments/runtime";
 import { readLocalApi } from "../localApi";
 import { selectProjectsAcrossEnvironments, useStore } from "../store";
-import { pluginUiComponents } from "./pluginUiComponents";
+import { createPluginUiComponents } from "./pluginUiComponents";
 
 interface PluginHostState {
   readonly catalog: ReadonlyArray<PluginCatalogEntry>;
@@ -247,6 +248,8 @@ export function usePluginHostState(): PluginHostState {
 function createPluginContext(input: {
   readonly client: WsRpcClient;
   readonly catalogEntry: PluginCatalogEntry;
+  readonly routeId: PluginRouteId;
+  readonly routeSurface: PluginRouteSurface;
   readonly navigate: DynamicNavigate;
 }): PluginUiContext {
   const pluginId = input.catalogEntry.manifest.id;
@@ -255,6 +258,10 @@ function createPluginContext(input: {
     pluginId,
     catalogEntry: input.catalogEntry,
     uiApiVersion: 1,
+    route: {
+      id: input.routeId,
+      surface: input.routeSurface,
+    },
     react: React as unknown as PluginUiContext["react"],
     api: {
       invoke: async (command, commandInput) => {
@@ -284,7 +291,7 @@ function createPluginContext(input: {
         toastManager.add({ type: "error", title, description });
       },
     },
-    components: pluginUiComponents,
+    components: createPluginUiComponents(input.routeSurface),
   };
 }
 
@@ -292,6 +299,7 @@ function resolvePluginRoute(input: {
   readonly hostState: PluginHostState;
   readonly pluginId: PluginId;
   readonly routeId: PluginRouteId;
+  readonly surface: PluginRouteSurface;
   readonly navigate: ReturnType<typeof useNavigate>;
 }): PluginRouteResolution {
   const catalogEntry = input.hostState.catalog.find(
@@ -314,6 +322,21 @@ function resolvePluginRoute(input: {
       message: `Plugin ${input.pluginId} is ${catalogEntry.status.status}.`,
     };
   }
+  const routeContribution = catalogEntry.manifest.routes.find(
+    (route) => route.id === input.routeId,
+  );
+  if (!routeContribution) {
+    return {
+      status: "missing",
+      message: `Plugin route ${input.routeId} was not found.`,
+    };
+  }
+  if (routeContribution.surface !== input.surface) {
+    return {
+      status: "missing",
+      message: `Plugin route ${input.routeId} is not available on the ${input.surface} surface.`,
+    };
+  }
 
   const factory = input.hostState.factories.get(input.pluginId);
   if (!factory) {
@@ -327,6 +350,8 @@ function resolvePluginRoute(input: {
   const context = createPluginContext({
     client: input.hostState.client,
     catalogEntry,
+    routeId: input.routeId,
+    routeSurface: input.surface,
     navigate: input.navigate,
   });
   const registration = factory(context);
@@ -347,24 +372,27 @@ function resolvePluginRoute(input: {
 export function PluginRouteView({
   pluginId,
   routeId,
+  surface,
 }: {
   readonly pluginId: PluginId;
   readonly routeId: PluginRouteId;
+  readonly surface: PluginRouteSurface;
 }) {
   const hostState = usePluginHostState();
   const navigate = useNavigate<AnyRouter>();
   const resolution = useMemo(
-    () => resolvePluginRoute({ hostState, pluginId, routeId, navigate }),
-    [hostState, navigate, pluginId, routeId],
+    () => resolvePluginRoute({ hostState, pluginId, routeId, surface, navigate }),
+    [hostState, navigate, pluginId, routeId, surface],
   );
 
   if (resolution.status === "loading") {
-    return <PluginRouteShell title="Loading plugin" />;
+    return <PluginRouteShell surface={surface} title="Loading plugin" />;
   }
 
   if (resolution.status === "failed") {
     return (
       <PluginRouteShell
+        surface={surface}
         title={`${resolution.catalogEntry.manifest.name} failed to start`}
         description={resolution.catalogEntry.status.diagnostics?.join("\n") ?? "No diagnostics."}
       />
@@ -372,33 +400,47 @@ export function PluginRouteView({
   }
 
   if (resolution.status === "missing") {
-    return <PluginRouteShell title="Plugin unavailable" description={resolution.message} />;
+    return (
+      <PluginRouteShell
+        surface={surface}
+        title="Plugin unavailable"
+        description={resolution.message}
+      />
+    );
   }
 
   const route = resolution.registration.routes[routeId];
   if (!route) {
-    return <PluginRouteShell title="Plugin route unavailable" />;
+    return <PluginRouteShell surface={surface} title="Plugin route unavailable" />;
   }
   return <>{route({ ctx: resolution.context }) as ReactNode}</>;
 }
 
 function PluginRouteShell({
+  surface,
   title,
   description,
 }: {
+  readonly surface: PluginRouteSurface;
   readonly title: string;
   readonly description?: string;
 }) {
-  return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
-      <div className="flex min-h-0 flex-1 items-center justify-center px-4">
-        <div className="max-w-md text-center">
-          <h1 className="text-base font-medium">{title}</h1>
-          {description ? (
-            <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{description}</p>
-          ) : null}
-        </div>
+  const content = (
+    <div className="flex min-h-0 flex-1 items-center justify-center px-4">
+      <div className="max-w-md text-center">
+        <h1 className="text-base font-medium">{title}</h1>
+        {description ? (
+          <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{description}</p>
+        ) : null}
       </div>
+    </div>
+  );
+
+  return surface === "settings" ? (
+    content
+  ) : (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+      {content}
     </SidebarInset>
   );
 }

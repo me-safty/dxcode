@@ -5,6 +5,7 @@ export {
   PluginCommandName,
   PluginId,
   PluginRouteId,
+  PluginUiPlacementId,
   ProjectId,
   ThreadId,
   TrimmedNonEmptyString,

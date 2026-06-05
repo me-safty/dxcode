@@ -2,6 +2,7 @@ import {
   PluginCommandName,
   PluginId,
   PluginRouteId,
+  PluginUiPlacementId,
   type PluginManifest,
 } from "@t3tools/contracts";
 import type { LoadedServerPlugin } from "@t3tools/plugin-api/package";
@@ -15,13 +16,23 @@ const layer = it.layer(PluginRegistryLive);
 
 const pluginId = PluginId.make("t3.registry-test");
 const routeId = PluginRouteId.make("main");
+const placementId = PluginUiPlacementId.make("main-sidebar");
 const command = PluginCommandName.make("registry.echo");
 const manifest: PluginManifest = {
   id: pluginId,
   name: "Registry Test",
   version: "0.1.0",
-  routes: [{ id: routeId, label: "Registry Test" }],
-  nav: [{ id: routeId, label: "Registry Test", routeId }],
+  routes: [{ id: routeId, label: "Registry Test", surface: "app" }],
+  ui: {
+    placements: [
+      {
+        id: placementId,
+        position: "sidebar.primary",
+        label: "Registry Test",
+        routeId,
+      },
+    ],
+  },
   commands: [{ name: command, label: "Echo" }],
 };
 
@@ -49,7 +60,7 @@ layer("PluginRegistry", (it) => {
       const registry = yield* PluginRegistry;
 
       yield* registry.registerActivePlugin(loadedPlugin);
-      yield* registry.setBadgeProvider(pluginId, routeId, () => Effect.succeed(2));
+      yield* registry.setPlacementBadgeProvider(pluginId, placementId, () => Effect.succeed(2));
       yield* registry.registerCommand(pluginId, command, {
         input: Schema.Struct({ text: Schema.String }),
         output: Schema.Struct({ text: Schema.String }),
@@ -59,7 +70,7 @@ layer("PluginRegistry", (it) => {
       const catalog = yield* registry.listCatalog;
       assert.equal(catalog.length, 1);
       assert.equal(catalog[0]?.manifest.id, pluginId);
-      assert.equal(catalog[0]?.manifest.nav[0]?.badgeCount, 2);
+      assert.equal(catalog[0]?.manifest.ui.placements[0]?.badgeCount, 2);
       assert.equal(catalog[0]?.assets.client, `/plugins/assets/${pluginId}/client.js`);
 
       const output = yield* registry.invoke(pluginId, command, {
@@ -81,7 +92,7 @@ layer("PluginRegistry", (it) => {
       const registry = yield* PluginRegistry;
 
       yield* registry.registerActivePlugin(loadedPlugin);
-      yield* registry.setBadgeProvider(pluginId, routeId, () => Effect.succeed(7));
+      yield* registry.setPlacementBadgeProvider(pluginId, placementId, () => Effect.succeed(7));
       yield* registry.registerCommand(pluginId, command, {
         input: Schema.Struct({ text: Schema.String }),
         output: Schema.Struct({ text: Schema.String }),
@@ -91,7 +102,7 @@ layer("PluginRegistry", (it) => {
       yield* registry.clearPluginContributions(pluginId);
 
       const catalog = yield* registry.listCatalog;
-      assert.isUndefined(catalog[0]?.manifest.nav[0]?.badgeCount);
+      assert.isUndefined(catalog[0]?.manifest.ui.placements[0]?.badgeCount);
 
       const invokeResult = yield* Effect.result(registry.invoke(pluginId, command, { text: "ok" }));
       assert.equal(invokeResult._tag, "Failure");

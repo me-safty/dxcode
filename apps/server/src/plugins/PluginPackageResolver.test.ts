@@ -26,6 +26,33 @@ const layer = it.layer(
 const encodeUnknownJsonString = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString);
 const AUTOMATIONS_PLUGIN_ID = "t3.automations";
 
+function writePluginPackage(input: { readonly packageRoot: string; readonly manifest: unknown }) {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+
+    yield* fs.makeDirectory(input.packageRoot, { recursive: true });
+    yield* fs.writeFileString(
+      path.join(input.packageRoot, "package.json"),
+      yield* encodeUnknownJsonString({
+        name: "@t3tools/plugin-test",
+        version: "0.0.1",
+        t3Plugin: {
+          id: "t3.test",
+          apiVersion: "^0.0.24",
+          manifest: "./manifest.json",
+          server: "./server.js",
+          client: "./client.js",
+        },
+      }),
+    );
+    yield* fs.writeFileString(
+      path.join(input.packageRoot, "manifest.json"),
+      yield* encodeUnknownJsonString(input.manifest),
+    );
+  });
+}
+
 layer("PluginPackageResolver", (it) => {
   it.effect("discovers the externalized Automations package from a plugins directory", () =>
     Effect.gen(function* () {
@@ -89,6 +116,173 @@ layer("PluginPackageResolver", (it) => {
       const plugins = yield* resolver.discoverFromDirectory(pluginsDir);
 
       assert.equal(plugins.length, 0);
+    }),
+  );
+
+  it.effect("rejects legacy top-level nav manifests", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const packageRoot = path.join(
+        yield* fs.makeTempDirectoryScoped({ prefix: "t3-plugin-resolver-legacy-nav-" }),
+        "plugin",
+      );
+      yield* writePluginPackage({
+        packageRoot,
+        manifest: {
+          id: "t3.test",
+          name: "Test",
+          version: "0.0.1",
+          routes: [{ id: "main", label: "Test", surface: "app" }],
+          nav: [{ id: "main", label: "Test", routeId: "main" }],
+          commands: [],
+        },
+      });
+
+      const result = yield* Effect.flip(loadPluginPackage(packageRoot));
+      assert.include(result.message, "legacy top-level nav");
+    }),
+  );
+
+  it.effect("rejects duplicate route and placement ids", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-plugin-resolver-duplicate-ids-",
+      });
+      const duplicateRoutesRoot = path.join(root, "duplicate-routes");
+      const duplicatePlacementsRoot = path.join(root, "duplicate-placements");
+
+      yield* writePluginPackage({
+        packageRoot: duplicateRoutesRoot,
+        manifest: {
+          id: "t3.test",
+          name: "Test",
+          version: "0.0.1",
+          routes: [
+            { id: "main", label: "Test", surface: "app" },
+            { id: "main", label: "Duplicate", surface: "app" },
+          ],
+          ui: { placements: [] },
+          commands: [],
+        },
+      });
+      const duplicateRouteResult = yield* Effect.flip(loadPluginPackage(duplicateRoutesRoot));
+      assert.include(duplicateRouteResult.message, "duplicate route id");
+
+      yield* writePluginPackage({
+        packageRoot: duplicatePlacementsRoot,
+        manifest: {
+          id: "t3.test",
+          name: "Test",
+          version: "0.0.1",
+          routes: [{ id: "main", label: "Test", surface: "app" }],
+          ui: {
+            placements: [
+              {
+                id: "main-sidebar",
+                position: "sidebar.primary",
+                label: "Test",
+                routeId: "main",
+              },
+              {
+                id: "main-sidebar",
+                position: "sidebar.footer",
+                label: "Test Footer",
+                routeId: "main",
+              },
+            ],
+          },
+          commands: [],
+        },
+      });
+      const duplicatePlacementResult = yield* Effect.flip(
+        loadPluginPackage(duplicatePlacementsRoot),
+      );
+      assert.include(duplicatePlacementResult.message, "duplicate placement id");
+    }),
+  );
+
+  it.effect("rejects placements that reference missing or incompatible routes", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-plugin-resolver-placement-routes-",
+      });
+      const missingRouteRoot = path.join(root, "missing-route");
+      const sidebarSettingsRoot = path.join(root, "sidebar-settings");
+      const settingsAppRoot = path.join(root, "settings-app");
+
+      yield* writePluginPackage({
+        packageRoot: missingRouteRoot,
+        manifest: {
+          id: "t3.test",
+          name: "Test",
+          version: "0.0.1",
+          routes: [{ id: "main", label: "Test", surface: "app" }],
+          ui: {
+            placements: [
+              {
+                id: "missing",
+                position: "sidebar.primary",
+                label: "Missing",
+                routeId: "missing",
+              },
+            ],
+          },
+          commands: [],
+        },
+      });
+      const missingRouteResult = yield* Effect.flip(loadPluginPackage(missingRouteRoot));
+      assert.include(missingRouteResult.message, "references missing route");
+
+      yield* writePluginPackage({
+        packageRoot: sidebarSettingsRoot,
+        manifest: {
+          id: "t3.test",
+          name: "Test",
+          version: "0.0.1",
+          routes: [{ id: "settings", label: "Test", surface: "settings" }],
+          ui: {
+            placements: [
+              {
+                id: "sidebar",
+                position: "sidebar.primary",
+                label: "Sidebar",
+                routeId: "settings",
+              },
+            ],
+          },
+          commands: [],
+        },
+      });
+      const sidebarSettingsResult = yield* Effect.flip(loadPluginPackage(sidebarSettingsRoot));
+      assert.include(sidebarSettingsResult.message, "must target an app route");
+
+      yield* writePluginPackage({
+        packageRoot: settingsAppRoot,
+        manifest: {
+          id: "t3.test",
+          name: "Test",
+          version: "0.0.1",
+          routes: [{ id: "main", label: "Test", surface: "app" }],
+          ui: {
+            placements: [
+              {
+                id: "settings",
+                position: "settings.sidebar",
+                label: "Settings",
+                routeId: "main",
+              },
+            ],
+          },
+          commands: [],
+        },
+      });
+      const settingsAppResult = yield* Effect.flip(loadPluginPackage(settingsAppRoot));
+      assert.include(settingsAppResult.message, "must target a settings route");
     }),
   );
 });

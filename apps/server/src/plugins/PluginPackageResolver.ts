@@ -1,4 +1,8 @@
-import { PluginManifest } from "@t3tools/contracts";
+import {
+  PluginManifest,
+  type PluginManifest as PluginManifestType,
+  type PluginRouteSurface,
+} from "@t3tools/contracts";
 import {
   isPluginApiVersionCompatible,
   PluginPackageJson,
@@ -93,6 +97,108 @@ function extractServerPlugin(module: unknown, packageRoot: string): ServerPlugin
   return candidate as ServerPlugin;
 }
 
+function rejectLegacyPluginNav(
+  json: unknown,
+  packageRoot: string,
+): Effect.Effect<void, PluginPackageResolverError> {
+  if (typeof json === "object" && json !== null && Object.hasOwn(json, "nav")) {
+    return Effect.fail(
+      new PluginPackageResolverError({
+        message: "Plugin manifest uses legacy top-level nav. Use ui.placements instead.",
+        packageRoot,
+      }),
+    );
+  }
+  return Effect.void;
+}
+
+function toManifestValidationError(
+  cause: unknown,
+  packageRoot: string,
+): PluginPackageResolverError {
+  return cause instanceof PluginPackageResolverError
+    ? cause
+    : new PluginPackageResolverError({
+        message: "Plugin manifest references could not be validated.",
+        packageRoot,
+        cause,
+      });
+}
+
+function validateManifestReferences(
+  manifest: PluginManifestType,
+  packageRoot: string,
+): Effect.Effect<void, PluginPackageResolverError> {
+  return Effect.try({
+    try: () => {
+      assertUniqueIds({
+        label: "route",
+        ids: manifest.routes.map((route) => route.id),
+        packageRoot,
+      });
+      assertUniqueIds({
+        label: "placement",
+        ids: manifest.ui.placements.map((placement) => placement.id),
+        packageRoot,
+      });
+
+      const routeById = new Map(manifest.routes.map((route) => [route.id, route]));
+      for (const placement of manifest.ui.placements) {
+        const route = routeById.get(placement.routeId);
+        if (!route) {
+          throw new PluginPackageResolverError({
+            message: `Plugin manifest placement ${placement.id} references missing route ${placement.routeId}.`,
+            packageRoot,
+          });
+        }
+
+        const expectedSurface = expectedSurfaceForPlacement(placement.position);
+        if (expectedSurface !== null && route.surface !== expectedSurface) {
+          throw new PluginPackageResolverError({
+            message: `Plugin manifest placement ${placement.id} at ${placement.position} must target ${routeSurfaceLabel(expectedSurface)}, but route ${route.id} is ${route.surface}.`,
+            packageRoot,
+          });
+        }
+      }
+    },
+    catch: (cause) => toManifestValidationError(cause, packageRoot),
+  });
+}
+
+function assertUniqueIds(input: {
+  readonly label: string;
+  readonly ids: ReadonlyArray<string>;
+  readonly packageRoot: string;
+}): void {
+  const seen = new Set<string>();
+  for (const id of input.ids) {
+    if (seen.has(id)) {
+      throw new PluginPackageResolverError({
+        message: `Plugin manifest has duplicate ${input.label} id: ${id}.`,
+        packageRoot: input.packageRoot,
+      });
+    }
+    seen.add(id);
+  }
+}
+
+function expectedSurfaceForPlacement(position: string): PluginRouteSurface | null {
+  switch (position) {
+    case "sidebar.primary":
+    case "sidebar.footer":
+      return "app";
+    case "settings.sidebar":
+      return "settings";
+    case "commandPalette.actions":
+      return null;
+  }
+  return null;
+}
+
+function routeSurfaceLabel(surface: PluginRouteSurface): string {
+  return surface === "app" ? "an app route" : "a settings route";
+}
+
 const resolveInsidePackage = (
   packageRoot: string,
   relativePath: string,
@@ -174,17 +280,22 @@ export const loadPluginPackage = (
       ),
       Effect.flatMap((text) => parseJson(text, packageRoot)),
       Effect.flatMap((json) =>
-        decodePluginManifest(json).pipe(
-          Effect.mapError(
-            (cause) =>
-              new PluginPackageResolverError({
-                message: "Plugin manifest does not match the plugin manifest schema.",
-                packageRoot,
-                cause,
-              }),
+        rejectLegacyPluginNav(json, packageRoot).pipe(
+          Effect.flatMap(() =>
+            decodePluginManifest(json).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new PluginPackageResolverError({
+                    message: "Plugin manifest does not match the plugin manifest schema.",
+                    packageRoot,
+                    cause,
+                  }),
+              ),
+            ),
           ),
         ),
       ),
+      Effect.tap((manifest) => validateManifestReferences(manifest, packageRoot)),
     );
 
     if (manifest.id !== packageJson.t3Plugin.id) {

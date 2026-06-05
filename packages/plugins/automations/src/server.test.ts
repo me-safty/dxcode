@@ -2,6 +2,7 @@ import {
   PluginCommandName,
   PluginId,
   PluginRouteId,
+  PluginUiPlacementId,
   ProjectId,
   ThreadId,
 } from "@t3tools/plugin-api/schema";
@@ -168,10 +169,10 @@ function makeHarness(options?: {
           });
         }),
     },
-    navigation: {
-      setBadgeProvider: (routeId, provider) =>
+    ui: {
+      setPlacementBadgeProvider: (placementId, provider) =>
         Effect.sync(() => {
-          badgeProviders.set(routeId, provider);
+          badgeProviders.set(placementId, provider);
         }),
     },
     runtime: {
@@ -285,7 +286,7 @@ it.effect(
       assert.isTrue(harness.collections.has("runs"));
       assert.isTrue(harness.collections.has("scheduleState"));
       assert.equal(harness.commands.size, automationsPlugin.manifest.commands.length);
-      assert.isFunction(harness.badgeProviders.get(PluginRouteId.make("main")));
+      assert.isFunction(harness.badgeProviders.get(PluginUiPlacementId.make("main-sidebar")));
     }),
 );
 

@@ -7,6 +7,7 @@ import {
   KeyboardIcon,
   Link2Icon,
   Settings2Icon,
+  WorkflowIcon,
 } from "lucide-react";
 import { useCanGoBack, useNavigate } from "@tanstack/react-router";
 
@@ -20,6 +21,12 @@ import {
   SidebarSeparator,
   useSidebar,
 } from "../ui/sidebar";
+import {
+  getActivePluginPlacementEntries,
+  resolvePluginPlacementPath,
+  type PluginPlacementEntry,
+} from "../../plugins/pluginPlacements";
+import { usePluginCatalog } from "../../plugins/pluginHost";
 
 export type SettingsSectionPath =
   | "/settings/general"
@@ -46,12 +53,30 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
+  const catalog = usePluginCatalog();
+  const pluginPlacements = getActivePluginPlacementEntries(catalog, "settings.sidebar");
   const handleSectionClick = useCallback(
     (to: SettingsSectionPath) => {
       if (isMobile) {
         setOpenMobile(false);
       }
       void navigate({ to, replace: true });
+    },
+    [isMobile, navigate, setOpenMobile],
+  );
+  const handlePluginPlacementClick = useCallback(
+    (placement: PluginPlacementEntry) => {
+      if (isMobile) {
+        setOpenMobile(false);
+      }
+      void navigate({
+        to: "/settings/plugins/$pluginId/$routeId",
+        params: {
+          pluginId: placement.catalogEntry.manifest.id,
+          routeId: placement.placement.routeId,
+        },
+        replace: true,
+      });
     },
     [isMobile, navigate, setOpenMobile],
   );
@@ -100,6 +125,43 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
             })}
           </SidebarMenu>
         </SidebarGroup>
+        {pluginPlacements.length > 0 ? (
+          <SidebarGroup className="px-2 py-3">
+            <div className="mb-1 px-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+              Plugins
+            </div>
+            <SidebarMenu>
+              {pluginPlacements.map((placement) => {
+                const isActive = pathname === resolvePluginPlacementPath(placement);
+                return (
+                  <SidebarMenuItem
+                    key={`${placement.catalogEntry.manifest.id}:${placement.placement.id}`}
+                  >
+                    <SidebarMenuButton
+                      size="sm"
+                      isActive={isActive}
+                      className={
+                        isActive
+                          ? "gap-2.5 px-2.5 py-2 text-left text-[13px] font-medium text-foreground"
+                          : "gap-2.5 px-2.5 py-2 text-left text-[13px] text-muted-foreground/70 hover:text-foreground/80"
+                      }
+                      onClick={() => handlePluginPlacementClick(placement)}
+                    >
+                      <WorkflowIcon
+                        className={
+                          isActive
+                            ? "size-4 shrink-0 text-foreground"
+                            : "size-4 shrink-0 text-muted-foreground/60"
+                        }
+                      />
+                      <span className="truncate">{placement.placement.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroup>
+        ) : null}
       </SidebarContent>
 
       <SidebarSeparator />

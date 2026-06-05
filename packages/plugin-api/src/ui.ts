@@ -3,6 +3,8 @@ import type {
   PluginCatalogEntry,
   PluginCommandName,
   PluginId,
+  PluginRouteId,
+  PluginRouteSurface,
   PluginsInvokeResult,
   ProjectId,
   ThreadId,
@@ -206,6 +208,10 @@ export interface PluginUiContext {
   readonly pluginId: PluginId;
   readonly catalogEntry: PluginCatalogEntry;
   readonly uiApiVersion: 1;
+  readonly route: {
+    readonly id: PluginRouteId;
+    readonly surface: PluginRouteSurface;
+  };
   readonly react: PluginUiReact;
   readonly api: PluginUiApi;
   readonly host: PluginUiHostServices;

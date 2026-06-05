@@ -2,8 +2,8 @@ import type {
   PluginCommandName,
   PluginId,
   PluginManifest,
-  PluginRouteId,
   PluginSubscriptionEvent,
+  PluginUiPlacementId,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -46,9 +46,9 @@ export interface PluginCommandRegistryApi {
   ) => Effect.Effect<void>;
 }
 
-export interface PluginNavigationApi {
-  readonly setBadgeProvider: (
-    routeId: PluginRouteId,
+export interface PluginUiContributionApi {
+  readonly setPlacementBadgeProvider: (
+    placementId: PluginUiPlacementId,
     provider: () => Effect.Effect<number, Error>,
   ) => Effect.Effect<void>;
 }
@@ -71,7 +71,7 @@ export interface PluginActivationContext {
   readonly pluginId: PluginId;
   readonly store: PluginDocumentStore;
   readonly commands: PluginCommandRegistryApi;
-  readonly navigation: PluginNavigationApi;
+  readonly ui: PluginUiContributionApi;
   readonly runtime: PluginRuntimeApi;
   readonly events: PluginEventApi;
 }

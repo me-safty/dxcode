@@ -21,9 +21,11 @@ import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagn
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as PluginsPluginIdRouteImport } from './routes/plugins.$pluginId'
+import { Route as SettingsPluginsPluginIdRouteImport } from './routes/settings.plugins.$pluginId'
 import { Route as PluginsPluginIdRouteIdRouteImport } from './routes/plugins.$pluginId.$routeId'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
+import { Route as SettingsPluginsPluginIdRouteIdRouteImport } from './routes/settings.plugins.$pluginId.$routeId'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -84,6 +86,11 @@ const PluginsPluginIdRoute = PluginsPluginIdRouteImport.update({
   path: '/plugins/$pluginId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsPluginsPluginIdRoute = SettingsPluginsPluginIdRouteImport.update({
+  id: '/plugins/$pluginId',
+  path: '/plugins/$pluginId',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const PluginsPluginIdRouteIdRoute = PluginsPluginIdRouteIdRouteImport.update({
   id: '/$routeId',
   path: '/$routeId',
@@ -99,6 +106,12 @@ const ChatEnvironmentIdThreadIdRoute =
     id: '/$environmentId/$threadId',
     path: '/$environmentId/$threadId',
     getParentRoute: () => ChatRoute,
+  } as any)
+const SettingsPluginsPluginIdRouteIdRoute =
+  SettingsPluginsPluginIdRouteIdRouteImport.update({
+    id: '/$routeId',
+    path: '/$routeId',
+    getParentRoute: () => SettingsPluginsPluginIdRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -116,6 +129,8 @@ export interface FileRoutesByFullPath {
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/plugins/$pluginId/$routeId': typeof PluginsPluginIdRouteIdRoute
+  '/settings/plugins/$pluginId': typeof SettingsPluginsPluginIdRouteWithChildren
+  '/settings/plugins/$pluginId/$routeId': typeof SettingsPluginsPluginIdRouteIdRoute
 }
 export interface FileRoutesByTo {
   '/pair': typeof PairRoute
@@ -132,6 +147,8 @@ export interface FileRoutesByTo {
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/plugins/$pluginId/$routeId': typeof PluginsPluginIdRouteIdRoute
+  '/settings/plugins/$pluginId': typeof SettingsPluginsPluginIdRouteWithChildren
+  '/settings/plugins/$pluginId/$routeId': typeof SettingsPluginsPluginIdRouteIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -150,6 +167,8 @@ export interface FileRoutesById {
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/plugins/$pluginId/$routeId': typeof PluginsPluginIdRouteIdRoute
+  '/settings/plugins/$pluginId': typeof SettingsPluginsPluginIdRouteWithChildren
+  '/settings/plugins/$pluginId/$routeId': typeof SettingsPluginsPluginIdRouteIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -168,6 +187,8 @@ export interface FileRouteTypes {
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
     | '/plugins/$pluginId/$routeId'
+    | '/settings/plugins/$pluginId'
+    | '/settings/plugins/$pluginId/$routeId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/pair'
@@ -184,6 +205,8 @@ export interface FileRouteTypes {
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
     | '/plugins/$pluginId/$routeId'
+    | '/settings/plugins/$pluginId'
+    | '/settings/plugins/$pluginId/$routeId'
   id:
     | '__root__'
     | '/_chat'
@@ -201,6 +224,8 @@ export interface FileRouteTypes {
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
     | '/plugins/$pluginId/$routeId'
+    | '/settings/plugins/$pluginId'
+    | '/settings/plugins/$pluginId/$routeId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -296,6 +321,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PluginsPluginIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/plugins/$pluginId': {
+      id: '/settings/plugins/$pluginId'
+      path: '/plugins/$pluginId'
+      fullPath: '/settings/plugins/$pluginId'
+      preLoaderRoute: typeof SettingsPluginsPluginIdRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/plugins/$pluginId/$routeId': {
       id: '/plugins/$pluginId/$routeId'
       path: '/$routeId'
@@ -317,6 +349,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatEnvironmentIdThreadIdRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/settings/plugins/$pluginId/$routeId': {
+      id: '/settings/plugins/$pluginId/$routeId'
+      path: '/$routeId'
+      fullPath: '/settings/plugins/$pluginId/$routeId'
+      preLoaderRoute: typeof SettingsPluginsPluginIdRouteIdRouteImport
+      parentRoute: typeof SettingsPluginsPluginIdRoute
+    }
   }
 }
 
@@ -334,6 +373,20 @@ const ChatRouteChildren: ChatRouteChildren = {
 
 const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 
+interface SettingsPluginsPluginIdRouteChildren {
+  SettingsPluginsPluginIdRouteIdRoute: typeof SettingsPluginsPluginIdRouteIdRoute
+}
+
+const SettingsPluginsPluginIdRouteChildren: SettingsPluginsPluginIdRouteChildren =
+  {
+    SettingsPluginsPluginIdRouteIdRoute: SettingsPluginsPluginIdRouteIdRoute,
+  }
+
+const SettingsPluginsPluginIdRouteWithChildren =
+  SettingsPluginsPluginIdRoute._addFileChildren(
+    SettingsPluginsPluginIdRouteChildren,
+  )
+
 interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
   SettingsConnectionsRoute: typeof SettingsConnectionsRoute
@@ -342,6 +395,7 @@ interface SettingsRouteChildren {
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
+  SettingsPluginsPluginIdRoute: typeof SettingsPluginsPluginIdRouteWithChildren
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
@@ -352,6 +406,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
+  SettingsPluginsPluginIdRoute: SettingsPluginsPluginIdRouteWithChildren,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(

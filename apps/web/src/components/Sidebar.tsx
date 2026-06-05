@@ -198,7 +198,10 @@ import {
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import { SidebarProviderUpdatePill } from "./sidebar/SidebarProviderUpdatePill";
-import { PluginSidebarNav } from "../plugins/PluginSidebarNav";
+import {
+  PluginSidebarFooterPlacements,
+  PluginSidebarPrimaryPlacements,
+} from "../plugins/PluginSidebarPlacements";
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",
@@ -2502,6 +2505,7 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     <SidebarFooter className="p-2">
       <SidebarProviderUpdatePill />
       <SidebarUpdatePill />
+      <PluginSidebarFooterPlacements />
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton
@@ -2670,7 +2674,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           </Alert>
         </SidebarGroup>
       ) : null}
-      <PluginSidebarNav />
+      <PluginSidebarPrimaryPlacements />
       <SidebarGroup className="px-2 py-2">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">

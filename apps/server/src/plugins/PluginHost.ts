@@ -270,9 +270,9 @@ function makeActivationContext(input: {
       register: (command, registration) =>
         registry.registerCommand(pluginId, command, registration),
     },
-    navigation: {
-      setBadgeProvider: (routeId, provider) =>
-        registry.setBadgeProvider(pluginId, routeId, provider),
+    ui: {
+      setPlacementBadgeProvider: (placementId, provider) =>
+        registry.setPlacementBadgeProvider(pluginId, placementId, provider),
     },
     runtime,
     events: {

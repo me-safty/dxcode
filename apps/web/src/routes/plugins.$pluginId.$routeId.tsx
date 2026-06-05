@@ -18,6 +18,7 @@ function PluginRoute() {
     <PluginRouteView
       pluginId={PluginId.make(params.pluginId)}
       routeId={PluginRouteId.make(params.routeId)}
+      surface="app"
     />
   );
 }

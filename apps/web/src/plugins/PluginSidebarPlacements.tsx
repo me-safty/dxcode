@@ -1,0 +1,79 @@
+import type { PluginUiPlacementPosition } from "@t3tools/contracts";
+import { Link, useLocation } from "@tanstack/react-router";
+import { WorkflowIcon } from "lucide-react";
+
+import {
+  SidebarGroup,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "~/components/ui/sidebar";
+import { getActivePluginPlacementEntries, resolvePluginPlacementPath } from "./pluginPlacements";
+import { usePluginCatalog } from "./pluginHost";
+
+function PluginSidebarPlacementMenu({
+  position,
+}: {
+  readonly position: PluginUiPlacementPosition;
+}) {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const catalog = usePluginCatalog();
+  const placements = getActivePluginPlacementEntries(catalog, position);
+
+  if (placements.length === 0) {
+    return null;
+  }
+
+  return (
+    <SidebarMenu>
+      {placements.map((entry) => {
+        const path = resolvePluginPlacementPath(entry);
+        const active = pathname === path || pathname.startsWith(`${path}/`);
+        return (
+          <SidebarMenuItem key={`${entry.catalogEntry.manifest.id}:${entry.placement.id}`}>
+            <SidebarMenuButton
+              size="sm"
+              isActive={active}
+              render={
+                <Link
+                  to="/plugins/$pluginId/$routeId"
+                  params={{
+                    pluginId: entry.catalogEntry.manifest.id,
+                    routeId: entry.placement.routeId,
+                  }}
+                />
+              }
+            >
+              <WorkflowIcon className="size-3.5" />
+              <span className="flex-1 truncate text-left text-xs">{entry.placement.label}</span>
+              {entry.placement.badgeCount && entry.placement.badgeCount > 0 ? (
+                <span className="min-w-4 rounded-sm bg-warning/12 px-1 text-center text-[10px] font-medium text-warning-foreground">
+                  {entry.placement.badgeCount}
+                </span>
+              ) : null}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        );
+      })}
+    </SidebarMenu>
+  );
+}
+
+export function PluginSidebarPrimaryPlacements() {
+  const catalog = usePluginCatalog();
+  const placements = getActivePluginPlacementEntries(catalog, "sidebar.primary");
+
+  if (placements.length === 0) {
+    return null;
+  }
+
+  return (
+    <SidebarGroup className="px-2 py-1">
+      <PluginSidebarPlacementMenu position="sidebar.primary" />
+    </SidebarGroup>
+  );
+}
+
+export function PluginSidebarFooterPlacements() {
+  return <PluginSidebarPlacementMenu position="sidebar.footer" />;
+}

@@ -9,6 +9,7 @@ import type {
   PluginUiTextTone,
   PluginUiTextVariant,
 } from "@t3tools/plugin-api/ui";
+import type { PluginRouteSurface } from "@t3tools/contracts";
 import type * as React from "react";
 
 import { Badge as AppBadge } from "../components/ui/badge";
@@ -135,6 +136,29 @@ function PluginPage({
         </main>
       </div>
     </SidebarInset>
+  );
+}
+
+function PluginSettingsPage({
+  title,
+  actions,
+  children,
+  style,
+}: Parameters<PluginUiComponents["Page"]>[0]) {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+      <header className="border-b border-border px-3 py-2 sm:px-5 sm:py-3">
+        <div className="flex min-h-7 min-w-0 items-center gap-2 sm:min-h-6">
+          <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h1>
+          {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        </div>
+      </header>
+      <main className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-5" style={style}>
+          {children}
+        </div>
+      </main>
+    </div>
   );
 }
 
@@ -514,8 +538,7 @@ function PluginSpinner({ label }: Parameters<PluginUiComponents["Spinner"]>[0]) 
   );
 }
 
-export const pluginUiComponents = {
-  Page: PluginPage,
+const basePluginUiComponents = {
   Toolbar: PluginToolbar,
   Section: PluginSection,
   Surface: PluginSurface,
@@ -535,4 +558,13 @@ export const pluginUiComponents = {
   List: PluginList,
   ListRow: PluginListRow,
   Spinner: PluginSpinner,
-} satisfies PluginUiComponents;
+} satisfies Omit<PluginUiComponents, "Page">;
+
+export function createPluginUiComponents(surface: PluginRouteSurface): PluginUiComponents {
+  return {
+    Page: surface === "settings" ? PluginSettingsPage : PluginPage,
+    ...basePluginUiComponents,
+  };
+}
+
+export const pluginUiComponents = createPluginUiComponents("app");

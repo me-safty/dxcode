@@ -1,9 +1,18 @@
 import "vite-plus/test/config";
 import { defineConfig } from "vite-plus";
+import { fileURLToPath } from "node:url";
+
+const webSrcPath = fileURLToPath(new URL("./apps/web/src", import.meta.url));
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "~": webSrcPath,
+    },
+  },
   test: {
     environment: "node",
+    exclude: ["**/node_modules/**", "**/.git/**", ".repos/**", "**/.repos/**"],
     hookTimeout: 60_000,
     testTimeout: 60_000,
   },

@@ -3,9 +3,9 @@ import type {
   PluginCommandName,
   PluginId,
   PluginManifest,
-  PluginRouteId,
   PluginStatus,
   PluginSubscriptionEvent,
+  PluginUiPlacementId,
 } from "@t3tools/contracts";
 import { PluginRpcError } from "@t3tools/contracts";
 import type { LoadedServerPlugin, PluginPackageDescriptor } from "@t3tools/plugin-api/package";
@@ -19,7 +19,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 type CommandKey = `${PluginId}:${PluginCommandName}`;
-type BadgeKey = `${PluginId}:${PluginRouteId}`;
+type BadgeKey = `${PluginId}:${PluginUiPlacementId}`;
 
 interface StoredCommandRegistration {
   readonly invoke: (input: unknown) => Effect.Effect<unknown, PluginRpcError>;
@@ -36,8 +36,8 @@ function commandKey(pluginId: PluginId, command: PluginCommandName): CommandKey 
   return `${pluginId}:${command}` as CommandKey;
 }
 
-function badgeKey(pluginId: PluginId, routeId: PluginRouteId): BadgeKey {
-  return `${pluginId}:${routeId}` as BadgeKey;
+function badgeKey(pluginId: PluginId, placementId: PluginUiPlacementId): BadgeKey {
+  return `${pluginId}:${placementId}` as BadgeKey;
 }
 
 export interface PluginRegistryShape {
@@ -51,9 +51,9 @@ export interface PluginRegistryShape {
     command: PluginCommandName,
     registration: PluginCommandRegistration<I, O>,
   ) => Effect.Effect<void>;
-  readonly setBadgeProvider: (
+  readonly setPlacementBadgeProvider: (
     pluginId: PluginId,
-    routeId: PluginRouteId,
+    placementId: PluginUiPlacementId,
     provider: () => Effect.Effect<number, Error>,
   ) => Effect.Effect<void>;
   readonly clearPluginContributions: (pluginId: PluginId) => Effect.Effect<void>;
@@ -78,7 +78,7 @@ export class PluginRegistry extends Context.Service<PluginRegistry, PluginRegist
 const makePluginRegistry = Effect.gen(function* () {
   const pluginById = new Map<PluginId, PluginRecord>();
   const commandByKey = new Map<CommandKey, StoredCommandRegistration>();
-  const badgeProviderByKey = new Map<BadgeKey, () => Effect.Effect<number, Error>>();
+  const placementBadgeProviderByKey = new Map<BadgeKey, () => Effect.Effect<number, Error>>();
   const events = yield* PubSub.unbounded<PluginSubscriptionEvent>();
 
   const toRpcError = (input: {
@@ -96,9 +96,9 @@ const makePluginRegistry = Effect.gen(function* () {
 
   const catalogEntryFor = (record: PluginRecord): Effect.Effect<PluginCatalogEntry> =>
     Effect.gen(function* () {
-      const nav = [];
-      for (const item of record.manifest.nav) {
-        const provider = badgeProviderByKey.get(badgeKey(record.manifest.id, item.routeId));
+      const placements = [];
+      for (const item of record.manifest.ui.placements) {
+        const provider = placementBadgeProviderByKey.get(badgeKey(record.manifest.id, item.id));
         const badgeCount =
           provider === undefined
             ? (item.badgeCount ?? 0)
@@ -106,7 +106,7 @@ const makePluginRegistry = Effect.gen(function* () {
                 Effect.map((count) => Math.max(0, Math.floor(count))),
                 Effect.catch(() => Effect.succeed(item.badgeCount ?? 0)),
               );
-        nav.push({
+        placements.push({
           ...item,
           ...(badgeCount > 0 ? { badgeCount } : {}),
         });
@@ -115,7 +115,10 @@ const makePluginRegistry = Effect.gen(function* () {
       return {
         manifest: {
           ...record.manifest,
-          nav,
+          ui: {
+            ...record.manifest.ui,
+            placements,
+          },
         },
         status: {
           pluginId: record.manifest.id,
@@ -196,9 +199,9 @@ const makePluginRegistry = Effect.gen(function* () {
         });
       }),
 
-    setBadgeProvider: (pluginId, routeId, provider) =>
+    setPlacementBadgeProvider: (pluginId, placementId, provider) =>
       Effect.sync(() => {
-        badgeProviderByKey.set(badgeKey(pluginId, routeId), provider);
+        placementBadgeProviderByKey.set(badgeKey(pluginId, placementId), provider);
       }),
 
     clearPluginContributions: (pluginId) =>
@@ -209,9 +212,9 @@ const makePluginRegistry = Effect.gen(function* () {
             commandByKey.delete(key);
           }
         }
-        for (const key of badgeProviderByKey.keys()) {
+        for (const key of placementBadgeProviderByKey.keys()) {
           if (key.startsWith(prefix)) {
-            badgeProviderByKey.delete(key);
+            placementBadgeProviderByKey.delete(key);
           }
         }
       }),

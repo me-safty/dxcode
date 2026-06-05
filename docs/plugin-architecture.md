@@ -87,7 +87,7 @@ The server plugin host runs during server startup:
 2. Each package's `package.json`, manifest, server entry, and client asset path are validated.
 3. `PluginHost` creates a per-plugin Effect scope.
 4. The host builds a `PluginActivationContext` for that plugin id.
-5. The plugin registers document collections, commands, badge providers, and runtime fibers.
+5. The plugin registers document collections, commands, placement badge providers, and runtime fibers.
 6. `PluginRegistry` records the plugin as active or failed.
 
 Plugin activation failures do not crash the server. Failed plugins stay in the catalog with
@@ -97,7 +97,7 @@ A plugin activation context exposes:
 
 - `store`: core-owned, plugin-namespaced JSON document storage with schemas registered at runtime.
 - `commands`: plugin command registration with input and output schema validation.
-- `navigation`: badge provider registration for plugin nav entries.
+- `ui`: badge provider registration for plugin UI placements.
 - `runtime`: host runtime actions, currently `createAndSendThread`.
 - `events`: plugin event publication for catalog refreshes and subscriptions.
 
@@ -123,11 +123,11 @@ service.
 
 The WebSocket surface has three generic plugin methods:
 
-| Method              | Purpose                                     |
-| ------------------- | ------------------------------------------- |
-| `plugins.list`      | Return plugin catalog, status, nav, assets  |
-| `plugins.invoke`    | Invoke a registered plugin command          |
-| `plugins.subscribe` | Stream plugin-published subscription events |
+| Method              | Purpose                                              |
+| ------------------- | ---------------------------------------------------- |
+| `plugins.list`      | Return plugin catalog, status, UI placements, assets |
+| `plugins.invoke`    | Invoke a registered plugin command                   |
+| `plugins.subscribe` | Stream plugin-published subscription events          |
 
 The host registry validates command input and output schemas around every invocation. Plugins publish
 events through `ctx.events.publish`; the registry adds `pluginId` and `createdAt`. The browser
@@ -164,12 +164,47 @@ self-contained while preserving the app's visual system and interaction behavior
 
 ## UI Contributions
 
-Plugin manifests contribute routes, nav entries, and command metadata. The web app maps active plugin
-nav entries into the main sidebar and routes them to:
+Plugin manifests contribute routes, fixed UI placements, and command metadata. Routes declare which
+host surface they render into:
+
+```json
+{
+  "routes": [{ "id": "main", "label": "Automations", "surface": "app" }],
+  "ui": {
+    "placements": [
+      {
+        "id": "main-sidebar",
+        "position": "sidebar.primary",
+        "label": "Automations",
+        "routeId": "main",
+        "order": 100
+      }
+    ]
+  }
+}
+```
+
+The first web UI placement positions are:
+
+| Position                 | Purpose                                         |
+| ------------------------ | ----------------------------------------------- |
+| `sidebar.primary`        | Main application sidebar entries above Projects |
+| `sidebar.footer`         | Global utility entries near Settings            |
+| `settings.sidebar`       | Plugin-owned Settings sections                  |
+| `commandPalette.actions` | Route-opening command palette actions           |
+
+The web app maps active app placements to:
 
 ```text
 /plugins/$pluginId
 /plugins/$pluginId/$routeId
+```
+
+Settings placements route to:
+
+```text
+/settings/plugins/$pluginId
+/settings/plugins/$pluginId/$routeId
 ```
 
 The default route id is `main`. Route rendering waits until the catalog and browser bundle are

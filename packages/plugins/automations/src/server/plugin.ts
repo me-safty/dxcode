@@ -6,6 +6,7 @@ import { AUTOMATIONS_COMMANDS, AUTOMATIONS_PLUGIN_ID } from "../shared/constants
 import { AutomationRule, AutomationRun } from "../shared/schema.ts";
 import { commandName, registerAutomationCommands } from "./commands.ts";
 import {
+  PLACEMENT_MAIN_SIDEBAR,
   ROUTE_MAIN,
   RULES_COLLECTION,
   RUNS_COLLECTION,
@@ -25,15 +26,20 @@ export const automationsPlugin = defineServerPlugin({
       {
         id: ROUTE_MAIN,
         label: "Automations",
+        surface: "app",
       },
     ],
-    nav: [
-      {
-        id: ROUTE_MAIN,
-        label: "Automations",
-        routeId: ROUTE_MAIN,
-      },
-    ],
+    ui: {
+      placements: [
+        {
+          id: PLACEMENT_MAIN_SIDEBAR,
+          position: "sidebar.primary",
+          label: "Automations",
+          routeId: ROUTE_MAIN,
+          order: 100,
+        },
+      ],
+    },
     commands: [
       {
         name: commandName(AUTOMATIONS_COMMANDS.rulesList),
@@ -71,7 +77,10 @@ export const automationsPlugin = defineServerPlugin({
       yield* runtime.markInterruptedRunsFailed;
       yield* startAutomationScheduleLoop(runtime);
 
-      yield* ctx.navigation.setBadgeProvider(ROUTE_MAIN, runtime.countFailedOrSkippedRuns);
+      yield* ctx.ui.setPlacementBadgeProvider(
+        PLACEMENT_MAIN_SIDEBAR,
+        runtime.countFailedOrSkippedRuns,
+      );
       yield* registerAutomationCommands(ctx, runtime);
     }),
 });

@@ -25,6 +25,7 @@ import {
   MessageSquareIcon,
   SettingsIcon,
   SquarePenIcon,
+  WorkflowIcon,
 } from "lucide-react";
 import {
   useCallback,
@@ -103,6 +104,8 @@ import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./Icons"
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
 import { useServerKeybindings } from "../rpc/serverState";
+import { getActivePluginPlacementEntries } from "../plugins/pluginPlacements";
+import { usePluginCatalog } from "../plugins/pluginHost";
 import { resolveShortcutCommand } from "../keybindings";
 import {
   Command,
@@ -402,6 +405,11 @@ function OpenCommandPaletteDialog() {
   const queryClient = useQueryClient();
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const settings = useSettings();
+  const pluginCatalog = usePluginCatalog();
+  const commandPalettePluginPlacements = getActivePluginPlacementEntries(
+    pluginCatalog,
+    "commandPalette.actions",
+  );
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
@@ -1060,6 +1068,42 @@ function OpenCommandPaletteDialog() {
       await navigate({ to: "/settings" });
     },
   });
+
+  for (const placement of commandPalettePluginPlacements) {
+    actionItems.push({
+      kind: "action",
+      value: `plugin:${placement.catalogEntry.manifest.id}:${placement.placement.id}`,
+      searchTerms: [
+        placement.catalogEntry.manifest.name,
+        placement.placement.label,
+        placement.route.label,
+        placement.placement.description ?? "",
+      ],
+      title: placement.placement.label,
+      description: placement.placement.description ?? placement.catalogEntry.manifest.name,
+      icon: <WorkflowIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        if (placement.route.surface === "settings") {
+          await navigate({
+            to: "/settings/plugins/$pluginId/$routeId",
+            params: {
+              pluginId: placement.catalogEntry.manifest.id,
+              routeId: placement.placement.routeId,
+            },
+          });
+          return;
+        }
+
+        await navigate({
+          to: "/plugins/$pluginId/$routeId",
+          params: {
+            pluginId: placement.catalogEntry.manifest.id,
+            routeId: placement.placement.routeId,
+          },
+        });
+      },
+    });
+  }
 
   const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
   const activeGroups = currentView ? currentView.groups : rootGroups;

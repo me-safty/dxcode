@@ -1,6 +1,7 @@
-import { PluginRouteId } from "@t3tools/plugin-api/schema";
+import { PluginRouteId, PluginUiPlacementId } from "@t3tools/plugin-api/schema";
 
 export const ROUTE_MAIN = PluginRouteId.make("main");
+export const PLACEMENT_MAIN_SIDEBAR = PluginUiPlacementId.make("main-sidebar");
 export const RULES_COLLECTION = "rules";
 export const RUNS_COLLECTION = "runs";
 export const SCHEDULE_STATE_COLLECTION = "scheduleState";

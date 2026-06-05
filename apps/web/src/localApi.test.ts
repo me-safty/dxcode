@@ -90,6 +90,11 @@ const rpcClientMock = {
   review: {
     getDiffPreview: vi.fn(),
   },
+  plugins: {
+    list: vi.fn(),
+    invoke: vi.fn(),
+    subscribe: vi.fn(() => () => undefined),
+  },
   server: {
     getConfig: vi.fn(),
     refreshProviders: vi.fn(),
