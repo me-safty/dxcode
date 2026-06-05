@@ -121,18 +121,18 @@ Relevant tests live in:
 Useful focused commands:
 
 ```sh
-bun run --filter t3 test src/provider/Layers/CodexAdapter.test.ts
-bun run --filter @t3tools/web test src/session-logic.test.ts
-bun run --filter @t3tools/web test src/environments/runtime/service.coalescing.test.ts src/store.test.ts src/components/chat/MessagesTimeline.test.tsx
-bun run --filter @t3tools/web test src/components/chat/ThreadConversationWidth.test.tsx
+pnpm --filter t3 test -- src/provider/Layers/CodexAdapter.test.ts
+pnpm --filter @t3tools/web test -- src/session-logic.test.ts
+pnpm --filter @t3tools/web test -- src/environments/runtime/service.coalescing.test.ts src/store.test.ts src/components/chat/MessagesTimeline.test.tsx
+pnpm --filter @t3tools/web test -- src/components/chat/ThreadConversationWidth.test.tsx
 ```
 
 Before considering the branch healthy, also run:
 
 ```sh
-bun fmt
-bun lint
-bun typecheck
+pnpm exec vp check
+pnpm exec vp run typecheck
+pnpm run test
 ```
 
 ## Conversation Width Defaults

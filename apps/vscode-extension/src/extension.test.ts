@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "@effect/vitest";
+import { vi } from "vite-plus/test";
 
 vi.mock("vscode", () => ({}));
 

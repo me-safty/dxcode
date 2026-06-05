@@ -33,12 +33,12 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "@types/vscode": "^1.106.0",
     "@vscode/vsce": "^3.6.0",
     "tsdown": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "typescript": "catalog:"
   },
   "contributes": {
     "commands": [

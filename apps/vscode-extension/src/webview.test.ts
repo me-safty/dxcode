@@ -5,7 +5,8 @@ import {
   THREAD_CONVERSATION_MAX_WIDTH_PX,
   THREAD_CONVERSATION_MIN_WIDTH_PX,
 } from "@t3tools/shared/displayPreferences";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest";
+import { vi } from "vite-plus/test";
 
 import packageJson from "../package.json" with { type: "json" };
 import { renderDesktopBackendRequiredWebview, renderT3Webview } from "./webview.ts";

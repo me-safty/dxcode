@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "@effect/vitest";
+import { vi } from "vite-plus/test";
 
 const vscodeState = vi.hoisted(() => ({
   settings: {} as Record<string, unknown>,
