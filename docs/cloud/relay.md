@@ -9,7 +9,7 @@ optional mobile notifications and Live Activities.
 
 The relay is intentionally not in the hot path for normal T3 Code traffic. After a client connects,
 regular API and WebSocket traffic goes directly between that client and the selected environment.
-See the [cloud architecture overview](../../docs/t3-code-cloud-auth-flow.html) for the larger system
+See the [cloud architecture overview](./t3-code-cloud-auth-flow.html) for the larger system
 design.
 
 ## Responsibilities
@@ -25,21 +25,21 @@ The relay currently owns:
 - Persisting relay state and exposing relay-specific traces for diagnostics.
 
 The environment server and relay have separate credentials and trust boundaries. Read
-[Environment Authentication Profile](../../docs/environment-auth.md) before changing token,
+[Environment Authentication Profile](./environment-auth.md) before changing token,
 credential, or authorization behavior.
 
 ## Code Map
 
-- [`alchemy.run.ts`](./alchemy.run.ts) defines the deployed Alchemy stack.
-- [`src/worker.ts`](./src/worker.ts) wires Cloudflare bindings, runtime layers, queues, and HTTP APIs.
-- [`src/http/Api.ts`](./src/http/Api.ts) contains the relay HTTP handlers and authentication
+- [`alchemy.run.ts`](../../infra/relay/alchemy.run.ts) defines the deployed Alchemy stack.
+- [`src/worker.ts`](../../infra/relay/src/worker.ts) wires Cloudflare bindings, runtime layers, queues, and HTTP APIs.
+- [`src/http/Api.ts`](../../infra/relay/src/http/Api.ts) contains the relay HTTP handlers and authentication
   boundaries.
-- [`src/environments`](./src/environments) contains environment linking, credentials, endpoint
+- [`src/environments`](../../infra/relay/src/environments) contains environment linking, credentials, endpoint
   provisioning, and connection flows.
-- [`src/agentActivity`](./src/agentActivity) contains mobile device registration, activity state,
+- [`src/agentActivity`](../../infra/relay/src/agentActivity) contains mobile device registration, activity state,
   APNs delivery, and queue processing.
-- [`src/auth`](./src/auth) contains relay token and DPoP proof handling.
-- [`src/persistence/schema.ts`](./src/persistence/schema.ts) defines persisted relay state. Keep
+- [`src/auth`](../../infra/relay/src/auth) contains relay token and DPoP proof handling.
+- [`src/persistence/schema.ts`](../../infra/relay/src/persistence/schema.ts) defines persisted relay state. Keep
   schema and migration changes together.
 
 Shared request and response schemas live in
@@ -83,7 +83,7 @@ vp run --filter t3code-relay deploy
 ```
 
 The stack provisions the Cloudflare Worker and queues, managed endpoint resources, database
-connectivity, and relay tracing resources. Copy [`infra/relay/.env.example`](./.env.example) to
+connectivity, and relay tracing resources. Copy [`infra/relay/.env.example`](../../infra/relay/.env.example) to
 `infra/relay/.env` and fill in the deployment-specific values before deploying. Alchemy loads that
 file from the relay directory. Runtime secrets include Clerk and APNs credentials. Production adopts
 the configured API and tunnel DNS zones as retained Cloudflare resources. Personal stages reference
@@ -159,8 +159,8 @@ and hosted web builds.
 
 See:
 
-- [T3 Cloud Clerk Setup](../../docs/t3-cloud-clerk.md) for Clerk keys, JWT templates, and waitlist
+- [T3 Cloud Clerk Setup](./t3-cloud-clerk.md) for Clerk keys, JWT templates, and waitlist
   setup.
-- [Relay Observability](../../docs/relay-observability.md) for deployment tracing and diagnostics.
-- [Cloud Architecture Overview](../../docs/t3-code-cloud-auth-flow.html) for the full link,
+- [Relay Observability](../operations/relay-observability.md) for deployment tracing and diagnostics.
+- [Cloud Architecture Overview](./t3-code-cloud-auth-flow.html) for the full link,
   connect, endpoint, and notification flows.
