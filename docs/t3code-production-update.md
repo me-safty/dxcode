@@ -16,8 +16,8 @@ detached wrapper.
 cd ~/code/t3code
 git fetch origin
 git pull --ff-only origin <branch>
-bun install
-bun run build
+vp i
+vp run build
 systemctl --user restart t3code-server.service
 ```
 
@@ -28,7 +28,7 @@ systemctl --user status t3code-server.service --no-pager
 curl -i http://127.0.0.1:3773/
 curl -i https://<your-public-t3-url>/
 curl -sS https://<your-public-t3-url>/api/external-intake/health
-bun run health:orchestrator
+vp run health:orchestrator
 ```
 
 ## Restart Only

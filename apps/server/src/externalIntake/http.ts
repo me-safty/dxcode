@@ -134,10 +134,7 @@ function verifyGitHubWebhookSignature(input: {
   }
 }
 
-function getHeaderValue(
-  headers: Readonly<Record<string, string | undefined>>,
-  target: string,
-) {
+function getHeaderValue(headers: Readonly<Record<string, string | undefined>>, target: string) {
   const normalizedTarget = target.toLowerCase();
   for (const [key, value] of Object.entries(headers)) {
     if (key.toLowerCase() === normalizedTarget) {
@@ -148,10 +145,14 @@ function getHeaderValue(
 }
 
 function parseResendSignatures(signatureHeader: string) {
-  const tokens = signatureHeader.split(/[\s,]+/).map((token) => token.trim()).filter(Boolean);
+  const tokens = signatureHeader
+    .split(/[\s,]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
   const signatures: string[] = [];
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
+    if (token === undefined) continue;
     if (token === "v1" && i + 1 < tokens.length) {
       signatures.push(tokens[i + 1] ?? "");
       i += 1;

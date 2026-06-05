@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { TerminalManager, type TerminalManagerShape } from "../../terminal/Services/Manager.ts";
@@ -101,6 +101,7 @@ describe("ProjectSetupScriptRunner", () => {
       Effect.succeed({
         threadId: "thread-1",
         terminalId: "setup-setup",
+        label: "Setup",
         cwd: "/repo/worktrees/a",
         worktreePath: "/repo/worktrees/a",
         status: "running" as const,
@@ -108,7 +109,6 @@ describe("ProjectSetupScriptRunner", () => {
         history: "",
         exitCode: null,
         exitSignal: null,
-        label: "setup-setup",
         updatedAt: "2026-01-01T00:00:00.000Z",
       }),
     );
@@ -161,6 +161,7 @@ describe("ProjectSetupScriptRunner", () => {
       Effect.succeed({
         threadId: "thread-1",
         terminalId: "setup-setup",
+        label: "Setup",
         cwd: "/repo/worktrees/a",
         worktreePath: "/repo/worktrees/a",
         status: "running" as const,
@@ -203,6 +204,7 @@ describe("ProjectSetupScriptRunner", () => {
       Effect.succeed({
         threadId: "thread-1",
         terminalId: "setup-worktree-setup",
+        label: "Worktree setup",
         cwd: "/repo/worktrees/a",
         worktreePath: "/repo/worktrees/a",
         status: "running" as const,
