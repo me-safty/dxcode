@@ -73,6 +73,20 @@ import {
   extractPlanMarkdown,
   extractTodosAsPlan,
 } from "../acp/CursorAcpExtension.ts";
+import {
+  type PendingApproval,
+  type PendingUserInput,
+  settlePendingApprovalsAsCancelled,
+  settlePendingUserInputsAsEmptyAnswers,
+  findModeByAliases,
+  isPlanMode,
+  resolveRequestedModeId,
+  parseAcpResumeToken,
+  selectAutoApprovedPermissionOption,
+  ACP_PLAN_MODE_ALIASES,
+  ACP_IMPLEMENT_MODE_ALIASES,
+  ACP_APPROVAL_MODE_ALIASES,
+} from "../acp/AcpAdapterCore.ts";
 import { type CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { resolveCursorAcpBaseModelId } from "./CursorProvider.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -80,9 +94,6 @@ const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJ
 
 const PROVIDER = ProviderDriverKind.make("cursor");
 const CURSOR_RESUME_VERSION = 1 as const;
-const ACP_PLAN_MODE_ALIASES = ["plan", "architect"];
-const ACP_IMPLEMENT_MODE_ALIASES = ["code", "agent", "default", "chat", "implement"];
-const ACP_APPROVAL_MODE_ALIASES = ["ask"];
 
 function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
   const result = encodeUnknownJsonStringExit(input);
@@ -112,15 +123,6 @@ export interface CursorAdapterLiveOptions {
   readonly resolveSettings?: Effect.Effect<CursorSettings>;
 }
 
-interface PendingApproval {
-  readonly decision: Deferred.Deferred<ProviderApprovalDecision>;
-  readonly kind: string | "unknown";
-}
-
-interface PendingUserInput {
-  readonly answers: Deferred.Deferred<ProviderUserInputAnswers>;
-}
-
 interface CursorSessionContext {
   readonly threadId: ThreadId;
   session: ProviderSession;
@@ -133,111 +135,6 @@ interface CursorSessionContext {
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
   stopped: boolean;
-}
-
-function settlePendingApprovalsAsCancelled(
-  pendingApprovals: ReadonlyMap<ApprovalRequestId, PendingApproval>,
-): Effect.Effect<void> {
-  const pendingEntries = Array.from(pendingApprovals.values());
-  return Effect.forEach(
-    pendingEntries,
-    (pending) => Deferred.succeed(pending.decision, "cancel").pipe(Effect.ignore),
-    {
-      discard: true,
-    },
-  );
-}
-
-function settlePendingUserInputsAsEmptyAnswers(
-  pendingUserInputs: ReadonlyMap<ApprovalRequestId, PendingUserInput>,
-): Effect.Effect<void> {
-  const pendingEntries = Array.from(pendingUserInputs.values());
-  return Effect.forEach(
-    pendingEntries,
-    (pending) => Deferred.succeed(pending.answers, {}).pipe(Effect.ignore),
-    {
-      discard: true,
-    },
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseCursorResume(raw: unknown): { sessionId: string } | undefined {
-  if (!isRecord(raw)) return undefined;
-  if (raw.schemaVersion !== CURSOR_RESUME_VERSION) return undefined;
-  if (typeof raw.sessionId !== "string" || !raw.sessionId.trim()) return undefined;
-  return { sessionId: raw.sessionId.trim() };
-}
-
-function normalizeModeSearchText(mode: AcpSessionMode): string {
-  return [mode.id, mode.name, mode.description]
-    .filter((value): value is string => typeof value === "string" && value.length > 0)
-    .join(" ")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function findModeByAliases(
-  modes: ReadonlyArray<AcpSessionMode>,
-  aliases: ReadonlyArray<string>,
-): AcpSessionMode | undefined {
-  const normalizedAliases = aliases.map((alias) => alias.toLowerCase());
-  for (const alias of normalizedAliases) {
-    const exact = modes.find((mode) => {
-      const id = mode.id.toLowerCase();
-      const name = mode.name.toLowerCase();
-      return id === alias || name === alias;
-    });
-    if (exact) {
-      return exact;
-    }
-  }
-  for (const alias of normalizedAliases) {
-    const partial = modes.find((mode) => normalizeModeSearchText(mode).includes(alias));
-    if (partial) {
-      return partial;
-    }
-  }
-  return undefined;
-}
-
-function isPlanMode(mode: AcpSessionMode): boolean {
-  return findModeByAliases([mode], ACP_PLAN_MODE_ALIASES) !== undefined;
-}
-
-function resolveRequestedModeId(input: {
-  readonly interactionMode: ProviderInteractionMode | undefined;
-  readonly runtimeMode: RuntimeMode;
-  readonly modeState: AcpSessionModeState | undefined;
-}): string | undefined {
-  const modeState = input.modeState;
-  if (!modeState) {
-    return undefined;
-  }
-
-  if (input.interactionMode === "plan") {
-    return findModeByAliases(modeState.availableModes, ACP_PLAN_MODE_ALIASES)?.id;
-  }
-
-  if (input.runtimeMode === "approval-required") {
-    return (
-      findModeByAliases(modeState.availableModes, ACP_APPROVAL_MODE_ALIASES)?.id ??
-      findModeByAliases(modeState.availableModes, ACP_IMPLEMENT_MODE_ALIASES)?.id ??
-      modeState.availableModes.find((mode) => !isPlanMode(mode))?.id ??
-      modeState.currentModeId
-    );
-  }
-
-  return (
-    findModeByAliases(modeState.availableModes, ACP_IMPLEMENT_MODE_ALIASES)?.id ??
-    findModeByAliases(modeState.availableModes, ACP_APPROVAL_MODE_ALIASES)?.id ??
-    modeState.availableModes.find((mode) => !isPlanMode(mode))?.id ??
-    modeState.currentModeId
-  );
 }
 
 function applyRequestedSessionConfiguration<E>(input: {
@@ -287,22 +184,6 @@ function applyRequestedSessionConfiguration<E>(input: {
       ),
     );
   });
-}
-
-function selectAutoApprovedPermissionOption(
-  request: EffectAcpSchema.RequestPermissionRequest,
-): string | undefined {
-  const allowAlwaysOption = request.options.find((option) => option.kind === "allow_always");
-  if (typeof allowAlwaysOption?.optionId === "string" && allowAlwaysOption.optionId.trim()) {
-    return allowAlwaysOption.optionId.trim();
-  }
-
-  const allowOnceOption = request.options.find((option) => option.kind === "allow_once");
-  if (typeof allowOnceOption?.optionId === "string" && allowOnceOption.optionId.trim()) {
-    return allowOnceOption.optionId.trim();
-  }
-
-  return undefined;
 }
 
 export function makeCursorAdapter(
@@ -507,7 +388,7 @@ export function makeCursorAdapter(
           );
           let ctx!: CursorSessionContext;
 
-          const resumeSessionId = parseCursorResume(input.resumeCursor)?.sessionId;
+          const resumeSessionId = parseAcpResumeToken(input.resumeCursor, CURSOR_RESUME_VERSION)?.sessionId;
           const acpNativeLoggers = makeAcpNativeLoggers({
             nativeEventLogger,
             provider: PROVIDER,
