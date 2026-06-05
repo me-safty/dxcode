@@ -31,3 +31,4 @@ dist-electron/
 .electron-runtime/
 apps/server/~/.t3code/
 ~/.t3code/
+.t3work-runs/

@@ -6,6 +6,8 @@
   "locFailThreshold": 200,
   "allowedModifiedFiles": [
     ".t3work-additive-guard.json",
+    "vitest.config.ts",
+    "apps/server/vitest.config.ts",
     "AGENTS.md",
     ".gitignore",
     "docs/t3work-additive-whitelist.md",

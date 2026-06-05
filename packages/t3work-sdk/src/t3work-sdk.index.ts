@@ -2,6 +2,25 @@ import "./t3work-sdk.globals.ts";
 
 export { builtinTools } from "./t3work-sdk.builtins.ts";
 export {
+  createDurableWorkflowRuntime,
+  resumeWorkflow,
+  startWorkflow,
+} from "./t3work-sdk.engine.ts";
+export {
+  CancelledError,
+  JournalSchemaError,
+  JournalSerializeError,
+  PermissionDeniedError,
+  ProviderUnavailableError,
+  ReplayDriftError,
+  SchemaExhaustedError,
+  TargetMissingError,
+  TimeoutError,
+  WorkflowError,
+  WorkflowLoadError,
+  WorkflowRunNotFoundError,
+} from "./t3work-sdk.errors.ts";
+export {
   githubRead,
   githubWrite,
   jiraRead,
@@ -30,6 +49,15 @@ export {
 export { renameThreadTool } from "./tools/t3work-sdk.t3work.ts";
 
 export type { BuiltinToolsTree } from "./t3work-sdk.builtins.ts";
+export type {
+  DurableWorkflowRuntime,
+  StartWorkflowOptions,
+  WorkflowRunOptions,
+  WorkflowRunResult,
+} from "./t3work-sdk.engine.ts";
+export type { ReplayDriftFacet, ReplayDriftReason } from "./t3work-sdk.errors.ts";
+export type { JournalEntry } from "./t3work-sdk.journalReader.ts";
+export type { WorkflowMeta } from "./t3work-sdk.sandbox.ts";
 export type {
   EngineCapability,
   FetchLike,

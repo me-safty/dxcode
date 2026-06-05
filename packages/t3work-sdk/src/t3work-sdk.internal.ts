@@ -9,6 +9,11 @@ import type { WorkflowRuntime, WorkflowSdkRegistry } from "./t3work-sdk.types.ts
 
 const REGISTRY_SYMBOL = Symbol.for("@t3work/sdk/registry");
 const CURRENT_MODULE_FILE = fileURLToPath(import.meta.url);
+// `defineWorkflow` lives in the sibling dispatch module, so its frame sits between this
+// file and the true caller. Skip it too — otherwise a relative workflow path resolves
+// against the SDK rather than the file (or workflow body) that called `defineWorkflow`.
+const DISPATCH_MODULE_FILE = CURRENT_MODULE_FILE.replace(/\.internal\.ts$/, ".ts");
+const SDK_FRAME_FILES = new Set([CURRENT_MODULE_FILE, DISPATCH_MODULE_FILE]);
 const nodeRequire = createRequire(import.meta.url);
 
 type NodeFsModule = {
@@ -73,7 +78,7 @@ function findCallerFilePath(): string | undefined {
       }
 
       const normalizedFileName = normalizeFilePath(fileName);
-      if (normalizedFileName !== CURRENT_MODULE_FILE) {
+      if (!SDK_FRAME_FILES.has(normalizedFileName)) {
         return normalizedFileName;
       }
     }

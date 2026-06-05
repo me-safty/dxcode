@@ -107,9 +107,9 @@ Three things make this file shape work under replay:
 
 1. **`meta` is the first non-`const`/non-`import` statement** and is itself a pure
    literal (or references to top-level `const`s declared above it in the same file). The
-   loader evaluates the consts in a no-globals sandbox and then extracts `meta` without
-   running the body — needed for the launcher UI, capability gating, and applicability
-   matching.
+   loader evaluates the consts in a minimal context (no engine primitives) and then extracts
+   `meta` without running the body — needed for the launcher UI, capability gating, and
+   applicability matching.
 2. **The body is implicit async with top-level await.** No `async function` wrapper; the
    engine wraps the module's top-level statements.
 3. **`args` is a global**, validated against `meta.inputs` _before_ the body runs. The
@@ -155,7 +155,7 @@ export const meta = {
 
 `meta` is read at workflow-load time **before** the body runs. The loader evaluates only
 the top-level `const` declarations referenced by `meta` (e.g. `Inputs`, `Outputs`) in a
-sandbox that exposes no engine primitives. This is what makes capability gating and
+context that exposes no engine primitives. This is what makes capability gating and
 permission UI safe to display before the user authorizes execution.
 
 What's allowed in `meta`:
@@ -231,7 +231,18 @@ that ships with `@t3work/workflow-sdk`.
 | `phase(title)`           | `void`                        | Start a progress group. `title` is typed as the union of `meta.phases[].title` literals when `meta.phases` is declared `as const` (recommended). Calling with a title outside that union is a compile-time error. |
 | `log(message)`           | `void`                        | Emit a narrator line above the progress tree.                                                                                                                                                                     |
 | `args`                   | `unknown`                     | The workflow's input; validated against `meta.inputs` before the body runs.                                                                                                                                       |
-| `budget`                 | `{ total, spent, remaining }` | Token budget shared with nested workflows.                                                                                                                                                                        |
+| `budget`                 | `{ total, spent, remaining }` | Token accumulator over journaled `agent`/`agent.task` entries. See the black-box note below for nesting.                                                                                                           |
+
+> **Black-box journaling boundary (Stage-1).** `parallel`, `pipeline`, and `workflow`
+> are each journaled as **one** entry; primitive calls made inside their thunks/stages/
+> sub-workflow body are **not** individually journaled — the composition primitive itself
+> is the journal boundary. On replay the recorded result is returned verbatim and the
+> thunks (and any LLM/tool/sub-workflow calls inside them) do **not** re-execute. Two
+> consequences: (1) an author who needs fine-grained replay across N branches must refactor
+> those branches into sequential sub-workflows; (2) `budget.spent()` only counts the
+> top-level (journaled) `agent`/`agent.task` calls — tokens spent inside a `parallel`/
+> `pipeline`/`workflow` thunk are invisible to the parent budget. Per-thunk journaling would
+> require a deterministic event loop (the path Temporal takes) and is deferred past Stage-1.
 
 ### Side-effect primitives (the Handle pattern)
 
@@ -287,9 +298,9 @@ makes the wrong-id-format error a compile-time one.
 | `scripts.<name>(args)`       | `Promise<T>`    | Call a recipe-registered script (typed). Result is journaled. See [§Scripts](#scripts). Gated by the `"script"` engine capability.     |
 | `tools.<group>.<name>(args)` | `Promise<T>`    | Call a broker tool. ToolRefs are typed; the ref's group is checked against `meta.capabilities` at the call site. See [§Tools](#tools). |
 | `wait(durationMs)`           | `Promise<void>` | Durable timer — suspends the workflow if the deadline hasn't passed. Survives server restart.                                          |
-| `random()`                   | `number`        | Journaled `[0, 1)` PRNG. Use instead of `Math.random()`.                                                                               |
-| `now()`                      | `number`        | Journaled epoch millis. Use instead of `Date.now()`.                                                                                   |
-| `uuid()`                     | `string`        | Journaled UUIDv4. Use instead of `crypto.randomUUID()`.                                                                                |
+| `Math.random()`              | `number`        | Deterministic `[0, 1)` — journaled. Call it as in any JS; a resume replays the recorded draw.                                          |
+| `Date.now()`, `new Date()`   | `number`/`Date` | Deterministic wall-clock — journaled. A resume replays the recorded epoch millis.                                                      |
+| `crypto.randomUUID()`        | `string`        | Deterministic UUIDv4 — journaled. A resume replays the recorded id.                                                                    |
 
 `script` and `tool` may take arbitrary wall-clock time but don't durably suspend — they
 block on a Promise that the engine awaits and journals when it resolves. `wait` is the
@@ -383,42 +394,59 @@ Sugar only — they call the underlying primitive and `.then(h => h.response)`.
 
 ### How replay works
 
-Every primitive call writes a journal entry: `{ callId, argsHash, result, timestamp }`.
-On resume:
+Every journaled primitive call writes one line to an append-only
+`.t3work-runs/<run-id>/journal.jsonl`:
+`{ seq, callId, kind, refId, argsHash, result?, startedAt, endedAt }`. `kind` is one of
+`"tool" | "script" | "script-never"` in 25.2 (the union widens as 25.3+ primitives are
+journaled), `result` is a value/void envelope that is absent for `script-never` markers
+(see below). On resume:
 
 1. The engine re-runs the workflow body from the top.
-2. Each primitive call's `(callId, argsHash)` is compared against the journal.
-3. **Matched:** return the recorded `result` synchronously without re-executing.
-4. **Not journaled yet:** run the primitive live, journal the result, return it.
-5. **Mismatched argsHash:** throw `ReplayDriftError` with the diverging call site.
+2. A per-run **sequence counter** increments on every primitive call; the call at counter
+   value `seq` is matched against the journal entry recorded at that same `seq`.
+3. **Matched** (same `kind`, `refId`, and `argsHash`): return the recorded `result`
+   (re-validated against the current result schema) without re-executing.
+4. **Not journaled yet** (`seq` past the recorded frontier): run the primitive live,
+   append a journal entry, return it.
+5. **Mismatched:** throw `ReplayDriftError` citing `seq` plus the expected-vs-observed
+   `(kind, refId)` (call-identity drift) or `argsHash` prefixes (argument drift). A `seq`
+   at or below the recorded frontier with no entry (a *gap*) is also drift.
 
-`callId` is derived from the call's lexical position in the workflow body (file, line,
-column) — not from a runtime counter. This is why **adding or removing primitive calls
-between two existing ones is a workflow-version-incompatible change**: every call after
-the insertion point shifts its lexical position.
+A `replay: "never"` script always re-executes, but it still writes a typed
+`script-never` **marker** (no `result`) so it occupies its `seq`. Removing or reordering a
+never-script therefore surfaces as `ReplayDriftError` at the next call, rather than
+silently re-executing a neighbouring journaled primitive. The workflow inputs are hashed
+into a sibling `runMeta.json` at start; resuming with different args is caught at that
+input boundary (drift at `seq 0`) before the body re-runs.
+
+`callId` is `"<seq>:<kind>:<refId>"` — derived from the **runtime sequence counter plus a
+type tag**, not from lexical position. (Lexical position via stack-trace parsing is too
+fragile under transpilation, bundling, and minification to be the durable key; the
+sequence-counter idiom is what Temporal/Restate use.) The type tag is the drift guard:
+**adding, removing, or reordering primitive calls is a workflow-version-incompatible
+change**, because every call after the edit shifts to a `seq` whose recorded `(kind, refId)`
+no longer matches — surfacing as a loud `ReplayDriftError` rather than a silent wrong
+replay. The one residual blind spot is reordering two calls that share the *same*
+`(kind, refId)`: the type tag can't tell them apart, so only a differing `argsHash` would
+catch it. Authors get correctness by keeping the call sequence stable across versions.
 
 ### Rules authors must follow
 
-**1. No ambient nondeterminism in workflow bodies.** Banned globals at workflow load
-time (lint-checked; runtime throws if they leak in):
-
-| Banned                         | Use instead                                          |
-| ------------------------------ | ---------------------------------------------------- |
-| `Date.now()`, `new Date()`     | `now()` global (journaled)                           |
-| `Math.random()`                | `random()` global (journaled)                        |
-| `crypto.randomUUID()`          | `uuid()` global (journaled)                          |
-| `setTimeout`, `setInterval`    | `wait(ms)` global (journaled, suspend-aware)         |
-| `fetch`                        | call from inside a `script` module — never inline    |
-| `process.env`, `process.cwd()` | pass via `args` or read from `context`               |
-| Module-level mutable state     | `let`/`var` at module level is refused by the linter |
+**1. Ambient nondeterminism is journaled, not banned.** Workflow bodies see deterministic
+`Date` (`Date.now()` / `new Date()`), `Math.random`, and `crypto.randomUUID` — call them
+exactly as you would in any JS code. The engine journals each call, so on replay they
+return the recorded value instead of re-reading the clock or drawing fresh entropy. For a
+durable timer use `wait(ms)` (it suspends across a server restart, which a raw `setTimeout`
+cannot); for network or filesystem I/O, call it from inside a `script` module rather than
+inline, so the result is journaled. Stage-1 does **not** refuse a workflow for reading
+ambient state — it trusts project code (see [§Sandboxing](#sandboxing)).
 
 **2. Imports are types-only.** Runtime imports change the module graph on replay — if a
-dependency's behavior changes between original run and resume, replay diverges. Only
-`import type { … } from "…"` is allowed in `.workflow.ts` files. The linter enforces
-this; the loader refuses files that contain non-type runtime imports.
-
-The single exception is `import { Schema } from "effect"` (and other allowlisted
-pure-value modules). The allowlist is hard-coded; you cannot extend it project-locally.
+dependency's behavior changes between original run and resume, replay diverges. Use
+`import type { … }` for types in `.workflow.ts` files. The loader blanks every import
+statement unconditionally — it makes no allow/deny decision — and injects `Schema` as a
+global, so `import { Schema } from "effect"` works while any other runtime import resolves
+to nothing in the body. The linter flags non-type imports so the gap surfaces early.
 
 **3. Schema decode at top.** `const input = Schema.decodeSync(Inputs)(args)` runs once,
 deterministically, before any primitive calls. Don't decode lazily; don't decode in a
@@ -426,8 +454,8 @@ branch.
 
 **4. Pure code between primitive calls.** Computation between `await agent(...)` and the
 next primitive call must be deterministic given the prior journaled results. If you
-branch on `now() > someThreshold`, that's fine (`now()` is journaled). If you branch on
-a closure over a mutable outer variable, you'll diverge.
+branch on `Date.now() > someThreshold`, that's fine (`Date.now()` is journaled). If you
+branch on a closure over a mutable outer variable, you'll diverge.
 
 **5. Script handlers must be deterministic OR pinned.** The engine journals every
 `scripts.<name>(args)` call's return value, so on replay you get the recorded result.
@@ -446,11 +474,10 @@ determinism for everything downstream of it.
 
 | Detected                                                                                         | When                      | Effect                                       |
 | ------------------------------------------------------------------------------------------------ | ------------------------- | -------------------------------------------- |
-| Banned global usage (`Date.now`, etc.)                                                           | Lint + workflow load time | Workflow refuses to load                     |
-| Non-type runtime imports                                                                         | Workflow load time        | Workflow refuses to load                     |
-| Module-level mutable state                                                                       | Lint + load time          | Workflow refuses to load                     |
+| Non-type runtime imports                                                                         | Lint                      | Flagged; the loader blanks the import (value is `undefined` in the body) |
+| Module-level mutable state                                                                       | Lint                      | Flagged by the linter                        |
 | `meta` referencing non-extractable values                                                        | Workflow load time        | Workflow refuses to load                     |
-| Mismatched `argsHash` on replay                                                                  | Replay execution          | `ReplayDriftError` at the diverging site     |
+| Mismatched `argsHash` on replay (including a journaled `Date`/`Math.random`/`uuid` call)         | Replay execution          | `ReplayDriftError` at the diverging site     |
 | Primitive call after `cancellation` aborted                                                      | Runtime                   | `CancelledError`                             |
 | Capability mismatch (call site references a tool whose `group` ref isn't in `meta.capabilities`) | Runtime, at the call site | `PermissionDeniedError` thrown and journaled |
 
@@ -466,6 +493,18 @@ determinism for everything downstream of it.
 Authors who follow the rules get correctness for free. Authors who break them get loud,
 specific errors at the boundary that broke (e.g. `ReplayDriftError` cites the file, line,
 and a side-by-side hash of expected vs. observed args).
+
+### Sandboxing
+
+Stage-1 has **no sandbox**. Workflow bodies run in a `vm.Script` context with deterministic
+`Date`/`Math.random`/`crypto.randomUUID` bound (each call journaled, so replays return the
+recorded value), but the host realm is reachable via prototype chains. The trust model is
+**"trusted project code"** — the same status as project recipes and scripts (see [Epic 16
+§Security: Two Stages](./16-action-recipes.md#security-two-stages)). There is no banned-globals
+scan and no AST refusal; the loader only blanks imports and lifts `meta`. Stage-2 (planned:
+SES or `isolated-vm`) is the real sandbox if and when untrusted workflows come into scope —
+until then the engine relies on the determinism contract above, not on isolation, for replay
+safety.
 
 ## Capability gating
 
@@ -697,9 +736,9 @@ credentials manually.
   sandbox.
 - **Project-local tool handlers** are stage-1 trusted today (same status as project
   recipes and scripts — see [Epic 16 §Security: Two Stages](./16-action-recipes.md#security-two-stages)).
-  Stage 2 sandboxes them via the same VM-isolation work that sandboxes workflow bodies:
-  the handler's `ToolHandlerCtx` becomes the only API surface, ambient
-  `fetch`/`fs`/`process` are stripped from `globalThis`.
+  Stage-1 has no sandbox for them, as for workflow bodies (see [§Sandboxing](#sandboxing)). The
+  planned Stage-2 VM-isolation work makes the handler's `ToolHandlerCtx` the only API surface,
+  with ambient `fetch`/`fs`/`process` stripped from `globalThis`.
 
 The handler ↔ workflow-body sandboxing is deliberately symmetric: same stage-1 vs.
 stage-2 plan, same injected-`ctx`-becomes-the-only-surface pattern. No new security
@@ -836,8 +875,8 @@ export default defineRecipe({
 `defineWorkflow<typeof Module>("./path")` returns a `WorkflowRef<Inputs, Outputs>` whose
 types are inferred from the file's exported `Inputs`/`Outputs` schemas via the type-only
 import. The type-only import doesn't pull the workflow body into the host module graph at
-runtime — TypeScript strips it — so the body stays sandboxed in the engine's VM at
-invocation time.
+runtime — TypeScript strips it — so the body is loaded and run only in the engine's
+`vm.Script` context at invocation time.
 
 View code consumes workflow refs by typed variable, with `host` injected as a prop:
 
@@ -917,9 +956,9 @@ This engine is not yet built. The current runtime is the forward-only step-list 
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
 | 25.1  | `.workflow.ts` file loader + `meta` static extractor + `defineWorkflow` / `defineTool` / `defineToolGroup` / `defineScript` SDK + ambient `tools.*` / `scripts.*` trees + ambient types                                                 | Planned |
 | 25.2  | Durable-execution engine prototype: journal, replay, `argsHash`, `ReplayDriftError`                                                                                                                                                     | Planned |
-| 25.3  | Inherited primitives: `agent`, `agent.task`, `parallel`, `pipeline`, `phase`, `log`, `args`, `budget`, `workflow`; plus the journaled-value primitives `random`, `now`, `uuid`, `wait`, and the `script` / `tool` invocation primitives | Planned |
+| 25.3  | Inherited primitives: `agent`, `agent.task`, `parallel`, `pipeline`, `phase`, `log`, `args`, `budget`, `workflow`; plus the journaled-value primitives `random`, `now`, `uuid`, `wait`, and the `script` / `tool` invocation primitives | Implemented |
 | 25.4  | Handle primitives: `ui.show`, `child.spawn`, `thread.send`, `user.ask`, `user.notify` (depends on the cross-thread messaging broker work catalogued in Epic 16)                                                                         | Planned |
-| 25.5  | Determinism enforcement: lint rules, banned-global throws, capability gating at load time                                                                                                                                               | Planned |
+| 25.5  | Determinism enforcement: lint rules flagging nondeterminism patterns, capability gating at load time                                                                                                                                    | Planned |
 | 25.6  | Migration tooling: legacy `recipe.json` + step-union → `.workflow.ts` conversion script                                                                                                                                                 | Planned |
 | 25.7  | Retire the step-union runtime; remove `recipeWorkflowRuntime*` once all recipes migrated                                                                                                                                                | Planned |
 
@@ -933,9 +972,9 @@ it's authored against via its module extension (`recipe.json` → old engine; `r
 1. **VM isolation strategy.** Stage 1 trusts project code (current). Stage 2 needs real
    sandboxing — likely via `node:vm` + a frozen-realm pattern, or a worker thread with a
    tightly typed message channel. Decide before phase 25.2 ships.
-2. **Journal storage.** Per-run journal lives in `runs/<run-id>/journal.jsonl` for MVP;
-   long-term may move into the SQL-backed local cache from Epic 16. Append-only either
-   way.
+2. **Journal storage.** Per-run journal lives in `.t3work-runs/<run-id>/journal.jsonl` for
+   MVP (dotted to keep run state out of project tree listings; gitignored). Long-term may
+   move into the SQL-backed local cache from Epic 16. Append-only either way.
 3. **`agent.task` model selection for cost discipline.** When `meta.model` declares a
    default and a single `agent.task` call wants a cheaper model, the per-call `model:`
    override should be a strict subset of the workflow's declared capability for that

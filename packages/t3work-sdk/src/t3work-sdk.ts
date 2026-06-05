@@ -78,7 +78,7 @@ export function defineTool<const Id extends string, Group extends T.ToolGroupRef
   }
 
   let ref!: T.ToolRef<I, R, Id, Group>;
-  const callable = async (args: I): Promise<R> => {
+  const callable = (args: I): Promise<R> => {
     const runtime = runtimeStorage.getStore();
     if (!runtime) {
       throw new Error(
@@ -86,13 +86,10 @@ export function defineTool<const Id extends string, Group extends T.ToolGroupRef
       );
     }
 
-    const validatedArgs = await decodeWithSchema(
-      opts.args,
-      args,
-      `Invalid arguments for tool '${opts.id}'`,
-    );
-    const result = await runtime.callTool(ref, validatedArgs);
-    return await decodeWithSchema(opts.result, result, `Invalid result for tool '${opts.id}'`);
+    // Canonical dispatch: the engine's `runtime.callTool` validates args + result and
+    // journals exactly once. A directly-called ref forwards raw args (no decode here) so
+    // this path and the `tools.*` tree path are identical — same hash, no spurious drift.
+    return runtime.callTool(ref, args);
   };
 
   ref = Object.freeze(
@@ -117,7 +114,7 @@ export function defineScript<I, O>(opts: {
   readonly replay?: "default" | "never";
 }): T.ScriptRef<I, O> {
   let ref!: T.ScriptRef<I, O>;
-  const callable = async (args: I): Promise<O> => {
+  const callable = (args: I): Promise<O> => {
     const runtime = runtimeStorage.getStore();
     if (!runtime) {
       throw new Error(
@@ -125,9 +122,9 @@ export function defineScript<I, O>(opts: {
       );
     }
 
-    const validatedArgs = await decodeWithSchema(opts.inputs, args, "Invalid arguments for script");
-    const result = await runtime.callScript(ref, validatedArgs);
-    return await decodeWithSchema(opts.outputs, result, "Invalid result for script");
+    // Canonical dispatch — see the note in defineTool's callable. The engine validates and
+    // journals; forwarding raw args keeps the direct-call and `scripts.*` tree paths aligned.
+    return runtime.callScript(ref, args);
   };
 
   ref = Object.freeze(

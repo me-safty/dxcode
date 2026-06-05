@@ -1,5 +1,7 @@
 import * as Schema from "effect/Schema";
 
+import type { LlmDispatcher } from "./t3work-sdk.primitiveTypes.ts";
+
 export type EngineCapability = "thread" | "child" | "user" | "script" | "ui" | "workflow";
 export type IntegrationMethod = (...args: ReadonlyArray<unknown>) => Promise<unknown>;
 
@@ -61,6 +63,12 @@ export interface ToolHandlerCtx {
   readonly log: ToolLogger;
   readonly fetch: FetchLike;
   readonly workspace: ToolWorkspace;
+  /**
+   * Call another tool from inside a handler. This is a **black box**: the nested call is
+   * NOT journaled and does not consume a workflow `seq`. The enclosing primitive is the
+   * journaled checkpoint, and on replay it returns from the journal without re-running the
+   * handler — so its nested calls must not have journal positions of their own.
+   */
   readonly callTool: <I, R>(ref: ToolRef<I, R>, args: I) => Promise<R>;
   readonly github?: IntegrationClient;
   readonly jira?: IntegrationClient;
@@ -104,40 +112,20 @@ export interface RegisteredWorkflowToolsTree {}
 export interface RegisteredWorkflowScriptsTree {}
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
-type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (
-  value: infer I,
-) => void
-  ? I
-  : never;
-type SnakeToCamelCase<Value extends string> = Value extends `${infer Head}_${infer Tail}`
-  ? `${Head}${Capitalize<SnakeToCamelCase<Tail>>}`
-  : Value;
-type DotPathTree<Path extends string, Value> = Path extends `${infer Head}.${infer Tail}`
-  ? { [K in SnakeToCamelCase<Head>]: DotPathTree<Tail, Value> }
-  : { [K in SnakeToCamelCase<Path>]: Value };
+type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (value: infer I) => void ? I : never;
+type SnakeToCamelCase<Value extends string> = Value extends `${infer Head}_${infer Tail}` ? `${Head}${Capitalize<SnakeToCamelCase<Tail>>}` : Value;
+type DotPathTree<Path extends string, Value> = Path extends `${infer Head}.${infer Tail}` ? { [K in SnakeToCamelCase<Head>]: DotPathTree<Tail, Value> } : { [K in SnakeToCamelCase<Path>]: Value };
 
-export type ToolTreeFromRefs<TRefs extends readonly unknown[]> = [TRefs[number]] extends [never]
-  ? {}
-  : Simplify<
-      UnionToIntersection<
-        TRefs[number] extends infer TRef
-          ? TRef extends { readonly id: infer Id extends string }
-            ? DotPathTree<Id, TRef>
-            : never
-          : never
-      >
-    >;
+export type ToolTreeFromRefs<TRefs extends readonly unknown[]> = [TRefs[number]] extends [never] ? {} : Simplify<
+    UnionToIntersection<TRefs[number] extends infer TRef ? TRef extends { readonly id: infer Id extends string } ? DotPathTree<Id, TRef> : never : never>
+  >;
 
 export type ScriptTreeFromRecord<TScripts extends Record<string, AnyScriptRef>> = {
   readonly [K in keyof TScripts]: TScripts[K];
 };
 
-export type WorkflowInputs<TModule> = TModule extends { Inputs: Schema.Schema<infer Inputs> }
-  ? Inputs
-  : unknown;
-export type WorkflowOutputs<TModule> = TModule extends { Outputs: Schema.Schema<infer Outputs> }
-  ? Outputs
-  : unknown;
+export type WorkflowInputs<TModule> = TModule extends { Inputs: Schema.Schema<infer V> } ? V : unknown;
+export type WorkflowOutputs<TModule> = TModule extends { Outputs: Schema.Schema<infer V> } ? V : unknown;
 
 export type AnyToolGroupRef = ToolGroupRef<string>;
 export type AnyToolRef = ToolRef<unknown, unknown, string, AnyToolGroupRef>;
@@ -148,7 +136,88 @@ export type WorkflowSdkRegistry = {
   readonly tools: Map<string, AnyToolRef>;
 };
 
+/**
+ * Every journaled primitive the engine knows about. `tool`/`script`/`script-never`, the
+ * deterministic `now`/`random`/`uuid`, and the 25.3 `agent`/`agent.task`/`parallel`/
+ * `pipeline`/`workflow`/`wait` primitives are journaled; the `thread.*`/`child.*`/`user.*`/
+ * `ui.show` Handle primitives are reserved for 25.4. One vocabulary shared by the journal
+ * `kind` and the runtime dispatch seats so later phases need no breaking change.
+ */
+export type PrimitiveKind =
+  | "tool"
+  | "script"
+  | "script-never"
+  | "now"
+  | "random"
+  | "uuid"
+  | "wait"
+  | "agent"
+  | "agent.task"
+  | "parallel"
+  | "pipeline"
+  | "thread.send"
+  | "child.spawn"
+  | "user.ask"
+  | "user.notify"
+  | "ui.show"
+  | "workflow";
+
+/**
+ * A single journaled primitive call. The engine assigns it a `seq`, hashes `args`, and
+ * either replays the recorded result (decoding it via {@link decodeRecorded}) or runs
+ * {@link exec} live and journals its result.
+ */
+export interface PrimitiveCall<R> {
+  readonly kind: PrimitiveKind;
+  /** Stable identity of the called primitive (tool id, script name, or primitive name). */
+  readonly refId: string;
+  /** Canonical-JSON arguments; hashed into the journal for drift detection. */
+  readonly args: unknown;
+  /**
+   * `"never"` → always re-execute and never replay the recorded value. The call still
+   * occupies a `seq` via a typed marker entry so the position stays aligned and a later
+   * removal/reorder surfaces as drift. Defaults to `"default"`.
+   */
+  readonly replay?: "default" | "never";
+  /** Live execution. Its resolved value is journaled and must be canonical-JSON-encodable. */
+  readonly exec: () => Promise<R>;
+  /**
+   * Re-validate a recorded result on replay before handing it back to the body. Should
+   * throw (the engine wraps the failure as `JournalSchemaError`). Omit for primitives whose
+   * recorded shape needs no schema check.
+   */
+  readonly decodeRecorded?: (recorded: unknown) => R | Promise<R>;
+}
+
+/**
+ * The journaling dispatcher a workflow body runs against. `callTool`/`callScript` (the
+ * `tools.*`/`scripts.*` trees and directly-callable refs) both funnel through
+ * {@link callPrimitive}, the single generic seat the 25.3 primitives delegate to.
+ */
 export type WorkflowRuntime = {
   readonly callTool: <I, R>(ref: ToolRef<I, R>, args: I) => Promise<R>;
   readonly callScript: <I, O>(ref: ScriptRef<I, O>, args: I) => Promise<O>;
+  readonly callPrimitive: <R>(call: PrimitiveCall<R>) => Promise<R>;
+  // Journaled wall-clock / entropy backing the body's `Date.now()` / `Math.random()` /
+  // `crypto.randomUUID()`; a resume replays the recorded value.
+  readonly now: () => number;
+  readonly random: () => number;
+  readonly uuid: () => string;
 };
+
+/** Options shared by `startWorkflow` and `resumeWorkflow`. Re-exported from engine. */
+export interface WorkflowRunOptions {
+  readonly runsRoot?: string;
+  readonly tools?: ReadonlyArray<AnyToolRef>;
+  readonly scripts?: Readonly<Record<string, AnyScriptRef>>;
+  readonly fetch?: FetchLike;
+  readonly workspace?: ToolWorkspace;
+  readonly log?: ToolLogger;
+  readonly workspaceRoot?: string;
+  // 25.3 primitive wiring: `llm` backs agent/agent.task (calling them without one throws);
+  // `budget` is the body's `budget.total`; `onPhase`/`onLog` are cosmetic progress callbacks.
+  readonly llm?: LlmDispatcher;
+  readonly budget?: number;
+  readonly onPhase?: (title: string) => void;
+  readonly onLog?: (message: string) => void;
+}
