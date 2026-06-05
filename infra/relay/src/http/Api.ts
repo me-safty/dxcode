@@ -852,16 +852,12 @@ const COMMON_AUTH_INVALID_REASONS = [
   DeliveryAttempts.DeliveryAttemptRecordPersistenceError,
 ] as const;
 type RelayCommonPersistenceError = InstanceType<(typeof COMMON_AUTH_INVALID_REASONS)[number]>;
-const isRelayCommonPersistenceErrorSchema = Schema.is(Schema.Union(COMMON_AUTH_INVALID_REASONS));
+const isRelayCommonPersistenceError = Schema.is(Schema.Union(COMMON_AUTH_INVALID_REASONS));
 
 type MapRelayCommonApiError<E> =
   | Exclude<E, HttpApiError.Unauthorized | RelayCommonPersistenceError>
   | (Extract<E, HttpApiError.Unauthorized> extends never ? never : RelayAuthInvalidError)
   | (Extract<E, RelayCommonPersistenceError> extends never ? never : RelayInternalError);
-
-function isRelayCommonPersistenceError(error: unknown): error is RelayCommonPersistenceError {
-  return isRelayCommonPersistenceErrorSchema(error);
-}
 
 function relayInternalErrorResponse(reason: RelayInternalError["reason"]) {
   return currentTraceId.pipe(
