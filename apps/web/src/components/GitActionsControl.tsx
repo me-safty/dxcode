@@ -690,7 +690,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                       }}
                       placeholder={publishPathPlaceholder}
                       disabled={publishRepositoryAction.isPending}
-                      className="w-full bg-transparent px-3 py-2 font-mono text-sm placeholder:text-muted-foreground/60 focus:outline-none"
+                      className="w-full bg-transparent px-3 py-2 font-mono text-sm placeholder:text-muted-foreground/80 focus:outline-none"
                     />
                   </div>
                 </div>

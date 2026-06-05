@@ -16,7 +16,7 @@ export function NoActiveThreadState() {
           )}
         >
           {isElectron ? (
-            <span className="text-xs text-muted-foreground/50 wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]">
+            <span className="text-xs text-muted-foreground/70 wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]">
               No active thread
             </span>
           ) : (

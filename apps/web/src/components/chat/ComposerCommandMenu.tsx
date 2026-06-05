@@ -149,7 +149,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
               {groupIndex > 0 ? <CommandSeparator className="my-0.5" /> : null}
               <CommandGroup>
                 {group.label ? (
-                  <CommandGroupLabel className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/55">
+                  <CommandGroupLabel className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">
                     {group.label}
                   </CommandGroupLabel>
                 ) : null}
@@ -171,7 +171,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
           <div className="px-3 py-2">
             {props.triggerKind === "skill" ? (
               <CommandGroup>
-                <CommandGroupLabel className="px-0 pt-0 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/55">
+                <CommandGroupLabel className="px-0 pt-0 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">
                   Skills
                 </CommandGroupLabel>
                 <p className="text-muted-foreground/70 text-xs">

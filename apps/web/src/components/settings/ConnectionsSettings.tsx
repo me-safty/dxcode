@@ -859,7 +859,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                     render={
                       <button
                         type="button"
-                        className="inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground/50 outline-none hover:text-foreground"
+                        className="inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground/70 outline-none hover:text-foreground"
                         aria-label="Show QR code"
                       />
                     }

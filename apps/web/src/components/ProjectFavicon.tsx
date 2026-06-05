@@ -28,7 +28,7 @@ export function ProjectFavicon(input: {
   if (!src) {
     return (
       <FolderIcon
-        className={`size-3.5 shrink-0 text-muted-foreground/50 ${input.className ?? ""}`}
+        className={`size-3.5 shrink-0 text-muted-foreground/70 ${input.className ?? ""}`}
       />
     );
   }
@@ -37,7 +37,7 @@ export function ProjectFavicon(input: {
     <>
       {status !== "loaded" ? (
         <FolderIcon
-          className={`size-3.5 shrink-0 text-muted-foreground/50 ${input.className ?? ""}`}
+          className={`size-3.5 shrink-0 text-muted-foreground/70 ${input.className ?? ""}`}
         />
       ) : null}
       <img
