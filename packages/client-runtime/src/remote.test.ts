@@ -469,7 +469,7 @@ describe("remote", () => {
         bearerToken: "bearer-token",
       }).pipe(provideRemoteHttp(fetch.fetchFn));
 
-      expect(url).toBe("wss://remote.example.com/ws?wsTicket=ws-ticket");
+      expect(url).toBe("wss://remote.example.com/?wsTicket=ws-ticket");
     }),
   );
 });

@@ -339,7 +339,7 @@ export const resolveRemoteWebSocketConnectionUrl = Effect.fn(
 
   const url = new URL(input.wsBaseUrl);
   const basePath = yield* normalizeBasePath(new URL(input.httpBaseUrl).pathname);
-  url.pathname = `${basePath}/ws`;
+  url.pathname = basePath || "/";
   url.searchParams.set("wsTicket", issued.ticket);
   return url.toString();
 });
@@ -360,9 +360,8 @@ export const resolveRemoteDpopWebSocketConnectionUrl = Effect.fn(
     ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
   });
   const url = new URL(input.wsBaseUrl);
-  if (url.pathname === "" || url.pathname === "/") {
-    url.pathname = "/ws";
-  }
+  const basePath = yield* normalizeBasePath(new URL(input.httpBaseUrl).pathname);
+  url.pathname = basePath || "/";
   url.searchParams.set("wsTicket", issued.ticket);
   return url.toString();
 });
