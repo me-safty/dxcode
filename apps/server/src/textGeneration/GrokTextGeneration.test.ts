@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { createModelSelection } from "@t3tools/shared/model";
-import { expect } from "vitest";
+import { expect } from "vite-plus/test";
 import { GrokSettings, ProviderInstanceId } from "@t3tools/contracts";
 
 import { ServerConfig } from "../config.ts";
@@ -42,7 +42,7 @@ function makeAcpGrokWrapper(dir: string, env: Record<string, string>): string {
       '  printf "%s\\n" "unexpected args: $*" >&2',
       "  exit 11",
       "fi",
-      `exec bun ${JSON.stringify(mockAgentPath)}`,
+      `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(mockAgentPath)}`,
       "",
     ].join("\n"),
     "utf8",

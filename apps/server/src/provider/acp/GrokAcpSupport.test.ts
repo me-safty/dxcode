@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as EffectAcpErrors from "effect-acp/errors";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyGrokAcpModelSelection,
