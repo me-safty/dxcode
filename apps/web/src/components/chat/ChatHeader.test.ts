@@ -10,24 +10,34 @@ import {
 const originalWindow = globalThis.window;
 
 function installWindowStub(input: {
-  readonly hasDesktopBridge?: boolean;
+  readonly href?: string;
   readonly forceReload?: () => Promise<void>;
   readonly reload?: () => void;
 }) {
-  const desktopBridge = input.forceReload
-    ? {
-        forceReload: input.forceReload,
-      }
-    : input.hasDesktopBridge
-      ? {}
-      : undefined;
+  const storage = new Map<string, string>();
 
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
-      ...(desktopBridge ? { desktopBridge } : {}),
+      ...(input.forceReload
+        ? {
+            desktopBridge: {
+              forceReload: input.forceReload,
+            },
+          }
+        : {}),
       location: {
+        href: input.href ?? "https://example.com/",
         reload: input.reload ?? vi.fn(),
+      },
+      sessionStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        removeItem: (key: string) => {
+          storage.delete(key);
+        },
+        setItem: (key: string, value: string) => {
+          storage.set(key, value);
+        },
       },
     },
   });
@@ -91,13 +101,23 @@ describe("shouldShowOpenInPicker", () => {
 });
 
 describe("shouldShowDownloadableDiagnostics", () => {
-  it("shows downloadable diagnostics when the desktop bridge is available", () => {
-    installWindowStub({ hasDesktopBridge: true });
+  it("shows downloadable diagnostics when the server feature flag is present", () => {
+    installWindowStub({});
+
+    expect(
+      shouldShowDownloadableDiagnostics({
+        serverWebFeatureFlags: ["downloadable-diagnostics"],
+      }),
+    ).toBe(true);
+  });
+
+  it("shows downloadable diagnostics when the feature flag is present", () => {
+    installWindowStub({ href: "https://example.com/?salchiFeature=downloadable-diagnostics" });
 
     expect(shouldShowDownloadableDiagnostics()).toBe(true);
   });
 
-  it("hides downloadable diagnostics in ordinary browser sessions", () => {
+  it("hides downloadable diagnostics without the feature flag", () => {
     installWindowStub({});
 
     expect(shouldShowDownloadableDiagnostics()).toBe(false);

@@ -36,6 +36,9 @@ import {
   exportWebSocketDiagnosticsNote,
   type WebSocketDiagnosticsContext,
 } from "../../rpc/webSocketDiagnostics";
+import { DOWNLOADABLE_DIAGNOSTICS_WEB_FEATURE } from "@t3tools/shared/webFeatureFlags";
+import { isWebFeatureEnabled } from "../../webFeatureFlags";
+import { useServerWebFeatureFlags } from "../../rpc/serverState";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -93,8 +96,13 @@ export function forceRefreshApp(): void {
   window.location.reload();
 }
 
-export function shouldShowDownloadableDiagnostics(): boolean {
-  return typeof window !== "undefined" && window.desktopBridge !== undefined;
+export function shouldShowDownloadableDiagnostics(input?: {
+  readonly serverWebFeatureFlags?: ReadonlyArray<string>;
+}): boolean {
+  return (
+    (input?.serverWebFeatureFlags ?? []).includes(DOWNLOADABLE_DIAGNOSTICS_WEB_FEATURE) ||
+    isWebFeatureEnabled(DOWNLOADABLE_DIAGNOSTICS_WEB_FEATURE)
+  );
 }
 
 function handleExportTimelineDiagnostics(): void {
@@ -180,6 +188,7 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isCompactHeader = useMediaQuery("(max-width: 760px)");
+  const serverWebFeatureFlags = useServerWebFeatureFlags();
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
     activeThreadEnvironmentId,
@@ -196,7 +205,9 @@ export const ChatHeader = memo(function ChatHeader({
   const threadEnvironmentLabel = isRemoteThread
     ? (remoteEnvRuntimeLabel ?? remoteEnvSavedLabel ?? "Remote")
     : null;
-  const showDownloadableDiagnostics = shouldShowDownloadableDiagnostics();
+  const showDownloadableDiagnostics = shouldShowDownloadableDiagnostics({
+    serverWebFeatureFlags,
+  });
   const renderProjectScriptsControl = (inMenu = false) =>
     activeProjectScripts ? (
       <ProjectScriptsControl
