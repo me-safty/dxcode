@@ -50,11 +50,18 @@ const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const INDEX_HTML_FILE_NAME = "index.html";
 
-export const browserApiCorsLayer = HttpRouter.cors({
-  allowedMethods: browserApiCorsAllowedMethods,
-  allowedHeaders: browserApiCorsAllowedHeaders,
-  maxAge: 600,
-});
+export const browserApiCorsLayer = Layer.unwrap(
+  Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    const devOrigin = config.devUrl?.origin;
+    return HttpRouter.cors({
+      ...(devOrigin ? { allowedOrigins: [devOrigin], credentials: true } : {}),
+      allowedMethods: browserApiCorsAllowedMethods,
+      allowedHeaders: browserApiCorsAllowedHeaders,
+      maxAge: 600,
+    });
+  }),
+);
 
 export function isLoopbackHostname(hostname: string): boolean {
   const normalizedHostname = hostname
@@ -159,8 +166,8 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
             otlpTracesUrl,
           }),
         ),
-        Effect.catch(() =>
-          Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
+        Effect.orElseSucceed(() =>
+          HttpServerResponse.text("Trace export failed.", { status: 502 }),
         ),
       );
   }).pipe(
@@ -208,9 +215,7 @@ export const attachmentsRouteLayer = HttpRouter.add(
     }
 
     const fileSystem = yield* FileSystem.FileSystem;
-    const fileInfo = yield* fileSystem
-      .stat(filePath)
-      .pipe(Effect.catch(() => Effect.succeed(null)));
+    const fileInfo = yield* fileSystem.stat(filePath).pipe(Effect.orElseSucceed(() => null));
     if (!fileInfo || fileInfo.type !== "File") {
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
@@ -221,9 +226,7 @@ export const attachmentsRouteLayer = HttpRouter.add(
         "Cache-Control": "public, max-age=31536000, immutable",
       },
     }).pipe(
-      Effect.catch(() =>
-        Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
-      ),
+      Effect.orElseSucceed(() => HttpServerResponse.text("Internal Server Error", { status: 500 })),
     );
   }).pipe(
     Effect.catchTags({
@@ -268,9 +271,7 @@ export const projectFaviconRouteLayer = HttpRouter.add(
         "Cache-Control": PROJECT_FAVICON_CACHE_CONTROL,
       },
     }).pipe(
-      Effect.catch(() =>
-        Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
-      ),
+      Effect.orElseSucceed(() => HttpServerResponse.text("Internal Server Error", { status: 500 })),
     );
   }).pipe(
     Effect.catchTags({
