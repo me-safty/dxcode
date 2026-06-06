@@ -2312,7 +2312,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("routes websocket rpc projects.searchEntries excludes gitignored files", () =>
+  it.effect("routes websocket rpc projects.searchEntries marks gitignored files", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -2338,6 +2338,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             listWorkspaceFiles: () =>
               Effect.succeed({
                 paths: ["src/tracked.ts"],
+                ignoredPaths: [".venv/lib/ignored-search-target.ts"],
                 truncated: false,
                 freshness: {
                   source: "live-local",
@@ -2364,7 +2365,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
 
-      assert.equal(response.entries.length, 0);
+      assert.equal(response.entries.length, 1);
+      assert.equal(response.entries[0]?.path, ".venv/lib/ignored-search-target.ts");
+      assert.equal(response.entries[0]?.kind, "file");
+      assert.equal(response.entries[0]?.parentPath, ".venv/lib");
+      assert.equal(response.entries[0]?.ignored, true);
       assert.equal(response.truncated, false);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

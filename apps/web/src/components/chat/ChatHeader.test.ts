@@ -1,24 +1,31 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { forceRefreshApp, shouldShowOpenInPicker } from "./ChatHeader";
+import {
+  forceRefreshApp,
+  shouldShowDownloadableDiagnostics,
+  shouldShowOpenInPicker,
+} from "./ChatHeader";
 
 const originalWindow = globalThis.window;
 
 function installWindowStub(input: {
+  readonly hasDesktopBridge?: boolean;
   readonly forceReload?: () => Promise<void>;
   readonly reload?: () => void;
 }) {
+  const desktopBridge = input.forceReload
+    ? {
+        forceReload: input.forceReload,
+      }
+    : input.hasDesktopBridge
+      ? {}
+      : undefined;
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
-      ...(input.forceReload
-        ? {
-            desktopBridge: {
-              forceReload: input.forceReload,
-            },
-          }
-        : {}),
+      ...(desktopBridge ? { desktopBridge } : {}),
       location: {
         reload: input.reload ?? vi.fn(),
       },
@@ -80,6 +87,20 @@ describe("shouldShowOpenInPicker", () => {
         primaryEnvironmentId,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldShowDownloadableDiagnostics", () => {
+  it("shows downloadable diagnostics when the desktop bridge is available", () => {
+    installWindowStub({ hasDesktopBridge: true });
+
+    expect(shouldShowDownloadableDiagnostics()).toBe(true);
+  });
+
+  it("hides downloadable diagnostics in ordinary browser sessions", () => {
+    installWindowStub({});
+
+    expect(shouldShowDownloadableDiagnostics()).toBe(false);
   });
 });
 

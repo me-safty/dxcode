@@ -32,6 +32,10 @@ import { Button } from "../ui/button";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { exportTimelineResizeDiagnostics } from "./timelineResizeDiagnostics";
+import {
+  exportWebSocketDiagnosticsNote,
+  type WebSocketDiagnosticsContext,
+} from "../../rpc/webSocketDiagnostics";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -89,6 +93,10 @@ export function forceRefreshApp(): void {
   window.location.reload();
 }
 
+export function shouldShowDownloadableDiagnostics(): boolean {
+  return typeof window !== "undefined" && window.desktopBridge !== undefined;
+}
+
 function handleExportTimelineDiagnostics(): void {
   void exportTimelineResizeDiagnostics()
     .then((result) => {
@@ -121,8 +129,28 @@ function handleExportTimelineDiagnostics(): void {
     });
 }
 
+function handleExportWebSocketDiagnostics(context: WebSocketDiagnosticsContext): void {
+  try {
+    const result = exportWebSocketDiagnosticsNote(context);
+    toastManager.add({
+      type: "success",
+      title: "WebSocket diagnostics downloaded",
+      description: result.filename,
+    });
+  } catch (error: unknown) {
+    toastManager.add(
+      stackedThreadToast({
+        type: "error",
+        title: "Could not export WebSocket diagnostics",
+        description: error instanceof Error ? error.message : "An unexpected error occurred.",
+      }),
+    );
+  }
+}
+
 export const ChatHeader = memo(function ChatHeader({
   activeThreadEnvironmentId,
+  activeThreadId,
   activeThreadTitle,
   activeProjectName,
   isGitRepo,
@@ -168,6 +196,7 @@ export const ChatHeader = memo(function ChatHeader({
   const threadEnvironmentLabel = isRemoteThread
     ? (remoteEnvRuntimeLabel ?? remoteEnvSavedLabel ?? "Remote")
     : null;
+  const showDownloadableDiagnostics = shouldShowDownloadableDiagnostics();
   const renderProjectScriptsControl = (inMenu = false) =>
     activeProjectScripts ? (
       <ProjectScriptsControl
@@ -345,11 +374,36 @@ export const ChatHeader = memo(function ChatHeader({
               <RefreshCwIcon aria-hidden="true" className="size-4" />
               Force refresh
             </MenuItem>
-            <MenuSeparator />
-            <MenuItem onClick={handleExportTimelineDiagnostics}>
-              <DownloadIcon aria-hidden="true" className="size-4" />
-              Export scroll diagnostics
-            </MenuItem>
+            {showDownloadableDiagnostics ? (
+              <>
+                <MenuSeparator />
+                <MenuItem onClick={handleExportTimelineDiagnostics}>
+                  <DownloadIcon aria-hidden="true" className="size-4" />
+                  Export scroll diagnostics
+                </MenuItem>
+                <MenuItem
+                  onClick={() =>
+                    handleExportWebSocketDiagnostics({
+                      activeProjectName,
+                      activeThreadEnvironmentId,
+                      activeThreadId,
+                      activeThreadTitle,
+                      diffOpen,
+                      fileExplorerAvailable,
+                      fileExplorerOpen,
+                      gitCwd,
+                      openInCwd,
+                      sourceControlOpen,
+                      terminalAvailable,
+                      terminalOpen,
+                    })
+                  }
+                >
+                  <DownloadIcon aria-hidden="true" className="size-4" />
+                  Export WebSocket diagnostics
+                </MenuItem>
+              </>
+            ) : null}
           </MenuPopup>
         </Menu>
       </div>
