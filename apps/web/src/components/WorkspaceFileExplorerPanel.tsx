@@ -66,7 +66,7 @@ function WorkspaceExplorerMessage(props: { children: ReactNode; tone?: "muted" |
   return (
     <div
       className={cn(
-        "flex items-center gap-2 px-3 py-2 text-xs",
+        "flex items-center gap-2 px-3 py-2 text-[15px] md:text-xs",
         props.tone === "error" ? "text-destructive" : "text-muted-foreground",
       )}
     >
@@ -193,7 +193,7 @@ const WorkspaceExplorerEntryRow = memo(function WorkspaceExplorerEntryRow(props:
     <div
       className={cn(
         EXPLORER_ROW_HEIGHT_CLASS_NAME,
-        "group flex w-full min-w-0 select-none items-center pr-2 text-[13px] transition-colors [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [-webkit-user-select:none] hover:bg-accent/70 focus-within:bg-accent focus-within:ring-2 focus-within:ring-ring",
+        "group flex w-full min-w-0 select-none items-center pr-2 text-[15px] transition-colors [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [-webkit-user-select:none] hover:bg-accent/70 focus-within:bg-accent focus-within:ring-2 focus-within:ring-ring md:text-[13px]",
       )}
       style={{ paddingLeft: 8 + depth * 14 }}
     >
@@ -524,8 +524,8 @@ export function WorkspaceFileExplorerPanel(props: {
           ) : null}
           <FolderTreeIcon className="size-4 shrink-0 text-muted-foreground/80" />
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-foreground">Files</p>
-            <p className="truncate font-mono text-[11px] text-muted-foreground/70">
+            <p className="truncate text-[15px] font-medium text-foreground md:text-sm">Files</p>
+            <p className="truncate font-mono text-[15px] text-muted-foreground/70 md:text-[11px]">
               {workspaceLabel}
             </p>
           </div>
@@ -563,7 +563,7 @@ export function WorkspaceFileExplorerPanel(props: {
             <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 z-10 size-3.5 -translate-y-1/2 text-muted-foreground/65" />
             <Input
               aria-label="Search workspace files"
-              className="rounded-md [&_input]:pl-8"
+              className="rounded-md text-[15px] md:text-sm [&_input]:pl-8"
               nativeInput
               placeholder="Search files"
               size="sm"

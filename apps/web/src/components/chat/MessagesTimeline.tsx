@@ -1043,7 +1043,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         }
 
         return (
-          <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+          <div className="whitespace-pre-wrap wrap-break-word text-[15px] leading-relaxed text-foreground md:text-sm">
             {inlineNodes}
           </div>
         );
@@ -1075,7 +1075,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     }
 
     return (
-      <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+      <div className="whitespace-pre-wrap wrap-break-word text-[15px] leading-relaxed text-foreground md:text-sm">
         {inlineNodes}
       </div>
     );
@@ -1086,7 +1086,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   }
 
   return (
-    <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+    <div className="whitespace-pre-wrap wrap-break-word text-[15px] leading-relaxed text-foreground md:text-sm">
       <SkillInlineText text={props.text} skills={props.skills} />
     </div>
   );

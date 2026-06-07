@@ -310,7 +310,22 @@ export function BranchToolbarBranchSelector({
     isBranchesSearchPending,
     refCount: refs.length,
   });
-  const shouldVirtualizeBranchList = filteredBranchPickerItems.length > 40;
+  // Once the visible ref list is large enough to virtualize, keep it virtualized
+  // for as long as the popover stays open. Flipping the Combobox's `virtualized`
+  // mode mid-session — which happens when the first keystroke filters the list
+  // below the threshold — tears down and recreates the popover's list subtree
+  // and drops focus from the search input. In an iOS PWA that dismisses the
+  // keyboard, forcing a second tap to keep typing.
+  const [shouldVirtualizeBranchList, setShouldVirtualizeBranchList] = useState(false);
+  useEffect(() => {
+    if (!isBranchMenuOpen) {
+      setShouldVirtualizeBranchList(false);
+      return;
+    }
+    if (filteredBranchPickerItems.length > 40) {
+      setShouldVirtualizeBranchList(true);
+    }
+  }, [filteredBranchPickerItems.length, isBranchMenuOpen]);
   const totalBranchCount = branchesSearchData?.pages[0]?.totalCount ?? 0;
   const branchStatusText = isBranchesSearchPending
     ? "Loading refs..."

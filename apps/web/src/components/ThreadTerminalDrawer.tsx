@@ -1113,7 +1113,12 @@ export function TerminalViewport({
     };
     const handlePointerDown = (event: PointerEvent) => {
       clearSelectionAction();
-      selectionGestureActiveRef.current = event.button === 0;
+      // Only mouse drags drive the selection-action menu through `mouseup`.
+      // Touch has its own selection path (`handleTouchEnd`); arming this flag
+      // for touch would leave it stuck `true` (iOS fires no `mouseup` during a
+      // touch drag), so a later dismiss tap's synthetic `mouseup` would reopen
+      // the menu against the still-active selection.
+      selectionGestureActiveRef.current = event.pointerType === "mouse" && event.button === 0;
     };
     let longPressTimer: number | null = null;
     let longPressFired = false;

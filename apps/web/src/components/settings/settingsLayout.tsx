@@ -5,6 +5,9 @@ import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
+const SETTINGS_MOBILE_TEXT_FLOOR_CLASS =
+  "max-md:[&_button]:text-[15px] max-md:[&_code]:text-[15px] max-md:[&_div]:text-[15px] max-md:[&_h1]:text-[15px] max-md:[&_h2]:text-[15px] max-md:[&_h3]:text-[15px] max-md:[&_h4]:text-[15px] max-md:[&_h5]:text-[15px] max-md:[&_h6]:text-[15px] max-md:[&_input]:text-[15px] max-md:[&_kbd]:text-[15px] max-md:[&_label]:text-[15px] max-md:[&_p]:text-[15px] max-md:[&_span]:text-[15px] max-md:[&_td]:text-[15px] max-md:[&_textarea]:text-[15px] max-md:[&_th]:text-[15px]";
+
 /** Re-render every `intervalMs`; return a stable timestamp snapshot for render-time relative labels. */
 export function useRelativeTimeTick(intervalMs = 1_000) {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -128,7 +131,13 @@ export function SettingsPageContainer({
 }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] sm:p-8 sm:pb-[calc(2rem+env(safe-area-inset-bottom,0px))]">
-      <div className={cn("mx-auto flex w-full max-w-3xl flex-col gap-8", className)}>
+      <div
+        className={cn(
+          "mx-auto flex w-full max-w-3xl flex-col gap-8",
+          SETTINGS_MOBILE_TEXT_FLOOR_CLASS,
+          className,
+        )}
+      >
         {children}
       </div>
     </div>

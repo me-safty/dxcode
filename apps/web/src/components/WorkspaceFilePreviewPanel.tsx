@@ -40,7 +40,7 @@ import { useFilePreviewWordWrapPreference } from "../filePreviewPreferences";
 import { formatWorkspaceRelativePath } from "../filePathDisplay";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useTheme } from "../hooks/useTheme";
-import { resolveDiffThemeName } from "../lib/diffRendering";
+import { DIFF_MOBILE_TEXT_FLOOR_UNSAFE_CSS, resolveDiffThemeName } from "../lib/diffRendering";
 import { gitWorkingTreeDiffQueryOptions } from "../lib/gitReactQuery";
 import { useGitStatus } from "../lib/gitStatusState";
 import type {
@@ -142,6 +142,8 @@ ${FILE_PREVIEW_UNSAFE_CSS}
 [data-file-info] {
   display: none !important;
 }
+
+${DIFF_MOBILE_TEXT_FLOOR_UNSAFE_CSS}
 `;
 
 interface WorkspaceFileInlineDiffAnnotation {
@@ -490,7 +492,7 @@ function WorkspaceInlineDiffAnnotation(props: {
       data-workspace-file-inline-diff="true"
     >
       <div className="flex h-7 items-center justify-between gap-2 border-b border-border/50 bg-muted/60 pl-3 pr-1">
-        <p className="truncate text-[11px] font-medium text-muted-foreground">
+        <p className="truncate text-[15px] font-medium text-muted-foreground md:text-[11px]">
           Working tree change {hunk.position} of {hunk.totalHunks}
         </p>
         <div className="flex shrink-0 items-center gap-0.5">

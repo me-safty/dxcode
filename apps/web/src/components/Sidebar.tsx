@@ -610,7 +610,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           {renamingThreadKey === threadKey ? (
             <input
               ref={handleRenameInputRef}
-              className="min-w-0 flex-1 truncate text-base bg-transparent outline-none border border-ring rounded px-0.5 md:text-xs"
+              className="min-w-0 flex-1 truncate text-[15px] bg-transparent outline-none border border-ring rounded px-0.5 md:text-xs"
               value={renamingTitle}
               onChange={handleRenameInputChange}
               onKeyDown={handleRenameInputKeyDown}

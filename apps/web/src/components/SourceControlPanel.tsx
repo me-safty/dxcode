@@ -56,8 +56,10 @@ import { SourceControlPublishDialog } from "./SourceControlPublishDialog";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import {
   buildSourceControlTree,
+  flattenSourceControlTreeRows,
   sourceControlFileName,
   statusBadge,
+  type SourceControlTreeSection,
   type SourceControlTreeNode,
 } from "./sourceControlTree";
 import { useGitActionRunner } from "./useGitActionRunner";
@@ -80,11 +82,11 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
-import { ScrollArea } from "./ui/scroll-area";
 import { Spinner } from "./ui/spinner";
 import { Textarea } from "./ui/textarea";
 import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { VirtualizedList, type VirtualizedListHandle } from "./virtualization/VirtualizedList";
 import {
   gitGenerateCommitMessageMutationOptions,
   gitMutationKeys,
@@ -96,7 +98,20 @@ import { refreshGitStatus } from "~/lib/gitStatusState";
 import { cn } from "~/lib/utils";
 
 export type SourceControlPanelMode = "sidebar" | "sheet";
-type SourceControlSection = "staged" | "unstaged";
+type SourceControlSection = SourceControlTreeSection;
+
+const SOURCE_CONTROL_ROW_ESTIMATED_HEIGHT = 28;
+const SOURCE_CONTROL_ROW_OVERSCAN_COUNT = 12;
+const SOURCE_CONTROL_ROW_OVERSCAN_PX = 336;
+
+type SourceControlListRow =
+  | { readonly kind: "section"; readonly section: SourceControlSection }
+  | {
+      readonly kind: "node";
+      readonly section: SourceControlSection;
+      readonly node: SourceControlTreeNode;
+      readonly depth: number;
+    };
 
 interface SourceControlPanelProps {
   mode?: SourceControlPanelMode;
@@ -139,13 +154,20 @@ function pullDisabledReason(input: {
   return null;
 }
 
-function getSourceControlScrollViewport(root: HTMLElement | null): HTMLElement | null {
-  return root?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
+function sourceControlRowKey(row: SourceControlListRow): string {
+  if (row.kind === "section") {
+    return `section:${row.section}`;
+  }
+  return `${row.section}:${row.node.type}:${row.node.path}`;
+}
+
+function getSourceControlRowType(row: SourceControlListRow): string {
+  return row.kind;
 }
 
 function useSourceControlScrollRestoration(input: {
   layoutKey: string;
-  rootRef: RefObject<HTMLElement | null>;
+  listRef: RefObject<VirtualizedListHandle | null>;
   workspaceKey: string | null;
 }): void {
   useLayoutEffect(() => {
@@ -154,19 +176,17 @@ function useSourceControlScrollRestoration(input: {
       return;
     }
 
-    const viewport = getSourceControlScrollViewport(input.rootRef.current);
-    if (!viewport) {
-      return;
-    }
-
     const restoreScrollTop = () => {
-      viewport.scrollTop = readSourceControlPanelScrollTop(workspaceKey);
+      void input.listRef.current?.scrollToOffset({
+        offset: readSourceControlPanelScrollTop(workspaceKey),
+        animated: false,
+      });
     };
     restoreScrollTop();
 
     const frameId = window.requestAnimationFrame(restoreScrollTop);
     return () => window.cancelAnimationFrame(frameId);
-  }, [input.layoutKey, input.rootRef, input.workspaceKey]);
+  }, [input.layoutKey, input.listRef, input.workspaceKey]);
 
   useEffect(() => {
     const workspaceKey = input.workspaceKey;
@@ -174,7 +194,7 @@ function useSourceControlScrollRestoration(input: {
       return;
     }
 
-    const viewport = getSourceControlScrollViewport(input.rootRef.current);
+    const viewport = input.listRef.current?.getScrollableNode();
     if (!viewport) {
       return;
     }
@@ -186,7 +206,7 @@ function useSourceControlScrollRestoration(input: {
     return () => {
       viewport.removeEventListener("scroll", recordScrollTop);
     };
-  }, [input.rootRef, input.workspaceKey]);
+  }, [input.layoutKey, input.listRef, input.workspaceKey]);
 }
 
 export default function SourceControlPanel({ mode = "sidebar", onClose }: SourceControlPanelProps) {
@@ -194,7 +214,7 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
   const setCommitMessage = useSetSourceControlCommitMessage();
   const queryClient = useQueryClient();
   const { resolvedTheme } = useTheme();
-  const scrollRootRef = useRef<HTMLDivElement>(null);
+  const sourceControlListRef = useRef<VirtualizedListHandle | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<SourceControlSection>>(
     () => new Set(),
   );
@@ -313,6 +333,7 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
   );
   const workspaceViewState = useSourceControlPanelWorkspaceViewState(scrollWorkspaceKey);
   const viewMode = workspaceViewState.viewMode;
+  const viewModeToggleLabel = viewMode === "tree" ? "View as list" : "View as tree";
   const collapsedDirs = workspaceViewState.collapsedDirs;
   const scrollLayoutKey = useMemo(
     () =>
@@ -328,7 +349,7 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
 
   useSourceControlScrollRestoration({
     layoutKey: scrollLayoutKey,
-    rootRef: scrollRootRef,
+    listRef: sourceControlListRef,
     workspaceKey: scrollWorkspaceKey,
   });
 
@@ -350,6 +371,28 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
   );
   const stagedTree = useMemo(() => buildTree(stagedFiles), [buildTree, stagedFiles]);
   const unstagedTree = useMemo(() => buildTree(unstagedFiles), [buildTree, unstagedFiles]);
+  const stagedVisibleRows = useMemo(
+    () =>
+      collapsedSections.has("staged")
+        ? []
+        : flattenSourceControlTreeRows({
+            tree: stagedTree,
+            section: "staged",
+            collapsedDirs,
+          }),
+    [collapsedDirs, collapsedSections, stagedTree],
+  );
+  const unstagedVisibleRows = useMemo(
+    () =>
+      collapsedSections.has("unstaged")
+        ? []
+        : flattenSourceControlTreeRows({
+            tree: unstagedTree,
+            section: "unstaged",
+            collapsedDirs,
+          }),
+    [collapsedDirs, collapsedSections, unstagedTree],
+  );
 
   const isStageOperationRunning =
     stageFilesMutation.isPending ||
@@ -358,6 +401,28 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
   const hasStagedFiles = stagedFiles.length > 0;
   const hasUnstagedFiles = unstagedFiles.length > 0;
   const hasChanges = hasStagedFiles || hasUnstagedFiles;
+  const sourceControlRows = useMemo<SourceControlListRow[]>(() => {
+    if (!hasChanges) {
+      return [];
+    }
+
+    return [
+      { kind: "section", section: "staged" },
+      ...stagedVisibleRows.map((row) => ({
+        kind: "node" as const,
+        section: "staged" as const,
+        node: row.node,
+        depth: row.depth,
+      })),
+      { kind: "section", section: "unstaged" },
+      ...unstagedVisibleRows.map((row) => ({
+        kind: "node" as const,
+        section: "unstaged" as const,
+        node: row.node,
+        depth: row.depth,
+      })),
+    ];
+  }, [hasChanges, stagedVisibleRows, unstagedVisibleRows]);
 
   useEffect(() => {
     if (!environmentId || !cwd) return;
@@ -619,6 +684,79 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
       })
     : null;
   const pushDisabled = pushMenuItem ? pushMenuItem.disabled || isStageOperationRunning : true;
+  const unstageOneFile = useCallback((path: string) => unstageFiles([path]), [unstageFiles]);
+  const stageOneFile = useCallback((path: string) => stageFiles([path]), [stageFiles]);
+  const revertOneUnstagedFile = useCallback(
+    (path: string) => revertUnstagedFiles([path]),
+    [revertUnstagedFiles],
+  );
+  const renderSourceControlRow = useCallback(
+    ({ item: row }: { item: SourceControlListRow; index: number }) => {
+      const actionDisabled = isGitActionRunning || isStageOperationRunning;
+      if (row.kind === "section") {
+        const section = row.section;
+        const isStagedSection = section === "staged";
+        return (
+          <SourceControlSectionHeader
+            section={section}
+            label={isStagedSection ? "Staged Changes" : "Changes"}
+            fileCount={isStagedSection ? stagedFiles.length : unstagedFiles.length}
+            filePaths={isStagedSection ? stagedFilePaths : unstagedFilePaths}
+            collapsed={collapsedSections.has(section)}
+            actionDisabled={actionDisabled}
+            pendingPaths={isStagedSection ? pendingUnstagePaths : pendingStagePaths}
+            pendingRevertPaths={pendingRevertPaths}
+            onToggleSection={toggleSection}
+            onSectionAction={isStagedSection ? unstageFiles : stageFiles}
+            onSectionRevert={isStagedSection ? undefined : requestBulkRevertUnstagedFiles}
+          />
+        );
+      }
+
+      const isStagedSection = row.section === "staged";
+      return (
+        <SourceControlTreeRow
+          node={row.node}
+          section={row.section}
+          viewMode={viewMode}
+          depth={row.depth}
+          collapsedDirs={collapsedDirs}
+          resolvedTheme={resolvedTheme}
+          actionDisabled={actionDisabled}
+          pendingPaths={isStagedSection ? pendingUnstagePaths : pendingStagePaths}
+          pendingRevertPaths={pendingRevertPaths}
+          onToggleDir={toggleDir}
+          onFileAction={isStagedSection ? unstageOneFile : stageOneFile}
+          onFileRevert={isStagedSection ? undefined : revertOneUnstagedFile}
+          onOpenFilePreview={handleOpenFilePreview}
+        />
+      );
+    },
+    [
+      collapsedDirs,
+      collapsedSections,
+      handleOpenFilePreview,
+      isGitActionRunning,
+      isStageOperationRunning,
+      pendingRevertPaths,
+      pendingStagePaths,
+      pendingUnstagePaths,
+      requestBulkRevertUnstagedFiles,
+      resolvedTheme,
+      revertOneUnstagedFile,
+      stageFiles,
+      stageOneFile,
+      stagedFilePaths,
+      stagedFiles.length,
+      toggleDir,
+      toggleSection,
+      unstageFiles,
+      unstageOneFile,
+      unstagedFilePaths,
+      unstagedFiles.length,
+      viewMode,
+    ],
+  );
   return (
     <>
       <div
@@ -631,15 +769,15 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
           <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             Source Control
           </span>
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-1">
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
                     size="icon-xs"
-                    variant="ghost"
-                    aria-label={viewMode === "tree" ? "View as list" : "View as tree"}
-                    className="text-muted-foreground/60 hover:text-foreground/80"
+                    variant="outline"
+                    aria-label={viewModeToggleLabel}
+                    title={viewModeToggleLabel}
                     onClick={() =>
                       recordSourceControlPanelViewMode(
                         scrollWorkspaceKey,
@@ -651,18 +789,16 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
               >
                 <ListTreeIcon className="size-3.5" />
               </TooltipTrigger>
-              <TooltipPopup side="bottom">
-                {viewMode === "tree" ? "View as list" : "View as tree"}
-              </TooltipPopup>
+              <TooltipPopup side="bottom">{viewModeToggleLabel}</TooltipPopup>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
                     size="icon-xs"
-                    variant="ghost"
+                    variant="outline"
                     aria-label="Refresh"
-                    className="text-muted-foreground/60 hover:text-foreground/80"
+                    title="Refresh"
                     onClick={handleRefresh}
                   />
                 }
@@ -673,10 +809,10 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
             </Tooltip>
             <Button
               size="icon-xs"
-              variant="ghost"
+              variant="outline"
               onClick={onClose}
               aria-label="Close source control panel"
-              className="text-muted-foreground/60 hover:text-foreground/80"
+              title="Close source control panel"
             >
               <PanelRightCloseIcon className="size-3.5" />
             </Button>
@@ -902,59 +1038,28 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
           </div>
         )}
 
-        <div ref={scrollRootRef} className="min-h-0 flex-1">
-          <ScrollArea className="h-full min-h-0" data-testid="source-control-scroll">
-            <div className="p-1.5">
-              {hasChanges ? (
-                <div className="space-y-0.5">
-                  <SourceControlSectionTree
-                    section="staged"
-                    label="Staged Changes"
-                    tree={stagedTree}
-                    viewMode={viewMode}
-                    fileCount={stagedFiles.length}
-                    filePaths={stagedFilePaths}
-                    collapsed={collapsedSections.has("staged")}
-                    collapsedDirs={collapsedDirs}
-                    resolvedTheme={resolvedTheme}
-                    actionDisabled={isGitActionRunning || isStageOperationRunning}
-                    pendingPaths={pendingUnstagePaths}
-                    pendingRevertPaths={pendingRevertPaths}
-                    onToggleSection={toggleSection}
-                    onToggleDir={toggleDir}
-                    onSectionAction={unstageFiles}
-                    onFileAction={(path) => unstageFiles([path])}
-                    onOpenFilePreview={handleOpenFilePreview}
-                  />
-                  <SourceControlSectionTree
-                    section="unstaged"
-                    label="Changes"
-                    tree={unstagedTree}
-                    viewMode={viewMode}
-                    fileCount={unstagedFiles.length}
-                    filePaths={unstagedFilePaths}
-                    collapsed={collapsedSections.has("unstaged")}
-                    collapsedDirs={collapsedDirs}
-                    resolvedTheme={resolvedTheme}
-                    actionDisabled={isGitActionRunning || isStageOperationRunning}
-                    pendingPaths={pendingStagePaths}
-                    pendingRevertPaths={pendingRevertPaths}
-                    onToggleSection={toggleSection}
-                    onToggleDir={toggleDir}
-                    onSectionAction={stageFiles}
-                    onFileAction={(path) => stageFiles([path])}
-                    onSectionRevert={requestBulkRevertUnstagedFiles}
-                    onFileRevert={(path) => revertUnstagedFiles([path])}
-                    onOpenFilePreview={handleOpenFilePreview}
-                  />
-                </div>
-              ) : (
-                <p className="px-1.5 py-6 text-center text-xs text-muted-foreground/60">
-                  No changes detected.
-                </p>
-              )}
-            </div>
-          </ScrollArea>
+        <div className="min-h-0 flex-1">
+          {hasChanges ? (
+            <VirtualizedList<SourceControlListRow>
+              ref={sourceControlListRef}
+              data={sourceControlRows}
+              keyExtractor={sourceControlRowKey}
+              getItemType={getSourceControlRowType}
+              renderItem={renderSourceControlRow}
+              estimatedItemSize={SOURCE_CONTROL_ROW_ESTIMATED_HEIGHT}
+              minOverscanItemCount={SOURCE_CONTROL_ROW_OVERSCAN_COUNT}
+              increaseViewportBy={SOURCE_CONTROL_ROW_OVERSCAN_PX}
+              className="h-full min-h-0 overflow-y-auto overscroll-y-contain"
+              style={{ height: "100%" }}
+              data-testid="source-control-scroll"
+              ListHeaderComponent={<div className="h-1.5" />}
+              ListFooterComponent={<div className="h-1.5" />}
+            />
+          ) : (
+            <p className="px-1.5 py-6 text-center text-xs text-muted-foreground/60">
+              No changes detected.
+            </p>
+          )}
         </div>
 
         {hasChanges ? (
@@ -1079,46 +1184,30 @@ function SourceControlMenuItem({
   );
 }
 
-function SourceControlSectionTree({
+function SourceControlSectionHeader({
   section,
   label,
-  tree,
-  viewMode,
   fileCount,
   filePaths,
   collapsed,
-  collapsedDirs,
-  resolvedTheme,
   actionDisabled,
   pendingPaths,
   pendingRevertPaths,
   onToggleSection,
-  onToggleDir,
   onSectionAction,
-  onFileAction,
   onSectionRevert,
-  onFileRevert,
-  onOpenFilePreview,
 }: {
   section: SourceControlSection;
   label: string;
-  tree: ReadonlyArray<SourceControlTreeNode>;
-  viewMode: "tree" | "list";
   fileCount: number;
   filePaths: ReadonlyArray<string>;
   collapsed: boolean;
-  collapsedDirs: ReadonlySet<string>;
-  resolvedTheme: "light" | "dark";
   actionDisabled: boolean;
   pendingPaths: ReadonlySet<string>;
   pendingRevertPaths: ReadonlySet<string>;
   onToggleSection: (section: SourceControlSection) => void;
-  onToggleDir: (path: string) => void;
   onSectionAction: (paths: ReadonlyArray<string>) => void;
-  onFileAction: (path: string) => void;
   onSectionRevert?: ((paths: ReadonlyArray<string>) => void) | undefined;
-  onFileRevert?: ((path: string) => void) | undefined;
-  onOpenFilePreview: (path: string) => void;
 }) {
   const ActionIcon = section === "staged" ? MinusIcon : PlusIcon;
   const actionLabel = section === "staged" ? "Unstage all" : "Stage all";
@@ -1126,50 +1215,24 @@ function SourceControlSectionTree({
   const sectionRevertPending = filePaths.some((path) => pendingRevertPaths.has(path));
 
   return (
-    <section>
-      <div className="group/section flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/40">
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-1 text-left"
-          onClick={() => onToggleSection(section)}
-        >
-          {collapsed ? (
-            <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
-          ) : (
-            <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
-          )}
-          <span className="truncate uppercase tracking-wide">{label}</span>
-          <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-            {fileCount}
-          </span>
-        </button>
-        <div className="grid shrink-0 grid-cols-[1.75rem_1.75rem] items-center justify-items-center gap-0.5 sm:grid-cols-[1.5rem_1.5rem]">
-          {section === "unstaged" && onSectionRevert ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label="Revert all unstaged changes"
-                    disabled={actionDisabled || fileCount === 0}
-                    className="text-muted-foreground/70 hover:text-foreground"
-                    onClick={() => onSectionRevert(filePaths)}
-                  />
-                }
-              >
-                {sectionRevertPending ? (
-                  <Spinner className="size-3.5" />
-                ) : (
-                  <Undo2Icon className="size-3.5" />
-                )}
-              </TooltipTrigger>
-              <TooltipPopup side="left">Revert all changes</TooltipPopup>
-            </Tooltip>
-          ) : (
-            <span className="size-7 sm:size-6" aria-hidden="true" />
-          )}
+    <div className="group/section mx-1.5 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/40">
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-center gap-1 text-left"
+        onClick={() => onToggleSection(section)}
+      >
+        {collapsed ? (
+          <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
+        ) : (
+          <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
+        )}
+        <span className="truncate uppercase tracking-wide">{label}</span>
+        <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+          {fileCount}
+        </span>
+      </button>
+      <div className="grid shrink-0 grid-cols-[1.75rem_1.75rem] items-center justify-items-center gap-0.5 sm:grid-cols-[1.5rem_1.5rem]">
+        {section === "unstaged" && onSectionRevert ? (
           <Tooltip>
             <TooltipTrigger
               render={
@@ -1177,46 +1240,48 @@ function SourceControlSectionTree({
                   type="button"
                   size="icon-xs"
                   variant="ghost"
-                  aria-label={actionLabel}
+                  aria-label="Revert all unstaged changes"
                   disabled={actionDisabled || fileCount === 0}
-                  className="text-muted-foreground/70 hover:text-foreground"
-                  onClick={() => onSectionAction(filePaths)}
+                  className="size-7 sm:size-6 text-muted-foreground/70 hover:text-foreground"
+                  onClick={() => onSectionRevert(filePaths)}
                 />
               }
             >
-              {sectionActionPending ? (
+              {sectionRevertPending ? (
                 <Spinner className="size-3.5" />
               ) : (
-                <ActionIcon className="size-3.5" />
+                <Undo2Icon className="size-3.5" />
               )}
             </TooltipTrigger>
-            <TooltipPopup side="left">{actionLabel}</TooltipPopup>
+            <TooltipPopup side="left">Revert all changes</TooltipPopup>
           </Tooltip>
-        </div>
+        ) : (
+          <span className="size-7 sm:size-6" aria-hidden="true" />
+        )}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label={actionLabel}
+                disabled={actionDisabled || fileCount === 0}
+                className="size-7 sm:size-6 text-muted-foreground/70 hover:text-foreground"
+                onClick={() => onSectionAction(filePaths)}
+              />
+            }
+          >
+            {sectionActionPending ? (
+              <Spinner className="size-3.5" />
+            ) : (
+              <ActionIcon className="size-3.5" />
+            )}
+          </TooltipTrigger>
+          <TooltipPopup side="left">{actionLabel}</TooltipPopup>
+        </Tooltip>
       </div>
-      {collapsed || fileCount === 0 ? null : (
-        <div className="pl-3">
-          {tree.map((node) => (
-            <SourceControlTreeRow
-              key={node.path}
-              node={node}
-              section={section}
-              viewMode={viewMode}
-              depth={0}
-              collapsedDirs={collapsedDirs}
-              resolvedTheme={resolvedTheme}
-              actionDisabled={actionDisabled}
-              pendingPaths={pendingPaths}
-              pendingRevertPaths={pendingRevertPaths}
-              onToggleDir={onToggleDir}
-              onFileAction={onFileAction}
-              onFileRevert={onFileRevert}
-              onOpenFilePreview={onOpenFilePreview}
-            />
-          ))}
-        </div>
-      )}
-    </section>
+    </div>
   );
 }
 
@@ -1249,57 +1314,35 @@ function SourceControlTreeRow({
   onFileRevert?: ((path: string) => void) | undefined;
   onOpenFilePreview: (path: string) => void;
 }) {
-  const indentStyle = { paddingLeft: `${depth * 12 + 6}px` };
+  const indentStyle = { paddingLeft: `${viewMode === "tree" ? depth * 12 + 18 : 6}px` };
 
   if (node.type === "dir") {
     const collapseKey = `${section}:${node.path}`;
     const collapsed = collapsedDirs.has(collapseKey);
     return (
-      <>
-        <div
-          style={indentStyle}
-          className="flex w-full items-center gap-1 rounded-md py-0.5 pr-2 text-left text-[13px] text-foreground/90 transition-colors hover:bg-accent/50"
+      <div
+        style={indentStyle}
+        className="mx-1.5 flex items-center gap-1 rounded-md py-0.5 pr-2 text-left text-[15px] text-foreground/90 transition-colors hover:bg-accent/50 md:text-[13px]"
+      >
+        <button
+          type="button"
+          onClick={() => onToggleDir(collapseKey)}
+          className="flex min-w-0 flex-1 items-center gap-1 text-left"
         >
-          <button
-            type="button"
-            onClick={() => onToggleDir(collapseKey)}
-            className="flex min-w-0 flex-1 items-center gap-1 text-left"
-          >
-            {collapsed ? (
-              <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
-            ) : (
-              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
-            )}
-            <VscodeEntryIcon
-              pathValue={node.path}
-              kind="directory"
-              theme={resolvedTheme}
-              className="size-4 shrink-0"
-            />
-            <span className="truncate">{node.name}</span>
-          </button>
-        </div>
-        {collapsed
-          ? null
-          : node.children.map((child) => (
-              <SourceControlTreeRow
-                key={child.path}
-                node={child}
-                section={section}
-                viewMode={viewMode}
-                depth={depth + 1}
-                collapsedDirs={collapsedDirs}
-                resolvedTheme={resolvedTheme}
-                actionDisabled={actionDisabled}
-                pendingPaths={pendingPaths}
-                pendingRevertPaths={pendingRevertPaths}
-                onToggleDir={onToggleDir}
-                onFileAction={onFileAction}
-                onFileRevert={onFileRevert}
-                onOpenFilePreview={onOpenFilePreview}
-              />
-            ))}
-      </>
+          {collapsed ? (
+            <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
+          ) : (
+            <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
+          )}
+          <VscodeEntryIcon
+            pathValue={node.path}
+            kind="directory"
+            theme={resolvedTheme}
+            className="size-4 shrink-0"
+          />
+          <span className="truncate">{node.name}</span>
+        </button>
+      </div>
     );
   }
 
@@ -1312,7 +1355,7 @@ function SourceControlTreeRow({
     <div
       style={indentStyle}
       title={node.path}
-      className="group flex w-full items-center gap-1.5 rounded-md py-0.5 pr-2 text-left transition-colors hover:bg-accent/50"
+      className="group mx-1.5 flex items-center gap-1.5 rounded-md py-0.5 pr-2 text-left transition-colors hover:bg-accent/50"
     >
       <button
         type="button"
@@ -1327,7 +1370,9 @@ function SourceControlTreeRow({
           theme={resolvedTheme}
           className="size-4 shrink-0"
         />
-        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground/90">{node.name}</span>
+        <span className="min-w-0 flex-1 truncate text-[15px] text-foreground/90 md:text-[13px]">
+          {node.name}
+        </span>
       </button>
       <div className="grid shrink-0 grid-cols-[1.25rem_1.75rem_1.75rem] items-center justify-items-center gap-0.5 sm:grid-cols-[1.25rem_1.5rem_1.5rem]">
         <span
@@ -1347,7 +1392,7 @@ function SourceControlTreeRow({
                   variant="ghost"
                   aria-label={`Revert ${node.path}`}
                   disabled={actionDisabled}
-                  className="text-muted-foreground/70 hover:text-foreground"
+                  className="size-7 sm:size-6 text-muted-foreground/70 hover:text-foreground"
                   onClick={(event) => {
                     event.stopPropagation();
                     onFileRevert(node.path);
@@ -1375,7 +1420,7 @@ function SourceControlTreeRow({
                 variant="ghost"
                 aria-label={actionLabel}
                 disabled={actionDisabled}
-                className="text-muted-foreground/70 hover:text-foreground"
+                className="size-7 sm:size-6 text-muted-foreground/70 hover:text-foreground"
                 onClick={(event) => {
                   event.stopPropagation();
                   onFileAction(node.path);

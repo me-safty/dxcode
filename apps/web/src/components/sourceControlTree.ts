@@ -21,6 +21,12 @@ export interface SourceControlTreeDirNode {
 }
 
 export type SourceControlTreeNode = SourceControlTreeFileNode | SourceControlTreeDirNode;
+export type SourceControlTreeSection = "staged" | "unstaged";
+
+export interface SourceControlVisibleTreeRow {
+  readonly node: SourceControlTreeNode;
+  readonly depth: number;
+}
 
 interface MutableDirNode {
   readonly type: "dir";
@@ -86,6 +92,52 @@ export function buildSourceControlTree(
   }
 
   return finalize(root).children;
+}
+
+function collectVisibleTreeRows(input: {
+  readonly section: SourceControlTreeSection;
+  readonly node: SourceControlTreeNode;
+  readonly depth: number;
+  readonly collapsedDirs: ReadonlySet<string>;
+  readonly rows: SourceControlVisibleTreeRow[];
+}): void {
+  input.rows.push({ node: input.node, depth: input.depth });
+
+  if (input.node.type === "file") {
+    return;
+  }
+
+  if (input.collapsedDirs.has(`${input.section}:${input.node.path}`)) {
+    return;
+  }
+
+  for (const child of input.node.children) {
+    collectVisibleTreeRows({
+      section: input.section,
+      node: child,
+      depth: input.depth + 1,
+      collapsedDirs: input.collapsedDirs,
+      rows: input.rows,
+    });
+  }
+}
+
+export function flattenSourceControlTreeRows(input: {
+  readonly tree: ReadonlyArray<SourceControlTreeNode>;
+  readonly section: SourceControlTreeSection;
+  readonly collapsedDirs: ReadonlySet<string>;
+}): SourceControlVisibleTreeRow[] {
+  const rows: SourceControlVisibleTreeRow[] = [];
+  for (const node of input.tree) {
+    collectVisibleTreeRows({
+      section: input.section,
+      node,
+      depth: 0,
+      collapsedDirs: input.collapsedDirs,
+      rows,
+    });
+  }
+  return rows;
 }
 
 /** Collect every file path beneath a tree node (itself if it is a file). */

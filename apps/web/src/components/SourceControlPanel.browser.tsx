@@ -40,6 +40,7 @@ const {
   toastPromiseSpy,
   toastUpdateSpy,
   unstageFilesMutateAsyncSpy,
+  virtualizedListPropsRef,
 } = vi.hoisted(() => ({
   activeRunStackedActionDeferredRef: { current: createDeferredPromise<never>() },
   currentGitStatusRef: {
@@ -85,6 +86,14 @@ const {
   toastPromiseSpy: vi.fn(),
   toastUpdateSpy: vi.fn(),
   unstageFilesMutateAsyncSpy: vi.fn(() => Promise.resolve(null)),
+  virtualizedListPropsRef: {
+    current: null as null | {
+      dataLength: number;
+      estimatedItemSize: number | undefined;
+      increaseViewportBy: number | { top: number; bottom: number } | undefined;
+      minOverscanItemCount: number | { top: number; bottom: number } | undefined;
+    },
+  },
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -169,6 +178,91 @@ vi.mock("~/components/ui/toast", () => ({
 vi.mock("./SourceControlPublishDialog", () => ({
   SourceControlPublishDialog: () => null,
 }));
+
+vi.mock("./virtualization/VirtualizedList", async () => {
+  const React = await import("react");
+  const VISIBLE_ITEM_LIMIT = 24;
+
+  type MockVirtualizedListHandle = {
+    getScrollableNode(): HTMLElement | null;
+    getState(): { isAtEnd: boolean };
+    scrollToEnd(options?: { animated?: boolean }): Promise<void>;
+    scrollToOffset(options: { offset: number; animated?: boolean }): Promise<void>;
+    scrollIndexIntoView(options: { index: number; animated?: boolean }): Promise<void>;
+  };
+
+  type MockVirtualizedListProps = {
+    data: readonly unknown[];
+    keyExtractor: (item: unknown, index: number) => string;
+    renderItem: (input: { item: unknown; index: number }) => React.ReactNode;
+    estimatedItemSize?: number;
+    increaseViewportBy?: number | { top: number; bottom: number };
+    minOverscanItemCount?: number | { top: number; bottom: number };
+    className?: string;
+    style?: React.CSSProperties;
+    ListHeaderComponent?: React.ReactNode;
+    ListFooterComponent?: React.ReactNode;
+    "data-testid"?: string;
+  };
+
+  const VirtualizedList = React.forwardRef<MockVirtualizedListHandle, MockVirtualizedListProps>(
+    (props, ref) => {
+      const rootRef = React.useRef<HTMLDivElement | null>(null);
+      React.useEffect(() => {
+        virtualizedListPropsRef.current = {
+          dataLength: props.data.length,
+          estimatedItemSize: props.estimatedItemSize,
+          increaseViewportBy: props.increaseViewportBy,
+          minOverscanItemCount: props.minOverscanItemCount,
+        };
+      }, [
+        props.data.length,
+        props.estimatedItemSize,
+        props.increaseViewportBy,
+        props.minOverscanItemCount,
+      ]);
+
+      React.useImperativeHandle(ref, () => ({
+        getScrollableNode: () => rootRef.current,
+        getState: () => ({ isAtEnd: false }),
+        scrollToEnd: async () => undefined,
+        scrollToOffset: async ({ offset }) => {
+          if (rootRef.current) {
+            rootRef.current.scrollTop = offset;
+          }
+        },
+        scrollIndexIntoView: async () => undefined,
+      }));
+
+      const visibleData =
+        props.data.length > VISIBLE_ITEM_LIMIT
+          ? props.data.slice(0, VISIBLE_ITEM_LIMIT)
+          : props.data;
+
+      return React.createElement(
+        "div",
+        {
+          className: props.className,
+          "data-testid": props["data-testid"],
+          ref: rootRef,
+          style: props.style,
+        },
+        props.ListHeaderComponent,
+        visibleData.map((item, index) =>
+          React.createElement(
+            React.Fragment,
+            { key: props.keyExtractor(item, index) },
+            props.renderItem({ item, index }),
+          ),
+        ),
+        props.ListFooterComponent,
+      );
+    },
+  );
+  VirtualizedList.displayName = "MockVirtualizedList";
+
+  return { VirtualizedList };
+});
 
 vi.mock("~/lib/gitReactQuery", () => ({
   gitGenerateCommitMessageMutationOptions: vi.fn(() => ({ __kind: "generate-commit-message" })),
@@ -408,9 +502,7 @@ async function renderPanel() {
 }
 
 function getSourceControlScrollViewport(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(
-    '[data-testid="source-control-scroll"] [data-slot="scroll-area-viewport"]',
-  );
+  return document.querySelector<HTMLElement>('[data-testid="source-control-scroll"]');
 }
 
 describe("SourceControlPanel git action runner", () => {
@@ -420,6 +512,7 @@ describe("SourceControlPanel git action runner", () => {
     activeRunStackedActionDeferredRef.current = createDeferredPromise<never>();
     currentGitStatusRef.current = createPanelStatus();
     hasServerThreadRef.current = true;
+    virtualizedListPropsRef.current = null;
     __resetSourceControlPanelStateForTests();
     __resetWorkspaceFilePanelStateForTests();
     document.body.innerHTML = "";
@@ -617,6 +710,54 @@ describe("SourceControlPanel git action runner", () => {
       expect(document.body.textContent).not.toContain("src/app.ts");
       expect(findButtonByExactText("src")).toBeNull();
       expect(document.querySelector('button[aria-label="View as tree"]')).not.toBeNull();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("uses row-scale virtualization for changed files", async () => {
+    currentGitStatusRef.current = createPanelStatus({
+      unstagedFiles: [{ path: "src/app.ts", status: "modified", insertions: 1, deletions: 0 }],
+    });
+    const { host, screen } = await renderPanel();
+
+    try {
+      await vi.waitFor(() => {
+        expect(virtualizedListPropsRef.current).not.toBeNull();
+      });
+      expect(virtualizedListPropsRef.current).toMatchObject({
+        dataLength: 3,
+        estimatedItemSize: 28,
+        increaseViewportBy: 336,
+        minOverscanItemCount: 12,
+      });
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("does not mount every changed-file action for large working trees", async () => {
+    currentGitStatusRef.current = createPanelStatus({
+      unstagedFiles: Array.from({ length: 120 }, (_, index) => ({
+        path: `docs/file-${String(index).padStart(3, "0")}.ts`,
+        status: "modified",
+        insertions: 1,
+        deletions: 0,
+      })),
+    });
+    const { host, screen } = await renderPanel();
+
+    try {
+      await vi.waitFor(() => {
+        expect(virtualizedListPropsRef.current?.dataLength).toBe(122);
+      });
+      const mountedStageButtons = document.querySelectorAll(
+        'button[aria-label^="Stage docs/file-"]',
+      );
+      expect(mountedStageButtons.length).toBeGreaterThan(0);
+      expect(mountedStageButtons.length).toBeLessThan(120);
     } finally {
       await screen.unmount();
       host.remove();
