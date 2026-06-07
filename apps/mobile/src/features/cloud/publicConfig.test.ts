@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { hasMobileTracingPublicConfig, resolveCloudPublicConfig } from "./publicConfig";
 
@@ -9,10 +9,6 @@ vi.mock("expo-constants", () => ({
     },
   },
 }));
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
 
 describe("resolveCloudPublicConfig", () => {
   it("returns no cloud configuration for an unconfigured build", () => {
@@ -80,18 +76,6 @@ describe("resolveCloudPublicConfig", () => {
       }).observability,
     ).toEqual({
       tracesUrl: null,
-      tracesDataset: "mobile-traces",
-      tracesToken: "public-ingest-token",
-    });
-  });
-
-  it("falls back to Expo public tracing variables when manifest extra is absent", () => {
-    vi.stubEnv("EXPO_PUBLIC_T3CODE_MOBILE_OTLP_TRACES_URL", "https://api.axiom.co/v1/traces");
-    vi.stubEnv("EXPO_PUBLIC_T3CODE_MOBILE_OTLP_TRACES_DATASET", "mobile-traces");
-    vi.stubEnv("EXPO_PUBLIC_T3CODE_MOBILE_OTLP_TRACES_TOKEN", "public-ingest-token");
-
-    expect(resolveCloudPublicConfig({}).observability).toEqual({
-      tracesUrl: "https://api.axiom.co/v1/traces",
       tracesDataset: "mobile-traces",
       tracesToken: "public-ingest-token",
     });

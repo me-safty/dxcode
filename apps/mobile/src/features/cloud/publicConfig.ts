@@ -50,15 +50,9 @@ export function resolveCloudPublicConfig(extra: ExpoExtra = Constants.expoConfig
     clerkJwtTemplate: trimNonEmpty(clerk?.jwtTemplate),
     relayUrl: normalizeSecureRelayUrl(trimNonEmpty(relay?.url) ?? ""),
     observability: {
-      tracesUrl: normalizeSecureUrl(
-        observability?.tracesUrl ?? process.env.EXPO_PUBLIC_T3CODE_MOBILE_OTLP_TRACES_URL,
-      ),
-      tracesDataset: trimNonEmpty(
-        observability?.tracesDataset ?? process.env.EXPO_PUBLIC_T3CODE_MOBILE_OTLP_TRACES_DATASET,
-      ),
-      tracesToken: trimNonEmpty(
-        observability?.tracesToken ?? process.env.EXPO_PUBLIC_T3CODE_MOBILE_OTLP_TRACES_TOKEN,
-      ),
+      tracesUrl: normalizeSecureUrl(observability?.tracesUrl),
+      tracesDataset: trimNonEmpty(observability?.tracesDataset),
+      tracesToken: trimNonEmpty(observability?.tracesToken),
     },
   } satisfies CloudPublicConfig;
 }
