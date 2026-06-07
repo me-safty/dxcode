@@ -89,6 +89,7 @@ import {
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
+  PaperclipIcon,
   PenLineIcon,
   XIcon,
 } from "lucide-react";
@@ -816,6 +817,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
   const mobileComposerExpandInFlightRef = useRef(false);
   const dragDepthRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ------------------------------------------------------------------
   // Derived: composer send state
@@ -1772,6 +1774,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     addComposerImages(files);
     focusComposer();
   };
+
+  const openComposerFilePicker = () => {
+    fileInputRef.current?.click();
+  };
+
+  const onComposerFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    // Reset the input so selecting the same file again still fires onChange.
+    event.target.value = "";
+    if (files.length === 0) {
+      return;
+    }
+    addComposerImages(files);
+    focusComposer();
+  };
+
   const handleInterruptPrimaryAction = useCallback(() => {
     void onInterrupt();
   }, [onInterrupt]);
@@ -1939,6 +1957,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       className="mx-auto w-full min-w-0 max-w-208"
       data-chat-composer-form="true"
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={onComposerFileInputChange}
+      />
       <div
         className={cn(
           "group rounded-[22px] p-px transition-colors duration-200",
@@ -2330,6 +2358,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }}
                   onInstanceModelChange={onProviderModelSelect}
                 />
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size={isComposerFooterCompact ? "icon-sm" : "sm"}
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  disabled={isComposerApprovalState || pendingUserInputs.length > 0}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={openComposerFilePicker}
+                  aria-label="Attach images"
+                >
+                  <PaperclipIcon className={isComposerFooterCompact ? undefined : "size-4"} />
+                  {isComposerFooterCompact ? null : <span>Attach</span>}
+                </Button>
 
                 {isComposerFooterCompact ? (
                   <CompactComposerControlsMenu
