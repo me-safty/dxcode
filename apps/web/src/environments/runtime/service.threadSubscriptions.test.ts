@@ -110,6 +110,8 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
     },
     filesystem: {
       browse: vi.fn(),
+      listDir: vi.fn(),
+      readFile: vi.fn(),
     },
     sourceControl: {
       lookupRepository: vi.fn(),

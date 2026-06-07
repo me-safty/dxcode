@@ -12,6 +12,12 @@ import {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
   FilesystemBrowseError,
+  FilesystemListDirInput,
+  FilesystemListDirResult,
+  FilesystemListDirError,
+  FilesystemReadFileInput,
+  FilesystemReadFileResult,
+  FilesystemReadFileError,
 } from "./filesystem.ts";
 import {
   GitActionProgressEvent,
@@ -129,6 +135,8 @@ export const WS_METHODS = {
 
   // Filesystem methods
   filesystemBrowse: "filesystem.browse",
+  filesystemListDir: "filesystem.listDir",
+  filesystemReadFile: "filesystem.readFile",
 
   // VCS methods
   vcsPull: "vcs.pull",
@@ -330,6 +338,18 @@ export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
   payload: FilesystemBrowseInput,
   success: FilesystemBrowseResult,
   error: Schema.Union([FilesystemBrowseError, EnvironmentAuthorizationError]),
+});
+
+export const WsFilesystemListDirRpc = Rpc.make(WS_METHODS.filesystemListDir, {
+  payload: FilesystemListDirInput,
+  success: FilesystemListDirResult,
+  error: Schema.Union([FilesystemListDirError, EnvironmentAuthorizationError]),
+});
+
+export const WsFilesystemReadFileRpc = Rpc.make(WS_METHODS.filesystemReadFile, {
+  payload: FilesystemReadFileInput,
+  success: FilesystemReadFileResult,
+  error: Schema.Union([FilesystemReadFileError, EnvironmentAuthorizationError]),
 });
 
 export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
@@ -567,6 +587,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
+  WsFilesystemListDirRpc,
+  WsFilesystemReadFileRpc,
   WsSubscribeVcsStatusRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,

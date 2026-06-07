@@ -13,6 +13,8 @@ import type * as Effect from "effect/Effect";
 import type {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
+  FilesystemListDirInput,
+  FilesystemListDirResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
 } from "@t3tools/contracts";
@@ -38,6 +40,17 @@ export class WorkspaceEntriesBrowseError extends Schema.TaggedErrorClass<Workspa
   },
 ) {}
 
+export class WorkspaceEntriesListDirError extends Schema.TaggedErrorClass<WorkspaceEntriesListDirError>()(
+  "WorkspaceEntriesListDirError",
+  {
+    cwd: Schema.String,
+    relativePath: Schema.String,
+    operation: Schema.String,
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
 /**
  * WorkspaceEntriesShape - Service API for workspace entry search and cache
  * invalidation.
@@ -49,6 +62,14 @@ export interface WorkspaceEntriesShape {
   readonly browse: (
     input: FilesystemBrowseInput,
   ) => Effect.Effect<FilesystemBrowseResult, WorkspaceEntriesBrowseError>;
+
+  /**
+   * List the immediate files and directories within a workspace-root-relative
+   * directory.
+   */
+  readonly listDir: (
+    input: FilesystemListDirInput,
+  ) => Effect.Effect<FilesystemListDirResult, WorkspaceEntriesListDirError>;
 
   /**
    * Search indexed workspace entries for files and directories matching the

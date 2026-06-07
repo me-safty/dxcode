@@ -60,6 +60,8 @@ const rpcClientMock = {
   },
   filesystem: {
     browse: vi.fn(),
+    listDir: vi.fn(),
+    readFile: vi.fn(),
   },
   sourceControl: {
     lookupRepository: vi.fn(),
@@ -522,6 +524,45 @@ describe("wsApi", () => {
     expect(rpcClientMock.filesystem.browse).toHaveBeenCalledWith({
       partialPath: "/tmp/project/",
       cwd: "/tmp/project",
+    });
+  });
+
+  it("forwards filesystem listDir requests to the RPC client", async () => {
+    rpcClientMock.filesystem.listDir.mockResolvedValue({
+      entries: [],
+    });
+    const { createEnvironmentApi } = await import("./environmentApi");
+
+    const api = createEnvironmentApi(rpcClientMock as never);
+    await api.filesystem.listDir({
+      cwd: "/tmp/project",
+      relativePath: "src",
+    });
+
+    expect(rpcClientMock.filesystem.listDir).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+      relativePath: "src",
+    });
+  });
+
+  it("forwards filesystem readFile requests to the RPC client", async () => {
+    rpcClientMock.filesystem.readFile.mockResolvedValue({
+      content: "hello",
+      truncated: false,
+      tooLarge: false,
+      binary: false,
+    });
+    const { createEnvironmentApi } = await import("./environmentApi");
+
+    const api = createEnvironmentApi(rpcClientMock as never);
+    await api.filesystem.readFile({
+      cwd: "/tmp/project",
+      relativePath: "src/main.ts",
+    });
+
+    expect(rpcClientMock.filesystem.readFile).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+      relativePath: "src/main.ts",
     });
   });
 
