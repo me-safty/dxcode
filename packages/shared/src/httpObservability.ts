@@ -1,15 +1,8 @@
+import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Headers from "effect/unstable/http/Headers";
 
-export const redactedHttpHeaderNames = [
-  "authorization",
-  "cookie",
-  "set-cookie",
-  "x-api-key",
-  "dpop",
-] as const;
-
-export const httpHeaderRedactionLayer = Layer.succeed(
+export const httpHeaderRedactionLayer = Layer.effect(
   Headers.CurrentRedactedNames,
-  redactedHttpHeaderNames,
+  Effect.map(Headers.CurrentRedactedNames, (names) => [...names, "dpop"]),
 );
