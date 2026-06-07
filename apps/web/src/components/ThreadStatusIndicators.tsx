@@ -1,6 +1,10 @@
 import { scopeProjectRef, scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
 import type { VcsStatusResult } from "@t3tools/contracts";
-import { CloudIcon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
+import {
+  IconCloud as CloudIcon,
+  IconGitPullRequest as GitPullRequestIcon,
+  IconTerminal2 as TerminalIcon,
+} from "@tabler/icons-react";
 import { useMemo } from "react";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import {

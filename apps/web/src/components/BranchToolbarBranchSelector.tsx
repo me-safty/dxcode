@@ -1,7 +1,7 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronDownIcon } from "lucide-react";
+import { IconChevronDown as ChevronDownIcon } from "@tabler/icons-react";
 import {
   useCallback,
   useDeferredValue,

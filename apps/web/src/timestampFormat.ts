@@ -71,6 +71,10 @@ export function formatRelativeTimeLabel(isoDate: string) {
   return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
 }
 
+export function formatRelativeTimeValue(isoDate: string): string {
+  return formatRelativeTime(isoDate).value;
+}
+
 /**
  * Relative elapsed duration since an ISO instant, without an "ago" suffix.
  * Useful for labels like "Connected for 3m".

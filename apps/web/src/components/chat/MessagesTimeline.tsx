@@ -27,19 +27,21 @@ import {
 } from "../../lib/diffRendering";
 import ChatMarkdown from "../ChatMarkdown";
 import {
-  BotIcon,
-  CheckIcon,
-  CircleAlertIcon,
-  EyeIcon,
-  GlobeIcon,
-  HammerIcon,
-  type LucideIcon,
-  SquarePenIcon,
-  TerminalIcon,
-  Undo2Icon,
-  WrenchIcon,
-  ZapIcon,
-} from "lucide-react";
+  IconAlertCircle as CircleAlertIcon,
+  IconArrowBackUp as Undo2Icon,
+  IconBolt as ZapIcon,
+  IconCheck as CheckIcon,
+  IconChevronDown as ChevronDownIcon,
+  IconChevronRight as ChevronRightIcon,
+  IconEye as EyeIcon,
+  IconHammer as HammerIcon,
+  IconPencil as SquarePenIcon,
+  IconRobot as BotIcon,
+  IconTerminal2 as TerminalIcon,
+  IconTool as WrenchIcon,
+  IconWorld as GlobeIcon,
+  type Icon as TablerIcon,
+} from "@tabler/icons-react";
 import { Button } from "../ui/button";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
@@ -48,12 +50,12 @@ import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
   computeStableMessagesTimelineRows,
-  MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
+  type TimelineActivityEntry,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -110,6 +112,17 @@ const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
+function TimelineMessageCopyButton({ text }: { text: string }) {
+  return (
+    <MessageCopyButton
+      text={text}
+      size="icon-xs"
+      variant="ghost"
+      className="text-muted-foreground/60 hover:text-foreground"
+    />
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Props (public API)
 // ---------------------------------------------------------------------------
@@ -123,6 +136,7 @@ interface MessagesTimelineProps {
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
+  completionSummaryTurnId?: TurnId | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
@@ -152,6 +166,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timelineEntries,
   completionDividerBeforeEntryId,
   completionSummary,
+  completionSummaryTurnId,
   turnDiffSummaryByAssistantMessageId,
   routeThreadKey,
   onOpenTurnDiff,
@@ -173,6 +188,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         timelineEntries,
         completionDividerBeforeEntryId,
         completionSummary,
+        completionSummaryTurnId: completionSummaryTurnId ?? null,
         isWorking,
         activeTurnInProgress,
         activeTurnId: activeTurnId ?? null,
@@ -184,6 +200,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       timelineEntries,
       completionDividerBeforeEntryId,
       completionSummary,
+      completionSummaryTurnId,
       isWorking,
       activeTurnInProgress,
       activeTurnId,
@@ -307,7 +324,7 @@ function keyExtractor(item: MessagesTimelineRow) {
 
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
-type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
+type TimelineWorkEntry = Extract<TimelineActivityEntry, { kind: "work" }>["workEntry"];
 type TimelineRow = MessagesTimelineRow;
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
@@ -322,7 +339,12 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
-      {row.kind === "work" ? <WorkGroupSection groupedEntries={row.groupedEntries} /> : null}
+      {row.kind === "work" ? (
+        <WorkGroupSection
+          groupedEntries={row.groupedEntries}
+          completionSummary={row.completionSummary}
+        />
+      ) : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
@@ -341,59 +363,57 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   const canRevertAgentWork = typeof row.revertTurnCount === "number";
 
   return (
-    <div className="flex justify-end">
-      <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
-        {userImages.length > 0 && (
-          <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-            {userImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-              <div
-                key={image.id}
-                className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-              >
-                {image.previewUrl ? (
-                  <button
-                    type="button"
-                    className="h-full w-full cursor-zoom-in"
-                    aria-label={`Preview ${image.name}`}
-                    onClick={() => {
-                      const preview = buildExpandedImagePreview(userImages, image.id);
-                      if (!preview) return;
-                      ctx.onImageExpand(preview);
-                    }}
-                  >
-                    <img
-                      src={image.previewUrl}
-                      alt={image.name}
-                      className="block h-auto max-h-[220px] w-full object-cover"
-                    />
-                  </button>
-                ) : (
-                  <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                    {image.name}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-        <CollapsibleUserMessageBody
-          text={displayedUserMessage.visibleText}
-          terminalContexts={terminalContexts}
-          skills={ctx.skills}
-          footer={
-            <>
-              <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
-                {displayedUserMessage.copyText && (
-                  <MessageCopyButton text={displayedUserMessage.copyText} />
-                )}
-                {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
-              </div>
-              <p className="text-right text-xs text-muted-foreground/50">
-                {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
-              </p>
-            </>
-          }
-        />
+    <div className="group/user flex justify-end">
+      <div className="max-w-[80%]">
+        <div className="relative rounded-2xl rounded-br-md bg-secondary px-4 py-3">
+          {userImages.length > 0 && (
+            <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
+              {userImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
+                <div
+                  key={image.id}
+                  className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                >
+                  {image.previewUrl ? (
+                    <button
+                      type="button"
+                      className="h-full w-full cursor-zoom-in"
+                      aria-label={`Preview ${image.name}`}
+                      onClick={() => {
+                        const preview = buildExpandedImagePreview(userImages, image.id);
+                        if (!preview) return;
+                        ctx.onImageExpand(preview);
+                      }}
+                    >
+                      <img
+                        src={image.previewUrl}
+                        alt={image.name}
+                        className="block h-auto max-h-[220px] w-full object-cover"
+                      />
+                    </button>
+                  ) : (
+                    <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                      {image.name}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <CollapsibleUserMessageBody
+            text={displayedUserMessage.visibleText}
+            terminalContexts={terminalContexts}
+            skills={ctx.skills}
+          />
+        </div>
+        <div className="mt-1 flex min-h-6 items-center justify-end gap-2 pr-2 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/user:opacity-100">
+          <p className="text-right text-xs text-muted-foreground/55">
+            {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
+          </p>
+          {displayedUserMessage.copyText && (
+            <TimelineMessageCopyButton text={displayedUserMessage.copyText} />
+          )}
+          {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
+        </div>
       </div>
     </div>
   );
@@ -406,8 +426,10 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
   return (
     <Button
       type="button"
-      size="xs"
-      variant="outline"
+      size="icon-xs"
+      variant="ghost"
+      className="text-muted-foreground/60 hover:text-foreground"
+      aria-label="Revert to this message"
       disabled={activity.isRevertingCheckpoint || activity.isWorking}
       onClick={() => ctx.onRevertUserMessage(messageId)}
       title="Revert to this message"
@@ -422,54 +444,44 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
 
   return (
-    <>
-      {row.showCompletionDivider && (
-        <AssistantCompletionDivider completionSummary={row.completionSummary} />
-      )}
-      <div className="min-w-0 px-1 py-0.5">
-        <ChatMarkdown
-          text={messageText}
-          cwd={ctx.markdownCwd}
-          isStreaming={Boolean(row.message.streaming)}
-          skills={ctx.skills}
-        />
-        <AssistantChangedFilesSection
-          turnSummary={row.assistantTurnDiffSummary}
-          routeThreadKey={ctx.routeThreadKey}
-          resolvedTheme={ctx.resolvedTheme}
-          onOpenTurnDiff={ctx.onOpenTurnDiff}
-        />
-        <div className="mt-1.5 flex items-center gap-2">
-          <p className="text-[10px] text-muted-foreground/30">
-            {row.message.streaming ? (
-              <LiveMessageMeta
-                createdAt={row.message.createdAt}
-                durationStart={row.durationStart}
-                timestampFormat={ctx.timestampFormat}
-              />
-            ) : (
-              formatMessageMeta(
-                row.message.createdAt,
-                formatElapsed(row.durationStart, row.message.completedAt),
-                ctx.timestampFormat,
-              )
-            )}
-          </p>
-          <AssistantCopyButton row={row} />
-        </div>
+    <div className="group/assistant-message min-w-0 px-1 py-0.5">
+      <ChatMarkdown
+        text={messageText}
+        cwd={ctx.markdownCwd}
+        isStreaming={Boolean(row.message.streaming)}
+        skills={ctx.skills}
+      />
+      <AssistantChangedFilesSection
+        turnSummary={row.assistantTurnDiffSummary}
+        routeThreadKey={ctx.routeThreadKey}
+        resolvedTheme={ctx.resolvedTheme}
+        onOpenTurnDiff={ctx.onOpenTurnDiff}
+      />
+      <div
+        className={cn(
+          "mt-1.5 flex min-h-5 items-center gap-2 transition-opacity duration-150",
+          row.message.streaming
+            ? "opacity-100"
+            : "opacity-0 focus-within:opacity-100 group-hover/assistant-message:opacity-100",
+        )}
+      >
+        <p className="text-[10px] text-muted-foreground/30">
+          {row.message.streaming ? (
+            <LiveMessageMeta
+              createdAt={row.message.createdAt}
+              durationStart={row.durationStart}
+              timestampFormat={ctx.timestampFormat}
+            />
+          ) : (
+            formatMessageMeta(
+              row.message.createdAt,
+              formatElapsed(row.durationStart, row.message.completedAt),
+              ctx.timestampFormat,
+            )
+          )}
+        </p>
+        <AssistantCopyButton row={row} />
       </div>
-    </>
-  );
-}
-
-function AssistantCompletionDivider({ completionSummary }: { completionSummary: string | null }) {
-  return (
-    <div className="my-3 flex items-center gap-3">
-      <span className="h-px flex-1 bg-border" />
-      <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
-        {completionSummary ? `Response • ${completionSummary}` : "Response"}
-      </span>
-      <span className="h-px flex-1 bg-border" />
     </div>
   );
 }
@@ -485,16 +497,7 @@ function AssistantCopyButton({ row }: { row: Extract<TimelineRow, { kind: "messa
     return null;
   }
 
-  return (
-    <div className="flex items-center opacity-0 transition-opacity duration-200  group-hover/assistant:opacity-100">
-      <MessageCopyButton
-        text={assistantCopyState.text ?? ""}
-        size="icon-xs"
-        variant="outline"
-        className="border-border/50 bg-background/35 text-muted-foreground/45 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/70"
-      />
-    </div>
-  );
+  return <TimelineMessageCopyButton text={assistantCopyState.text ?? ""} />;
 }
 
 function ProposedPlanTimelineRow({
@@ -606,48 +609,72 @@ function LiveMessageMeta({
  *  State resets on unmount which is fine — work groups start collapsed. */
 const WorkGroupSection = memo(function WorkGroupSection({
   groupedEntries,
+  completionSummary,
 }: {
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
+  completionSummary: string | null;
 }) {
   const { workspaceRoot } = use(TimelineRowCtx);
   const [isExpanded, setIsExpanded] = useState(false);
-  const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
-  const visibleEntries =
-    hasOverflow && !isExpanded
-      ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
-      : groupedEntries;
-  const hiddenCount = groupedEntries.length - visibleEntries.length;
-  const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
-  const showHeader = hasOverflow || !onlyToolEntries;
-  const groupLabel = onlyToolEntries ? "Tool calls" : "Work log";
+  const groupLabel = formatWorkGroupSummary(groupedEntries, completionSummary);
 
   return (
-    <div className="rounded-xl border border-border/45 bg-card/25 px-2 py-1.5">
-      {showHeader && (
-        <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
-          <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
-            {groupLabel} ({groupedEntries.length})
-          </p>
-          {hasOverflow && (
-            <button
-              type="button"
-              className="cursor-pointer text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
-              onClick={() => setIsExpanded((v) => !v)}
-            >
-              {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
-            </button>
-          )}
-        </div>
-      )}
-      <div className="space-y-0.5">
-        {visibleEntries.map((workEntry) => (
-          <SimpleWorkEntryRow
-            key={`work-row:${workEntry.id}`}
-            workEntry={workEntry}
-            workspaceRoot={workspaceRoot}
+    <div className="my-2" data-work-group-expanded={isExpanded ? "true" : "false"}>
+      <button
+        type="button"
+        aria-expanded={isExpanded}
+        className="group flex w-full cursor-pointer items-center gap-2 py-1 text-left"
+        data-scroll-anchor-ignore
+        onClick={() => setIsExpanded((value) => !value)}
+      >
+        <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground/70 transition-colors group-hover:text-muted-foreground">
+          {groupLabel}
+          <ChevronRightIcon
+            className={cn(
+              "size-4 transition-transform duration-150",
+              isExpanded ? "rotate-90" : null,
+            )}
           />
-        ))}
-      </div>
+        </span>
+        <span className="h-px min-w-8 flex-1 bg-border/65" />
+      </button>
+      {isExpanded ? (
+        <div className="mt-1 space-y-2">
+          {groupedEntries.map((entry) => (
+            <ActivityGroupEntryRow
+              key={`activity-row:${entry.id}`}
+              entry={entry}
+              workspaceRoot={workspaceRoot}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
+const ActivityGroupEntryRow = memo(function ActivityGroupEntryRow({
+  entry,
+  workspaceRoot,
+}: {
+  entry: TimelineActivityEntry;
+  workspaceRoot: string | undefined;
+}) {
+  const ctx = use(TimelineRowCtx);
+
+  if (entry.kind === "work") {
+    return <SimpleWorkEntryRow workEntry={entry.workEntry} workspaceRoot={workspaceRoot} />;
+  }
+
+  const messageText = entry.message.text || "(empty response)";
+  return (
+    <div className="min-w-0 px-1 py-0.5">
+      <ChatMarkdown
+        text={messageText}
+        cwd={ctx.markdownCwd}
+        isStreaming={Boolean(entry.message.streaming)}
+        skills={ctx.skills}
+      />
     </div>
   );
 });
@@ -762,9 +789,7 @@ const UserMessageTerminalContextInlineLabel = memo(
 );
 
 const MAX_COLLAPSED_USER_MESSAGE_LINES = 8;
-const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 600;
-const COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM = 1.75;
-const COLLAPSED_USER_MESSAGE_FADE_MASK = `linear-gradient(to bottom, black calc(100% - ${COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM}rem), transparent)`;
+const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 220;
 
 function shouldCollapseUserMessage(text: string): boolean {
   if (text.trim().length === 0) {
@@ -781,7 +806,6 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
-  footer?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasVisibleBody = props.text.trim().length > 0 || props.terminalContexts.length > 0;
@@ -792,19 +816,10 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
     <div>
       {hasVisibleBody ? (
         <div
-          className={cn("relative", isCollapsed && "max-h-44 overflow-hidden")}
+          className={cn("relative", isCollapsed && "line-clamp-2")}
           data-user-message-body="true"
           data-user-message-collapsed={isCollapsed ? "true" : "false"}
           data-user-message-collapsible={canCollapse ? "true" : "false"}
-          data-user-message-fade={isCollapsed ? "true" : "false"}
-          style={
-            isCollapsed
-              ? {
-                  WebkitMaskImage: COLLAPSED_USER_MESSAGE_FADE_MASK,
-                  maskImage: COLLAPSED_USER_MESSAGE_FADE_MASK,
-                }
-              : undefined
-          }
         >
           <UserMessageBody
             text={props.text}
@@ -813,30 +828,20 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
           />
         </div>
       ) : null}
-      {canCollapse || props.footer ? (
-        <div
-          className={cn(
-            "mt-1.5 flex items-center gap-2",
-            canCollapse && props.footer ? "justify-between" : "justify-end",
-          )}
-          data-user-message-footer="true"
-        >
-          {canCollapse ? (
-            <Button
-              type="button"
-              size="xs"
-              variant="ghost"
-              aria-expanded={expanded}
-              data-scroll-anchor-ignore
-              onClick={() => setExpanded((value) => !value)}
-              className="-ml-1 h-6 rounded-md px-1.5 text-xs text-muted-foreground/72 hover:bg-muted/55 hover:text-foreground/85"
-            >
-              {expanded ? "Show less" : "Show full message"}
-            </Button>
-          ) : null}
-          {props.footer ? (
-            <div className="ml-auto flex items-center gap-2">{props.footer}</div>
-          ) : null}
+      {canCollapse ? (
+        <div className="mt-2" data-user-message-footer="true">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            data-scroll-anchor-ignore
+            onClick={() => setExpanded((value) => !value)}
+            className="inline-flex cursor-pointer items-center gap-1 text-sm text-muted-foreground/75 transition-colors hover:text-foreground/85"
+          >
+            {expanded ? "Show less" : "Show more"}
+            <ChevronDownIcon
+              className={cn("size-4 transition-transform", expanded ? "rotate-180" : null)}
+            />
+          </button>
         </div>
       ) : null}
     </div>
@@ -1072,8 +1077,26 @@ function formatMessageMeta(
   return `${formatTimestamp(createdAt, timestampFormat)} • ${duration}`;
 }
 
+function formatWorkGroupSummary(
+  groupedEntries: ReadonlyArray<Pick<TimelineActivityEntry, "createdAt">>,
+  completionSummary: string | null,
+): string {
+  if (completionSummary) {
+    return completionSummary;
+  }
+
+  const firstEntry = groupedEntries[0];
+  const lastEntry = groupedEntries[groupedEntries.length - 1];
+  if (!firstEntry || !lastEntry) {
+    return "Worked";
+  }
+
+  const elapsed = formatWorkingTimer(firstEntry.createdAt, lastEntry.createdAt);
+  return elapsed ? `Worked for ${elapsed}` : "Worked";
+}
+
 function workToneIcon(tone: TimelineWorkEntry["tone"]): {
-  icon: LucideIcon;
+  icon: TablerIcon;
   className: string;
 } {
   if (tone === "error") {
@@ -1132,7 +1155,7 @@ function workEntryRawCommand(
   return rawCommand === workEntry.command.trim() ? null : rawCommand;
 }
 
-function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
+function workEntryIcon(workEntry: TimelineWorkEntry): TablerIcon {
   if (workEntry.requestKind === "command") return TerminalIcon;
   if (workEntry.requestKind === "file-read") return EyeIcon;
   if (workEntry.requestKind === "file-change") return SquarePenIcon;

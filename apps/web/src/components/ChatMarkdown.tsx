@@ -1,5 +1,5 @@
 import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { IconCheck as CheckIcon, IconCopy as CopyIcon } from "@tabler/icons-react";
 import type { ServerProviderSkill } from "@t3tools/contracts";
 import React, {
   Children,

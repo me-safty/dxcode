@@ -515,6 +515,28 @@ describe("groupSidebarThreadsByWorktree", () => {
     expect(groups.map((group) => group.label)).toEqual(["feature/readable-branch", "path-label"]);
   });
 
+  it("does not show a stale base branch when the worktree path still has a temporary branch name", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-stale", "/repo/.worktrees/t3code-fb0108e4", "dev"),
+    ]);
+
+    expect(groups[0]?.label).toBe("t3code/fb0108e4");
+    expect(groups[0]?.branch).toBe("t3code/fb0108e4");
+  });
+
+  it("shows a real renamed branch before falling back to the temporary worktree path", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread(
+        "thread-renamed",
+        "/home/example/.t3/worktrees/nextcard/t3code-fb0108e4",
+        "feature/card-credit-logo-recommendations",
+      ),
+    ]);
+
+    expect(groups[0]?.label).toBe("feature/card-credit-logo-recommendations");
+    expect(groups[0]?.branch).toBe("feature/card-credit-logo-recommendations");
+  });
+
   it("prefers an AI-generated branch label over a temporary worktree branch", () => {
     const groups = groupSidebarThreadsByWorktree([
       thread("thread-temp", "/repo/.worktrees/t3code-12345678", "t3code/12345678"),

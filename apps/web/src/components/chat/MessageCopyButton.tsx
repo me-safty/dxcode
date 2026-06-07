@@ -1,5 +1,5 @@
 import { memo, useRef } from "react";
-import { CopyIcon, CheckIcon } from "lucide-react";
+import { IconCheck as CheckIcon, IconCopy as CopyIcon } from "@tabler/icons-react";
 import { Button } from "../ui/button";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { cn } from "~/lib/utils";

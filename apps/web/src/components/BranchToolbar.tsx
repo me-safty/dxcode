@@ -1,13 +1,13 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
-  ChevronDownIcon,
-  CloudIcon,
-  FolderGit2Icon,
-  FolderGitIcon,
-  FolderIcon,
-  MonitorIcon,
-} from "lucide-react";
+  IconChevronDown as ChevronDownIcon,
+  IconCloud as CloudIcon,
+  IconFolder as FolderIcon,
+  IconFolderCode as FolderGitIcon,
+  IconGitBranch as FolderGit2Icon,
+  IconDeviceDesktop as MonitorIcon,
+} from "@tabler/icons-react";
 import { memo, useMemo } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";

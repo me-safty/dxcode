@@ -595,17 +595,25 @@ const make = Effect.gen(function* () {
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
   }) {
-    if (!input.branch || !input.worktreePath) {
-      return;
-    }
-    if (!isTemporaryWorktreeBranch(input.branch)) {
+    if (!input.worktreePath) {
       return;
     }
 
-    const oldBranch = input.branch;
     const cwd = input.worktreePath;
     const attachments = input.attachments ?? [];
+    let oldBranchForLog = input.branch;
     yield* Effect.gen(function* () {
+      const actualBranch = yield* gitWorkflow.localStatus({ cwd }).pipe(
+        Effect.map((status) => (status.isRepo ? status.refName : null)),
+        Effect.catchCause(() => Effect.succeed(input.branch)),
+      );
+
+      if (!actualBranch || !isTemporaryWorktreeBranch(actualBranch)) {
+        return;
+      }
+
+      const oldBranch = actualBranch;
+      oldBranchForLog = actualBranch;
       const { textGenerationModelSelection: modelSelection } =
         yield* serverSettingsService.getSettings;
 
@@ -634,7 +642,7 @@ const make = Effect.gen(function* () {
         Effect.logWarning("provider command reactor failed to generate or rename worktree branch", {
           threadId: input.threadId,
           cwd,
-          oldBranch,
+          oldBranch: oldBranchForLog,
           cause: Cause.pretty(cause),
         }),
       ),

@@ -1,6 +1,6 @@
 import * as React from "react";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
-import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import {
   getThreadSortTimestamp,
   sortThreads,
@@ -385,8 +385,8 @@ export function resolveThreadStatusPill(input: {
   if (hasUnseenCompletion(thread)) {
     return {
       label: "Completed",
-      colorClass: "text-emerald-600 dark:text-emerald-300/90",
-      dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
+      colorClass: "text-sky-600 dark:text-sky-300/80",
+      dotClass: "bg-sky-500 dark:bg-sky-300/80",
       pulse: false,
     };
   }
@@ -482,7 +482,52 @@ function isDisplayableWorktreeBranch(branch: string | null): branch is string {
   return branch !== null && !isTemporaryWorktreeBranch(branch);
 }
 
-function resolveWorktreeGroupBranch(current: string | null, next: string | null): string | null {
+function temporaryBranchFromWorktreePath(worktreePath: string | null): string | null {
+  if (worktreePath === null) return null;
+  const basename = basenameFromPath(worktreePath);
+  const escapedPrefix = WORKTREE_BRANCH_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`^${escapedPrefix}-([0-9a-f]{8})$`, "i").exec(basename);
+  return match?.[1] ? `${WORKTREE_BRANCH_PREFIX}/${match[1].toLowerCase()}` : null;
+}
+
+function isGeneratedWorktreeBranch(branch: string | null): branch is string {
+  return branch !== null && branch.startsWith(`${WORKTREE_BRANCH_PREFIX}/`);
+}
+
+function isLikelyStaleBaseBranch(branch: string): boolean {
+  switch (branch.trim().toLowerCase()) {
+    case "dev":
+    case "develop":
+    case "development":
+    case "main":
+    case "master":
+    case "trunk":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function resolveWorktreeGroupBranch(
+  worktreePath: string | null,
+  current: string | null,
+  next: string | null,
+): string | null {
+  if (worktreePath === null) {
+    if (isDisplayableWorktreeBranch(current)) return current;
+    if (isDisplayableWorktreeBranch(next)) return next;
+    return current ?? next;
+  }
+
+  if (isDisplayableWorktreeBranch(current) && isGeneratedWorktreeBranch(current)) return current;
+  if (isDisplayableWorktreeBranch(next) && isGeneratedWorktreeBranch(next)) return next;
+
+  if (isDisplayableWorktreeBranch(current) && !isLikelyStaleBaseBranch(current)) return current;
+  if (isDisplayableWorktreeBranch(next) && !isLikelyStaleBaseBranch(next)) return next;
+
+  const pathTemporaryBranch = temporaryBranchFromWorktreePath(worktreePath);
+  if (pathTemporaryBranch !== null) return pathTemporaryBranch;
+
   if (isDisplayableWorktreeBranch(current)) return current;
   if (isDisplayableWorktreeBranch(next)) return next;
   return current ?? next;
@@ -507,13 +552,17 @@ export function groupSidebarThreadsByWorktree<
     const existing = groups.get(key);
     if (existing) {
       existing.threads.push(thread);
-      const branch = resolveWorktreeGroupBranch(existing.branch, thread.branch);
+      const branch = resolveWorktreeGroupBranch(
+        existing.worktreePath,
+        existing.branch,
+        thread.branch,
+      );
       existing.branch = branch;
       existing.label = resolveWorktreeGroupLabel(existing.worktreePath, branch);
       continue;
     }
 
-    const branch = resolveWorktreeGroupBranch(null, thread.branch);
+    const branch = resolveWorktreeGroupBranch(worktreePath, null, thread.branch);
     groups.set(key, {
       key,
       label: resolveWorktreeGroupLabel(worktreePath, branch),

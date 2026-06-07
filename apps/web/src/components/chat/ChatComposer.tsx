@@ -83,15 +83,15 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
-  BotIcon,
-  CircleAlertIcon,
-  ListTodoIcon,
-  type LucideIcon,
-  LockIcon,
-  LockOpenIcon,
-  PenLineIcon,
-  XIcon,
-} from "lucide-react";
+  IconAlertCircle as CircleAlertIcon,
+  IconChecklist as ListTodoIcon,
+  IconLock as LockIcon,
+  IconLockOpen as LockOpenIcon,
+  IconPencil as PenLineIcon,
+  IconTool as BotIcon,
+  IconX as XIcon,
+  type Icon as TablerIcon,
+} from "@tabler/icons-react";
 import { proposedPlanTitle } from "../../proposedPlan";
 import { getProviderInteractionModeToggle } from "../../providerModels";
 import {
@@ -114,7 +114,7 @@ const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES 
 
 const runtimeModeConfig: Record<
   RuntimeMode,
-  { label: string; description: string; icon: LucideIcon }
+  { label: string; description: string; icon: TablerIcon }
 > = {
   "approval-required": {
     label: "Supervised",
