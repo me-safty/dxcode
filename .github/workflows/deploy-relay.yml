@@ -17,6 +17,7 @@ concurrency:
 jobs:
   deploy_relay:
     name: Deploy production relay
+    if: ${{ false }} # Disabled for the fork: no production relay deployment.
     runs-on: t3code-arc
     timeout-minutes: 15
     environment:

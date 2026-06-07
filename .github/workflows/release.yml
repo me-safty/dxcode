@@ -167,7 +167,7 @@ jobs:
   relay_public_config:
     name: Resolve T3 Cloud public config
     needs: preflight
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    if: ${{ false }} # Disabled for the fork: no production relay config.
     runs-on: t3code-arc
     timeout-minutes: 5
     environment:
@@ -218,15 +218,15 @@ jobs:
 
   build:
     name: Build ${{ matrix.label }}
-    needs: [preflight, relay_public_config]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' }}
+    needs: [preflight]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
-      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
-      T3CODE_CLERK_JWT_TEMPLATE: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
-      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
-      T3CODE_RELAY_URL: ${{ needs.relay_public_config.outputs.relay_url }}
+      T3CODE_CLERK_PUBLISHABLE_KEY: ""
+      T3CODE_CLERK_JWT_TEMPLATE: ""
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ""
+      T3CODE_RELAY_URL: ""
     strategy:
       fail-fast: false
       matrix:
@@ -478,7 +478,7 @@ jobs:
 
   publish_cli:
     name: Publish CLI to npm
-    needs: [preflight, relay_public_config, build]
+    needs: [preflight, build]
     if: ${{ false }} # Disabled for the fork: keep the private CLI package out of npm publishing.
     runs-on: t3code-arc
     timeout-minutes: 10
@@ -486,10 +486,10 @@ jobs:
       contents: read
       id-token: write
     env:
-      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
-      T3CODE_CLERK_JWT_TEMPLATE: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
-      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
-      T3CODE_RELAY_URL: ${{ needs.relay_public_config.outputs.relay_url }}
+      T3CODE_CLERK_PUBLISHABLE_KEY: ""
+      T3CODE_CLERK_JWT_TEMPLATE: ""
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ""
+      T3CODE_RELAY_URL: ""
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -638,14 +638,14 @@ jobs:
 
   deploy_web:
     name: Deploy hosted web app
-    needs: [preflight, relay_public_config, release]
+    needs: [preflight, release]
     if: ${{ false }} # Disabled for the fork: avoid deploying the hosted web app with upstream Vercel secrets.
     runs-on: t3code-arc
     timeout-minutes: 10
     env:
-      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
-      T3CODE_CLERK_JWT_TEMPLATE: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
-      T3CODE_RELAY_URL: ${{ needs.relay_public_config.outputs.relay_url }}
+      T3CODE_CLERK_PUBLISHABLE_KEY: ""
+      T3CODE_CLERK_JWT_TEMPLATE: ""
+      T3CODE_RELAY_URL: ""
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -809,7 +809,7 @@ jobs:
   announce_discord:
     name: Announce release on Discord
     if: ${{ false }} # Disabled for the fork: avoid posting upstream release announcements.
-    needs: [preflight, relay_public_config, release, deploy_web, finalize]
+    needs: [preflight, release, deploy_web, finalize]
     runs-on: t3code-arc
     timeout-minutes: 10
     steps:
