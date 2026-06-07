@@ -578,7 +578,7 @@ function ChatMarkdown({
         if (typeof parentSuffix === "string" && parentSuffix.length > 0) {
           labelParts.push(parentSuffix);
         }
-        if (fileLinkMeta.line) {
+        if (fileLinkMeta.line && fileLinkMeta.line !== 1) {
           labelParts.push(
             `L${fileLinkMeta.line}${fileLinkMeta.column ? `:C${fileLinkMeta.column}` : ""}`,
           );

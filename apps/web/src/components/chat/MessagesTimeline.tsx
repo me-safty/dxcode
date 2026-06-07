@@ -969,7 +969,7 @@ function workActivityIcon(category: WorkActivityCategory): TablerIcon {
     case "search":
       return SearchIcon;
     case "file":
-      return TerminalIcon;
+      return SearchIcon;
     case "edit":
       return SquarePenIcon;
     case "command":

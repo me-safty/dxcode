@@ -181,7 +181,62 @@ describe("summarizeWorkActivityEntries", () => {
     ]);
   });
 
-  it("keeps assistant messages as boundaries between work summaries", () => {
+  it("combines adjacent work categories between assistant messages", () => {
+    const displayEntries = deriveWorkActivityDisplayEntries(
+      [
+        {
+          kind: "work",
+          id: "search-entry",
+          createdAt: "2026-01-01T00:00:00Z",
+          workEntry: workEntry({
+            id: "search-1",
+            command: "rg toolbar apps/web",
+            itemType: "command_execution",
+            requestKind: "command",
+          }),
+        },
+        {
+          kind: "work",
+          id: "read-entry-1",
+          createdAt: "2026-01-01T00:00:01Z",
+          workEntry: workEntry({
+            id: "read-1",
+            command: "cat /repo/src/index.ts",
+            itemType: "command_execution",
+            requestKind: "command",
+          }),
+        },
+        {
+          kind: "work",
+          id: "read-entry-2",
+          createdAt: "2026-01-01T00:00:02Z",
+          workEntry: workEntry({
+            id: "read-2",
+            command: "sed -n '1,80p' /repo/src/app.ts",
+            itemType: "command_execution",
+            requestKind: "command",
+          }),
+        },
+      ],
+      "/repo",
+    );
+
+    expect(displayEntries).toHaveLength(1);
+    expect(displayEntries[0]).toMatchObject({
+      kind: "work-summary",
+      summary: {
+        category: "search",
+        label: "Explored 1 search, 2 files",
+        items: [
+          { label: "Searched for toolbar" },
+          { label: "Read src/index.ts" },
+          { label: "Read src/app.ts" },
+        ],
+      },
+    });
+  });
+
+  it("keeps assistant messages visible inside work groups", () => {
     const displayEntries = deriveWorkActivityDisplayEntries(
       [
         {

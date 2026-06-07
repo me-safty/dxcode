@@ -55,7 +55,7 @@ describe("ChatMarkdown", () => {
     }
   });
 
-  it("keeps line anchors working after rewriting file uri hrefs", async () => {
+  it("keeps line 1 anchors working without showing a redundant line badge", async () => {
     const filePath =
       "/Users/yashsingh/p/sco/claude-code-extract/src/utils/permissions/PermissionRule.ts";
     const screen = await render(
@@ -63,7 +63,7 @@ describe("ChatMarkdown", () => {
     );
 
     try {
-      const link = page.getByRole("link", { name: "PermissionRule.ts · L1" });
+      const link = page.getByRole("link", { name: "PermissionRule.ts" });
       await expect.element(link).toBeInTheDocument();
       await expect.element(link).toHaveAttribute("href", `${filePath}:1`);
 
@@ -72,6 +72,22 @@ describe("ChatMarkdown", () => {
       await vi.waitFor(() => {
         expect(openInPreferredEditorMock).toHaveBeenCalledWith(expect.anything(), `${filePath}:1`);
       });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("shows non-1 line anchors inline", async () => {
+    const filePath =
+      "/Users/yashsingh/p/sco/claude-code-extract/src/utils/permissions/PermissionRule.ts";
+    const screen = await render(
+      <ChatMarkdown text={`[PermissionRule.ts](file://${filePath}#L42)`} cwd="/repo/project" />,
+    );
+
+    try {
+      const link = page.getByRole("link", { name: "PermissionRule.ts · L42" });
+      await expect.element(link).toBeInTheDocument();
+      await expect.element(link).toHaveAttribute("href", `${filePath}:42`);
     } finally {
       await screen.unmount();
     }

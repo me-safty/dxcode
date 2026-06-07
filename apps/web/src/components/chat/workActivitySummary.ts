@@ -89,27 +89,7 @@ export function summarizeWorkActivityEntries(
   workspaceRoot: string | undefined,
 ): WorkActivitySummary[] {
   const classifiedEntries = entries.map((entry) => classifyWorkEntry(entry, workspaceRoot));
-  const summaries: WorkActivitySummary[] = [];
-  let pending: ClassifiedWorkEntry[] = [];
-
-  const flush = () => {
-    if (pending.length === 0) {
-      return;
-    }
-    summaries.push(buildSummary(pending));
-    pending = [];
-  };
-
-  for (const entry of classifiedEntries) {
-    const previous = pending.at(-1);
-    if (previous && previous.category !== entry.category) {
-      flush();
-    }
-    pending.push(entry);
-  }
-
-  flush();
-  return summaries;
+  return classifiedEntries.length > 0 ? [buildSummary(classifiedEntries)] : [];
 }
 
 function classifyWorkEntry(
@@ -167,7 +147,7 @@ function buildSummary(pending: ReadonlyArray<ClassifiedWorkEntry>): WorkActivity
   return {
     id: `${first.category}:${first.entry.id}`,
     category: first.category,
-    label: summaryLabel(first.category, items.length),
+    label: summaryLabel(pending),
     items,
     debugText: buildSummaryDebugText(first.category, pending),
   };
@@ -190,23 +170,57 @@ function expandSummaryItems(entry: ClassifiedWorkEntry): WorkActivitySummaryItem
   }));
 }
 
-function summaryLabel(category: WorkActivityCategory, count: number): string {
+function summaryLabel(entries: ReadonlyArray<ClassifiedWorkEntry>): string {
+  const first = entries[0]!;
+  const countsByCategory = new Map<WorkActivityCategory, number>();
+  for (const entry of entries) {
+    const itemCount = Math.max(1, expandSummaryItems(entry).length);
+    countsByCategory.set(entry.category, (countsByCategory.get(entry.category) ?? 0) + itemCount);
+  }
+  const fragments = [...countsByCategory].map(([category, count]) =>
+    formatCount(count, summaryNoun(category), summaryPluralNoun(category)),
+  );
+  return `${summaryVerb(first.category)} ${fragments.join(", ")}`;
+}
+
+function summaryVerb(category: WorkActivityCategory): string {
   switch (category) {
     case "search":
-      return `Explored ${formatCount(count, "search", "searches")}`;
     case "file":
-      return `Explored ${formatCount(count, "file")}`;
+      return "Explored";
     case "edit":
-      return `Edited ${formatCount(count, "file")}`;
+      return "Edited";
     case "command":
-      return `Ran ${formatCount(count, "command")}`;
+      return "Ran";
     case "tool":
-      return `Used ${formatCount(count, "tool")}`;
+      return "Used";
     case "info":
-      return `Noted ${formatCount(count, "update")}`;
+      return "Noted";
     case "error":
-      return `Encountered ${formatCount(count, "error")}`;
+      return "Encountered";
   }
+}
+
+function summaryNoun(category: WorkActivityCategory): string {
+  switch (category) {
+    case "search":
+      return "search";
+    case "file":
+    case "edit":
+      return "file";
+    case "command":
+      return "command";
+    case "tool":
+      return "tool";
+    case "info":
+      return "update";
+    case "error":
+      return "error";
+  }
+}
+
+function summaryPluralNoun(category: WorkActivityCategory): string {
+  return category === "search" ? "searches" : `${summaryNoun(category)}s`;
 }
 
 function formatCount(count: number, singular: string, plural = `${singular}s`): string {

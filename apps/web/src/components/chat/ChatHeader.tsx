@@ -113,7 +113,7 @@ export const ChatHeader = memo(function ChatHeader({
           </Badge>
         )}
       </div>
-      <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 sm:shrink-0 sm:justify-end @3xl/header-actions:gap-3">
+      <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 pr-10 sm:shrink-0 sm:justify-end @3xl/header-actions:gap-3">
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}
@@ -163,31 +163,31 @@ export const ChatHeader = memo(function ChatHeader({
                 : "Toggle terminal drawer"}
           </TooltipPopup>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Toggle
-                className="shrink-0"
-                pressed={diffOpen}
-                onPressedChange={onToggleDiff}
-                aria-label="Toggle diff panel"
-                variant="outline"
-                size="xs"
-                disabled={!isGitRepo && !diffOpen}
-              >
-                <DiffIcon className="size-3" />
-              </Toggle>
-            }
-          />
-          <TooltipPopup side="bottom">
-            {!isGitRepo && !diffOpen
-              ? "Diff panel is unavailable because this project is not a git repository."
-              : diffToggleShortcutLabel
-                ? `Toggle diff panel (${diffToggleShortcutLabel})`
-                : "Toggle diff panel"}
-          </TooltipPopup>
-        </Tooltip>
       </div>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Toggle
+              className="fixed top-3.5 right-[calc(env(safe-area-inset-right)+0.75rem)] z-[60] shrink-0 [-webkit-app-region:no-drag] sm:right-[calc(env(safe-area-inset-right)+1.25rem)] wco:right-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]"
+              pressed={diffOpen}
+              onPressedChange={onToggleDiff}
+              aria-label="Toggle diff panel"
+              variant="outline"
+              size="xs"
+              disabled={!isGitRepo && !diffOpen}
+            >
+              <DiffIcon className="size-3" />
+            </Toggle>
+          }
+        />
+        <TooltipPopup side="bottom" align="end">
+          {!isGitRepo && !diffOpen
+            ? "Diff panel is unavailable because this project is not a git repository."
+            : diffToggleShortcutLabel
+              ? `Toggle diff panel (${diffToggleShortcutLabel})`
+              : "Toggle diff panel"}
+        </TooltipPopup>
+      </Tooltip>
     </div>
   );
 });
