@@ -18,6 +18,8 @@ export const mobileRuntime = ManagedRuntime.make(
   mobileManagedRelayClientLayer(configuredRelayUrl()).pipe(
     Layer.provideMerge(mobileCryptoLayer),
     Layer.provideMerge(mobileHttpClientLayer),
-    Layer.provide(mobileTracingLayer.pipe(Layer.provide(mobileHttpClientLayer))),
+    Layer.provideMerge(mobileTracingLayer.pipe(Layer.provide(mobileHttpClientLayer))),
   ),
 );
+
+export const mobileRuntimeContextLayer = Layer.effectContext(mobileRuntime.contextEffect);
