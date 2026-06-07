@@ -11,7 +11,11 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
-import { type FilesystemBrowseInput, type ProjectEntry } from "@t3tools/contracts";
+import {
+  type FilesystemBrowseInput,
+  type FilesystemListDirEntry,
+  type ProjectEntry,
+} from "@t3tools/contracts";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
 import {
   insertRankedSearchResult,
@@ -25,6 +29,7 @@ import {
   WorkspaceEntries,
   WorkspaceEntriesBrowseError,
   WorkspaceEntriesError,
+  WorkspaceEntriesListDirError,
   type WorkspaceEntriesShape,
 } from "../Services/WorkspaceEntries.ts";
 import { WorkspacePaths } from "../Services/WorkspacePaths.ts";
@@ -493,6 +498,104 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     },
   );
 
+  const listDir: WorkspaceEntriesShape["listDir"] = Effect.fn("WorkspaceEntries.listDir")(
+    function* (input) {
+      const workspaceRoot = yield* workspacePaths.normalizeWorkspaceRoot(input.cwd).pipe(
+        Effect.mapError(
+          (cause) =>
+            new WorkspaceEntriesListDirError({
+              cwd: input.cwd,
+              relativePath: input.relativePath,
+              operation: "workspaceEntries.listDir.normalizeWorkspaceRoot",
+              detail: cause.message,
+              cause,
+            }),
+        ),
+      );
+
+      const trimmedRelativePath = input.relativePath.trim();
+      const absoluteDir = trimmedRelativePath
+        ? path.resolve(workspaceRoot, trimmedRelativePath)
+        : workspaceRoot;
+
+      // Containment: reject paths that escape the workspace root, mirroring the
+      // WorkspacePaths.resolveRelativePathWithinRoot guard.
+      if (path.isAbsolute(trimmedRelativePath)) {
+        return yield* new WorkspaceEntriesListDirError({
+          cwd: input.cwd,
+          relativePath: input.relativePath,
+          operation: "workspaceEntries.listDir.containment",
+          detail: `Directory path must be relative to the project root: ${input.relativePath}`,
+        });
+      }
+      const relativeToRoot = toPosixPath(path.relative(workspaceRoot, absoluteDir));
+      if (
+        relativeToRoot === ".." ||
+        relativeToRoot.startsWith("../") ||
+        path.isAbsolute(relativeToRoot)
+      ) {
+        return yield* new WorkspaceEntriesListDirError({
+          cwd: input.cwd,
+          relativePath: input.relativePath,
+          operation: "workspaceEntries.listDir.containment",
+          detail: `Directory path must be relative to the project root: ${input.relativePath}`,
+        });
+      }
+
+      const dirents = yield* Effect.tryPromise({
+        try: () => fsPromises.readdir(absoluteDir, { withFileTypes: true }),
+        catch: (cause) =>
+          new WorkspaceEntriesListDirError({
+            cwd: input.cwd,
+            relativePath: input.relativePath,
+            operation: "workspaceEntries.listDir.readDirectory",
+            detail: `Unable to list '${absoluteDir}': ${cause instanceof Error ? cause.message : String(cause)}`,
+            cause,
+          }),
+      }).pipe(
+        // The user can deny macOS TCC prompts for the target dir (Documents,
+        // Downloads, Music, etc.); surface an empty listing instead of an
+        // error so the caller doesn't retry-loop the prompt.
+        Effect.catchIf(
+          (error) => {
+            const code = (error.cause as NodeJS.ErrnoException | undefined)?.code;
+            return code === "EACCES" || code === "EPERM";
+          },
+          () => Effect.succeed<Dirent[]>([]),
+        ),
+      );
+
+      const entries: FilesystemListDirEntry[] = [];
+      for (const dirent of dirents) {
+        if (!dirent.name || dirent.name === "." || dirent.name === "..") {
+          continue;
+        }
+        // Skip symlinks/sockets/etc. that aren't plain files or directories.
+        if (!dirent.isDirectory() && !dirent.isFile()) {
+          continue;
+        }
+        const relativePath = toPosixPath(
+          trimmedRelativePath ? path.join(trimmedRelativePath, dirent.name) : dirent.name,
+        );
+        entries.push({
+          name: dirent.name,
+          relativePath,
+          kind: dirent.isDirectory() ? "directory" : "file",
+        });
+      }
+
+      // Directories first, then files, each alphabetical.
+      entries.sort((left, right) => {
+        if (left.kind !== right.kind) {
+          return left.kind === "directory" ? -1 : 1;
+        }
+        return left.name.localeCompare(right.name);
+      });
+
+      return { entries };
+    },
+  );
+
   const search: WorkspaceEntriesShape["search"] = Effect.fn("WorkspaceEntries.search")(
     function* (input) {
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
@@ -530,6 +633,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
 
   return {
     browse,
+    listDir,
     invalidate,
     search,
   } satisfies WorkspaceEntriesShape;

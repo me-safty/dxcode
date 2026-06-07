@@ -473,6 +473,41 @@ label:has(> select#reasoning-effort) select {
   background: color-mix(in srgb, var(--muted) 78%, var(--background)) !important;
 }
 
+/* Read-only file viewer (Files panel): shiki output with gutter line numbers. */
+.file-viewer-shiki .shiki {
+  margin: 0;
+  padding: 0.5rem 0;
+  background: var(--background) !important;
+  counter-reset: file-viewer-line;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  tab-size: 2;
+}
+
+.file-viewer-shiki .shiki code {
+  display: block;
+  width: fit-content;
+  min-width: 100%;
+}
+
+.file-viewer-shiki .shiki .line {
+  display: inline-block;
+  width: 100%;
+  padding-right: 1rem;
+}
+
+.file-viewer-shiki .shiki .line::before {
+  counter-increment: file-viewer-line;
+  content: counter(file-viewer-line);
+  display: inline-block;
+  width: 3rem;
+  margin-right: 1rem;
+  padding-right: 0.75rem;
+  text-align: right;
+  color: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  user-select: none;
+}
+
 .chat-markdown table {
   width: 100%;
   border-collapse: collapse;

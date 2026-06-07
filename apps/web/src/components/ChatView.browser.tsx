@@ -248,6 +248,8 @@ function createMockEnvironmentApi(input: {
     projects: {} as EnvironmentApi["projects"],
     filesystem: {
       browse: input.browse,
+      listDir: vi.fn() as unknown as EnvironmentApi["filesystem"]["listDir"],
+      readFile: vi.fn() as unknown as EnvironmentApi["filesystem"]["readFile"],
     },
     sourceControl: {} as EnvironmentApi["sourceControl"],
     vcs: {} as EnvironmentApi["vcs"],

@@ -45,6 +45,7 @@ import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import { parseFilesRouteSearch, stripFilesSearchParams } from "../filesRouteSearch";
 import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
@@ -803,6 +804,10 @@ export default function ChatView(props: ChatViewProps) {
     strict: false,
     select: (params) => parseDiffRouteSearch(params),
   });
+  const filesSearch = useSearch({
+    strict: false,
+    select: (params) => parseFilesRouteSearch(params),
+  });
   const { resolvedTheme } = useTheme();
   // Granular store selectors — avoid subscribing to prompt changes.
   const composerRuntimeMode = useComposerDraftStore(
@@ -968,6 +973,20 @@ export default function ChatView(props: ChatViewProps) {
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const diffOpen = rawSearch.diff === "1";
+  // Diff and Files share the one docked right surface; never treat both as open.
+  // Diff takes precedence as a backstop if both params ever coexist.
+  const filesOpen = filesSearch.files === "1" && !diffOpen;
+  const rightPanelOpen = diffOpen || filesOpen;
+  // A single header button opens/closes the docked surface; remember which view
+  // it was last showing so reopening returns to the same one.
+  const [lastRightPanelMode, setLastRightPanelMode] = useState<"diff" | "files">("diff");
+  useEffect(() => {
+    if (diffOpen) {
+      setLastRightPanelMode("diff");
+    } else if (filesOpen) {
+      setLastRightPanelMode("files");
+    }
+  }, [diffOpen, filesOpen]);
   const activeThreadId = activeThread?.id ?? null;
   const runningTerminalIds = useThreadRunningTerminalIds({
     environmentId: activeThread?.environmentId ?? null,
@@ -1916,11 +1935,57 @@ export default function ChatView(props: ChatViewProps) {
       },
       replace: true,
       search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
+        // Opening Diff closes Files (they share the one docked right surface).
+        // `files: undefined` is explicit so retainSearchParams clears it rather
+        // than re-injecting its prior value.
+        const rest = stripFilesSearchParams(stripDiffSearchParams(previous));
+        return diffOpen
+          ? { ...rest, diff: undefined, files: undefined }
+          : { ...rest, diff: "1", files: undefined };
       },
     });
   }, [diffOpen, environmentId, isServerThread, navigate, onDiffPanelOpen, threadId]);
+  const onToggleFiles = useCallback(() => {
+    if (!isServerThread) {
+      return;
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId,
+        threadId,
+      },
+      replace: true,
+      search: (previous) => {
+        // Opening Files closes Diff (they share the one docked right surface).
+        // `diff: undefined` is explicit so retainSearchParams clears it rather
+        // than re-injecting its prior value.
+        const rest = stripFilesSearchParams(stripDiffSearchParams(previous));
+        return filesOpen
+          ? { ...rest, files: undefined, diff: undefined }
+          : { ...rest, files: "1", diff: undefined };
+      },
+    });
+  }, [environmentId, filesOpen, isServerThread, navigate, threadId]);
+  // Single open/close control for the docked right surface. Closing closes
+  // whichever view is open; opening restores the last view (falling back to
+  // Files when Diff is unavailable). In-panel tabs switch between the two.
+  const onToggleRightPanel = useCallback(() => {
+    if (diffOpen) {
+      onToggleDiff();
+      return;
+    }
+    if (filesOpen) {
+      onToggleFiles();
+      return;
+    }
+    const mode = lastRightPanelMode === "diff" && !isGitRepo ? "files" : lastRightPanelMode;
+    if (mode === "diff") {
+      onToggleDiff();
+    } else {
+      onToggleFiles();
+    }
+  }, [diffOpen, filesOpen, isGitRepo, lastRightPanelMode, onToggleDiff, onToggleFiles]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -2737,7 +2802,7 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "diff.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        onToggleDiff();
+        onToggleRightPanel();
         return;
       }
 
@@ -2769,7 +2834,7 @@ export default function ChatView(props: ChatViewProps) {
     runProjectScript,
     splitTerminal,
     keybindings,
-    onToggleDiff,
+    onToggleRightPanel,
     toggleTerminalVisibility,
   ]);
 
@@ -3692,10 +3757,12 @@ export default function ChatView(props: ChatViewProps) {
           threadId,
         },
         search: (previous) => {
-          const rest = stripDiffSearchParams(previous);
+          // Opening Diff closes Files (they share the one docked right surface).
+          // `files: undefined` is explicit so retainSearchParams clears it.
+          const rest = stripFilesSearchParams(stripDiffSearchParams(previous));
           return filePath
-            ? { ...rest, diff: "1", diffTurnId: turnId, diffFilePath: filePath }
-            : { ...rest, diff: "1", diffTurnId: turnId };
+            ? { ...rest, diff: "1", diffTurnId: turnId, diffFilePath: filePath, files: undefined }
+            : { ...rest, diff: "1", diffTurnId: turnId, files: undefined };
         },
       });
     },
@@ -3752,15 +3819,15 @@ export default function ChatView(props: ChatViewProps) {
           terminalAvailable={activeProject !== undefined}
           terminalOpen={terminalUiState.terminalOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-          diffToggleShortcutLabel={diffPanelShortcutLabel}
+          rightPanelToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
-          diffOpen={diffOpen}
+          rightPanelOpen={rightPanelOpen}
           onRunProjectScript={runProjectScript}
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
-          onToggleDiff={onToggleDiff}
+          onToggleRightPanel={onToggleRightPanel}
         />
       </header>
 
