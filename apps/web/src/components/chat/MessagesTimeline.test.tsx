@@ -146,9 +146,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Show full message");
+    expect(markup).toContain("Show more");
     expect(markup).toContain('data-user-message-collapsed="true"');
-    expect(markup).toContain('data-user-message-fade="true"');
     expect(markup).toContain('data-user-message-footer="true"');
   }, 15_000);
 
@@ -161,7 +160,7 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).not.toContain("Show full message");
+    expect(markup).not.toContain("Show more");
     expect(markup).toContain('data-user-message-collapsible="false"');
   });
 
@@ -189,7 +188,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Terminal 1 lines 1-5");
     expect(markup).toContain("lucide-terminal");
     expect(markup).toContain("yoo what&#x27;s ");
-    expect(markup).toContain("Show full message");
+    expect(markup).toContain("Show more");
   }, 20_000);
 
   it("keeps the copy button for collapsed long user messages", async () => {
@@ -227,8 +226,9 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Context compacted");
-    expect(markup).toContain("Work log");
+    expect(markup).toContain("Worked for 0s");
+    expect(markup).toContain('data-work-group-expanded="false"');
+    expect(markup).not.toContain("Context compacted");
   });
 
   it("formats changed file paths from the workspace root", async () => {
@@ -254,7 +254,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("t3code/apps/web/src/session-logic.ts");
+    expect(markup).toContain("Worked for 0s");
+    expect(markup).toContain('data-work-group-expanded="false"');
     expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
   });
 

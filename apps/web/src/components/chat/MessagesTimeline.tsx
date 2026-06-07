@@ -137,6 +137,8 @@ interface MessagesTimelineProps {
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
   completionSummaryTurnId?: TurnId | null;
+  completionSummaryStartedAt?: string | null;
+  completionSummaryCompletedAt?: string | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
@@ -167,6 +169,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   completionDividerBeforeEntryId,
   completionSummary,
   completionSummaryTurnId,
+  completionSummaryStartedAt,
+  completionSummaryCompletedAt,
   turnDiffSummaryByAssistantMessageId,
   routeThreadKey,
   onOpenTurnDiff,
@@ -189,6 +193,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         completionDividerBeforeEntryId,
         completionSummary,
         completionSummaryTurnId: completionSummaryTurnId ?? null,
+        completionSummaryStartedAt: completionSummaryStartedAt ?? null,
+        completionSummaryCompletedAt: completionSummaryCompletedAt ?? null,
         isWorking,
         activeTurnInProgress,
         activeTurnId: activeTurnId ?? null,
@@ -201,6 +207,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       completionDividerBeforeEntryId,
       completionSummary,
       completionSummaryTurnId,
+      completionSummaryStartedAt,
+      completionSummaryCompletedAt,
       isWorking,
       activeTurnInProgress,
       activeTurnId,
@@ -343,6 +351,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         <WorkGroupSection
           groupedEntries={row.groupedEntries}
           completionSummary={row.completionSummary}
+          activeStartedAt={row.activeStartedAt}
         />
       ) : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
@@ -350,7 +359,6 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         <AssistantTimelineRow row={row} />
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
-      {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
     </div>
   );
 });
@@ -519,29 +527,6 @@ function ProposedPlanTimelineRow({
   );
 }
 
-function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
-  return (
-    <div className="py-0.5 pl-1.5">
-      <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
-        <span className="inline-flex items-center gap-[3px]">
-          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
-          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
-          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
-        </span>
-        <span>
-          {row.createdAt ? (
-            <>
-              Working for <WorkingTimer createdAt={row.createdAt} />
-            </>
-          ) : (
-            "Working..."
-          )}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Self-ticking labels — update their own text nodes so elapsed-time display
 // does not create a React commit every second while a response is streaming.
@@ -610,37 +595,58 @@ function LiveMessageMeta({
 const WorkGroupSection = memo(function WorkGroupSection({
   groupedEntries,
   completionSummary,
+  activeStartedAt,
 }: {
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
   completionSummary: string | null;
+  activeStartedAt: string | null;
 }) {
   const { workspaceRoot } = use(TimelineRowCtx);
   const [isExpanded, setIsExpanded] = useState(false);
   const groupLabel = formatWorkGroupSummary(groupedEntries, completionSummary);
+  const isActive = activeStartedAt !== null;
+  const visibleEntries = groupedEntries.filter(
+    (entry) => entry.kind !== "work" || entry.workEntry.hidden !== true,
+  );
 
   return (
     <div className="my-2" data-work-group-expanded={isExpanded ? "true" : "false"}>
-      <button
-        type="button"
-        aria-expanded={isExpanded}
-        className="group flex w-full cursor-pointer items-center gap-2 py-1 text-left"
-        data-scroll-anchor-ignore
-        onClick={() => setIsExpanded((value) => !value)}
-      >
-        <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground/70 transition-colors group-hover:text-muted-foreground">
-          {groupLabel}
-          <ChevronRightIcon
-            className={cn(
-              "size-4 transition-transform duration-150",
-              isExpanded ? "rotate-90" : null,
+      {isActive ? (
+        <div className="flex w-full items-center gap-2 py-1 text-left">
+          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground/70">
+            {activeStartedAt ? (
+              <>
+                Working for <WorkingTimer createdAt={activeStartedAt} />
+              </>
+            ) : (
+              "Working..."
             )}
-          />
-        </span>
-        <span className="h-px min-w-8 flex-1 bg-border/65" />
-      </button>
-      {isExpanded ? (
+          </span>
+          <span className="h-px min-w-8 flex-1 bg-border/65" />
+        </div>
+      ) : (
+        <button
+          type="button"
+          aria-expanded={isExpanded}
+          className="group flex w-full cursor-pointer items-center gap-2 py-1 text-left"
+          data-scroll-anchor-ignore
+          onClick={() => setIsExpanded((value) => !value)}
+        >
+          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground/70 transition-colors group-hover:text-muted-foreground">
+            {groupLabel}
+            <ChevronRightIcon
+              className={cn(
+                "size-4 transition-transform duration-150",
+                isExpanded ? "rotate-90" : null,
+              )}
+            />
+          </span>
+          <span className="h-px min-w-8 flex-1 bg-border/65" />
+        </button>
+      )}
+      {(isActive || isExpanded) && visibleEntries.length > 0 ? (
         <div className="mt-1 space-y-2">
-          {groupedEntries.map((entry) => (
+          {visibleEntries.map((entry) => (
             <ActivityGroupEntryRow
               key={`activity-row:${entry.id}`}
               entry={entry}
@@ -1078,21 +1084,30 @@ function formatMessageMeta(
 }
 
 function formatWorkGroupSummary(
-  groupedEntries: ReadonlyArray<Pick<TimelineActivityEntry, "createdAt">>,
+  groupedEntries: ReadonlyArray<TimelineActivityEntry>,
   completionSummary: string | null,
 ): string {
+  const firstEntry = groupedEntries[0];
+  const lastEntry = groupedEntries[groupedEntries.length - 1];
+  const elapsed =
+    firstEntry && lastEntry ? formatWorkingTimer(firstEntry.createdAt, lastEntry.createdAt) : null;
+  const hasHiddenEntries = groupedEntries.some(
+    (entry) => entry.kind === "work" && entry.workEntry.hidden === true,
+  );
+
+  if (hasHiddenEntries && elapsed) {
+    return `Worked for ${elapsed}`;
+  }
+
   if (completionSummary) {
     return completionSummary;
   }
 
-  const firstEntry = groupedEntries[0];
-  const lastEntry = groupedEntries[groupedEntries.length - 1];
-  if (!firstEntry || !lastEntry) {
+  if (!elapsed) {
     return "Worked";
   }
 
-  const elapsed = formatWorkingTimer(firstEntry.createdAt, lastEntry.createdAt);
-  return elapsed ? `Worked for ${elapsed}` : "Worked";
+  return `Worked for ${elapsed}`;
 }
 
 function workToneIcon(tone: TimelineWorkEntry["tone"]): {

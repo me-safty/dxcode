@@ -61,7 +61,6 @@ import {
   findLatestProposedPlan,
   deriveWorkLogEntries,
   hasActionableProposedPlan,
-  hasToolActivityForTurn,
   isLatestTurnSettled,
   formatElapsed,
 } from "../session-logic";
@@ -1472,10 +1471,6 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
-  const latestTurnHasToolActivity = useMemo(
-    () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
-    [activeLatestTurn?.turnId, threadActivities],
-  );
   const pendingApprovals = useMemo(
     () => derivePendingApprovals(threadActivities),
     [threadActivities],
@@ -1814,15 +1809,33 @@ export default function ChatView(props: ChatViewProps) {
     if (!latestTurnSettled) return null;
     if (!activeLatestTurn?.startedAt) return null;
     if (!activeLatestTurn.completedAt) return null;
-    if (!latestTurnHasToolActivity) return null;
 
-    const elapsed = formatElapsed(activeLatestTurn.startedAt, activeLatestTurn.completedAt);
+    let completedAt = activeLatestTurn.completedAt;
+    if (activeLatestTurn.turnId) {
+      let latestActivityAtMs = Date.parse(completedAt);
+      if (Number.isNaN(latestActivityAtMs)) {
+        latestActivityAtMs = 0;
+      }
+      for (const activity of threadActivities) {
+        if (activity.turnId !== activeLatestTurn.turnId) {
+          continue;
+        }
+        const activityAtMs = Date.parse(activity.createdAt);
+        if (!Number.isNaN(activityAtMs) && activityAtMs > latestActivityAtMs) {
+          latestActivityAtMs = activityAtMs;
+          completedAt = activity.createdAt;
+        }
+      }
+    }
+
+    const elapsed = formatElapsed(activeLatestTurn.startedAt, completedAt);
     return elapsed ? `Worked for ${elapsed}` : null;
   }, [
     activeLatestTurn?.completedAt,
     activeLatestTurn?.startedAt,
-    latestTurnHasToolActivity,
+    activeLatestTurn?.turnId,
     latestTurnSettled,
+    threadActivities,
   ]);
   const completionDividerBeforeEntryId = useMemo(() => {
     if (!latestTurnSettled) return null;
@@ -3787,6 +3800,9 @@ export default function ChatView(props: ChatViewProps) {
               timelineEntries={timelineEntries}
               completionDividerBeforeEntryId={completionDividerBeforeEntryId}
               completionSummary={completionSummary}
+              completionSummaryTurnId={activeLatestTurn?.turnId ?? null}
+              completionSummaryStartedAt={activeLatestTurn?.startedAt ?? null}
+              completionSummaryCompletedAt={activeLatestTurn?.completedAt ?? null}
               turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
               activeThreadEnvironmentId={activeThread.environmentId}
               routeThreadKey={routeThreadKey}

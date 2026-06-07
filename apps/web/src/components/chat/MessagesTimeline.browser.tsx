@@ -127,7 +127,10 @@ describe("MessagesTimeline", () => {
       await expect
         .element(page.getByText("Send a message to start the conversation."))
         .not.toBeInTheDocument();
-      await expect.element(page.getByText("Thinking - Inspecting repository state")).toBeVisible();
+      await expect.element(page.getByText("Worked for 0s")).toBeVisible();
+      await expect
+        .element(page.getByText("Thinking - Inspecting repository state"))
+        .not.toBeInTheDocument();
     } finally {
       await screen.unmount();
     }
@@ -170,7 +173,7 @@ describe("MessagesTimeline", () => {
         />,
       );
 
-      await expect.element(page.getByText("Thinking - Inspecting repository state")).toBeVisible();
+      await expect.element(page.getByText("Worked for 0s")).toBeVisible();
       expect(props.onIsAtEndChange).toHaveBeenCalledWith(true);
       expect(scrollToEndSpy).toHaveBeenCalledWith({ animated: false });
       expect(requestAnimationFrameSpy).toHaveBeenCalled();
@@ -188,7 +191,7 @@ describe("MessagesTimeline", () => {
     );
 
     try {
-      const toggle = page.getByRole("button", { name: "Show full message" });
+      const toggle = page.getByRole("button", { name: "Show more" });
       await expect.element(toggle).toBeVisible();
       await expect.element(toggle).toHaveAttribute("aria-expanded", "false");
 
@@ -196,10 +199,7 @@ describe("MessagesTimeline", () => {
         "[data-user-message-body='true']",
       ) as HTMLDivElement | null;
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");
-      expect(messageBody?.className).toContain("max-h-44");
-      expect(messageBody?.className).toContain("overflow-hidden");
-      expect(messageBody?.getAttribute("data-user-message-fade")).toBe("true");
-      expect(messageBody?.style.maskImage).toContain("linear-gradient");
+      expect(messageBody?.className).toContain("line-clamp-2");
     } finally {
       await screen.unmount();
     }
@@ -214,7 +214,7 @@ describe("MessagesTimeline", () => {
     );
 
     try {
-      const expandButton = page.getByRole("button", { name: "Show full message" });
+      const expandButton = page.getByRole("button", { name: "Show more" });
       await expect.element(expandButton).toBeVisible();
 
       expect(document.body.textContent ?? "").toContain("deep hidden detail only after expand");
@@ -227,18 +227,14 @@ describe("MessagesTimeline", () => {
 
       let messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("false");
-      expect(messageBody?.className).not.toContain("max-h-44");
-      expect(messageBody?.getAttribute("data-user-message-fade")).toBe("false");
-      expect((messageBody as HTMLDivElement | null)?.style.maskImage ?? "").toBe("");
+      expect(messageBody?.className).not.toContain("line-clamp-2");
 
       await collapseButton.click();
 
-      await expect.element(page.getByRole("button", { name: "Show full message" })).toBeVisible();
+      await expect.element(page.getByRole("button", { name: "Show more" })).toBeVisible();
       messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");
-      expect(messageBody?.className).toContain("max-h-44");
-      expect(messageBody?.getAttribute("data-user-message-fade")).toBe("true");
-      expect((messageBody as HTMLDivElement | null)?.style.maskImage).toContain("linear-gradient");
+      expect(messageBody?.className).toContain("line-clamp-2");
     } finally {
       await screen.unmount();
     }
@@ -253,7 +249,7 @@ describe("MessagesTimeline", () => {
     );
 
     try {
-      await expect.element(page.getByRole("button", { name: "Show full message" })).toBeVisible();
+      await expect.element(page.getByRole("button", { name: "Show more" })).toBeVisible();
 
       const messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");

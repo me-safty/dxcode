@@ -1,5 +1,44 @@
 import * as React from "react";
 
+export async function writeClipboardText(value: string): Promise<void> {
+  if (typeof window === "undefined") {
+    throw new Error("Clipboard API unavailable.");
+  }
+
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {
+      // Fall back for embedded browsers where the async Clipboard API exists
+      // but rejects because clipboard permissions are not delegated.
+    }
+  }
+
+  const document = window.document;
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.top = "0";
+  textArea.style.left = "0";
+  textArea.style.width = "1px";
+  textArea.style.height = "1px";
+  textArea.style.opacity = "0";
+
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("Clipboard copy command failed.");
+    }
+  } finally {
+    textArea.remove();
+  }
+}
+
 export function useCopyToClipboard<TContext = void>({
   timeout = 2000,
   onCopy,
@@ -20,14 +59,9 @@ export function useCopyToClipboard<TContext = void>({
   timeoutRef.current = timeout;
 
   const copyToClipboard = React.useCallback((value: string, ctx: TContext): void => {
-    if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
-      onErrorRef.current?.(new Error("Clipboard API unavailable."), ctx);
-      return;
-    }
-
     if (!value) return;
 
-    navigator.clipboard.writeText(value).then(
+    writeClipboardText(value).then(
       () => {
         if (timeoutIdRef.current) {
           clearTimeout(timeoutIdRef.current);

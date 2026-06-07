@@ -205,7 +205,160 @@ describe("resolveAssistantMessageCopyState", () => {
 });
 
 describe("deriveMessagesTimelineRows", () => {
-  it("only enables assistant copy for the terminal assistant message in a turn", () => {
+  it("attaches completion summary to the work group before the final assistant message", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "user-1" as never,
+            role: "user",
+            text: "Do the thing",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:10Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:10Z",
+            label: "Ran command",
+            detail: "pnpm test",
+            tone: "tool",
+          },
+        },
+        {
+          id: "assistant-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:20Z",
+          message: {
+            id: "assistant-1" as never,
+            role: "assistant",
+            text: "Done",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:20Z",
+            completedAt: "2026-01-01T00:00:30Z",
+            streaming: false,
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: "assistant-entry",
+      completionSummary: "Worked for 30s",
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const workRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { kind: "work" }> => row.kind === "work",
+    );
+
+    expect(workRow?.completionSummary).toBe("Worked for 30s");
+  });
+
+  it("attaches completion summary by turn id when work appears after the final assistant message", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "assistant-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:20Z",
+          message: {
+            id: "assistant-1" as never,
+            role: "assistant",
+            text: "Done",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:20Z",
+            completedAt: "2026-01-01T00:00:30Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:40Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:40Z",
+            turnId: "turn-1" as never,
+            label: "Runtime warning",
+            tone: "info",
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: "assistant-entry",
+      completionSummary: "Worked for 30s",
+      completionSummaryTurnId: "turn-1" as never,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const workRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { kind: "work" }> => row.kind === "work",
+    );
+
+    expect(workRow?.completionSummary).toBe("Worked for 30s");
+  });
+
+  it("attaches completion summary by turn time window when visible work has no turn id", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "assistant-progress-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:30Z",
+          message: {
+            id: "assistant-progress" as never,
+            role: "assistant",
+            text: "Still working.",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:30Z",
+            completedAt: "2026-01-01T00:00:31Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "assistant-final-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:40Z",
+          message: {
+            id: "assistant-final" as never,
+            role: "assistant",
+            text: "Done",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:40Z",
+            completedAt: "2026-01-01T00:00:41Z",
+            streaming: false,
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      completionSummary: "Worked for 38s",
+      completionSummaryStartedAt: "2026-01-01T00:00:02Z",
+      completionSummaryCompletedAt: "2026-01-01T00:00:40Z",
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const workRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { kind: "work" }> => row.kind === "work",
+    );
+
+    expect(workRow?.completionSummary).toBe("Worked for 38s");
+  });
+
+  it("collapses interim assistant messages and only shows the terminal assistant message", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -262,13 +415,103 @@ describe("deriveMessagesTimelineRows", () => {
         row.kind === "message" && row.message.role === "assistant",
     );
 
-    expect(assistantRows).toHaveLength(2);
-    expect(assistantRows[0]?.showAssistantCopyButton).toBe(false);
-    expect(assistantRows[1]?.showAssistantCopyButton).toBe(true);
-    expect(assistantRows[1]?.showCompletionDivider).toBe(true);
+    const workRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { kind: "work" }> => row.kind === "work",
+    );
+
+    expect(assistantRows).toHaveLength(1);
+    expect(assistantRows[0]?.message.id).toBe("assistant-final");
+    expect(assistantRows[0]?.showAssistantCopyButton).toBe(true);
+    expect(assistantRows[0]?.showCompletionDivider).toBe(true);
+    expect(workRow?.groupedEntries).toMatchObject([
+      {
+        kind: "assistant-message",
+        message: {
+          text: "I should ground this first.",
+        },
+      },
+    ]);
   });
 
-  it("marks only the active assistant turn as streaming for copy controls", () => {
+  it("keeps active turn progress under one active work group", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "user-1" as never,
+            role: "user",
+            text: "Inspect files",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "assistant-progress-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:10Z",
+          message: {
+            id: "assistant-progress" as never,
+            role: "assistant",
+            text: "I am reading files.",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:10Z",
+            streaming: true,
+          },
+        },
+        {
+          id: "work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:12Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:12Z",
+            turnId: "turn-1" as never,
+            label: "Read file",
+            tone: "tool",
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: true,
+      activeTurnInProgress: true,
+      activeTurnId: "turn-1" as never,
+      activeTurnStartedAt: "2026-01-01T00:00:05Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const workRows = rows.filter(
+      (row): row is Extract<(typeof rows)[number], { kind: "work" }> => row.kind === "work",
+    );
+    const assistantRows = rows.filter(
+      (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
+        row.kind === "message" && row.message.role === "assistant",
+    );
+
+    expect(assistantRows).toHaveLength(0);
+    expect(workRows).toHaveLength(1);
+    expect(workRows[0]?.activeStartedAt).toBe("2026-01-01T00:00:05Z");
+    expect(workRows[0]?.groupedEntries).toMatchObject([
+      {
+        kind: "assistant-message",
+        message: {
+          text: "I am reading files.",
+        },
+      },
+      {
+        kind: "work",
+        workEntry: {
+          label: "Read file",
+        },
+      },
+    ]);
+  });
+
+  it("moves the active assistant turn into the active work group", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -302,10 +545,10 @@ describe("deriveMessagesTimelineRows", () => {
       ],
       completionDividerBeforeEntryId: "assistant-two-entry",
       completionSummary: "done",
-      isWorking: false,
+      isWorking: true,
       activeTurnInProgress: true,
       activeTurnId: "turn-2" as never,
-      activeTurnStartedAt: null,
+      activeTurnStartedAt: "2026-01-01T00:00:19Z",
       turnDiffSummaryByAssistantMessageId: new Map(),
       revertTurnCountByUserMessageId: new Map(),
     });
@@ -314,11 +557,23 @@ describe("deriveMessagesTimelineRows", () => {
       (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
         row.kind === "message" && row.message.role === "assistant",
     );
+    const workRows = rows.filter(
+      (row): row is Extract<(typeof rows)[number], { kind: "work" }> => row.kind === "work",
+    );
 
+    expect(assistantRows).toHaveLength(1);
     expect(assistantRows[0]?.assistantCopyStreaming).toBe(false);
     expect(assistantRows[0]?.completionSummary).toBeNull();
-    expect(assistantRows[1]?.assistantCopyStreaming).toBe(true);
-    expect(assistantRows[1]?.completionSummary).toBe("done");
+    expect(workRows).toHaveLength(1);
+    expect(workRows[0]?.activeStartedAt).toBe("2026-01-01T00:00:19Z");
+    expect(workRows[0]?.groupedEntries).toMatchObject([
+      {
+        kind: "assistant-message",
+        message: {
+          text: "Active response.",
+        },
+      },
+    ]);
   });
 
   it("projects assistant diff summaries and user revert counts onto the affected rows", () => {

@@ -692,6 +692,32 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
   });
 
+  it("marks runtime warnings as hidden work log entries", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "runtime-warning",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "runtime.warning",
+        summary: "Runtime warning",
+        tone: "info",
+        payload: { message: "Provider emitted a noisy warning" },
+      }),
+      makeActivity({
+        id: "runtime-error",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "runtime.error",
+        summary: "Runtime error",
+        tone: "error",
+        payload: { message: "Provider failed" },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries.map((entry) => entry.id)).toEqual(["runtime-warning", "runtime-error"]);
+    expect(entries[0]?.hidden).toBe(true);
+    expect(entries[1]?.hidden).toBeUndefined();
+  });
+
   it("omits ExitPlanMode lifecycle entries once the plan card is shown", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
