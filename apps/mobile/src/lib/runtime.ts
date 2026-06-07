@@ -13,12 +13,11 @@ function configuredRelayUrl(): string {
 }
 
 const mobileHttpClientLayer = remoteHttpClientLayer(fetch);
-const mobilePlatformLayer = Layer.merge(mobileHttpClientLayer, mobileCryptoLayer);
-const mobileRelayLayer = mobileManagedRelayClientLayer(configuredRelayUrl()).pipe(
-  Layer.provide(mobilePlatformLayer),
-);
-const mobileObservabilityLayer = mobileTracingLayer.pipe(Layer.provide(mobileHttpClientLayer));
 
 export const mobileRuntime = ManagedRuntime.make(
-  Layer.merge(mobilePlatformLayer, mobileRelayLayer).pipe(Layer.provide(mobileObservabilityLayer)),
+  mobileManagedRelayClientLayer(configuredRelayUrl()).pipe(
+    Layer.provideMerge(mobileCryptoLayer),
+    Layer.provideMerge(mobileHttpClientLayer),
+    Layer.provide(mobileTracingLayer.pipe(Layer.provide(mobileHttpClientLayer))),
+  ),
 );
