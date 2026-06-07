@@ -3,6 +3,7 @@ import { sql as drizzleSql } from "drizzle-orm";
 import * as Crypto from "effect/Crypto";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Record from "effect/Record";
@@ -68,7 +69,7 @@ import { withSpanAttributes } from "../observability.ts";
 import { RelayDb } from "../db.ts";
 
 const relayCorsAllowedMethods = ["GET", "POST", "DELETE", "OPTIONS"] as const;
-const RELAY_DPOP_ACCESS_TOKEN_TTL_SECONDS = 30 * 60;
+const RELAY_DPOP_ACCESS_TOKEN_TTL = "30 minutes";
 const relayCorsAllowedHeaders = [
   "authorization",
   "b3",
@@ -598,7 +599,7 @@ export const tokenApi = HttpApiBuilder.group(
           Effect.provideService(DpopProofs.DpopProofReplay, dpopProofs),
         );
         const now = yield* DateTime.now;
-        const expiresAt = DateTime.addDuration(now, "30 minutes");
+        const expiresAt = DateTime.addDuration(now, RELAY_DPOP_ACCESS_TOKEN_TTL);
         const jti = yield* crypto.randomUUIDv4.pipe(
           Effect.catch(() => relayInternalErrorResponse("internal_error")),
         );
@@ -616,7 +617,7 @@ export const tokenApi = HttpApiBuilder.group(
             .pipe(Effect.catch(() => relayInternalErrorResponse("internal_error"))),
           issued_token_type: RelayAccessTokenType,
           token_type: "DPoP" as const,
-          expires_in: RELAY_DPOP_ACCESS_TOKEN_TTL_SECONDS,
+          expires_in: Duration.toSeconds(RELAY_DPOP_ACCESS_TOKEN_TTL),
           scope: encodeOAuthScope(requestedScopes),
         };
       }, mapRelayCommonApiErrors("invalid_dpop")),
