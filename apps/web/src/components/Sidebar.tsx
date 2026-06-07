@@ -2051,7 +2051,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               </TooltipPopup>
             </Tooltip>
           ) : (
-            <ProjectFavicon environmentId={project.environmentId} cwd={project.cwd} />
+            <ProjectFavicon
+              environmentId={project.environmentId}
+              cwd={project.cwd}
+              isActive={activeRouteThreadKey !== null}
+            />
           )}
           <span className="flex min-w-0 flex-1 items-center gap-2">
             <span className="truncate text-xs font-medium text-foreground/90">

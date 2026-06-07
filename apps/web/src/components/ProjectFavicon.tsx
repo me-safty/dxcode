@@ -1,5 +1,5 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { FolderIcon } from "lucide-react";
+import { FolderIcon, FolderOpenIcon } from "lucide-react";
 import { useState } from "react";
 import { resolveEnvironmentHttpUrl } from "../environments/runtime";
 
@@ -10,7 +10,9 @@ export function ProjectFavicon(input: {
   environmentId: EnvironmentId;
   cwd: string;
   className?: string;
+  isActive?: boolean;
 }) {
+  const FallbackFolderIcon = input.isActive ? FolderOpenIcon : FolderIcon;
   const src = (() => {
     try {
       return resolveEnvironmentHttpUrl({
@@ -28,7 +30,7 @@ export function ProjectFavicon(input: {
 
   if (!src) {
     return (
-      <FolderIcon
+      <FallbackFolderIcon
         className={`size-3.5 shrink-0 text-muted-foreground/50 ${input.className ?? ""}`}
       />
     );
@@ -37,7 +39,7 @@ export function ProjectFavicon(input: {
   return (
     <>
       {status !== "loaded" ? (
-        <FolderIcon
+        <FallbackFolderIcon
           className={`size-3.5 shrink-0 text-muted-foreground/50 ${input.className ?? ""}`}
         />
       ) : null}
