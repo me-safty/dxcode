@@ -3,8 +3,8 @@
  *
  * Cursor exposes an ACP-based CLI. The driver is still a plain value, but
  * its snapshot uses `makeManagedServerProvider`'s optional `enrichSnapshot`
- * hook to run the slow ACP model-capability probe in the background without
- * blocking the initial `ready`-state publish.
+ * hook to republish maintenance metadata without blocking the initial
+ * `ready`-state publish.
  *
  * Text generation is supported via the ACP runtime — `makeCursorTextGeneration`
  * drives `runtime.prompt` with a structured-output schema and collects the
@@ -139,20 +139,17 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         initialSnapshot: (settings) =>
           buildInitialCursorProviderSnapshot(settings).pipe(Effect.map(stampIdentity)),
         checkProvider,
-        // Preserve the background ACP model-capability probe that used to
-        // live on `CursorProviderLive`. Only fires when the snapshot reports
-        // an authenticated, enabled provider with at least one non-custom
-        // model whose capabilities haven't been captured yet.
+        // Cursor model discovery runs during provider checks. Enrichment only
+        // republishes maintenance metadata such as version advisories.
         enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
           enrichCursorSnapshot({
             settings,
-            environment: processEnv,
             snapshot: currentSnapshot,
             maintenanceCapabilities,
             publishSnapshot,
             stampIdentity,
             httpClient,
-          }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
+          }),
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(
         Effect.mapError(

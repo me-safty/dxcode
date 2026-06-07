@@ -65,6 +65,7 @@ import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts";
 import {
   authBearerBootstrapRouteLayer,
+  authBrowserSessionRouteLayer,
   authBootstrapRouteLayer,
   authClientsRevokeOthersRouteLayer,
   authClientsRevokeRouteLayer,
@@ -73,6 +74,8 @@ import {
   authPairingLinksRouteLayer,
   authPairingCredentialRouteLayer,
   authSessionRouteLayer,
+  authTokenExchangeRouteLayer,
+  authWebSocketTicketRouteLayer,
   authWebSocketTokenRouteLayer,
 } from "./auth/http.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
@@ -309,6 +312,7 @@ const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
 
 export const makeRoutesLayer = Layer.mergeAll(
   authBearerBootstrapRouteLayer,
+  authBrowserSessionRouteLayer,
   authBootstrapRouteLayer,
   authClientsRevokeOthersRouteLayer,
   authClientsRevokeRouteLayer,
@@ -317,6 +321,8 @@ export const makeRoutesLayer = Layer.mergeAll(
   authPairingLinksRouteLayer,
   authPairingCredentialRouteLayer,
   authSessionRouteLayer,
+  authTokenExchangeRouteLayer,
+  authWebSocketTicketRouteLayer,
   authWebSocketTokenRouteLayer,
   attachmentsRouteLayer,
   orchestrationDispatchRouteLayer,

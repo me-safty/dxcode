@@ -269,6 +269,8 @@ function splitNullSeparatedPaths(input: string, truncated: boolean): string[] {
   return parts.filter((value) => value.length > 0);
 }
 
+const WORKSPACE_FILE_EXISTENCE_CHECK_CONCURRENCY = 64;
+
 function chunkPathsForGitCheckIgnore(relativePaths: ReadonlyArray<string>): string[][] {
   const chunks: string[][] = [];
   let chunk: string[] = [];
@@ -490,10 +492,24 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       });
     }
 
+    const filterExistingPaths = (relativePaths: ReadonlyArray<string>) =>
+      Effect.filter(
+        relativePaths,
+        (relativePath) =>
+          fileSystem.exists(path.join(cwd, relativePath)).pipe(Effect.orElseSucceed(() => false)),
+        { concurrency: WORKSPACE_FILE_EXISTENCE_CHECK_CONCURRENCY },
+      );
+
+    const paths = yield* filterExistingPaths(
+      splitNullSeparatedPaths(listedResult.stdout, listedResult.stdoutTruncated),
+    );
+    const ignoredPaths = yield* filterExistingPaths(
+      splitNullSeparatedPaths(ignoredResult.stdout, ignoredResult.stdoutTruncated),
+    );
     const freshness = yield* nowFreshness();
     return {
-      paths: splitNullSeparatedPaths(listedResult.stdout, listedResult.stdoutTruncated),
-      ignoredPaths: splitNullSeparatedPaths(ignoredResult.stdout, ignoredResult.stdoutTruncated),
+      paths,
+      ignoredPaths,
       truncated: listedResult.stdoutTruncated || ignoredResult.stdoutTruncated,
       freshness,
     };

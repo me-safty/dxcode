@@ -210,6 +210,108 @@ function modeState(): AcpSchema.SessionModeState {
   };
 }
 
+function listAvailableModelsResponse(): {
+  readonly models: ReadonlyArray<{
+    readonly value: string;
+    readonly name: string;
+    readonly configOptions?: ReadonlyArray<AcpSchema.SessionConfigOption>;
+  }>;
+} {
+  return {
+    models: [
+      {
+        value: "default",
+        name: "Auto",
+        configOptions: [],
+      },
+      {
+        value: "composer-2",
+        name: "Composer 2",
+        configOptions: [
+          {
+            id: "fast",
+            name: "Fast",
+            category: "model_config",
+            type: "select",
+            currentValue: "true",
+            options: [
+              { value: "false", name: "Off" },
+              { value: "true", name: "Fast" },
+            ],
+          },
+        ],
+      },
+      {
+        value: "gpt-5.4",
+        name: "GPT-5.4",
+        configOptions: [
+          {
+            id: "reasoning",
+            name: "Reasoning",
+            category: "thought_level",
+            type: "select",
+            currentValue: currentReasoning,
+            options: [
+              { value: "none", name: "None" },
+              { value: "low", name: "Low" },
+              { value: "medium", name: "Medium" },
+              { value: "high", name: "High" },
+              { value: "extra-high", name: "Extra High" },
+            ],
+          },
+          {
+            id: "context",
+            name: "Context",
+            category: "model_config",
+            type: "select",
+            currentValue: currentContext,
+            options: [
+              { value: "272k", name: "272K" },
+              { value: "1m", name: "1M" },
+            ],
+          },
+          {
+            id: "fast",
+            name: "Fast",
+            category: "model_config",
+            type: "select",
+            currentValue: String(currentFast),
+            options: [
+              { value: "false", name: "Off" },
+              { value: "true", name: "Fast" },
+            ],
+          },
+        ],
+      },
+      {
+        value: "claude-opus-4-6",
+        name: "Opus 4.6",
+        configOptions: [
+          {
+            id: "reasoning",
+            name: "Reasoning",
+            category: "thought_level",
+            type: "select",
+            currentValue: "high",
+            options: [
+              { value: "low", name: "Low" },
+              { value: "medium", name: "Medium" },
+              { value: "high", name: "High" },
+            ],
+          },
+          {
+            id: "thinking",
+            name: "Thinking",
+            category: "model_config",
+            type: "boolean",
+            currentValue: true,
+          },
+        ],
+      },
+    ],
+  };
+}
+
 const program = Effect.gen(function* () {
   const agent = yield* EffectAcpAgent.AcpAgent;
 
@@ -533,6 +635,10 @@ const program = Effect.gen(function* () {
   );
 
   yield* agent.handleUnknownExtRequest((method, params) => {
+    if (method === "cursor/list_available_models") {
+      return Effect.succeed(listAvailableModelsResponse());
+    }
+
     if (method !== "session/mode/set") {
       return Effect.fail(AcpError.AcpRequestError.methodNotFound(method));
     }

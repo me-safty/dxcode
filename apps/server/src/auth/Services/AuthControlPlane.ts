@@ -26,7 +26,7 @@ export interface IssuedPairingLink {
 export interface IssuedBearerSession {
   readonly sessionId: AuthSessionId;
   readonly token: string;
-  readonly method: "bearer-session-token";
+  readonly method: "bearer-access-token";
   readonly role: SessionRole;
   readonly subject: string;
   readonly client: AuthClientMetadata;

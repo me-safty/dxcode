@@ -1100,6 +1100,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.deepEqual(body.auth.bootstrapMethods, ["desktop-bootstrap"]);
       assert.deepEqual(body.auth.sessionMethods, [
         "browser-session-cookie",
+        "bearer-access-token",
         "bearer-session-token",
       ]);
       assert.isTrue(body.auth.sessionCookieName.startsWith("t3_session_"));
@@ -1149,7 +1150,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
         assert.equal(bootstrapResponse.status, 200);
         assert.equal(bootstrapBody.authenticated, true);
-        assert.equal(bootstrapBody.sessionMethod, "bearer-session-token");
+        assert.equal(bootstrapBody.sessionMethod, "bearer-access-token");
         assert.equal(typeof bootstrapBody.sessionToken, "string");
         assert.isTrue((bootstrapBody.sessionToken?.length ?? 0) > 0);
 
@@ -1165,29 +1166,29 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
         assert.equal(sessionResponse.status, 200);
         assert.equal(sessionBody.authenticated, true);
-        assert.equal(sessionBody.sessionMethod, "bearer-session-token");
+        assert.equal(sessionBody.sessionMethod, "bearer-access-token");
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("issues short-lived websocket tokens for authenticated bearer sessions", () =>
+  it.effect("issues short-lived websocket tickets for authenticated bearer sessions", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
       const bearerToken = yield* getAuthenticatedBearerSessionToken();
-      const wsTokenResponse = yield* HttpClient.post("/api/auth/ws-token", {
+      const wsTicketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
         headers: {
           authorization: `Bearer ${bearerToken}`,
         },
       });
-      const wsTokenBody = (yield* wsTokenResponse.json) as {
-        readonly token: string;
+      const wsTicketBody = (yield* wsTicketResponse.json) as {
+        readonly ticket: string;
         readonly expiresAt: string;
       };
 
-      assert.equal(wsTokenResponse.status, 200);
-      assert.equal(typeof wsTokenBody.token, "string");
-      assert.isTrue(wsTokenBody.token.length > 0);
-      assert.equal(typeof wsTokenBody.expiresAt, "string");
+      assert.equal(wsTicketResponse.status, 200);
+      assert.equal(typeof wsTicketBody.ticket, "string");
+      assert.isTrue(wsTicketBody.ticket.length > 0);
+      assert.equal(typeof wsTicketBody.expiresAt, "string");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -1222,31 +1223,31 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(sessionResponse.status, 200);
       assertBrowserApiCorsHeaders(sessionResponse.headers);
       assert.equal(sessionBody.authenticated, true);
-      assert.equal(sessionBody.sessionMethod, "bearer-session-token");
+      assert.equal(sessionBody.sessionMethod, "bearer-access-token");
 
-      const wsTokenResponse = yield* HttpClient.post("/api/auth/ws-token", {
+      const wsTicketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
         headers: {
           authorization: `Bearer ${bootstrapBody.sessionToken ?? ""}`,
           origin,
         },
       });
-      const wsTokenBody = (yield* wsTokenResponse.json) as {
-        readonly token: string;
+      const wsTicketBody = (yield* wsTicketResponse.json) as {
+        readonly ticket: string;
       };
 
-      assert.equal(wsTokenResponse.status, 200);
-      assertBrowserApiCorsHeaders(wsTokenResponse.headers);
-      assert.equal(typeof wsTokenBody.token, "string");
+      assert.equal(wsTicketResponse.status, 200);
+      assertBrowserApiCorsHeaders(wsTicketResponse.headers);
+      assert.equal(typeof wsTicketBody.ticket, "string");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect(
-    "responds to remote auth websocket-token preflight requests with authorization CORS headers",
+    "responds to remote auth websocket-ticket preflight requests with authorization CORS headers",
     () =>
       Effect.gen(function* () {
         yield* buildAppUnderTest();
 
-        const response = yield* HttpClient.options("/api/auth/ws-token", {
+        const response = yield* HttpClient.options("/api/auth/websocket-ticket", {
           headers: {
             origin: crossOriginClientOrigin,
             "access-control-request-method": "POST",
@@ -1259,11 +1260,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("includes CORS headers on remote websocket-token auth failures", () =>
+  it.effect("includes CORS headers on remote websocket-ticket auth failures", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const response = yield* HttpClient.post("/api/auth/ws-token", {
+      const response = yield* HttpClient.post("/api/auth/websocket-ticket", {
         headers: {
           origin: crossOriginClientOrigin,
         },
@@ -1623,21 +1624,21 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   );
 
   it.effect(
-    "accepts websocket rpc handshake with a dedicated websocket token in the query string",
+    "accepts websocket rpc handshake with a dedicated websocket ticket in the query string",
     () =>
       Effect.gen(function* () {
         yield* buildAppUnderTest();
 
         const bearerToken = yield* getAuthenticatedBearerSessionToken();
-        const wsTokenResponse = yield* HttpClient.post("/api/auth/ws-token", {
+        const wsTicketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
           headers: {
             authorization: `Bearer ${bearerToken}`,
           },
         });
-        const wsTokenBody = (yield* wsTokenResponse.json) as {
-          readonly token: string;
+        const wsTicketBody = (yield* wsTicketResponse.json) as {
+          readonly ticket: string;
         };
-        const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsToken=${encodeURIComponent(wsTokenBody.token)}`;
+        const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?ticket=${encodeURIComponent(wsTicketBody.ticket)}`;
 
         const response = yield* Effect.scoped(
           withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({})),

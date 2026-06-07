@@ -4,7 +4,7 @@ import {
   bootstrapRemoteBearerSession,
   fetchRemoteEnvironmentDescriptor,
   fetchRemoteSessionState,
-  issueRemoteWebSocketToken,
+  issueRemoteWebSocketTicket,
   resolveRemoteWebSocketConnectionUrl,
 } from "./api";
 import { resolveRemotePairingTarget } from "./target";
@@ -91,11 +91,11 @@ describe("remote environment api", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          authenticated: true,
-          role: "client",
-          sessionMethod: "bearer-session-token",
-          expiresAt: "2026-05-01T12:00:00.000Z",
-          sessionToken: "bearer-token",
+          access_token: "bearer-token",
+          issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+          token_type: "Bearer",
+          expires_in: 3600,
+          scope: "orchestration:read relay:read",
         }),
         { status: 200 },
       ),
@@ -108,18 +108,21 @@ describe("remote environment api", () => {
         credential: "pairing-token",
       }),
     ).resolves.toMatchObject({
-      sessionMethod: "bearer-session-token",
-      sessionToken: "bearer-token",
+      access_token: "bearer-token",
+      token_type: "Bearer",
     });
 
-    expect(fetchMock).toHaveBeenCalledWith("https://remote.example.com/api/auth/bootstrap/bearer", {
+    expect(fetchMock).toHaveBeenCalledWith("https://remote.example.com/oauth/token", {
       method: "POST",
       headers: {
-        "content-type": "application/json",
+        "content-type": "application/x-www-form-urlencoded",
       },
-      body: JSON.stringify({
-        credential: "pairing-token",
-      }),
+      body: new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+        subject_token: "pairing-token",
+        subject_token_type: "urn:t3:params:oauth:token-type:environment-bootstrap",
+        requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
+      }).toString(),
     });
   });
 
@@ -150,11 +153,11 @@ describe("remote environment api", () => {
             auth: {
               policy: "remote-reachable",
               bootstrapMethods: ["one-time-token"],
-              sessionMethods: ["browser-session-cookie", "bearer-session-token"],
+              sessionMethods: ["browser-session-cookie", "bearer-access-token"],
               sessionCookieName: "t3_session",
             },
             role: "client",
-            sessionMethod: "bearer-session-token",
+            sessionMethod: "bearer-access-token",
             expiresAt: "2026-05-01T12:00:00.000Z",
           }),
           { status: 200 },
@@ -163,7 +166,7 @@ describe("remote environment api", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            token: "ws-token",
+            ticket: "ws-ticket",
             expiresAt: "2026-05-01T12:05:00.000Z",
           }),
           { status: 200 },
@@ -191,12 +194,12 @@ describe("remote environment api", () => {
     });
 
     await expect(
-      issueRemoteWebSocketToken({
+      issueRemoteWebSocketTicket({
         httpBaseUrl: "https://remote.example.com/",
         bearerToken: "bearer-token",
       }),
     ).resolves.toMatchObject({
-      token: "ws-token",
+      ticket: "ws-ticket",
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -213,19 +216,23 @@ describe("remote environment api", () => {
         authorization: "Bearer bearer-token",
       },
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "https://remote.example.com/api/auth/ws-token", {
-      method: "POST",
-      headers: {
-        authorization: "Bearer bearer-token",
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://remote.example.com/api/auth/websocket-ticket",
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer bearer-token",
+        },
       },
-    });
+    );
   });
 
   it("mints a websocket url with a short-lived ws token", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          token: "ws-token",
+          ticket: "ws-ticket",
           expiresAt: "2026-05-01T12:05:00.000Z",
         }),
         { status: 200 },
@@ -239,7 +246,7 @@ describe("remote environment api", () => {
         httpBaseUrl: "https://remote.example.com/",
         bearerToken: "bearer-token",
       }),
-    ).resolves.toBe("wss://remote.example.com/?wsToken=ws-token");
+    ).resolves.toBe("wss://remote.example.com/?ticket=ws-ticket");
   });
 });
 

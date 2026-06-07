@@ -1,11 +1,17 @@
 import {
+  type AuthAccessTokenResult,
   type AuthBearerBootstrapResult,
+  AuthBrowserSessionRequest,
+  type AuthBrowserSessionResult,
   AuthBootstrapInput,
   AuthCreatePairingCredentialInput,
+  AuthEnvironmentScope,
   AuthRevokeClientSessionInput,
   AuthRevokePairingLinkInput,
+  type AuthWebSocketTicketResult,
   type AuthWebSocketTokenResult,
 } from "@t3tools/contracts";
+import { parseAllowedOAuthScope } from "@t3tools/shared/oauthScope";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -99,6 +105,143 @@ export const authBootstrapRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
 );
 
+export const authBrowserSessionRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/auth/browser-session",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    const sessions = yield* SessionCredentialService;
+    const payload = yield* HttpServerRequest.schemaBodyJson(AuthBrowserSessionRequest).pipe(
+      Effect.mapError(
+        (cause) =>
+          new AuthError({
+            message: "Invalid browser session payload.",
+            status: 400,
+            cause,
+          }),
+      ),
+    );
+    const result = yield* serverAuth.exchangeBootstrapCredentialForBrowserSession(
+      payload.credential,
+      deriveAuthClientMetadata({ request }),
+    );
+
+    return yield* HttpServerResponse.jsonUnsafe(
+      result.response satisfies AuthBrowserSessionResult,
+      {
+        status: 200,
+        headers: browserApiCorsHeaders,
+      },
+    ).pipe(
+      HttpServerResponse.setCookie(sessions.cookieName, result.sessionToken, {
+        expires: DateTime.toDate(result.response.expiresAt),
+        httpOnly: true,
+        path: "/",
+        sameSite: "lax",
+      }),
+    );
+  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+);
+
+const AuthTokenExchangeJsonInput = Schema.Struct({
+  credential: Schema.optionalKey(Schema.String),
+  subject_token: Schema.optionalKey(Schema.String),
+  scope: Schema.optionalKey(Schema.String),
+  client_label: Schema.optionalKey(Schema.String),
+  client_device_type: Schema.optionalKey(Schema.String),
+  client_os: Schema.optionalKey(Schema.String),
+});
+
+const TokenExchangeHeaders = Schema.Struct({
+  "content-type": Schema.optionalKey(Schema.String),
+});
+
+const readTokenExchangePayload = Effect.gen(function* () {
+  const headers = yield* HttpServerRequest.schemaHeaders(TokenExchangeHeaders).pipe(
+    Effect.mapError(
+      (cause) =>
+        new AuthError({
+          message: "Invalid token exchange headers.",
+          status: 400,
+          cause,
+        }),
+    ),
+  );
+  const contentType = headers["content-type"]?.toLowerCase() ?? "";
+  const decodePayload = contentType.includes("application/x-www-form-urlencoded")
+    ? HttpServerRequest.schemaBodyUrlParams(AuthTokenExchangeJsonInput)
+    : HttpServerRequest.schemaBodyJson(AuthTokenExchangeJsonInput);
+
+  return yield* decodePayload.pipe(
+    Effect.mapError(
+      (cause) =>
+        new AuthError({
+          message: "Invalid token exchange payload.",
+          status: 400,
+          cause,
+        }),
+    ),
+  );
+});
+
+function parseRequestedScopes(scope: string | undefined) {
+  if (scope === undefined || scope.trim().length === 0) {
+    return Effect.succeed(undefined as ReadonlyArray<AuthEnvironmentScope> | undefined);
+  }
+  const parsed = parseAllowedOAuthScope({
+    value: scope,
+    allowedScopes: new Set(AuthEnvironmentScope.literals),
+  });
+  if (parsed === null) {
+    return Effect.fail(
+      new AuthError({
+        message: "Invalid requested OAuth scope.",
+        status: 400,
+      }),
+    );
+  }
+  return Effect.succeed(parsed);
+}
+
+export const authTokenExchangeRouteLayer = HttpRouter.add(
+  "POST",
+  "/oauth/token",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    const payload = yield* readTokenExchangePayload;
+    const credential = payload.subject_token ?? payload.credential;
+    if (!credential || credential.trim().length === 0) {
+      return yield* new AuthError({
+        message: "Missing token exchange credential.",
+        status: 401,
+      });
+    }
+    const requestedScopes = yield* parseRequestedScopes(payload.scope);
+    const result = yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
+      credential,
+      {
+        ...deriveAuthClientMetadata({ request }),
+        ...(payload.client_label ? { label: payload.client_label } : {}),
+        ...(payload.client_device_type === "desktop" ||
+        payload.client_device_type === "mobile" ||
+        payload.client_device_type === "tablet" ||
+        payload.client_device_type === "bot" ||
+        payload.client_device_type === "unknown"
+          ? { deviceType: payload.client_device_type }
+          : {}),
+        ...(payload.client_os ? { os: payload.client_os } : {}),
+      },
+      requestedScopes,
+    );
+    return HttpServerResponse.jsonUnsafe(result satisfies AuthAccessTokenResult, {
+      status: 200,
+      headers: browserApiCorsHeaders,
+    });
+  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+);
+
 export const authBearerBootstrapRouteLayer = HttpRouter.add(
   "POST",
   "/api/auth/bootstrap/bearer",
@@ -135,6 +278,21 @@ export const authWebSocketTokenRouteLayer = HttpRouter.add(
     const session = yield* serverAuth.authenticateHttpRequest(request);
     const result = yield* serverAuth.issueWebSocketToken(session);
     return HttpServerResponse.jsonUnsafe(result satisfies AuthWebSocketTokenResult, {
+      status: 200,
+      headers: browserApiCorsHeaders,
+    });
+  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
+);
+
+export const authWebSocketTicketRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/auth/websocket-ticket",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    const session = yield* serverAuth.authenticateHttpRequest(request);
+    const result = yield* serverAuth.issueWebSocketTicket(session);
+    return HttpServerResponse.jsonUnsafe(result satisfies AuthWebSocketTicketResult, {
       status: 200,
       headers: browserApiCorsHeaders,
     });

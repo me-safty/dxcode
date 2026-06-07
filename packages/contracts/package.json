@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/contracts",
-  "version": "0.0.29",
+  "version": "0.0.30",
   "private": true,
   "files": [
     "dist"
@@ -18,13 +18,14 @@
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "vitest run"
+    "test": "vp test run"
   },
   "dependencies": {
     "effect": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "vite-plus": "catalog:",
     "vitest": "catalog:"
   }
 }

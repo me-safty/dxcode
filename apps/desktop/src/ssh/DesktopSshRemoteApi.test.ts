@@ -74,6 +74,29 @@ describe("DesktopSshRemoteApi", () => {
       assert.instanceOf(error, DesktopSshRemoteApi.DesktopSshRemoteApiError);
       assert.equal(error.operation, "fetch-environment-descriptor");
       assert.equal(error.cause instanceof SshHttpBridgeError, false);
+      assert.equal(error.sshHttpStatus, null);
+      assert.equal(error.message.includes("[ssh_http:"), false);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("preserves ssh http status from forwarded endpoint failures", () => {
+    const layer = makeLayer((request) =>
+      Effect.succeed(jsonResponse(request, { error: "Unauthorized" }, 401)),
+    );
+
+    return Effect.gen(function* () {
+      const remoteApi = yield* DesktopSshRemoteApi.DesktopSshRemoteApi;
+      const error = yield* remoteApi
+        .fetchSessionState({
+          httpBaseUrl: "http://127.0.0.1:41773/",
+          bearerToken: "expired-token",
+        })
+        .pipe(Effect.flip);
+
+      assert.instanceOf(error, DesktopSshRemoteApi.DesktopSshRemoteApiError);
+      assert.equal(error.operation, "fetch-session-state");
+      assert.equal(error.sshHttpStatus, 401);
+      assert.match(error.message, /^\[ssh_http:401\]/);
     }).pipe(Effect.provide(layer));
   });
 });

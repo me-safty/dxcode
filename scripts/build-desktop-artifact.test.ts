@@ -3,8 +3,11 @@ import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import { ChildProcess } from "effect/unstable/process";
 
 import {
+  createStagePnpmConfig,
+  getPatchedDependencyPackageName,
   resolveDesktopRuntimeDependencies,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
@@ -12,6 +15,7 @@ import {
   resolveDesktopUpdateChannel,
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
+  runCommand,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 
@@ -63,6 +67,79 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       },
     );
   });
+
+  it("carries only staged dependency patch metadata into staged desktop installs", () => {
+    assert.deepStrictEqual(
+      createStagePnpmConfig(
+        {
+          "@expo/metro-config@56.0.13": "patches/@expo%2Fmetro-config@56.0.13.patch",
+          "@pierre/diffs@1.1.20": "patches/@pierre%2Fdiffs@1.1.20.patch",
+          "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
+        },
+        {
+          "@pierre/diffs": "1.1.20",
+          effect: "4.0.0-beta.73",
+        },
+      ),
+      {
+        patchedDependencies: {
+          "@pierre/diffs@1.1.20": "patches/@pierre%2Fdiffs@1.1.20.patch",
+          "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
+        },
+      },
+    );
+
+    assert.equal(
+      createStagePnpmConfig(
+        {
+          "@expo/metro-config@56.0.13": "patches/@expo%2Fmetro-config@56.0.13.patch",
+        },
+        { effect: "4.0.0-beta.73" },
+      ),
+      undefined,
+    );
+  });
+
+  it("parses scoped patched dependency package names", () => {
+    assert.equal(getPatchedDependencyPackageName("@pierre/diffs@1.1.20"), "@pierre/diffs");
+    assert.equal(getPatchedDependencyPackageName("effect@4.0.0-beta.73"), "effect");
+  });
+
+  it.effect("includes command stdout and stderr tails in failures", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        runCommand(
+          ChildProcess.make(process.execPath, [
+            "-e",
+            "console.log('stdout-value'); console.error('stderr-value'); process.exit(7)",
+          ]),
+          { label: "failing command", verbose: false },
+        ),
+      );
+
+      assert.match(error.message, /Command exited with non-zero exit code \(7\)/);
+      assert.match(error.message, /Command: failing command/);
+      assert.match(error.message, /stdout tail:\nstdout-value/);
+      assert.match(error.message, /stderr tail:\nstderr-value/);
+    }),
+  );
+
+  it.effect("tails long command output to 20000 characters", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        runCommand(
+          ChildProcess.make(process.execPath, [
+            "-e",
+            "process.stdout.write('BEGIN' + 'x'.repeat(20050) + 'TAIL'); process.exit(1)",
+          ]),
+          { label: "long output", verbose: false },
+        ),
+      );
+
+      assert.match(error.message, /TAIL/);
+      assert.notMatch(error.message, /BEGIN/);
+    }),
+  );
 
   it("falls back to the default mock update port when the configured port is blank", () => {
     assert.equal(resolveMockUpdateServerUrl(undefined), "http://localhost:3000");

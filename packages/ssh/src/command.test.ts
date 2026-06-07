@@ -17,6 +17,49 @@ import {
   resolveRemoteT3CliPackageSpec,
   runSshCommand,
 } from "./command.ts";
+import { SshCommandError } from "./errors.ts";
+
+const encoder = new TextEncoder();
+
+const makeFailedProcess = (input: { readonly stdout: string; readonly stderr?: string }) => {
+  const stdoutStream =
+    input.stdout.length > 0 ? Stream.make(encoder.encode(input.stdout)) : Stream.empty;
+  const stderrStream =
+    input.stderr && input.stderr.length > 0
+      ? Stream.make(encoder.encode(input.stderr))
+      : Stream.empty;
+  return ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(123),
+    stdout: stdoutStream,
+    stderr: stderrStream,
+    all: Stream.empty,
+    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+    isRunning: Effect.succeed(false),
+    kill: () => Effect.void,
+    stdin: Sink.drain,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+    unref: Effect.succeed(Effect.void),
+  });
+};
+
+const runFailingSshCommand = (input: { readonly stdout: string; readonly stderr?: string }) => {
+  const spawner = ChildProcessSpawner.make(() => Effect.succeed(makeFailedProcess(input)));
+  const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
+  const processLayer = Layer.mergeAll(NodeServices.layer, spawnerLayer);
+
+  return Effect.result(
+    runSshCommand(
+      {
+        alias: "devbox",
+        hostname: "devbox.example.com",
+        username: "julius",
+        port: 2222,
+      },
+      { remoteCommandArgs: ["sh", "-s"] },
+    ),
+  ).pipe(Effect.provide(processLayer));
+};
 
 const makeNeverFinishingProcess = () => {
   let finish: ((exitCode: ChildProcessSpawner.ExitCode) => void) | null = null;
@@ -121,6 +164,69 @@ describe("ssh command", () => {
         ),
         '{"credential":"pairing-token"}',
       );
+    }),
+  );
+
+  it.effect("includes stdout in non-zero command failures when stderr is empty", () =>
+    Effect.gen(function* () {
+      const result = yield* runFailingSshCommand({
+        stdout: "Pairing token creation failed\n",
+      });
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, SshCommandError);
+        assert.equal(result.failure.message, "Pairing token creation failed");
+        assert.equal(result.failure.stdout, "Pairing token creation failed\n");
+        assert.equal(result.failure.stderr, "");
+      }
+    }),
+  );
+
+  it.effect("redacts credentials from stdout in non-zero command failures", () =>
+    Effect.gen(function* () {
+      const result = yield* runFailingSshCommand({
+        stdout: '{"credential":"pairing-secret","token":"api-secret"}\n',
+      });
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, SshCommandError);
+        assert.equal(result.failure.stdout, '{"credential":"[redacted]","token":"[redacted]"}\n');
+        assert.equal(result.failure.message, '{"credential":"[redacted]","token":"[redacted]"}');
+      }
+    }),
+  );
+
+  it.effect("prefers stderr over stdout for non-zero command failure messages", () =>
+    Effect.gen(function* () {
+      const result = yield* runFailingSshCommand({
+        stdout: "stdout detail\n",
+        stderr: "stderr detail\n",
+      });
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, SshCommandError);
+        assert.equal(result.failure.message, "stderr detail");
+        assert.equal(result.failure.stdout, "stdout detail\n");
+        assert.equal(result.failure.stderr, "stderr detail\n");
+      }
+    }),
+  );
+
+  it.effect("truncates stdout in non-zero command failures", () =>
+    Effect.gen(function* () {
+      const result = yield* runFailingSshCommand({
+        stdout: "x".repeat(4_050),
+      });
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, SshCommandError);
+        assert.equal(result.failure.stdout, `${"x".repeat(4_000)}\n[truncated]`);
+        assert.equal(result.failure.message, `${"x".repeat(4_000)}\n[truncated]`);
+      }
     }),
   );
 

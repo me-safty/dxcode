@@ -140,7 +140,7 @@ describe("addSavedEnvironment", () => {
         fetchSshEnvironmentDescriptor: mockFetchSshEnvironmentDescriptor,
         bootstrapSshBearerSession: mockBootstrapSshBearerSession,
         fetchSshSessionState: mockFetchSshSessionState,
-        issueSshWebSocketToken: vi.fn(),
+        issueSshWebSocketTicket: vi.fn(),
       },
     });
     mockResolveRemotePairingTarget.mockImplementation(
@@ -163,8 +163,11 @@ describe("addSavedEnvironment", () => {
       label: "Remote environment",
     });
     mockBootstrapRemoteBearerSession.mockResolvedValue({
-      sessionToken: "bearer-token",
-      role: "owner",
+      access_token: "bearer-token",
+      issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+      token_type: "Bearer",
+      expires_in: 3600,
+      scope: "access:read orchestration:read relay:read",
     });
     mockFetchRemoteSessionState.mockResolvedValue({
       authenticated: true,
@@ -172,15 +175,18 @@ describe("addSavedEnvironment", () => {
     });
     mockIsRemoteEnvironmentAuthHttpError.mockReturnValue(false);
     mockResolveRemoteWebSocketConnectionUrl.mockResolvedValue(
-      "wss://remote.example.com/?wsToken=remote-token",
+      "wss://remote.example.com/?ticket=remote-ticket",
     );
     mockFetchSshEnvironmentDescriptor.mockResolvedValue({
       environmentId: EnvironmentId.make("environment-1"),
       label: "Remote environment",
     });
     mockBootstrapSshBearerSession.mockResolvedValue({
-      sessionToken: "ssh-bearer-token",
-      role: "owner",
+      access_token: "ssh-bearer-token",
+      issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+      token_type: "Bearer",
+      expires_in: 3600,
+      scope: "access:read orchestration:read relay:read",
     });
     mockPersistSavedEnvironmentRecord.mockResolvedValue(undefined);
     mockWriteSavedEnvironmentBearerToken.mockResolvedValue(false);
@@ -368,12 +374,18 @@ describe("addSavedEnvironment", () => {
     mockWriteSavedEnvironmentBearerToken.mockResolvedValue(true);
     mockBootstrapSshBearerSession
       .mockResolvedValueOnce({
-        sessionToken: "ssh-bearer-token",
-        role: "owner",
+        access_token: "ssh-bearer-token",
+        issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+        token_type: "Bearer",
+        expires_in: 3600,
+        scope: "access:read orchestration:read relay:read",
       })
       .mockResolvedValueOnce({
-        sessionToken: "ssh-bearer-token-2",
-        role: "owner",
+        access_token: "ssh-bearer-token-2",
+        issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+        token_type: "Bearer",
+        expires_in: 3600,
+        scope: "access:read orchestration:read relay:read",
       });
     mockFetchSshSessionState
       .mockRejectedValueOnce(new Error("[ssh_http:401] Unauthorized"))
@@ -437,12 +449,18 @@ describe("addSavedEnvironment", () => {
     mockWriteSavedEnvironmentBearerToken.mockResolvedValue(true);
     mockBootstrapSshBearerSession
       .mockResolvedValueOnce({
-        sessionToken: "ssh-bearer-token",
-        role: "owner",
+        access_token: "ssh-bearer-token",
+        issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+        token_type: "Bearer",
+        expires_in: 3600,
+        scope: "access:read orchestration:read relay:read",
       })
       .mockResolvedValueOnce({
-        sessionToken: "ssh-bearer-token-2",
-        role: "owner",
+        access_token: "ssh-bearer-token-2",
+        issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+        token_type: "Bearer",
+        expires_in: 3600,
+        scope: "access:read orchestration:read relay:read",
       });
     mockFetchSshSessionState
       .mockRejectedValueOnce(new Error("[ssh_http:401] Unauthorized"))

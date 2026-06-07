@@ -1,12 +1,77 @@
 import { describe, expect, it } from "vitest";
+import * as Schema from "effect/Schema";
 
 import {
+  CursorListAvailableModelsResponse,
   extractAskQuestions,
   extractPlanMarkdown,
   extractTodosAsPlan,
 } from "./CursorAcpExtension.ts";
 
 describe("CursorAcpExtension", () => {
+  it("decodes Cursor list_available_models responses", () => {
+    const decode = Schema.decodeUnknownSync(CursorListAvailableModelsResponse);
+
+    expect(
+      decode({
+        models: [
+          {
+            value: "gpt-5.4",
+            name: "GPT-5.4",
+            configOptions: [
+              {
+                id: "reasoning",
+                name: "Reasoning",
+                category: "thought_level",
+                type: "select",
+                currentValue: "medium",
+                options: [
+                  { value: "low", name: "Low" },
+                  { value: "medium", name: "Medium" },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({
+      models: [
+        {
+          value: "gpt-5.4",
+          name: "GPT-5.4",
+          configOptions: [
+            {
+              id: "reasoning",
+              name: "Reasoning",
+              category: "thought_level",
+              type: "select",
+              currentValue: "medium",
+              options: [
+                { value: "low", name: "Low" },
+                { value: "medium", name: "Medium" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("rejects malformed Cursor list_available_models entries", () => {
+    const decode = Schema.decodeUnknownSync(CursorListAvailableModelsResponse);
+
+    expect(() =>
+      decode({
+        models: [
+          {
+            value: "gpt-5.4",
+            configOptions: [],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("extracts ask-question prompts from the real Cursor ACP payload shape", () => {
     const questions = extractAskQuestions({
       toolCallId: "ask-1",
