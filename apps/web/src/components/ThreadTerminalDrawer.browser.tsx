@@ -873,6 +873,74 @@ describe("TerminalViewport", () => {
     }
   });
 
+  it("does not reopen the selection menu when dismissing it after a touch drag selection", async () => {
+    const environment = createEnvironmentApi();
+    environmentApiById.set("environment-a", environment);
+    terminalLineTextByRow.set(0, "  git status done");
+
+    const showSpy = vi.fn(
+      async (_items: ReadonlyArray<{ id: string; label: string }>, _position?: unknown) => null,
+    );
+    readLocalApiMock.mockReturnValue({
+      contextMenu: { show: showSpy },
+      shell: { openExternal: vi.fn(async () => undefined) },
+    });
+
+    const mounted = await mountTerminalViewport({
+      threadRef: scopeThreadRef("environment-a" as never, THREAD_ID),
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(terminalInstances).toHaveLength(1);
+      });
+
+      const surface = getTerminalSurface();
+
+      // iOS fires a `pointerdown` alongside `touchstart`; this previously armed
+      // the mouse selection-gesture flag and left it stuck `true` for the whole
+      // touch drag (no `mouseup` arrives to reset it).
+      surface.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "touch" }),
+      );
+
+      const startTouch = createTouch(surface, 7, 85, 8);
+      dispatchTouchEvent(surface, "touchstart", [startTouch], [startTouch]);
+
+      await vi.waitFor(
+        () => {
+          expect(terminalInstances[0]?.select).toHaveBeenCalledWith(6, 0, 6);
+        },
+        { timeout: 2_000 },
+      );
+
+      const dragTouch = createTouch(surface, 7, 45, 24);
+      dispatchTouchEvent(surface, "touchmove", [dragTouch], [dragTouch]);
+      dispatchTouchEvent(surface, "touchend", [], [dragTouch]);
+
+      await vi.waitFor(() => {
+        expect(showSpy).toHaveBeenCalledTimes(1);
+      });
+
+      // Dismissing the menu by tapping outside delivers a synthetic `mouseup`
+      // to the window. The selection stays active, so a stale gesture flag would
+      // re-present the menu here.
+      window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
+
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+      await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+
+      expect(showSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      await mounted.cleanup();
+      readLocalApiMock.mockReset();
+      readLocalApiMock.mockImplementation(() => ({
+        contextMenu: { show: vi.fn(async () => null) },
+        shell: { openExternal: vi.fn(async () => undefined) },
+      }));
+    }
+  });
+
   it("uses the drawer surface colors for the terminal theme", async () => {
     const environment = createEnvironmentApi();
     environmentApiById.set("environment-a", environment);

@@ -800,7 +800,7 @@ function ChatMarkdown({
   );
 
   return (
-    <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
+    <div className="chat-markdown w-full min-w-0 text-[15px] leading-relaxed text-foreground/80 md:text-sm">
       <ReactMarkdown
         remarkPlugins={CHAT_MARKDOWN_REMARK_PLUGINS}
         components={markdownComponents}

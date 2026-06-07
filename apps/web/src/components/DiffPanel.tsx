@@ -1,5 +1,5 @@
 import { parsePatchFiles } from "@pierre/diffs";
-import { FileDiff, type FileDiffMetadata } from "@pierre/diffs/react";
+import { FileDiff, Virtualizer, type FileDiffMetadata } from "@pierre/diffs/react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import type { TurnId } from "@t3tools/contracts";
@@ -8,7 +8,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   Columns2Icon,
-  GitBranchIcon,
   PanelRightCloseIcon,
   PilcrowIcon,
   Rows3Icon,
@@ -35,8 +34,11 @@ import {
   type DiffRouteSource,
 } from "../diffRouteSearch";
 import { useTheme } from "../hooks/useTheme";
-import { buildPatchCacheKey } from "../lib/diffRendering";
-import { resolveDiffThemeName } from "../lib/diffRendering";
+import {
+  buildPatchCacheKey,
+  DIFF_MOBILE_TEXT_FLOOR_UNSAFE_CSS,
+  resolveDiffThemeName,
+} from "../lib/diffRendering";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { selectProjectByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
@@ -48,7 +50,6 @@ import {
 } from "../threadRoutes";
 import { useSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
-import { openRightPanel } from "../rightPanelGesture";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { Button } from "./ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
@@ -134,6 +135,8 @@ const DIFF_PANEL_UNSAFE_CSS = `
   color: color-mix(in srgb, var(--foreground) 84%, var(--primary)) !important;
   text-decoration-color: currentColor;
 }
+
+${DIFF_MOBILE_TEXT_FLOOR_UNSAFE_CSS}
 `;
 
 type RenderablePatch =
@@ -778,12 +781,13 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         </Select>
       </div>
       <div className="relative min-w-0 flex-1 [-webkit-app-region:no-drag] max-[760px]:hidden">
-        <button
-          type="button"
+        <Button
+          size="icon-xs"
+          variant="outline"
           className={cn(
-            "absolute left-0 top-1/2 z-20 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-background/90 text-muted-foreground transition-colors",
+            "absolute left-0 top-1/2 z-20 -translate-y-1/2 bg-background/90 text-muted-foreground",
             canScrollTurnStripLeft
-              ? "border-border/70 hover:border-border hover:text-foreground"
+              ? "hover:text-foreground"
               : "cursor-not-allowed border-border/40 text-muted-foreground/40",
           )}
           onClick={() => scrollTurnStripBy(-180)}
@@ -791,13 +795,14 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           aria-label="Scroll turn list left"
         >
           <ChevronLeftIcon className="size-3.5" />
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          size="icon-xs"
+          variant="outline"
           className={cn(
-            "absolute right-0 top-1/2 z-20 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-background/90 text-muted-foreground transition-colors",
+            "absolute right-0 top-1/2 z-20 -translate-y-1/2 bg-background/90 text-muted-foreground",
             canScrollTurnStripRight
-              ? "border-border/70 hover:border-border hover:text-foreground"
+              ? "hover:text-foreground"
               : "cursor-not-allowed border-border/40 text-muted-foreground/40",
           )}
           onClick={() => scrollTurnStripBy(180)}
@@ -805,7 +810,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           aria-label="Scroll turn list right"
         >
           <ChevronRightIcon className="size-3.5" />
-        </button>
+        </Button>
         <div
           ref={turnStripRef}
           className="turn-chip-strip flex gap-1 overflow-x-auto px-8 py-0.5"
@@ -946,15 +951,6 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         >
           <PilcrowIcon className="size-3" />
         </Toggle>
-        <Button
-          size="icon-xs"
-          variant="outline"
-          aria-label="Open source control"
-          title="Source control"
-          onClick={() => openRightPanel("source-control")}
-        >
-          <GitBranchIcon className="size-3" />
-        </Button>
         {mode === "sheet" ? (
           <Button
             size="icon-xs"
@@ -1015,7 +1011,13 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                   </div>
                 )
               ) : renderablePatch.kind === "files" ? (
-                <div className="diff-render-surface h-full min-h-0 overflow-auto px-2 pb-2">
+                <Virtualizer
+                  className="diff-render-surface h-full min-h-0 overflow-auto px-2 pb-2"
+                  config={{
+                    overscrollSize: 600,
+                    intersectionObserverMargin: 1200,
+                  }}
+                >
                   {renderableFiles.map((fileDiff) => {
                     const filePath = resolveFileDiffPath(fileDiff);
                     const fileKey = buildFileDiffRenderKey(fileDiff);
@@ -1102,14 +1104,16 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                       </div>
                     );
                   })}
-                </div>
+                </Virtualizer>
               ) : (
                 <div className="h-full overflow-auto p-2">
                   <div className="space-y-2">
-                    <p className="text-[11px] text-muted-foreground/75">{renderablePatch.reason}</p>
+                    <p className="text-[15px] text-muted-foreground/75 md:text-[11px]">
+                      {renderablePatch.reason}
+                    </p>
                     <pre
                       className={cn(
-                        "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90",
+                        "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[15px] leading-relaxed text-muted-foreground/90 md:text-[11px]",
                         diffWordWrap
                           ? "overflow-auto whitespace-pre-wrap wrap-break-word"
                           : "overflow-auto",

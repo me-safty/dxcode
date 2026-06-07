@@ -288,7 +288,7 @@ export const ChatHeader = memo(function ChatHeader({
                 size="xs"
                 disabled={!hasSourceControl}
               >
-                <GitBranchIcon className="size-3" />
+                <GitBranchIcon className="size-4.5 sm:size-3" />
               </Toggle>
             }
           />
@@ -312,7 +312,7 @@ export const ChatHeader = memo(function ChatHeader({
                 size="xs"
                 disabled={!terminalAvailable}
               >
-                <TerminalSquareIcon className="size-3" />
+                <TerminalSquareIcon className="size-4.5 sm:size-3" />
               </Toggle>
             }
           />
@@ -324,59 +324,76 @@ export const ChatHeader = memo(function ChatHeader({
                 : "Toggle terminal drawer"}
           </TooltipPopup>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Toggle
-                className="shrink-0"
-                pressed={fileExplorerOpen}
-                onPressedChange={onToggleFileExplorer}
-                aria-label="Toggle file explorer"
-                variant="outline"
-                size="xs"
-                disabled={!fileExplorerAvailable}
-              >
-                <FolderTreeIcon className="size-3" />
-              </Toggle>
-            }
-          />
-          <TooltipPopup side="bottom">
-            {fileExplorerAvailable
-              ? "Toggle file explorer"
-              : "File explorer is unavailable until this thread has an active project."}
-          </TooltipPopup>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Toggle
-                className="shrink-0"
-                pressed={diffOpen}
-                onPressedChange={onToggleDiff}
-                aria-label="Toggle diff panel"
-                variant="outline"
-                size="xs"
-                disabled={!isGitRepo && !diffOpen}
-              >
-                <DiffIcon className="size-3" />
-              </Toggle>
-            }
-          />
-          <TooltipPopup side="bottom">
-            {!isGitRepo && !diffOpen
-              ? "Diff panel is unavailable because this project is not a git repository."
-              : diffToggleShortcutLabel
-                ? `Toggle diff panel (${diffToggleShortcutLabel})`
-                : "Toggle diff panel"}
-          </TooltipPopup>
-        </Tooltip>
+        {!isCompactHeader && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Toggle
+                  className="shrink-0"
+                  pressed={fileExplorerOpen}
+                  onPressedChange={onToggleFileExplorer}
+                  aria-label="Toggle file explorer"
+                  variant="outline"
+                  size="xs"
+                  disabled={!fileExplorerAvailable}
+                >
+                  <FolderTreeIcon className="size-3" />
+                </Toggle>
+              }
+            />
+            <TooltipPopup side="bottom">
+              {fileExplorerAvailable
+                ? "Toggle file explorer"
+                : "File explorer is unavailable until this thread has an active project."}
+            </TooltipPopup>
+          </Tooltip>
+        )}
+        {!isCompactHeader && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Toggle
+                  className="shrink-0"
+                  pressed={diffOpen}
+                  onPressedChange={onToggleDiff}
+                  aria-label="Toggle diff panel"
+                  variant="outline"
+                  size="xs"
+                  disabled={!isGitRepo && !diffOpen}
+                >
+                  <DiffIcon className="size-3" />
+                </Toggle>
+              }
+            />
+            <TooltipPopup side="bottom">
+              {!isGitRepo && !diffOpen
+                ? "Diff panel is unavailable because this project is not a git repository."
+                : diffToggleShortcutLabel
+                  ? `Toggle diff panel (${diffToggleShortcutLabel})`
+                  : "Toggle diff panel"}
+            </TooltipPopup>
+          </Tooltip>
+        )}
         <Menu>
           <MenuTrigger
             render={<Button size="icon-xs" variant="outline" aria-label="More thread actions" />}
           >
-            <EllipsisIcon className="size-4" />
+            <EllipsisIcon className="size-4.5 sm:size-4" />
           </MenuTrigger>
           <MenuPopup align="end" side="bottom" className="min-w-48">
+            {isCompactHeader ? (
+              <>
+                <MenuItem onClick={() => onToggleDiff()} disabled={!isGitRepo && !diffOpen}>
+                  <DiffIcon aria-hidden="true" className="size-4" />
+                  Diff
+                </MenuItem>
+                <MenuItem onClick={() => onToggleFileExplorer()} disabled={!fileExplorerAvailable}>
+                  <FolderTreeIcon aria-hidden="true" className="size-4" />
+                  File explorer
+                </MenuItem>
+                <MenuSeparator />
+              </>
+            ) : null}
             {showCompactOverflowActions && hasProjectScriptsControl
               ? renderProjectScriptsControl(true)
               : null}

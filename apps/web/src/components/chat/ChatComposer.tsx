@@ -2262,7 +2262,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   <button
                     type="button"
                     className={cn(
-                      "min-w-0 flex-1 truncate bg-transparent py-1.5 text-left text-sm",
+                      "min-w-0 flex-1 truncate bg-transparent py-1.5 text-left text-[15px] md:text-sm",
                       activePendingProgress?.customAnswer
                         ? "text-foreground"
                         : "text-muted-foreground/60",
@@ -2302,7 +2302,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <button
                 type="button"
                 className={cn(
-                  "min-w-0 flex-1 truncate bg-transparent p-0 text-left text-[14px] focus:outline-none",
+                  "min-w-0 flex-1 truncate bg-transparent p-0 text-left text-[15px] focus:outline-none md:text-sm",
                   (activePendingProgress ? activePendingProgress.customAnswer : prompt.trim())
                     ? "text-foreground"
                     : "text-muted-foreground/35",

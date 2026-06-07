@@ -9,6 +9,16 @@ export function resolveDiffThemeName(theme: "light" | "dark"): DiffThemeName {
   return theme === "dark" ? DIFF_THEME_NAMES.dark : DIFF_THEME_NAMES.light;
 }
 
+export const DIFF_MOBILE_TEXT_FLOOR_UNSAFE_CSS = `
+@media (max-width: 767px) {
+  [data-diff],
+  [data-file],
+  [data-line] {
+    --diffs-font-size: 15px !important;
+  }
+}
+`;
+
 const FNV_OFFSET_BASIS_32 = 0x811c9dc5;
 const FNV_PRIME_32 = 0x01000193;
 const SECONDARY_HASH_SEED = 0x9e3779b9;

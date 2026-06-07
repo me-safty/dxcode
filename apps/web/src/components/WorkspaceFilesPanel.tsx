@@ -67,8 +67,8 @@ function WorkspaceFilesUnavailablePanel(props: { mode: DiffPanelMode }) {
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <FileIcon className="size-4 shrink-0 text-muted-foreground/80" />
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-foreground">Files</p>
-              <p className="truncate font-mono text-[11px] text-muted-foreground/70">
+              <p className="truncate text-[15px] font-medium text-foreground md:text-sm">Files</p>
+              <p className="truncate font-mono text-[15px] text-muted-foreground/70 md:text-[11px]">
                 No workspace selected
               </p>
             </div>
@@ -85,7 +85,7 @@ function WorkspaceFilesUnavailablePanel(props: { mode: DiffPanelMode }) {
         </>
       }
     >
-      <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center text-sm text-muted-foreground">
+      <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center text-[15px] text-muted-foreground md:text-sm">
         No workspace is available for file browsing.
       </div>
     </DiffPanelShell>

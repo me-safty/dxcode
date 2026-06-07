@@ -1,34 +1,87 @@
+import type { VcsStatusResult } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { buildSourceControlTree, sourceControlFileName } from "./sourceControlTree";
+import { buildSourceControlTree, flattenSourceControlTreeRows } from "./sourceControlTree";
 
-describe("sourceControlTree", () => {
-  it("uses the last non-empty path segment for trailing-slash file paths", () => {
-    expect(sourceControlFileName("public/images/")).toBe("images");
-    expect(sourceControlFileName("public\\images\\")).toBe("images");
-  });
+type SourceControlFile = VcsStatusResult["workingTree"]["files"][number];
 
-  it("does not render blank file labels for trailing-slash status paths", () => {
+function file(path: string): SourceControlFile {
+  return {
+    path,
+    status: "modified",
+    insertions: 1,
+    deletions: 0,
+  };
+}
+
+function rowPaths(rows: ReturnType<typeof flattenSourceControlTreeRows>): string[] {
+  return rows.map((row) => `${row.depth}:${row.node.type}:${row.node.path}`);
+}
+
+describe("flattenSourceControlTreeRows", () => {
+  it("includes expanded directory descendants", () => {
     const tree = buildSourceControlTree([
-      {
-        path: "public/images/",
-        status: "untracked",
-        insertions: 0,
-        deletions: 0,
-      },
+      file("src/App.tsx"),
+      file("src/components/Button.tsx"),
+      file("README.md"),
     ]);
 
-    const publicNode = tree[0];
-    expect(publicNode?.type).toBe("dir");
-    if (publicNode?.type !== "dir") {
-      throw new Error("Expected public directory");
-    }
+    expect(
+      rowPaths(
+        flattenSourceControlTreeRows({
+          tree,
+          section: "unstaged",
+          collapsedDirs: new Set(),
+        }),
+      ),
+    ).toEqual([
+      "0:dir:src",
+      "1:dir:src/components",
+      "2:file:src/components/Button.tsx",
+      "1:file:src/App.tsx",
+      "0:file:README.md",
+    ]);
+  });
 
-    const imageNode = publicNode.children[0];
-    expect(imageNode).toMatchObject({
-      type: "file",
-      path: "public/images/",
-      name: "images",
-    });
+  it("omits descendants below collapsed directories", () => {
+    const tree = buildSourceControlTree([
+      file("src/App.tsx"),
+      file("src/components/Button.tsx"),
+      file("README.md"),
+    ]);
+
+    expect(
+      rowPaths(
+        flattenSourceControlTreeRows({
+          tree,
+          section: "unstaged",
+          collapsedDirs: new Set(["unstaged:src"]),
+        }),
+      ),
+    ).toEqual(["0:dir:src", "0:file:README.md"]);
+  });
+
+  it("honors section-prefixed collapse keys", () => {
+    const tree = buildSourceControlTree([file("src/App.tsx")]);
+
+    expect(
+      rowPaths(
+        flattenSourceControlTreeRows({
+          tree,
+          section: "staged",
+          collapsedDirs: new Set(["unstaged:src"]),
+        }),
+      ),
+    ).toEqual(["0:dir:src", "1:file:src/App.tsx"]);
+
+    expect(
+      rowPaths(
+        flattenSourceControlTreeRows({
+          tree,
+          section: "staged",
+          collapsedDirs: new Set(["staged:src"]),
+        }),
+      ),
+    ).toEqual(["0:dir:src"]);
   });
 });
