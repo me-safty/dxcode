@@ -2,6 +2,7 @@ import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import { type DiffPanelMode, DiffPanelShell } from "./DiffPanelShell";
+import { RightPanelModeTabs } from "./RightPanelModeTabs";
 import { FileTree } from "./files/FileTree";
 import { FileViewer } from "./files/FileViewer";
 import { parseFilesRouteSearch, stripFilesSearchParams } from "../filesRouteSearch";
@@ -68,9 +69,20 @@ export default function FilesPanel(props: { mode: DiffPanelMode }) {
   const environmentId = activeThread?.environmentId ?? null;
   const cwd = activeThread?.worktreePath ?? activeProject?.cwd ?? null;
 
+  const hasUnsavedEditsRef = useRef(false);
+  const handleDirtyChange = useCallback((dirty: boolean) => {
+    hasUnsavedEditsRef.current = dirty;
+  }, []);
+
   const onSelectFile = useCallback(
     (relativePath: string) => {
       if (!activeThread) {
+        return;
+      }
+      if (
+        hasUnsavedEditsRef.current &&
+        !window.confirm("Discard unsaved changes to the current file?")
+      ) {
         return;
       }
       void navigate({
@@ -122,7 +134,7 @@ export default function FilesPanel(props: { mode: DiffPanelMode }) {
 
   const header = (
     <div className="flex min-w-0 flex-1 items-center gap-2">
-      <span className="shrink-0 text-sm font-medium text-foreground">Files</span>
+      <RightPanelModeTabs />
       {selectedPath ? (
         <span className="truncate font-mono text-[11px] text-muted-foreground/80">
           {selectedPath}
@@ -141,6 +153,7 @@ export default function FilesPanel(props: { mode: DiffPanelMode }) {
               cwd={cwd}
               relativePath={selectedPath}
               theme={resolvedTheme}
+              onDirtyChange={handleDirtyChange}
             />
           ) : null}
         </div>

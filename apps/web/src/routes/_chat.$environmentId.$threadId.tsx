@@ -232,7 +232,9 @@ function ChatThreadRouteView() {
   const serverThreadStarted = threadHasStarted(serverThread);
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
   const diffOpen = search.diff === "1";
-  const filesOpen = search.files === "1";
+  // Diff and Files share the one docked right surface; never render both. Diff
+  // takes precedence as a backstop if both params ever coexist.
+  const filesOpen = search.files === "1" && !diffOpen;
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
   const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
@@ -345,8 +347,11 @@ function ChatThreadRouteView() {
     return null;
   }
 
-  const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
-  const shouldRenderFilesContent = filesOpen || hasOpenedFiles;
+  // Only keep the active surface's content mounted. The two are mutually
+  // exclusive, and a still-mounted DiffPanel re-asserts its diff URL params,
+  // which would otherwise snap the view back when switching to Files.
+  const shouldRenderDiffContent = (diffOpen || hasOpenedDiff) && !filesOpen;
+  const shouldRenderFilesContent = (filesOpen || hasOpenedFiles) && !diffOpen;
 
   if (!shouldUseDiffSheet) {
     return (
