@@ -879,7 +879,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
                         <button
                           type="button"
                           aria-label={`New thread in ${group.label}`}
-                          className="inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground/60 opacity-70 hover:bg-accent hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring group-hover/worktree-header:opacity-100 group-focus-within/worktree-header:opacity-100"
+                          className="inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/60 opacity-70 hover:bg-accent hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring group-hover/worktree-header:opacity-100 group-focus-within/worktree-header:opacity-100"
                           onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
