@@ -417,4 +417,69 @@ describe("VcsStatusBroadcaster", () => {
       assert.isTrue(Option.isSome(yield* Deferred.poll(remoteInterrupted)));
     }).pipe(Effect.provide(testLayer));
   });
+
+  // `it.live`, not `it.effect`: this exercises a real `fs.watch` plus
+  // `Stream.debounce`, which need the live clock (TestClock would freeze them).
+  it.live(
+    "pushes a local status update when .git/HEAD changes on disk",
+    () => {
+      const state = {
+        currentLocalStatus: baseLocalStatus,
+        currentRemoteStatus: baseRemoteStatus,
+        localStatusCalls: 0,
+        remoteStatusCalls: 0,
+        localInvalidationCalls: 0,
+        remoteInvalidationCalls: 0,
+      };
+
+      return Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const repoDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-vcs-watch-" });
+        const gitDir = path.join(repoDir, ".git");
+        yield* fileSystem.makeDirectory(gitDir, { recursive: true });
+        const headPath = path.join(gitDir, "HEAD");
+        yield* fileSystem.writeFileString(headPath, "ref: refs/heads/main\n");
+
+        const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+        const snapshot = yield* Deferred.make<VcsStatusStreamEvent>();
+        const localUpdated = yield* Deferred.make<VcsStatusStreamEvent>();
+        yield* Stream.runForEach(broadcaster.streamStatus({ cwd: repoDir }), (event) => {
+          if (event._tag === "snapshot") {
+            return Deferred.succeed(snapshot, event).pipe(Effect.ignore);
+          }
+          if (event._tag === "localUpdated") {
+            return Deferred.succeed(localUpdated, event).pipe(Effect.ignore);
+          }
+          return Effect.void;
+        }).pipe(Effect.forkScoped);
+
+        // Wait for the initial snapshot so the cached local status is the base ref
+        // before we change what the workflow will report on the next refresh.
+        yield* Deferred.await(snapshot);
+        state.currentLocalStatus = { ...baseLocalStatus, refName: "feature/switched-in-terminal" };
+
+        // Simulate an external `git switch` by rewriting HEAD. The watcher starts
+        // asynchronously, so rewrite on an interval (spaced past the debounce)
+        // until it observes a change — keeps the test deterministic, not racy.
+        yield* Effect.forkScoped(
+          Effect.gen(function* () {
+            let revision = 0;
+            while (true) {
+              revision += 1;
+              yield* fileSystem.writeFileString(headPath, `ref: refs/heads/branch-${revision}\n`);
+              yield* Effect.sleep(Duration.millis(250));
+            }
+          }),
+        );
+
+        const event = yield* Deferred.await(localUpdated);
+        assert.deepStrictEqual(event, {
+          _tag: "localUpdated",
+          local: state.currentLocalStatus,
+        } satisfies VcsStatusStreamEvent);
+      }).pipe(Effect.provide(makeTestLayer(state)));
+    },
+    20_000,
+  );
 });
