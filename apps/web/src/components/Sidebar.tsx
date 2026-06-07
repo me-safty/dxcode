@@ -164,6 +164,7 @@ import {
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
+  resolveRestingThreadTitleClassName,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
@@ -598,7 +599,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 render={
                   <span
                     className={`min-w-0 flex-1 truncate text-xs ${
-                      isUnseenCompleted && !isHighlighted ? "text-foreground" : ""
+                      isUnseenCompleted && !isHighlighted
+                        ? "text-foreground"
+                        : isHighlighted
+                          ? ""
+                          : resolveRestingThreadTitleClassName({
+                              lastActivityAt:
+                                thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
+                            })
                     }`}
                     data-testid={`thread-title-${thread.id}`}
                   >
@@ -852,6 +860,14 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             );
           }
 
+          const isActiveWorktreeGroup =
+            activeRouteThreadKey !== null &&
+            group.threads.some(
+              (groupThread) =>
+                scopedThreadKey(scopeThreadRef(groupThread.environmentId, groupThread.id)) ===
+                activeRouteThreadKey,
+            );
+
           return (
             <React.Fragment key={group.key}>
               <SidebarMenuSubItem
@@ -860,7 +876,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               >
                 <div
                   data-thread-selection-safe
-                  className="group/worktree-header flex h-6 w-full min-w-0 translate-x-0 items-center gap-1.5 px-2 text-left text-[10px] text-muted-foreground/70"
+                  className="group/worktree-header flex h-6 w-full min-w-0 translate-x-0 items-center gap-1.5 pr-1.5 pl-2 text-left text-[10px] text-muted-foreground/70"
                   title={group.detail ?? "Local project checkout"}
                 >
                   <SidebarWorktreePrStatus
@@ -870,7 +886,11 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
                     projectCwd={projectCwd}
                     onOpenPr={openPrLink}
                   />
-                  <span className="min-w-0 flex-1 truncate font-medium text-foreground/70">
+                  <span
+                    className={`min-w-0 flex-1 truncate text-xs font-medium ${
+                      isActiveWorktreeGroup ? "text-foreground" : "text-foreground/55"
+                    }`}
+                  >
                     {group.label}
                   </span>
                   <Tooltip>

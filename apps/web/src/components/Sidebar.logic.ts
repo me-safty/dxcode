@@ -296,6 +296,30 @@ export function isContextMenuPointerDown(input: {
   return input.isMac && input.button === 0 && input.ctrlKey;
 }
 
+const STALE_THREAD_THRESHOLD_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * Resting (inactive, non-attention) thread titles recede beneath the worktree
+ * label. Threads that have been idle for more than 48 hours recede further so
+ * the active worktree's recent threads read first.
+ */
+export function resolveRestingThreadTitleClassName(input: {
+  lastActivityAt: string | null | undefined;
+  nowMs?: number;
+}): string {
+  if (!input.lastActivityAt) {
+    return "text-muted-foreground/70";
+  }
+  const lastActivityMs = new Date(input.lastActivityAt).getTime();
+  if (Number.isNaN(lastActivityMs)) {
+    return "text-muted-foreground/70";
+  }
+  const ageMs = (input.nowMs ?? Date.now()) - lastActivityMs;
+  return ageMs > STALE_THREAD_THRESHOLD_MS
+    ? "text-muted-foreground/55"
+    : "text-muted-foreground/70";
+}
+
 export function resolveThreadRowClassName(input: {
   isActive: boolean;
   isSelected: boolean;

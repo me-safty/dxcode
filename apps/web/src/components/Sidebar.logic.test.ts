@@ -14,6 +14,7 @@ import {
   isContextMenuPointerDown,
   orderItemsByPreferredIds,
   resolveProjectStatusIndicator,
+  resolveRestingThreadTitleClassName,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
@@ -715,6 +716,40 @@ describe("resolveThreadRowClassName", () => {
     const className = resolveThreadRowClassName({ isActive: true, isSelected: false });
     expect(className).toContain("bg-accent/85");
     expect(className).toContain("hover:bg-accent");
+  });
+});
+
+describe("resolveRestingThreadTitleClassName", () => {
+  const now = new Date("2026-06-07T12:00:00.000Z").getTime();
+
+  it("uses the brighter resting color for recently active threads", () => {
+    const lastActivityAt = new Date(now - 2 * 60 * 60 * 1000).toISOString();
+    expect(resolveRestingThreadTitleClassName({ lastActivityAt, nowMs: now })).toBe(
+      "text-muted-foreground/70",
+    );
+  });
+
+  it("dims threads idle for more than 48 hours", () => {
+    const lastActivityAt = new Date(now - 49 * 60 * 60 * 1000).toISOString();
+    expect(resolveRestingThreadTitleClassName({ lastActivityAt, nowMs: now })).toBe(
+      "text-muted-foreground/55",
+    );
+  });
+
+  it("treats exactly 48 hours as not yet stale", () => {
+    const lastActivityAt = new Date(now - 48 * 60 * 60 * 1000).toISOString();
+    expect(resolveRestingThreadTitleClassName({ lastActivityAt, nowMs: now })).toBe(
+      "text-muted-foreground/70",
+    );
+  });
+
+  it("falls back to the brighter resting color when the timestamp is missing or invalid", () => {
+    expect(resolveRestingThreadTitleClassName({ lastActivityAt: null, nowMs: now })).toBe(
+      "text-muted-foreground/70",
+    );
+    expect(resolveRestingThreadTitleClassName({ lastActivityAt: "not-a-date", nowMs: now })).toBe(
+      "text-muted-foreground/70",
+    );
   });
 });
 

@@ -10,7 +10,7 @@ import {
 
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
-const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
+const THREAD_MAIN_CONTENT_MIN_WIDTH = 28 * 16;
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
@@ -69,7 +69,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <ThreadSidebar />
         <SidebarRail />
       </Sidebar>
-      <div className="fixed left-[calc(env(safe-area-inset-left)+0.75rem)] top-2 z-40">
+      <div className="fixed left-[calc(env(safe-area-inset-left)+0.75rem)] top-0 z-40 flex h-9 items-center sm:h-11">
         <SidebarTrigger className="size-7 shrink-0" />
       </div>
       {children}
