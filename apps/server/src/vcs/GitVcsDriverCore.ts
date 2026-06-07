@@ -1297,8 +1297,26 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
     const stagedEntries = parseNumstatEntries(stagedNumstatStdout);
     const unstagedEntries = parseNumstatEntries(unstagedNumstatStdout);
+    // `git diff --numstat` (staged + unstaged) never includes untracked files,
+    // so newly created files would otherwise report +0/-0. Diff each untracked
+    // path against /dev/null to recover its real line counts without mutating
+    // the index. `--no-index` exits non-zero when differences exist.
+    const untrackedNumstatStdouts = yield* Effect.all(
+      Array.from(changedFilesWithoutNumstat, (filePath) =>
+        runGitStdout(
+          "GitVcsDriver.statusDetails.untrackedNumstat",
+          cwd,
+          ["diff", "--no-index", "--numstat", "--", "/dev/null", filePath],
+          true,
+        ).pipe(Effect.orElseSucceed(() => "")),
+      ),
+      { concurrency: "unbounded" },
+    );
+    const untrackedEntries = untrackedNumstatStdouts.flatMap((stdout) =>
+      parseNumstatEntries(stdout),
+    );
     const fileStatMap = new Map<string, { insertions: number; deletions: number }>();
-    for (const entry of [...stagedEntries, ...unstagedEntries]) {
+    for (const entry of [...stagedEntries, ...unstagedEntries, ...untrackedEntries]) {
       const existing = fileStatMap.get(entry.path) ?? { insertions: 0, deletions: 0 };
       existing.insertions += entry.insertions;
       existing.deletions += entry.deletions;

@@ -236,7 +236,7 @@ function SidebarThreadStatusIcon({ status }: { status: ThreadStatusPill }) {
       role="img"
       aria-label={status.label}
       title={status.label}
-      className={`inline-flex h-5 min-w-5 items-center justify-end ${status.colorClass}`}
+      className={`inline-flex items-center justify-center ${status.colorClass}`}
     >
       {status.label === "Completed" ? (
         <span className={`size-2 shrink-0 rounded-full ${status.dotClass}`} aria-hidden />
@@ -247,6 +247,24 @@ function SidebarThreadStatusIcon({ status }: { status: ThreadStatusPill }) {
           }`}
           aria-hidden
         />
+      )}
+    </span>
+  );
+}
+
+/**
+ * Always-visible leading status indicator for a thread row. Forms a consistent
+ * vertical "spine" so thread rows visually hang off their worktree-group header
+ * (whose PR icon occupies the same leading column). Shows the active status
+ * icon/dot when present, otherwise a dim idle dot so titles stay aligned.
+ */
+function SidebarThreadLeadingStatus({ status }: { status: ThreadStatusPill | null }) {
+  return (
+    <span className="inline-flex size-4 shrink-0 items-center justify-center">
+      {status ? (
+        <SidebarThreadStatusIcon status={status} />
+      ) : (
+        <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/30" aria-hidden />
       )}
     </span>
   );
@@ -391,6 +409,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       lastVisitedAt,
     },
   });
+  // A thread that finished while unviewed reads as "needs attention", so we
+  // give its title + timestamp full-foreground emphasis, matching how the
+  // actively-viewed thread looks rather than the muted resting state.
+  const isUnseenCompleted = threadStatus?.label === "Completed";
+  const emphasizeRow = isHighlighted || isUnseenCompleted;
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
@@ -557,6 +580,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         onKeyDown={handleRowKeyDown}
         onContextMenu={handleRowContextMenu}
       >
+        <SidebarThreadLeadingStatus status={threadStatus} />
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
           {renamingThreadKey === threadKey ? (
             <input
@@ -573,7 +597,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               <TooltipTrigger
                 render={
                   <span
-                    className="min-w-0 flex-1 truncate text-xs"
+                    className={`min-w-0 flex-1 truncate text-xs ${
+                      isUnseenCompleted && !isHighlighted ? "text-foreground" : ""
+                    }`}
                     data-testid={`thread-title-${thread.id}`}
                   >
                     {thread.title}
@@ -597,7 +623,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               <TerminalIcon className={`size-3 ${terminalStatus.pulse ? "animate-pulse" : ""}`} />
             </span>
           )}
-          <div className="flex min-w-12 justify-end max-sm:min-w-20">
+          <div className="flex justify-end">
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -658,12 +684,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   >
                     {jumpLabel}
                   </span>
-                ) : threadStatus ? (
-                  <SidebarThreadStatusIcon status={threadStatus} />
                 ) : (
                   <span
                     className={`text-[10px] ${
-                      isHighlighted
+                      emphasizeRow
                         ? "text-foreground/72 dark:text-foreground/82"
                         : "text-muted-foreground/40"
                     }`}
@@ -846,7 +870,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
                     projectCwd={projectCwd}
                     onOpenPr={openPrLink}
                   />
-                  <span className="min-w-0 flex-1 truncate font-medium text-muted-foreground/85">
+                  <span className="min-w-0 flex-1 truncate font-medium text-foreground/70">
                     {group.label}
                   </span>
                   <Tooltip>

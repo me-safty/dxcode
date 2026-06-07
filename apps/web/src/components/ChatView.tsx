@@ -2948,6 +2948,11 @@ export default function ChatView(props: ChatViewProps) {
       options?: {
         restoreComposerOnFailure?: boolean;
         shouldClearComposer?: boolean;
+        // Queued submissions are stamped with `createdAt` at queue time, but the
+        // message must be ordered by when it actually sends. When draining the
+        // queue we restamp `createdAt` so the message sorts after the turn it
+        // was waiting on, not back at its (earlier) queue time.
+        restampCreatedAtOnSend?: boolean;
       },
     ): Promise<boolean> => {
       const api = readEnvironmentApi(environmentId);
@@ -2990,7 +2995,9 @@ export default function ChatView(props: ChatViewProps) {
         composerTerminalContextsSnapshot,
       );
       const messageIdForSend = newMessageId();
-      const messageCreatedAt = submission.createdAt;
+      const messageCreatedAt = options?.restampCreatedAtOnSend
+        ? new Date().toISOString()
+        : submission.createdAt;
       const outgoingMessageText = formatOutgoingPrompt({
         provider: submission.selectedProvider,
         model: submission.selectedModel,
@@ -3429,6 +3436,7 @@ export default function ChatView(props: ChatViewProps) {
       void sendTurnSubmission(submission, {
         restoreComposerOnFailure: false,
         shouldClearComposer: false,
+        restampCreatedAtOnSend: true,
       }).then((sent) => {
         if (sent) {
           removeQueuedTurnSubmission(submissionId, { revokeImages: false });
@@ -3458,6 +3466,7 @@ export default function ChatView(props: ChatViewProps) {
     void sendTurnSubmission(nextSubmission, {
       restoreComposerOnFailure: false,
       shouldClearComposer: false,
+      restampCreatedAtOnSend: true,
     }).then((sent) => {
       if (sent) {
         removeQueuedTurnSubmission(nextSubmission.id, { revokeImages: false });
