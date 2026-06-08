@@ -161,6 +161,12 @@ export function QueuedMessagesPanel(props: {
     props.onReorder(arrayMove(ids, oldIndex, newIndex));
   };
 
+  // The panel is tied to an active turn: it surfaces the running turn's diff
+  // count and any messages queued behind it. With no active turn there is
+  // nothing to review or steer, so the panel is hidden entirely.
+  if (!props.activeTurnId) {
+    return null;
+  }
   if (props.items.length === 0 && diffSummary.fileCount === 0) {
     return null;
   }

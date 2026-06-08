@@ -638,7 +638,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
     <div className="my-2" data-work-group-expanded={showExpandedEntries ? "true" : "false"}>
       {isActive ? (
         <div className="flex w-full items-center gap-2 py-1 text-left">
-          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground/70">
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground/70">
             {activeStartedAt ? (
               <>
                 Working for <WorkingTimer createdAt={activeStartedAt} />
@@ -657,7 +657,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
           data-scroll-anchor-ignore
           onClick={() => setWorkGroupExpanded(routeThreadKey, rowId, !isExpanded)}
         >
-          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground/70 transition-colors group-hover:text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground/70 transition-colors group-hover:text-muted-foreground">
             {groupLabel}
             <ChevronRightIcon
               className={cn(
@@ -724,7 +724,7 @@ const WorkActivitySummaryRow = memo(function WorkActivitySummaryRow({
       data-scroll-anchor-ignore
       onClick={() => setWorkActivityExpanded(routeThreadKey, summary.id, !expanded)}
       className={cn(
-        "group/activity inline-flex h-5 max-w-full items-center gap-1.5 text-left text-sm leading-5",
+        "group/activity inline-flex h-5 max-w-full items-center gap-1.5 text-left text-xs leading-5",
         canExpand ? "cursor-pointer" : "cursor-default",
       )}
     >
@@ -795,7 +795,7 @@ function WorkActivitySummaryItemRow({ item }: { item: WorkActivitySummary["items
   const setWorkActivityExpanded = useUiStateStore((store) => store.setThreadWorkActivityExpanded);
   const debugText = import.meta.env.DEV ? (item.debugText ?? item.title) : item.title;
   const labelClassName =
-    "min-w-0 truncate text-left text-sm text-muted-foreground/65 transition-colors hover:text-foreground/85";
+    "min-w-0 truncate text-left text-xs text-muted-foreground/65 transition-colors hover:text-foreground/85";
   const label = canShowInlineDiff ? (
     <button
       type="button"
@@ -1026,7 +1026,7 @@ function AssistantChangedFilesSectionInner({
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
   const allDirectoriesExpanded = useUiStateStore(
-    (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId] ?? true,
+    (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId] ?? false,
   );
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
   const summaryStat = summarizeTurnDiffStats(checkpointFiles);
@@ -1091,8 +1091,8 @@ const UserMessageTerminalContextInlineLabel = memo(
   },
 );
 
-const MAX_COLLAPSED_USER_MESSAGE_LINES = 8;
-const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 220;
+const MAX_COLLAPSED_USER_MESSAGE_LINES = 12;
+const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 1200;
 
 function shouldCollapseUserMessage(text: string): boolean {
   if (text.trim().length === 0) {
@@ -1119,7 +1119,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
     <div>
       {hasVisibleBody ? (
         <div
-          className={cn("relative", isCollapsed && "line-clamp-2")}
+          className={cn("relative", isCollapsed && "line-clamp-6")}
           data-user-message-body="true"
           data-user-message-collapsed={isCollapsed ? "true" : "false"}
           data-user-message-collapsible={canCollapse ? "true" : "false"}
@@ -1138,7 +1138,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
             aria-expanded={expanded}
             data-scroll-anchor-ignore
             onClick={() => setExpanded((value) => !value)}
-            className="inline-flex cursor-pointer items-center gap-1 text-sm text-muted-foreground/75 transition-colors hover:text-foreground/85"
+            className="inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground/75 transition-colors hover:text-foreground/85"
           >
             {expanded ? "Show less" : "Show more"}
             <ChevronDownIcon
@@ -1159,7 +1159,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   const reviewCommentSegments = parseReviewCommentMessageSegments(props.text);
   if (reviewCommentSegments.some((segment) => segment.kind === "review-comment")) {
     return (
-      <div className="space-y-3 text-sm leading-relaxed text-foreground">
+      <div className="space-y-3 text-xs leading-relaxed text-foreground">
         {reviewCommentSegments.map((segment) =>
           segment.kind === "text" ? (
             segment.text.trim().length > 0 ? (
@@ -1219,7 +1219,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         }
 
         return (
-          <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+          <div className="whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-foreground">
             {inlineNodes}
           </div>
         );
@@ -1251,7 +1251,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     }
 
     return (
-      <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+      <div className="whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-foreground">
         {inlineNodes}
       </div>
     );
@@ -1262,7 +1262,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   }
 
   return (
-    <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+    <div className="whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-foreground">
       <SkillInlineText text={props.text} skills={props.skills} />
     </div>
   );
@@ -1286,7 +1286,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
         </div>
       </div>
       {comment.text.length > 0 && (
-        <div className="whitespace-pre-wrap wrap-break-word text-sm">
+        <div className="whitespace-pre-wrap wrap-break-word text-xs">
           <SkillInlineText text={comment.text} skills={ctx.skills} />
         </div>
       )}

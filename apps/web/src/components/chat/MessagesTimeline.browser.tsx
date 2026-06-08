@@ -209,7 +209,7 @@ describe("MessagesTimeline", () => {
         "[data-user-message-body='true']",
       ) as HTMLDivElement | null;
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");
-      expect(messageBody?.className).toContain("line-clamp-2");
+      expect(messageBody?.className).toContain("line-clamp-6");
     } finally {
       await screen.unmount();
     }
@@ -237,14 +237,14 @@ describe("MessagesTimeline", () => {
 
       let messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("false");
-      expect(messageBody?.className).not.toContain("line-clamp-2");
+      expect(messageBody?.className).not.toContain("line-clamp-6");
 
       await collapseButton.click();
 
       await expect.element(page.getByRole("button", { name: "Show more" })).toBeVisible();
       messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");
-      expect(messageBody?.className).toContain("line-clamp-2");
+      expect(messageBody?.className).toContain("line-clamp-6");
     } finally {
       await screen.unmount();
     }

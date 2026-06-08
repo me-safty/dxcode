@@ -97,11 +97,8 @@ import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
-import { useMediaQuery } from "../hooks/useMediaQuery";
-import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import PlanSidebar from "./PlanSidebar";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomHex } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -141,9 +138,10 @@ import {
 } from "../lib/terminalContext";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { Group as PanelGroup, Panel } from "react-resizable-panels";
-import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
+import { Sidebar, SidebarProvider, SidebarRail, useOptionalSidebar } from "./ui/sidebar";
 import { BottomDock } from "./BottomDock";
 import { useThreadDockPanels } from "../hooks/useThreadDockPanels";
+import { toggleProjectSidebar } from "../projectSidebarToggleStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../terminalSessionState";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
@@ -189,7 +187,7 @@ import {
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
-import { RightPanelSheet } from "./RightPanelSheet";
+
 import { Button } from "./ui/button";
 import {
   buildVersionMismatchDismissalKey,
@@ -529,7 +527,6 @@ export default function ChatView(props: ChatViewProps) {
     (store) => store.setStickyModelSelection,
   );
   const timestampFormat = settings.timestampFormat;
-  const autoOpenPlanSidebar = settings.autoOpenPlanSidebar;
   const navigate = useNavigate();
   const rawSearch = useSearch({
     strict: false,
@@ -596,13 +593,6 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
-  const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
-  const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
-  // Tracks whether the user explicitly dismissed the sidebar for the active turn.
-  const planSidebarDismissedForTurnRef = useRef<string | null>(null);
-  // When set, the thread-change reset effect will open the sidebar instead of closing it.
-  // Used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
-  const planSidebarOpenOnNextThreadRef = useRef(false);
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
@@ -1247,7 +1237,6 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
-  const planSidebarLabel = sidebarProposedPlan || interactionMode === "plan" ? "Plan" : "Tasks";
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
@@ -1490,9 +1479,14 @@ export default function ChatView(props: ChatViewProps) {
     }
     return byTurnId;
   }, [inferredCheckpointTurnCountByTurnId, turnDiffSummaries]);
-  const activeTurnDiffSummaryForQueue = activeLatestTurn?.turnId
-    ? (turnDiffSummaryByTurnId.get(activeLatestTurn.turnId) ?? null)
-    : null;
+  // Only surface a turn diff for the queue while a turn is actively running.
+  // `activeLatestTurn` lingers as the last completed turn once idle, so without
+  // this gate the queue panel would show a stale file/diff count (and stay
+  // visible) even though there is no active turn.
+  const activeTurnDiffSummaryForQueue =
+    phase === "running" && activeLatestTurn?.turnId
+      ? (turnDiffSummaryByTurnId.get(activeLatestTurn.turnId) ?? null)
+      : null;
   const queuedMessagePanelItems = useMemo(
     () =>
       activeQueuedTurnSubmissions.map((submission) => {
@@ -1754,9 +1748,91 @@ export default function ChatView(props: ChatViewProps) {
     isServerThread,
     keybindings,
     onAddTerminalContext: addTerminalContextToDraft,
+    activePlan,
+    activeProposedPlan: sidebarProposedPlan,
+    timestampFormat,
+    markdownCwd: gitCwd ?? undefined,
+    workspaceRoot: activeWorkspaceRoot,
   });
   const toggleTerminalVisibility = dockPanels.toggleTerminal;
   const onToggleDiff = dockPanels.toggleDiff;
+  const toggleRightDock = dockPanels.toggleRightDock;
+  const openTasks = dockPanels.openTasks;
+  const [rightDockExpanded, setRightDockExpanded] = useState(false);
+  // The left project sidebar's context (ChatView renders inside it, before its
+  // own right-dock provider). Used to know if the fixed project-sidebar toggle
+  // overlaps the expanded dock's left edge (only when that sidebar is closed).
+  const leftSidebar = useOptionalSidebar();
+  const leftSidebarOpen = leftSidebar?.open ?? false;
+  // Collapsing the right dock (or it closing) also exits its full-width mode.
+  useEffect(() => {
+    if (!dockPanels.rightOpen && rightDockExpanded) {
+      setRightDockExpanded(false);
+    }
+  }, [dockPanels.rightOpen, rightDockExpanded]);
+  const toggleRightDockExpanded = useCallback(() => {
+    setRightDockExpanded((value) => !value);
+  }, []);
+  // Memoized so the Sidebar's resize options keep a stable identity across
+  // renders. A fresh object each render would re-run the rail's stored-width
+  // restore effect, which clobbers the expanded full-width on every re-render
+  // (e.g. when adding a tab while expanded).
+  const rightDockResizable = useMemo(
+    () => ({
+      minWidth: RIGHT_DOCK_SIDEBAR_MIN_WIDTH,
+      maxWidth: RIGHT_DOCK_SIDEBAR_MAX_WIDTH,
+      shouldAcceptWidth: ({
+        currentWidth,
+        nextWidth,
+        wrapper,
+      }: {
+        currentWidth: number;
+        nextWidth: number;
+        wrapper: HTMLElement;
+      }) => {
+        // Allow shrinking freely; only block growth once the chat column would
+        // drop below its minimum. Rejecting growth-only (rather than any width
+        // over the limit) keeps the drag from oscillating at the boundary.
+        if (nextWidth <= currentWidth) return true;
+        return wrapper.clientWidth - nextWidth >= CHAT_MAIN_MIN_WIDTH_PX;
+      },
+      storageKey: RIGHT_DOCK_SIDEBAR_WIDTH_STORAGE_KEY,
+    }),
+    [],
+  );
+  // When the right dock is expanded to full width, the Sidebar's fixed
+  // container would otherwise resolve `100%` against the viewport and overlap
+  // the left project sidebar. Track the chat area's (SidebarProvider wrapper)
+  // width in state so the declarative `--sidebar-width` survives re-renders
+  // (avoids width flicker when adding tabs while expanded) and stays in sync as
+  // the window/left sidebar resize.
+  const rightDockWrapperRef = useRef<HTMLDivElement | null>(null);
+  const [expandedDockWidth, setExpandedDockWidth] = useState<number | null>(null);
+  useEffect(() => {
+    const wrapper = rightDockWrapperRef.current;
+    if (!wrapper || !rightDockExpanded) {
+      setExpandedDockWidth(null);
+      return;
+    }
+    let rafId: number | null = null;
+    const apply = () => {
+      // Defer to the next frame and only update on real changes to avoid the
+      // "ResizeObserver loop" warning when our state update re-triggers layout.
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        const next = wrapper.clientWidth;
+        setExpandedDockWidth((current) => (current === next ? current : next));
+      });
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(wrapper);
+    return () => {
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
+  }, [rightDockExpanded]);
 
   // Keep the `?diff=1` route in sync with whether a diff dock tab exists, so
   // the diff content (which self-resolves from the route) mounts/unmounts.
@@ -2084,22 +2160,6 @@ export default function ChatView(props: ChatViewProps) {
   const toggleInteractionMode = useCallback(() => {
     handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
   }, [handleInteractionModeChange, interactionMode]);
-  const togglePlanSidebar = useCallback(() => {
-    setPlanSidebarOpen((open) => {
-      if (open) {
-        planSidebarDismissedForTurnRef.current =
-          activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-      } else {
-        planSidebarDismissedForTurnRef.current = null;
-      }
-      return !open;
-    });
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
-  const closePlanSidebar = useCallback(() => {
-    setPlanSidebarOpen(false);
-    planSidebarDismissedForTurnRef.current =
-      activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -2182,34 +2242,7 @@ export default function ChatView(props: ChatViewProps) {
     isAtEndRef.current = true;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
-    if (planSidebarOpenOnNextThreadRef.current) {
-      planSidebarOpenOnNextThreadRef.current = false;
-      setPlanSidebarOpen(true);
-    } else {
-      planSidebarOpenOnNextThreadRef.current = false;
-      setPlanSidebarOpen(false);
-    }
-    planSidebarDismissedForTurnRef.current = null;
   }, [activeThread?.id]);
-
-  // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
-  // Don't auto-open for plans carried over from a previous turn (the user can open manually).
-  useEffect(() => {
-    if (!autoOpenPlanSidebar) return;
-    if (!activePlan) return;
-    if (planSidebarOpen) return;
-    const latestTurnId = activeLatestTurn?.turnId ?? null;
-    if (latestTurnId && activePlan.turnId !== latestTurnId) return;
-    const turnKey = activePlan.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-    if (planSidebarDismissedForTurnRef.current === turnKey) return;
-    setPlanSidebarOpen(true);
-  }, [
-    activePlan,
-    activeLatestTurn?.turnId,
-    autoOpenPlanSidebar,
-    planSidebarOpen,
-    sidebarProposedPlan?.turnId,
-  ]);
 
   useEffect(() => {
     setIsRevertingCheckpoint(false);
@@ -2429,6 +2462,27 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "sidebar.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleProjectSidebar();
+        return;
+      }
+
+      if (command === "dock.right.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleRightDock();
+        return;
+      }
+
+      if (command === "tasks.open") {
+        event.preventDefault();
+        event.stopPropagation();
+        openTasks();
+        return;
+      }
+
       if (command === "modelPicker.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -2458,6 +2512,8 @@ export default function ChatView(props: ChatViewProps) {
     splitTerminal,
     keybindings,
     onToggleDiff,
+    toggleRightDock,
+    openTasks,
     toggleTerminalVisibility,
   ]);
 
@@ -3345,13 +3401,6 @@ export default function ChatView(props: ChatViewProps) {
             : {}),
           createdAt: messageCreatedAt,
         });
-        // Optimistically open the plan sidebar when implementing (not refining).
-        // "default" mode here means the agent is executing the plan, which produces
-        // step-tracking activities that the sidebar will display.
-        if (nextInteractionMode === "default" && autoOpenPlanSidebar) {
-          planSidebarDismissedForTurnRef.current = null;
-          setPlanSidebarOpen(true);
-        }
         sendInFlightRef.current = false;
       } catch (err) {
         setOptimisticUserMessages((existing) =>
@@ -3377,7 +3426,6 @@ export default function ChatView(props: ChatViewProps) {
       runtimeMode,
       setComposerDraftInteractionMode,
       setThreadError,
-      autoOpenPlanSidebar,
       environmentId,
     ],
   );
@@ -3471,8 +3519,6 @@ export default function ChatView(props: ChatViewProps) {
         return waitForStartedServerThread(scopeThreadRef(activeThread.environmentId, nextThreadId));
       })
       .then(() => {
-        // Signal that the plan sidebar should open on the new thread when enabled.
-        planSidebarOpenOnNextThreadRef.current = autoOpenPlanSidebar;
         return navigate({
           to: "/$environmentId/$threadId",
           params: {
@@ -3514,7 +3560,6 @@ export default function ChatView(props: ChatViewProps) {
     navigate,
     resetLocalDispatch,
     runtimeMode,
-    autoOpenPlanSidebar,
     environmentId,
   ]);
 
@@ -3650,15 +3695,28 @@ export default function ChatView(props: ChatViewProps) {
 
   return (
     <SidebarProvider
+      ref={rightDockWrapperRef}
       defaultOpen={false}
       open={dockPanels.rightOpen}
       onOpenChange={(open) => {
         if (!open) onToggleDiff();
       }}
       className="min-h-0! w-auto! flex-1"
-      style={{ "--sidebar-width": RIGHT_DOCK_SIDEBAR_DEFAULT_WIDTH } as React.CSSProperties}
+      style={
+        {
+          "--sidebar-width":
+            rightDockExpanded && expandedDockWidth !== null
+              ? `${expandedDockWidth}px`
+              : RIGHT_DOCK_SIDEBAR_DEFAULT_WIDTH,
+        } as React.CSSProperties
+      }
     >
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      <div
+        className={cn(
+          "flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background",
+          rightDockExpanded && "hidden",
+        )}
+      >
         {/* Top bar: chat header + fixed dock toggles */}
         <header
           className={cn(
@@ -3675,9 +3733,18 @@ export default function ChatView(props: ChatViewProps) {
           <div
             className={cn(
               "flex min-w-0 flex-1 items-center",
+              // The fixed dock toggles sit at the top-right of the chat area
+              // only when the right dock is closed; reserve space for them then.
+              // When the dock is open they sit over the dock, so the chat header
+              // can use its normal compact padding.
               isElectron
-                ? "px-3 sm:px-5"
-                : "pl-[calc(env(safe-area-inset-left)+3rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]",
+                ? cn("px-3 sm:px-5", !dockPanels.rightOpen && "pr-20 sm:pr-24")
+                : cn(
+                    "pl-[calc(env(safe-area-inset-left)+3rem)]",
+                    dockPanels.rightOpen
+                      ? "pr-[calc(env(safe-area-inset-right)+0.75rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]"
+                      : "pr-[calc(env(safe-area-inset-right)+5rem)] sm:pr-[calc(env(safe-area-inset-right)+5.5rem)]",
+                  ),
             )}
           >
             <ChatHeader
@@ -3691,26 +3758,6 @@ export default function ChatView(props: ChatViewProps) {
             />
           </div>
         </header>
-
-        <div
-          className={cn(
-            "fixed top-0 z-50 flex h-11 items-center [-webkit-app-region:no-drag]",
-            isElectron
-              ? "right-3 wco:right-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+0.5rem)]"
-              : "right-[calc(env(safe-area-inset-right)+0.75rem)]",
-          )}
-        >
-          <DockToggles
-            terminalAvailable={activeProject !== undefined}
-            terminalOpen={dockPanels.bottomOpen}
-            terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-            isGitRepo={isGitRepo}
-            diffOpen={dockPanels.rightOpen}
-            diffToggleShortcutLabel={diffPanelShortcutLabel}
-            onToggleTerminal={toggleTerminalVisibility}
-            onToggleDiff={onToggleDiff}
-          />
-        </div>
 
         {/* Error banner */}
         <ProviderStatusBanner status={activeProviderStatus} />
@@ -3732,7 +3779,15 @@ export default function ChatView(props: ChatViewProps) {
                       <MessagesTimeline
                         key={activeThread.id}
                         isWorking={isWorking}
-                        activeTurnInProgress={isWorking || !latestTurnSettled}
+                        // `activeTurnInProgress` means "the turn referenced by
+                        // `activeTurnId` (the latest turn) is actually running".
+                        // Don't fold in the broader `isWorking` (which is true
+                        // during the send/connect/revert window before the new
+                        // turn exists): that made the *previous* completed turn's
+                        // terminal assistant message reclassify into a work group
+                        // on send, changing its row key at the list bottom and
+                        // jumping the virtualized list to the top.
+                        activeTurnInProgress={!latestTurnSettled}
                         activeTurnId={activeLatestTurn?.turnId ?? null}
                         activeTurnStartedAt={activeWorkStartedAt}
                         listRef={legendListRef}
@@ -3787,7 +3842,9 @@ export default function ChatView(props: ChatViewProps) {
                       <div className="relative isolate mx-auto w-full min-w-0 max-w-208">
                         <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                         <QueuedMessagesPanel
-                          activeTurnId={activeLatestTurn?.turnId ?? null}
+                          activeTurnId={
+                            phase === "running" ? (activeLatestTurn?.turnId ?? null) : null
+                          }
                           activeTurnDiffSummary={activeTurnDiffSummaryForQueue}
                           activeChangeSummary={activeChangeSummaryForQueue}
                           items={queuedMessagePanelItems}
@@ -3828,10 +3885,6 @@ export default function ChatView(props: ChatViewProps) {
                             respondingRequestIds={respondingRequestIds}
                             showPlanFollowUpPrompt={showPlanFollowUpPrompt}
                             activeProposedPlan={activeProposedPlan}
-                            activePlan={activePlan as { turnId?: TurnId } | null}
-                            sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
-                            planSidebarLabel={planSidebarLabel}
-                            planSidebarOpen={planSidebarOpen}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
                             lockedProvider={lockedProvider}
@@ -3869,7 +3922,6 @@ export default function ChatView(props: ChatViewProps) {
                             toggleInteractionMode={toggleInteractionMode}
                             handleRuntimeModeChange={handleRuntimeModeChange}
                             handleInteractionModeChange={handleInteractionModeChange}
-                            togglePlanSidebar={togglePlanSidebar}
                             focusComposer={focusComposer}
                             scheduleComposerFocus={scheduleComposerFocus}
                             setThreadError={setThreadError}
@@ -3921,21 +3973,6 @@ export default function ChatView(props: ChatViewProps) {
                     ) : null}
                   </div>
                   {/* end chat column */}
-
-                  {/* Plan sidebar */}
-                  {planSidebarOpen && !shouldUsePlanSidebarSheet ? (
-                    <PlanSidebar
-                      activePlan={activePlan}
-                      activeProposedPlan={sidebarProposedPlan}
-                      label={planSidebarLabel}
-                      environmentId={environmentId}
-                      markdownCwd={gitCwd ?? undefined}
-                      workspaceRoot={activeWorkspaceRoot}
-                      timestampFormat={timestampFormat}
-                      mode="sidebar"
-                      onClose={closePlanSidebar}
-                    />
-                  ) : null}
                 </div>
               </Panel>
             </PanelGroup>
@@ -3954,47 +3991,42 @@ export default function ChatView(props: ChatViewProps) {
           </BottomDock>
         ) : null}
 
-        {shouldUsePlanSidebarSheet ? (
-          <RightPanelSheet open={planSidebarOpen} onClose={closePlanSidebar}>
-            <PlanSidebar
-              activePlan={activePlan}
-              activeProposedPlan={sidebarProposedPlan}
-              label={planSidebarLabel}
-              environmentId={environmentId}
-              markdownCwd={gitCwd ?? undefined}
-              workspaceRoot={activeWorkspaceRoot}
-              timestampFormat={timestampFormat}
-              mode="sheet"
-              onClose={closePlanSidebar}
-            />
-          </RightPanelSheet>
-        ) : null}
-
         {expandedImage && (
           <ExpandedImageDialog preview={expandedImage} onClose={closeExpandedImage} />
         )}
       </div>
-      {dockPanels.hasDiffTab ? (
+      <div
+        className={cn(
+          "fixed top-0 z-50 flex h-11 items-center [-webkit-app-region:no-drag]",
+          isElectron
+            ? "right-3 wco:right-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+0.5rem)]"
+            : "right-[calc(env(safe-area-inset-right)+0.75rem)]",
+        )}
+      >
+        <DockToggles
+          terminalAvailable={activeProject !== undefined}
+          terminalOpen={dockPanels.bottomOpen}
+          terminalToggleShortcutLabel={terminalToggleShortcutLabel}
+          isGitRepo={isGitRepo}
+          diffOpen={dockPanels.rightOpen}
+          diffToggleShortcutLabel={diffPanelShortcutLabel}
+          onToggleTerminal={toggleTerminalVisibility}
+          onToggleDiff={onToggleDiff}
+          rightDockExpanded={rightDockExpanded}
+          onToggleRightDockExpanded={toggleRightDockExpanded}
+        />
+      </div>
+      {dockPanels.rightHasTabs ? (
         <Sidebar
           side="right"
           collapsible="offcanvas"
           disableHoverPreview
           className="border-l border-border bg-background text-foreground"
-          resizable={{
-            minWidth: RIGHT_DOCK_SIDEBAR_MIN_WIDTH,
-            maxWidth: RIGHT_DOCK_SIDEBAR_MAX_WIDTH,
-            shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) => {
-              // Allow shrinking freely; only block growth once the chat column
-              // would drop below its minimum. Rejecting growth-only (rather than
-              // any width over the limit) keeps the drag from oscillating at the
-              // boundary.
-              if (nextWidth <= currentWidth) return true;
-              return wrapper.clientWidth - nextWidth >= CHAT_MAIN_MIN_WIDTH_PX;
-            },
-            storageKey: RIGHT_DOCK_SIDEBAR_WIDTH_STORAGE_KEY,
-          }}
+          resizable={rightDockResizable}
         >
-          {dockPanels.renderSlot("right")}
+          {dockPanels.renderSlot("right", {
+            reserveLeadingInset: rightDockExpanded && !leftSidebarOpen,
+          })}
           <SidebarRail />
         </Sidebar>
       ) : null}

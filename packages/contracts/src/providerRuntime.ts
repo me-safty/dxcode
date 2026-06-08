@@ -103,6 +103,7 @@ export type RuntimeErrorClass = typeof RuntimeErrorClass.Type;
 
 export const TOOL_LIFECYCLE_ITEM_TYPES = [
   "command_execution",
+  "file_read",
   "file_change",
   "mcp_tool_call",
   "dynamic_tool_call",

@@ -158,6 +158,67 @@ describe("summarizeWorkActivityEntries", () => {
     ]);
   });
 
+  it("classifies provider built-in Read tools as file reads using the tool name", () => {
+    const summaries = summarizeWorkActivityEntries(
+      [
+        workEntry({
+          id: "read-1",
+          label: "Tool call",
+          toolTitle: "Tool call",
+          toolName: "Read",
+          itemType: "dynamic_tool_call",
+          detail: 'Read: {"file_path":"/repo/apps/server/src/orchestration/decider.ts"}',
+        }),
+        workEntry({
+          id: "read-2",
+          label: "Tool call",
+          toolTitle: "Tool call",
+          toolName: "Read",
+          itemType: "dynamic_tool_call",
+          detail: 'Read: {"file_path":"/repo/apps/server/src/cli/project.ts"}',
+        }),
+        workEntry({
+          id: "read-3",
+          label: "Tool call",
+          toolTitle: "Tool call",
+          toolName: "Read",
+          itemType: "dynamic_tool_call",
+          detail: 'Read: {"file_path":"/repo/apps/web/src/components/Sidebar.tsx"}',
+        }),
+      ],
+      "/repo",
+    );
+
+    expect(summaries).toMatchObject([
+      {
+        category: "file",
+        label: "Explored 3 files",
+        items: [
+          { label: "Read apps/server/src/orchestration/decider.ts" },
+          { label: "Read apps/server/src/cli/project.ts" },
+          { label: "Read apps/web/src/components/Sidebar.tsx" },
+        ],
+      },
+    ]);
+  });
+
+  it("classifies provider built-in Grep tools as file exploration", () => {
+    const summaries = summarizeWorkActivityEntries(
+      [
+        workEntry({
+          id: "grep-1",
+          label: "Tool call",
+          toolName: "Grep",
+          itemType: "dynamic_tool_call",
+          detail: 'Grep: {"pattern":"foo","path":"src"}',
+        }),
+      ],
+      "/repo",
+    );
+
+    expect(summaries).toMatchObject([{ category: "file" }]);
+  });
+
   it("expands multi-file edits into one item per changed file", () => {
     const summaries = summarizeWorkActivityEntries(
       [

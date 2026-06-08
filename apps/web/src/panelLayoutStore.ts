@@ -17,7 +17,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { resolveStorage } from "./lib/storage";
 
 export type PanelSlot = "bottom" | "right";
-export type PanelContentKind = "terminal" | "diff" | "chat" | "files";
+export type PanelContentKind = "terminal" | "diff" | "chat" | "files" | "tasks";
 
 export interface PanelTab {
   id: string;
@@ -245,10 +245,12 @@ export const usePanelLayoutStore = create<PanelLayoutStoreState>()(
         addTab: (threadRef, slot, tab) =>
           update(threadRef, (state) =>
             updateSlot(state, slot, (slotState) => {
-              // Diff is a singleton per slot; focus the existing one instead of
-              // adding a duplicate.
-              if (tab.kind === "diff") {
-                const existing = slotState.tabs.find((existingTab) => existingTab.kind === "diff");
+              // Diff and tasks are singletons per slot; focus the existing one
+              // instead of adding a duplicate.
+              if (tab.kind === "diff" || tab.kind === "tasks") {
+                const existing = slotState.tabs.find(
+                  (existingTab) => existingTab.kind === tab.kind,
+                );
                 if (existing) {
                   return { ...slotState, open: true, activeTabId: existing.id };
                 }

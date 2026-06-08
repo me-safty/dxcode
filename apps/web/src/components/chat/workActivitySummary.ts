@@ -125,6 +125,10 @@ function resolveWorkCategory(entry: WorkLogEntry): WorkActivityCategory {
   ) {
     return "file";
   }
+  const toolNameCategory = categoryFromToolName(entry.toolName);
+  if (toolNameCategory) {
+    return toolNameCategory;
+  }
   if (
     commandText(entry) &&
     (entry.requestKind === "command" || entry.itemType === "command_execution" || entry.command)
@@ -139,6 +143,42 @@ function resolveWorkCategory(entry: WorkLogEntry): WorkActivityCategory {
     return "tool";
   }
   return entry.tone === "info" ? "info" : "tool";
+}
+
+// Provider built-in tools (notably Claude's Read/Grep/Glob/Edit/Write) arrive as
+// generic `dynamic_tool_call` entries, so the only reliable signal for what they
+// did is the tool name itself. Map the well-known names onto our activity
+// categories so they read as "Read N files" / "Edited N files" rather than the
+// generic "Used N tools".
+function categoryFromToolName(toolName: string | undefined): WorkActivityCategory | null {
+  const normalized = toolName?.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (
+    normalized === "read" ||
+    normalized === "grep" ||
+    normalized === "glob" ||
+    normalized.includes("readfile") ||
+    normalized.includes("read file") ||
+    normalized.includes("view")
+  ) {
+    return "file";
+  }
+  if (normalized.includes("websearch") || normalized.includes("web search")) {
+    return "search";
+  }
+  if (
+    normalized.includes("edit") ||
+    normalized.includes("write") ||
+    normalized.includes("create") ||
+    normalized.includes("delete") ||
+    normalized.includes("patch") ||
+    normalized.includes("replace")
+  ) {
+    return "edit";
+  }
+  return null;
 }
 
 function buildSummary(pending: ReadonlyArray<ClassifiedWorkEntry>): WorkActivitySummary {
@@ -275,7 +315,10 @@ function fileExploreLabel(entry: WorkLogEntry, workspaceRoot: string | undefined
   const executable = commandExecutable(command);
   const pathFromCommand = extractFilePathFromCommand(command);
   const pathFromEntry =
-    pathFromCommand ?? extractPathLikeText(entry.detail) ?? extractPathLikeText(entry.label);
+    pathFromCommand ??
+    extractPathFromToolInput(entry) ??
+    extractPathLikeText(entry.detail) ??
+    extractPathLikeText(entry.label);
 
   if (executable === "pwd") {
     return "Checked current directory";
@@ -499,6 +542,48 @@ function extractFilePathFromCommand(tokens: ReadonlyArray<string>): string | nul
     fileTokens.push(token);
   }
   return fileTokens.findLast(looksLikePath) ?? null;
+}
+
+// Provider built-in tools embed their arguments as JSON in the entry detail,
+// e.g. `Read: {"file_path":"/abs/path","offset":160}`. Pull the file path out of
+// that payload so file reads/views render with a real path.
+function extractPathFromToolInput(entry: WorkLogEntry): string | null {
+  for (const source of [entry.detail, entry.label]) {
+    const path = pathFromToolInputText(source);
+    if (path) {
+      return path;
+    }
+  }
+  return null;
+}
+
+function pathFromToolInputText(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return null;
+  }
+  const braceIndex = normalized.indexOf("{");
+  if (braceIndex === -1) {
+    return null;
+  }
+  const candidate = normalized.slice(braceIndex);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+  const input = parsed as Record<string, unknown>;
+  for (const key of ["file_path", "filePath", "path", "notebook_path", "target_file"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
 }
 
 function extractPathLikeText(value: string | null | undefined): string | null {

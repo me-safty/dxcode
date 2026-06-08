@@ -241,6 +241,45 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     () => reviewDiff.data?.sources.find((entry) => entry.kind === "working-tree") ?? null,
     [reviewDiff.data],
   );
+
+  // Auto-refresh the working-tree / branch diffs when the repository state
+  // changes. These come from `review.getDiffPreview` (a git snapshot) and have
+  // no built-in invalidation, so we derive a cheap fingerprint from the live
+  // VCS status (`vcs.onStatus`) and refresh when it changes. Turn diffs are
+  // excluded — they already invalidate on turn completion.
+  const reviewRefreshRef = useRef(reviewDiff.refresh);
+  reviewRefreshRef.current = reviewDiff.refresh;
+  const repoFingerprint = useMemo(() => {
+    const status = gitStatusQuery.data;
+    if (!status) return null;
+    const workingTree = status.workingTree;
+    return [
+      status.refName ?? "",
+      status.hasWorkingTreeChanges ? "dirty" : "clean",
+      workingTree.insertions,
+      workingTree.deletions,
+      workingTree.files
+        .map((file) => `${file.path}:${file.insertions}:${file.deletions}`)
+        .join("|"),
+      // Commits added/removed on the branch shift the base...HEAD range.
+      status.aheadCount,
+    ].join("\u0001");
+  }, [gitStatusQuery.data]);
+  const lastRepoFingerprintRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!usesReview || repoFingerprint === null) return;
+    // Skip the first observed fingerprint: the SWR atom already loads on mount,
+    // so we only refresh on a genuine change.
+    if (lastRepoFingerprintRef.current === null) {
+      lastRepoFingerprintRef.current = repoFingerprint;
+      return;
+    }
+    if (lastRepoFingerprintRef.current === repoFingerprint) return;
+    lastRepoFingerprintRef.current = repoFingerprint;
+    const timer = setTimeout(() => reviewRefreshRef.current(), 300);
+    return () => clearTimeout(timer);
+  }, [repoFingerprint, usesReview]);
+
   const branchBaseLabel = branchSource?.baseRef ?? null;
   const currentBranch = gitStatusQuery.data?.refName ?? activeThread?.branch ?? null;
 

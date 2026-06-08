@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "prepare": "effect-tsgo patch",
-    "dev": "node scripts/dev-runner.ts dev",
+    "dev": "node scripts/dev-runner.ts dev --no-browser",
     "dev:server": "node scripts/dev-runner.ts dev:server",
     "dev:local-cloudflare": "node scripts/local-cloudflare-dev.ts",
     "health:orchestrator": "node scripts/orchestrator-health-check.ts",

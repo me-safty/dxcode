@@ -190,7 +190,7 @@ export function DiffPanelToolbar(props: DiffPanelToolbarProps) {
             </button>
           }
         />
-        <MenuPopup align="start" className="min-w-44">
+        <MenuPopup align="end" className="min-w-44">
           <MenuItem
             onClick={() => onSelectSource({ kind: "working-tree" })}
             className={cn(source.kind === "working-tree" && "bg-accent/60")}
@@ -257,22 +257,28 @@ export function DiffPanelToolbar(props: DiffPanelToolbarProps) {
             >
               Turns
             </MenuSubTrigger>
-            <MenuSubPopup className="max-h-80 min-w-48">
+            <MenuSubPopup className="max-h-80 min-w-64">
               {changedTurnDiffSummaries.map((summary) => {
                 const count =
                   summary.checkpointTurnCount ??
                   inferredCheckpointTurnCountByTurnId[summary.turnId] ??
                   "?";
                 const isActive = source.kind === "turn" && source.turnId === summary.turnId;
+                const prompt = turnPromptByTurnId[summary.turnId]?.replace(/\s+/g, " ").trim();
                 return (
                   <MenuItem
                     key={summary.turnId}
                     onClick={() => onSelectSource({ kind: "turn", turnId: summary.turnId })}
-                    className={cn(isActive && "bg-accent/60")}
+                    className={cn("items-start", isActive && "bg-accent/60")}
+                    title={prompt ? `Turn ${count}: ${prompt}` : `Turn ${count}`}
                   >
-                    <span className="flex-1">Turn {count}</span>
-                    <span className="ml-2 shrink-0 text-[10px] text-muted-foreground/70">
-                      {formatTurnTimestamp(summary.completedAt)}
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="truncate">
+                        {prompt && prompt.length > 0 ? prompt : `Turn ${count}`}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground/60">
+                        Turn {count} · {formatTurnTimestamp(summary.completedAt)}
+                      </span>
                     </span>
                   </MenuItem>
                 );

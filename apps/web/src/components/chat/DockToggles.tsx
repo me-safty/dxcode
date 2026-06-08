@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { PanelBottomIcon, PanelRightIcon } from "lucide-react";
+import { Maximize2Icon, Minimize2Icon, PanelBottomIcon, PanelRightIcon } from "lucide-react";
 
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -13,6 +13,10 @@ interface DockTogglesProps {
   diffToggleShortcutLabel: string | null;
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
+  /** Whether the right dock currently fills the full width (chat hidden). */
+  rightDockExpanded?: boolean;
+  /** Toggles the right dock between split and full-width; only shown when open. */
+  onToggleRightDockExpanded?: () => void;
 }
 
 const toggleClassName =
@@ -33,9 +37,36 @@ export const DockToggles = memo(function DockToggles({
   diffToggleShortcutLabel,
   onToggleTerminal,
   onToggleDiff,
+  rightDockExpanded = false,
+  onToggleRightDockExpanded,
 }: DockTogglesProps) {
   return (
     <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
+      {diffOpen && onToggleRightDockExpanded ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                className={toggleClassName}
+                pressed={rightDockExpanded}
+                onPressedChange={onToggleRightDockExpanded}
+                aria-label="Expand panel"
+                variant="default"
+                size="xs"
+              >
+                {rightDockExpanded ? (
+                  <Minimize2Icon className="size-3" />
+                ) : (
+                  <Maximize2Icon className="size-3" />
+                )}
+              </Toggle>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {rightDockExpanded ? "Collapse panel" : "Expand panel"}
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
       <Tooltip>
         <TooltipTrigger
           render={

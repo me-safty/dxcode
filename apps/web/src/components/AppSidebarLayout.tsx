@@ -2,15 +2,32 @@ import { useEffect, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import ThreadSidebar from "./Sidebar";
-import { Sidebar, SidebarProvider, SidebarRail, SidebarTrigger } from "./ui/sidebar";
+import { Sidebar, SidebarProvider, SidebarRail, SidebarTrigger, useSidebar } from "./ui/sidebar";
 import {
   clearShortcutModifierState,
   syncShortcutModifierStateFromKeyboardEvent,
 } from "../shortcutModifierState";
+import { useProjectSidebarToggleStore } from "../projectSidebarToggleStore";
 
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 28 * 16;
+
+/**
+ * Registers the project sidebar's toggle into a shared store so descendants
+ * (e.g. the chat keybinding dispatcher) can toggle it despite living under a
+ * different `SidebarProvider`. Renders nothing.
+ */
+function ProjectSidebarToggleRegistrar() {
+  const { toggleSidebar } = useSidebar();
+  const setToggle = useProjectSidebarToggleStore((state) => state.setToggle);
+  useEffect(() => {
+    setToggle(toggleSidebar);
+    return () => setToggle(null);
+  }, [setToggle, toggleSidebar]);
+  return null;
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
@@ -55,6 +72,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
+      <ProjectSidebarToggleRegistrar />
       <Sidebar
         side="left"
         collapsible="offcanvas"

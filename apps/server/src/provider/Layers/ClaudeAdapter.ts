@@ -461,6 +461,17 @@ function classifyToolItemType(toolName: string): CanonicalItemType {
   ) {
     return "command_execution";
   }
+  // Web search and image checks come before the read-only check because
+  // isReadOnlyToolName matches the substrings "search" and "view".
+  if (normalized.includes("websearch") || normalized.includes("web search")) {
+    return "web_search";
+  }
+  if (normalized.includes("image")) {
+    return "image_view";
+  }
+  if (isReadOnlyToolName(toolName)) {
+    return "file_read";
+  }
   if (
     normalized.includes("edit") ||
     normalized.includes("write") ||
@@ -474,12 +485,6 @@ function classifyToolItemType(toolName: string): CanonicalItemType {
   }
   if (normalized.includes("mcp")) {
     return "mcp_tool_call";
-  }
-  if (normalized.includes("websearch") || normalized.includes("web search")) {
-    return "web_search";
-  }
-  if (normalized.includes("image")) {
-    return "image_view";
   }
   return "dynamic_tool_call";
 }
@@ -560,6 +565,16 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
     }
   }
 
+  // For read-only file tools (Read/Grep/Glob), prefer the target path/pattern over raw JSON
+  // so the UI can render "Read <path>" instead of a serialized input blob.
+  if (itemType === "file_read") {
+    const pathValue = input.file_path ?? input.path ?? input.pattern ?? input.query;
+    const path = typeof pathValue === "string" ? pathValue.trim() : undefined;
+    if (path) {
+      return `${toolName}: ${path.slice(0, 400)}`;
+    }
+  }
+
   const serialized = encodeJsonStringForDiagnostics(input) ?? "[unserializable input]";
   if (serialized.length <= 400) {
     return `${toolName}: ${serialized}`;
@@ -571,6 +586,8 @@ function titleForTool(itemType: CanonicalItemType): string {
   switch (itemType) {
     case "command_execution":
       return "Command run";
+    case "file_read":
+      return "File read";
     case "file_change":
       return "File change";
     case "mcp_tool_call":

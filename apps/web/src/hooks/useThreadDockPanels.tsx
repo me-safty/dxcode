@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import type { ResolvedKeybindingsConfig, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
-import { scopedThreadKey } from "@t3tools/client-runtime";
+import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { Suspense, lazy } from "react";
@@ -19,6 +19,8 @@ import { useKnownTerminalSessions } from "../terminalSessionState";
 import { DockSlot } from "../components/DockSlot";
 import { SingleTerminalView } from "../components/SingleTerminalView";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
+import PlanSidebar from "../components/PlanSidebar";
+import type { ActivePlanState, LatestProposedPlanState } from "../session-logic";
 
 const LazyDiffPanel = lazy(() => import("../components/DiffPanel"));
 
@@ -34,19 +36,28 @@ export interface UseThreadDockPanelsArgs {
   isServerThread: boolean;
   keybindings: ResolvedKeybindingsConfig;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
+  /** Tasks-tab data: the live plan checklist and proposed-plan document. */
+  activePlan: ActivePlanState | null;
+  activeProposedPlan: LatestProposedPlanState | null;
+  timestampFormat: TimestampFormat;
+  markdownCwd: string | undefined;
+  workspaceRoot: string | undefined;
 }
 
 export interface ThreadDockPanels {
   bottomOpen: boolean;
   rightOpen: boolean;
+  rightHasTabs: boolean;
   bottomSize: number;
   rightSize: number;
   hasTerminalTab: boolean;
   hasDiffTab: boolean;
-  renderSlot: (slot: PanelSlot) => React.ReactNode;
+  renderSlot: (slot: PanelSlot, options?: { reserveLeadingInset?: boolean }) => React.ReactNode;
   handleResize: (slot: PanelSlot, size: number) => void;
   toggleTerminal: () => void;
   toggleDiff: () => void;
+  toggleRightDock: () => void;
+  openTasks: () => void;
   addTerminal: (slot?: PanelSlot) => void;
 }
 
@@ -58,6 +69,7 @@ export interface ThreadDockPanels {
  */
 export function useThreadDockPanels(args: UseThreadDockPanelsArgs): ThreadDockPanels {
   const { threadRef, threadId, project, worktreePath, isServerThread, keybindings } = args;
+  const { activePlan, activeProposedPlan, timestampFormat, markdownCwd, workspaceRoot } = args;
   const onAddTerminalContextRef = useRef(args.onAddTerminalContext);
   useEffect(() => {
     onAddTerminalContextRef.current = args.onAddTerminalContext;
@@ -180,6 +192,7 @@ export function useThreadDockPanels(args: UseThreadDockPanelsArgs): ThreadDockPa
     (kind: PanelContentKind) => {
       if (kind === "terminal") return project !== null && cwd !== null;
       if (kind === "diff") return isServerThread;
+      if (kind === "tasks") return true;
       return false;
     },
     [cwd, isServerThread, project],
@@ -264,6 +277,20 @@ export function useThreadDockPanels(args: UseThreadDockPanelsArgs): ThreadDockPa
           </DiffWorkerPoolProvider>
         );
       }
+      if (tab.kind === "tasks" && threadRef) {
+        return (
+          <PlanSidebar
+            activePlan={activePlan}
+            activeProposedPlan={activeProposedPlan}
+            environmentId={threadRef.environmentId}
+            markdownCwd={markdownCwd}
+            workspaceRoot={workspaceRoot}
+            timestampFormat={timestampFormat}
+            mode="panel"
+            onClose={() => handleCloseTab(slot, tab)}
+          />
+        );
+      }
       return (
         <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-sm text-muted-foreground/70">
           Coming soon
@@ -271,19 +298,24 @@ export function useThreadDockPanels(args: UseThreadDockPanelsArgs): ThreadDockPa
       );
     },
     [
+      activePlan,
+      activeProposedPlan,
       cwd,
       handleCloseTab,
       keybindings,
+      markdownCwd,
       runtimeEnv,
       terminalLabelById,
       threadId,
       threadRef,
+      timestampFormat,
       worktreePath,
+      workspaceRoot,
     ],
   );
 
   const renderSlot = useCallback(
-    (slot: PanelSlot) => {
+    (slot: PanelSlot, options?: { reserveLeadingInset?: boolean }) => {
       const slotState = panelLayout[slot];
       const terminalLabelByTabId = new Map<string, string>();
       for (const tab of slotState.tabs) {
@@ -307,6 +339,7 @@ export function useThreadDockPanels(args: UseThreadDockPanelsArgs): ThreadDockPa
           onClose={() => threadRef && setSlotOpen(threadRef, slot, false)}
           renderTab={(tab) => renderTabContent(slot, tab, tab.id === slotState.activeTabId)}
           reserveToggleSpace={slot === "right"}
+          reserveLeadingInset={options?.reserveLeadingInset ?? false}
         />
       );
     },
@@ -372,9 +405,24 @@ export function useThreadDockPanels(args: UseThreadDockPanelsArgs): ThreadDockPa
     }
   }, [handleAddTab, hasDiffTab, isServerThread, panelLayout.right.open, setSlotOpen, threadRef]);
 
+  // Toggle the right dock's open state without changing its tabs. No-op when
+  // the slot has no tabs (nothing to reveal).
+  const toggleRightDock = useCallback(() => {
+    if (!threadRef || panelLayout.right.tabs.length === 0) return;
+    setSlotOpen(threadRef, "right", !panelLayout.right.open);
+  }, [panelLayout.right.open, panelLayout.right.tabs.length, setSlotOpen, threadRef]);
+
+  // Open the right dock with a Tasks tab. `tasks` is a singleton per slot, so
+  // this focuses the existing tab if one is already present.
+  const openTasks = useCallback(() => {
+    if (!threadRef) return;
+    handleAddTab("right", "tasks");
+  }, [handleAddTab, threadRef]);
+
   return {
     bottomOpen: panelLayout.bottom.open && panelLayout.bottom.tabs.length > 0,
     rightOpen: panelLayout.right.open && panelLayout.right.tabs.length > 0,
+    rightHasTabs: panelLayout.right.tabs.length > 0,
     bottomSize: panelLayout.bottom.size,
     rightSize: panelLayout.right.size,
     hasTerminalTab,
@@ -383,6 +431,8 @@ export function useThreadDockPanels(args: UseThreadDockPanelsArgs): ThreadDockPa
     handleResize,
     toggleTerminal,
     toggleDiff,
+    toggleRightDock,
+    openTasks,
     addTerminal: (slot: PanelSlot = "bottom") => handleAddTab(slot, "terminal"),
   };
 }

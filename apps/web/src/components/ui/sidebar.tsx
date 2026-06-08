@@ -88,6 +88,13 @@ function useSidebar() {
   return context;
 }
 
+/** Like {@link useSidebar} but returns null instead of throwing when there is
+ * no enclosing provider (e.g. reading an ancestor sidebar from a component that
+ * also hosts its own provider, or in tests rendered without one). */
+function useOptionalSidebar() {
+  return React.use(SidebarContext);
+}
+
 function SidebarProvider({
   defaultOpen = true,
   open: openProp,
@@ -95,6 +102,7 @@ function SidebarProvider({
   className,
   style,
   children,
+  ref,
   ...props
 }: React.ComponentProps<"div"> & {
   defaultOpen?: boolean;
@@ -153,6 +161,7 @@ function SidebarProvider({
   return (
     <SidebarContext value={contextValue}>
       <div
+        ref={ref}
         className={cn(
           "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
           className,
@@ -1104,5 +1113,6 @@ export {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
+  useOptionalSidebar,
   useSidebar,
 };

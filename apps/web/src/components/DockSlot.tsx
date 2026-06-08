@@ -1,6 +1,7 @@
 import {
   IconFolder,
   IconGitCompare,
+  IconListCheck,
   IconMessage,
   IconPlus,
   IconTerminal2,
@@ -32,6 +33,11 @@ const KIND_META: Record<PanelContentKind, KindMeta> = {
     description: "View code changes",
     Icon: (props) => <IconGitCompare {...props} />,
   },
+  tasks: {
+    label: "Tasks",
+    description: "Plan and live task steps",
+    Icon: (props) => <IconListCheck {...props} />,
+  },
   chat: {
     label: "Side chat",
     description: "Start a side conversation",
@@ -47,11 +53,11 @@ const KIND_META: Record<PanelContentKind, KindMeta> = {
 };
 
 // Order shown in the launcher and the (+) add menu.
-const KIND_ORDER: ReadonlyArray<PanelContentKind> = ["terminal", "diff", "chat", "files"];
+const KIND_ORDER: ReadonlyArray<PanelContentKind> = ["terminal", "diff", "tasks", "chat", "files"];
 
 // Kinds limited to one tab per slot; adding again just refocuses the existing
 // tab, so they are hidden from the add menu once present.
-const SINGLETON_KINDS: ReadonlySet<PanelContentKind> = new Set(["diff"]);
+const SINGLETON_KINDS: ReadonlySet<PanelContentKind> = new Set(["diff", "tasks"]);
 
 function tabTitle(tab: PanelTab, terminalLabel?: string): string {
   if (tab.kind === "terminal") {
@@ -83,6 +89,7 @@ export function DockSlot(props: {
   renderTab: (tab: PanelTab) => ReactNode;
   hideTabBar?: boolean;
   reserveToggleSpace?: boolean;
+  reserveLeadingInset?: boolean;
 }) {
   const {
     slot,
@@ -97,6 +104,7 @@ export function DockSlot(props: {
     renderTab,
     hideTabBar,
     reserveToggleSpace,
+    reserveLeadingInset,
   } = props;
 
   if (tabs.length === 0) {
@@ -114,6 +122,7 @@ export function DockSlot(props: {
             onCloseTab={onCloseTab}
             onClose={onClose}
             reserveToggleSpace={reserveToggleSpace}
+            reserveLeadingInset={reserveLeadingInset}
           />
         )}
         <DockLauncher isKindAvailable={isKindAvailable} onAddTab={onAddTab} />
@@ -135,6 +144,7 @@ export function DockSlot(props: {
           onCloseTab={onCloseTab}
           onClose={onClose}
           reserveToggleSpace={reserveToggleSpace}
+          reserveLeadingInset={reserveLeadingInset}
         />
       )}
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -177,6 +187,12 @@ export function DockSlotTabBar(props: {
    * toggles) and hide the slot's own close button, since the toggle closes it.
    */
   reserveToggleSpace?: boolean | undefined;
+  /**
+   * Reserve left padding to clear the fixed project-sidebar toggle, used when
+   * the dock is expanded to full width and its tab bar reaches the app's left
+   * edge.
+   */
+  reserveLeadingInset?: boolean | undefined;
 }) {
   const {
     slot,
@@ -191,6 +207,7 @@ export function DockSlotTabBar(props: {
     trailing,
     bare,
     reserveToggleSpace,
+    reserveLeadingInset,
   } = props;
   const useDragRegion = !bare && isElectron && slot === "right";
 
@@ -253,6 +270,7 @@ export function DockSlotTabBar(props: {
         "flex items-center gap-1",
         bare ? "min-w-0 flex-1" : "h-11 shrink-0 border-b border-border px-2",
         reserveToggleSpace && "pr-16",
+        reserveLeadingInset && "pl-12",
         useDragRegion &&
           "drag-region wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+0.5rem)]",
       )}

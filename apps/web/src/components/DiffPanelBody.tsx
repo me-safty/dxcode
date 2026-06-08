@@ -142,6 +142,7 @@ export function DiffPanelBody(props: DiffPanelBodyProps) {
             allDirectoriesExpanded
             resolvedTheme={resolvedTheme}
             selectedFilePath={selectedFilePath}
+            showStats={false}
             onOpenTurnDiff={(_turnId, filePath) => {
               if (filePath) handleSelectFile(filePath);
             }}

@@ -1734,6 +1734,28 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           )
         : null);
 
+    // Optionally fetch the remote-tracking ref before diffing so a branch
+    // comparison reflects the latest pushed commits. Best-effort: failures
+    // (offline, missing remote) fall back to the on-disk ref.
+    if (input.fetchBaseRef && baseRef) {
+      const remoteNames = yield* runGitStdout(
+        "GitVcsDriver.getReviewDiffPreview.remoteNames",
+        input.cwd,
+        ["remote"],
+      ).pipe(
+        Effect.map(parseRemoteNames),
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
+      );
+      const parsedRemoteRef = parseRemoteRefWithRemoteNames(baseRef, remoteNames);
+      if (parsedRemoteRef) {
+        yield* fetchRemoteTrackingBranch({
+          cwd: input.cwd,
+          remoteName: parsedRemoteRef.remoteName,
+          remoteBranch: parsedRemoteRef.branchName,
+        }).pipe(Effect.orElseSucceed(() => undefined));
+      }
+    }
+
     const dirtyTrackedResult = yield* executeGit(
       "GitVcsDriver.getReviewDiffPreview.dirtyTracked",
       input.cwd,

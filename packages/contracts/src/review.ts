@@ -6,6 +6,11 @@ import { VcsError } from "./vcs.ts";
 export const ReviewDiffPreviewInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   baseRef: Schema.optional(TrimmedNonEmptyString),
+  // When true and `baseRef` is a remote-tracking ref (e.g. `origin/dev`), fetch
+  // that branch from its remote before computing the branch-range diff so the
+  // comparison reflects the latest pushed commits. Best-effort: a failed fetch
+  // (offline, missing remote) falls back to the on-disk ref.
+  fetchBaseRef: Schema.optional(Schema.Boolean),
 });
 export type ReviewDiffPreviewInput = typeof ReviewDiffPreviewInput.Type;
 
