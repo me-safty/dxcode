@@ -1,6 +1,5 @@
 import {
   IconArchive as ArchiveIcon,
-  IconAlertCircle,
   IconAlertTriangle,
   IconAlertTriangle as TriangleAlertIcon,
   IconArrowsSort as ArrowUpDownIcon,
@@ -226,15 +225,13 @@ function SidebarThreadStatusIcon({ status }: { status: ThreadStatusPill }) {
   const Icon =
     status.label === "Pending Approval"
       ? IconAlertTriangle
-      : status.label === "Failed"
-        ? IconAlertCircle
-        : status.label === "Awaiting Input"
-          ? IconMessageQuestion
-          : status.label === "Plan Ready"
-            ? IconChecklist
-            : status.label === "Connecting"
-              ? IconRefresh
-              : IconLoader2;
+      : status.label === "Awaiting Input"
+        ? IconMessageQuestion
+        : status.label === "Plan Ready"
+          ? IconChecklist
+          : status.label === "Connecting"
+            ? IconRefresh
+            : IconLoader2;
 
   return (
     <span

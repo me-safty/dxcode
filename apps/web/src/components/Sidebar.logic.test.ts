@@ -694,76 +694,12 @@ describe("resolveThreadStatusPill", () => {
       }),
     ).toMatchObject({ label: "Completed", pulse: false });
   });
-
-  it("shows failed when the session is in an error state", () => {
-    expect(
-      resolveThreadStatusPill({
-        thread: {
-          ...baseThread,
-          session: {
-            ...baseThread.session,
-            status: "error",
-            orchestrationStatus: "ready",
-          },
-        },
-      }),
-    ).toMatchObject({ label: "Failed", pulse: false });
-  });
-
-  it("shows failed when the latest turn is in an error state", () => {
-    expect(
-      resolveThreadStatusPill({
-        thread: {
-          ...baseThread,
-          latestTurn: { ...makeLatestTurn(), state: "error" },
-          session: {
-            ...baseThread.session,
-            status: "ready",
-            orchestrationStatus: "ready",
-          },
-        },
-      }),
-    ).toMatchObject({ label: "Failed", pulse: false });
-  });
-
-  it("shows pending approval before failed", () => {
-    expect(
-      resolveThreadStatusPill({
-        thread: {
-          ...baseThread,
-          hasPendingApprovals: true,
-          session: {
-            ...baseThread.session,
-            status: "error",
-            orchestrationStatus: "ready",
-          },
-        },
-      }),
-    ).toMatchObject({ label: "Pending Approval", pulse: false });
-  });
-
-  it("shows failed before awaiting input", () => {
-    expect(
-      resolveThreadStatusPill({
-        thread: {
-          ...baseThread,
-          hasPendingUserInput: true,
-          session: {
-            ...baseThread.session,
-            status: "error",
-            orchestrationStatus: "ready",
-          },
-        },
-      }),
-    ).toMatchObject({ label: "Failed", pulse: false });
-  });
 });
 
 describe("isNeedsReviewStatus", () => {
   it("treats user-actionable states as needing review", () => {
     for (const label of [
       "Pending Approval",
-      "Failed",
       "Awaiting Input",
       "Plan Ready",
       "Completed",

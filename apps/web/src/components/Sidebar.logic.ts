@@ -33,16 +33,14 @@ export interface ThreadStatusPill {
     | "Completed"
     | "Pending Approval"
     | "Awaiting Input"
-    | "Plan Ready"
-    | "Failed";
+    | "Plan Ready";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
 }
 
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
-  "Pending Approval": 6,
-  Failed: 5,
+  "Pending Approval": 5,
   "Awaiting Input": 4,
   Working: 3,
   Connecting: 3,
@@ -59,7 +57,6 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
  */
 const NEEDS_REVIEW_STATUS_LABELS: ReadonlySet<ThreadStatusPill["label"]> = new Set([
   "Pending Approval",
-  "Failed",
   "Awaiting Input",
   "Plan Ready",
   "Completed",
@@ -382,15 +379,6 @@ export function resolveThreadStatusPill(input: {
       label: "Pending Approval",
       colorClass: "text-amber-600 dark:text-amber-300/90",
       dotClass: "bg-amber-500 dark:bg-amber-300/90",
-      pulse: false,
-    };
-  }
-
-  if (thread.session?.status === "error" || thread.latestTurn?.state === "error") {
-    return {
-      label: "Failed",
-      colorClass: "text-red-600 dark:text-red-400/90",
-      dotClass: "bg-red-500 dark:bg-red-400/90",
       pulse: false,
     };
   }
