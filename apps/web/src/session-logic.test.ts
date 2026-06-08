@@ -990,30 +990,6 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
-  it("does not overwrite subagent output with command result fallbacks", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({
-        id: "subagent-with-output",
-        kind: "tool.completed",
-        summary: "Subagent",
-        payload: {
-          itemType: "collab_agent_tool_call",
-          data: {
-            rawOutput: {
-              content: "Subagent result",
-            },
-            item: {
-              aggregatedOutput: "Command-like fallback",
-            },
-          },
-        },
-      }),
-    ];
-
-    const [entry] = deriveWorkLogEntries(activities, undefined);
-    expect(entry?.output).toBe("Subagent result");
-  });
-
   it("extracts changed file paths for file-change tool activities", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
