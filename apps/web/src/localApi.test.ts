@@ -554,7 +554,32 @@ describe("wsApi", () => {
     const api = createLocalApi(rpcClientMock as never);
 
     await expect(api.server.refreshProviders()).resolves.toEqual({ providers: nextProviders });
-    expect(rpcClientMock.server.refreshProviders).toHaveBeenCalledWith();
+    expect(rpcClientMock.server.refreshProviders).toHaveBeenCalledWith(undefined);
+
+    await expect(
+      api.server.refreshProviders({
+        instanceId: defaultProviders[0]!.instanceId,
+        cwd: "/workspace/project",
+      }),
+    ).resolves.toEqual({ providers: nextProviders });
+    expect(rpcClientMock.server.refreshProviders).toHaveBeenLastCalledWith({
+      instanceId: defaultProviders[0]!.instanceId,
+      cwd: "/workspace/project",
+    });
+
+    const { createEnvironmentApi } = await import("./environmentApi");
+    const environmentApi = createEnvironmentApi(rpcClientMock as never);
+
+    await expect(
+      environmentApi.server.refreshProviders({
+        instanceId: defaultProviders[0]!.instanceId,
+        cwd: "/remote/workspace/project",
+      }),
+    ).resolves.toEqual({ providers: nextProviders });
+    expect(rpcClientMock.server.refreshProviders).toHaveBeenLastCalledWith({
+      instanceId: defaultProviders[0]!.instanceId,
+      cwd: "/remote/workspace/project",
+    });
   });
 
   it("forwards provider updates directly to the RPC client", async () => {

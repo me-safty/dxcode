@@ -499,6 +499,7 @@ export interface LocalApi {
      */
     refreshProviders: (input?: {
       readonly instanceId?: ProviderInstanceId;
+      readonly cwd?: string;
     }) => Promise<ServerProviderUpdatedPayload>;
     updateProvider: (input: ServerProviderUpdateInput) => Promise<ServerProviderUpdatedPayload>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
@@ -525,6 +526,15 @@ export interface LocalApi {
  * `environmentId` rather than reaching through the local desktop bridge.
  */
 export interface EnvironmentApi {
+  server: {
+    /**
+     * Refresh provider snapshots for this backend environment.
+     */
+    refreshProviders: (input?: {
+      readonly instanceId?: ProviderInstanceId;
+      readonly cwd?: string;
+    }) => Promise<ServerProviderUpdatedPayload>;
+  };
   terminal: {
     open: (input: typeof TerminalOpenInput.Encoded) => Promise<TerminalSessionSnapshot>;
     attach: (

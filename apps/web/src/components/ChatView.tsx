@@ -171,6 +171,7 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  resolveProviderRefreshTarget,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
@@ -202,6 +203,7 @@ const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const CODEX_PROVIDER_DRIVER = ProviderDriverKind.make("codex");
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -844,6 +846,7 @@ export default function ChatView(props: ChatViewProps) {
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
+  const codexWorkspaceProviderRefreshKeyRef = useRef<string | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
@@ -1859,6 +1862,62 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  useEffect(() => {
+    if (!activeWorkspaceRoot) return;
+    const refreshTarget = resolveProviderRefreshTarget({
+      activeProviderInstanceId,
+      activeProviderStatus,
+      selectedProvider,
+      targetDriver: CODEX_PROVIDER_DRIVER,
+    });
+    if (!refreshTarget) return;
+
+    const refreshKey = `${environmentId}\u0000${refreshTarget.instanceId}\u0000${activeWorkspaceRoot}`;
+    if (codexWorkspaceProviderRefreshKeyRef.current === refreshKey) return;
+
+    const api = readEnvironmentApi(environmentId);
+    if (!api) return;
+    codexWorkspaceProviderRefreshKeyRef.current = refreshKey;
+    void (async () => {
+      try {
+        const result = await api.server.refreshProviders({
+          instanceId: refreshTarget.instanceId,
+          cwd: activeWorkspaceRoot,
+        });
+        if (!refreshTarget.fallbackInstanceId) return;
+        if (result.providers.some((provider) => provider.instanceId === refreshTarget.instanceId)) {
+          return;
+        }
+        if (codexWorkspaceProviderRefreshKeyRef.current !== refreshKey) return;
+
+        const fallbackRefreshKey = `${environmentId}\u0000${refreshTarget.fallbackInstanceId}\u0000${activeWorkspaceRoot}`;
+        codexWorkspaceProviderRefreshKeyRef.current = fallbackRefreshKey;
+        try {
+          await api.server.refreshProviders({
+            instanceId: refreshTarget.fallbackInstanceId,
+            cwd: activeWorkspaceRoot,
+          });
+        } catch (fallbackError: unknown) {
+          if (codexWorkspaceProviderRefreshKeyRef.current === fallbackRefreshKey) {
+            codexWorkspaceProviderRefreshKeyRef.current = null;
+          }
+          console.warn("Failed to refresh Codex provider for active workspace", fallbackError);
+        }
+      } catch (error: unknown) {
+        if (codexWorkspaceProviderRefreshKeyRef.current === refreshKey) {
+          codexWorkspaceProviderRefreshKeyRef.current = null;
+        }
+        console.warn("Failed to refresh Codex provider for active workspace", error);
+      }
+    })();
+  }, [
+    activeProviderInstanceId,
+    activeProviderStatus?.driver,
+    activeProviderStatus?.instanceId,
+    activeWorkspaceRoot,
+    environmentId,
+    selectedProvider,
+  ]);
   const activeTerminalLaunchContext =
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
   // Default true while loading to avoid toolbar flicker.

@@ -136,11 +136,12 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       });
       const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);
 
-      const checkProvider = checkOpenCodeProviderStatus(
-        effectiveConfig,
-        serverConfig.cwd,
-        processEnv,
-      ).pipe(Effect.map(stampIdentity), Effect.provideService(OpenCodeRuntime, openCodeRuntime));
+      const checkProvider = (refreshInput?: { readonly cwd?: string | undefined }) =>
+        checkOpenCodeProviderStatus(
+          effectiveConfig,
+          refreshInput?.cwd ?? serverConfig.cwd,
+          processEnv,
+        ).pipe(Effect.map(stampIdentity), Effect.provideService(OpenCodeRuntime, openCodeRuntime));
 
       const snapshot = yield* makeManagedServerProvider<OpenCodeSettings>({
         maintenanceCapabilities,
