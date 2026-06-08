@@ -58,6 +58,7 @@ import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { T3workThreadToolContextStoreLive } from "./t3work-threadToolContextStore.ts";
+import { T3workWorkflowEngineRegistryLive } from "./t3work-workflowEngineRegistry.ts";
 import {
   NoopT3workToolBroker,
   T3workToolBroker,
@@ -698,7 +699,9 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.checkpointDiffQuery,
         }),
       ),
-      Layer.provideMerge(T3workThreadToolContextStoreLive),
+      Layer.provideMerge(
+        Layer.mergeAll(T3workThreadToolContextStoreLive, T3workWorkflowEngineRegistryLive),
+      ),
     );
 
     const appLayer = servedRoutesLayer.pipe(

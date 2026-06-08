@@ -6,6 +6,7 @@ import {
 } from "@t3tools/contracts";
 import type { LaunchProjectRecipeWorkflowRequest } from "@t3tools/project-recipes";
 import { createModelSelection } from "@t3tools/shared/model";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import { HttpRouter } from "effect/unstable/http";
 
@@ -16,177 +17,87 @@ import {
   T3workAtlassianError,
 } from "./t3work-atlassian-http.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
-import {
-  runProjectRecipeWorkflowLaunch,
-  runDeterministicProjectRecipeWorkflowLaunch,
-  upsertProjectRecipeLaunchActivity,
-} from "./t3work-recipeWorkflowRuntime.ts";
-export { t3workThreadRecipeWorkflowCardActionRouteLayer } from "./t3work-thread-recipe-workflow-cardActionRoute.ts";
-import { upsertRecipeWorkflowAgentBootstrapContext } from "./t3work-recipeWorkflowAgentBootstrap.ts";
-import { readRecipeWorkflowLaunchContext } from "./t3work-recipeWorkflowLaunchContext.ts";
-import { dispatchRecipeWorkflowTurnStart } from "./t3work-recipeWorkflowTurnStart.ts";
 import { toT3workError } from "./t3work-project-repository-utils.ts";
+import { t3workRandomUUID } from "./t3work-random.ts";
 import {
   isProviderInteractionMode,
   isRuntimeMode,
   loadThreadProjectContext,
 } from "./t3work-thread-recipe-workflow-routes-shared.ts";
-import type { T3workTurnToolContext } from "./t3work-toolBroker.ts";
-import { T3workThreadToolContextStore } from "./t3work-threadToolContextStore.ts";
+import { launchWorkflowRecipe } from "./t3work-workflowEngineLaunch.ts";
+import { T3workWorkflowEngineRegistry } from "./t3work-workflowEngineRegistry.ts";
 
+function nowIso(): string {
+  return DateTime.formatIso(DateTime.nowUnsafe());
+}
+
+/**
+ * Launch a recipe's `.workflow.ts` through the durable engine (Epic 25). Replaces the legacy
+ * step-union launch: it resolves the launching thread's project, builds a per-run
+ * orchestration broker, and calls `startWorkflow`. A run that fires an ask verb suspends and is
+ * parked by the registry; the workflow-engine reactor resumes it when the reply lands.
+ */
 export const t3workThreadRecipeWorkflowLaunchRouteLayer = HttpRouter.add(
   "POST",
   "/api/t3work/thread/recipe-workflow/launch",
   Effect.gen(function* () {
-    const orchestrationEngine = yield* OrchestrationEngineService;
-    const threadToolContextStore = yield* T3workThreadToolContextStore;
+    const orchestration = yield* OrchestrationEngineService;
+    const registry = yield* T3workWorkflowEngineRegistry;
     const input = yield* readJsonBody<LaunchProjectRecipeWorkflowRequest>();
+
     const threadIdInput = input.threadId?.trim() ?? "";
-    const workspaceRoot = input.workspaceRoot?.trim() ?? "";
-    const kickoffMessage = input.kickoffMessage?.trim() ?? "";
-    const titleSeed = input.titleSeed?.trim() ?? "";
     const modelInstanceId = input.modelSelection?.instanceId?.trim() ?? "";
     const modelName = input.modelSelection?.model?.trim() ?? "";
     if (!input.launch || typeof input.launch !== "object") {
       return yield* new T3workAtlassianError({ message: "launch is required." });
     }
-
-    if (threadIdInput.length === 0) {
-      if (workspaceRoot.length === 0) {
-        return yield* new T3workAtlassianError({
-          message: "workspaceRoot is required for deterministic recipe launches.",
-        });
-      }
-      if (!input.toolContext || typeof input.toolContext !== "object") {
-        return yield* new T3workAtlassianError({
-          message: "toolContext is required for deterministic recipe launches.",
-        });
-      }
-
-      const toolContext: T3workTurnToolContext = {
-        surface: input.toolContext.surface,
-        tools: input.toolContext.tools.map((tool) => ({
-          id: tool.id,
-          capabilities: [...tool.capabilities],
-          ...(tool.label ? { label: tool.label } : {}),
-        })),
-        state: input.toolContext.state,
-      };
-
-      const result = yield* runDeterministicProjectRecipeWorkflowLaunch({
-        workspaceRoot,
-        launch: input.launch,
-        kickoffMessage,
-        createdAt: input.createdAt,
-        toolContext,
-      });
-
-      return okJson({
-        ok: true,
-        mode: "deterministic",
-        workflowRunId: result.workflowRunId,
-        effects: result.effects,
-        completionActivity: result.completionActivity,
+    const workflowPath = input.launch.workflowPath?.trim() ?? "";
+    if (workflowPath.length === 0) {
+      return yield* new T3workAtlassianError({
+        message: "launch.workflowPath is required: this recipe has no .workflow.ts to run.",
       });
     }
-
-    if (kickoffMessage.length === 0) {
-      return yield* new T3workAtlassianError({ message: "kickoffMessage is required." });
+    if (threadIdInput.length === 0) {
+      return yield* new T3workAtlassianError({
+        message: "threadId is required: headless recipe launches are not yet supported by the engine.",
+      });
     }
     if (modelInstanceId.length === 0 || modelName.length === 0) {
       return yield* new T3workAtlassianError({ message: "modelSelection is required." });
     }
-    if (titleSeed.length === 0) {
-      return yield* new T3workAtlassianError({ message: "titleSeed is required." });
-    }
 
     const threadId = ThreadId.make(threadIdInput);
-    const runtimeModeInput = input.runtimeMode;
-    const interactionModeInput = input.interactionMode;
     const runtimeMode =
-      runtimeModeInput && isRuntimeMode(runtimeModeInput) ? runtimeModeInput : DEFAULT_RUNTIME_MODE;
+      input.runtimeMode && isRuntimeMode(input.runtimeMode) ? input.runtimeMode : DEFAULT_RUNTIME_MODE;
     const interactionMode =
-      interactionModeInput && isProviderInteractionMode(interactionModeInput)
-        ? interactionModeInput
+      input.interactionMode && isProviderInteractionMode(input.interactionMode)
+        ? input.interactionMode
         : DEFAULT_PROVIDER_INTERACTION_MODE;
-    const modelSelection = createModelSelection(
-      ProviderInstanceId.make(modelInstanceId),
-      modelName,
+    const modelSelection = createModelSelection(ProviderInstanceId.make(modelInstanceId), modelName);
+    const { project, thread } = yield* loadThreadProjectContext(threadId);
+
+    const dispatch = (command: Parameters<typeof orchestration.dispatch>[0]): Promise<void> =>
+      Effect.runPromise(orchestration.dispatch(command)).then(() => undefined);
+
+    const result = yield* Effect.promise(() =>
+      launchWorkflowRecipe({
+        runId: t3workRandomUUID(),
+        workflowPath,
+        args: input.launch.parameters ?? {},
+        runsRoot: `${project.workspaceRoot}/.t3work-runs`,
+        launchThreadId: threadIdInput,
+        projectId: thread.projectId,
+        modelSelection,
+        runtimeMode,
+        interactionMode,
+        registry,
+        dispatch,
+        newId: () => t3workRandomUUID(),
+        nowIso,
+      }),
     );
-    const { project } = yield* loadThreadProjectContext(threadId);
-    const launchContext = readRecipeWorkflowLaunchContext(
-      yield* threadToolContextStore.get(threadId),
-    );
 
-    const program = Effect.gen(function* () {
-      const prepared = yield* runProjectRecipeWorkflowLaunch({
-        orchestration: orchestrationEngine,
-        threadId,
-        workspaceRoot: project.workspaceRoot,
-        launch: input.launch,
-        ...(launchContext ? { launchContext } : {}),
-        kickoffMessage,
-        createdAt: input.createdAt,
-      });
-      const preparedTurnStartStepId =
-        "turnStartStepId" in prepared ? prepared.turnStartStepId : undefined;
-
-      yield* upsertProjectRecipeLaunchActivity({
-        orchestration: orchestrationEngine,
-        threadId,
-        launch: input.launch,
-        phase: "bootstrapping-agent",
-        createdAt: input.createdAt,
-      });
-
-      if (prepared.turnStartMessage) {
-        yield* upsertRecipeWorkflowAgentBootstrapContext({
-          orchestration: orchestrationEngine,
-          threadId,
-          workspaceRoot: project.workspaceRoot,
-          launch: input.launch,
-          stepId: preparedTurnStartStepId ?? "bootstrap",
-          createdAt: input.createdAt,
-          agentPromptText: prepared.turnStartMessage,
-          userPromptText: prepared.kickoffMessage,
-        });
-
-        yield* dispatchRecipeWorkflowTurnStart({
-          orchestration: orchestrationEngine,
-          threadId,
-          userTurnMessage: prepared.kickoffMessage,
-          createdAt: input.createdAt,
-          modelSelection,
-          runtimeMode,
-          interactionMode,
-          titleSeed,
-          commandPrefix: "recipe-workflow-launch",
-        });
-
-        yield* upsertProjectRecipeLaunchActivity({
-          orchestration: orchestrationEngine,
-          threadId,
-          launch: input.launch,
-          phase: "running",
-          createdAt: input.createdAt,
-        });
-      }
-
-      return okJson({ ok: true, mode: "thread" });
-    });
-
-    return yield* program.pipe(
-      Effect.catchCause((cause) =>
-        upsertProjectRecipeLaunchActivity({
-          orchestration: orchestrationEngine,
-          threadId,
-          launch: input.launch,
-          phase: "failed",
-          createdAt: input.createdAt,
-          error: "Failed to launch recipe workflow.",
-        }).pipe(Effect.ignore, Effect.andThen(Effect.failCause(cause))),
-      ),
-    );
+    return okJson({ ok: true, mode: "engine", runId: result.runId, status: result.status });
   }).pipe(
     Effect.mapError((cause) => toT3workError(cause, "Failed to launch recipe workflow.")),
     Effect.catch(errorResponse),

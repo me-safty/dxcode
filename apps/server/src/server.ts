@@ -102,10 +102,7 @@ import {
 import { t3workAtlassianOAuthExchangeRouteLayer } from "./t3work-atlassian-oauth-routes.ts";
 import { t3workProjectWorkspaceDiscoverRecipesRouteLayer } from "./t3work-project-workspace-recipe-routes.ts";
 import { t3workProjectWorkspaceWriteContextFilesRouteLayer } from "./t3work-project-workspace-write-routes.ts";
-import {
-  t3workThreadRecipeWorkflowCardActionRouteLayer,
-  t3workThreadRecipeWorkflowLaunchRouteLayer,
-} from "./t3work-thread-recipe-workflow-routes.ts";
+import { t3workThreadRecipeWorkflowLaunchRouteLayer } from "./t3work-thread-recipe-workflow-routes.ts";
 import {
   t3workGitHubAssetRouteLayer,
   t3workGitHubInboxRouteLayer,
@@ -114,8 +111,9 @@ import {
 import { t3workProjectWorkspaceBootstrapRouteLayer } from "./t3work-project-repository-routes.ts";
 import { t3workThreadPlacementRouteLayer } from "./t3work-thread-placement-routes.ts";
 import { t3workThreadToolContextRouteLayer } from "./t3work-thread-tool-context-routes.ts";
-import { T3workRecipeWorkflowRuntimeReactorLive } from "./t3work-recipeWorkflowRuntimeReactor.ts";
 import { T3workThreadToolContextStoreLive } from "./t3work-threadToolContextStore.ts";
+import { T3workWorkflowEngineReactorLive } from "./t3work-workflowEngineReactor.ts";
+import { T3workWorkflowEngineRegistryLive } from "./t3work-workflowEngineRegistry.ts";
 import { T3workToolBrokerLive } from "./t3work-toolBrokerLive.ts";
 import * as NetService from "@t3tools/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
@@ -287,6 +285,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       Layer.provide(OrchestrationLayerLive),
     ),
   ),
+  // Shared singleton: the launch route registers parked runs here and the workflow-engine
+  // reactor resumes them — both resolve the same instance from this layer.
+  Layer.provideMerge(T3workWorkflowEngineRegistryLive),
   // The instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
@@ -359,7 +360,6 @@ export const makeRoutesLayer = Layer.mergeAll(
   t3workProjectWorkspaceDiscoverRecipesRouteLayer,
   t3workThreadPlacementRouteLayer,
   t3workThreadRecipeWorkflowLaunchRouteLayer,
-  t3workThreadRecipeWorkflowCardActionRouteLayer,
   t3workThreadToolContextRouteLayer,
   t3workProjectWorkspaceWriteContextFilesRouteLayer,
   otlpTracesProxyRouteLayer,
@@ -462,7 +462,7 @@ export const makeServerLayer = Layer.unwrap(
       httpListeningLayer,
       runtimeStateLayer,
       tailscaleServeLayer,
-      T3workRecipeWorkflowRuntimeReactorLive,
+      T3workWorkflowEngineReactorLive,
     );
 
     return serverApplicationLayer.pipe(
