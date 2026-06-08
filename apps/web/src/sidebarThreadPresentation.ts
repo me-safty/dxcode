@@ -1,0 +1,143 @@
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
+import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
+
+import type { DraftThreadState } from "./composerDraftStore";
+import type { LocalDispatchSnapshot } from "./components/ChatView.logic";
+import type { SidebarThreadSummary, Thread } from "./types";
+
+export interface SidebarThreadPresentation {
+  readonly threads: SidebarThreadSummary[];
+  readonly pendingThreadKeys: ReadonlySet<string>;
+}
+
+export interface SidebarThreadPresentationInput {
+  readonly serverThreads: readonly SidebarThreadSummary[];
+  readonly draftThreads: readonly DraftThreadState[];
+  readonly localDispatchByThreadKey: Readonly<Record<string, LocalDispatchSnapshot | undefined>>;
+  readonly serverThreadByKey?: ReadonlyMap<string, Thread>;
+  readonly projectRefs?: readonly ScopedProjectRef[];
+}
+
+function threadKey(ref: ScopedThreadRef): string {
+  return scopedThreadKey(ref);
+}
+
+function draftThreadRef(draftThread: DraftThreadState): ScopedThreadRef {
+  return scopeThreadRef(draftThread.environmentId, draftThread.threadId);
+}
+
+function matchesProjectRefs(
+  draftThread: DraftThreadState,
+  projectRefs: readonly ScopedProjectRef[] | undefined,
+): boolean {
+  if (projectRefs === undefined) {
+    return true;
+  }
+  return projectRefs.some(
+    (ref) =>
+      ref.environmentId === draftThread.environmentId && ref.projectId === draftThread.projectId,
+  );
+}
+
+function latestServerUserMessageAt(thread: Thread | undefined): string | null {
+  if (!thread) {
+    return null;
+  }
+  for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
+    const message = thread.messages[index];
+    if (message?.role === "user") {
+      return message.createdAt;
+    }
+  }
+  return null;
+}
+
+function resolveServerThread(
+  serverThreadByKey: ReadonlyMap<string, Thread> | undefined,
+  rowRef: ScopedThreadRef,
+  draftRef: ScopedThreadRef,
+): Thread | undefined {
+  return serverThreadByKey?.get(threadKey(rowRef)) ?? serverThreadByKey?.get(threadKey(draftRef));
+}
+
+function buildPendingThreadSummary(input: {
+  readonly draftThread: DraftThreadState;
+  readonly localDispatch: LocalDispatchSnapshot | null;
+  readonly serverThread: Thread | undefined;
+  readonly rowRef: ScopedThreadRef;
+}): SidebarThreadSummary {
+  const { draftThread, localDispatch, rowRef, serverThread } = input;
+  const activityAt =
+    localDispatch?.startedAt ??
+    serverThread?.updatedAt ??
+    serverThread?.createdAt ??
+    draftThread.createdAt;
+  const latestUserMessageAt =
+    localDispatch?.startedAt ?? latestServerUserMessageAt(serverThread) ?? activityAt;
+  const title = serverThread?.title.trim() ? serverThread.title : "New thread";
+
+  return {
+    id: rowRef.threadId,
+    environmentId: rowRef.environmentId,
+    projectId: draftThread.projectId,
+    title,
+    interactionMode: serverThread?.interactionMode ?? draftThread.interactionMode,
+    session: serverThread?.session ?? null,
+    createdAt: serverThread?.createdAt ?? draftThread.createdAt,
+    archivedAt: serverThread?.archivedAt ?? null,
+    updatedAt: activityAt,
+    latestTurn: serverThread?.latestTurn ?? null,
+    branch: serverThread?.branch ?? draftThread.branch,
+    worktreePath: serverThread?.worktreePath ?? draftThread.worktreePath,
+    latestUserMessageAt,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+  };
+}
+
+export function buildSidebarThreadPresentation(
+  input: SidebarThreadPresentationInput,
+): SidebarThreadPresentation {
+  const serverThreadKeys = new Set(
+    input.serverThreads.map((thread) => threadKey(scopeThreadRef(thread.environmentId, thread.id))),
+  );
+  const pendingThreadKeys = new Set<string>();
+  const pendingThreads: SidebarThreadSummary[] = [];
+
+  for (const draftThread of input.draftThreads) {
+    if (!matchesProjectRefs(draftThread, input.projectRefs)) {
+      continue;
+    }
+
+    const draftRef = draftThreadRef(draftThread);
+    const rowRef = draftThread.promotedTo ?? draftRef;
+    const rowKey = threadKey(rowRef);
+    if (serverThreadKeys.has(rowKey) || pendingThreadKeys.has(rowKey)) {
+      continue;
+    }
+
+    const draftKey = threadKey(draftRef);
+    const localDispatch =
+      input.localDispatchByThreadKey[rowKey] ?? input.localDispatchByThreadKey[draftKey] ?? null;
+    const isPromotedMissingSidebarSummary = draftThread.promotedTo !== null;
+    if (!localDispatch && !isPromotedMissingSidebarSummary) {
+      continue;
+    }
+
+    pendingThreadKeys.add(rowKey);
+    pendingThreads.push(
+      buildPendingThreadSummary({
+        draftThread,
+        localDispatch,
+        rowRef,
+        serverThread: resolveServerThread(input.serverThreadByKey, rowRef, draftRef),
+      }),
+    );
+  }
+
+  return {
+    threads: [...input.serverThreads, ...pendingThreads],
+    pendingThreadKeys,
+  };
+}

@@ -18,6 +18,8 @@ import {
 } from "@tanstack/react-query";
 import { ensureEnvironmentApi } from "../environmentApi";
 import { requireEnvironmentConnection } from "../environments/runtime";
+import { applyGitStatusLocalUpdate } from "./gitStatusState";
+import { recordSourceControlDiagnosticEvent } from "./sourceControlDiagnostics";
 
 const GIT_BRANCHES_STALE_TIME_MS = 15_000;
 const GIT_BRANCHES_REFETCH_INTERVAL_MS = 60_000;
@@ -303,15 +305,47 @@ export function vcsStageFilesMutationOptions(input: {
   cwd: string | null;
   queryClient: QueryClient;
 }) {
+  const action = "stage";
   return mutationOptions({
     mutationKey: gitMutationKeys.stageFiles(input.environmentId, input.cwd),
     mutationFn: async (args: Omit<VcsStageFilesInput, "cwd">) => {
+      recordSourceControlDiagnosticEvent({
+        kind: "mutation-start",
+        action,
+        environmentId: input.environmentId,
+        cwd: input.cwd,
+        filePaths: args.filePaths,
+      });
       if (!input.cwd || !input.environmentId) throw new Error("Git staging is unavailable.");
       const api = ensureEnvironmentApi(input.environmentId);
       return api.vcs.stageFiles({ cwd: input.cwd, filePaths: args.filePaths });
     },
-    onSuccess: async () => {
-      await input.queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
+    onSuccess: (localStatus) => {
+      applyGitStatusLocalUpdate(
+        { environmentId: input.environmentId, cwd: input.cwd },
+        localStatus,
+      );
+      recordSourceControlDiagnosticEvent({
+        kind: "mutation-success",
+        action,
+        environmentId: input.environmentId,
+        cwd: input.cwd,
+      });
+      recordSourceControlDiagnosticEvent({
+        kind: "git-query-invalidation-scheduled",
+        action,
+        queryKey: gitQueryKeys.all,
+      });
+      void input.queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
+    },
+    onError: (error) => {
+      recordSourceControlDiagnosticEvent({
+        kind: "mutation-error",
+        action,
+        environmentId: input.environmentId,
+        cwd: input.cwd,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+      });
     },
   });
 }
@@ -321,15 +355,47 @@ export function vcsUnstageFilesMutationOptions(input: {
   cwd: string | null;
   queryClient: QueryClient;
 }) {
+  const action = "unstage";
   return mutationOptions({
     mutationKey: gitMutationKeys.unstageFiles(input.environmentId, input.cwd),
     mutationFn: async (args: Omit<VcsUnstageFilesInput, "cwd">) => {
+      recordSourceControlDiagnosticEvent({
+        kind: "mutation-start",
+        action,
+        environmentId: input.environmentId,
+        cwd: input.cwd,
+        filePaths: args.filePaths,
+      });
       if (!input.cwd || !input.environmentId) throw new Error("Git unstaging is unavailable.");
       const api = ensureEnvironmentApi(input.environmentId);
       return api.vcs.unstageFiles({ cwd: input.cwd, filePaths: args.filePaths });
     },
-    onSuccess: async () => {
-      await input.queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
+    onSuccess: (localStatus) => {
+      applyGitStatusLocalUpdate(
+        { environmentId: input.environmentId, cwd: input.cwd },
+        localStatus,
+      );
+      recordSourceControlDiagnosticEvent({
+        kind: "mutation-success",
+        action,
+        environmentId: input.environmentId,
+        cwd: input.cwd,
+      });
+      recordSourceControlDiagnosticEvent({
+        kind: "git-query-invalidation-scheduled",
+        action,
+        queryKey: gitQueryKeys.all,
+      });
+      void input.queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
+    },
+    onError: (error) => {
+      recordSourceControlDiagnosticEvent({
+        kind: "mutation-error",
+        action,
+        environmentId: input.environmentId,
+        cwd: input.cwd,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+      });
     },
   });
 }
@@ -339,17 +405,49 @@ export function vcsRevertUnstagedFilesMutationOptions(input: {
   cwd: string | null;
   queryClient: QueryClient;
 }) {
+  const action = "revert";
   return mutationOptions({
     mutationKey: gitMutationKeys.revertUnstagedFiles(input.environmentId, input.cwd),
     mutationFn: async (args: Omit<VcsRevertUnstagedFilesInput, "cwd">) => {
+      recordSourceControlDiagnosticEvent({
+        kind: "mutation-start",
+        action,
+        environmentId: input.environmentId,
+        cwd: input.cwd,
+        filePaths: args.filePaths,
+      });
       if (!input.cwd || !input.environmentId) {
         throw new Error("Git revert is unavailable.");
       }
       const api = ensureEnvironmentApi(input.environmentId);
       return api.vcs.revertUnstagedFiles({ cwd: input.cwd, filePaths: args.filePaths });
     },
-    onSuccess: async () => {
-      await input.queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
+    onSuccess: (localStatus) => {
+      applyGitStatusLocalUpdate(
+        { environmentId: input.environmentId, cwd: input.cwd },
+        localStatus,
+      );
+      recordSourceControlDiagnosticEvent({
+        kind: "mutation-success",
+        action,
+        environmentId: input.environmentId,
+        cwd: input.cwd,
+      });
+      recordSourceControlDiagnosticEvent({
+        kind: "git-query-invalidation-scheduled",
+        action,
+        queryKey: gitQueryKeys.all,
+      });
+      void input.queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
+    },
+    onError: (error) => {
+      recordSourceControlDiagnosticEvent({
+        kind: "mutation-error",
+        action,
+        environmentId: input.environmentId,
+        cwd: input.cwd,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+      });
     },
   });
 }

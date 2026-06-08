@@ -9,10 +9,17 @@ const mockState = vi.hoisted(() => ({
 interface MockLegendListProps {
   readonly data?: readonly string[];
   readonly keyExtractor?: (item: string, index: number) => Key;
+  readonly getItemType?: (item: string, index: number) => string | undefined;
+  readonly getFixedItemSize?: (
+    item: string,
+    index: number,
+    itemType: string | undefined,
+  ) => number | undefined;
   readonly renderItem?: (args: { item: string; index: number }) => ReactNode;
   readonly ListHeaderComponent?: ReactNode;
   readonly ListFooterComponent?: ReactNode;
   readonly initialScrollAtEnd?: boolean;
+  readonly extraData?: unknown;
   readonly maintainScrollAtEnd?: boolean | { animated?: boolean };
   readonly maintainScrollAtEndThreshold?: number;
   readonly maintainVisibleContentPosition?: unknown;
@@ -100,6 +107,20 @@ describe("VirtualizedList", () => {
     expect(getLatestLegendListProps().initialScrollAtEnd).toBe(true);
   });
 
+  it("passes extraData through to LegendList", () => {
+    const extraData = { revision: "actions-enabled" };
+    renderToStaticMarkup(
+      <VirtualizedList
+        data={["alpha"]}
+        keyExtractor={(item) => item}
+        renderItem={({ item }) => item}
+        extraData={extraData}
+      />,
+    );
+
+    expect(getLatestLegendListProps().extraData).toBe(extraData);
+  });
+
   it("passes animated maintainScrollAtEnd through to LegendList", () => {
     renderToStaticMarkup(
       <VirtualizedList
@@ -131,6 +152,23 @@ describe("VirtualizedList", () => {
       data: true,
       size: true,
     });
+  });
+
+  it("passes fixed item sizing through to LegendList", () => {
+    const getFixedItemSize = vi.fn(() => 28);
+    renderToStaticMarkup(
+      <VirtualizedList
+        data={["alpha"]}
+        keyExtractor={(item) => item}
+        getItemType={() => "row"}
+        getFixedItemSize={getFixedItemSize}
+        renderItem={({ item }) => item}
+      />,
+    );
+
+    const legendProps = getLatestLegendListProps();
+    expect(legendProps.getFixedItemSize?.("alpha", 0, "row")).toBe(28);
+    expect(getFixedItemSize).toHaveBeenCalledWith("alpha", 0, "row");
   });
 
   it("updates at-end state through the imperative handle state source", () => {

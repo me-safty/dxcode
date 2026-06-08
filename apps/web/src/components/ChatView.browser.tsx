@@ -75,6 +75,7 @@ import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
 vi.mock("../lib/gitStatusState", () => ({
+  applyGitStatusLocalUpdate: () => undefined,
   useGitStatus: () => ({ data: null, error: null, cause: null, isPending: false }),
   useGitStatuses: () => new Map(),
   refreshGitStatus: () => Promise.resolve(null),
@@ -4739,12 +4740,44 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await sendButton.click();
 
       await expect.element(page.getByText(sentText)).toBeInTheDocument();
+      await expect.element(page.getByTestId(`thread-row-${newThreadId}`)).toBeInTheDocument();
+      await vi.waitFor(
+        () => {
+          const row = document.querySelector<HTMLElement>(
+            `[data-testid="thread-row-${newThreadId}"]`,
+          );
+          expect(row).not.toBeNull();
+          expect(row?.textContent).toContain("New thread");
+          expect(row?.textContent).toContain("Working");
+          expect(row?.querySelector(`[data-testid="thread-archive-${newThreadId}"]`)).toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      document
+        .querySelector<HTMLElement>(`[data-testid="thread-row-${newThreadId}"]`)
+        ?.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: 24,
+            clientY: 24,
+          }),
+        );
+      await waitForLayout();
+      expect(
+        [...document.querySelectorAll("button")].some((button) =>
+          /^(Rename|Delete|Archive)/.test(button.textContent?.trim() ?? ""),
+        ),
+      ).toBe(false);
       await materializePromotedDraftThreadViaDomainEvent(newThreadId);
       await startPromotedServerThreadViaDomainEvent(newThreadId);
       await waitForLayout();
 
       expect(mounted.router.state.location.pathname).toBe(newThreadPath);
       await expect.element(page.getByText(sentText)).toBeInTheDocument();
+      expect(document.querySelectorAll(`[data-testid="thread-row-${newThreadId}"]`)).toHaveLength(
+        1,
+      );
     } finally {
       await mounted.cleanup();
     }

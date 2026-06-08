@@ -368,6 +368,107 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.lastError).toBe("turn failed");
   });
 
+  it("clears lastError when a new turn starts after a failed turn", async () => {
+    const harness = await createHarness();
+    const failedTurnAt = "2026-01-01T00:00:00.000Z";
+    const nextTurnAt = "2026-01-01T00:00:02.000Z";
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-with-old-failure"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: failedTurnAt,
+      turnId: asTurnId("turn-failed"),
+      payload: {
+        state: "failed",
+        errorMessage: "old failure",
+      },
+    });
+
+    let thread = await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.session?.status === "error" &&
+        entry.session?.activeTurnId === null &&
+        entry.session?.lastError === "old failure",
+    );
+    expect(thread.session?.status).toBe("error");
+    expect(thread.session?.lastError).toBe("old failure");
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-after-old-failure"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: nextTurnAt,
+      turnId: asTurnId("turn-after-failure"),
+    });
+
+    thread = await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.session?.status === "running" &&
+        entry.session?.activeTurnId === "turn-after-failure" &&
+        entry.session?.lastError === null,
+    );
+    expect(thread.session?.status).toBe("running");
+    expect(thread.session?.activeTurnId).toBe("turn-after-failure");
+    expect(thread.session?.lastError).toBeNull();
+  });
+
+  it.each(["interrupted", "cancelled"] as const)(
+    "clears lastError when a %s turn completes",
+    async (turnState) => {
+      const harness = await createHarness();
+      const turnId = asTurnId(`turn-${turnState}`);
+
+      harness.emit({
+        type: "runtime.error",
+        eventId: asEventId(`evt-runtime-error-before-${turnState}`),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId: asThreadId("thread-1"),
+        turnId,
+        payload: {
+          message: "old runtime failure",
+        },
+      });
+
+      let thread = await waitForThread(
+        harness.readModel,
+        (entry) =>
+          entry.session?.status === "error" &&
+          entry.session?.activeTurnId === turnId &&
+          entry.session?.lastError === "old runtime failure",
+      );
+      expect(thread.session?.status).toBe("error");
+      expect(thread.session?.lastError).toBe("old runtime failure");
+
+      harness.emit({
+        type: "turn.completed",
+        eventId: asEventId(`evt-turn-completed-${turnState}`),
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-1"),
+        createdAt: "2026-01-01T00:00:01.000Z",
+        turnId,
+        payload: {
+          state: turnState,
+        },
+      });
+
+      thread = await waitForThread(
+        harness.readModel,
+        (entry) =>
+          entry.session?.status === "ready" &&
+          entry.session?.activeTurnId === null &&
+          entry.session?.lastError === null,
+      );
+      expect(thread.session?.status).toBe("ready");
+      expect(thread.session?.lastError).toBeNull();
+    },
+  );
+
   it("applies provider session.state.changed transitions directly", async () => {
     const harness = await createHarness();
     const waitingAt = "2026-01-01T00:00:01.000Z";
@@ -432,10 +533,10 @@ describe("ProviderRuntimeIngestion", () => {
       (entry) =>
         entry.session?.status === "stopped" &&
         entry.session?.activeTurnId === null &&
-        entry.session?.lastError === "provider crashed",
+        entry.session?.lastError === null,
     );
     expect(thread.session?.status).toBe("stopped");
-    expect(thread.session?.lastError).toBe("provider crashed");
+    expect(thread.session?.lastError).toBeNull();
 
     harness.emit({
       type: "session.state.changed",

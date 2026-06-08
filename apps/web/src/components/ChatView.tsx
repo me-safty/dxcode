@@ -2830,6 +2830,32 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThread?.id, activeThread?.queuedTurns, optimisticQueuedTurns]);
 
   useEffect(() => {
+    if (!activeThread?.id || activeThread.messages.length === 0) {
+      return;
+    }
+    const messageIds = new Set(activeThread.messages.map((message) => message.id));
+    const removedQueuedTurns = optimisticQueuedTurns.filter((queuedTurn) =>
+      messageIds.has(queuedTurn.messageId),
+    );
+    if (removedQueuedTurns.length === 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setOptimisticQueuedTurns((existing) =>
+        existing.filter((queuedTurn) => !messageIds.has(queuedTurn.messageId)),
+      );
+    }, 0);
+    for (const queuedTurn of removedQueuedTurns) {
+      for (const attachment of queuedTurn.attachments) {
+        revokeBlobPreviewUrl(attachment.previewUrl);
+      }
+    }
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [activeThread?.id, activeThread?.messages, optimisticQueuedTurns]);
+
+  useEffect(() => {
     if (interruptingTurnId === null) {
       return;
     }

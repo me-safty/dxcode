@@ -73,6 +73,7 @@ import {
   selectThreadsAcrossEnvironments,
 } from "~/store";
 import { computeOrchestrationThreadDetailFingerprint } from "@t3tools/shared/orchestrationThreadDetailFingerprint";
+import { isThreadDetailOrchestrationEvent } from "@t3tools/shared/orchestrationThreadDetailEvents";
 import { useTerminalStateStore } from "~/terminalStateStore";
 import { useUiStateStore } from "~/uiStateStore";
 import type { WsProtocolCloseContext } from "../../rpc/protocol";
@@ -933,17 +934,6 @@ function getOrchestrationEventThreadId(event: OrchestrationEvent): ThreadId | nu
   return "threadId" in event.payload ? event.payload.threadId : null;
 }
 
-function isThreadDetailReplayEvent(event: OrchestrationEvent): boolean {
-  return (
-    event.type === "thread.message-sent" ||
-    event.type === "thread.proposed-plan-upserted" ||
-    event.type === "thread.activity-appended" ||
-    event.type === "thread.turn-diff-completed" ||
-    event.type === "thread.reverted" ||
-    event.type === "thread.session-set"
-  );
-}
-
 function reconcileThreadDetailSubscriptionsAfterRecoveredEvents(
   events: ReadonlyArray<OrchestrationEvent>,
   environmentId: EnvironmentId,
@@ -961,7 +951,7 @@ function reconcileThreadDetailSubscriptionsAfterRecoveredEvents(
       continue;
     }
 
-    if (isThreadDetailReplayEvent(event)) {
+    if (isThreadDetailOrchestrationEvent(event)) {
       markThreadDetailSequence(entry, event.sequence);
     }
     scheduleThreadDetailReconcileIfBehind(environmentId, threadId, event.sequence);

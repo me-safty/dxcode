@@ -11,6 +11,7 @@ import {
   GitBranchIcon,
   GitCommitIcon,
   GitPullRequestArrowIcon,
+  DownloadIcon,
   ListTreeIcon,
   MinusIcon,
   PanelRightCloseIcon,
@@ -21,6 +22,7 @@ import {
 } from "lucide-react";
 import {
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
   useCallback,
   useEffect,
@@ -95,14 +97,23 @@ import {
   vcsUnstageFilesMutationOptions,
 } from "~/lib/gitReactQuery";
 import { refreshGitStatus } from "~/lib/gitStatusState";
+import {
+  exportSourceControlDiagnostics,
+  recordSourceControlDiagnosticEvent,
+  recordSourceControlDisabledSnapshot,
+  sourceControlActionDisabledReasons,
+  type SourceControlActionDisabledSnapshot,
+} from "~/lib/sourceControlDiagnostics";
 import { cn } from "~/lib/utils";
 
 export type SourceControlPanelMode = "sidebar" | "sheet";
 type SourceControlSection = SourceControlTreeSection;
 
-const SOURCE_CONTROL_ROW_ESTIMATED_HEIGHT = 28;
+const SOURCE_CONTROL_ROW_HEIGHT = 28;
 const SOURCE_CONTROL_ROW_OVERSCAN_COUNT = 12;
 const SOURCE_CONTROL_ROW_OVERSCAN_PX = 336;
+const sourceControlRowActionButtonClass =
+  "size-6 text-muted-foreground/70 hover:text-foreground pointer-coarse:after:min-h-auto pointer-coarse:after:min-w-auto";
 
 type SourceControlListRow =
   | { readonly kind: "section"; readonly section: SourceControlSection }
@@ -161,8 +172,16 @@ function sourceControlRowKey(row: SourceControlListRow): string {
   return `${row.section}:${row.node.type}:${row.node.path}`;
 }
 
+function sourceControlPathSetKey(paths: ReadonlySet<string>): string {
+  return [...paths].sort((left, right) => left.localeCompare(right)).join("\0");
+}
+
 function getSourceControlRowType(row: SourceControlListRow): string {
   return row.kind;
+}
+
+function getSourceControlRowHeight(): number {
+  return SOURCE_CONTROL_ROW_HEIGHT;
 }
 
 function useSourceControlScrollRestoration(input: {
@@ -394,13 +413,66 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
     [collapsedDirs, collapsedSections, unstagedTree],
   );
 
+  const stageFilesPending = stageFilesMutation.isPending;
+  const unstageFilesPending = unstageFilesMutation.isPending;
+  const revertUnstagedFilesPending = revertUnstagedFilesMutation.isPending;
   const isStageOperationRunning =
-    stageFilesMutation.isPending ||
-    unstageFilesMutation.isPending ||
-    revertUnstagedFilesMutation.isPending;
+    stageFilesPending || unstageFilesPending || revertUnstagedFilesPending;
   const hasStagedFiles = stagedFiles.length > 0;
   const hasUnstagedFiles = unstagedFiles.length > 0;
   const hasChanges = hasStagedFiles || hasUnstagedFiles;
+  const sourceControlDisabledSnapshot = useMemo<SourceControlActionDisabledSnapshot>(() => {
+    const actionDisabledReasons = sourceControlActionDisabledReasons({
+      isGitActionRunningRaw,
+      isFinalizingAction,
+      isPushing,
+      stageFilesPending,
+      unstageFilesPending,
+      revertUnstagedFilesPending,
+    });
+
+    return {
+      environmentId,
+      cwd,
+      actionDisabled: actionDisabledReasons.length > 0,
+      actionDisabledReasons,
+      isGitActionRunning,
+      isGitActionRunningRaw,
+      isFinalizingAction,
+      isPushing,
+      isStageOperationRunning,
+      stageFilesPending,
+      unstageFilesPending,
+      revertUnstagedFilesPending,
+      pendingStageCount: pendingStagePaths.size,
+      pendingUnstageCount: pendingUnstagePaths.size,
+      pendingRevertCount: pendingRevertPaths.size,
+      stagedFileCount: stagedFiles.length,
+      unstagedFileCount: unstagedFiles.length,
+      hasChanges,
+      gitStatusAvailable: gitStatus !== null,
+      gitStatusError: gitStatusError?.message ?? null,
+    };
+  }, [
+    cwd,
+    environmentId,
+    gitStatus,
+    gitStatusError,
+    hasChanges,
+    isFinalizingAction,
+    isGitActionRunning,
+    isGitActionRunningRaw,
+    isPushing,
+    isStageOperationRunning,
+    pendingRevertPaths.size,
+    pendingStagePaths.size,
+    pendingUnstagePaths.size,
+    revertUnstagedFilesPending,
+    stageFilesPending,
+    stagedFiles.length,
+    unstageFilesPending,
+    unstagedFiles.length,
+  ]);
   const sourceControlRows = useMemo<SourceControlListRow[]>(() => {
     if (!hasChanges) {
       return [];
@@ -423,11 +495,34 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
       })),
     ];
   }, [hasChanges, stagedVisibleRows, unstagedVisibleRows]);
+  const sourceControlRowsExtraData = useMemo(
+    () =>
+      [
+        isGitActionRunning ? "git-running" : "git-idle",
+        isStageOperationRunning ? "stage-running" : "stage-idle",
+        resolvedTheme,
+        sourceControlPathSetKey(pendingStagePaths),
+        sourceControlPathSetKey(pendingUnstagePaths),
+        sourceControlPathSetKey(pendingRevertPaths),
+      ].join("\u0001"),
+    [
+      isGitActionRunning,
+      isStageOperationRunning,
+      pendingRevertPaths,
+      pendingStagePaths,
+      pendingUnstagePaths,
+      resolvedTheme,
+    ],
+  );
 
   useEffect(() => {
     if (!environmentId || !cwd) return;
     void refreshGitStatus({ environmentId, cwd }).catch(() => undefined);
   }, [environmentId, cwd]);
+
+  useEffect(() => {
+    recordSourceControlDisabledSnapshot(sourceControlDisabledSnapshot);
+  }, [sourceControlDisabledSnapshot]);
 
   const toggleDir = useCallback(
     (path: string) => {
@@ -458,6 +553,12 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
     (filePaths: ReadonlyArray<string>) => {
       if (filePaths.length === 0) return;
       const paths = [...filePaths];
+      recordSourceControlDiagnosticEvent({
+        kind: "row-action-requested",
+        action: "stage",
+        filePaths: paths,
+        before: sourceControlDisabledSnapshot,
+      });
       setPendingStagePaths((previous) => {
         const next = new Set(previous);
         for (const path of paths) next.add(path);
@@ -466,6 +567,12 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
       void stageFilesMutation
         .mutateAsync({ filePaths: paths })
         .catch((error: unknown) => {
+          recordSourceControlDiagnosticEvent({
+            kind: "row-action-error",
+            action: "stage",
+            filePaths: paths,
+            errorMessage: error instanceof Error ? error.message : "Unknown error",
+          });
           toastManager.add({
             type: "error",
             title: "Unable to stage files",
@@ -473,6 +580,11 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
           });
         })
         .finally(() => {
+          recordSourceControlDiagnosticEvent({
+            kind: "row-action-settled",
+            action: "stage",
+            filePaths: paths,
+          });
           setPendingStagePaths((previous) => {
             const next = new Set(previous);
             for (const path of paths) next.delete(path);
@@ -480,13 +592,19 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
           });
         });
     },
-    [stageFilesMutation],
+    [sourceControlDisabledSnapshot, stageFilesMutation],
   );
 
   const unstageFiles = useCallback(
     (filePaths: ReadonlyArray<string>) => {
       if (filePaths.length === 0) return;
       const paths = [...filePaths];
+      recordSourceControlDiagnosticEvent({
+        kind: "row-action-requested",
+        action: "unstage",
+        filePaths: paths,
+        before: sourceControlDisabledSnapshot,
+      });
       setPendingUnstagePaths((previous) => {
         const next = new Set(previous);
         for (const path of paths) next.add(path);
@@ -495,6 +613,12 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
       void unstageFilesMutation
         .mutateAsync({ filePaths: paths })
         .catch((error: unknown) => {
+          recordSourceControlDiagnosticEvent({
+            kind: "row-action-error",
+            action: "unstage",
+            filePaths: paths,
+            errorMessage: error instanceof Error ? error.message : "Unknown error",
+          });
           toastManager.add({
             type: "error",
             title: "Unable to unstage files",
@@ -502,6 +626,11 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
           });
         })
         .finally(() => {
+          recordSourceControlDiagnosticEvent({
+            kind: "row-action-settled",
+            action: "unstage",
+            filePaths: paths,
+          });
           setPendingUnstagePaths((previous) => {
             const next = new Set(previous);
             for (const path of paths) next.delete(path);
@@ -509,13 +638,19 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
           });
         });
     },
-    [unstageFilesMutation],
+    [sourceControlDisabledSnapshot, unstageFilesMutation],
   );
 
   const revertUnstagedFiles = useCallback(
     (filePaths: ReadonlyArray<string>) => {
       if (filePaths.length === 0) return;
       const paths = [...filePaths];
+      recordSourceControlDiagnosticEvent({
+        kind: "row-action-requested",
+        action: "revert",
+        filePaths: paths,
+        before: sourceControlDisabledSnapshot,
+      });
       setPendingRevertPaths((previous) => {
         const next = new Set(previous);
         for (const path of paths) next.add(path);
@@ -524,6 +659,12 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
       void revertUnstagedFilesMutation
         .mutateAsync({ filePaths: paths })
         .catch((error: unknown) => {
+          recordSourceControlDiagnosticEvent({
+            kind: "row-action-error",
+            action: "revert",
+            filePaths: paths,
+            errorMessage: error instanceof Error ? error.message : "Unknown error",
+          });
           toastManager.add({
             type: "error",
             title: "Unable to revert changes",
@@ -531,6 +672,11 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
           });
         })
         .finally(() => {
+          recordSourceControlDiagnosticEvent({
+            kind: "row-action-settled",
+            action: "revert",
+            filePaths: paths,
+          });
           setPendingRevertPaths((previous) => {
             const next = new Set(previous);
             for (const path of paths) next.delete(path);
@@ -538,7 +684,7 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
           });
         });
     },
-    [revertUnstagedFilesMutation],
+    [revertUnstagedFilesMutation, sourceControlDisabledSnapshot],
   );
 
   const requestBulkRevertUnstagedFiles = useCallback((filePaths: ReadonlyArray<string>) => {
@@ -557,6 +703,56 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
     if (!environmentId || !cwd) return;
     void refreshGitStatus({ environmentId, cwd }).catch(() => undefined);
   }, [environmentId, cwd]);
+
+  const handleExportSourceControlDiagnostics = useCallback(() => {
+    void exportSourceControlDiagnostics({ currentSnapshot: sourceControlDisabledSnapshot })
+      .then((result) => {
+        toastManager.add({
+          type: "success",
+          title:
+            result === "downloaded"
+              ? "Source-control diagnostics downloaded"
+              : result === "copied"
+                ? "Source-control diagnostics copied to clipboard"
+                : "Source-control diagnostics shared",
+        });
+      })
+      .catch((error: unknown) => {
+        toastManager.add({
+          type: "error",
+          title: "Could not export source-control diagnostics",
+          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        });
+      });
+  }, [sourceControlDisabledSnapshot]);
+
+  const handleSourceControlPointerUpCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const hitElement = document.elementFromPoint(event.clientX, event.clientY);
+      const buttonElement = hitElement?.closest("button") ?? null;
+      const actionElement =
+        hitElement?.closest<HTMLElement>("[data-source-control-action]") ?? null;
+      const rowElement = hitElement?.closest<HTMLElement>("[data-source-control-row-key]") ?? null;
+      const htmlButton = buttonElement instanceof HTMLButtonElement ? buttonElement : null;
+
+      recordSourceControlDiagnosticEvent({
+        kind: "pointer-hit-test",
+        pointerType: event.pointerType || "unknown",
+        clientX: event.clientX,
+        clientY: event.clientY,
+        elementTag: hitElement?.tagName.toLowerCase() ?? null,
+        elementAriaLabel: hitElement?.getAttribute("aria-label") ?? null,
+        buttonAriaLabel: buttonElement?.getAttribute("aria-label") ?? null,
+        buttonDisabled: htmlButton ? htmlButton.disabled : null,
+        sourceControlAction: actionElement?.dataset.sourceControlAction ?? null,
+        sourceControlPath:
+          actionElement?.dataset.sourceControlPath ?? rowElement?.dataset.sourceControlPath ?? null,
+        sourceControlRowKey: rowElement?.dataset.sourceControlRowKey ?? null,
+        snapshot: sourceControlDisabledSnapshot,
+      });
+    },
+    [sourceControlDisabledSnapshot],
+  );
 
   const handleCommit = useCallback(async () => {
     // Surface progress as an inline button spinner rather than a toast.
@@ -807,6 +1003,22 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
               </TooltipTrigger>
               <TooltipPopup side="bottom">Refresh</TooltipPopup>
             </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-xs"
+                    variant="outline"
+                    aria-label="Export source-control diagnostics"
+                    title="Export source-control diagnostics"
+                    onClick={handleExportSourceControlDiagnostics}
+                  />
+                }
+              >
+                <DownloadIcon className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">Export diagnostics</TooltipPopup>
+            </Tooltip>
             <Button
               size="icon-xs"
               variant="outline"
@@ -1038,15 +1250,17 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
           </div>
         )}
 
-        <div className="min-h-0 flex-1">
+        <div className="min-h-0 flex-1" onPointerUpCapture={handleSourceControlPointerUpCapture}>
           {hasChanges ? (
             <VirtualizedList<SourceControlListRow>
               ref={sourceControlListRef}
               data={sourceControlRows}
               keyExtractor={sourceControlRowKey}
               getItemType={getSourceControlRowType}
+              getFixedItemSize={getSourceControlRowHeight}
               renderItem={renderSourceControlRow}
-              estimatedItemSize={SOURCE_CONTROL_ROW_ESTIMATED_HEIGHT}
+              extraData={sourceControlRowsExtraData}
+              estimatedItemSize={SOURCE_CONTROL_ROW_HEIGHT}
               minOverscanItemCount={SOURCE_CONTROL_ROW_OVERSCAN_COUNT}
               increaseViewportBy={SOURCE_CONTROL_ROW_OVERSCAN_PX}
               className="h-full min-h-0 overflow-y-auto overscroll-y-contain"
@@ -1213,9 +1427,13 @@ function SourceControlSectionHeader({
   const actionLabel = section === "staged" ? "Unstage all" : "Stage all";
   const sectionActionPending = filePaths.some((path) => pendingPaths.has(path));
   const sectionRevertPending = filePaths.some((path) => pendingRevertPaths.has(path));
+  const rowKey = sourceControlRowKey({ kind: "section", section });
 
   return (
-    <div className="group/section mx-1.5 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/40">
+    <div
+      className="group/section mx-1.5 flex h-7 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/40"
+      data-source-control-row-key={rowKey}
+    >
       <button
         type="button"
         className="flex min-w-0 flex-1 items-center gap-1 text-left"
@@ -1231,7 +1449,7 @@ function SourceControlSectionHeader({
           {fileCount}
         </span>
       </button>
-      <div className="grid shrink-0 grid-cols-[1.75rem_1.75rem] items-center justify-items-center gap-0.5 sm:grid-cols-[1.5rem_1.5rem]">
+      <div className="grid shrink-0 grid-cols-[1.5rem_1.5rem] items-center justify-items-center gap-0.5">
         {section === "unstaged" && onSectionRevert ? (
           <Tooltip>
             <TooltipTrigger
@@ -1242,7 +1460,8 @@ function SourceControlSectionHeader({
                   variant="ghost"
                   aria-label="Revert all unstaged changes"
                   disabled={actionDisabled || fileCount === 0}
-                  className="size-7 sm:size-6 text-muted-foreground/70 hover:text-foreground"
+                  data-source-control-action="revert-all"
+                  className={sourceControlRowActionButtonClass}
                   onClick={() => onSectionRevert(filePaths)}
                 />
               }
@@ -1253,10 +1472,12 @@ function SourceControlSectionHeader({
                 <Undo2Icon className="size-3.5" />
               )}
             </TooltipTrigger>
-            <TooltipPopup side="left">Revert all changes</TooltipPopup>
+            <TooltipPopup className="pointer-events-none" side="left">
+              Revert all changes
+            </TooltipPopup>
           </Tooltip>
         ) : (
-          <span className="size-7 sm:size-6" aria-hidden="true" />
+          <span className="size-6" aria-hidden="true" />
         )}
         <Tooltip>
           <TooltipTrigger
@@ -1267,7 +1488,8 @@ function SourceControlSectionHeader({
                 variant="ghost"
                 aria-label={actionLabel}
                 disabled={actionDisabled || fileCount === 0}
-                className="size-7 sm:size-6 text-muted-foreground/70 hover:text-foreground"
+                data-source-control-action={section === "staged" ? "unstage-all" : "stage-all"}
+                className={sourceControlRowActionButtonClass}
                 onClick={() => onSectionAction(filePaths)}
               />
             }
@@ -1278,7 +1500,9 @@ function SourceControlSectionHeader({
               <ActionIcon className="size-3.5" />
             )}
           </TooltipTrigger>
-          <TooltipPopup side="left">{actionLabel}</TooltipPopup>
+          <TooltipPopup className="pointer-events-none" side="left">
+            {actionLabel}
+          </TooltipPopup>
         </Tooltip>
       </div>
     </div>
@@ -1315,6 +1539,7 @@ function SourceControlTreeRow({
   onOpenFilePreview: (path: string) => void;
 }) {
   const indentStyle = { paddingLeft: `${viewMode === "tree" ? depth * 12 + 18 : 6}px` };
+  const rowKey = sourceControlRowKey({ kind: "node", section, node, depth });
 
   if (node.type === "dir") {
     const collapseKey = `${section}:${node.path}`;
@@ -1322,7 +1547,8 @@ function SourceControlTreeRow({
     return (
       <div
         style={indentStyle}
-        className="mx-1.5 flex items-center gap-1 rounded-md py-0.5 pr-2 text-left text-[15px] text-foreground/90 transition-colors hover:bg-accent/50 md:text-[13px]"
+        className="mx-1.5 flex h-7 items-center gap-1 rounded-md pr-2 text-left text-[15px] text-foreground/90 transition-colors hover:bg-accent/50 md:text-[13px]"
+        data-source-control-row-key={rowKey}
       >
         <button
           type="button"
@@ -1355,7 +1581,9 @@ function SourceControlTreeRow({
     <div
       style={indentStyle}
       title={node.path}
-      className="group mx-1.5 flex items-center gap-1.5 rounded-md py-0.5 pr-2 text-left transition-colors hover:bg-accent/50"
+      className="group mx-1.5 flex h-7 items-center gap-1.5 rounded-md pr-2 text-left transition-colors hover:bg-accent/50"
+      data-source-control-path={node.path}
+      data-source-control-row-key={rowKey}
     >
       <button
         type="button"
@@ -1374,7 +1602,7 @@ function SourceControlTreeRow({
           {node.name}
         </span>
       </button>
-      <div className="grid shrink-0 grid-cols-[1.25rem_1.75rem_1.75rem] items-center justify-items-center gap-0.5 sm:grid-cols-[1.25rem_1.5rem_1.5rem]">
+      <div className="grid shrink-0 grid-cols-[1.25rem_1.5rem_1.5rem] items-center justify-items-center gap-0.5">
         <span
           className={cn("w-5 text-center text-[11px] font-semibold tabular-nums", badge.className)}
           aria-label={badge.label}
@@ -1392,7 +1620,9 @@ function SourceControlTreeRow({
                   variant="ghost"
                   aria-label={`Revert ${node.path}`}
                   disabled={actionDisabled}
-                  className="size-7 sm:size-6 text-muted-foreground/70 hover:text-foreground"
+                  data-source-control-action="revert"
+                  data-source-control-path={node.path}
+                  className={sourceControlRowActionButtonClass}
                   onClick={(event) => {
                     event.stopPropagation();
                     onFileRevert(node.path);
@@ -1406,10 +1636,12 @@ function SourceControlTreeRow({
                 <Undo2Icon className="size-3.5" />
               )}
             </TooltipTrigger>
-            <TooltipPopup side="left">Revert file</TooltipPopup>
+            <TooltipPopup className="pointer-events-none" side="left">
+              Revert file
+            </TooltipPopup>
           </Tooltip>
         ) : (
-          <span className="size-7 sm:size-6" aria-hidden="true" />
+          <span className="size-6" aria-hidden="true" />
         )}
         <Tooltip>
           <TooltipTrigger
@@ -1420,7 +1652,9 @@ function SourceControlTreeRow({
                 variant="ghost"
                 aria-label={actionLabel}
                 disabled={actionDisabled}
-                className="size-7 sm:size-6 text-muted-foreground/70 hover:text-foreground"
+                data-source-control-action={section === "staged" ? "unstage" : "stage"}
+                data-source-control-path={node.path}
+                className={sourceControlRowActionButtonClass}
                 onClick={(event) => {
                   event.stopPropagation();
                   onFileAction(node.path);
@@ -1430,7 +1664,7 @@ function SourceControlTreeRow({
           >
             {filePending ? <Spinner className="size-3.5" /> : <ActionIcon className="size-3.5" />}
           </TooltipTrigger>
-          <TooltipPopup side="left">
+          <TooltipPopup className="pointer-events-none" side="left">
             {section === "staged" ? "Unstage file" : "Stage file"}
           </TooltipPopup>
         </Tooltip>

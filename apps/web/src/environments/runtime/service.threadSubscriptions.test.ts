@@ -274,6 +274,7 @@ function makeThreadDetailSnapshot(params: {
   readonly threadId: ThreadId;
   readonly updatedAt?: string;
   readonly messages?: OrchestrationThread["messages"];
+  readonly queuedTurns?: OrchestrationThread["queuedTurns"];
   readonly pageInfo?: OrchestrationThreadDetailPageInfo;
   readonly sessionStatus?:
     | "idle"
@@ -300,7 +301,7 @@ function makeThreadDetailSnapshot(params: {
       updatedAt: params.updatedAt ?? shellThread.updatedAt,
       deletedAt: null,
       messages: params.messages ?? [],
-      queuedTurns: [],
+      queuedTurns: params.queuedTurns ?? [],
       proposedPlans: [],
       activities: [],
       checkpoints: [],
@@ -412,6 +413,55 @@ function makeThreadDetailReconcileSnapshotResult(
     serverSequence: snapshot.snapshotSequence,
     serverFingerprint: { version: 1 as const, value: `fingerprint-${snapshot.snapshotSequence}` },
     snapshot,
+  };
+}
+
+function makeQueuedTurn(
+  threadId: ThreadId,
+  messageId = MessageId.make("queued-message-1"),
+): OrchestrationThread["queuedTurns"][number] {
+  const createdAt = "2026-04-13T00:00:01.000Z";
+  return {
+    threadId,
+    messageId,
+    role: "user",
+    text: "Queued from background",
+    attachments: [],
+    modelSelection: {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5-codex",
+    },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+function makeQueuedTurnDispatchedEvent(params: {
+  readonly sequence: number;
+  readonly threadId: ThreadId;
+  readonly messageId: MessageId;
+  readonly dispatchedAt?: string;
+}): Extract<OrchestrationEvent, { type: "thread.queued-turn-dispatched" }> {
+  const dispatchedAt = params.dispatchedAt ?? `2026-04-13T00:00:0${params.sequence}.000Z`;
+
+  return {
+    sequence: params.sequence,
+    eventId: EventId.make(`event-queued-turn-dispatched-${params.sequence}`),
+    aggregateKind: "thread",
+    aggregateId: params.threadId,
+    occurredAt: dispatchedAt,
+    commandId: CommandId.make(`command-queued-turn-dispatched-${params.sequence}`),
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type: "thread.queued-turn-dispatched",
+    payload: {
+      threadId: params.threadId,
+      messageId: params.messageId,
+      dispatchedAt,
+    },
   };
 }
 
@@ -1342,6 +1392,66 @@ describe("retainThreadDetailSubscription", () => {
 
     expect(thread?.detailPageInfo).toEqual(pageInfo);
     expect(environmentState.threadDetailPageInfoByThreadId[threadId]).toEqual(pageInfo);
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("promotes queued turns from dispatched detail events when message-sent is absent", async () => {
+    const {
+      retainActiveThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+    const { scopeThreadRef } = await import("@t3tools/client-runtime");
+    const { selectThreadByRef, useStore } = await import("~/store");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-queued-dispatch-subscription");
+    const queuedTurn = makeQueuedTurn(threadId);
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "ready",
+      }),
+      environmentId,
+    );
+
+    const release = retainActiveThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    const detailListener = readThreadDetailSubscriptionListener(0);
+    detailListener({
+      kind: "snapshot",
+      snapshot: makeThreadDetailSnapshot({
+        snapshotSequence: 1,
+        threadId,
+        queuedTurns: [queuedTurn],
+      }),
+    });
+
+    expect(
+      selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId))?.queuedTurns,
+    ).toHaveLength(1);
+
+    detailListener({
+      kind: "event",
+      event: makeQueuedTurnDispatchedEvent({
+        sequence: 2,
+        threadId,
+        messageId: queuedTurn.messageId,
+        dispatchedAt: "2026-04-13T00:00:02.000Z",
+      }),
+    });
+
+    const thread = selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId));
+    expect(thread?.queuedTurns).toEqual([]);
+    expect(thread?.messages.map((message) => message.text)).toEqual(["Queued from background"]);
 
     release();
     stop();

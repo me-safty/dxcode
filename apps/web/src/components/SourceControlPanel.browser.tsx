@@ -27,10 +27,13 @@ function createDeferredPromise<T>() {
 const {
   activeRunStackedActionDeferredRef,
   currentGitStatusRef,
+  exportSourceControlDiagnosticsSpy,
   generateCommitMessageMutateAsyncSpy,
   hasServerThreadRef,
   navigateSpy,
   refreshGitStatusSpy,
+  recordSourceControlDiagnosticEventSpy,
+  recordSourceControlDisabledSnapshotSpy,
   revertUnstagedFilesMutateAsyncSpy,
   runStackedActionMutateAsyncSpy,
   setThreadBranchSpy,
@@ -68,12 +71,15 @@ const {
       pr: null,
     } as VcsStatusResult,
   },
+  exportSourceControlDiagnosticsSpy: vi.fn(() => Promise.resolve("downloaded")),
   generateCommitMessageMutateAsyncSpy: vi.fn(() =>
     Promise.resolve({ commitMessage: "Update staged files" }),
   ),
   hasServerThreadRef: { current: true },
   navigateSpy: vi.fn(),
   refreshGitStatusSpy: vi.fn(() => Promise.resolve(null)),
+  recordSourceControlDiagnosticEventSpy: vi.fn(),
+  recordSourceControlDisabledSnapshotSpy: vi.fn(),
   revertUnstagedFilesMutateAsyncSpy: vi.fn(() => Promise.resolve(null)),
   runStackedActionMutateAsyncSpy: vi.fn((input: unknown) => {
     void input;
@@ -90,6 +96,7 @@ const {
     current: null as null | {
       dataLength: number;
       estimatedItemSize: number | undefined;
+      fixedItemSize: number | undefined;
       increaseViewportBy: number | { top: number; bottom: number } | undefined;
       minOverscanItemCount: number | { top: number; bottom: number } | undefined;
     },
@@ -194,6 +201,11 @@ vi.mock("./virtualization/VirtualizedList", async () => {
   type MockVirtualizedListProps = {
     data: readonly unknown[];
     keyExtractor: (item: unknown, index: number) => string;
+    getFixedItemSize?: (
+      item: unknown,
+      index: number,
+      itemType: string | undefined,
+    ) => number | undefined;
     renderItem: (input: { item: unknown; index: number }) => React.ReactNode;
     estimatedItemSize?: number;
     increaseViewportBy?: number | { top: number; bottom: number };
@@ -212,12 +224,14 @@ vi.mock("./virtualization/VirtualizedList", async () => {
         virtualizedListPropsRef.current = {
           dataLength: props.data.length,
           estimatedItemSize: props.estimatedItemSize,
+          fixedItemSize: props.getFixedItemSize?.(props.data[0], 0, undefined),
           increaseViewportBy: props.increaseViewportBy,
           minOverscanItemCount: props.minOverscanItemCount,
         };
       }, [
         props.data.length,
         props.estimatedItemSize,
+        props.getFixedItemSize,
         props.increaseViewportBy,
         props.minOverscanItemCount,
       ]);
@@ -288,6 +302,31 @@ vi.mock("~/lib/gitStatusState", () => ({
     error: null,
     isPending: false,
   })),
+}));
+
+vi.mock("~/lib/sourceControlDiagnostics", () => ({
+  exportSourceControlDiagnostics: exportSourceControlDiagnosticsSpy,
+  recordSourceControlDiagnosticEvent: recordSourceControlDiagnosticEventSpy,
+  recordSourceControlDisabledSnapshot: recordSourceControlDisabledSnapshotSpy,
+  sourceControlActionDisabledReasons: vi.fn(
+    (input: {
+      isGitActionRunningRaw: boolean;
+      isFinalizingAction: boolean;
+      isPushing: boolean;
+      stageFilesPending: boolean;
+      unstageFilesPending: boolean;
+      revertUnstagedFilesPending: boolean;
+    }) => {
+      const reasons: string[] = [];
+      if (input.isGitActionRunningRaw) reasons.push("git-action-running");
+      if (input.isFinalizingAction) reasons.push("finalizing-action");
+      if (input.isPushing) reasons.push("pushing");
+      if (input.stageFilesPending) reasons.push("stage-files-pending");
+      if (input.unstageFilesPending) reasons.push("unstage-files-pending");
+      if (input.revertUnstagedFilesPending) reasons.push("revert-unstaged-files-pending");
+      return reasons;
+    },
+  ),
 }));
 
 vi.mock("~/localApi", () => ({
@@ -537,6 +576,42 @@ describe("SourceControlPanel git action runner", () => {
     }
   });
 
+  it("exports source-control diagnostics from the panel header", async () => {
+    currentGitStatusRef.current = createPanelStatus({
+      unstagedFiles: [{ path: "src/app.ts", status: "modified", insertions: 1, deletions: 0 }],
+    });
+    const { host, screen } = await renderPanel();
+
+    try {
+      const exportButton = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Export source-control diagnostics"]',
+      );
+      expect(exportButton).not.toBeNull();
+      exportButton?.click();
+
+      await vi.waitFor(() => {
+        expect(exportSourceControlDiagnosticsSpy).toHaveBeenCalledWith({
+          currentSnapshot: expect.objectContaining({
+            cwd: GIT_CWD,
+            environmentId: ENVIRONMENT_A,
+            actionDisabled: false,
+            actionDisabledReasons: [],
+            unstagedFileCount: 1,
+          }),
+        });
+      });
+      expect(toastAddSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "success",
+          title: "Source-control diagnostics downloaded",
+        }),
+      );
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
   it("stages and unstages files from row and section actions", async () => {
     currentGitStatusRef.current = createPanelStatus({
       stagedFiles: [{ path: "staged.ts", status: "modified", insertions: 1, deletions: 0 }],
@@ -729,6 +804,7 @@ describe("SourceControlPanel git action runner", () => {
       expect(virtualizedListPropsRef.current).toMatchObject({
         dataLength: 3,
         estimatedItemSize: 28,
+        fixedItemSize: 28,
         increaseViewportBy: 336,
         minOverscanItemCount: 12,
       });

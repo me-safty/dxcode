@@ -22,7 +22,12 @@ import {
   useRegisterRightPanel,
 } from "../rightPanelGesture";
 import { retainActiveThreadDetailSubscription } from "../environments/runtime/service";
-import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
+import {
+  selectEnvironmentState,
+  selectSidebarThreadSummaryByRef,
+  selectThreadExistsByRef,
+  useStore,
+} from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
 import { SidebarInset, useSidebar } from "~/components/ui/sidebar";
@@ -69,6 +74,9 @@ function ChatThreadRouteView() {
   });
   const routeThreadExists = threadExists || draftThreadExists;
   const serverThreadStarted = threadHasStarted(serverThread);
+  const serverSidebarSummaryExists = useStore(
+    (store) => selectSidebarThreadSummaryByRef(store, threadRef) !== undefined,
+  );
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
   const diffOpen = search.diff === "1";
   const filePanel = useWorkspaceFilePanelState();
@@ -282,11 +290,16 @@ function ChatThreadRouteView() {
   }, [isRecoveringMissingThread, navigate, threadRef]);
 
   useEffect(() => {
-    if (!threadRef || !serverThreadStarted || !draftThread?.promotedTo) {
+    if (
+      !threadRef ||
+      !serverThreadStarted ||
+      !serverSidebarSummaryExists ||
+      !draftThread?.promotedTo
+    ) {
       return;
     }
     finalizePromotedDraftThreadByRef(threadRef);
-  }, [draftThread?.promotedTo, serverThreadStarted, threadRef]);
+  }, [draftThread?.promotedTo, serverSidebarSummaryExists, serverThreadStarted, threadRef]);
 
   const shouldRenderThreadRoute =
     threadRef !== null &&

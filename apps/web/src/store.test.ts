@@ -1754,7 +1754,7 @@ describe("incremental orchestration updates", () => {
     );
   });
 
-  it("applies queued turn lifecycle events outside the timeline", () => {
+  it("promotes queued turns into the timeline when they are dispatched", () => {
     const thread = makeThread();
     const state = makeState(thread);
     const queuedTurn = makeQueuedTurn(1);
@@ -1795,6 +1795,17 @@ describe("incremental orchestration updates", () => {
       localEnvironmentId,
     );
     expect(threadsOf(dispatched)[0]?.queuedTurns).toEqual([]);
+    expect(threadsOf(dispatched)[0]?.messages).toEqual([
+      {
+        id: queuedTurn.messageId,
+        role: queuedTurn.role,
+        text: queuedTurn.text,
+        turnId: null,
+        createdAt: queuedTurn.createdAt,
+        completedAt: "2026-02-13T00:03:00.000Z",
+        streaming: false,
+      },
+    ]);
 
     const sent = applyOrchestrationEvent(
       dispatched,
@@ -1814,6 +1825,29 @@ describe("incremental orchestration updates", () => {
     expect(threadsOf(sent)[0]?.messages.map((message) => message.text)).toEqual([
       "queued message 1",
     ]);
+    expect(threadsOf(sent)[0]?.messages).toHaveLength(1);
+  });
+
+  it("does not synthesize a queued message when the dispatched turn is not known locally", () => {
+    const thread = makeThread({
+      queuedTurns: [makeQueuedTurn(1)],
+    });
+    const state = makeState(thread);
+
+    const dispatched = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.queued-turn-dispatched", {
+        threadId: thread.id,
+        messageId: MessageId.make("missing-queued-message"),
+        dispatchedAt: "2026-02-13T00:03:00.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    expect(threadsOf(dispatched)[0]?.queuedTurns.map((turn) => turn.messageId)).toEqual([
+      MessageId.make("queued-message-1"),
+    ]);
+    expect(threadsOf(dispatched)[0]?.messages).toEqual([]);
   });
 
   it("applies replay batches in sequence and updates session state", () => {

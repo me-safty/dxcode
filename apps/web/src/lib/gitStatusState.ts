@@ -2,8 +2,11 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   type EnvironmentId,
   type GitManagerServiceError,
+  type VcsStatusLocalResult,
+  type VcsStatusRemoteResult,
   type VcsStatusResult,
 } from "@t3tools/contracts";
+import { mergeGitStatusParts } from "@t3tools/shared/git";
 import * as Cause from "effect/Cause";
 import { Atom } from "effect/unstable/reactivity";
 import { useEffect } from "react";
@@ -129,6 +132,41 @@ function writeGitStatus(targetKey: string, status: VcsStatusResult): void {
   });
 }
 
+function bumpGitStatusRefreshToken(targetKey: string): void {
+  gitStatusRefreshTokenByKey.set(targetKey, (gitStatusRefreshTokenByKey.get(targetKey) ?? 0) + 1);
+}
+
+function remoteStatusPartFromStatus(status: VcsStatusResult): VcsStatusRemoteResult {
+  return {
+    hasUpstream: status.hasUpstream,
+    aheadCount: status.aheadCount,
+    behindCount: status.behindCount,
+    ...(status.aheadOfDefaultCount === undefined
+      ? {}
+      : { aheadOfDefaultCount: status.aheadOfDefaultCount }),
+    pr: status.pr,
+  };
+}
+
+export function applyGitStatusLocalUpdate(
+  target: GitStatusTarget,
+  local: VcsStatusLocalResult,
+): VcsStatusResult | null {
+  const targetKey = getGitStatusTargetKey(target);
+  if (targetKey === null) {
+    return null;
+  }
+
+  const current = getGitStatusSnapshot(target).data;
+  const status = mergeGitStatusParts(local, current ? remoteStatusPartFromStatus(current) : null);
+  // Mutation RPCs return a freshly read local status. Bump the token so an
+  // older in-flight refresh started before the mutation cannot write stale
+  // working-tree data after this authoritative local update.
+  bumpGitStatusRefreshToken(targetKey);
+  writeGitStatus(targetKey, status);
+  return status;
+}
+
 export function refreshGitStatus(
   target: GitStatusTarget,
   options?: { client?: GitStatusClient; force?: boolean },
@@ -157,8 +195,8 @@ export function refreshGitStatus(
   }
 
   gitStatusLastRefreshAtByKey.set(targetKey, Date.now());
-  const requestToken = (gitStatusRefreshTokenByKey.get(targetKey) ?? 0) + 1;
-  gitStatusRefreshTokenByKey.set(targetKey, requestToken);
+  bumpGitStatusRefreshToken(targetKey);
+  const requestToken = gitStatusRefreshTokenByKey.get(targetKey) ?? 0;
   const cwd = target.cwd;
   const refreshPromise = resolvedClient
     .refreshStatus({ cwd })
