@@ -7,6 +7,34 @@ const TRANSPORT_ERROR_PATTERNS = [
 ] as const;
 
 /**
+ * Diagnostic noise emitted by the Claude Agent SDK when a turn is aborted
+ * mid-flight (e.g. the user presses stop while the model was about to call a
+ * tool). The SDK yields an `error_during_execution` result whose first error is
+ * an `[ede_diagnostic]` line such as:
+ *   `[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use`
+ * This is an interrupt artifact, not a real failure, so it should never surface
+ * as a thread error banner.
+ */
+const INTERRUPT_ARTIFACT_PATTERNS = [/\[ede_diagnostic\]/i] as const;
+
+/**
+ * Test whether an error message is an internal diagnostic artifact produced by
+ * interrupting a turn, rather than a genuine error worth showing the user.
+ */
+export function isInterruptArtifactErrorMessage(message: string | null | undefined): boolean {
+  if (typeof message !== "string") {
+    return false;
+  }
+
+  const normalizedMessage = message.trim();
+  if (normalizedMessage.length === 0) {
+    return false;
+  }
+
+  return INTERRUPT_ARTIFACT_PATTERNS.some((pattern) => pattern.test(normalizedMessage));
+}
+
+/**
  * Test whether an error message originates from a transport-level connection
  * failure (socket close, socket open, ping timeout, etc.) rather than a
  * business-logic error.
@@ -30,5 +58,8 @@ export function isTransportConnectionErrorMessage(message: string | null | undef
  * real errors and transient connection issues.
  */
 export function sanitizeThreadErrorMessage(message: string | null | undefined): string | null {
-  return isTransportConnectionErrorMessage(message) ? null : (message ?? null);
+  if (isTransportConnectionErrorMessage(message) || isInterruptArtifactErrorMessage(message)) {
+    return null;
+  }
+  return message ?? null;
 }

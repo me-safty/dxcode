@@ -1618,6 +1618,11 @@ export default function ChatView(props: ChatViewProps) {
     const defaultInstanceId = defaultInstanceIdForDriver(selectedProvider);
     return providerStatuses.find((status) => status.instanceId === defaultInstanceId) ?? null;
   }, [activeProviderInstanceId, providerStatuses, selectedProvider]);
+  // Only the Codex driver exposes a live `turn/steer` primitive. For every other
+  // provider, "steering" a queued message instead interrupts the running turn
+  // and sends the message next, so the queue panel offers an "Interrupt" action.
+  const activeProviderSupportsSteering =
+    activeProviderStatus?.driver === ProviderDriverKind.make("codex");
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
@@ -3119,7 +3124,7 @@ export default function ChatView(props: ChatViewProps) {
     sendTurnSubmission,
   ]);
 
-  const onInterrupt = async () => {
+  const onInterrupt = useCallback(async () => {
     const api = readEnvironmentApi(environmentId);
     if (!api || !activeThread) return;
     await api.orchestration.dispatchCommand({
@@ -3128,7 +3133,28 @@ export default function ChatView(props: ChatViewProps) {
       threadId: activeThread.id,
       createdAt: new Date().toISOString(),
     });
-  };
+  }, [activeThread, environmentId]);
+
+  // Providers without live steering (everything except Codex) instead interrupt
+  // the running turn and let the queued message run next. Moving the submission
+  // to the front of the queue and interrupting is enough: once the turn leaves
+  // the "running" phase the auto-drain effect sends the front submission.
+  const interruptAndSendQueuedTurnSubmission = useCallback(
+    (submissionId: string) => {
+      const submission = activeQueuedTurnSubmissionsRef.current.find(
+        (entry) => entry.id === submissionId,
+      );
+      if (!submission) {
+        return;
+      }
+      updateActiveQueuedTurnSubmissions((current) => [
+        submission,
+        ...current.filter((entry) => entry.id !== submissionId),
+      ]);
+      void onInterrupt();
+    },
+    [onInterrupt, updateActiveQueuedTurnSubmissions],
+  );
 
   const onRespondToApproval = useCallback(
     async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => {
@@ -3854,7 +3880,9 @@ export default function ChatView(props: ChatViewProps) {
                           onEdit={editQueuedTurnSubmission}
                           onReviewDiff={onOpenTurnDiff}
                           onReorder={reorderQueuedTurnSubmissions}
+                          supportsSteering={activeProviderSupportsSteering}
                           onSteer={steerQueuedTurnSubmission}
+                          onInterruptAndSend={interruptAndSendQueuedTurnSubmission}
                         />
                         <div className="relative">
                           <ChatComposer

@@ -14,7 +14,13 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { IconGripVertical, IconPencil, IconTrash, IconCornerDownRight } from "@tabler/icons-react";
+import {
+  IconGripVertical,
+  IconPencil,
+  IconTrash,
+  IconCornerDownRight,
+  IconPlayerStopFilled,
+} from "@tabler/icons-react";
 import type { TurnId } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -52,9 +58,11 @@ function summarizeTurnDiff(summary: TurnDiffSummary | null): {
 
 function QueuedMessageRow(props: {
   item: QueuedMessagePanelItem;
+  supportsSteering: boolean;
   onDelete: (id: string) => void;
   onEdit: (id: string) => void;
   onSteer: (id: string) => void;
+  onInterruptAndSend: (id: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: props.item.id,
@@ -85,16 +93,36 @@ function QueuedMessageRow(props: {
       <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
         {props.item.text}
       </span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-6 gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
-        onClick={() => props.onSteer(props.item.id)}
-      >
-        <IconCornerDownRight className="size-3.5" />
-        Steer
-      </Button>
+      {props.supportsSteering ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => props.onSteer(props.item.id)}
+        >
+          <IconCornerDownRight className="size-3.5" />
+          Steer
+        </Button>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6 gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => props.onInterruptAndSend(props.item.id)}
+              />
+            }
+          >
+            <IconPlayerStopFilled className="size-3.5" />
+            Interrupt
+          </TooltipTrigger>
+          <TooltipPopup side="top">Interrupt the current turn and send this message</TooltipPopup>
+        </Tooltip>
+      )}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -142,7 +170,9 @@ export function QueuedMessagesPanel(props: {
   onEdit: (id: string) => void;
   onReviewDiff: (turnId: TurnId) => void;
   onReorder: (ids: readonly string[]) => void;
+  supportsSteering: boolean;
   onSteer: (id: string) => void;
+  onInterruptAndSend: (id: string) => void;
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const diffSummary = props.activeChangeSummary ?? summarizeTurnDiff(props.activeTurnDiffSummary);
@@ -218,9 +248,11 @@ export function QueuedMessagesPanel(props: {
                 <QueuedMessageRow
                   key={item.id}
                   item={item}
+                  supportsSteering={props.supportsSteering}
                   onDelete={props.onDelete}
                   onEdit={props.onEdit}
                   onSteer={props.onSteer}
+                  onInterruptAndSend={props.onInterruptAndSend}
                 />
               ))}
             </div>
