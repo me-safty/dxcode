@@ -1300,9 +1300,23 @@ function isCommandWorkEntry(workEntry: TimelineWorkEntry): boolean {
   if (workEntry.itemType === "command_execution" || workEntry.requestKind === "command") {
     return true;
   }
-  if (workEntry.itemType || workEntry.requestKind) {
+  if (
+    workEntry.itemType === "file_change" ||
+    workEntry.itemType === "collab_agent_tool_call" ||
+    workEntry.requestKind === "file-change"
+  ) {
     return false;
   }
+  if (workEntry.itemType || workEntry.requestKind) {
+    return (
+      (workEntry.itemType === "dynamic_tool_call" || workEntry.itemType === "mcp_tool_call") &&
+      hasCommandWorkEntryCommand(workEntry)
+    );
+  }
+  return hasCommandWorkEntryCommand(workEntry);
+}
+
+function hasCommandWorkEntryCommand(workEntry: TimelineWorkEntry): boolean {
   return Boolean(workEntry.command || workEntry.rawCommand);
 }
 
@@ -1310,10 +1324,17 @@ function isFileChangeWorkEntry(workEntry: TimelineWorkEntry): boolean {
   if (workEntry.itemType === "file_change" || workEntry.requestKind === "file-change") {
     return true;
   }
-  if (workEntry.itemType || workEntry.requestKind) {
+  if (
+    workEntry.itemType === "command_execution" ||
+    workEntry.itemType === "collab_agent_tool_call" ||
+    workEntry.requestKind === "command"
+  ) {
     return false;
   }
-  return Boolean(workEntry.patch);
+  if (workEntry.patch) {
+    return true;
+  }
+  return false;
 }
 
 function CommandEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {

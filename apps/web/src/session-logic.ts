@@ -1073,7 +1073,7 @@ function extractCommandResult(payload: Record<string, unknown> | null): {
     firstNumberFromRecord(data, ["durationMs", "elapsedMs"]) ??
     firstNumberFromRecord(payload, ["durationMs", "elapsedMs"]) ??
     (elapsedSeconds !== null ? elapsedSeconds * 1000 : null);
-  const strippedStdout = rawOutputStdout ? stripTrailingExitCode(rawOutputStdout) : null;
+  const strippedStdout = stdout ? stripTrailingExitCode(stdout) : null;
   const normalizedOutput =
     strippedContent?.exitCode !== undefined ? strippedContent.output : (content ?? null);
 
@@ -1332,6 +1332,7 @@ function collectPatchStrings(
   patches: string[],
   seen: Set<string>,
   depth: number,
+  includeNested = true,
 ): void {
   if (depth > MAX_PATCH_SEARCH_DEPTH || patches.length >= MAX_PATCH_STRINGS) {
     return;
@@ -1366,6 +1367,9 @@ function collectPatchStrings(
     seen.add(candidate);
     patches.push(candidate);
   }
+  if (!includeNested) {
+    return;
+  }
   for (const nestedKey of ["item", "result", "input", "data", "changes", "files", "edits"]) {
     if (!(nestedKey in record)) {
       continue;
@@ -1379,8 +1383,13 @@ function collectPatchStrings(
 
 function extractToolPatch(payload: Record<string, unknown> | null): string | null {
   const patches: string[] = [];
+  const seen = new Set<string>();
+  if (payload) {
+    collectPatchStrings(payload, patches, seen, 0, false);
+  }
+  const data = asRecord(payload?.data);
   // Keep traversal bounded; provider payloads can nest raw tool data deeply.
-  collectPatchStrings(payload, patches, new Set<string>(), 0);
+  collectPatchStrings(data, patches, seen, 0);
   return patches.length > 0 ? patches.join("\n\n") : null;
 }
 
