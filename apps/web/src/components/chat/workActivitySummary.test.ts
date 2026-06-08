@@ -404,3 +404,112 @@ describe("summarizeWorkActivityEntries", () => {
     });
   });
 });
+
+describe("file_read labeling", () => {
+  it("uses the structured readPath instead of echoing the tool name or raw output", () => {
+    const summaries = summarizeWorkActivityEntries(
+      [
+        workEntry({
+          id: "read-structured",
+          label: "read",
+          toolName: "read",
+          itemType: "file_read",
+          detail: "<path>/repo/src/app.ts</path>\n<content>...</content>",
+          readPath: "/repo/src/app.ts",
+        }),
+      ],
+      "/repo",
+    );
+
+    expect(summaries[0]?.items[0]?.label).toBe("Read src/app.ts");
+  });
+
+  it("falls back to a bare verb when no path is recoverable", () => {
+    const summaries = summarizeWorkActivityEntries(
+      [
+        workEntry({
+          id: "read-bare",
+          label: "read",
+          toolName: "read",
+          itemType: "file_read",
+        }),
+      ],
+      "/repo",
+    );
+
+    expect(summaries[0]?.items[0]?.label).toBe("Read files");
+  });
+});
+
+describe("summarizeWorkActivityEntries subagents and todos", () => {
+  it("renders a collab_agent_tool_call as a subagent row with type, description and report", () => {
+    const summaries = summarizeWorkActivityEntries(
+      [
+        workEntry({
+          id: "subagent-1",
+          label: "Subagent task",
+          itemType: "collab_agent_tool_call",
+          subagent: {
+            subagentType: "Explore",
+            description: "Find steer capability and provider info",
+            modelId: "anthropic.claude-opus-4-8",
+            report: "## Findings\n\nThe steer capability lives in...",
+          },
+        }),
+      ],
+      "/repo",
+    );
+
+    expect(summaries).toMatchObject([
+      {
+        category: "subagent",
+        label: "Delegated to 1 subagent",
+        items: [
+          {
+            label: "Explore: Find steer capability and provider info",
+            subagent: {
+              subagentType: "Explore",
+              modelId: "anthropic.claude-opus-4-8",
+              report: "## Findings\n\nThe steer capability lives in...",
+            },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("renders a todowrite entry as a todo checklist row", () => {
+    const summaries = summarizeWorkActivityEntries(
+      [
+        workEntry({
+          id: "todo-1",
+          label: "Updated todos",
+          itemType: "dynamic_tool_call",
+          todos: [
+            { content: "Create monorepo structure", status: "completed", priority: "high" },
+            { content: "Move SvelteKit app to apps/web", status: "in_progress", priority: "high" },
+            { content: "Wire Convex package", status: "pending", priority: "medium" },
+          ],
+        }),
+      ],
+      "/repo",
+    );
+
+    expect(summaries).toMatchObject([
+      {
+        category: "todo",
+        label: "Updated 1 todo list",
+        items: [
+          {
+            label: "Todos (1/3)",
+            todos: [
+              { content: "Create monorepo structure", status: "completed" },
+              { content: "Move SvelteKit app to apps/web", status: "in_progress" },
+              { content: "Wire Convex package", status: "pending" },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+});

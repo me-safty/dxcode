@@ -1,10 +1,12 @@
 import {
+  type CollabAgentMeta,
   EventId,
   type OpenCodeSettings,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  type RuntimeTodoItem,
   RuntimeItemId,
   RuntimeRequestId,
   ThreadId,
@@ -143,8 +145,38 @@ type EventBaseInput = {
   readonly raw?: unknown;
 };
 
-function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType {
+/**
+ * Tools that OpenCode reports under generic names but which map onto specific
+ * canonical categories. Exact-match these before falling back to substring
+ * heuristics so e.g. `read`/`grep`/`glob` render as file reads rather than
+ * generic "Used N tools" rows.
+ */
+const FILE_READ_TOOL_NAMES = new Set(["read", "grep", "glob", "list", "ls"]);
+
+/**
+ * The OpenCode `todowrite` tool emits a structured checklist; it is not a file
+ * change. {@link isTodoTool} routes it to a dedicated todo payload instead of
+ * `file_change`.
+ */
+function isTodoTool(toolName: string): boolean {
+  return toolName.toLowerCase() === "todowrite";
+}
+
+/**
+ * The OpenCode `question` tool lifecycle duplicates the dedicated
+ * `question.asked` / `question.replied` events (which already drive the
+ * user-input UI). Suppress the tool-call echo so the prompt is not rendered
+ * twice.
+ */
+function isQuestionTool(toolName: string): boolean {
+  return toolName.toLowerCase() === "question";
+}
+
+export function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType {
   const normalized = toolName.toLowerCase();
+  if (FILE_READ_TOOL_NAMES.has(normalized)) {
+    return "file_read";
+  }
   if (normalized.includes("bash") || normalized.includes("command")) {
     return "command_execution";
   }
@@ -349,6 +381,79 @@ function detailFromToolPart(part: Extract<Part, { type: "tool" }>): string | und
     default:
       return undefined;
   }
+}
+
+function collabAgentMetaFromToolPart(
+  part: Extract<Part, { type: "tool" }>,
+): CollabAgentMeta | undefined {
+  const state = part.state as {
+    readonly metadata?: {
+      readonly sessionId?: unknown;
+      readonly parentSessionId?: unknown;
+      readonly model?: { readonly modelID?: unknown; readonly providerID?: unknown };
+    };
+    readonly input?: { readonly description?: unknown };
+    readonly title?: unknown;
+  };
+  const metadata = state.metadata;
+  const model = metadata?.model;
+  const asString = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim().length > 0 ? value : undefined;
+  const description = asString(state.input?.description) ?? asString(state.title);
+  const meta: CollabAgentMeta = {
+    ...(asString(metadata?.sessionId) ? { sessionId: asString(metadata?.sessionId) } : {}),
+    ...(asString(metadata?.parentSessionId)
+      ? { parentSessionId: asString(metadata?.parentSessionId) }
+      : {}),
+    ...(asString(part.tool) ? { subagentType: asString(part.tool) } : {}),
+    ...(description ? { description } : {}),
+    ...(asString(model?.modelID) ? { modelId: asString(model?.modelID) } : {}),
+    ...(asString(model?.providerID) ? { providerId: asString(model?.providerID) } : {}),
+  };
+  return Object.keys(meta).length > 0 ? meta : undefined;
+}
+
+function todosFromToolPart(
+  part: Extract<Part, { type: "tool" }>,
+): ReadonlyArray<RuntimeTodoItem> | undefined {
+  const input = (part.state as { readonly input?: { readonly todos?: unknown } }).input;
+  const rawTodos = input?.todos;
+  if (!Array.isArray(rawTodos)) {
+    return undefined;
+  }
+  const todos: RuntimeTodoItem[] = [];
+  for (const raw of rawTodos) {
+    if (typeof raw !== "object" || raw === null) {
+      continue;
+    }
+    const candidate = raw as {
+      readonly content?: unknown;
+      readonly status?: unknown;
+      readonly priority?: unknown;
+    };
+    if (typeof candidate.content !== "string" || candidate.content.trim().length === 0) {
+      continue;
+    }
+    const status =
+      candidate.status === "pending" ||
+      candidate.status === "in_progress" ||
+      candidate.status === "completed" ||
+      candidate.status === "cancelled"
+        ? candidate.status
+        : undefined;
+    const priority =
+      candidate.priority === "high" ||
+      candidate.priority === "medium" ||
+      candidate.priority === "low"
+        ? candidate.priority
+        : undefined;
+    todos.push({
+      content: candidate.content,
+      ...(status ? { status } : {}),
+      ...(priority ? { priority } : {}),
+    });
+  }
+  return todos.length > 0 ? todos : undefined;
 }
 
 function toolStateCreatedAt(part: Extract<Part, { type: "tool" }>): string | undefined {
@@ -738,10 +843,21 @@ export function makeOpenCodeAdapter(
           }
 
           if (part.type === "tool") {
-            const itemType = toToolLifecycleItemType(part.tool);
+            // The `question` tool lifecycle duplicates the dedicated
+            // question.asked/replied events that already drive the user-input
+            // UI; suppress the tool-call echo to avoid rendering it twice.
+            if (isQuestionTool(part.tool)) {
+              appendTurnItem(context, turnId, part);
+              break;
+            }
+            const isTodo = isTodoTool(part.tool);
+            const itemType = isTodo ? "dynamic_tool_call" : toToolLifecycleItemType(part.tool);
             const title =
               part.state.status === "running" ? (part.state.title ?? part.tool) : part.tool;
             const detail = detailFromToolPart(part);
+            const collabAgent =
+              itemType === "collab_agent_tool_call" ? collabAgentMetaFromToolPart(part) : undefined;
+            const todos = isTodo ? todosFromToolPart(part) : undefined;
             const payload = {
               itemType,
               ...(part.state.status === "error"
@@ -751,6 +867,8 @@ export function makeOpenCodeAdapter(
                   : { status: "inProgress" as const }),
               ...(title ? { title } : {}),
               ...(detail ? { detail } : {}),
+              ...(collabAgent ? { collabAgent } : {}),
+              ...(todos ? { todos } : {}),
               data: {
                 tool: part.tool,
                 state: part.state,

@@ -24,14 +24,14 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
       <MenuTrigger
         render={
           <Button
-            size="sm"
+            size="xs"
             variant="ghost"
             className="shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80"
             aria-label="More composer controls"
           />
         }
       >
-        <EllipsisIcon aria-hidden="true" className="size-4" />
+        <EllipsisIcon aria-hidden="true" className="size-3.5" />
       </MenuTrigger>
       <MenuPopup align="start">
         {props.traitsMenuContent ? (

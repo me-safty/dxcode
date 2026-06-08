@@ -34,9 +34,11 @@ import {
   IconAlertCircle as CircleAlertIcon,
   IconArrowBackUp as Undo2Icon,
   IconCheck as CheckIcon,
+  IconChecklist as ChecklistIcon,
   IconChevronDown as ChevronDownIcon,
   IconChevronRight as ChevronRightIcon,
   IconPencil as SquarePenIcon,
+  IconRobot as RobotIcon,
   IconSearch as SearchIcon,
   IconTerminal2 as TerminalIcon,
   IconTool as WrenchIcon,
@@ -786,7 +788,12 @@ function WorkActivitySummaryItemRow({ item }: { item: WorkActivitySummary["items
   const ctx = use(TimelineRowCtx);
   const turnSummary = item.turnId ? ctx.turnDiffSummaryByTurnId.get(item.turnId) : undefined;
   const canShowInlineDiff = Boolean(turnSummary && item.changedFilePath);
-  const inlineDiffExpanded = useUiStateStore(
+  const subagentReport = item.subagent?.report;
+  const canShowSubagentReport = Boolean(subagentReport && subagentReport.trim().length > 0);
+  const todos = item.todos;
+  const canShowTodos = Boolean(todos && todos.length > 0);
+  const isExpandable = canShowInlineDiff || canShowSubagentReport || canShowTodos;
+  const expanded = useUiStateStore(
     (store) =>
       store.threadWorkActivityExpandedById[ctx.routeThreadKey]?.[
         workActivityItemDiffExpansionKey(item.id)
@@ -796,33 +803,58 @@ function WorkActivitySummaryItemRow({ item }: { item: WorkActivitySummary["items
   const debugText = import.meta.env.DEV ? (item.debugText ?? item.title) : item.title;
   const labelClassName =
     "min-w-0 truncate text-left text-xs text-muted-foreground/65 transition-colors hover:text-foreground/85";
-  const label = canShowInlineDiff ? (
+  const subagentModel = item.subagent?.modelId;
+  const subagentUsage = formatSubagentUsage(item.subagent);
+  const label = isExpandable ? (
     <button
       type="button"
       className="group/item inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5"
       data-scroll-anchor-ignore
-      aria-expanded={inlineDiffExpanded}
+      aria-expanded={expanded}
       onClick={() =>
         setWorkActivityExpanded(
           ctx.routeThreadKey,
           workActivityItemDiffExpansionKey(item.id),
-          !inlineDiffExpanded,
+          !expanded,
         )
       }
       title={item.title ?? item.label}
     >
       <span className={labelClassName}>{item.label}</span>
+      {subagentUsage ? (
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground/55">
+          {subagentUsage}
+        </span>
+      ) : null}
+      {subagentModel ? (
+        <span className="shrink-0 rounded bg-muted/60 px-1 py-px font-mono text-[10px] text-muted-foreground/70">
+          {subagentModel}
+        </span>
+      ) : null}
       <ChevronRightIcon
         className={cn(
           "size-4 shrink-0 text-muted-foreground/60 opacity-0 transition-[opacity,transform,color] duration-150 group-hover/item:opacity-100 group-hover/item:text-foreground/80 group-focus-visible/item:opacity-100",
-          inlineDiffExpanded ? "rotate-90" : null,
-          inlineDiffExpanded ? "opacity-100" : null,
+          expanded ? "rotate-90" : null,
+          expanded ? "opacity-100" : null,
         )}
       />
     </button>
   ) : (
-    <p className={labelClassName} title={item.title ?? item.label}>
-      {item.label}
+    <p
+      className="inline-flex min-w-0 max-w-full items-center gap-1.5"
+      title={item.title ?? item.label}
+    >
+      <span className={labelClassName}>{item.label}</span>
+      {subagentUsage ? (
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground/55">
+          {subagentUsage}
+        </span>
+      ) : null}
+      {subagentModel ? (
+        <span className="shrink-0 rounded bg-muted/60 px-1 py-px font-mono text-[10px] text-muted-foreground/70">
+          {subagentModel}
+        </span>
+      ) : null}
     </p>
   );
 
@@ -843,10 +875,75 @@ function WorkActivitySummaryItemRow({ item }: { item: WorkActivitySummary["items
   return (
     <div className="min-w-0">
       {labelWithTooltip}
-      {canShowInlineDiff && inlineDiffExpanded && turnSummary && item.changedFilePath ? (
+      {canShowInlineDiff && expanded && turnSummary && item.changedFilePath ? (
         <InlineWorkActivityFileDiff turnSummary={turnSummary} filePath={item.changedFilePath} />
       ) : null}
+      {!canShowInlineDiff && canShowSubagentReport && expanded && subagentReport ? (
+        <div className="mt-1 max-h-[28rem] overflow-y-auto rounded-md border border-border/50 bg-muted/20 px-3 py-2">
+          <ChatMarkdown text={subagentReport} cwd={ctx.workspaceRoot} />
+        </div>
+      ) : null}
+      {!canShowInlineDiff && !canShowSubagentReport && canShowTodos && expanded && todos ? (
+        <TodoChecklist todos={todos} />
+      ) : null}
     </div>
+  );
+}
+
+function formatSubagentUsage(
+  subagent: WorkActivitySummary["items"][number]["subagent"],
+): string | null {
+  if (!subagent) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (typeof subagent.toolUses === "number" && subagent.toolUses > 0) {
+    parts.push(`${subagent.toolUses} ${subagent.toolUses === 1 ? "tool" : "tools"}`);
+  }
+  if (typeof subagent.durationMs === "number" && subagent.durationMs > 0) {
+    const seconds = subagent.durationMs / 1000;
+    parts.push(seconds >= 10 ? `${Math.round(seconds)}s` : `${seconds.toFixed(1)}s`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function TodoChecklist({ todos }: { todos: WorkActivitySummary["items"][number]["todos"] }) {
+  if (!todos || todos.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="mt-1 flex flex-col gap-0.5 rounded-md border border-border/50 bg-muted/20 px-3 py-2">
+      {todos.map((todo) => {
+        const status = todo.status ?? "pending";
+        return (
+          <li key={todo.content} className="flex items-start gap-2 text-xs leading-5">
+            <span className="mt-px shrink-0">
+              {status === "completed" ? (
+                <CheckIcon className="size-3.5 text-emerald-400/90" />
+              ) : status === "in_progress" ? (
+                <ChevronRightIcon className="size-3.5 text-amber-400/90" />
+              ) : status === "cancelled" ? (
+                <CircleAlertIcon className="size-3.5 text-muted-foreground/50" />
+              ) : (
+                <span className="ml-1 mr-0.5 inline-block size-2.5 rounded-full border border-muted-foreground/40" />
+              )}
+            </span>
+            <span
+              className={cn(
+                "min-w-0 wrap-break-word",
+                status === "completed"
+                  ? "text-muted-foreground/55 line-through"
+                  : status === "cancelled"
+                    ? "text-muted-foreground/45 line-through"
+                    : "text-muted-foreground/80",
+              )}
+            >
+              {todo.content}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -973,6 +1070,10 @@ function workActivityIcon(category: WorkActivityCategory): TablerIcon {
       return SquarePenIcon;
     case "command":
       return TerminalIcon;
+    case "subagent":
+      return RobotIcon;
+    case "todo":
+      return ChecklistIcon;
     case "tool":
       return WrenchIcon;
     case "info":

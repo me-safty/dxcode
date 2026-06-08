@@ -1567,3 +1567,139 @@ describe("deriveActiveWorkStartedAt", () => {
     ).toBe("2026-02-27T21:11:00.000Z");
   });
 });
+
+describe("deriveWorkLogEntries subagent and todo extraction", () => {
+  it("extracts subagent metadata across in-progress and completed frames", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "subagent-updated",
+        kind: "tool.updated",
+        summary: "Subagent task",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          detail: "Explore: Find steer capability",
+          collabAgent: {
+            sessionId: "ses_child",
+            parentSessionId: "ses_parent",
+            subagentType: "Explore",
+            description: "Find steer capability",
+            modelId: "anthropic.claude-opus-4-8",
+            providerId: "amazon-bedrock",
+          },
+          data: { tool: "task" },
+        },
+      }),
+      makeActivity({
+        id: "subagent-completed",
+        kind: "tool.completed",
+        summary: "Subagent task",
+        sequence: 2,
+        turnId: "turn-1",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "completed",
+          detail: "## Report\n\nThe steer capability lives in CodexAdapter.",
+          collabAgent: {
+            sessionId: "ses_child",
+            subagentType: "Explore",
+          },
+          data: { tool: "task" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.subagent).toMatchObject({
+      sessionId: "ses_child",
+      parentSessionId: "ses_parent",
+      subagentType: "Explore",
+      description: "Find steer capability",
+      modelId: "anthropic.claude-opus-4-8",
+      report: "## Report\n\nThe steer capability lives in CodexAdapter.",
+    });
+  });
+
+  it("collapses a Claude task.progress stream into one subagent row with live usage", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "task-progress-1",
+        kind: "task.progress",
+        summary: "Reasoning update",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          taskId: "task-a",
+          taskType: "local_agent",
+          detail: "Running grep -r steer",
+          lastToolName: "Bash",
+          usage: { tool_uses: 1, duration_ms: 2126 },
+        },
+      }),
+      makeActivity({
+        id: "task-progress-2",
+        kind: "task.progress",
+        summary: "Reasoning update",
+        sequence: 2,
+        turnId: "turn-1",
+        payload: {
+          taskId: "task-a",
+          taskType: "local_agent",
+          detail: "Reading ChatView.tsx",
+          lastToolName: "Read",
+          usage: { tool_uses: 7, duration_ms: 14355 },
+        },
+      }),
+      makeActivity({
+        id: "task-completed",
+        kind: "task.completed",
+        summary: "Task completed",
+        tone: "info",
+        sequence: 3,
+        turnId: "turn-1",
+        payload: { taskId: "task-a", status: "completed" },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.subagent).toMatchObject({
+      subagentType: "Subagent",
+      lastStep: "Reading ChatView.tsx",
+      lastToolName: "Read",
+      toolUses: 7,
+      durationMs: 14355,
+    });
+  });
+
+  it("extracts structured todos from a todowrite tool payload", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "todo-completed",
+        kind: "tool.completed",
+        summary: "Updated todos",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          itemType: "dynamic_tool_call",
+          status: "completed",
+          todos: [
+            { content: "Create monorepo structure", status: "completed", priority: "high" },
+            { content: "Move app to apps/web", status: "in_progress", priority: "high" },
+          ],
+          data: { tool: "todowrite" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.todos).toEqual([
+      { content: "Create monorepo structure", status: "completed", priority: "high" },
+      { content: "Move app to apps/web", status: "in_progress", priority: "high" },
+    ]);
+  });
+});

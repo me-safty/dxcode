@@ -190,8 +190,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
         <>
           <Button
             variant="ghost"
-            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-            size="sm"
+            className="shrink-0 whitespace-nowrap px-2 font-medium text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+            size="xs"
             type="button"
             onClick={props.onToggleInteractionMode}
             title={
@@ -200,7 +200,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                 : "Default mode — click to enter plan mode"
             }
           >
-            <BotIcon />
+            <BotIcon className="size-3.5" />
             <span className="sr-only sm:not-sr-only">
               {props.interactionMode === "plan" ? "Plan" : "Build"}
             </span>
@@ -216,12 +216,12 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
       >
         <SelectTrigger
           variant="ghost"
-          size="sm"
+          size="xs"
           className="font-medium"
           aria-label="Runtime mode"
           title={runtimeModeOption.description}
         >
-          <RuntimeModeIcon className="size-4" />
+          <RuntimeModeIcon className="size-3.5" />
           <SelectValue>{runtimeModeOption.label}</SelectValue>
         </SelectTrigger>
         <SelectPopup alignItemWithTrigger={false}>
@@ -1603,6 +1603,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     event: KeyboardEvent,
   ) => {
     if (key === "Tab" && event.shiftKey) {
+      if (!composerProviderControls.showInteractionModeToggle) {
+        return false;
+      }
       toggleInteractionMode();
       return true;
     }

@@ -401,12 +401,45 @@ const TurnDiffUpdatedPayload = Schema.Struct({
 });
 export type TurnDiffUpdatedPayload = typeof TurnDiffUpdatedPayload.Type;
 
+/**
+ * Canonical identity of a delegated sub-agent ("collab agent") tool call,
+ * normalized across providers. OpenCode runs each sub-agent as a real child
+ * session and exposes stable session ids; Claude only exposes a subagent type
+ * and description. All fields are optional so providers populate what they
+ * have.
+ */
+export const CollabAgentMeta = Schema.Struct({
+  sessionId: Schema.optional(TrimmedNonEmptyStringSchema),
+  parentSessionId: Schema.optional(TrimmedNonEmptyStringSchema),
+  subagentType: Schema.optional(TrimmedNonEmptyStringSchema),
+  description: Schema.optional(TrimmedNonEmptyStringSchema),
+  modelId: Schema.optional(TrimmedNonEmptyStringSchema),
+  providerId: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type CollabAgentMeta = typeof CollabAgentMeta.Type;
+
+/**
+ * A single structured todo item from a provider todo/checklist tool (e.g.
+ * OpenCode `todowrite`). Surfaced as a live checklist row in the UI instead of
+ * being buried as a raw JSON file-change blob.
+ */
+export const RuntimeTodoItem = Schema.Struct({
+  content: TrimmedNonEmptyStringSchema,
+  status: Schema.optional(Schema.Literals(["pending", "in_progress", "completed", "cancelled"])),
+  priority: Schema.optional(Schema.Literals(["high", "medium", "low"])),
+});
+export type RuntimeTodoItem = typeof RuntimeTodoItem.Type;
+
 export const ItemLifecyclePayload = Schema.Struct({
   itemType: CanonicalItemType,
   status: Schema.optional(RuntimeItemStatus),
   title: Schema.optional(TrimmedNonEmptyStringSchema),
   detail: Schema.optional(TrimmedNonEmptyStringSchema),
   data: Schema.optional(Schema.Unknown),
+  /** Sub-agent identity, populated for `collab_agent_tool_call` items. */
+  collabAgent: Schema.optional(CollabAgentMeta),
+  /** Structured todo list, populated for provider todo/checklist tools. */
+  todos: Schema.optional(Schema.Array(RuntimeTodoItem)),
 });
 export type ItemLifecyclePayload = typeof ItemLifecyclePayload.Type;
 

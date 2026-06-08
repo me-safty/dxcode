@@ -87,7 +87,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <ThreadSidebar />
         <SidebarRail />
       </Sidebar>
-      <div className="fixed left-[calc(env(safe-area-inset-left)+0.75rem)] top-0 z-40 flex h-9 items-center sm:h-11">
+      <div className="fixed left-[calc(env(safe-area-inset-left)+0.75rem)] top-0 z-40 flex h-11 items-center">
         <SidebarTrigger className="size-7 shrink-0" />
       </div>
       {children}

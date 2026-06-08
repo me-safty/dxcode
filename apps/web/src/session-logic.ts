@@ -47,6 +47,30 @@ export const PROVIDER_OPTIONS: Array<{
   },
 ];
 
+export interface SubagentInfo {
+  sessionId?: string;
+  parentSessionId?: string;
+  subagentType?: string;
+  description?: string;
+  modelId?: string;
+  providerId?: string;
+  report?: string;
+  /** Latest step the subagent is working on (Claude streams these live). */
+  lastStep?: string;
+  /** Name of the tool the subagent last used (e.g. "Bash", "Read"). */
+  lastToolName?: string;
+  /** Cumulative tool-call count reported by the subagent. */
+  toolUses?: number;
+  /** Cumulative wall-clock duration reported by the subagent, in ms. */
+  durationMs?: number;
+}
+
+export interface TodoItem {
+  content: string;
+  status?: "pending" | "in_progress" | "completed" | "cancelled";
+  priority?: "high" | "medium" | "low";
+}
+
 export interface WorkLogEntry {
   id: string;
   createdAt: string;
@@ -62,12 +86,17 @@ export interface WorkLogEntry {
   toolName?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
+  /** Target path for a file-read tool, extracted from structured tool input. */
+  readPath?: string;
+  subagent?: SubagentInfo;
+  todos?: ReadonlyArray<TodoItem>;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseKey?: string;
   toolCallId?: string;
+  taskId?: string;
 }
 
 export interface PendingApproval {
@@ -588,6 +617,24 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (toolCallId) {
     entry.toolCallId = toolCallId;
   }
+  const subagent = extractSubagentInfo(payload, activity.kind, detail);
+  if (subagent) {
+    entry.subagent = subagent;
+  }
+  const readPath = extractReadPath(payload);
+  if (readPath) {
+    entry.readPath = readPath;
+  }
+  if (isTaskActivity || activity.kind === "task.started") {
+    const taskId = typeof payload?.taskId === "string" ? payload.taskId : null;
+    if (taskId) {
+      entry.taskId = taskId;
+    }
+  }
+  const todos = extractTodos(payload);
+  if (todos) {
+    entry.todos = todos;
+  }
   const collapseKey = deriveToolLifecycleCollapseKey(entry);
   if (collapseKey) {
     entry.collapseKey = collapseKey;
@@ -614,6 +661,12 @@ function shouldCollapseToolLifecycleEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
 ): boolean {
+  // Sub-agent step streams (Claude `task.progress`/`task.completed`) share a
+  // stable taskId across every step. Collapse them into a single sub-agent row
+  // so the timeline shows one entry per sub-agent rather than one per step.
+  if (previous.taskId !== undefined && previous.taskId === next.taskId) {
+    return previous.activityKind !== "task.completed";
+  }
   if (previous.activityKind !== "tool.updated" && previous.activityKind !== "tool.completed") {
     return false;
   }
@@ -649,6 +702,9 @@ function mergeDerivedWorkLogEntries(
   const requestKind = next.requestKind ?? previous.requestKind;
   const collapseKey = next.collapseKey ?? previous.collapseKey;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
+  const taskId = next.taskId ?? previous.taskId;
+  const subagent = mergeSubagentInfo(previous.subagent, next.subagent);
+  const todos = next.todos ?? previous.todos;
   return {
     ...previous,
     ...next,
@@ -662,7 +718,50 @@ function mergeDerivedWorkLogEntries(
     ...(requestKind ? { requestKind } : {}),
     ...(collapseKey ? { collapseKey } : {}),
     ...(toolCallId ? { toolCallId } : {}),
+    ...(taskId ? { taskId } : {}),
+    ...(subagent ? { subagent } : {}),
+    ...(todos ? { todos } : {}),
   };
+}
+
+function mergeSubagentInfo(
+  previous: SubagentInfo | undefined,
+  next: SubagentInfo | undefined,
+): SubagentInfo | undefined {
+  if (!previous) {
+    return next;
+  }
+  if (!next) {
+    return previous;
+  }
+  // Metadata generally arrives on the in-progress frame; the report arrives on
+  // completion. Field-wise merge so neither is lost across collapse.
+  const merged: SubagentInfo = {};
+  const sessionId = next.sessionId ?? previous.sessionId;
+  if (sessionId) merged.sessionId = sessionId;
+  const parentSessionId = next.parentSessionId ?? previous.parentSessionId;
+  if (parentSessionId) merged.parentSessionId = parentSessionId;
+  const subagentType = next.subagentType ?? previous.subagentType;
+  if (subagentType) merged.subagentType = subagentType;
+  const description = next.description ?? previous.description;
+  if (description) merged.description = description;
+  const modelId = next.modelId ?? previous.modelId;
+  if (modelId) merged.modelId = modelId;
+  const providerId = next.providerId ?? previous.providerId;
+  if (providerId) merged.providerId = providerId;
+  const report = next.report ?? previous.report;
+  if (report) merged.report = report;
+  // Live progress: prefer the newer frame's step/tool, take the max running
+  // usage so the collapsed row reflects the latest cumulative figures.
+  const lastStep = next.lastStep ?? previous.lastStep;
+  if (lastStep) merged.lastStep = lastStep;
+  const lastToolName = next.lastToolName ?? previous.lastToolName;
+  if (lastToolName) merged.lastToolName = lastToolName;
+  const toolUses = Math.max(next.toolUses ?? 0, previous.toolUses ?? 0);
+  if (toolUses > 0) merged.toolUses = toolUses;
+  const durationMs = Math.max(next.durationMs ?? 0, previous.durationMs ?? 0);
+  if (durationMs > 0) merged.durationMs = durationMs;
+  return merged;
 }
 
 function mergeChangedFiles(
@@ -688,6 +787,18 @@ function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | un
   const itemType = entry.itemType ?? "";
   if (normalizedLabel.length === 0 && detail.length === 0 && itemType.length === 0) {
     return undefined;
+  }
+  // Sub-agent items stream a stable title/description across frames but their
+  // detail changes (the in-progress description vs. the final report), so keying
+  // on detail would split one sub-agent into two rows. Key on item type +
+  // label only so the lifecycle collapses into a single row.
+  if (itemType === "collab_agent_tool_call") {
+    // Prefer the stable child session id (OpenCode) so distinct sub-agents of
+    // the same type stay distinct; fall back to type/label for providers
+    // (Claude) that do not expose a session id.
+    const subagentKey =
+      entry.subagent?.sessionId ?? entry.subagent?.subagentType ?? normalizedLabel;
+    return [itemType, subagentKey].join("\u001f");
   }
   return [itemType, normalizedLabel, detail].join("\u001f");
 }
@@ -1132,6 +1243,136 @@ function extractChangedFiles(payload: Record<string, unknown> | null): string[] 
   const seen = new Set<string>();
   collectChangedFiles(asRecord(payload?.data), changedFiles, seen, 0);
   return changedFiles;
+}
+
+/**
+ * Pull the target file path for a read tool from structured tool input
+ * (e.g. OpenCode `read` -> data.state.input.filePath, Claude `Read` ->
+ * data.input.file_path). This lets the UI render "Read <path>" without parsing
+ * the file's XML-wrapped output text.
+ */
+function extractReadPath(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  if (!data) {
+    return null;
+  }
+  const inputs = [asRecord(data.input), asRecord(asRecord(data.state)?.input)];
+  for (const input of inputs) {
+    if (!input) {
+      continue;
+    }
+    for (const key of ["filePath", "file_path", "path", "notebook_path", "target_file"]) {
+      const value = input[key];
+      if (typeof value === "string" && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+  }
+  return null;
+}
+
+function extractSubagentInfo(
+  payload: Record<string, unknown> | null,
+  activityKind: OrchestrationThreadActivity["kind"],
+  detail: string | null,
+): SubagentInfo | null {
+  const asString = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim().length > 0 ? value : undefined;
+
+  // Claude streams sub-agent work as a separate `task.*` stream (not a
+  // collab_agent_tool_call). These carry the live step the sub-agent is on plus
+  // running usage, which is exactly what makes the work understandable.
+  if (
+    activityKind === "task.started" ||
+    activityKind === "task.progress" ||
+    activityKind === "task.completed"
+  ) {
+    return subagentInfoFromTaskActivity(payload, asString);
+  }
+
+  const meta = asRecord(payload?.collabAgent);
+  if (!meta) {
+    return null;
+  }
+  const info: SubagentInfo = {};
+  const sessionId = asString(meta.sessionId);
+  if (sessionId) info.sessionId = sessionId;
+  const parentSessionId = asString(meta.parentSessionId);
+  if (parentSessionId) info.parentSessionId = parentSessionId;
+  const subagentType = asString(meta.subagentType);
+  if (subagentType) info.subagentType = subagentType;
+  const description = asString(meta.description);
+  if (description) info.description = description;
+  const modelId = asString(meta.modelId);
+  if (modelId) info.modelId = modelId;
+  const providerId = asString(meta.providerId);
+  if (providerId) info.providerId = providerId;
+  // The subagent's full report only arrives on the completed item, surfaced
+  // as the item detail. Keep it for an expand-on-click disclosure.
+  if (activityKind === "tool.completed" && detail && detail.trim().length > 0) {
+    info.report = detail;
+  }
+  return Object.keys(info).length > 0 ? info : null;
+}
+
+function subagentInfoFromTaskActivity(
+  payload: Record<string, unknown> | null,
+  asString: (value: unknown) => string | undefined,
+): SubagentInfo | null {
+  const info: SubagentInfo = {};
+  const taskType = asString(payload?.taskType);
+  // Render `local_agent` as a friendly "Subagent" type; pass other task types
+  // through (e.g. `plan`, `local_bash`).
+  if (taskType && taskType !== "local_agent") {
+    info.subagentType = taskType;
+  } else if (taskType === "local_agent") {
+    info.subagentType = "Subagent";
+  }
+  const description = asString(payload?.description);
+  if (description) info.description = description;
+  const lastStep = asString(payload?.summary) ?? asString(payload?.detail);
+  if (lastStep) info.lastStep = lastStep;
+  const lastToolName = asString(payload?.lastToolName);
+  if (lastToolName) info.lastToolName = lastToolName;
+  const usage = asRecord(payload?.usage);
+  if (usage) {
+    if (typeof usage.tool_uses === "number") info.toolUses = usage.tool_uses;
+    if (typeof usage.duration_ms === "number") info.durationMs = usage.duration_ms;
+  }
+  return Object.keys(info).length > 0 ? info : null;
+}
+
+function extractTodos(payload: Record<string, unknown> | null): TodoItem[] | null {
+  const rawTodos = payload?.todos;
+  if (!Array.isArray(rawTodos)) {
+    return null;
+  }
+  const todos: TodoItem[] = [];
+  for (const raw of rawTodos) {
+    const candidate = asRecord(raw);
+    if (!candidate || typeof candidate.content !== "string") {
+      continue;
+    }
+    const status =
+      candidate.status === "pending" ||
+      candidate.status === "in_progress" ||
+      candidate.status === "completed" ||
+      candidate.status === "cancelled"
+        ? candidate.status
+        : undefined;
+    const priority =
+      candidate.priority === "high" ||
+      candidate.priority === "medium" ||
+      candidate.priority === "low"
+        ? candidate.priority
+        : undefined;
+    todos.push({
+      content: candidate.content,
+      ...(status ? { status } : {}),
+      ...(priority ? { priority } : {}),
+    });
+  }
+  return todos.length > 0 ? todos : null;
 }
 
 function compareActivitiesByOrder(

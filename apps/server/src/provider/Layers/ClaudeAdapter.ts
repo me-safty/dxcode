@@ -25,6 +25,7 @@ import {
   type CanonicalItemType,
   type CanonicalRequestType,
   type ClaudeSettings,
+  type CollabAgentMeta,
   EventId,
   type ProviderApprovalDecision,
   ProviderDriverKind,
@@ -154,6 +155,7 @@ interface ToolInFlight {
   readonly toolName: string;
   readonly title: string;
   readonly detail?: string;
+  readonly collabAgent?: CollabAgentMeta;
   readonly input: Record<string, unknown>;
   readonly partialInputJson: string;
   readonly lastEmittedInputFingerprint?: string;
@@ -580,6 +582,30 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
     return `${toolName}: ${serialized}`;
   }
   return `${toolName}: ${serialized.slice(0, 397)}...`;
+}
+
+/**
+ * Build the canonical sub-agent identity for a Claude `Task`/agent tool call.
+ * Claude does not expose child session ids, so only the subagent type and
+ * description are available — but normalizing them here lets the UI render
+ * Claude and OpenCode sub-agents through one code path.
+ */
+function collabAgentMetaFromInput(
+  toolName: string,
+  input: Record<string, unknown>,
+): CollabAgentMeta | undefined {
+  if (classifyToolItemType(toolName) !== "collab_agent_tool_call") {
+    return undefined;
+  }
+  const asString = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+  const subagentType = asString(input.subagent_type);
+  const description = asString(input.description) ?? asString(input.prompt)?.slice(0, 200);
+  const meta: CollabAgentMeta = {
+    ...(subagentType ? { subagentType } : {}),
+    ...(description ? { description } : {}),
+  };
+  return Object.keys(meta).length > 0 ? meta : undefined;
 }
 
 function titleForTool(itemType: CanonicalItemType): string {
@@ -1550,6 +1576,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: status === "completed" ? "completed" : "failed",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
+          ...(tool.collabAgent ? { collabAgent: tool.collabAgent } : {}),
           data: {
             toolName: tool.toolName,
             input: tool.input,
@@ -1706,11 +1733,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         const partialInputJson = tool.partialInputJson + event.delta.partial_json;
         const parsedInput = tryParseJsonRecord(partialInputJson);
         const detail = parsedInput ? summarizeToolRequest(tool.toolName, parsedInput) : tool.detail;
+        const collabAgent = parsedInput
+          ? (collabAgentMetaFromInput(tool.toolName, parsedInput) ?? tool.collabAgent)
+          : tool.collabAgent;
         let nextTool: ToolInFlight = {
           ...tool,
           partialInputJson,
           ...(parsedInput ? { input: parsedInput } : {}),
           ...(detail ? { detail } : {}),
+          ...(collabAgent ? { collabAgent } : {}),
         };
 
         const nextFingerprint =
@@ -1751,6 +1782,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             status: "inProgress",
             title: nextTool.title,
             ...(nextTool.detail ? { detail: nextTool.detail } : {}),
+            ...(nextTool.collabAgent ? { collabAgent: nextTool.collabAgent } : {}),
             data: {
               toolName: nextTool.toolName,
               input: nextTool.input,
@@ -1820,12 +1852,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const inputFingerprint =
         Object.keys(toolInput).length > 0 ? toolInputFingerprint(toolInput) : undefined;
 
+      const startedCollabAgent = collabAgentMetaFromInput(toolName, toolInput);
       const tool: ToolInFlight = {
         itemId,
         itemType,
         toolName,
         title: titleForTool(itemType),
         detail,
+        ...(startedCollabAgent ? { collabAgent: startedCollabAgent } : {}),
         input: toolInput,
         partialInputJson: "",
         ...(inputFingerprint ? { lastEmittedInputFingerprint: inputFingerprint } : {}),
@@ -1846,6 +1880,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: "inProgress",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
+          ...(tool.collabAgent ? { collabAgent: tool.collabAgent } : {}),
           data: {
             toolName: tool.toolName,
             input: toolInput,
@@ -1923,6 +1958,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: toolResult.isError ? "failed" : "inProgress",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
+          ...(tool.collabAgent ? { collabAgent: tool.collabAgent } : {}),
           data: toolData,
         },
         providerRefs: nativeProviderRefs(context, {
@@ -1975,6 +2011,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: itemStatus,
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
+          ...(tool.collabAgent ? { collabAgent: tool.collabAgent } : {}),
           data: toolData,
         },
         providerRefs: nativeProviderRefs(context, {

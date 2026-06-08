@@ -168,7 +168,7 @@ export function QueuedMessagesPanel(props: {
   items: readonly QueuedMessagePanelItem[];
   onDelete: (id: string) => void;
   onEdit: (id: string) => void;
-  onReviewDiff: (turnId: TurnId) => void;
+  onReviewDiff: () => void;
   onReorder: (ids: readonly string[]) => void;
   supportsSteering: boolean;
   onSteer: (id: string) => void;
@@ -224,9 +224,7 @@ export function QueuedMessagesPanel(props: {
           className="h-7 px-2 text-xs text-foreground"
           disabled={!props.activeTurnId}
           onClick={() => {
-            if (props.activeTurnId) {
-              props.onReviewDiff(props.activeTurnId);
-            }
+            props.onReviewDiff();
           }}
         >
           Review

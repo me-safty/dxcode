@@ -1,4 +1,4 @@
-import { type WorkLogEntry } from "../../session-logic";
+import { type SubagentInfo, type TodoItem, type WorkLogEntry } from "../../session-logic";
 import { type TimelineActivityEntry } from "./MessagesTimeline.logic";
 
 export type WorkActivityCategory =
@@ -6,6 +6,8 @@ export type WorkActivityCategory =
   | "file"
   | "edit"
   | "command"
+  | "subagent"
+  | "todo"
   | "tool"
   | "info"
   | "error";
@@ -17,6 +19,8 @@ export interface WorkActivitySummaryItem {
   debugText?: string;
   turnId?: WorkLogEntry["turnId"];
   changedFilePath?: string;
+  subagent?: SubagentInfo;
+  todos?: ReadonlyArray<TodoItem>;
 }
 
 export interface WorkActivitySummary {
@@ -109,6 +113,12 @@ function resolveWorkCategory(entry: WorkLogEntry): WorkActivityCategory {
   if (entry.tone === "error") {
     return "error";
   }
+  if (entry.itemType === "collab_agent_tool_call" || entry.subagent) {
+    return "subagent";
+  }
+  if ((entry.todos?.length ?? 0) > 0) {
+    return "todo";
+  }
   if (entry.requestKind === "file-change" || entry.itemType === "file_change") {
     return "edit";
   }
@@ -136,11 +146,7 @@ function resolveWorkCategory(entry: WorkLogEntry): WorkActivityCategory {
   ) {
     return "command";
   }
-  if (
-    entry.itemType === "mcp_tool_call" ||
-    entry.itemType === "dynamic_tool_call" ||
-    entry.itemType === "collab_agent_tool_call"
-  ) {
+  if (entry.itemType === "mcp_tool_call" || entry.itemType === "dynamic_tool_call") {
     return "tool";
   }
   return entry.tone === "info" ? "info" : "tool";
@@ -233,6 +239,10 @@ function summaryVerb(category: WorkActivityCategory): string {
       return "Edited";
     case "command":
       return "Ran";
+    case "subagent":
+      return "Delegated to";
+    case "todo":
+      return "Updated";
     case "tool":
       return "Used";
     case "info":
@@ -251,6 +261,10 @@ function summaryNoun(category: WorkActivityCategory): string {
       return "file";
     case "command":
       return "command";
+    case "subagent":
+      return "subagent";
+    case "todo":
+      return "todo list";
     case "tool":
       return "tool";
     case "info":
@@ -261,7 +275,13 @@ function summaryNoun(category: WorkActivityCategory): string {
 }
 
 function summaryPluralNoun(category: WorkActivityCategory): string {
-  return category === "search" ? "searches" : `${summaryNoun(category)}s`;
+  if (category === "search") {
+    return "searches";
+  }
+  if (category === "todo") {
+    return "todo lists";
+  }
+  return `${summaryNoun(category)}s`;
 }
 
 function formatCount(count: number, singular: string, plural = `${singular}s`): string {
@@ -283,6 +303,8 @@ function buildSummaryItem(
     ...(category === "edit" && entry.changedFiles?.length === 1
       ? { changedFilePath: displayPath(entry.changedFiles[0]!, workspaceRoot) }
       : {}),
+    ...(category === "subagent" && entry.subagent ? { subagent: entry.subagent } : {}),
+    ...(category === "todo" && entry.todos ? { todos: entry.todos } : {}),
     ...(title && title !== label ? { title } : {}),
     debugText: workEntryDebugText(entry, category),
   };
@@ -302,6 +324,10 @@ function itemLabel(
       return editLabel(entry, workspaceRoot);
     case "command":
       return `Ran ${compactCommandLabel(entry)}`;
+    case "subagent":
+      return subagentLabel(entry);
+    case "todo":
+      return todoLabel(entry);
     case "tool":
       return compactEntryLabel(entry);
     case "info":
@@ -311,12 +337,39 @@ function itemLabel(
   }
 }
 
+function subagentLabel(entry: WorkLogEntry): string {
+  const type = entry.subagent?.subagentType?.trim();
+  const description = entry.subagent?.description?.trim();
+  const lastStep = entry.subagent?.lastStep?.trim();
+  // Prefer a stable "Type: description" identity; fall back to the live step
+  // (Claude task streams have no description, just the current step).
+  const headline = description ?? lastStep;
+  if (type && headline) {
+    return `${type}: ${headline}`;
+  }
+  if (headline) {
+    return headline;
+  }
+  if (type) {
+    return type;
+  }
+  return compactEntryLabel(entry);
+}
+
+function todoLabel(entry: WorkLogEntry): string {
+  const todos = entry.todos ?? [];
+  const completed = todos.filter((todo) => todo.status === "completed").length;
+  const total = todos.length;
+  return total > 0 ? `Todos (${completed}/${total})` : "Updated todos";
+}
+
 function fileExploreLabel(entry: WorkLogEntry, workspaceRoot: string | undefined): string {
   const command = commandTokens(entry);
   const executable = commandExecutable(command);
   const pathFromCommand = extractFilePathFromCommand(command);
   const pathFromEntry =
     pathFromCommand ??
+    entry.readPath ??
     extractPathFromToolInput(entry) ??
     extractPathLikeText(entry.detail) ??
     extractPathLikeText(entry.label);
@@ -334,20 +387,28 @@ function fileExploreLabel(entry: WorkLogEntry, workspaceRoot: string | undefined
     return "Listed files";
   }
 
+  // When we can't recover a concrete path, fall back to a bare verb instead of
+  // echoing the raw tool name (which produced labels like "Read read").
+  const toolNameOnly = entry.toolName?.trim().toLowerCase();
+  const fallbackLabel = compactEntryLabel(entry);
+  const fallbackIsToolName =
+    toolNameOnly !== undefined && fallbackLabel.trim().toLowerCase() === toolNameOnly;
   const display = pathFromEntry
     ? displayPath(pathFromEntry, workspaceRoot)
-    : compactEntryLabel(entry);
+    : fallbackIsToolName
+      ? null
+      : fallbackLabel;
 
   if (executable === "ls" || executable === "find") {
-    return `Listed ${display}`;
+    return display ? `Listed ${display}` : "Listed files";
   }
   if (executable === "rg" && command.includes("--files")) {
-    return `Listed ${display}`;
+    return display ? `Listed ${display}` : "Listed files";
   }
   if (entry.itemType === "image_view") {
-    return `Viewed ${display}`;
+    return display ? `Viewed ${display}` : "Viewed image";
   }
-  return `Read ${display}`;
+  return display ? `Read ${display}` : "Read files";
 }
 
 function editLabel(entry: WorkLogEntry, workspaceRoot: string | undefined): string {

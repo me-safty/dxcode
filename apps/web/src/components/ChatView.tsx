@@ -94,6 +94,7 @@ import {
   type TurnDiffSummary,
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
@@ -1773,6 +1774,12 @@ export default function ChatView(props: ChatViewProps) {
   const toggleRightDock = dockPanels.toggleRightDock;
   const openTasks = dockPanels.openTasks;
   const [rightDockExpanded, setRightDockExpanded] = useState(false);
+  // On mobile/narrow viewports there is no split view for the right dock: the
+  // screen shows either the main chat or the dock, full-width. So an open dock
+  // on mobile always reads as "full width" (chat hidden), and the explicit
+  // expand/collapse toggle is hidden (there is nothing to split from).
+  const isMobile = useIsMobile();
+  const rightDockFullWidth = isMobile ? dockPanels.rightOpen : rightDockExpanded;
   // The left project sidebar's context (ChatView renders inside it, before its
   // own right-dock provider). Used to know if the fixed project-sidebar toggle
   // overlaps the expanded dock's left edge (only when that sidebar is closed).
@@ -1824,7 +1831,7 @@ export default function ChatView(props: ChatViewProps) {
   const [expandedDockWidth, setExpandedDockWidth] = useState<number | null>(null);
   useEffect(() => {
     const wrapper = rightDockWrapperRef.current;
-    if (!wrapper || !rightDockExpanded) {
+    if (!wrapper || !rightDockFullWidth) {
       setExpandedDockWidth(null);
       return;
     }
@@ -1846,7 +1853,7 @@ export default function ChatView(props: ChatViewProps) {
       if (rafId !== null) window.cancelAnimationFrame(rafId);
       observer.disconnect();
     };
-  }, [rightDockExpanded]);
+  }, [rightDockFullWidth]);
 
   // Keep the `?diff=1` route in sync with whether a diff dock tab exists, so
   // the diff content (which self-resolves from the route) mounts/unmounts.
@@ -3768,6 +3775,23 @@ export default function ChatView(props: ChatViewProps) {
     },
     [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
   );
+  const onOpenLastTurnDiff = useCallback(() => {
+    if (!isServerThread) {
+      return;
+    }
+    onDiffPanelOpen?.();
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId,
+        threadId,
+      },
+      search: (previous) => {
+        const rest = stripDiffSearchParams(previous);
+        return { ...rest, diff: "1", diffSource: "last-turn" as const };
+      },
+    });
+  }, [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId]);
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
@@ -3799,7 +3823,7 @@ export default function ChatView(props: ChatViewProps) {
       style={
         {
           "--sidebar-width":
-            rightDockExpanded && expandedDockWidth !== null
+            rightDockFullWidth && expandedDockWidth !== null
               ? `${expandedDockWidth}px`
               : RIGHT_DOCK_SIDEBAR_DEFAULT_WIDTH,
         } as React.CSSProperties
@@ -3808,7 +3832,7 @@ export default function ChatView(props: ChatViewProps) {
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background",
-          rightDockExpanded && "hidden",
+          rightDockFullWidth && "hidden",
         )}
       >
         {/* Top bar: chat header + fixed dock toggles */}
@@ -3946,7 +3970,7 @@ export default function ChatView(props: ChatViewProps) {
                             removeQueuedTurnSubmission(submissionId, { revokeImages: true })
                           }
                           onEdit={editQueuedTurnSubmission}
-                          onReviewDiff={onOpenTurnDiff}
+                          onReviewDiff={onOpenLastTurnDiff}
                           onReorder={reorderQueuedTurnSubmissions}
                           supportsSteering={activeProviderSupportsSteering}
                           onSteer={steerQueuedTurnSubmission}
@@ -4109,22 +4133,35 @@ export default function ChatView(props: ChatViewProps) {
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
           rightDockExpanded={rightDockExpanded}
-          onToggleRightDockExpanded={toggleRightDockExpanded}
+          {...(isMobile ? {} : { onToggleRightDockExpanded: toggleRightDockExpanded })}
         />
       </div>
       {dockPanels.rightHasTabs ? (
-        <Sidebar
-          side="right"
-          collapsible="offcanvas"
-          disableHoverPreview
-          className="border-l border-border bg-background text-foreground"
-          resizable={rightDockResizable}
-        >
-          {dockPanels.renderSlot("right", {
-            reserveLeadingInset: rightDockExpanded && !leftSidebarOpen,
-          })}
-          <SidebarRail />
-        </Sidebar>
+        isMobile ? (
+          // Mobile/narrow: no split view. When open, the right dock fills the
+          // screen (chat is hidden) and the floating dock toggles stay above it
+          // so the dock can be closed. The shared Sidebar primitive's own mobile
+          // path is bypassed because it tracks a separate open state that does
+          // not follow the dock's controlled `open`.
+          dockPanels.rightOpen ? (
+            <div className="fixed inset-0 z-40 flex flex-col bg-background text-foreground pb-safe pt-safe">
+              {dockPanels.renderSlot("right")}
+            </div>
+          ) : null
+        ) : (
+          <Sidebar
+            side="right"
+            collapsible="offcanvas"
+            disableHoverPreview
+            className="border-l border-border bg-background text-foreground"
+            resizable={rightDockResizable}
+          >
+            {dockPanels.renderSlot("right", {
+              reserveLeadingInset: rightDockExpanded && !leftSidebarOpen,
+            })}
+            <SidebarRail />
+          </Sidebar>
+        )
       ) : null}
     </SidebarProvider>
   );

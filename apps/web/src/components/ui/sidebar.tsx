@@ -17,7 +17,7 @@ import {
 } from "~/components/ui/sheet";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { useIsMobile } from "~/hooks/useMediaQuery";
+import { useIsTouchDevice } from "~/hooks/useMediaQuery";
 import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
 import * as Schema from "effect/Schema";
 
@@ -109,7 +109,11 @@ function SidebarProvider({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const isMobile = useIsMobile();
+  // "Mobile" here means the touch/slide-over experience (Sheet + tap, no
+  // hover-preview), keyed on pointer type rather than viewport width. A desktop
+  // browser resized to a narrow width keeps the offcanvas + hover-preview
+  // behavior because it still has a fine pointer and can hover.
+  const isMobile = useIsTouchDevice();
   const [openMobile, setOpenMobile] = React.useState(false);
 
   // This is the internal state of the sidebar.
@@ -300,7 +304,7 @@ function Sidebar({
   return (
     <SidebarInstanceContext value={instanceContextValue}>
       <div
-        className="group peer hidden text-sidebar-foreground md:block"
+        className="group peer block text-sidebar-foreground"
         data-collapsible={state === "collapsed" ? collapsible : ""}
         data-preview={previewOpen ? "open" : "closed"}
         data-side={side}
@@ -332,7 +336,7 @@ function Sidebar({
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) will-change-transform transition-[translate,width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none md:flex",
+            "fixed inset-y-0 z-10 flex h-svh w-(--sidebar-width) will-change-transform transition-[translate,width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:-translate-x-full group-data-[preview=open]:translate-x-0"
               : "right-0 group-data-[collapsible=offcanvas]:translate-x-full group-data-[preview=open]:translate-x-0",
@@ -377,7 +381,7 @@ function Sidebar({
           <button
             aria-label="Preview Sidebar"
             className={cn(
-              "fixed inset-y-0 z-20 hidden w-3 cursor-default bg-transparent md:block",
+              "fixed inset-y-0 z-20 block w-3 cursor-default bg-transparent",
               side === "left" ? "left-0" : "right-0",
             )}
             data-slot="sidebar-preview-trigger"
