@@ -185,7 +185,10 @@ import {
   useServerKeybindings,
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
-import { retainThreadDetailSubscription } from "../environments/runtime/service";
+import {
+  refreshRetainedThreadDetailSubscription,
+  retainThreadDetailSubscription,
+} from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
 import {
@@ -3095,6 +3098,7 @@ export default function ChatView(props: ChatViewProps) {
         ...(bootstrap ? { bootstrap } : {}),
         createdAt: messageCreatedAt,
       });
+      refreshRetainedThreadDetailSubscription(activeThread.environmentId, threadIdForSend);
       turnStartSucceeded = true;
     })().catch(async (err: unknown) => {
       if (

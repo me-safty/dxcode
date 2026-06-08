@@ -129,6 +129,9 @@ const pendingSavedEnvironmentConnections = new Map<
   EnvironmentId,
   PendingSavedEnvironmentConnection
 >();
+const pendingSavedEnvironmentReconnects = new Map<EnvironmentId, Promise<void>>();
+const pendingSshAutoReconnectTimeouts = new Map<EnvironmentId, ReturnType<typeof setTimeout>>();
+const sshAutoReconnectEpochs = new Map<EnvironmentId, number>();
 const environmentConnectionListeners = new Set<() => void>();
 const providerInvalidationListeners = new Set<() => void>();
 const threadDetailSubscriptions = new Map<string, ThreadDetailSubscriptionEntry>();
@@ -163,6 +166,7 @@ let lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 15 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
 const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
+const SSH_AUTO_RECONNECT_DELAY_MS = 5_000;
 const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
 const NOOP = () => undefined;
 const SSH_HTTP_STATUS_RE = /^\[ssh_http:(\d+)\]\s/u;
@@ -467,6 +471,38 @@ function attachThreadDetailSubscriptionsForEnvironment(environmentId: Environmen
       attachThreadDetailSubscription(entry);
     }
   }
+}
+
+function reattachThreadDetailSubscriptionsForEnvironment(environmentId: EnvironmentId): void {
+  for (const entry of threadDetailSubscriptions.values()) {
+    if (entry.environmentId !== environmentId) {
+      continue;
+    }
+    entry.unsubscribe();
+    entry.unsubscribe = NOOP;
+    attachThreadDetailSubscription(entry);
+  }
+}
+
+export function refreshRetainedThreadDetailSubscription(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+): boolean {
+  const entry = threadDetailSubscriptions.get(
+    getThreadDetailSubscriptionKey(environmentId, threadId),
+  );
+  if (!entry) {
+    return false;
+  }
+
+  entry.unsubscribe();
+  entry.unsubscribe = NOOP;
+  if (!attachThreadDetailSubscription(entry)) {
+    watchThreadDetailSubscriptionConnection(entry);
+    return false;
+  }
+  entry.lastAccessedAt = Date.now();
+  return true;
 }
 
 function reconcileThreadDetailSubscriptionsForEnvironment(
@@ -905,6 +941,69 @@ function setRuntimeError(environmentId: EnvironmentId, error: unknown) {
   });
 }
 
+function clearPendingSshAutoReconnect(environmentId: EnvironmentId): void {
+  sshAutoReconnectEpochs.set(environmentId, (sshAutoReconnectEpochs.get(environmentId) ?? 0) + 1);
+  cancelPendingSshAutoReconnectTimer(environmentId);
+}
+
+function cancelPendingSshAutoReconnectTimer(environmentId: EnvironmentId): void {
+  const timeoutId = pendingSshAutoReconnectTimeouts.get(environmentId);
+  if (!timeoutId) {
+    return;
+  }
+  clearTimeout(timeoutId);
+  pendingSshAutoReconnectTimeouts.delete(environmentId);
+}
+
+function shouldAutoReconnectSsh(environmentId: EnvironmentId, epoch: number): boolean {
+  if ((sshAutoReconnectEpochs.get(environmentId) ?? 0) !== epoch) {
+    return false;
+  }
+
+  const record = getSavedEnvironmentRecord(environmentId);
+  if (!record?.desktopSsh) {
+    return false;
+  }
+  if (!getClientSettings().autoReconnectSshConnections) {
+    return false;
+  }
+
+  const runtimeState = useSavedEnvironmentRuntimeStore.getState().byId[environmentId];
+  return (
+    runtimeState?.connectionState === "connecting" ||
+    runtimeState?.connectionState === "disconnected" ||
+    runtimeState?.connectionState === "error"
+  );
+}
+
+function scheduleSshAutoReconnect(environmentId: EnvironmentId): void {
+  if (pendingSshAutoReconnectTimeouts.has(environmentId)) {
+    return;
+  }
+
+  const epoch = sshAutoReconnectEpochs.get(environmentId) ?? 0;
+  const timeoutId = setTimeout(() => {
+    pendingSshAutoReconnectTimeouts.delete(environmentId);
+    if (!shouldAutoReconnectSsh(environmentId, epoch)) {
+      return;
+    }
+
+    void reconnectSavedEnvironment(environmentId, {
+      preserveSshAutoReconnectEpoch: true,
+    }).catch((error) => {
+      console.warn("SSH auto reconnect failed", {
+        environmentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      if (shouldAutoReconnectSsh(environmentId, epoch)) {
+        setRuntimeConnecting(environmentId);
+        scheduleSshAutoReconnect(environmentId);
+      }
+    });
+  }, SSH_AUTO_RECONNECT_DELAY_MS);
+  pendingSshAutoReconnectTimeouts.set(environmentId, timeoutId);
+}
+
 function coalesceOrchestrationUiEvents(
   events: ReadonlyArray<OrchestrationEvent>,
 ): OrchestrationEvent[] {
@@ -1142,7 +1241,14 @@ function createEnvironmentConnectionHandlers() {
   };
 }
 
-function createWsRpcClient(transport: WsTransport): WsRpcClient {
+function createWsRpcClient(
+  transport: WsTransport,
+  options?: { readonly resetGlobalReconnectBackoff?: boolean },
+): WsRpcClient {
+  const resetGlobalReconnectBackoff = options?.resetGlobalReconnectBackoff !== false;
+  if (!resetGlobalReconnectBackoff) {
+    return createBaseWsRpcClient(transport);
+  }
   return createBaseWsRpcClient(transport, {
     beforeReconnect: () => resetWsReconnectBackoff(),
   });
@@ -1256,6 +1362,7 @@ function createSavedEnvironmentClient(
           setRuntimeConnecting(environmentId);
         },
         onOpen: () => {
+          cancelPendingSshAutoReconnectTimer(environmentId);
           setRuntimeConnected(environmentId);
         },
         onError: (message: string) => {
@@ -1268,7 +1375,14 @@ function createSavedEnvironmentClient(
             lastErrorAt: isoNow(),
           });
         },
-        onClose: (details: { readonly code: number; readonly reason: string }) => {
+        onClose: (
+          details: { readonly code: number; readonly reason: string },
+          context: { readonly intentional: boolean },
+        ) => {
+          const shouldScheduleAutoReconnect =
+            !context.intentional &&
+            getSavedEnvironmentRecord(environmentId)?.desktopSsh &&
+            getClientSettings().autoReconnectSshConnections;
           setRuntimeDisconnected(
             environmentId,
             appendVersionMismatchHint(
@@ -1278,9 +1392,18 @@ function createSavedEnvironmentClient(
               ),
             ),
           );
+          if (shouldScheduleAutoReconnect) {
+            setRuntimeConnecting(environmentId);
+            scheduleSshAutoReconnect(environmentId);
+          }
         },
       },
+      {
+        trackGlobalConnectionState: false,
+        trackGlobalRequestLatency: false,
+      },
     ),
+    { resetGlobalReconnectBackoff: false },
   );
 }
 
@@ -1758,6 +1881,7 @@ export async function disconnectSavedEnvironment(environmentId: EnvironmentId): 
   if (connection?.kind === "saved") {
     await removeConnection(environmentId).catch(() => false);
   }
+  clearPendingSshAutoReconnect(environmentId);
   setRuntimeDisconnected(environmentId);
 
   if (record?.desktopSsh && typeof window !== "undefined") {
@@ -1766,55 +1890,82 @@ export async function disconnectSavedEnvironment(environmentId: EnvironmentId): 
   }
 }
 
-export async function reconnectSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
+export async function reconnectSavedEnvironment(
+  environmentId: EnvironmentId,
+  options?: { readonly preserveSshAutoReconnectEpoch?: boolean },
+): Promise<void> {
   const record = getSavedEnvironmentRecord(environmentId);
   if (!record) {
     throw new Error("Saved environment not found.");
   }
+  if (record.desktopSsh) {
+    if (options?.preserveSshAutoReconnectEpoch) {
+      cancelPendingSshAutoReconnectTimer(environmentId);
+    } else {
+      clearPendingSshAutoReconnect(environmentId);
+    }
+  }
 
-  const connection = environmentConnections.get(environmentId);
-  if (!connection) {
+  const pendingReconnect = pendingSavedEnvironmentReconnects.get(environmentId);
+  if (pendingReconnect) {
+    return await pendingReconnect;
+  }
+
+  const reconnectPromise = Promise.resolve().then(async () => {
+    const connection = environmentConnections.get(environmentId);
+    if (!connection) {
+      setRuntimeConnecting(environmentId);
+      try {
+        await ensureSavedEnvironmentConnection(record);
+        return;
+      } catch (error) {
+        if (isSavedEnvironmentConnectionCancelledError(error)) {
+          return;
+        }
+        setRuntimeError(environmentId, error);
+        throw error;
+      }
+    }
+
     setRuntimeConnecting(environmentId);
     try {
-      await ensureSavedEnvironmentConnection(record);
-      return;
+      if (record.desktopSsh) {
+        await prepareSavedEnvironmentRecordForConnection(record);
+      }
+      await connection.reconnect();
+      reattachThreadDetailSubscriptionsForEnvironment(environmentId);
+      setRuntimeConnected(environmentId);
     } catch (error) {
-      if (isSavedEnvironmentConnectionCancelledError(error)) {
-        return;
+      if (record.desktopSsh) {
+        try {
+          const issued = await issueDesktopSshBearerSession(
+            getSavedEnvironmentRecord(environmentId) ?? record,
+          );
+          await removeConnection(environmentId).catch(() => false);
+          await ensureSavedEnvironmentConnection(issued.record, {
+            bearerToken: issued.bearerToken,
+            scopes: issued.scopes,
+          });
+          return;
+        } catch (recoveryError) {
+          if (isSavedEnvironmentConnectionCancelledError(recoveryError)) {
+            return;
+          }
+          setRuntimeError(environmentId, recoveryError);
+          throw recoveryError;
+        }
       }
       setRuntimeError(environmentId, error);
       throw error;
     }
-  }
-
-  setRuntimeConnecting(environmentId);
+  });
+  pendingSavedEnvironmentReconnects.set(environmentId, reconnectPromise);
   try {
-    if (record.desktopSsh) {
-      await prepareSavedEnvironmentRecordForConnection(record);
+    await reconnectPromise;
+  } finally {
+    if (pendingSavedEnvironmentReconnects.get(environmentId) === reconnectPromise) {
+      pendingSavedEnvironmentReconnects.delete(environmentId);
     }
-    await connection.reconnect();
-  } catch (error) {
-    if (record.desktopSsh) {
-      try {
-        const issued = await issueDesktopSshBearerSession(
-          getSavedEnvironmentRecord(environmentId) ?? record,
-        );
-        await removeConnection(environmentId).catch(() => false);
-        await ensureSavedEnvironmentConnection(issued.record, {
-          bearerToken: issued.bearerToken,
-          scopes: issued.scopes,
-        });
-        return;
-      } catch (recoveryError) {
-        if (isSavedEnvironmentConnectionCancelledError(recoveryError)) {
-          return;
-        }
-        setRuntimeError(environmentId, recoveryError);
-        throw recoveryError;
-      }
-    }
-    setRuntimeError(environmentId, error);
-    throw error;
   }
 }
 
@@ -1824,6 +1975,7 @@ export async function removeSavedEnvironment(environmentId: EnvironmentId): Prom
   useSavedEnvironmentRegistryStore.getState().remove(environmentId);
   useSavedEnvironmentRuntimeStore.getState().clear(environmentId);
   useStore.getState().removeEnvironmentState(environmentId);
+  clearPendingSshAutoReconnect(environmentId);
   await removeSavedEnvironmentBearerToken(environmentId);
 }
 
@@ -2019,6 +2171,12 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
     stop: () => {
       unsubscribeSavedEnvironments();
       unsubscribeBrowserResumeReconnects();
+      for (const timeoutId of pendingSshAutoReconnectTimeouts.values()) {
+        clearTimeout(timeoutId);
+      }
+      pendingSshAutoReconnectTimeouts.clear();
+      sshAutoReconnectEpochs.clear();
+      pendingSavedEnvironmentReconnects.clear();
       queryInvalidationThrottler.cancel();
     },
   };
@@ -2040,6 +2198,12 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
   lastAppliedProjectionVersionByEnvironment.clear();
   pendingSavedEnvironmentConnections.clear();
+  pendingSavedEnvironmentReconnects.clear();
+  for (const timeoutId of pendingSshAutoReconnectTimeouts.values()) {
+    clearTimeout(timeoutId);
+  }
+  pendingSshAutoReconnectTimeouts.clear();
+  sshAutoReconnectEpochs.clear();
   savedEnvironmentConnectionAttempts.clear();
   for (const key of Array.from(threadDetailSubscriptions.keys())) {
     disposeThreadDetailSubscriptionByKey(key);

@@ -117,6 +117,7 @@ import {
 import { useUiStateStore } from "~/uiStateStore";
 import { resolveServerConfigVersionMismatch } from "~/versionSkew";
 import { useServerConfig } from "~/rpc/serverState";
+import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import {
   connectManagedCloudEnvironment,
   linkPrimaryEnvironmentToCloud,
@@ -1945,6 +1946,10 @@ export function ConnectionsSettings() {
     DesktopServerExposureState["mode"] | null
   >(null);
   const primaryServerConfig = useServerConfig();
+  const autoReconnectSshConnections = useSettings(
+    (settings) => settings.autoReconnectSshConnections,
+  );
+  const { updateSettings } = useUpdateSettings();
   const primaryVersionMismatch = resolveServerConfigVersionMismatch(primaryServerConfig);
   const [isAdvertisedEndpointListExpanded, setIsAdvertisedEndpointListExpanded] = useState(false);
   const defaultAdvertisedEndpointKey = useUiStateStore(
@@ -2856,6 +2861,21 @@ export function ConnectionsSettings() {
       }
     />
   );
+  const renderAutoReconnectSshRow = () => (
+    <SettingsRow
+      title="Auto-reconnect"
+      description="Repeatedly reconnect SSH connections. Useful for unstable remotes."
+      control={
+        <Switch
+          checked={autoReconnectSshConnections}
+          onCheckedChange={(checked) =>
+            updateSettings({ autoReconnectSshConnections: Boolean(checked) })
+          }
+          aria-label="Enable Auto-reconnect"
+        />
+      }
+    />
+  );
 
   return (
     <SettingsPageContainer>
@@ -2880,6 +2900,7 @@ export function ConnectionsSettings() {
                 {renderNetworkAccessRow()}
                 {renderEndpointRows("endpoint-rail")}
                 {renderTailscaleRow()}
+                {renderAutoReconnectSshRow()}
                 <CloudLinkRow canManageRelay={canManageRelay} />
               </>
             ) : (

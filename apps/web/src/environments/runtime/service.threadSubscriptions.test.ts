@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import type { WsRpcClient } from "@t3tools/client-runtime";
 import {
+  DEFAULT_CLIENT_SETTINGS,
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
@@ -21,14 +22,32 @@ const mockReadSavedEnvironmentBearerToken = vi.fn();
 const mockReadSavedEnvironmentCredential = vi.fn();
 const mockSavedEnvironmentRegistrySubscribe = vi.fn();
 const mockGetPrimaryKnownEnvironment = vi.hoisted(() => vi.fn());
+const mockSavedEnvironmentRuntimeById: Record<string, Record<string, unknown>> = {};
 const mockFetchRemoteSessionState = vi.fn();
 const mockResolveRemoteWebSocketConnectionUrl = vi.fn(async () => "ws://remote.example.test/ws");
 const mockRemoteHttpRunPromise = vi.fn((effect: Promise<unknown>) => effect);
 const mockConnectionReconnects: Array<ReturnType<typeof vi.fn>> = [];
+const mockGetClientSettings = vi.hoisted(() => vi.fn());
+const mockTransportLifecycleHandlers: Array<{
+  readonly onOpen?: () => void;
+  readonly onClose?: (
+    details: { readonly code: number; readonly reason: string },
+    context: { readonly intentional: boolean },
+  ) => void;
+}> = [];
 let savedEnvironmentRegistryListener: (() => void) | null = null;
 
-function MockWsTransport() {
-  return undefined;
+function MockWsTransport(
+  _url: unknown,
+  lifecycleHandlers?: {
+    readonly onOpen?: () => void;
+    readonly onClose?: (
+      details: { readonly code: number; readonly reason: string },
+      context: { readonly intentional: boolean },
+    ) => void;
+  },
+) {
+  mockTransportLifecycleHandlers.push(lifecycleHandlers ?? {});
 }
 
 vi.mock("../primary", () => ({
@@ -39,6 +58,11 @@ vi.mock("../../lib/runtime", () => ({
   webRuntime: {
     runPromise: mockRemoteHttpRunPromise,
   },
+}));
+
+vi.mock("~/hooks/useSettings", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../hooks/useSettings")>()),
+  getClientSettings: mockGetClientSettings,
 }));
 
 vi.mock("./catalog", () => ({
@@ -60,9 +84,19 @@ vi.mock("./catalog", () => ({
   },
   useSavedEnvironmentRuntimeStore: {
     getState: () => ({
-      ensure: vi.fn(),
-      patch: vi.fn(),
-      clear: vi.fn(),
+      byId: mockSavedEnvironmentRuntimeById,
+      ensure: (environmentId: EnvironmentId) => {
+        mockSavedEnvironmentRuntimeById[environmentId] ??= {};
+      },
+      patch: (environmentId: EnvironmentId, patch: Record<string, unknown>) => {
+        mockSavedEnvironmentRuntimeById[environmentId] = {
+          ...mockSavedEnvironmentRuntimeById[environmentId],
+          ...patch,
+        };
+      },
+      clear: (environmentId: EnvironmentId) => {
+        delete mockSavedEnvironmentRuntimeById[environmentId];
+      },
     }),
   },
   waitForSavedEnvironmentRegistryHydration: mockWaitForSavedEnvironmentRegistryHydration,
@@ -312,11 +346,16 @@ describe("retainThreadDetailSubscription", () => {
       const token = await mockReadSavedEnvironmentBearerToken();
       return token ? { version: 1, method: "bearer", token } : null;
     });
+    mockGetClientSettings.mockReturnValue(DEFAULT_CLIENT_SETTINGS);
+    for (const key of Object.keys(mockSavedEnvironmentRuntimeById)) {
+      delete mockSavedEnvironmentRuntimeById[key];
+    }
     mockFetchRemoteSessionState.mockResolvedValue({
       authenticated: true,
       scopes: ["orchestration:read"],
     });
     mockConnectionReconnects.length = 0;
+    mockTransportLifecycleHandlers.length = 0;
   });
 
   afterEach(async () => {
@@ -354,6 +393,46 @@ describe("retainThreadDetailSubscription", () => {
     expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
 
     stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("refreshes a retained thread detail subscription on demand", async () => {
+    const {
+      refreshRetainedThreadDetailSubscription,
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-refresh");
+
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    expect(refreshRetainedThreadDetailSubscription(environmentId, threadId)).toBe(true);
+    expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not refresh an unretained thread detail subscription", async () => {
+    const { refreshRetainedThreadDetailSubscription, resetEnvironmentServiceForTests } =
+      await import("./service");
+
+    expect(
+      refreshRetainedThreadDetailSubscription(
+        EnvironmentId.make("env-1"),
+        ThreadId.make("thread-missing"),
+      ),
+    ).toBe(false);
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+    expect(mockSubscribeThread).not.toHaveBeenCalled();
+
     await resetEnvironmentServiceForTests();
   });
 
@@ -490,6 +569,97 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("refreshes retained thread detail subscriptions after a saved environment reconnect", async () => {
+    const environmentId = EnvironmentId.make("env-remote");
+    const threadId = ThreadId.make("thread-reconnect-refresh");
+    const record = {
+      environmentId,
+      label: "Remote env",
+      httpBaseUrl: "http://remote.example.test",
+      wsBaseUrl: "ws://remote.example.test",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      lastConnectedAt: "2026-05-01T00:00:00.000Z",
+    };
+    mockListSavedEnvironmentRecords.mockReturnValue([record]);
+    mockGetSavedEnvironmentRecord.mockReturnValue(record);
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue("bearer-token");
+
+    const {
+      listEnvironmentConnections,
+      reconnectSavedEnvironment,
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    savedEnvironmentRegistryListener?.();
+    await vi.waitFor(() => {
+      expect(
+        listEnvironmentConnections().some(
+          (connection) => connection.environmentId === environmentId,
+        ),
+      ).toBe(true);
+    });
+
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    await reconnectSavedEnvironment(environmentId);
+
+    expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(2);
+
+    release();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("marks saved environment runtime connected after a successful reconnect", async () => {
+    const environmentId = EnvironmentId.make("env-remote");
+    const record = {
+      environmentId,
+      label: "Remote env",
+      httpBaseUrl: "http://remote.example.test",
+      wsBaseUrl: "ws://remote.example.test",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      lastConnectedAt: "2026-05-01T00:00:00.000Z",
+    };
+    mockListSavedEnvironmentRecords.mockReturnValue([record]);
+    mockGetSavedEnvironmentRecord.mockReturnValue(record);
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue("bearer-token");
+
+    const {
+      listEnvironmentConnections,
+      reconnectSavedEnvironment,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    savedEnvironmentRegistryListener?.();
+    await vi.waitFor(() => {
+      expect(
+        listEnvironmentConnections().some(
+          (connection) => connection.environmentId === environmentId,
+        ),
+      ).toBe(true);
+    });
+
+    mockSavedEnvironmentRuntimeById[environmentId] = {
+      ...mockSavedEnvironmentRuntimeById[environmentId],
+      connectionState: "disconnected",
+      disconnectedAt: "2026-05-01T00:00:00.000Z",
+    };
+
+    await reconnectSavedEnvironment(environmentId);
+
+    expect(mockSavedEnvironmentRuntimeById[environmentId]?.connectionState).toBe("connected");
+    expect(mockSavedEnvironmentRuntimeById[environmentId]?.disconnectedAt).toBeNull();
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
   it("keeps healthy environment streams connected when the browser resumes from the background", async () => {
     let visibilityState: DocumentVisibilityState = "visible";
     const documentTarget = new EventTarget();
@@ -597,6 +767,461 @@ describe("retainThreadDetailSubscription", () => {
     visibilityState = "visible";
     documentTarget.dispatchEvent(new Event("visibilitychange"));
     expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("auto reconnects saved SSH environments after an unexpected close when enabled", async () => {
+    const environmentId = EnvironmentId.make("env-ssh");
+    const target = {
+      alias: "devbox",
+      hostname: "devbox.example.test",
+      username: null,
+      port: null,
+      source: "manual" as const,
+    };
+    const record = {
+      environmentId,
+      label: "SSH env",
+      httpBaseUrl: "http://127.0.0.1:43001",
+      wsBaseUrl: "ws://127.0.0.1:43001",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      lastConnectedAt: "2026-05-01T00:00:00.000Z",
+      desktopSsh: target,
+    };
+    mockGetClientSettings.mockReturnValue({
+      ...DEFAULT_CLIENT_SETTINGS,
+      autoReconnectSshConnections: true,
+    });
+    mockListSavedEnvironmentRecords.mockReturnValue([record]);
+    mockGetSavedEnvironmentRecord.mockReturnValue(record);
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue("ssh-bearer-token");
+    vi.stubGlobal("window", {
+      desktopBridge: {
+        ensureSshEnvironment: vi.fn(async () => ({
+          target,
+          httpBaseUrl: record.httpBaseUrl,
+          wsBaseUrl: record.wsBaseUrl,
+          pairingToken: null,
+        })),
+        fetchSshSessionState: vi.fn(async () => ({
+          authenticated: true,
+          scopes: ["orchestration:read"],
+        })),
+        issueSshWebSocketTicket: vi.fn(async () => ({ ticket: "ssh-ws-ticket" })),
+      },
+    });
+
+    const {
+      listEnvironmentConnections,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    savedEnvironmentRegistryListener?.();
+    await vi.waitFor(() => {
+      expect(
+        listEnvironmentConnections().some(
+          (connection) => connection.environmentId === environmentId,
+        ),
+      ).toBe(true);
+    });
+
+    const savedConnectionCalls = mockCreateEnvironmentConnection.mock.calls.filter(
+      ([input]) => input.kind === "saved",
+    );
+    expect(savedConnectionCalls).toHaveLength(1);
+    const savedReconnect = mockConnectionReconnects.at(-1);
+    expect(savedReconnect).toBeDefined();
+
+    const savedLifecycle = mockTransportLifecycleHandlers.find((handlers) => handlers.onClose);
+    expect(savedLifecycle?.onClose).toBeDefined();
+    savedLifecycle?.onClose?.({ code: 1006, reason: "transport lost" }, { intentional: false });
+    expect(mockSavedEnvironmentRuntimeById[environmentId]?.connectionState).toBe("connecting");
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(savedReconnect).toHaveBeenCalledTimes(1);
+    expect(mockSavedEnvironmentRuntimeById[environmentId]?.connectionState).toBe("connected");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(savedReconnect).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("cancels a pending SSH auto reconnect timer when the user reconnects manually", async () => {
+    const environmentId = EnvironmentId.make("env-ssh-manual-reconnect");
+    const target = {
+      alias: "devbox-manual",
+      hostname: "devbox-manual.example.test",
+      username: null,
+      port: null,
+      source: "manual" as const,
+    };
+    const record = {
+      environmentId,
+      label: "SSH env manual reconnect",
+      httpBaseUrl: "http://127.0.0.1:43004",
+      wsBaseUrl: "ws://127.0.0.1:43004",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      lastConnectedAt: "2026-05-01T00:00:00.000Z",
+      desktopSsh: target,
+    };
+    mockGetClientSettings.mockReturnValue({
+      ...DEFAULT_CLIENT_SETTINGS,
+      autoReconnectSshConnections: true,
+    });
+    mockListSavedEnvironmentRecords.mockReturnValue([record]);
+    mockGetSavedEnvironmentRecord.mockReturnValue(record);
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue("ssh-bearer-token");
+    vi.stubGlobal("window", {
+      desktopBridge: {
+        ensureSshEnvironment: vi.fn(async () => ({
+          target,
+          httpBaseUrl: record.httpBaseUrl,
+          wsBaseUrl: record.wsBaseUrl,
+          pairingToken: null,
+        })),
+        fetchSshSessionState: vi.fn(async () => ({
+          authenticated: true,
+          scopes: ["orchestration:read"],
+        })),
+        issueSshWebSocketTicket: vi.fn(async () => ({ ticket: "ssh-ws-ticket" })),
+      },
+    });
+
+    const {
+      listEnvironmentConnections,
+      reconnectSavedEnvironment,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    savedEnvironmentRegistryListener?.();
+    await vi.waitFor(() => {
+      expect(
+        listEnvironmentConnections().some(
+          (connection) => connection.environmentId === environmentId,
+        ),
+      ).toBe(true);
+    });
+
+    const savedReconnect = mockConnectionReconnects.at(-1);
+    expect(savedReconnect).toBeDefined();
+
+    const savedLifecycle = mockTransportLifecycleHandlers.find((handlers) => handlers.onClose);
+    savedLifecycle?.onClose?.({ code: 1006, reason: "transport lost" }, { intentional: false });
+    await reconnectSavedEnvironment(environmentId);
+    expect(savedReconnect).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(savedReconnect).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("dedupes manual reconnect while SSH auto reconnect is already in progress", async () => {
+    const environmentId = EnvironmentId.make("env-ssh-overlap-reconnect");
+    const target = {
+      alias: "devbox-overlap",
+      hostname: "devbox-overlap.example.test",
+      username: null,
+      port: null,
+      source: "manual" as const,
+    };
+    const record = {
+      environmentId,
+      label: "SSH env overlap reconnect",
+      httpBaseUrl: "http://127.0.0.1:43006",
+      wsBaseUrl: "ws://127.0.0.1:43006",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      lastConnectedAt: "2026-05-01T00:00:00.000Z",
+      desktopSsh: target,
+    };
+    mockGetClientSettings.mockReturnValue({
+      ...DEFAULT_CLIENT_SETTINGS,
+      autoReconnectSshConnections: true,
+    });
+    mockListSavedEnvironmentRecords.mockReturnValue([record]);
+    mockGetSavedEnvironmentRecord.mockReturnValue(record);
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue("ssh-bearer-token");
+    vi.stubGlobal("window", {
+      desktopBridge: {
+        ensureSshEnvironment: vi.fn(async () => ({
+          target,
+          httpBaseUrl: record.httpBaseUrl,
+          wsBaseUrl: record.wsBaseUrl,
+          pairingToken: null,
+        })),
+        fetchSshSessionState: vi.fn(async () => ({
+          authenticated: true,
+          scopes: ["orchestration:read"],
+        })),
+        issueSshWebSocketTicket: vi.fn(async () => ({ ticket: "ssh-ws-ticket" })),
+      },
+    });
+
+    const {
+      listEnvironmentConnections,
+      reconnectSavedEnvironment,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    savedEnvironmentRegistryListener?.();
+    await vi.waitFor(() => {
+      expect(
+        listEnvironmentConnections().some(
+          (connection) => connection.environmentId === environmentId,
+        ),
+      ).toBe(true);
+    });
+
+    let finishReconnect = () => {};
+    const reconnectGate = new Promise<void>((resolve) => {
+      finishReconnect = resolve;
+    });
+    const savedReconnect = mockConnectionReconnects.at(-1);
+    expect(savedReconnect).toBeDefined();
+    savedReconnect?.mockImplementation(async () => {
+      await reconnectGate;
+    });
+
+    const savedLifecycle = mockTransportLifecycleHandlers.find((handlers) => handlers.onClose);
+    savedLifecycle?.onClose?.({ code: 1006, reason: "transport lost" }, { intentional: false });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(savedReconnect).toHaveBeenCalledTimes(1);
+
+    const manualReconnect = reconnectSavedEnvironment(environmentId);
+    await Promise.resolve();
+    expect(savedReconnect).toHaveBeenCalledTimes(1);
+
+    finishReconnect();
+    await manualReconnect;
+    expect(savedReconnect).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not auto reconnect saved SSH environments when disabled", async () => {
+    const environmentId = EnvironmentId.make("env-ssh-disabled");
+    const target = {
+      alias: "devbox-disabled",
+      hostname: "devbox-disabled.example.test",
+      username: null,
+      port: null,
+      source: "manual" as const,
+    };
+    const record = {
+      environmentId,
+      label: "SSH env disabled",
+      httpBaseUrl: "http://127.0.0.1:43002",
+      wsBaseUrl: "ws://127.0.0.1:43002",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      lastConnectedAt: "2026-05-01T00:00:00.000Z",
+      desktopSsh: target,
+    };
+    mockListSavedEnvironmentRecords.mockReturnValue([record]);
+    mockGetSavedEnvironmentRecord.mockReturnValue(record);
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue("ssh-bearer-token");
+    vi.stubGlobal("window", {
+      desktopBridge: {
+        ensureSshEnvironment: vi.fn(async () => ({
+          target,
+          httpBaseUrl: record.httpBaseUrl,
+          wsBaseUrl: record.wsBaseUrl,
+          pairingToken: null,
+        })),
+        fetchSshSessionState: vi.fn(async () => ({
+          authenticated: true,
+          scopes: ["orchestration:read"],
+        })),
+        issueSshWebSocketTicket: vi.fn(async () => ({ ticket: "ssh-ws-ticket" })),
+      },
+    });
+
+    const {
+      listEnvironmentConnections,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    savedEnvironmentRegistryListener?.();
+    await vi.waitFor(() => {
+      expect(
+        listEnvironmentConnections().some(
+          (connection) => connection.environmentId === environmentId,
+        ),
+      ).toBe(true);
+    });
+
+    const savedReconnect = mockConnectionReconnects.at(-1);
+    const savedLifecycle = mockTransportLifecycleHandlers.find((handlers) => handlers.onClose);
+    savedLifecycle?.onClose?.({ code: 1006, reason: "transport lost" }, { intentional: false });
+    expect(mockSavedEnvironmentRuntimeById[environmentId]?.connectionState).toBe("disconnected");
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(savedReconnect).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("continues auto reconnecting saved SSH environments every five seconds while failures continue", async () => {
+    const environmentId = EnvironmentId.make("env-ssh-loop");
+    const target = {
+      alias: "devbox-loop",
+      hostname: "devbox-loop.example.test",
+      username: null,
+      port: null,
+      source: "manual" as const,
+    };
+    const record = {
+      environmentId,
+      label: "SSH env loop",
+      httpBaseUrl: "http://127.0.0.1:43003",
+      wsBaseUrl: "ws://127.0.0.1:43003",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      lastConnectedAt: "2026-05-01T00:00:00.000Z",
+      desktopSsh: target,
+    };
+    mockGetClientSettings.mockReturnValue({
+      ...DEFAULT_CLIENT_SETTINGS,
+      autoReconnectSshConnections: true,
+    });
+    mockListSavedEnvironmentRecords.mockReturnValue([record]);
+    mockGetSavedEnvironmentRecord.mockReturnValue(record);
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue("ssh-bearer-token");
+    vi.stubGlobal("window", {
+      desktopBridge: {
+        ensureSshEnvironment: vi.fn(async () => ({
+          target,
+          httpBaseUrl: record.httpBaseUrl,
+          wsBaseUrl: record.wsBaseUrl,
+          pairingToken: null,
+        })),
+        fetchSshSessionState: vi.fn(async () => ({
+          authenticated: true,
+          scopes: ["orchestration:read"],
+        })),
+        issueSshWebSocketTicket: vi.fn(async () => ({ ticket: "ssh-ws-ticket" })),
+      },
+    });
+
+    const {
+      listEnvironmentConnections,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    savedEnvironmentRegistryListener?.();
+    await vi.waitFor(() => {
+      expect(
+        listEnvironmentConnections().some(
+          (connection) => connection.environmentId === environmentId,
+        ),
+      ).toBe(true);
+    });
+
+    const savedReconnect = mockConnectionReconnects.at(-1);
+    expect(savedReconnect).toBeDefined();
+    savedReconnect?.mockRejectedValue(new Error("still down"));
+
+    const savedLifecycle = mockTransportLifecycleHandlers.find((handlers) => handlers.onClose);
+    savedLifecycle?.onClose?.({ code: 1006, reason: "transport lost" }, { intentional: false });
+    expect(mockSavedEnvironmentRuntimeById[environmentId]?.connectionState).toBe("connecting");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(savedReconnect).toHaveBeenCalledTimes(1);
+    expect(mockSavedEnvironmentRuntimeById[environmentId]?.connectionState).toBe("connecting");
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(savedReconnect).toHaveBeenCalledTimes(2);
+    expect(mockSavedEnvironmentRuntimeById[environmentId]?.connectionState).toBe("connecting");
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("continues auto reconnecting saved SSH environments when the socket opens before reconnect fails", async () => {
+    const environmentId = EnvironmentId.make("env-ssh-open-then-fail");
+    const target = {
+      alias: "devbox-open-fail",
+      hostname: "devbox-open-fail.example.test",
+      username: null,
+      port: null,
+      source: "manual" as const,
+    };
+    const record = {
+      environmentId,
+      label: "SSH env open then fail",
+      httpBaseUrl: "http://127.0.0.1:43005",
+      wsBaseUrl: "ws://127.0.0.1:43005",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      lastConnectedAt: "2026-05-01T00:00:00.000Z",
+      desktopSsh: target,
+    };
+    mockGetClientSettings.mockReturnValue({
+      ...DEFAULT_CLIENT_SETTINGS,
+      autoReconnectSshConnections: true,
+    });
+    mockListSavedEnvironmentRecords.mockReturnValue([record]);
+    mockGetSavedEnvironmentRecord.mockReturnValue(record);
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue("ssh-bearer-token");
+    vi.stubGlobal("window", {
+      desktopBridge: {
+        ensureSshEnvironment: vi.fn(async () => ({
+          target,
+          httpBaseUrl: record.httpBaseUrl,
+          wsBaseUrl: record.wsBaseUrl,
+          pairingToken: null,
+        })),
+        fetchSshSessionState: vi.fn(async () => ({
+          authenticated: true,
+          scopes: ["orchestration:read"],
+        })),
+        issueSshWebSocketTicket: vi.fn(async () => ({ ticket: "ssh-ws-ticket" })),
+      },
+    });
+
+    const {
+      listEnvironmentConnections,
+      resetEnvironmentServiceForTests,
+      startEnvironmentConnectionService,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    savedEnvironmentRegistryListener?.();
+    await vi.waitFor(() => {
+      expect(
+        listEnvironmentConnections().some(
+          (connection) => connection.environmentId === environmentId,
+        ),
+      ).toBe(true);
+    });
+
+    const savedReconnect = mockConnectionReconnects.at(-1);
+    expect(savedReconnect).toBeDefined();
+    const savedLifecycle = mockTransportLifecycleHandlers.find((handlers) => handlers.onOpen);
+    savedReconnect?.mockImplementation(async () => {
+      savedLifecycle?.onOpen?.();
+      throw new Error("metadata refresh failed");
+    });
+
+    savedLifecycle?.onClose?.({ code: 1006, reason: "transport lost" }, { intentional: false });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(savedReconnect).toHaveBeenCalledTimes(1);
+    expect(mockSavedEnvironmentRuntimeById[environmentId]?.connectionState).toBe("connecting");
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(savedReconnect).toHaveBeenCalledTimes(2);
 
     stop();
     await resetEnvironmentServiceForTests();
