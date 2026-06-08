@@ -165,6 +165,12 @@ function createBaseServerConfig(): ServerConfig {
           serverPassword: "",
           customModels: [],
         },
+        ollama: {
+          enabled: true,
+          baseUrl: "http://localhost:11434",
+          model: "",
+          customModels: [],
+        },
       },
     },
   };
