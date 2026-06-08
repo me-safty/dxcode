@@ -335,6 +335,96 @@ export function createLocalDispatchSnapshot(
   };
 }
 
+/**
+ * Shared gating used by both queued-turn drain paths. Sending is only allowed
+ * when the session is idle and ready to accept a new turn: not running, not
+ * busy sending, connected, no pending approval/input, and no send already in
+ * flight.
+ */
+export function canSendQueuedTurn(input: {
+  phase: SessionPhase;
+  isSendBusy: boolean;
+  isConnecting: boolean;
+  activeEnvironmentUnavailable: boolean;
+  activePendingApproval: boolean;
+  activePendingUserInput: boolean;
+  sendInFlight: boolean;
+}): boolean {
+  return !(
+    input.phase === "running" ||
+    input.isSendBusy ||
+    input.isConnecting ||
+    input.activeEnvironmentUnavailable ||
+    input.activePendingApproval ||
+    input.activePendingUserInput ||
+    input.sendInFlight
+  );
+}
+
+/**
+ * Decides which queued submission, if any, the general type-ahead auto-drain
+ * should send next. The interrupt-targeted path takes precedence: while an
+ * interrupt-send is pending, the general drain must stay suppressed so it
+ * cannot cascade through the rest of the queue. It also guards against
+ * re-sending a submission whose drain is already in flight.
+ */
+export function decideGeneralQueueDrain(input: {
+  canSend: boolean;
+  pendingInterruptSendId: string | null;
+  drainingQueuedTurnId: string | null;
+  nextSubmissionId: string | null;
+}): { submissionId: string } | null {
+  if (!input.canSend) {
+    return null;
+  }
+  if (input.pendingInterruptSendId !== null) {
+    return null;
+  }
+  if (input.nextSubmissionId === null) {
+    return null;
+  }
+  if (input.drainingQueuedTurnId === input.nextSubmissionId) {
+    return null;
+  }
+  return { submissionId: input.nextSubmissionId };
+}
+
+/**
+ * Decides whether the interrupt-targeted send effect should fire. It sends
+ * exactly the submission the user clicked "Interrupt" on — never the rest of
+ * the queue — once the interrupted turn has left the running phase and no send
+ * is in flight. Pending approval/input do not block this path: the interrupt
+ * itself clears the running turn, and the user explicitly requested this send.
+ */
+export function decideInterruptTargetedSend(input: {
+  pendingInterruptSendId: string | null;
+  phase: SessionPhase;
+  isSendBusy: boolean;
+  isConnecting: boolean;
+  activeEnvironmentUnavailable: boolean;
+  sendInFlight: boolean;
+  queuedSubmissionIds: readonly string[];
+}): { action: "send"; submissionId: string } | { action: "clear" } | { action: "wait" } {
+  const pendingId = input.pendingInterruptSendId;
+  if (pendingId === null) {
+    return { action: "wait" };
+  }
+  if (
+    input.phase === "running" ||
+    input.isSendBusy ||
+    input.isConnecting ||
+    input.activeEnvironmentUnavailable ||
+    input.sendInFlight
+  ) {
+    return { action: "wait" };
+  }
+  if (!input.queuedSubmissionIds.includes(pendingId)) {
+    // The targeted submission is no longer queued (e.g. deleted); abandon it.
+    return { action: "clear" };
+  }
+  return { action: "send", submissionId: pendingId };
+}
+
 export function hasServerAcknowledgedLocalDispatch(input: {
   localDispatch: LocalDispatchSnapshot | null;
   phase: SessionPhase;

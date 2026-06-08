@@ -160,8 +160,11 @@ import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
+  canSendQueuedTurn,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
+  decideGeneralQueueDrain,
+  decideInterruptTargetedSend,
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
@@ -697,6 +700,12 @@ export default function ChatView(props: ChatViewProps) {
   const activeThreadKeyRef = useRef(activeThreadKey);
   activeThreadKeyRef.current = activeThreadKey;
   const drainingQueuedTurnIdRef = useRef<string | null>(null);
+  // When the user presses "Interrupt" on a single queued message we want to
+  // send ONLY that message once the running turn is interrupted — never the
+  // rest of the queue. This ref holds the targeted submission id while the
+  // interrupt is settling. While it is set, the general type-ahead auto-drain
+  // is suppressed so it cannot cascade through the remaining queued messages.
+  const pendingInterruptSendIdRef = useRef<string | null>(null);
 
   const updateActiveQueuedTurnSubmissions = useCallback(
     (updater: (current: readonly QueuedTurnSubmission[]) => readonly QueuedTurnSubmission[]) => {
@@ -3086,19 +3095,25 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   useEffect(() => {
-    if (
-      phase === "running" ||
-      isSendBusy ||
-      isConnecting ||
-      activeEnvironmentUnavailable ||
-      activePendingApproval ||
-      activePendingUserInput ||
-      sendInFlightRef.current
-    ) {
-      return;
-    }
-    const nextSubmission = activeQueuedTurnSubmissions[0];
-    if (!nextSubmission || drainingQueuedTurnIdRef.current === nextSubmission.id) {
+    const nextSubmission = activeQueuedTurnSubmissions[0] ?? null;
+    const decision = decideGeneralQueueDrain({
+      canSend: canSendQueuedTurn({
+        phase,
+        isSendBusy,
+        isConnecting,
+        activeEnvironmentUnavailable,
+        activePendingApproval: Boolean(activePendingApproval),
+        activePendingUserInput: Boolean(activePendingUserInput),
+        sendInFlight: sendInFlightRef.current,
+      }),
+      // While an interrupt-targeted send is pending, the dedicated effect below
+      // sends exactly that one message. Suppress the general drain so it cannot
+      // cascade through the rest of the queue at the same phase transition.
+      pendingInterruptSendId: pendingInterruptSendIdRef.current,
+      drainingQueuedTurnId: drainingQueuedTurnIdRef.current,
+      nextSubmissionId: nextSubmission?.id ?? null,
+    });
+    if (!decision || !nextSubmission) {
       return;
     }
     drainingQueuedTurnIdRef.current = nextSubmission.id;
@@ -3135,10 +3150,13 @@ export default function ChatView(props: ChatViewProps) {
     });
   }, [activeThread, environmentId]);
 
-  // Providers without live steering (everything except Codex) instead interrupt
-  // the running turn and let the queued message run next. Moving the submission
-  // to the front of the queue and interrupting is enough: once the turn leaves
-  // the "running" phase the auto-drain effect sends the front submission.
+  // Providers without live steering (everything except Codex) interrupt the
+  // running turn and send ONLY the clicked message next — never the rest of the
+  // queue. We record the targeted submission id, interrupt the active turn, and
+  // let the dedicated effect below send just that message once the turn leaves
+  // the "running" phase. The general type-ahead auto-drain is suppressed while
+  // this is pending so the remaining queued messages stay put. They resume
+  // normal auto-draining only after this message's turn completes naturally.
   const interruptAndSendQueuedTurnSubmission = useCallback(
     (submissionId: string) => {
       const submission = activeQueuedTurnSubmissionsRef.current.find(
@@ -3147,14 +3165,64 @@ export default function ChatView(props: ChatViewProps) {
       if (!submission) {
         return;
       }
-      updateActiveQueuedTurnSubmissions((current) => [
-        submission,
-        ...current.filter((entry) => entry.id !== submissionId),
-      ]);
+      pendingInterruptSendIdRef.current = submissionId;
       void onInterrupt();
     },
-    [onInterrupt, updateActiveQueuedTurnSubmissions],
+    [onInterrupt],
   );
+
+  // Sends the single message targeted by an "Interrupt" action once the running
+  // turn has been interrupted (i.e. the phase has left "running" and no send is
+  // in flight). Only this submission is sent and removed; the rest of the queue
+  // is untouched. The general auto-drain effect is gated on
+  // `pendingInterruptSendIdRef` so it cannot also fire during this window.
+  useEffect(() => {
+    const decision = decideInterruptTargetedSend({
+      pendingInterruptSendId: pendingInterruptSendIdRef.current,
+      phase,
+      isSendBusy,
+      isConnecting,
+      activeEnvironmentUnavailable,
+      sendInFlight: sendInFlightRef.current,
+      queuedSubmissionIds: activeQueuedTurnSubmissions.map((entry) => entry.id),
+    });
+    if (decision.action === "wait") {
+      return;
+    }
+    if (decision.action === "clear") {
+      // The targeted submission is gone (e.g. deleted); abandon the pending send
+      // so the general auto-drain can resume.
+      pendingInterruptSendIdRef.current = null;
+      return;
+    }
+    const submission = activeQueuedTurnSubmissionsRef.current.find(
+      (entry) => entry.id === decision.submissionId,
+    );
+    if (!submission) {
+      pendingInterruptSendIdRef.current = null;
+      return;
+    }
+    void sendTurnSubmission(submission, {
+      restoreComposerOnFailure: false,
+      shouldClearComposer: false,
+      restampCreatedAtOnSend: true,
+    }).then((sent) => {
+      if (sent) {
+        removeQueuedTurnSubmission(decision.submissionId, { revokeImages: false });
+        pendingInterruptSendIdRef.current = null;
+      }
+      // On failure, leave the pending id set so the user can retry; the general
+      // auto-drain stays suppressed until this message is sent or cleared.
+    });
+  }, [
+    activeEnvironmentUnavailable,
+    activeQueuedTurnSubmissions,
+    isConnecting,
+    isSendBusy,
+    phase,
+    removeQueuedTurnSubmission,
+    sendTurnSubmission,
+  ]);
 
   const onRespondToApproval = useCallback(
     async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => {
