@@ -1,5 +1,6 @@
 import {
   IconArchive as ArchiveIcon,
+  IconAlertCircle,
   IconAlertTriangle,
   IconAlertTriangle as TriangleAlertIcon,
   IconArrowsSort as ArrowUpDownIcon,
@@ -163,6 +164,7 @@ import {
   groupSidebarThreadsByWorktree,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
+  isNeedsReviewStatus,
   resolveProjectStatusIndicator,
   resolveRestingThreadTitleClassName,
   resolveSidebarNewThreadSeedContext,
@@ -224,13 +226,15 @@ function SidebarThreadStatusIcon({ status }: { status: ThreadStatusPill }) {
   const Icon =
     status.label === "Pending Approval"
       ? IconAlertTriangle
-      : status.label === "Awaiting Input"
-        ? IconMessageQuestion
-        : status.label === "Plan Ready"
-          ? IconChecklist
-          : status.label === "Connecting"
-            ? IconRefresh
-            : IconLoader2;
+      : status.label === "Failed"
+        ? IconAlertCircle
+        : status.label === "Awaiting Input"
+          ? IconMessageQuestion
+          : status.label === "Plan Ready"
+            ? IconChecklist
+            : status.label === "Connecting"
+              ? IconRefresh
+              : IconLoader2;
 
   return (
     <span
@@ -410,11 +414,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       lastVisitedAt,
     },
   });
-  // A thread that finished while unviewed reads as "needs attention", so we
-  // give its title + timestamp full-foreground emphasis, matching how the
-  // actively-viewed thread looks rather than the muted resting state.
-  const isUnseenCompleted = threadStatus?.label === "Completed";
-  const emphasizeRow = isHighlighted || isUnseenCompleted;
+  // A thread that finished while unviewed — or is otherwise waiting on the user
+  // (needs approval/input, has a plan to review, or failed) — reads as "needs
+  // attention", so we give its title + timestamp full-foreground emphasis,
+  // matching how the actively-viewed thread looks rather than the muted resting
+  // state. Actively-busy states (Working/Connecting) are excluded.
+  const needsReview = threadStatus != null && isNeedsReviewStatus(threadStatus.label);
+  const emphasizeRow = isHighlighted || needsReview;
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
@@ -599,7 +605,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 render={
                   <span
                     className={`min-w-0 flex-1 truncate text-xs ${
-                      isUnseenCompleted && !isHighlighted
+                      needsReview && !isHighlighted
                         ? "text-foreground"
                         : isHighlighted
                           ? ""

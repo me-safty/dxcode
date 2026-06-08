@@ -33,20 +33,41 @@ export interface ThreadStatusPill {
     | "Completed"
     | "Pending Approval"
     | "Awaiting Input"
-    | "Plan Ready";
+    | "Plan Ready"
+    | "Failed";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
 }
 
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
-  "Pending Approval": 5,
+  "Pending Approval": 6,
+  Failed: 5,
   "Awaiting Input": 4,
   Working: 3,
   Connecting: 3,
   "Plan Ready": 2,
   Completed: 1,
 };
+
+/**
+ * Statuses where the ball is in the user's court: the thread is no longer
+ * actively progressing on its own and needs a human to look at it. These get
+ * the sidebar "needs review" emphasis (brightened title + timestamp). The
+ * actively-busy states (Working/Connecting) are intentionally excluded — there
+ * is nothing to review yet.
+ */
+const NEEDS_REVIEW_STATUS_LABELS: ReadonlySet<ThreadStatusPill["label"]> = new Set([
+  "Pending Approval",
+  "Failed",
+  "Awaiting Input",
+  "Plan Ready",
+  "Completed",
+]);
+
+export function isNeedsReviewStatus(label: ThreadStatusPill["label"]): boolean {
+  return NEEDS_REVIEW_STATUS_LABELS.has(label);
+}
 
 type ThreadStatusInput = Pick<
   SidebarThreadSummary,
@@ -361,6 +382,15 @@ export function resolveThreadStatusPill(input: {
       label: "Pending Approval",
       colorClass: "text-amber-600 dark:text-amber-300/90",
       dotClass: "bg-amber-500 dark:bg-amber-300/90",
+      pulse: false,
+    };
+  }
+
+  if (thread.session?.status === "error" || thread.latestTurn?.state === "error") {
+    return {
+      label: "Failed",
+      colorClass: "text-red-600 dark:text-red-400/90",
+      dotClass: "bg-red-500 dark:bg-red-400/90",
       pulse: false,
     };
   }
