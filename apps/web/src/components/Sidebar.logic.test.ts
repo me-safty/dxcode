@@ -12,6 +12,7 @@ import {
   groupSidebarThreadsByWorktree,
   hasUnseenCompletion,
   isContextMenuPointerDown,
+  isNeedsReviewStatus,
   orderItemsByPreferredIds,
   resolveProjectStatusIndicator,
   resolveRestingThreadTitleClassName,
@@ -692,6 +693,88 @@ describe("resolveThreadStatusPill", () => {
         },
       }),
     ).toMatchObject({ label: "Completed", pulse: false });
+  });
+
+  it("shows failed when the session is in an error state", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          session: {
+            ...baseThread.session,
+            status: "error",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Failed", pulse: false });
+  });
+
+  it("shows failed when the latest turn is in an error state", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          latestTurn: { ...makeLatestTurn(), state: "error" },
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Failed", pulse: false });
+  });
+
+  it("shows pending approval before failed", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          hasPendingApprovals: true,
+          session: {
+            ...baseThread.session,
+            status: "error",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Pending Approval", pulse: false });
+  });
+
+  it("shows failed before awaiting input", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          hasPendingUserInput: true,
+          session: {
+            ...baseThread.session,
+            status: "error",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Failed", pulse: false });
+  });
+});
+
+describe("isNeedsReviewStatus", () => {
+  it("treats user-actionable states as needing review", () => {
+    for (const label of [
+      "Pending Approval",
+      "Failed",
+      "Awaiting Input",
+      "Plan Ready",
+      "Completed",
+    ] as const) {
+      expect(isNeedsReviewStatus(label)).toBe(true);
+    }
+  });
+
+  it("does not treat actively-busy states as needing review", () => {
+    expect(isNeedsReviewStatus("Working")).toBe(false);
+    expect(isNeedsReviewStatus("Connecting")).toBe(false);
   });
 });
 
