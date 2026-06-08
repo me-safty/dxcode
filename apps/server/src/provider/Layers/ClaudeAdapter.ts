@@ -25,6 +25,7 @@ import {
   type CanonicalItemType,
   type CanonicalRequestType,
   type ClaudeSettings,
+  type CollabAgentMeta,
   EventId,
   type ProviderApprovalDecision,
   ProviderDriverKind,
@@ -66,6 +67,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { CLAUDE_OPENCODE_ANTHROPIC_SYSTEM_PROMPT } from "../ClaudeSystemPrompt.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
@@ -154,6 +156,7 @@ interface ToolInFlight {
   readonly toolName: string;
   readonly title: string;
   readonly detail?: string;
+  readonly collabAgent?: CollabAgentMeta;
   readonly input: Record<string, unknown>;
   readonly partialInputJson: string;
   readonly lastEmittedInputFingerprint?: string;
@@ -461,6 +464,17 @@ function classifyToolItemType(toolName: string): CanonicalItemType {
   ) {
     return "command_execution";
   }
+  // Web search and image checks come before the read-only check because
+  // isReadOnlyToolName matches the substrings "search" and "view".
+  if (normalized.includes("websearch") || normalized.includes("web search")) {
+    return "web_search";
+  }
+  if (normalized.includes("image")) {
+    return "image_view";
+  }
+  if (isReadOnlyToolName(toolName)) {
+    return "file_read";
+  }
   if (
     normalized.includes("edit") ||
     normalized.includes("write") ||
@@ -474,12 +488,6 @@ function classifyToolItemType(toolName: string): CanonicalItemType {
   }
   if (normalized.includes("mcp")) {
     return "mcp_tool_call";
-  }
-  if (normalized.includes("websearch") || normalized.includes("web search")) {
-    return "web_search";
-  }
-  if (normalized.includes("image")) {
-    return "image_view";
   }
   return "dynamic_tool_call";
 }
@@ -510,6 +518,10 @@ function classifyRequestType(toolName: string): CanonicalRequestType {
 
 function isTodoTool(toolName: string): boolean {
   return toolName.toLowerCase().includes("todowrite");
+}
+
+function isAskUserQuestionTool(toolName: string): boolean {
+  return toolName === "AskUserQuestion";
 }
 
 type PlanStep = {
@@ -560,6 +572,16 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
     }
   }
 
+  // For read-only file tools (Read/Grep/Glob), prefer the target path/pattern over raw JSON
+  // so the UI can render "Read <path>" instead of a serialized input blob.
+  if (itemType === "file_read") {
+    const pathValue = input.file_path ?? input.path ?? input.pattern ?? input.query;
+    const path = typeof pathValue === "string" ? pathValue.trim() : undefined;
+    if (path) {
+      return `${toolName}: ${path.slice(0, 400)}`;
+    }
+  }
+
   const serialized = encodeJsonStringForDiagnostics(input) ?? "[unserializable input]";
   if (serialized.length <= 400) {
     return `${toolName}: ${serialized}`;
@@ -567,10 +589,36 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
   return `${toolName}: ${serialized.slice(0, 397)}...`;
 }
 
+/**
+ * Build the canonical sub-agent identity for a Claude `Task`/agent tool call.
+ * Claude does not expose child session ids, so only the subagent type and
+ * description are available — but normalizing them here lets the UI render
+ * Claude and OpenCode sub-agents through one code path.
+ */
+function collabAgentMetaFromInput(
+  toolName: string,
+  input: Record<string, unknown>,
+): CollabAgentMeta | undefined {
+  if (classifyToolItemType(toolName) !== "collab_agent_tool_call") {
+    return undefined;
+  }
+  const asString = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+  const subagentType = asString(input.subagent_type);
+  const description = asString(input.description) ?? asString(input.prompt)?.slice(0, 200);
+  const meta: CollabAgentMeta = {
+    ...(subagentType ? { subagentType } : {}),
+    ...(description ? { description } : {}),
+  };
+  return Object.keys(meta).length > 0 ? meta : undefined;
+}
+
 function titleForTool(itemType: CanonicalItemType): string {
   switch (itemType) {
     case "command_execution":
       return "Command run";
+    case "file_read":
+      return "File read";
     case "file_change":
       return "File change";
     case "mcp_tool_call":
@@ -970,6 +1018,52 @@ function sdkNativeMethod(message: SDKMessage): string {
   }
 
   return `claude/${message.type}`;
+}
+
+// Discriminator/identity keys carry no human-readable content; everything else
+// on an unmodeled SDK message is potentially worth surfacing in the work log.
+const SDK_MESSAGE_NOISE_KEYS = new Set([
+  "type",
+  "subtype",
+  "uuid",
+  "parent_uuid",
+  "session_id",
+  "parent_tool_use_id",
+  "request_id",
+]);
+
+// Pull the salient scalar content out of a message the adapter doesn't model
+// yet, so the work-log row shows what actually arrived (e.g. a notification's
+// text) instead of an opaque "unhandled subtype" placeholder. Nested structures
+// are left to the full payload retained in the event's `detail`.
+function previewUnknownSdkContent(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") {
+    return undefined;
+  }
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(message as Record<string, unknown>)) {
+    if (SDK_MESSAGE_NOISE_KEYS.has(key)) {
+      continue;
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed.length > 0) {
+        parts.push(`${key}: ${trimmed}`);
+      }
+    } else if (typeof value === "number" || typeof value === "boolean") {
+      parts.push(`${key}: ${String(value)}`);
+    }
+  }
+  if (parts.length === 0) {
+    return undefined;
+  }
+  const joined = parts.join(" · ");
+  return joined.length > 280 ? `${joined.slice(0, 279)}…` : joined;
+}
+
+function describeUnknownSdkMessage(kind: string, message: unknown): string {
+  const preview = previewUnknownSdkContent(message);
+  return preview ? `${kind} — ${preview}` : `${kind} (no displayable text content)`;
 }
 
 function sdkNativeItemId(message: SDKMessage): string | undefined {
@@ -1533,6 +1627,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: status === "completed" ? "completed" : "failed",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
+          ...(tool.collabAgent ? { collabAgent: tool.collabAgent } : {}),
           data: {
             toolName: tool.toolName,
             input: tool.input,
@@ -1689,11 +1784,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         const partialInputJson = tool.partialInputJson + event.delta.partial_json;
         const parsedInput = tryParseJsonRecord(partialInputJson);
         const detail = parsedInput ? summarizeToolRequest(tool.toolName, parsedInput) : tool.detail;
+        const collabAgent = parsedInput
+          ? (collabAgentMetaFromInput(tool.toolName, parsedInput) ?? tool.collabAgent)
+          : tool.collabAgent;
         let nextTool: ToolInFlight = {
           ...tool,
           partialInputJson,
           ...(parsedInput ? { input: parsedInput } : {}),
           ...(detail ? { detail } : {}),
+          ...(collabAgent ? { collabAgent } : {}),
         };
 
         const nextFingerprint =
@@ -1734,6 +1833,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             status: "inProgress",
             title: nextTool.title,
             ...(nextTool.detail ? { detail: nextTool.detail } : {}),
+            ...(nextTool.collabAgent ? { collabAgent: nextTool.collabAgent } : {}),
             data: {
               toolName: nextTool.toolName,
               input: nextTool.input,
@@ -1793,6 +1893,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
 
       const toolName = block.name;
+      // `AskUserQuestion` is surfaced separately as a structured
+      // user-input.requested/resolved interaction (handleAskUserQuestion).
+      // Skip the raw tool-call lifecycle so the question is not also rendered
+      // as a redundant "AskUserQuestion: {json}" tool row.
+      if (isAskUserQuestionTool(toolName)) {
+        return;
+      }
       const itemType = classifyToolItemType(toolName);
       const toolInput =
         typeof block.input === "object" && block.input !== null
@@ -1803,12 +1910,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const inputFingerprint =
         Object.keys(toolInput).length > 0 ? toolInputFingerprint(toolInput) : undefined;
 
+      const startedCollabAgent = collabAgentMetaFromInput(toolName, toolInput);
       const tool: ToolInFlight = {
         itemId,
         itemType,
         toolName,
         title: titleForTool(itemType),
         detail,
+        ...(startedCollabAgent ? { collabAgent: startedCollabAgent } : {}),
         input: toolInput,
         partialInputJson: "",
         ...(inputFingerprint ? { lastEmittedInputFingerprint: inputFingerprint } : {}),
@@ -1829,6 +1938,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: "inProgress",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
+          ...(tool.collabAgent ? { collabAgent: tool.collabAgent } : {}),
           data: {
             toolName: tool.toolName,
             input: toolInput,
@@ -1906,6 +2016,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: toolResult.isError ? "failed" : "inProgress",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
+          ...(tool.collabAgent ? { collabAgent: tool.collabAgent } : {}),
           data: toolData,
         },
         providerRefs: nativeProviderRefs(context, {
@@ -1958,6 +2069,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: itemStatus,
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
+          ...(tool.collabAgent ? { collabAgent: tool.collabAgent } : {}),
           data: toolData,
         },
         providerRefs: nativeProviderRefs(context, {
@@ -2267,10 +2379,31 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           },
         });
         return;
+      case "thinking_tokens":
+        return;
+      case "permission_denied":
+        yield* offerRuntimeEvent({
+          ...base,
+          type: "tool.denied",
+          payload: {
+            toolName: message.tool_name,
+            ...(message.tool_use_id ? { toolUseId: message.tool_use_id } : {}),
+            ...(message.decision_reason ? { reason: message.decision_reason } : {}),
+            ...(message.agent_id ? { agentId: message.agent_id } : {}),
+          },
+        });
+        return;
+      case "mirror_error":
+        yield* emitRuntimeError(
+          context,
+          `Claude workspace mirror error: ${message.error}`,
+          message,
+        );
+        return;
       default:
         yield* emitRuntimeWarning(
           context,
-          `Unhandled Claude system message subtype '${message.subtype}'.`,
+          describeUnknownSdkMessage(`Claude system message '${message.subtype}'`, message),
           message,
         );
         return;
@@ -2384,7 +2517,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       default:
         yield* emitRuntimeWarning(
           context,
-          `Unhandled Claude SDK message type '${message.type}'.`,
+          describeUnknownSdkMessage(`Claude SDK message '${message.type}'`, message),
           message,
         );
         return;
@@ -2932,7 +3065,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
-        systemPrompt: { type: "preset", preset: "claude_code" },
+        // System prompt selection (defaults to the claude_code preset):
+        //   - preset: Claude Code's built-in prompt, which also injects the
+        //     dynamic sections (cwd / auto-loaded CLAUDE.md memory / git status).
+        //   - custom string: the bundled port of OpenCode's anthropic.txt base
+        //     prompt (see ClaudeSystemPrompt.ts). A custom-string systemPrompt
+        //     bypasses the preset's dynamic sections; settingSources below still
+        //     loads settings + permissions.
+        systemPrompt: claudeSettings.useCustomSystemPrompt
+          ? CLAUDE_OPENCODE_ANTHROPIC_SYSTEM_PROMPT
+          : { type: "preset", preset: "claude_code" },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is
         // normalized to `xhigh` above and paired with `settings.ultracode`.
@@ -2975,6 +3117,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.query.include_partial_messages": true,
         "claude.query.additional_directories": input.cwd ? [input.cwd] : [],
         "claude.query.setting_sources": [...CLAUDE_SETTING_SOURCES],
+        "claude.query.use_custom_system_prompt": claudeSettings.useCustomSystemPrompt,
         "claude.query.settings_json": encodeJsonStringForDiagnostics(settings) ?? "",
         "claude.query.extra_args_json": encodeJsonStringForDiagnostics(extraArgs) ?? "",
         "claude.query.path_to_executable": claudeBinaryPath,

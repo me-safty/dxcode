@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { isTransportConnectionErrorMessage, sanitizeThreadErrorMessage } from "./transportError.ts";
+import {
+  isInterruptArtifactErrorMessage,
+  isTransportConnectionErrorMessage,
+  sanitizeThreadErrorMessage,
+} from "./transportError.ts";
 
 describe("isTransportConnectionErrorMessage", () => {
   it("returns true for SocketCloseError", () => {
@@ -42,9 +46,56 @@ describe("isTransportConnectionErrorMessage", () => {
   });
 });
 
+describe("isInterruptArtifactErrorMessage", () => {
+  it("returns true for the Claude SDK ede_diagnostic interrupt artifact", () => {
+    expect(
+      isInterruptArtifactErrorMessage(
+        "[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use",
+      ),
+    ).toBe(true);
+  });
+
+  it("returns true for the OpenCode bare Aborted message", () => {
+    expect(isInterruptArtifactErrorMessage("Aborted")).toBe(true);
+    expect(isInterruptArtifactErrorMessage("aborted")).toBe(true);
+    expect(isInterruptArtifactErrorMessage("Aborted.")).toBe(true);
+    expect(isInterruptArtifactErrorMessage("  Aborted  ")).toBe(true);
+    expect(isInterruptArtifactErrorMessage("AbortError: Aborted")).toBe(true);
+  });
+
+  it("returns false for errors that merely mention aborted", () => {
+    expect(isInterruptArtifactErrorMessage("The request was aborted by the server")).toBe(false);
+    expect(isInterruptArtifactErrorMessage("Aborted because the file was missing")).toBe(false);
+  });
+
+  it("returns false for business logic errors", () => {
+    expect(isInterruptArtifactErrorMessage("Thread not found")).toBe(false);
+    expect(isInterruptArtifactErrorMessage("Claude turn failed.")).toBe(false);
+  });
+
+  it("returns false for null, undefined, and empty strings", () => {
+    expect(isInterruptArtifactErrorMessage(null)).toBe(false);
+    expect(isInterruptArtifactErrorMessage(undefined)).toBe(false);
+    expect(isInterruptArtifactErrorMessage("")).toBe(false);
+    expect(isInterruptArtifactErrorMessage("   ")).toBe(false);
+  });
+});
+
 describe("sanitizeThreadErrorMessage", () => {
   it("strips transport errors", () => {
     expect(sanitizeThreadErrorMessage("SocketCloseError: oops")).toBeNull();
+  });
+
+  it("strips interrupt diagnostic artifacts", () => {
+    expect(
+      sanitizeThreadErrorMessage(
+        "[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use",
+      ),
+    ).toBeNull();
+  });
+
+  it("strips OpenCode Aborted interrupt messages", () => {
+    expect(sanitizeThreadErrorMessage("Aborted")).toBeNull();
   });
 
   it("preserves non-transport errors", () => {

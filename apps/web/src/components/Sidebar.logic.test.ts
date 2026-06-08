@@ -12,8 +12,10 @@ import {
   groupSidebarThreadsByWorktree,
   hasUnseenCompletion,
   isContextMenuPointerDown,
+  isNeedsReviewStatus,
   orderItemsByPreferredIds,
   resolveProjectStatusIndicator,
+  resolveRestingThreadTitleClassName,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
@@ -489,9 +491,22 @@ describe("groupSidebarThreadsByWorktree", () => {
       thread("thread-older", "/repo/.worktrees/feature", "feature"),
     ]);
 
-    expect(groups[0]?.threads.map((item) => item.id)).toEqual([
+    const featureGroup = groups.find((group) => group.worktreePath === "/repo/.worktrees/feature");
+    expect(featureGroup?.threads.map((item) => item.id)).toEqual([
       ThreadId.make("thread-newest"),
       ThreadId.make("thread-older"),
+    ]);
+  });
+
+  it("orders local threads before worktree groups", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-worktree", "/repo/.worktrees/feature", "feature"),
+      thread("thread-local", null, "main"),
+    ]);
+
+    expect(groups.map((group) => group.key)).toEqual([
+      "local",
+      "worktree:/repo/.worktrees/feature",
     ]);
   });
 
@@ -513,6 +528,28 @@ describe("groupSidebarThreadsByWorktree", () => {
     ]);
 
     expect(groups.map((group) => group.label)).toEqual(["feature/readable-branch", "path-label"]);
+  });
+
+  it("does not show a stale base branch when the worktree path still has a temporary branch name", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-stale", "/repo/.worktrees/t3code-fb0108e4", "dev"),
+    ]);
+
+    expect(groups[0]?.label).toBe("t3code/fb0108e4");
+    expect(groups[0]?.branch).toBe("t3code/fb0108e4");
+  });
+
+  it("shows a real renamed branch before falling back to the temporary worktree path", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread(
+        "thread-renamed",
+        "/home/example/.t3/worktrees/nextcard/t3code-fb0108e4",
+        "feature/card-credit-logo-recommendations",
+      ),
+    ]);
+
+    expect(groups[0]?.label).toBe("feature/card-credit-logo-recommendations");
+    expect(groups[0]?.branch).toBe("feature/card-credit-logo-recommendations");
   });
 
   it("prefers an AI-generated branch label over a temporary worktree branch", () => {
@@ -659,6 +696,24 @@ describe("resolveThreadStatusPill", () => {
   });
 });
 
+describe("isNeedsReviewStatus", () => {
+  it("treats user-actionable states as needing review", () => {
+    for (const label of [
+      "Pending Approval",
+      "Awaiting Input",
+      "Plan Ready",
+      "Completed",
+    ] as const) {
+      expect(isNeedsReviewStatus(label)).toBe(true);
+    }
+  });
+
+  it("does not treat actively-busy states as needing review", () => {
+    expect(isNeedsReviewStatus("Working")).toBe(false);
+    expect(isNeedsReviewStatus("Connecting")).toBe(false);
+  });
+});
+
 describe("resolveThreadRowClassName", () => {
   it("uses the darker selected palette when a thread is both selected and active", () => {
     const className = resolveThreadRowClassName({ isActive: true, isSelected: true });
@@ -680,6 +735,40 @@ describe("resolveThreadRowClassName", () => {
     const className = resolveThreadRowClassName({ isActive: true, isSelected: false });
     expect(className).toContain("bg-accent/85");
     expect(className).toContain("hover:bg-accent");
+  });
+});
+
+describe("resolveRestingThreadTitleClassName", () => {
+  const now = new Date("2026-06-07T12:00:00.000Z").getTime();
+
+  it("uses the brighter resting color for recently active threads", () => {
+    const lastActivityAt = new Date(now - 2 * 60 * 60 * 1000).toISOString();
+    expect(resolveRestingThreadTitleClassName({ lastActivityAt, nowMs: now })).toBe(
+      "text-muted-foreground/70",
+    );
+  });
+
+  it("dims threads idle for more than 48 hours", () => {
+    const lastActivityAt = new Date(now - 49 * 60 * 60 * 1000).toISOString();
+    expect(resolveRestingThreadTitleClassName({ lastActivityAt, nowMs: now })).toBe(
+      "text-muted-foreground/55",
+    );
+  });
+
+  it("treats exactly 48 hours as not yet stale", () => {
+    const lastActivityAt = new Date(now - 48 * 60 * 60 * 1000).toISOString();
+    expect(resolveRestingThreadTitleClassName({ lastActivityAt, nowMs: now })).toBe(
+      "text-muted-foreground/70",
+    );
+  });
+
+  it("falls back to the brighter resting color when the timestamp is missing or invalid", () => {
+    expect(resolveRestingThreadTitleClassName({ lastActivityAt: null, nowMs: now })).toBe(
+      "text-muted-foreground/70",
+    );
+    expect(resolveRestingThreadTitleClassName({ lastActivityAt: "not-a-date", nowMs: now })).toBe(
+      "text-muted-foreground/70",
+    );
   });
 });
 

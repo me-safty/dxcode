@@ -239,9 +239,18 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         },
       }),
     ),
+    useCustomSystemPrompt: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Use custom system prompt",
+        description:
+          "Replace Claude Code's built-in preset system prompt with the bundled custom prompt. When off, the standard claude_code preset is used (this also keeps auto-loaded CLAUDE.md memory).",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
   },
   {
-    order: ["binaryPath", "homePath", "launchArgs"],
+    order: ["binaryPath", "homePath", "launchArgs", "useCustomSystemPrompt"],
   },
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;
@@ -428,6 +437,7 @@ const ClaudeSettingsPatch = Schema.Struct({
   homePath: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
   launchArgs: Schema.optionalKey(TrimmedString),
+  useCustomSystemPrompt: Schema.optionalKey(Schema.Boolean),
 });
 
 const CursorSettingsPatch = Schema.Struct({

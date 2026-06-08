@@ -1,5 +1,4 @@
 import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
-import { CheckIcon, CopyIcon } from "lucide-react";
 import type { ServerProviderSkill } from "@t3tools/contracts";
 import React, {
   Children,
@@ -11,8 +10,6 @@ import React, {
   memo,
   useEffect,
   useMemo,
-  useRef,
-  useState,
   type ReactNode,
 } from "react";
 import type { Components } from "react-markdown";
@@ -146,52 +143,8 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   return promise;
 }
 
-function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNode }) {
-  const [copied, setCopied] = useState(false);
-  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleCopy = useCallback(() => {
-    if (typeof navigator === "undefined" || navigator.clipboard == null) {
-      return;
-    }
-    void navigator.clipboard
-      .writeText(code)
-      .then(() => {
-        if (copiedTimerRef.current != null) {
-          clearTimeout(copiedTimerRef.current);
-        }
-        setCopied(true);
-        copiedTimerRef.current = setTimeout(() => {
-          setCopied(false);
-          copiedTimerRef.current = null;
-        }, 1200);
-      })
-      .catch(() => undefined);
-  }, [code]);
-
-  useEffect(
-    () => () => {
-      if (copiedTimerRef.current != null) {
-        clearTimeout(copiedTimerRef.current);
-        copiedTimerRef.current = null;
-      }
-    },
-    [],
-  );
-
-  return (
-    <div className="chat-markdown-codeblock leading-snug">
-      <button
-        type="button"
-        className="chat-markdown-copy-button"
-        onClick={handleCopy}
-        title={copied ? "Copied" : "Copy code"}
-        aria-label={copied ? "Copied" : "Copy code"}
-      >
-        {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
-      </button>
-      {children}
-    </div>
-  );
+function MarkdownCodeBlock({ children }: { children: ReactNode }) {
+  return <div className="chat-markdown-codeblock leading-snug">{children}</div>;
 }
 
 interface SuspenseShikiCodeBlockProps {
@@ -578,7 +531,7 @@ function ChatMarkdown({
         if (typeof parentSuffix === "string" && parentSuffix.length > 0) {
           labelParts.push(parentSuffix);
         }
-        if (fileLinkMeta.line) {
+        if (fileLinkMeta.line && fileLinkMeta.line !== 1) {
           labelParts.push(
             `L${fileLinkMeta.line}${fileLinkMeta.column ? `:C${fileLinkMeta.column}` : ""}`,
           );
@@ -607,7 +560,7 @@ function ChatMarkdown({
         }
 
         return (
-          <MarkdownCodeBlock code={codeBlock.code}>
+          <MarkdownCodeBlock>
             <CodeHighlightErrorBoundary
               fallback={
                 <pre {...props} ref={ref as React.Ref<HTMLPreElement> | undefined}>
@@ -645,7 +598,7 @@ function ChatMarkdown({
   );
 
   return (
-    <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
+    <div className="chat-markdown w-full min-w-0 text-xs leading-relaxed text-foreground">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={markdownComponents}

@@ -45,7 +45,7 @@ const PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES = 49_000;
 const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
-const REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES = 120_000;
+const REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES = 2_000_000;
 const REVIEW_UNTRACKED_DIFF_MAX_OUTPUT_BYTES = 80_000;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 120_000;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
@@ -1297,8 +1297,26 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
     const stagedEntries = parseNumstatEntries(stagedNumstatStdout);
     const unstagedEntries = parseNumstatEntries(unstagedNumstatStdout);
+    // `git diff --numstat` (staged + unstaged) never includes untracked files,
+    // so newly created files would otherwise report +0/-0. Diff each untracked
+    // path against /dev/null to recover its real line counts without mutating
+    // the index. `--no-index` exits non-zero when differences exist.
+    const untrackedNumstatStdouts = yield* Effect.all(
+      Array.from(changedFilesWithoutNumstat, (filePath) =>
+        runGitStdout(
+          "GitVcsDriver.statusDetails.untrackedNumstat",
+          cwd,
+          ["diff", "--no-index", "--numstat", "--", "/dev/null", filePath],
+          true,
+        ).pipe(Effect.orElseSucceed(() => "")),
+      ),
+      { concurrency: "unbounded" },
+    );
+    const untrackedEntries = untrackedNumstatStdouts.flatMap((stdout) =>
+      parseNumstatEntries(stdout),
+    );
     const fileStatMap = new Map<string, { insertions: number; deletions: number }>();
-    for (const entry of [...stagedEntries, ...unstagedEntries]) {
+    for (const entry of [...stagedEntries, ...unstagedEntries, ...untrackedEntries]) {
       const existing = fileStatMap.get(entry.path) ?? { insertions: 0, deletions: 0 };
       existing.insertions += entry.insertions;
       existing.deletions += entry.deletions;
@@ -1715,6 +1733,28 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             Effect.orElseSucceed(() => null),
           )
         : null);
+
+    // Optionally fetch the remote-tracking ref before diffing so a branch
+    // comparison reflects the latest pushed commits. Best-effort: failures
+    // (offline, missing remote) fall back to the on-disk ref.
+    if (input.fetchBaseRef && baseRef) {
+      const remoteNames = yield* runGitStdout(
+        "GitVcsDriver.getReviewDiffPreview.remoteNames",
+        input.cwd,
+        ["remote"],
+      ).pipe(
+        Effect.map(parseRemoteNames),
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
+      );
+      const parsedRemoteRef = parseRemoteRefWithRemoteNames(baseRef, remoteNames);
+      if (parsedRemoteRef) {
+        yield* fetchRemoteTrackingBranch({
+          cwd: input.cwd,
+          remoteName: parsedRemoteRef.remoteName,
+          remoteBranch: parsedRemoteRef.branchName,
+        }).pipe(Effect.orElseSucceed(() => undefined));
+      }
+    }
 
     const dirtyTrackedResult = yield* executeGit(
       "GitVcsDriver.getReviewDiffPreview.dirtyTracked",

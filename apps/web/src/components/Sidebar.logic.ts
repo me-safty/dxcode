@@ -1,6 +1,6 @@
 import * as React from "react";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
-import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import {
   getThreadSortTimestamp,
   sortThreads,
@@ -47,6 +47,24 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Plan Ready": 2,
   Completed: 1,
 };
+
+/**
+ * Statuses where the ball is in the user's court: the thread is no longer
+ * actively progressing on its own and needs a human to look at it. These get
+ * the sidebar "needs review" emphasis (brightened title + timestamp). The
+ * actively-busy states (Working/Connecting) are intentionally excluded — there
+ * is nothing to review yet.
+ */
+const NEEDS_REVIEW_STATUS_LABELS: ReadonlySet<ThreadStatusPill["label"]> = new Set([
+  "Pending Approval",
+  "Awaiting Input",
+  "Plan Ready",
+  "Completed",
+]);
+
+export function isNeedsReviewStatus(label: ThreadStatusPill["label"]): boolean {
+  return NEEDS_REVIEW_STATUS_LABELS.has(label);
+}
 
 type ThreadStatusInput = Pick<
   SidebarThreadSummary,
@@ -296,12 +314,36 @@ export function isContextMenuPointerDown(input: {
   return input.isMac && input.button === 0 && input.ctrlKey;
 }
 
+const STALE_THREAD_THRESHOLD_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * Resting (inactive, non-attention) thread titles recede beneath the worktree
+ * label. Threads that have been idle for more than 48 hours recede further so
+ * the active worktree's recent threads read first.
+ */
+export function resolveRestingThreadTitleClassName(input: {
+  lastActivityAt: string | null | undefined;
+  nowMs?: number;
+}): string {
+  if (!input.lastActivityAt) {
+    return "text-muted-foreground/70";
+  }
+  const lastActivityMs = new Date(input.lastActivityAt).getTime();
+  if (Number.isNaN(lastActivityMs)) {
+    return "text-muted-foreground/70";
+  }
+  const ageMs = (input.nowMs ?? Date.now()) - lastActivityMs;
+  return ageMs > STALE_THREAD_THRESHOLD_MS
+    ? "text-muted-foreground/55"
+    : "text-muted-foreground/70";
+}
+
 export function resolveThreadRowClassName(input: {
   isActive: boolean;
   isSelected: boolean;
 }): string {
   const baseClassName =
-    "h-6 w-full translate-x-0 cursor-pointer justify-start px-2 text-left select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring sm:h-7";
+    "h-6 w-full translate-x-0 cursor-pointer justify-start gap-1.5 px-2 text-left select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring sm:h-7";
 
   if (input.isSelected && input.isActive) {
     return cn(
@@ -385,8 +427,8 @@ export function resolveThreadStatusPill(input: {
   if (hasUnseenCompletion(thread)) {
     return {
       label: "Completed",
-      colorClass: "text-emerald-600 dark:text-emerald-300/90",
-      dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
+      colorClass: "text-sky-600 dark:text-sky-300/80",
+      dotClass: "bg-sky-500 dark:bg-sky-300/80",
       pulse: false,
     };
   }
@@ -482,7 +524,52 @@ function isDisplayableWorktreeBranch(branch: string | null): branch is string {
   return branch !== null && !isTemporaryWorktreeBranch(branch);
 }
 
-function resolveWorktreeGroupBranch(current: string | null, next: string | null): string | null {
+function temporaryBranchFromWorktreePath(worktreePath: string | null): string | null {
+  if (worktreePath === null) return null;
+  const basename = basenameFromPath(worktreePath);
+  const escapedPrefix = WORKTREE_BRANCH_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`^${escapedPrefix}-([0-9a-f]{8})$`, "i").exec(basename);
+  return match?.[1] ? `${WORKTREE_BRANCH_PREFIX}/${match[1].toLowerCase()}` : null;
+}
+
+function isGeneratedWorktreeBranch(branch: string | null): branch is string {
+  return branch !== null && branch.startsWith(`${WORKTREE_BRANCH_PREFIX}/`);
+}
+
+function isLikelyStaleBaseBranch(branch: string): boolean {
+  switch (branch.trim().toLowerCase()) {
+    case "dev":
+    case "develop":
+    case "development":
+    case "main":
+    case "master":
+    case "trunk":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function resolveWorktreeGroupBranch(
+  worktreePath: string | null,
+  current: string | null,
+  next: string | null,
+): string | null {
+  if (worktreePath === null) {
+    if (isDisplayableWorktreeBranch(current)) return current;
+    if (isDisplayableWorktreeBranch(next)) return next;
+    return current ?? next;
+  }
+
+  if (isDisplayableWorktreeBranch(current) && isGeneratedWorktreeBranch(current)) return current;
+  if (isDisplayableWorktreeBranch(next) && isGeneratedWorktreeBranch(next)) return next;
+
+  if (isDisplayableWorktreeBranch(current) && !isLikelyStaleBaseBranch(current)) return current;
+  if (isDisplayableWorktreeBranch(next) && !isLikelyStaleBaseBranch(next)) return next;
+
+  const pathTemporaryBranch = temporaryBranchFromWorktreePath(worktreePath);
+  if (pathTemporaryBranch !== null) return pathTemporaryBranch;
+
   if (isDisplayableWorktreeBranch(current)) return current;
   if (isDisplayableWorktreeBranch(next)) return next;
   return current ?? next;
@@ -507,13 +594,17 @@ export function groupSidebarThreadsByWorktree<
     const existing = groups.get(key);
     if (existing) {
       existing.threads.push(thread);
-      const branch = resolveWorktreeGroupBranch(existing.branch, thread.branch);
+      const branch = resolveWorktreeGroupBranch(
+        existing.worktreePath,
+        existing.branch,
+        thread.branch,
+      );
       existing.branch = branch;
       existing.label = resolveWorktreeGroupLabel(existing.worktreePath, branch);
       continue;
     }
 
-    const branch = resolveWorktreeGroupBranch(null, thread.branch);
+    const branch = resolveWorktreeGroupBranch(worktreePath, null, thread.branch);
     groups.set(key, {
       key,
       label: resolveWorktreeGroupLabel(worktreePath, branch),
@@ -525,7 +616,11 @@ export function groupSidebarThreadsByWorktree<
     });
   }
 
-  return [...groups.values()];
+  return [...groups.values()].sort((left, right) => {
+    if (left.worktreePath === null && right.worktreePath !== null) return -1;
+    if (left.worktreePath !== null && right.worktreePath === null) return 1;
+    return 0;
+  });
 }
 
 export function getFallbackThreadIdAfterDelete<

@@ -14,9 +14,19 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
   files: ReadonlyArray<TurnDiffFileChange>;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
+  selectedFilePath?: string | null;
+  showStats?: boolean;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId } = props;
+  const {
+    files,
+    allDirectoriesExpanded,
+    onOpenTurnDiff,
+    resolvedTheme,
+    turnId,
+    selectedFilePath,
+    showStats = true,
+  } = props;
   const treeNodes = useMemo(() => buildTurnDiffTree(files), [files]);
   const directoryPathsKey = useMemo(
     () => collectDirectoryPaths(treeNodes).join("\u0000"),
@@ -52,7 +62,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
   );
 
   const renderTreeNode = (node: TurnDiffTreeNode, depth: number) => {
-    const leftPadding = 8 + depth * 14;
+    const leftPadding = 6 + depth * 7;
     if (node.kind === "directory") {
       const isExpanded = expandedDirectories[node.path] ?? allDirectoriesExpanded;
       return (
@@ -79,7 +89,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
             <span className="truncate font-mono text-[11px] text-muted-foreground/90 group-hover:text-foreground/90">
               {node.name}
             </span>
-            {hasNonZeroStat(node.stat) && (
+            {showStats && hasNonZeroStat(node.stat) && (
               <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
                 <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} />
               </span>
@@ -94,11 +104,16 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
       );
     }
 
+    const isSelected = selectedFilePath != null && node.path === selectedFilePath;
     return (
       <button
         key={`file:${node.path}`}
         type="button"
-        className="group flex w-full cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80"
+        aria-current={isSelected ? "true" : undefined}
+        className={cn(
+          "group flex w-full cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80",
+          isSelected && "bg-accent text-accent-foreground hover:bg-accent",
+        )}
         style={{ paddingLeft: `${leftPadding}px` }}
         onClick={() => onOpenTurnDiff(turnId, node.path)}
       >
@@ -109,10 +124,15 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
           theme={resolvedTheme}
           className="size-3.5 text-muted-foreground/70"
         />
-        <span className="truncate font-mono text-[11px] text-muted-foreground/80 group-hover:text-foreground/90">
+        <span
+          className={cn(
+            "truncate font-mono text-[11px] text-muted-foreground/80 group-hover:text-foreground/90",
+            isSelected && "text-accent-foreground",
+          )}
+        >
           {node.name}
         </span>
-        {node.stat && (
+        {showStats && node.stat && (
           <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
             <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} />
           </span>

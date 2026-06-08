@@ -264,6 +264,20 @@ describe("ProviderCommandReactor", () => {
         pr: null,
       }),
     );
+    const localStatus = vi.fn((_: { readonly cwd: string }) =>
+      Effect.succeed({
+        isRepo: true,
+        hasPrimaryRemote: true,
+        isDefaultRef: false,
+        refName: "t3code/1234abcd",
+        hasWorkingTreeChanges: false,
+        workingTree: {
+          files: [],
+          insertions: 0,
+          deletions: 0,
+        },
+      }),
+    );
     const generateBranchName = vi.fn<TextGenerationShape["generateBranchName"]>((_) =>
       Effect.fail(
         new TextGenerationError({
@@ -337,6 +351,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
       Layer.provideMerge(
         Layer.mock(GitWorkflowService)({
+          localStatus,
           renameBranch,
         } satisfies Partial<GitWorkflowServiceShape>),
       ),
@@ -404,6 +419,7 @@ describe("ProviderCommandReactor", () => {
       respondToRequest,
       respondToUserInput,
       stopSession,
+      localStatus,
       renameBranch,
       refreshStatus,
       generateBranchName,
@@ -646,6 +662,73 @@ describe("ProviderCommandReactor", () => {
       message: "Add a safer reconnect backoff.",
     });
     expect(harness.refreshStatus.mock.calls[0]?.[0]).toBe("/tmp/provider-project-worktree");
+  });
+
+  it("renames a temporary worktree branch even when thread metadata still has the base branch", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-thread-stale-branch"),
+        threadId: ThreadId.make("thread-1"),
+        branch: "dev",
+        worktreePath: "/tmp/provider-project-worktree",
+      }),
+    );
+
+    harness.localStatus.mockImplementation((_: { readonly cwd: string }) =>
+      Effect.succeed({
+        isRepo: true,
+        hasPrimaryRemote: true,
+        isDefaultRef: false,
+        refName: "t3code/fb0108e4",
+        hasWorkingTreeChanges: false,
+        workingTree: {
+          files: [],
+          insertions: 0,
+          deletions: 0,
+        },
+      }),
+    );
+    harness.generateBranchName.mockImplementation(() =>
+      Effect.succeed({
+        branch: "research-credit-logos",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-stale-branch"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-stale-branch"),
+          role: "user",
+          text: "Research credit logos by slug.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.generateBranchName.mock.calls.length === 1);
+    await waitFor(() => harness.renameBranch.mock.calls.length === 1);
+    expect(harness.renameBranch.mock.calls[0]?.[0]).toEqual({
+      cwd: "/tmp/provider-project-worktree",
+      oldBranch: "t3code/fb0108e4",
+      newBranch: "t3code/research-credit-logos",
+    });
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return (
+        readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"))?.branch ===
+        "t3code/research-credit-logos"
+      );
+    });
   });
 
   it("forwards codex model options through session start and turn send", async () => {

@@ -50,14 +50,14 @@ export function formatShortTimestamp(isoDate: string, timestampFormat: Timestamp
 
 /**
  * Format a relative time string from an ISO date.
- * Returns `{ value: "20s", suffix: "ago" }` or `{ value: "just now", suffix: null }`
+ * Returns `{ value: "20s", suffix: "ago" }` or `{ value: "now", suffix: null }`
  * so callers can style the numeric portion independently.
  */
 export function formatRelativeTime(isoDate: string): { value: string; suffix: string | null } {
   const diffMs = Date.now() - new Date(isoDate).getTime();
-  if (diffMs < 0) return { value: "just now", suffix: null };
+  if (diffMs < 0) return { value: "now", suffix: null };
   const seconds = Math.floor(diffMs / 1000);
-  if (seconds < 60) return { value: "just now", suffix: null };
+  if (seconds < 60) return { value: "now", suffix: null };
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return { value: `${minutes}m`, suffix: "ago" };
   const hours = Math.floor(minutes / 60);
@@ -69,6 +69,10 @@ export function formatRelativeTime(isoDate: string): { value: string; suffix: st
 export function formatRelativeTimeLabel(isoDate: string) {
   const relative = formatRelativeTime(isoDate);
   return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
+}
+
+export function formatRelativeTimeValue(isoDate: string): string {
+  return formatRelativeTime(isoDate).value;
 }
 
 /**

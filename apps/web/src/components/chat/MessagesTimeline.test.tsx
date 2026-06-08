@@ -1,4 +1,4 @@
-import { EnvironmentId, MessageId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import { createRef, type ReactNode, type Ref } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
@@ -26,6 +26,14 @@ vi.mock("@legendapp/list/react", async () => {
 
   return { LegendList };
 });
+
+vi.mock("../../lib/checkpointDiffState", () => ({
+  useCheckpointDiff: () => ({
+    data: null,
+    error: null,
+    isPending: false,
+  }),
+}));
 
 function MockFileDiff(props: {
   fileDiff: { name?: string | null; prevName?: string | null };
@@ -88,6 +96,7 @@ beforeAll(() => {
 });
 
 const ACTIVE_THREAD_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
+const ACTIVE_THREAD_ID = ThreadId.make("thread-1");
 const MESSAGE_CREATED_AT = "2026-03-17T19:12:28.000Z";
 
 function buildProps() {
@@ -100,6 +109,7 @@ function buildProps() {
     completionDividerBeforeEntryId: null,
     completionSummary: null,
     turnDiffSummaryByAssistantMessageId: new Map(),
+    turnDiffSummaryByTurnId: new Map(),
     routeThreadKey: "environment-local:thread-1",
     onOpenTurnDiff: () => {},
     revertTurnCountByUserMessageId: new Map(),
@@ -107,6 +117,7 @@ function buildProps() {
     isRevertingCheckpoint: false,
     onImageExpand: () => {},
     activeThreadEnvironmentId: ACTIVE_THREAD_ENVIRONMENT_ID,
+    activeThreadId: ACTIVE_THREAD_ID,
     markdownCwd: undefined,
     resolvedTheme: "light" as const,
     timestampFormat: "locale" as const,
@@ -146,9 +157,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Show full message");
+    expect(markup).toContain("Show more");
     expect(markup).toContain('data-user-message-collapsed="true"');
-    expect(markup).toContain('data-user-message-fade="true"');
     expect(markup).toContain('data-user-message-footer="true"');
   }, 15_000);
 
@@ -161,7 +171,7 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).not.toContain("Show full message");
+    expect(markup).not.toContain("Show more");
     expect(markup).toContain('data-user-message-collapsible="false"');
   });
 
@@ -189,7 +199,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Terminal 1 lines 1-5");
     expect(markup).toContain("lucide-terminal");
     expect(markup).toContain("yoo what&#x27;s ");
-    expect(markup).toContain("Show full message");
+    expect(markup).toContain("Show more");
   }, 20_000);
 
   it("keeps the copy button for collapsed long user messages", async () => {
@@ -227,8 +237,9 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Context compacted");
-    expect(markup).toContain("Work log");
+    expect(markup).toContain("Worked for 0s");
+    expect(markup).toContain('data-work-group-expanded="false"');
+    expect(markup).not.toContain("Context compacted");
   });
 
   it("formats changed file paths from the workspace root", async () => {
@@ -254,7 +265,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("t3code/apps/web/src/session-logic.ts");
+    expect(markup).toContain("Worked for 0s");
+    expect(markup).toContain('data-work-group-expanded="false"');
     expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
   });
 

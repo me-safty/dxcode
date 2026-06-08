@@ -17,7 +17,7 @@ import {
 } from "~/components/ui/sheet";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { useIsMobile } from "~/hooks/useMediaQuery";
+import { useIsTouchDevice } from "~/hooks/useMediaQuery";
 import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
 import * as Schema from "effect/Schema";
 
@@ -27,6 +27,9 @@ const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
+// Dragging the rail more than this many pixels past the minimum size closes
+// the panel (a quick drag-to-dismiss gesture, matching all dock surfaces).
+const SIDEBAR_RESIZE_CLOSE_OVERSHOOT = 64;
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed";
@@ -85,6 +88,13 @@ function useSidebar() {
   return context;
 }
 
+/** Like {@link useSidebar} but returns null instead of throwing when there is
+ * no enclosing provider (e.g. reading an ancestor sidebar from a component that
+ * also hosts its own provider, or in tests rendered without one). */
+function useOptionalSidebar() {
+  return React.use(SidebarContext);
+}
+
 function SidebarProvider({
   defaultOpen = true,
   open: openProp,
@@ -92,13 +102,18 @@ function SidebarProvider({
   className,
   style,
   children,
+  ref,
   ...props
 }: React.ComponentProps<"div"> & {
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const isMobile = useIsMobile();
+  // "Mobile" here means the touch/slide-over experience (Sheet + tap, no
+  // hover-preview), keyed on pointer type rather than viewport width. A desktop
+  // browser resized to a narrow width keeps the offcanvas + hover-preview
+  // behavior because it still has a fine pointer and can hover.
+  const isMobile = useIsTouchDevice();
   const [openMobile, setOpenMobile] = React.useState(false);
 
   // This is the internal state of the sidebar.
@@ -150,6 +165,7 @@ function SidebarProvider({
   return (
     <SidebarContext value={contextValue}>
       <div
+        ref={ref}
         className={cn(
           "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
           className,
@@ -175,6 +191,7 @@ function Sidebar({
   variant = "sidebar",
   collapsible = "offcanvas",
   resizable = false,
+  disableHoverPreview = false,
   className,
   children,
   ...props
@@ -183,8 +200,10 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset";
   collapsible?: "offcanvas" | "icon" | "none";
   resizable?: boolean | SidebarResizableOptions;
+  disableHoverPreview?: boolean;
 }) {
-  const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+  const { isMobile, state, openMobile, setOpen, setOpenMobile } = useSidebar();
+  const [previewOpen, setPreviewOpen] = React.useState(false);
   const resolvedResizable = React.useMemo<SidebarResolvedResizableOptions | null>(() => {
     if (isMobile || collapsible === "none" || !resizable) {
       return null;
@@ -203,6 +222,29 @@ function Sidebar({
     () => ({ side, resizable: resolvedResizable }),
     [resolvedResizable, side],
   );
+  const canPreviewOffcanvas =
+    !disableHoverPreview && !isMobile && collapsible === "offcanvas" && state === "collapsed";
+
+  React.useEffect(() => {
+    if (!canPreviewOffcanvas && previewOpen) {
+      setPreviewOpen(false);
+    }
+  }, [canPreviewOffcanvas, previewOpen]);
+
+  React.useEffect(() => {
+    if (!previewOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPreviewOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [previewOpen]);
 
   if (collapsible === "none") {
     return (
@@ -262,17 +304,28 @@ function Sidebar({
   return (
     <SidebarInstanceContext value={instanceContextValue}>
       <div
-        className="group peer hidden text-sidebar-foreground md:block"
+        className="group peer block text-sidebar-foreground"
         data-collapsible={state === "collapsed" ? collapsible : ""}
+        data-preview={previewOpen ? "open" : "closed"}
         data-side={side}
         data-slot="sidebar"
         data-state={state}
         data-variant={variant}
+        onMouseLeave={() => {
+          if (canPreviewOffcanvas) {
+            setPreviewOpen(false);
+          }
+        }}
+        onPointerLeave={() => {
+          if (canPreviewOffcanvas) {
+            setPreviewOpen(false);
+          }
+        }}
       >
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
-            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
+            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
             "group-data-[collapsible=offcanvas]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"
@@ -283,10 +336,10 @@ function Sidebar({
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex",
+            "fixed inset-y-0 z-10 flex h-svh w-(--sidebar-width) will-change-transform transition-[translate,width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
             side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
-              : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+              ? "left-0 group-data-[collapsible=offcanvas]:-translate-x-full group-data-[preview=open]:translate-x-0"
+              : "right-0 group-data-[collapsible=offcanvas]:translate-x-full group-data-[preview=open]:translate-x-0",
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
@@ -294,6 +347,26 @@ function Sidebar({
             className,
           )}
           data-slot="sidebar-container"
+          onMouseEnter={() => {
+            if (canPreviewOffcanvas) {
+              setPreviewOpen(true);
+            }
+          }}
+          onMouseMove={() => {
+            if (canPreviewOffcanvas) {
+              setPreviewOpen(true);
+            }
+          }}
+          onPointerEnter={() => {
+            if (canPreviewOffcanvas) {
+              setPreviewOpen(true);
+            }
+          }}
+          onPointerMove={() => {
+            if (canPreviewOffcanvas) {
+              setPreviewOpen(true);
+            }
+          }}
           {...props}
         >
           <div
@@ -304,13 +377,41 @@ function Sidebar({
             {children}
           </div>
         </div>
+        {canPreviewOffcanvas ? (
+          <button
+            aria-label="Preview Sidebar"
+            className={cn(
+              "fixed inset-y-0 z-20 block w-3 cursor-default bg-transparent",
+              side === "left" ? "left-0" : "right-0",
+            )}
+            data-slot="sidebar-preview-trigger"
+            onClick={() => {
+              setOpen(true);
+            }}
+            onMouseEnter={() => {
+              setPreviewOpen(true);
+            }}
+            onMouseMove={() => {
+              setPreviewOpen(true);
+            }}
+            onPointerEnter={() => {
+              setPreviewOpen(true);
+            }}
+            onPointerMove={() => {
+              setPreviewOpen(true);
+            }}
+            tabIndex={-1}
+            type="button"
+          />
+        ) : null}
       </div>
     </SidebarInstanceContext>
   );
 }
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar, openMobile } = useSidebar();
+  const { isMobile, open, openMobile, toggleSidebar } = useSidebar();
+  const sidebarOpen = isMobile ? openMobile : open;
 
   return (
     <Button
@@ -325,7 +426,7 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       variant="ghost"
       {...props}
     >
-      {openMobile ? <PanelLeftCloseIcon /> : <PanelLeftIcon />}
+      {sidebarOpen ? <PanelLeftCloseIcon /> : <PanelLeftIcon />}
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );
@@ -344,7 +445,7 @@ function SidebarRail({
   onPointerUp,
   ...props
 }: React.ComponentProps<"button">) {
-  const { open, toggleSidebar } = useSidebar();
+  const { open, setOpen, toggleSidebar } = useSidebar();
   const sidebarInstance = React.use(SidebarInstanceContext);
   const railRef = React.useRef<HTMLButtonElement | null>(null);
   const suppressClickRef = React.useRef(false);
@@ -360,6 +461,7 @@ function SidebarRail({
     startX: number;
     transitionTargets: HTMLElement[];
     width: number;
+    willClose: boolean;
     wrapper: HTMLElement;
   } | null>(null);
   const resolvedResizable = sidebarInstance?.resizable ?? null;
@@ -379,10 +481,17 @@ function SidebarRail({
       resizeState.transitionTargets.forEach((element) => {
         element.style.removeProperty("transition-duration");
       });
-      if (resolvedResizable?.storageKey && typeof window !== "undefined") {
-        setLocalStorageItem(resolvedResizable.storageKey, resizeState.width, Schema.Finite);
+      if (resizeState.willClose) {
+        // Restore the pre-drag width so the panel reopens at a sensible size,
+        // then close it instead of persisting the tiny dragged width.
+        resizeState.wrapper.style.setProperty("--sidebar-width", `${resizeState.startWidth}px`);
+        setOpen(false);
+      } else {
+        if (resolvedResizable?.storageKey && typeof window !== "undefined") {
+          setLocalStorageItem(resolvedResizable.storageKey, resizeState.width, Schema.Finite);
+        }
+        resolvedResizable?.onResize?.(resizeState.width);
       }
-      resolvedResizable?.onResize?.(resizeState.width);
       resizeStateRef.current = null;
       if (resizeState.rail.hasPointerCapture(pointerId)) {
         resizeState.rail.releasePointerCapture(pointerId);
@@ -390,7 +499,7 @@ function SidebarRail({
       document.body.style.removeProperty("cursor");
       document.body.style.removeProperty("user-select");
     },
-    [resolvedResizable],
+    [resolvedResizable, setOpen],
   );
 
   const handlePointerDown = React.useCallback(
@@ -436,6 +545,7 @@ function SidebarRail({
         startX: event.clientX,
         transitionTargets,
         width: initialWidth,
+        willClose: false,
         wrapper,
       };
       wrapper.style.setProperty("--sidebar-width", `${initialWidth}px`);
@@ -444,6 +554,18 @@ function SidebarRail({
       document.body.style.userSelect = "none";
     },
     [onPointerDown, open, resolvedResizable, sidebarInstance?.side],
+  );
+
+  const endResizeInteraction = React.useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      const resizeState = resizeStateRef.current;
+      if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+
+      event.preventDefault();
+      suppressClickRef.current = resizeState.moved;
+      stopResize(event.pointerId);
+    },
+    [stopResize],
   );
 
   const handlePointerMove = React.useCallback(
@@ -461,10 +583,20 @@ function SidebarRail({
       if (Math.abs(delta) > 2) {
         resizeState.moved = true;
       }
-      resizeState.pendingWidth = clampSidebarWidth(
-        resizeState.startWidth + delta,
-        resolvedResizable,
-      );
+      const rawWidth = resizeState.startWidth + delta;
+      // Collapse live the moment the drag crosses the close threshold, like
+      // Codex — don't wait for pointer-up.
+      if (rawWidth < resolvedResizable.minWidth - SIDEBAR_RESIZE_CLOSE_OVERSHOOT) {
+        resizeState.willClose = true;
+        resizeState.wrapper.style.setProperty("--sidebar-width", `${resizeState.startWidth}px`);
+        if (resizeState.rafId !== null) {
+          window.cancelAnimationFrame(resizeState.rafId);
+          resizeState.rafId = null;
+        }
+        endResizeInteraction(event);
+        return;
+      }
+      resizeState.pendingWidth = clampSidebarWidth(rawWidth, resolvedResizable);
       if (resizeState.rafId !== null) {
         return;
       }
@@ -492,19 +624,7 @@ function SidebarRail({
         activeResizeState.width = nextWidth;
       });
     },
-    [onPointerMove, resolvedResizable],
-  );
-
-  const endResizeInteraction = React.useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const resizeState = resizeStateRef.current;
-      if (!resizeState || resizeState.pointerId !== event.pointerId) return;
-
-      event.preventDefault();
-      suppressClickRef.current = resizeState.moved;
-      stopResize(event.pointerId);
-    },
-    [stopResize],
+    [endResizeInteraction, onPointerMove, resolvedResizable],
   );
 
   const handlePointerUp = React.useCallback(
@@ -576,7 +696,7 @@ function SidebarRail({
       aria-label={railLabel}
       className={cn(
         /* disable pointer events only when offcanvas sidebar is collapsed, that's when the rail sits over the native scrollbar on windows and linux. icon mode stays fully clickable. */
-        "-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=right]:left-0 sm:flex [[data-collapsible=offcanvas][data-state=collapsed]_&]:pointer-events-none",
+        "-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 transition-[background-color,translate] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=right]:left-0 sm:flex [[data-collapsible=offcanvas][data-state=collapsed]_&]:pointer-events-none",
         "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
         "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
         "group-data-[collapsible=offcanvas]:translate-x-0 hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:after:left-full",
@@ -660,7 +780,7 @@ function SidebarSeparator({ className, ...props }: React.ComponentProps<typeof S
 
 function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <ScrollArea hideScrollbars scrollFade className="h-auto min-h-0 flex-1">
+    <ScrollArea hideScrollbars className="h-auto min-h-0 flex-1">
       <div
         className={cn(
           "flex w-full min-w-0 flex-col gap-2 group-data-[collapsible=icon]:overflow-hidden",
@@ -997,5 +1117,6 @@ export {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
+  useOptionalSidebar,
   useSidebar,
 };

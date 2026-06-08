@@ -14,7 +14,10 @@ import { type Thread } from "../types";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
+  canSendQueuedTurn,
   createLocalDispatchSnapshot,
+  decideGeneralQueueDrain,
+  decideInterruptTargetedSend,
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
@@ -723,5 +726,146 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
         threadError: null,
       }),
     ).toBe(true);
+  });
+});
+
+const idleGate = {
+  phase: "ready" as const,
+  isSendBusy: false,
+  isConnecting: false,
+  activeEnvironmentUnavailable: false,
+  activePendingApproval: false,
+  activePendingUserInput: false,
+  sendInFlight: false,
+};
+
+describe("canSendQueuedTurn", () => {
+  it("allows sending when the session is idle and ready", () => {
+    expect(canSendQueuedTurn(idleGate)).toBe(true);
+  });
+
+  it("blocks sending while a turn is running", () => {
+    expect(canSendQueuedTurn({ ...idleGate, phase: "running" })).toBe(false);
+  });
+
+  it.each([
+    ["isSendBusy", { isSendBusy: true }],
+    ["isConnecting", { isConnecting: true }],
+    ["activeEnvironmentUnavailable", { activeEnvironmentUnavailable: true }],
+    ["activePendingApproval", { activePendingApproval: true }],
+    ["activePendingUserInput", { activePendingUserInput: true }],
+    ["sendInFlight", { sendInFlight: true }],
+  ])("blocks sending when %s", (_label, override) => {
+    expect(canSendQueuedTurn({ ...idleGate, ...override })).toBe(false);
+  });
+});
+
+describe("decideGeneralQueueDrain", () => {
+  it("drains the front submission when allowed", () => {
+    expect(
+      decideGeneralQueueDrain({
+        canSend: true,
+        pendingInterruptSendId: null,
+        drainingQueuedTurnId: null,
+        nextSubmissionId: "a",
+      }),
+    ).toEqual({ submissionId: "a" });
+  });
+
+  it("does not drain while an interrupt-targeted send is pending (no cascade)", () => {
+    expect(
+      decideGeneralQueueDrain({
+        canSend: true,
+        pendingInterruptSendId: "a",
+        drainingQueuedTurnId: null,
+        nextSubmissionId: "b",
+      }),
+    ).toBeNull();
+  });
+
+  it("does not drain when sending is gated", () => {
+    expect(
+      decideGeneralQueueDrain({
+        canSend: false,
+        pendingInterruptSendId: null,
+        drainingQueuedTurnId: null,
+        nextSubmissionId: "a",
+      }),
+    ).toBeNull();
+  });
+
+  it("does not re-drain a submission already in flight", () => {
+    expect(
+      decideGeneralQueueDrain({
+        canSend: true,
+        pendingInterruptSendId: null,
+        drainingQueuedTurnId: "a",
+        nextSubmissionId: "a",
+      }),
+    ).toBeNull();
+  });
+
+  it("does nothing with an empty queue", () => {
+    expect(
+      decideGeneralQueueDrain({
+        canSend: true,
+        pendingInterruptSendId: null,
+        drainingQueuedTurnId: null,
+        nextSubmissionId: null,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("decideInterruptTargetedSend", () => {
+  const base = {
+    phase: "ready" as const,
+    isSendBusy: false,
+    isConnecting: false,
+    activeEnvironmentUnavailable: false,
+    sendInFlight: false,
+    queuedSubmissionIds: ["a", "b", "c"] as const,
+  };
+
+  it("waits when no interrupt send is pending", () => {
+    expect(decideInterruptTargetedSend({ ...base, pendingInterruptSendId: null })).toEqual({
+      action: "wait",
+    });
+  });
+
+  it("waits while the interrupted turn is still running", () => {
+    expect(
+      decideInterruptTargetedSend({
+        ...base,
+        phase: "running",
+        pendingInterruptSendId: "b",
+      }),
+    ).toEqual({ action: "wait" });
+  });
+
+  it("sends ONLY the targeted submission once the turn is interrupted", () => {
+    expect(decideInterruptTargetedSend({ ...base, pendingInterruptSendId: "b" })).toEqual({
+      action: "send",
+      submissionId: "b",
+    });
+  });
+
+  it("clears the pending id when the targeted submission was removed", () => {
+    expect(
+      decideInterruptTargetedSend({
+        ...base,
+        pendingInterruptSendId: "gone",
+      }),
+    ).toEqual({ action: "clear" });
+  });
+
+  it("waits while a send is already in flight", () => {
+    expect(
+      decideInterruptTargetedSend({
+        ...base,
+        sendInFlight: true,
+        pendingInterruptSendId: "b",
+      }),
+    ).toEqual({ action: "wait" });
   });
 });

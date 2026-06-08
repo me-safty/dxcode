@@ -411,7 +411,7 @@ export const TraitsPicker = memo(function TraitsPicker({
       <MenuTrigger
         render={
           <Button
-            size="sm"
+            size="xs"
             variant={triggerVariant ?? "ghost"}
             className={cn(
               isCodexStyle

@@ -11,8 +11,20 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
-import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
+import { SidebarInset } from "../components/ui/sidebar";
 import { isElectron } from "../env";
+import { formatDocumentTitle, useDocumentTitle } from "../lib/documentTitle";
+
+const SETTINGS_PAGE_LABELS: Record<string, string> = {
+  "/settings/general": "General",
+  "/settings/source-control": "Source Control",
+  "/settings/providers": "Providers",
+  "/settings/keybindings": "Keybindings",
+  "/settings/connections": "Connections",
+  "/settings/cloud": "Cloud",
+  "/settings/diagnostics": "Diagnostics",
+  "/settings/archived": "Archived",
+};
 
 function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
@@ -36,6 +48,10 @@ function SettingsContentLayout() {
   const canGoBack = useCanGoBack();
   const [restoreSignal, setRestoreSignal] = useState(0);
   const showRestoreDefaults = location.pathname === "/settings/general";
+  const settingsPageLabel = SETTINGS_PAGE_LABELS[location.pathname];
+  useDocumentTitle(
+    formatDocumentTitle(settingsPageLabel ? `${settingsPageLabel} · Settings` : "Settings"),
+  );
   const handleRestored = () => setRestoreSignal((value) => value + 1);
   const navigateBackWithinApp = useCallback(() => {
     if (canGoBack) {
@@ -64,9 +80,8 @@ function SettingsContentLayout() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         {!isElectron && (
-          <header className="border-b border-border px-3 py-2 sm:px-5">
+          <header className="border-b border-border py-2 pr-3 pl-12 sm:pr-5">
             <div className="flex min-h-7 items-center gap-2 sm:min-h-6">
-              <SidebarTrigger className="size-7 shrink-0 md:hidden" />
               <span className="text-sm font-medium text-foreground">Settings</span>
               {showRestoreDefaults ? (
                 <div className="ms-auto flex items-center gap-2">

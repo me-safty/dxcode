@@ -114,6 +114,23 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("counts line additions for untracked (newly created) files", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "created.txt", "alpha\nbeta\ngamma\n");
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+
+        const createdFile = status.workingTree.files.find((file) => file.path === "created.txt");
+        assert.ok(createdFile, "expected untracked file in working tree status");
+        assert.equal(createdFile.insertions, 3);
+        assert.equal(createdFile.deletions, 0);
+        assert.equal(status.workingTree.insertions, 3);
+        assert.equal(status.workingTree.deletions, 0);
+      }),
+    );
+
     it.effect("reports refName and dirty state for a repository", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

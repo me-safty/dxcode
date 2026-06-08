@@ -11,6 +11,7 @@ import {
   deriveCompletionDividerBeforeEntryId,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveActiveTodos,
   derivePendingApprovals,
   derivePendingUserInputs,
   deriveTimelineEntries,
@@ -370,6 +371,88 @@ describe("deriveActivePlanState", () => {
   });
 });
 
+describe("deriveActiveTodos", () => {
+  it("returns the latest todowrite snapshot from tool activities", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "todo-old",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Updated todos",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          itemType: "dynamic_tool_call",
+          todos: [{ content: "Step one", status: "in_progress" }],
+          data: { tool: "todowrite" },
+        },
+      }),
+      makeActivity({
+        id: "todo-latest",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Updated todos",
+        sequence: 2,
+        turnId: "turn-1",
+        payload: {
+          itemType: "dynamic_tool_call",
+          todos: [
+            { content: "Step one", status: "completed" },
+            { content: "Step two", status: "in_progress" },
+          ],
+          data: { tool: "todowrite" },
+        },
+      }),
+    ];
+
+    const result = deriveActiveTodos(activities, TurnId.make("turn-1"));
+    expect(result).toEqual({
+      createdAt: "2026-02-23T00:00:02.000Z",
+      turnId: "turn-1",
+      todos: [
+        { content: "Step one", status: "completed" },
+        { content: "Step two", status: "in_progress" },
+      ],
+    });
+  });
+
+  it("falls back to the most recent todos from any turn", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "todo-turn1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.completed",
+        summary: "Updated todos",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          itemType: "dynamic_tool_call",
+          todos: [{ content: "Persisted task", status: "pending" }],
+          data: { tool: "todowrite" },
+        },
+      }),
+    ];
+
+    // Current turn is turn-2 with no todos — falls back to turn-1's snapshot.
+    const result = deriveActiveTodos(activities, TurnId.make("turn-2"));
+    expect(result?.todos).toEqual([{ content: "Persisted task", status: "pending" }]);
+  });
+
+  it("returns null when there are no todo activities", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "cmd",
+        kind: "tool.completed",
+        summary: "Command run",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: { itemType: "command_execution", data: { tool: "bash" } },
+      }),
+    ];
+    expect(deriveActiveTodos(activities, TurnId.make("turn-1"))).toBeNull();
+  });
+});
+
 describe("findLatestProposedPlan", () => {
   it("prefers the latest proposed plan for the active turn", () => {
     expect(
@@ -692,6 +775,32 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
   });
 
+  it("marks runtime warnings as hidden work log entries", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "runtime-warning",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "runtime.warning",
+        summary: "Runtime warning",
+        tone: "info",
+        payload: { message: "Provider emitted a noisy warning" },
+      }),
+      makeActivity({
+        id: "runtime-error",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "runtime.error",
+        summary: "Runtime error",
+        tone: "error",
+        payload: { message: "Provider failed" },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries.map((entry) => entry.id)).toEqual(["runtime-warning", "runtime-error"]);
+    expect(entries[0]?.hidden).toBe(true);
+    expect(entries[1]?.hidden).toBeUndefined();
+  });
+
   it("omits ExitPlanMode lifecycle entries once the plan card is shown", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -920,6 +1029,29 @@ describe("deriveWorkLogEntries", () => {
       "apps/web/src/components/ChatView.tsx",
       "apps/web/src/session-logic.ts",
     ]);
+  });
+
+  it("extracts changed file paths from snake_case file_path tool input (Claude Edit)", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "claude-edit",
+        kind: "tool.completed",
+        summary: "File change",
+        payload: {
+          itemType: "file_change",
+          data: {
+            toolName: "Edit",
+            input: {
+              file_path: "apps/web/src/components/ChatView.tsx",
+              replace_all: false,
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.changedFiles).toEqual(["apps/web/src/components/ChatView.tsx"]);
   });
 
   it("drops duplicated tool detail when it only repeats the title", () => {
@@ -1516,5 +1648,373 @@ describe("deriveActiveWorkStartedAt", () => {
         "2026-02-27T21:11:00.000Z",
       ),
     ).toBe("2026-02-27T21:11:00.000Z");
+  });
+});
+
+describe("deriveWorkLogEntries subagent and todo extraction", () => {
+  it("extracts subagent metadata across in-progress and completed frames", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "subagent-updated",
+        kind: "tool.updated",
+        summary: "Subagent task",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          detail: "Explore: Find steer capability",
+          collabAgent: {
+            sessionId: "ses_child",
+            parentSessionId: "ses_parent",
+            subagentType: "Explore",
+            description: "Find steer capability",
+            modelId: "anthropic.claude-opus-4-8",
+            providerId: "amazon-bedrock",
+          },
+          data: { tool: "task" },
+        },
+      }),
+      makeActivity({
+        id: "subagent-completed",
+        kind: "tool.completed",
+        summary: "Subagent task",
+        sequence: 2,
+        turnId: "turn-1",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "completed",
+          detail: "## Report\n\nThe steer capability lives in CodexAdapter.",
+          collabAgent: {
+            sessionId: "ses_child",
+            subagentType: "Explore",
+          },
+          data: { tool: "task" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.subagent).toMatchObject({
+      sessionId: "ses_child",
+      parentSessionId: "ses_parent",
+      subagentType: "Explore",
+      description: "Find steer capability",
+      modelId: "anthropic.claude-opus-4-8",
+      report: "## Report\n\nThe steer capability lives in CodexAdapter.",
+    });
+  });
+
+  it("collapses a Claude task.progress stream into one subagent row with live usage", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "task-progress-1",
+        kind: "task.progress",
+        summary: "Reasoning update",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          taskId: "task-a",
+          taskType: "local_agent",
+          detail: "Running grep -r steer",
+          lastToolName: "Bash",
+          usage: { tool_uses: 1, duration_ms: 2126 },
+        },
+      }),
+      makeActivity({
+        id: "task-progress-2",
+        kind: "task.progress",
+        summary: "Reasoning update",
+        sequence: 2,
+        turnId: "turn-1",
+        payload: {
+          taskId: "task-a",
+          taskType: "local_agent",
+          detail: "Reading ChatView.tsx",
+          lastToolName: "Read",
+          usage: { tool_uses: 7, duration_ms: 14355 },
+        },
+      }),
+      makeActivity({
+        id: "task-completed",
+        kind: "task.completed",
+        summary: "Task completed",
+        tone: "info",
+        sequence: 3,
+        turnId: "turn-1",
+        payload: { taskId: "task-a", status: "completed" },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.subagent).toMatchObject({
+      subagentType: "Subagent",
+      lastStep: "Reading ChatView.tsx",
+      lastToolName: "Read",
+      toolUses: 7,
+      durationMs: 14355,
+    });
+  });
+
+  it("extracts structured todos from a todowrite tool payload", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "todo-completed",
+        kind: "tool.completed",
+        summary: "Updated todos",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          itemType: "dynamic_tool_call",
+          status: "completed",
+          todos: [
+            { content: "Create monorepo structure", status: "completed", priority: "high" },
+            { content: "Move app to apps/web", status: "in_progress", priority: "high" },
+          ],
+          data: { tool: "todowrite" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.todos).toEqual([
+      { content: "Create monorepo structure", status: "completed", priority: "high" },
+      { content: "Move app to apps/web", status: "in_progress", priority: "high" },
+    ]);
+  });
+
+  it("collapses interleaved parallel subagent task streams into one row per subagent", () => {
+    // Two subagents running in parallel emit interleaved progress keyed by taskId.
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "p-a-1",
+        kind: "task.progress",
+        summary: "Reasoning update",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: { taskId: "task-a", taskType: "local_agent", detail: "A step 1" },
+      }),
+      makeActivity({
+        id: "p-b-1",
+        kind: "task.progress",
+        summary: "Reasoning update",
+        sequence: 2,
+        turnId: "turn-1",
+        payload: { taskId: "task-b", taskType: "local_agent", detail: "B step 1" },
+      }),
+      makeActivity({
+        id: "p-a-2",
+        kind: "task.progress",
+        summary: "Reasoning update",
+        sequence: 3,
+        turnId: "turn-1",
+        payload: { taskId: "task-a", taskType: "local_agent", detail: "A step 2" },
+      }),
+      makeActivity({
+        id: "p-b-2",
+        kind: "task.progress",
+        summary: "Reasoning update",
+        sequence: 4,
+        turnId: "turn-1",
+        payload: { taskId: "task-b", taskType: "local_agent", detail: "B step 2" },
+      }),
+      makeActivity({
+        id: "c-a",
+        kind: "task.completed",
+        summary: "Task completed",
+        tone: "info",
+        sequence: 5,
+        turnId: "turn-1",
+        payload: { taskId: "task-a", status: "completed" },
+      }),
+      makeActivity({
+        id: "c-b",
+        kind: "task.completed",
+        summary: "Task completed",
+        tone: "info",
+        sequence: 6,
+        turnId: "turn-1",
+        payload: { taskId: "task-b", status: "completed" },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    expect(entries).toHaveLength(2);
+    expect(entries[0]?.subagent?.lastStep).toBe("A step 2");
+    expect(entries[1]?.subagent?.lastStep).toBe("B step 2");
+  });
+
+  it("does not treat a file_read tool's filePath as a changed file", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "read-1",
+        kind: "tool.completed",
+        summary: "Read file",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          itemType: "file_read",
+          status: "completed",
+          data: { tool: "read", state: { input: { filePath: "/repo/README.md" } } },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.changedFiles).toBeUndefined();
+    expect(entries[0]?.readPath).toBe("/repo/README.md");
+  });
+
+  it("does not extract a readPath from a command_execution tool", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "cmd-1",
+        kind: "tool.completed",
+        summary: "Command run",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          itemType: "command_execution",
+          status: "completed",
+          data: { tool: "bash", state: { input: { path: "/dev/null" } } },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.readPath).toBeUndefined();
+    expect(entries[0]?.changedFiles).toBeUndefined();
+  });
+
+  it("renders a user-input.resolved event as a combined question to answer row", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "ui-req",
+        kind: "user-input.requested",
+        summary: "Asked: Sidebar header",
+        tone: "info",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          requestId: "req-1",
+          questions: [
+            {
+              id: "q-header",
+              header: "Sidebar header",
+              question: "What should replace the current sidebar header?",
+              options: [
+                { label: "Keep logo", description: "Keep the T3 logo" },
+                { label: "Drop badge", description: "Drop the DEV badge" },
+              ],
+            },
+          ],
+        },
+      }),
+      makeActivity({
+        id: "ui-res",
+        kind: "user-input.resolved",
+        summary: "User input submitted",
+        tone: "info",
+        sequence: 2,
+        turnId: "turn-1",
+        payload: {
+          requestId: "req-1",
+          answers: { "q-header": "Keep logo, drop badge" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    // The bare "Asked:" request row is dropped; only the combined row remains.
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.label).toBe("Answered: What should replace the current sidebar header?");
+    expect(entries[0]?.questionAnswers).toEqual([
+      {
+        question: "What should replace the current sidebar header?",
+        answer: "Keep logo, drop badge",
+      },
+    ]);
+  });
+
+  it("summarizes multiple question answers with a (+N more) suffix", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "ui-req",
+        kind: "user-input.requested",
+        summary: "Asked",
+        tone: "info",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          requestId: "req-2",
+          questions: [
+            {
+              id: "q1",
+              header: "App location",
+              question: "Where?",
+              options: [{ label: "apps/web", description: "Move there" }],
+            },
+            {
+              id: "q2",
+              header: "Linter",
+              question: "Which?",
+              options: [{ label: "Biome", description: "Use Biome" }],
+            },
+          ],
+        },
+      }),
+      makeActivity({
+        id: "ui-res",
+        kind: "user-input.resolved",
+        summary: "User input submitted",
+        tone: "info",
+        sequence: 2,
+        turnId: "turn-1",
+        payload: { requestId: "req-2", answers: { q1: "apps/web", q2: "Biome" } },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.label).toBe("Answered 2 questions");
+    expect(entries[0]?.questionAnswers).toEqual([
+      { question: "Where?", answer: "apps/web" },
+      { question: "Which?", answer: "Biome" },
+    ]);
+  });
+
+  it("extracts an editDiff for a file_change tool (OpenCode metadata.diff)", () => {
+    const diff = [
+      "Index: /repo/a.ts",
+      "--- /repo/a.ts",
+      "+++ /repo/a.ts",
+      "@@ -1 +1 @@",
+      "-const x = 1;",
+      "+const x = 2;",
+    ].join("\n");
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "edit-1",
+        kind: "tool.completed",
+        summary: "Edit applied",
+        sequence: 1,
+        turnId: "turn-1",
+        payload: {
+          itemType: "file_change",
+          status: "completed",
+          data: { tool: "edit", state: { input: { filePath: "/repo/a.ts" }, metadata: { diff } } },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-1"));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.editDiff).toBe(diff);
+    expect(entries[0]?.changedFiles).toEqual(["/repo/a.ts"]);
   });
 });

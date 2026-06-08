@@ -11,7 +11,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { beforeEach } from "vite-plus/test";
+import { beforeEach, describe, expect, test } from "vite-plus/test";
 
 import {
   OpenCodeSettings,
@@ -33,6 +33,7 @@ import {
   appendOpenCodeAssistantTextDelta,
   makeOpenCodeAdapter,
   mergeOpenCodeAssistantText,
+  toToolLifecycleItemType,
 } from "./OpenCodeAdapter.ts";
 
 // Test-local service tag so the rest of the file can keep using `yield* OpenCodeAdapter`.
@@ -226,6 +227,27 @@ beforeEach(() => {
 
 const advanceTestClock = (ms: number) =>
   TestClock.adjust(`${ms} millis`).pipe(Effect.andThen(Effect.yieldNow));
+
+describe("toToolLifecycleItemType", () => {
+  test("classifies OpenCode read/grep/glob tools as file reads", () => {
+    expect(toToolLifecycleItemType("read")).toBe("file_read");
+    expect(toToolLifecycleItemType("grep")).toBe("file_read");
+    expect(toToolLifecycleItemType("glob")).toBe("file_read");
+    expect(toToolLifecycleItemType("list")).toBe("file_read");
+  });
+
+  test("classifies edit/write/bash and agent tools", () => {
+    expect(toToolLifecycleItemType("edit")).toBe("file_change");
+    expect(toToolLifecycleItemType("write")).toBe("file_change");
+    expect(toToolLifecycleItemType("bash")).toBe("command_execution");
+    expect(toToolLifecycleItemType("task")).toBe("collab_agent_tool_call");
+  });
+
+  test("falls back to dynamic_tool_call for unknown tools", () => {
+    expect(toToolLifecycleItemType("skill")).toBe("dynamic_tool_call");
+    expect(toToolLifecycleItemType("uidotsh_uidotsh_fetch")).toBe("dynamic_tool_call");
+  });
+});
 
 it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
   it.effect("reuses a configured OpenCode server URL instead of spawning a local server", () =>
