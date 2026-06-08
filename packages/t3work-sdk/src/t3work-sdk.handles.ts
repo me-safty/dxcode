@@ -1,21 +1,16 @@
 /**
- * The Handle pattern (Epic 25 §The Handle pattern, 25.4) — the genuine durable-suspension
- * boundary. A side-effect primitive (ui.show / thread.send / child.spawn / user.ask /
- * user.notify) splits into TWO journal entries because the reply is a separate event that
- * may arrive after a suspend/resume:
- *
- *   • a `"sent"` entry — recorded when the primitive fires; carries a deterministic
- *     `correlationId` (`"<runId>:<seq>"`) and NO result.
- *   • a `"resolved"` entry — recorded when the reply settles, keyed by that `correlationId`
- *     (NOT by `seq`, because it lands out of band via the broker/host).
- *
- * Replay: sent + resolved present → return the recorded reply. Sent present, resolved
- * absent → the body's `await handle.response` throws {@link WorkflowSuspended}, which the
- * runner converts into a `SuspendedResult` ("park this run; resume when the reply lands").
- * Fire-and-forget handles (`Handle<never>`) record only a `sent` entry and never suspend.
- *
- * `correlationId` is derived from `"<runId>:<seq>"` of the `sent` entry, so replaying to the
- * same `await` re-derives the same id and finds (or re-waits on) the same resolved entry.
+ * The Handle pattern (Epic 25 §The thread model) — the durable-suspension boundary the Thread
+ * verbs are built on. A side-effect primitive splits into a `"sent"` entry (deterministic
+ * `correlationId` of `"<runId>:<seq>"`, no result) and a `"resolved"` entry (keyed by that
+ * `correlationId`, since the reply lands out of band). Two dispatch shapes share the machinery:
+ *   • {@link HandleDispatch.send} — ask-shaped (`thread.turn` / `user.input`): journal the sent
+ *     entry, fire the broker, return the `correlationId`; the body later `awaitResolution`s it.
+ *   • {@link HandleDispatch.sendOneWay} — fire-and-forget (`thread.create` / `thread.message`):
+ *     journal the sent entry SYNCHRONOUSLY (so seq alignment survives a later suspend), fire the
+ *     broker best-effort, return the `correlationId` (the new thread's id). Never suspends.
+ * Replay: a recorded sent entry is NOT re-fired; an ask whose resolved entry is present returns
+ * the recorded reply, one whose entry is absent throws {@link WorkflowSuspended} (→ a
+ * `SuspendedResult` the host resumes when the reply lands).
  */
 
 import { hashArgs } from "./t3work-sdk.canonicalJson.ts";
@@ -24,15 +19,6 @@ import type { JournalEntry, ResolvedEntry } from "./t3work-sdk.journalReader.ts"
 import type { JournalWriter } from "./t3work-sdk.journalWriter.ts";
 import { assertJournalMatch, gapDrift } from "./t3work-sdk.replayDrift.ts";
 import type { PrimitiveKind } from "./t3work-sdk.types.ts";
-
-/** A typed handle on a fired side effect. Ask-shaped calls (a `responseSchema` was given)
- * expose `.response`; fire-and-forget calls are `Handle<never>` and have no `.response`. */
-export type Handle<R> = [R] extends [never]
-  ? { readonly id: string; dismiss(): Promise<void> }
-  : { readonly id: string; dismiss(): Promise<void>; readonly response: Promise<R> };
-
-/** A `ui.show` handle — a {@link Handle} plus `update(view)` to re-render the same surface. */
-export type UiHandle<R> = Handle<R> & { update(view: unknown): Promise<void> };
 
 /** Settles a fired handle synchronously — the broker calls this when a reply is immediate. */
 export interface ReplyResolver {
@@ -69,22 +55,24 @@ export interface HandleSeat {
 }
 
 export interface HandleDispatch {
-  /** Journal (or replay) a `sent` entry and fire the side effect; returns the correlationId. */
+  /** Journal (or replay) an ask-shaped `sent` entry and fire the side effect; returns the
+   * correlationId. */
   send(call: HandleSendCall): Promise<string>;
+  /** Journal (or replay) a one-way `sent` entry synchronously and fire the side effect
+   * best-effort; returns the correlationId (used as the new thread's id for `thread.create`). */
+  sendOneWay(call: HandleSendCall): string;
   /** Read the resolved reply for a correlationId, or throw {@link WorkflowSuspended}. */
   awaitResolution<R>(
     correlationId: string,
     decodeReply: ((reply: unknown) => Promise<R>) | undefined,
   ): Promise<R>;
-  /** Record a terminal dismissal so a later reply is ignored. */
-  dismiss(correlationId: string, kind: PrimitiveKind, refId: string): Promise<void>;
 }
 
 /**
- * The internal signal a suspended `await handle.response` throws. NOT part of the author
- * error taxonomy (it does not extend {@link import("./t3work-sdk.errors.ts").WorkflowError})
- * so a body's `catch (e instanceof WorkflowError)` does not swallow it; the runner catches
- * it by identity and parks the run.
+ * The internal signal a suspended `await` on an ask-shaped reply throws. NOT part of the
+ * author error taxonomy (it does not extend {@link import("./t3work-sdk.errors.ts").WorkflowError})
+ * so a body's `catch (e instanceof WorkflowError)` does not swallow it; the runner catches it
+ * by identity and parks the run.
  */
 export class WorkflowSuspended extends Error {
   readonly correlationId: string;
@@ -95,7 +83,15 @@ export class WorkflowSuspended extends Error {
   }
 }
 
+const noopResolver: ReplyResolver = { resolve: () => {}, reject: () => {} };
+
 export function createHandleDispatch(seat: HandleSeat): HandleDispatch {
+  // Unique synthetic ids for black-boxed sends (inside parallel/pipeline). These execute live
+  // and are never journaled/replayed, so the counter only has to stay unique within one run —
+  // a shared `"<runId>:blackbox"` id would collide across concurrent thunks (first-write-wins
+  // on the resolved map would hand one thunk another's reply).
+  let blackboxSeq = 0;
+
   const recordResolved = (
     correlationId: string,
     kind: PrimitiveKind,
@@ -119,11 +115,18 @@ export function createHandleDispatch(seat: HandleSeat): HandleDispatch {
     reject: () => recordResolved(correlationId, kind, refId, { dismissed: true }),
   });
 
+  // A resolver for a black-boxed send: settles the IN-MEMORY map only, never the journal —
+  // the enclosing parallel/pipeline entry is the journal boundary, so a nested ask's reply
+  // must not occupy a journal line of its own.
+  const inMemoryResolver = (correlationId: string, kind: PrimitiveKind, refId: string): ReplyResolver => ({
+    resolve: (reply) => seat.setResolved({ correlationId, kind, refId, dismissed: false, reply }),
+    reject: () => seat.setResolved({ correlationId, kind, refId, dismissed: true, reply: undefined }),
+  });
+
   const send = async (call: HandleSendCall): Promise<string> => {
     if (seat.isBlackBoxed()) {
-      // Inside parallel/pipeline: no journaling/suspension (per-thunk journaling deferred).
-      const id = `${seat.runId}:blackbox`;
-      await call.fire(id, makeResolver(id, call.kind, call.refId));
+      const id = `${seat.runId}:blackbox:${(blackboxSeq += 1)}`;
+      await call.fire(id, inMemoryResolver(id, call.kind, call.refId));
       return id;
     }
     const currentSeq = seat.takeSeq();
@@ -153,6 +156,40 @@ export function createHandleDispatch(seat: HandleSeat): HandleDispatch {
     return correlationId;
   };
 
+  const sendOneWay = (call: HandleSendCall): string => {
+    if (seat.isBlackBoxed()) {
+      const id = `${seat.runId}:blackbox:${(blackboxSeq += 1)}`;
+      void call.fire(id, noopResolver);
+      return id;
+    }
+    const currentSeq = seat.takeSeq();
+    const correlationId = `${seat.runId}:${currentSeq}`;
+    const argsHash = hashArgs(call.args);
+    const recorded = seat.recordedAt(currentSeq);
+    if (recorded !== undefined) {
+      assertJournalMatch(currentSeq, recorded, call.kind, call.refId, argsHash, seat.filePath);
+      return recorded.correlationId ?? correlationId; // replay: do NOT re-fire
+    }
+    if (currentSeq <= seat.maxRecordedSeq) gapDrift(currentSeq, call.kind, call.refId, seat.filePath);
+    // Journal the sent entry SYNCHRONOUSLY (writeSync) before firing, so a suspend on a later
+    // await cannot dispose the writer mid-append. Delivery is best-effort, fired floating.
+    const ts = seat.nowIso();
+    seat.writer.append({
+      seq: currentSeq,
+      callId: `${currentSeq}:${call.kind}:${call.refId}`,
+      kind: call.kind,
+      refId: call.refId,
+      argsHash,
+      result: undefined,
+      phase: "sent",
+      correlationId,
+      startedAt: ts,
+      endedAt: ts,
+    });
+    void call.fire(correlationId, noopResolver);
+    return correlationId;
+  };
+
   const awaitResolution = async <R>(
     correlationId: string,
     decodeReply: ((reply: unknown) => Promise<R>) | undefined,
@@ -167,36 +204,5 @@ export function createHandleDispatch(seat: HandleSeat): HandleDispatch {
     return (decodeReply === undefined ? resolved.reply : await decodeReply(resolved.reply)) as R;
   };
 
-  const dismiss = async (correlationId: string, kind: PrimitiveKind, refId: string): Promise<void> => {
-    recordResolved(correlationId, kind, refId, { dismissed: true });
-  };
-
-  return { send, awaitResolution, dismiss };
-}
-
-/** Build the typed {@link Handle}/{@link UiHandle} returned to the workflow body. */
-export function makeHandle<R>(
-  dispatch: HandleDispatch,
-  correlationId: string,
-  opts: {
-    readonly kind: PrimitiveKind;
-    readonly refId: string;
-    readonly ask: boolean;
-    readonly decodeReply?: (reply: unknown) => Promise<R>;
-    readonly update?: (view: unknown) => Promise<void>;
-  },
-): Handle<R> {
-  const handle: Record<string, unknown> = {
-    id: correlationId,
-    dismiss: () => dispatch.dismiss(correlationId, opts.kind, opts.refId),
-  };
-  if (opts.update !== undefined) handle["update"] = opts.update;
-  if (opts.ask) {
-    // Lazy getter: the suspend check fires only when the body actually awaits `.response`.
-    Object.defineProperty(handle, "response", {
-      enumerable: true,
-      get: () => dispatch.awaitResolution<R>(correlationId, opts.decodeReply),
-    });
-  }
-  return handle as Handle<R>;
+  return { send, sendOneWay, awaitResolution };
 }

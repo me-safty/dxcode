@@ -15,11 +15,10 @@ import * as Schema from "effect/Schema";
 import type { MessageBroker } from "./t3work-sdk.broker.ts";
 import type { DurableWorkflowRuntime } from "./t3work-sdk.durableRuntime.ts";
 import { WorkflowError } from "./t3work-sdk.errors.ts";
-import { createHandlePrimitives } from "./t3work-sdk.handlePrimitives.ts";
 import type { HandleDispatch } from "./t3work-sdk.handles.ts";
 import { decodeWithSchema, setNestedValue } from "./t3work-sdk.internal.ts";
 import { createWorkflowPrimitives, type WorkflowPrimitives } from "./t3work-sdk.primitives.ts";
-import type { LlmDispatcher } from "./t3work-sdk.primitiveTypes.ts";
+import { createThreadPrimitives } from "./t3work-sdk.threadPrimitives.ts";
 import {
   extractMeta,
   prepareWorkflow,
@@ -34,16 +33,10 @@ import { buildWorkflowGlobals } from "./t3work-sdk.workflowGlobals.ts";
 const nodeRequire = createRequire(import.meta.url);
 const fs = nodeRequire("node:fs") as { readonly readFileSync: (p: string, e: "utf8") => string };
 
-const defaultLlm: LlmDispatcher = () => {
-  throw new WorkflowError(
-    "This workflow called agent()/agent.task() but the run was started without an `llm` dispatcher. Provide one via the run options.",
-  );
-};
-
 const defaultBroker: MessageBroker = {
   send: () => {
     throw new WorkflowError(
-      "This workflow fired a Handle primitive (ui.show/thread.send/child.spawn/user.*) but the run was started without a `broker`. Provide one via the run options.",
+      "This workflow fired a thread verb (spawnThread/agent/thread.askAgent/askUser/notify) but the run was started without a `broker`. Provide one via the run options.",
     );
   },
 };
@@ -87,6 +80,8 @@ export async function runPreparedBody(opts: {
   readonly primitives: WorkflowPrimitives;
   readonly handleDispatch: HandleDispatch;
   readonly broker?: MessageBroker;
+  readonly launchThreadId?: string;
+  readonly defaultModel?: T.ModelSelection;
 }): Promise<unknown> {
   const source: WorkflowSource = {
     absolutePath: opts.ref.absolutePath,
@@ -102,11 +97,13 @@ export async function runPreparedBody(opts: {
           opts.args,
           `Invalid inputs for workflow '${meta.name}'`,
         );
-  // Capability-gate the Handle globals against this workflow's declared meta.capabilities.
-  const handles = createHandlePrimitives({
+  // Build the Thread-model globals; capability-gate askUser/notifyUser against meta.capabilities.
+  const threads = createThreadPrimitives({
     dispatch: opts.handleDispatch,
     broker: opts.broker ?? defaultBroker,
     capabilities: engineCapabilities(meta),
+    launchThreadId: opts.launchThreadId,
+    defaultModel: opts.defaultModel,
   });
   const globals = buildWorkflowGlobals({
     args: decodedArgs,
@@ -114,7 +111,7 @@ export async function runPreparedBody(opts: {
     scripts: buildScriptTree(opts.scripts, opts.runtime),
     runtime: opts.runtime,
     primitives: opts.primitives,
-    handles,
+    threads,
   });
   const output = await withWorkflowRuntime(opts.runtime, () =>
     runWorkflowBody(prepared, source, globals),
@@ -145,7 +142,6 @@ export function buildWorkflowPrimitives(opts: {
     runBlackBoxed: runtime.runBlackBoxed,
     spentAgentTokens: runtime.spentAgentTokens,
     hostNow: runtime.hostNow,
-    llm: options.llm ?? defaultLlm,
     budgetTotal: options.budget ?? 0,
     onPhase: options.onPhase ?? (() => {}),
     onLog: options.onLog ?? (() => {}),
@@ -161,6 +157,8 @@ export function buildWorkflowPrimitives(opts: {
       primitives: nested,
       handleDispatch: runtime.handles,
       broker,
+      ...(options.launchThreadId === undefined ? {} : { launchThreadId: options.launchThreadId }),
+      ...(options.defaultModel === undefined ? {} : { defaultModel: options.defaultModel }),
     });
   return createWorkflowPrimitives({ ...shared, runSubWorkflow });
 }

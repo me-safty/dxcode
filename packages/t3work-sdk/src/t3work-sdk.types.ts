@@ -1,7 +1,6 @@
 import * as Schema from "effect/Schema";
 
 import type { MessageBroker } from "./t3work-sdk.broker.ts";
-import type { LlmDispatcher } from "./t3work-sdk.primitiveTypes.ts";
 
 export type EngineCapability = "thread" | "child" | "user" | "script" | "ui" | "workflow";
 export type IntegrationMethod = (...args: ReadonlyArray<unknown>) => Promise<unknown>;
@@ -49,6 +48,12 @@ export interface ModelRef<Id extends string = string, Provider extends string = 
   readonly provider: Provider;
 }
 
+/** A per-call model choice: a project-configured provider-instance id + a typed `ModelRef`. */
+export interface ModelSelection {
+  readonly provider: string;
+  readonly model: ModelRef;
+}
+
 export interface WorkflowRef<Inputs = unknown, Outputs = unknown, Path extends string = string> {
   readonly kind: "workflow";
   readonly path: Path;
@@ -64,12 +69,8 @@ export interface ToolHandlerCtx {
   readonly log: ToolLogger;
   readonly fetch: FetchLike;
   readonly workspace: ToolWorkspace;
-  /**
-   * Call another tool from inside a handler. This is a **black box**: the nested call is
-   * NOT journaled and does not consume a workflow `seq`. The enclosing primitive is the
-   * journaled checkpoint, and on replay it returns from the journal without re-running the
-   * handler — so its nested calls must not have journal positions of their own.
-   */
+  /** Call another tool from inside a handler. A **black box**: the nested call is NOT journaled
+   * and consumes no `seq` (the enclosing primitive is the journaled checkpoint). */
   readonly callTool: <I, R>(ref: ToolRef<I, R>, args: I) => Promise<R>;
   readonly github?: IntegrationClient;
   readonly jira?: IntegrationClient;
@@ -138,11 +139,10 @@ export type WorkflowSdkRegistry = {
 };
 
 /**
- * Every journaled primitive the engine knows about. `tool`/`script`/`script-never`, the
- * deterministic `now`/`random`/`uuid`, and the 25.3 `agent`/`agent.task`/`parallel`/
- * `pipeline`/`workflow`/`wait` primitives are journaled; the `thread.*`/`child.*`/`user.*`/
- * `ui.show` Handle primitives are reserved for 25.4. One vocabulary shared by the journal
- * `kind` and the runtime dispatch seats so later phases need no breaking change.
+ * Every journaled primitive. `tool`/`script`/`script-never`, `now`/`random`/`uuid`, and the
+ * `wait`/`parallel`/`pipeline`/`workflow` composition primitives are normal journaled calls;
+ * the four Thread-model verbs split into a `sent`/`resolved` pair (Epic 25 §The thread model) —
+ * `thread.create`/`thread.message` are one-way, `thread.turn`/`user.input` are ask-shaped.
  */
 export type PrimitiveKind =
   | "tool"
@@ -152,16 +152,13 @@ export type PrimitiveKind =
   | "random"
   | "uuid"
   | "wait"
-  | "agent"
-  | "agent.task"
   | "parallel"
   | "pipeline"
-  | "thread.send"
-  | "child.spawn"
-  | "user.ask"
-  | "user.notify"
-  | "ui.show"
-  | "workflow";
+  | "workflow"
+  | "thread.create"
+  | "thread.turn"
+  | "thread.message"
+  | "user.input";
 
 /**
  * A single journaled primitive call. The engine assigns it a `seq`, hashes `args`, and
@@ -215,12 +212,14 @@ export interface WorkflowRunOptions {
   readonly workspace?: ToolWorkspace;
   readonly log?: ToolLogger;
   readonly workspaceRoot?: string;
-  // 25.3 primitive wiring: `llm` backs agent/agent.task (calling them without one throws);
   // `budget` is the body's `budget.total`; `onPhase`/`onLog` are cosmetic progress callbacks.
-  readonly llm?: LlmDispatcher;
   readonly budget?: number;
   readonly onPhase?: (title: string) => void;
   readonly onLog?: (message: string) => void;
-  // 25.4 Handle wiring: the host delivery seam ui.show/thread.send/child.spawn/user.* fire into.
+  // Thread-model wiring: thread verbs fire through `broker` into the host. `launchThreadId` is
+  // the chat the user launched from (the `thread` global binds to it; absent → headless).
+  // `defaultModel` backs agent/askAgent calls that omit a per-call model.
   readonly broker?: MessageBroker;
+  readonly launchThreadId?: string;
+  readonly defaultModel?: ModelSelection;
 }

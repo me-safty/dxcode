@@ -49,7 +49,8 @@ export interface DurableWorkflowRuntime extends T.WorkflowRuntime {
   /** Run `fn` with the black-box depth lifted — its primitive calls execute live and are
    * not journaled. Backs `parallel`/`pipeline`/`workflow`. */
   readonly runBlackBoxed: <R>(fn: () => Promise<R>) => Promise<R>;
-  /** Sum of `tokens` over the `agent`/`agent.task` entries journaled so far — backs `budget`. */
+  /** Tokens spent so far — backs `budget.spent()`. Thread-turn token rollup is deferred
+   * (Epic 25 §Out of scope), so this is currently always 0. */
   readonly spentAgentTokens: () => number;
   /** Real host wall-clock (unjournaled) — backs `wait`'s deadline math. */
   readonly hostNow: () => number;
@@ -76,13 +77,10 @@ export function createDurableWorkflowRuntime(config: DurableRuntimeConfig): Dura
   // Real host wall-clock/entropy — journaled by the live path, returned raw by the black box.
   const host = hostSource();
 
-  // Budget accumulator: summed as `agent`/`agent.task` entries replay or journal (rebuilds identically on resume; black-boxed agent calls never reach a record site).
-  let spentAgentTokens = 0;
-  const recordAgentTokens = (kind: T.PrimitiveKind, result: unknown): void => {
-    if (kind !== "agent" && kind !== "agent.task") return;
-    const tokens = (result as { readonly tokens?: unknown } | null)?.tokens;
-    if (typeof tokens === "number") spentAgentTokens += tokens;
-  };
+  // Token rollup across thread turns is deferred (Epic 25 §Out of scope): agent verbs now run
+  // as `thread.turn` Handle primitives whose resolved reply carries no token count, so the
+  // `budget` accumulator reads 0 for this phase.
+  const spentAgentTokens = 0;
 
   // Handlers are black boxes — a tool/script that calls another tool must NOT journal.
   const blackBox: T.WorkflowRuntime = {
@@ -133,7 +131,6 @@ export function createDurableWorkflowRuntime(config: DurableRuntimeConfig): Dura
       assertJournalMatch(currentSeq, recorded, call.kind, call.refId, argsHash, config.filePath);
       // A matched `script-never` marker always re-runs (its result was never recorded).
       if (isNever) return await call.exec();
-      recordAgentTokens(call.kind, recorded.result);
       return await decodeRecorded(call, recorded.result, currentSeq);
     }
 
@@ -163,7 +160,6 @@ export function createDurableWorkflowRuntime(config: DurableRuntimeConfig): Dura
       });
     }
     config.writer.append({ ...baseEntry, kind: call.kind, result });
-    recordAgentTokens(call.kind, result);
     return result;
   };
 

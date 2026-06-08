@@ -25,8 +25,8 @@ import {
   TimeoutError,
   WorkflowError,
 } from "./t3work-sdk.errors.ts";
-import type { WorkflowHandlePrimitives } from "./t3work-sdk.handlePrimitives.ts";
 import type { WorkflowPrimitives } from "./t3work-sdk.primitives.ts";
+import type { WorkflowThreadPrimitives } from "./t3work-sdk.threadPrimitives.ts";
 import { defineWorkflow } from "./t3work-sdk.ts";
 
 /** The journaled-entropy surface the deterministic globals route through (the durable
@@ -106,10 +106,10 @@ export function hostSource(): DeterministicSource {
 
 /**
  * Assemble the engine surface the loader binds into the body context: `args`, `Schema`, the
- * `tools.*`/`scripts.*` trees, the 25.3 primitive set (`agent`/`parallel`/`pipeline`/
- * `workflow`/`wait`/`budget`/`phase`/`log`), the deterministic globals, and the catchable
- * error-class globals (Epic 25 §Error classes — the full taxonomy is bindable even though
- * 25.2/25.3 only raise a subset).
+ * `tools.*`/`scripts.*` trees, the composition primitive set (`parallel`/`pipeline`/
+ * `workflow`/`wait`/`budget`/`phase`/`log`), the Thread-model globals (`thread`/`spawnThread`/
+ * `agent`), the deterministic globals, and the catchable error-class globals (Epic 25 §Error
+ * classes — the full taxonomy is bindable even though only a subset is raised so far).
  */
 export function buildWorkflowGlobals(opts: {
   readonly args: unknown;
@@ -117,17 +117,16 @@ export function buildWorkflowGlobals(opts: {
   readonly scripts: Record<string, unknown>;
   readonly runtime: DeterministicSource;
   readonly primitives: WorkflowPrimitives;
-  readonly handles: WorkflowHandlePrimitives;
+  readonly threads: WorkflowThreadPrimitives;
 }): Record<string, unknown> {
   const p = opts.primitives;
-  const h = opts.handles;
+  const t = opts.threads;
   return {
     ...deterministicGlobals(opts.runtime),
     args: opts.args,
     Schema,
     tools: opts.tools,
     scripts: opts.scripts,
-    agent: p.agent,
     parallel: p.parallel,
     pipeline: p.pipeline,
     workflow: p.workflow,
@@ -135,11 +134,12 @@ export function buildWorkflowGlobals(opts: {
     budget: p.budget,
     phase: p.phase,
     log: p.log,
-    // 25.4 Handle globals (capability-gated per meta.capabilities — see handlePrimitives).
-    ui: h.ui,
-    thread: h.thread,
-    child: h.child,
-    user: h.user,
+    // The Thread model (Epic 25 §The thread model): `thread` is the launching chat (undefined
+    // if headless); `spawnThread` makes an isolated thread; `agent` is the one-shot shortcut
+    // for `spawnThread().askAgent()`. `askUser`/`notifyUser` are capability-gated per call.
+    thread: t.thread,
+    spawnThread: t.spawnThread,
+    agent: t.agent,
     // `defineWorkflow` lets a body construct the typed sub-workflow ref `workflow()` needs;
     // it is a pure ref constructor (no capability concern), so it is unconditionally bound.
     defineWorkflow,

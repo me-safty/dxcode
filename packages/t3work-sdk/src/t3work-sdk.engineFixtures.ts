@@ -12,13 +12,12 @@ import { join } from "node:path";
 import * as Schema from "effect/Schema";
 
 import type * as AgentPrimitiveWorkflow from "./__fixtures__/t3work-sdk.agentPrimitive.workflow.ts";
-import type * as AgentTaskWorkflow from "./__fixtures__/t3work-sdk.agentTask.workflow.ts";
 import type * as AskResponseWorkflow from "./__fixtures__/t3work-sdk.askResponse.workflow.ts";
 import type * as BudgetWorkflow from "./__fixtures__/t3work-sdk.budgetPrimitive.workflow.ts";
 import type * as ChildSpawnWorkflow from "./__fixtures__/t3work-sdk.childSpawn.workflow.ts";
-import type * as HandleDismissWorkflow from "./__fixtures__/t3work-sdk.handleDismiss.workflow.ts";
+import type * as E2eReviewWorkflow from "./__fixtures__/t3work-sdk.e2eReview.workflow.ts";
 import type * as FireForgetWorkflow from "./__fixtures__/t3work-sdk.handleFireForget.workflow.ts";
-import type * as ThreadSendDeniedWorkflow from "./__fixtures__/t3work-sdk.threadSendDenied.workflow.ts";
+import type * as UserAskDeniedWorkflow from "./__fixtures__/t3work-sdk.userAskDenied.workflow.ts";
 import type * as ParallelWorkflow from "./__fixtures__/t3work-sdk.parallelPrimitive.workflow.ts";
 import type * as PipelineWorkflow from "./__fixtures__/t3work-sdk.pipelinePrimitive.workflow.ts";
 import type * as SubParentWorkflow from "./__fixtures__/t3work-sdk.subParent.workflow.ts";
@@ -34,8 +33,8 @@ import type * as ScriptWorkflow from "./__fixtures__/t3work-sdk.journalScript.wo
 import type * as TwoToolsWorkflow from "./__fixtures__/t3work-sdk.journalTwoTools.workflow.ts";
 import type * as UuidWorkflow from "./__fixtures__/t3work-sdk.journalUuid.workflow.ts";
 import type * as VoidResultWorkflow from "./__fixtures__/t3work-sdk.voidResult.workflow.ts";
+import type { MessageEnvelope, MockBrokerOutcome } from "./t3work-sdk.broker.ts";
 import { defineScript, defineTool, defineToolGroup, defineWorkflow } from "./t3work-sdk.index.ts";
-import type { LlmDispatcher } from "./t3work-sdk.primitiveTypes.ts";
 
 // ── Test-controlled tool behavior ──────────────────────────────────────────
 // Counters live on a single mutable holder so tests across multiple files can read AND
@@ -47,7 +46,6 @@ export const counters = {
   noopCalls: 0,
   greetCalls: 0,
   ticketCounter: 0,
-  llmCalls: 0,
 };
 export function resetCounters(): void {
   counters.approveCalls = 0;
@@ -56,27 +54,32 @@ export function resetCounters(): void {
   counters.noopCalls = 0;
   counters.greetCalls = 0;
   counters.ticketCounter = 0;
-  counters.llmCalls = 0;
 }
 
-/** A canned LLM response keyed by prompt; `text` backs a bare `agent`, `structured` backs a
- * schema/`agent.task` call. */
-export interface MockLlmResponse {
-  readonly text?: string;
-  readonly structured?: unknown;
-  readonly tokens: number;
+/** The `prompt`/`question`/`text` field of a thread-verb envelope, for matching in tests. */
+export function envelopeText(envelope: MessageEnvelope): string {
+  const payload = envelope.payload as Record<string, unknown>;
+  return String(payload["prompt"] ?? payload["question"] ?? payload["text"] ?? "");
 }
 
-/** Deterministic {@link LlmDispatcher} for tests: looks responses up by prompt and bumps
- * `counters.llmCalls` so a test can assert the dispatcher does NOT re-fire on replay. */
-export function createMockLlmDispatcher(responses: Map<string, MockLlmResponse>): LlmDispatcher {
-  return async (req) => {
-    const canned = responses.get(req.prompt);
-    if (canned === undefined) {
-      throw new Error(`mock LLM dispatcher: no canned response for prompt '${req.prompt}'`);
+/**
+ * A mock-broker `decide` that resolves a thread turn / user input whose prompt CONTAINS one of
+ * the given keys with that key's reply (an object is JSON-stringified, mimicking an agent's
+ * text reply that the SDK then parses + validates), and defers everything else (one-way verbs
+ * and unmatched asks).
+ */
+export function resolveTurnsBy(
+  lookup: ReadonlyArray<readonly [match: string, reply: unknown]>,
+): (envelope: MessageEnvelope) => MockBrokerOutcome {
+  return (envelope) => {
+    if (envelope.kind !== "thread.turn" && envelope.kind !== "user.input") return { kind: "defer" };
+    const text = envelopeText(envelope);
+    for (const [match, reply] of lookup) {
+      if (text.includes(match)) {
+        return { kind: "resolve", reply: typeof reply === "string" ? reply : JSON.stringify(reply) };
+      }
     }
-    counters.llmCalls += 1;
-    return { text: canned.text ?? "", tokens: canned.tokens, structured: canned.structured };
+    return { kind: "defer" };
   };
 }
 
@@ -205,9 +208,6 @@ export const uuidWorkflow = defineWorkflow<typeof UuidWorkflow>(
 export const agentPrimitiveWorkflow = defineWorkflow<typeof AgentPrimitiveWorkflow>(
   "./__fixtures__/t3work-sdk.agentPrimitive.workflow.ts",
 );
-export const agentTaskWorkflow = defineWorkflow<typeof AgentTaskWorkflow>(
-  "./__fixtures__/t3work-sdk.agentTask.workflow.ts",
-);
 export const budgetWorkflow = defineWorkflow<typeof BudgetWorkflow>(
   "./__fixtures__/t3work-sdk.budgetPrimitive.workflow.ts",
 );
@@ -226,17 +226,17 @@ export const waitWorkflow = defineWorkflow<typeof WaitWorkflow>(
 export const askResponseWorkflow = defineWorkflow<typeof AskResponseWorkflow>(
   "./__fixtures__/t3work-sdk.askResponse.workflow.ts",
 );
-export const handleDismissWorkflow = defineWorkflow<typeof HandleDismissWorkflow>(
-  "./__fixtures__/t3work-sdk.handleDismiss.workflow.ts",
-);
 export const fireForgetWorkflow = defineWorkflow<typeof FireForgetWorkflow>(
   "./__fixtures__/t3work-sdk.handleFireForget.workflow.ts",
 );
-export const threadSendDeniedWorkflow = defineWorkflow<typeof ThreadSendDeniedWorkflow>(
-  "./__fixtures__/t3work-sdk.threadSendDenied.workflow.ts",
+export const userAskDeniedWorkflow = defineWorkflow<typeof UserAskDeniedWorkflow>(
+  "./__fixtures__/t3work-sdk.userAskDenied.workflow.ts",
 );
 export const childSpawnWorkflow = defineWorkflow<typeof ChildSpawnWorkflow>(
   "./__fixtures__/t3work-sdk.childSpawn.workflow.ts",
+);
+export const e2eReviewWorkflow = defineWorkflow<typeof E2eReviewWorkflow>(
+  "./__fixtures__/t3work-sdk.e2eReview.workflow.ts",
 );
 
 export const runsRoot = mkdtempSync(join(tmpdir(), "t3work-engine-"));

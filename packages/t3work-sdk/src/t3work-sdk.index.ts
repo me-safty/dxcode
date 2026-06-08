@@ -56,7 +56,6 @@ export type {
   MessageEnvelope,
   MockBroker,
   MockBrokerOutcome,
-  ThreadTargetWire,
 } from "./t3work-sdk.broker.ts";
 export type { BuiltinToolsTree } from "./t3work-sdk.builtins.ts";
 export type {
@@ -67,11 +66,12 @@ export type {
   WorkflowRunResult,
 } from "./t3work-sdk.engine.ts";
 export type {
+  AskOpts,
+  SpawnThreadOpts,
+  Thread,
   ThreadRef,
-  ThreadTarget,
-  WorkflowHandlePrimitives,
-} from "./t3work-sdk.handlePrimitives.ts";
-export type { Handle, UiHandle } from "./t3work-sdk.handles.ts";
+  WorkflowThreadPrimitives,
+} from "./t3work-sdk.threadPrimitives.ts";
 export type { ReplayDriftFacet, ReplayDriftReason } from "./t3work-sdk.errors.ts";
 export type { JournalEntry } from "./t3work-sdk.journalReader.ts";
 export type { WorkflowMeta } from "./t3work-sdk.loader.ts";

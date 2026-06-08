@@ -1,18 +1,18 @@
-// fire-and-forget fixture: ui.show (no responseSchema → Handle<never>) and user.notify each
-// record a single "sent" entry and never suspend — there is no `.response` on the type, so
-// the body cannot await a reply.
+// fire-and-forget fixture: spawnThread + notifyAgent + notifyUser each record a single "sent"
+// entry and never suspend — `notify*` return void, so the body cannot await a reply.
 import { Schema } from "effect";
 
-export const Outputs = Schema.Struct({ bannerId: Schema.String, noteId: Schema.String });
+export const Outputs = Schema.Struct({ threadId: Schema.String });
 
 export const meta = {
   name: "fixtures.fire-forget",
-  description: "Renders a banner and notifies the user; neither awaits a reply.",
+  description: "Spawns a thread and posts two one-way messages; neither awaits a reply.",
   outputs: Outputs,
-  capabilities: ["ui", "user"],
+  capabilities: ["user"],
 } as const;
 
-const banner = await ui.show({ message: "Working…" });
-const note = await user.notify("All done.");
+const worker = spawnThread({ name: "worker" });
+worker.notifyAgent("heads up");
+worker.notifyUser("fyi");
 
-return { bannerId: banner.id, noteId: note.id };
+return { threadId: worker.id.id };

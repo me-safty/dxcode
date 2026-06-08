@@ -1,20 +1,22 @@
 /**
- * The message-broker seam (Epic 25.4 §The Handle pattern, Part 3). The engine does NOT
- * deliver messages — the host does. A handle's `sent` entry fires `broker.send(envelope,
- * resolver)`; the host routes the envelope into the recipient thread and, when a reply
- * lands, settles it. Two settlement paths:
+ * The message-broker seam (Epic 25 §The thread model — host wiring). The engine does NOT
+ * deliver messages — the host does. A thread verb's `sent` entry fires `broker.send(envelope,
+ * resolver)`; the host routes the envelope into orchestration and, when a reply lands, settles
+ * it. Two settlement paths:
  *
  *   • Synchronous — the broker calls `resolver.resolve(reply)` inside `send`. The runtime
  *     appends the `resolved` journal entry immediately, so the same run sees the reply and
  *     never suspends. (This is what the mock broker uses, and what an in-process recipient
  *     would do.)
  *   • Out of band — the broker returns without resolving; the run suspends. When the reply
- *     arrives later the host calls {@link appendResolvedEntry} to write the `resolved` line,
- *     then `resumeWorkflow`, which replays to the same `await` and finds it.
+ *     arrives later (a turn completes, or the user posts a message) the host calls
+ *     {@link appendResolvedEntry} to write the `resolved` line, then `resumeWorkflow`, which
+ *     replays to the same `await` and finds it.
  *
- * Agents (non-workflow) get the fire-and-forget half only (see Epic 25 §Agents vs.
- * workflows): their `t3work.thread.send` maps to a broker `send` with no resolver wiring —
- * never the suspending workflow primitive.
+ * The four thread verbs map onto orchestration: `thread.create` → dispatch(thread.create),
+ * `thread.turn` → dispatch(thread.turn.start) (resolves on turn-done), `thread.message` →
+ * dispatch(thread.message.upsert) (one-way), `user.input` → a system message requesting input
+ * (resolves on the user's reply). One-way verbs never settle a resolver.
  */
 
 import * as DateTime from "effect/DateTime";
@@ -25,25 +27,15 @@ import { journalFilePath } from "./t3work-sdk.journal.ts";
 import { readJournalEntries } from "./t3work-sdk.journalReader.ts";
 import { JournalWriter } from "./t3work-sdk.journalWriter.ts";
 
-/** The five Handle-firing primitives, as the broker sees them. */
-export type HandleKind = "ui.show" | "thread.send" | "child.spawn" | "user.ask" | "user.notify";
+/** The four thread-verb primitives, as the broker sees them. */
+export type HandleKind = "thread.create" | "thread.turn" | "thread.message" | "user.input";
 
-/** A resolved `thread.send` target descriptor (the wire form of a `ThreadTarget`). */
-export type ThreadTargetWire =
-  | { readonly kind: "self" }
-  | { readonly kind: "parent" }
-  | { readonly kind: "thread"; readonly id: string }
-  | { readonly kind: "child"; readonly id: string };
-
-/** What the host is handed for one fired side effect. */
+/** What the host is handed for one fired side effect. `payload` carries the verb's data —
+ * always a `threadId`, plus `prompt`/`question`/`text`/`name`/`model` per kind. */
 export interface MessageEnvelope {
   readonly correlationId: string;
   readonly kind: HandleKind;
-  /** Present for `thread.send`; absent for ui/child/user. */
-  readonly target?: ThreadTargetWire;
   readonly payload: unknown;
-  /** Schema identity for ask-shaped calls (the response is validated against it). */
-  readonly responseSchema?: unknown;
 }
 
 /** The host-provided delivery seam, injected via `WorkflowRunOptions.broker`. */
@@ -78,34 +70,29 @@ export function createMockBroker(
       const outcome = decide(envelope);
       if (outcome.kind === "resolve") resolver.resolve(outcome.reply);
       else if (outcome.kind === "reject") resolver.reject();
-      // "defer" → leave it pending → the workflow suspends on `await handle.response`.
+      // "defer" → leave it pending → an ask verb suspends on `await`.
     },
   };
 }
 
 /**
- * Host delivery handlers, one per Handle kind. A handler FIRES the side effect into the
- * recipient and returns — it does NOT settle the reply here. Replies arrive out of band:
- * when one lands the host calls {@link appendResolvedEntry} + `resumeWorkflow`. This is the
- * real (non-mock) path. A host wires:
- *   • `child.spawn`  → the existing `t3work-toolBrokerStartChild` (`makeStartChildThread`);
- *   • `thread.send`  → the cross-thread message broker (Epic 16) — this is also the
- *     fire-and-forget surface an *agent's* `t3work.thread.send` maps onto (no suspension);
- *   • `ui.show` / `user.ask` / `user.notify` → the tiered-message / escalation surfaces.
+ * Host delivery handlers, one per thread kind. A handler FIRES the side effect into
+ * orchestration and returns — it does NOT settle an ask reply here. Ask replies arrive out of
+ * band: when a turn completes or the user replies, the host calls {@link appendResolvedEntry}
+ * + `resumeWorkflow`. One-way verbs (`thread.create` / `thread.message`) have no reply. An
+ * unhandled kind is a no-op fire (that surface is not wired in this runtime).
  */
 export interface HostBrokerHandlers {
-  readonly "ui.show"?: (envelope: MessageEnvelope) => Promise<void>;
-  readonly "thread.send"?: (envelope: MessageEnvelope) => Promise<void>;
-  readonly "child.spawn"?: (envelope: MessageEnvelope) => Promise<void>;
-  readonly "user.ask"?: (envelope: MessageEnvelope) => Promise<void>;
-  readonly "user.notify"?: (envelope: MessageEnvelope) => Promise<void>;
+  readonly "thread.create"?: (envelope: MessageEnvelope) => Promise<void>;
+  readonly "thread.turn"?: (envelope: MessageEnvelope) => Promise<void>;
+  readonly "thread.message"?: (envelope: MessageEnvelope) => Promise<void>;
+  readonly "user.input"?: (envelope: MessageEnvelope) => Promise<void>;
 }
 
 /**
  * The real broker: route each envelope to its host handler and return. The `resolver` is
  * intentionally unused — synchronous resolution is the mock/in-process path; a real host
- * settles replies out of band via {@link appendResolvedEntry}. An unhandled kind is a no-op
- * fire (the recipient surface is not wired in this runtime).
+ * settles ask replies out of band via {@link appendResolvedEntry}.
  */
 export function createHostBroker(handlers: HostBrokerHandlers): MessageBroker {
   return {

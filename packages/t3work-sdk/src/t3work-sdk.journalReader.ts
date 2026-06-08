@@ -9,8 +9,8 @@
  *   { seq, callId, kind, refId, argsHash, result?, phase?, correlationId?, startedAt, endedAt }
  *
  * `phase` (25.4) splits a Handle primitive's lifecycle into two lines:
- *   • `phase: "sent"`    — the side effect fired (ui.show / thread.send / child.spawn /
- *     user.ask / user.notify). Carries a `correlationId`, NO `result`. Keyed by `seq`.
+ *   • `phase: "sent"`    — the side effect fired (thread.create / thread.turn / thread.message
+ *     / user.input). Carries a `correlationId`, NO `result`. Keyed by `seq`.
  *   • `phase: "resolved"`— the reply for that `correlationId` settled (or was dismissed).
  *     Carries the `result`. Keyed by `correlationId`, NOT by `seq` — it arrives out of band
  *     (possibly hours later, via the broker), so it does not occupy a replay position.
@@ -59,16 +59,13 @@ export const JournalEntrySchema = Schema.Struct({
     "random",
     "uuid",
     "wait",
-    "agent",
-    "agent.task",
     "parallel",
     "pipeline",
-    "thread.send",
-    "child.spawn",
-    "user.ask",
-    "user.notify",
-    "ui.show",
     "workflow",
+    "thread.create",
+    "thread.turn",
+    "thread.message",
+    "user.input",
   ]),
   /** Tool id (e.g. `github.pull_request.merge`) or script/primitive registration name. */
   refId: Schema.String,

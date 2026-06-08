@@ -114,6 +114,10 @@ export async function executeRun<O>(opts: {
       primitives,
       handleDispatch: runtime.handles,
       ...(opts.options.broker === undefined ? {} : { broker: opts.options.broker }),
+      ...(opts.options.launchThreadId === undefined
+        ? {}
+        : { launchThreadId: opts.options.launchThreadId }),
+      ...(opts.options.defaultModel === undefined ? {} : { defaultModel: opts.options.defaultModel }),
     });
     return { kind: "completed", output: result as O };
   } catch (error) {
