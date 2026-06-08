@@ -156,6 +156,7 @@ function createBaseServerConfig(): ServerConfig {
           homePath: "",
           customModels: [],
           launchArgs: "",
+          useCustomSystemPrompt: false,
         },
         cursor: { enabled: true, binaryPath: "", apiEndpoint: "", customModels: [] },
         opencode: {

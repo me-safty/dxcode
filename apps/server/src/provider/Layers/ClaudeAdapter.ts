@@ -3065,12 +3065,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
-        // Override Claude Code's built-in preset system prompt with a port of
-        // OpenCode's anthropic.txt base prompt. See ClaudeSystemPrompt.ts.
-        // NOTE: a custom-string systemPrompt bypasses the preset's dynamic
-        // sections (cwd / auto-loaded CLAUDE.md / git status). settingSources
-        // below still loads settings + permissions.
-        systemPrompt: CLAUDE_OPENCODE_ANTHROPIC_SYSTEM_PROMPT,
+        // System prompt selection (defaults to the claude_code preset):
+        //   - preset: Claude Code's built-in prompt, which also injects the
+        //     dynamic sections (cwd / auto-loaded CLAUDE.md memory / git status).
+        //   - custom string: the bundled port of OpenCode's anthropic.txt base
+        //     prompt (see ClaudeSystemPrompt.ts). A custom-string systemPrompt
+        //     bypasses the preset's dynamic sections; settingSources below still
+        //     loads settings + permissions.
+        systemPrompt: claudeSettings.useCustomSystemPrompt
+          ? CLAUDE_OPENCODE_ANTHROPIC_SYSTEM_PROMPT
+          : { type: "preset", preset: "claude_code" },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is
         // normalized to `xhigh` above and paired with `settings.ultracode`.
@@ -3113,6 +3117,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.query.include_partial_messages": true,
         "claude.query.additional_directories": input.cwd ? [input.cwd] : [],
         "claude.query.setting_sources": [...CLAUDE_SETTING_SOURCES],
+        "claude.query.use_custom_system_prompt": claudeSettings.useCustomSystemPrompt,
         "claude.query.settings_json": encodeJsonStringForDiagnostics(settings) ?? "",
         "claude.query.extra_args_json": encodeJsonStringForDiagnostics(extraArgs) ?? "",
         "claude.query.path_to_executable": claudeBinaryPath,
