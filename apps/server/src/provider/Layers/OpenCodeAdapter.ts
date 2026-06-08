@@ -757,6 +757,32 @@ export function makeOpenCodeAdapter(
       }
 
       const turnId = context.activeTurnId;
+
+      // OpenCode signals turn completion either via `session.status` with
+      // `status.type === "idle"` or via the dedicated `session.idle` event,
+      // depending on the SDK/server version. Both must flip the session back to
+      // ready and emit `turn.completed`, otherwise the session stays "running"
+      // forever (and the Stop button appears to do nothing).
+      const completeActiveTurn = Effect.fn("completeActiveTurn")(function* () {
+        if (!context.activeTurnId) {
+          return;
+        }
+        const completedTurnId = context.activeTurnId;
+        context.activeTurnId = undefined;
+        yield* updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: context.session.threadId,
+            turnId: completedTurnId,
+            raw: event,
+          })),
+          type: "turn.completed",
+          payload: {
+            state: "completed",
+          },
+        });
+      });
+
       yield* writeNativeEventBestEffort(context.session.threadId, {
         observedAt: yield* nowIso,
         event: {
@@ -1015,20 +1041,13 @@ export function makeOpenCodeAdapter(
           }
 
           if (event.properties.status.type === "idle" && turnId) {
-            context.activeTurnId = undefined;
-            yield* updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
-            yield* emit({
-              ...(yield* buildEventBase({
-                threadId: context.session.threadId,
-                turnId,
-                raw: event,
-              })),
-              type: "turn.completed",
-              payload: {
-                state: "completed",
-              },
-            });
+            yield* completeActiveTurn();
           }
+          break;
+        }
+
+        case "session.idle": {
+          yield* completeActiveTurn();
           break;
         }
 
