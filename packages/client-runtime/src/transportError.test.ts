@@ -55,6 +55,19 @@ describe("isInterruptArtifactErrorMessage", () => {
     ).toBe(true);
   });
 
+  it("returns true for the OpenCode bare Aborted message", () => {
+    expect(isInterruptArtifactErrorMessage("Aborted")).toBe(true);
+    expect(isInterruptArtifactErrorMessage("aborted")).toBe(true);
+    expect(isInterruptArtifactErrorMessage("Aborted.")).toBe(true);
+    expect(isInterruptArtifactErrorMessage("  Aborted  ")).toBe(true);
+    expect(isInterruptArtifactErrorMessage("AbortError: Aborted")).toBe(true);
+  });
+
+  it("returns false for errors that merely mention aborted", () => {
+    expect(isInterruptArtifactErrorMessage("The request was aborted by the server")).toBe(false);
+    expect(isInterruptArtifactErrorMessage("Aborted because the file was missing")).toBe(false);
+  });
+
   it("returns false for business logic errors", () => {
     expect(isInterruptArtifactErrorMessage("Thread not found")).toBe(false);
     expect(isInterruptArtifactErrorMessage("Claude turn failed.")).toBe(false);
@@ -79,6 +92,10 @@ describe("sanitizeThreadErrorMessage", () => {
         "[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use",
       ),
     ).toBeNull();
+  });
+
+  it("strips OpenCode Aborted interrupt messages", () => {
+    expect(sanitizeThreadErrorMessage("Aborted")).toBeNull();
   });
 
   it("preserves non-transport errors", () => {

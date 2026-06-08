@@ -7,15 +7,24 @@ const TRANSPORT_ERROR_PATTERNS = [
 ] as const;
 
 /**
- * Diagnostic noise emitted by the Claude Agent SDK when a turn is aborted
- * mid-flight (e.g. the user presses stop while the model was about to call a
- * tool). The SDK yields an `error_during_execution` result whose first error is
- * an `[ede_diagnostic]` line such as:
- *   `[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use`
- * This is an interrupt artifact, not a real failure, so it should never surface
- * as a thread error banner.
+ * Noise emitted by provider SDKs when a turn is aborted mid-flight (e.g. the
+ * user presses stop or interrupts to send a new message). These are interrupt
+ * artifacts, not real failures, so they should never surface as a thread error
+ * banner.
+ *
+ * - Claude Agent SDK: yields an `error_during_execution` result whose first
+ *   error is an `[ede_diagnostic]` line such as:
+ *     `[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use`
+ * - OpenCode: emits a bare `Aborted` error message when the active session is
+ *   aborted via interrupt.
  */
-const INTERRUPT_ARTIFACT_PATTERNS = [/\[ede_diagnostic\]/i] as const;
+const INTERRUPT_ARTIFACT_PATTERNS = [
+  /\[ede_diagnostic\]/i,
+  // OpenCode aborts surface as exactly "Aborted" (optionally prefixed by an
+  // error class, e.g. "AbortError: Aborted"). Anchor to the whole message so we
+  // don't swallow legitimate errors that merely mention the word "aborted".
+  /^(?:[\w.]*error:\s*)?aborted\.?$/i,
+] as const;
 
 /**
  * Test whether an error message is an internal diagnostic artifact produced by
