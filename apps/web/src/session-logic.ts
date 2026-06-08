@@ -54,12 +54,23 @@ export interface WorkLogEntry {
   detail?: string;
   command?: string;
   rawCommand?: string;
+  output?: string;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+  durationMs?: number;
+  patch?: string;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
 }
+
+const MAX_PATCH_SEARCH_DEPTH = 4;
+const MAX_PATCH_STRINGS = 4;
+const MAX_INLINE_PATCH_CHARS = 200_000;
+const PATCH_TOO_LARGE_MESSAGE = `[patch omitted: exceeds ${MAX_INLINE_PATCH_CHARS} characters]`;
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
@@ -515,7 +526,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? (activity.payload as Record<string, unknown>)
       : null;
   const commandPreview = extractToolCommand(payload);
+  const commandResult = extractCommandResult(payload);
   const changedFiles = extractChangedFiles(payload);
+  const patch = extractToolPatch(payload);
   const title = extractToolTitle(payload);
   const isTaskActivity = activity.kind === "task.progress" || activity.kind === "task.completed";
   const taskSummary =
@@ -561,6 +574,28 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (commandPreview.rawCommand) {
     entry.rawCommand = commandPreview.rawCommand;
+  }
+  const isCommandEntry =
+    itemType === "command_execution" ||
+    requestKind === "command" ||
+    Boolean(commandPreview.command || commandPreview.rawCommand);
+  if (commandResult.output && !commandResult.stdout && !commandResult.stderr && isCommandEntry) {
+    entry.output = commandResult.output;
+  }
+  if (commandResult.stdout) {
+    entry.stdout = commandResult.stdout;
+  }
+  if (commandResult.stderr) {
+    entry.stderr = commandResult.stderr;
+  }
+  if (commandResult.exitCode !== null) {
+    entry.exitCode = commandResult.exitCode;
+  }
+  if (commandResult.durationMs !== null) {
+    entry.durationMs = commandResult.durationMs;
+  }
+  if (patch) {
+    entry.patch = patch;
   }
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
@@ -632,6 +667,12 @@ function mergeDerivedWorkLogEntries(
   const detail = next.detail ?? previous.detail;
   const command = next.command ?? previous.command;
   const rawCommand = next.rawCommand ?? previous.rawCommand;
+  const output = mergeTextOutput(previous.output, next.output);
+  const stdout = mergeTextOutput(previous.stdout, next.stdout);
+  const stderr = mergeTextOutput(previous.stderr, next.stderr);
+  const exitCode = next.exitCode ?? previous.exitCode;
+  const durationMs = next.durationMs ?? previous.durationMs;
+  const patch = next.patch ?? previous.patch;
   const toolTitle = next.toolTitle ?? previous.toolTitle;
   const itemType = next.itemType ?? previous.itemType;
   const requestKind = next.requestKind ?? previous.requestKind;
@@ -643,6 +684,12 @@ function mergeDerivedWorkLogEntries(
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
+    ...(output ? { output } : {}),
+    ...(stdout ? { stdout } : {}),
+    ...(stderr ? { stderr } : {}),
+    ...(exitCode !== undefined ? { exitCode } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(patch ? { patch } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
@@ -661,6 +708,22 @@ function mergeChangedFiles(
     return [];
   }
   return [...new Set(merged)];
+}
+
+function mergeTextOutput(
+  previous: string | undefined,
+  next: string | undefined,
+): string | undefined {
+  if (!previous) {
+    return next;
+  }
+  if (!next) {
+    return previous;
+  }
+  if (previous === next) {
+    return next;
+  }
+  return `${previous}${previous.endsWith("\n") ? "" : "\n"}${next}`;
 }
 
 function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | undefined {
@@ -894,6 +957,94 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
   };
 }
 
+function firstNumberFromRecord(
+  record: Record<string, unknown> | null,
+  keys: ReadonlyArray<string>,
+): number | null {
+  if (!record) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = asNumber(record[key]);
+    if (value !== null) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function firstIntegerFromRecord(
+  record: Record<string, unknown> | null,
+  keys: ReadonlyArray<string>,
+): number | null {
+  const value = firstNumberFromRecord(record, keys);
+  return value !== null && Number.isInteger(value) ? value : null;
+}
+
+function extractCommandResult(payload: Record<string, unknown> | null): {
+  output: string | null;
+  stdout: string | null;
+  stderr: string | null;
+  exitCode: number | null;
+  durationMs: number | null;
+} {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const itemResult = asRecord(item?.result);
+  const rawOutput = asRecord(data?.rawOutput);
+  const stdout =
+    firstRawStringFromRecord(rawOutput, ["stdout"]) ??
+    firstRawStringFromRecord(itemResult, ["stdout"]) ??
+    firstRawStringFromRecord(data, ["stdout"]) ??
+    firstRawStringFromRecord(payload, ["stdout"]);
+  const stderr =
+    firstRawStringFromRecord(rawOutput, ["stderr"]) ??
+    firstRawStringFromRecord(itemResult, ["stderr"]) ??
+    firstRawStringFromRecord(data, ["stderr"]) ??
+    firstRawStringFromRecord(payload, ["stderr"]);
+  const content =
+    stdout ??
+    firstRawStringFromRecord(rawOutput, ["content", "output", "text", "result"]) ??
+    firstRawStringFromRecord(itemResult, ["content", "output", "text", "result"]) ??
+    firstRawStringFromRecord(item, ["aggregatedOutput", "output", "text", "result"]);
+  const strippedContent = content ? stripTrailingExitCode(content) : null;
+  const detailExit =
+    typeof payload?.detail === "string" ? stripTrailingExitCode(payload.detail) : null;
+  const exitCode =
+    firstIntegerFromRecord(rawOutput, ["exitCode", "code"]) ??
+    firstIntegerFromRecord(itemResult, ["exitCode", "code"]) ??
+    firstIntegerFromRecord(item, ["exitCode", "code"]) ??
+    firstIntegerFromRecord(data, ["exitCode", "code"]) ??
+    firstIntegerFromRecord(payload, ["exitCode", "code"]) ??
+    strippedContent?.exitCode ??
+    detailExit?.exitCode ??
+    null;
+  const elapsedSeconds =
+    firstNumberFromRecord(rawOutput, ["elapsedSeconds"]) ??
+    firstNumberFromRecord(itemResult, ["elapsedSeconds"]) ??
+    firstNumberFromRecord(item, ["elapsedSeconds"]) ??
+    firstNumberFromRecord(data, ["elapsedSeconds"]) ??
+    firstNumberFromRecord(payload, ["elapsedSeconds"]);
+  const durationMs =
+    firstNumberFromRecord(rawOutput, ["durationMs", "elapsedMs"]) ??
+    firstNumberFromRecord(itemResult, ["durationMs", "elapsedMs"]) ??
+    firstNumberFromRecord(item, ["durationMs", "elapsedMs"]) ??
+    firstNumberFromRecord(data, ["durationMs", "elapsedMs"]) ??
+    firstNumberFromRecord(payload, ["durationMs", "elapsedMs"]) ??
+    (elapsedSeconds !== null ? elapsedSeconds * 1000 : null);
+  const strippedStdout = stdout ? stripTrailingExitCode(stdout) : null;
+  const normalizedOutput =
+    strippedContent?.exitCode !== undefined ? strippedContent.output : (content ?? null);
+
+  return {
+    output: normalizedOutput,
+    stdout: strippedStdout?.exitCode !== undefined ? strippedStdout.output : stdout,
+    stderr,
+    exitCode,
+    durationMs,
+  };
+}
+
 function extractToolTitle(payload: Record<string, unknown> | null): string | null {
   return asTrimmedString(payload?.title);
 }
@@ -1027,6 +1178,151 @@ function stripTrailingExitCode(value: string): {
   };
 }
 
+function firstRawStringFromRecord(
+  record: Record<string, unknown> | null,
+  keys: ReadonlyArray<string>,
+): string | null {
+  if (!record) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function looksLikeUnifiedDiff(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    trimmed.startsWith("diff --git ") ||
+    trimmed.startsWith("--- ") ||
+    trimmed.startsWith("@@ ") ||
+    /^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/u.test(trimmed)
+  );
+}
+
+function codexChangeKindType(record: Record<string, unknown>): string | null {
+  const kind = record.kind;
+  if (typeof kind === "string") {
+    return kind;
+  }
+  const kindRecord = asRecord(kind);
+  return asTrimmedString(kindRecord?.type);
+}
+
+function patchPathFromRecord(record: Record<string, unknown>): string | null {
+  return (
+    asTrimmedString(record.path) ??
+    asTrimmedString(record.filePath) ??
+    asTrimmedString(record.relativePath) ??
+    asTrimmedString(record.filename) ??
+    asTrimmedString(record.newPath) ??
+    asTrimmedString(record.oldPath)
+  );
+}
+
+function normalizeDiffHeaderPath(path: string): string {
+  return path.replace(/\\/gu, "/");
+}
+
+function toUnifiedPatchFromRecordDiff(
+  record: Record<string, unknown>,
+  diff: string,
+): string | null {
+  if (diff.startsWith("diff --git ") || diff.startsWith("--- ")) {
+    return diff;
+  }
+  const trimmed = diff.trimEnd();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  const rawPath = patchPathFromRecord(record);
+  if (!rawPath) {
+    return looksLikeUnifiedDiff(trimmed) ? trimmed : null;
+  }
+  const path = normalizeDiffHeaderPath(rawPath);
+
+  if (codexChangeKindType(record) === "add") {
+    if (trimmed.startsWith("@@ ")) {
+      return `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n${trimmed}`;
+    }
+    const lines = trimmed.length > 0 ? trimmed.split(/\r?\n/u) : [];
+    const addedLines = lines.map((line) => `+${line}`).join("\n");
+    return `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${lines.length} @@\n${addedLines}`;
+  }
+
+  if (trimmed.startsWith("@@ ")) {
+    return `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${trimmed}`;
+  }
+
+  return null;
+}
+
+function collectPatchStrings(
+  value: unknown,
+  patches: string[],
+  seen: Set<string>,
+  depth: number,
+  includeNested = true,
+): void {
+  if (depth > MAX_PATCH_SEARCH_DEPTH || patches.length >= MAX_PATCH_STRINGS) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      collectPatchStrings(entry, patches, seen, depth + 1);
+      if (patches.length >= MAX_PATCH_STRINGS) {
+        return;
+      }
+    }
+    return;
+  }
+  const record = asRecord(value);
+  if (!record) {
+    return;
+  }
+  for (const key of ["patch", "diff", "unifiedDiff"]) {
+    const rawCandidate = typeof record[key] === "string" ? record[key] : null;
+    const candidate = rawCandidate ? toUnifiedPatchFromRecordDiff(record, rawCandidate) : null;
+    if (!candidate || seen.has(candidate)) {
+      continue;
+    }
+    if (candidate.length > MAX_INLINE_PATCH_CHARS) {
+      seen.add(candidate);
+      patches.push(PATCH_TOO_LARGE_MESSAGE);
+      continue;
+    }
+    if (!looksLikeUnifiedDiff(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    patches.push(candidate);
+  }
+  if (!includeNested) {
+    return;
+  }
+  for (const nestedKey of ["item", "result", "input", "data", "changes", "files", "edits"]) {
+    if (!(nestedKey in record)) {
+      continue;
+    }
+    collectPatchStrings(record[nestedKey], patches, seen, depth + 1);
+    if (patches.length >= MAX_PATCH_STRINGS) {
+      return;
+    }
+  }
+}
+
+function extractToolPatch(payload: Record<string, unknown> | null): string | null {
+  const patches: string[] = [];
+  const data = asRecord(payload?.data);
+  collectPatchStrings(data, patches, new Set<string>(), 0, false);
+  collectPatchStrings(asRecord(data?.item), patches, new Set<string>(patches), 0);
+  return patches.length > 0 ? patches.join("\n\n") : null;
+}
 function extractWorkLogItemType(
   payload: Record<string, unknown> | null,
 ): WorkLogEntry["itemType"] | undefined {

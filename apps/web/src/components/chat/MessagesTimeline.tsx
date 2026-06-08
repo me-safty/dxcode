@@ -13,11 +13,13 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { FileDiff } from "@pierre/diffs/react";
-import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
+import type { FileDiffMetadata, Hunk } from "@pierre/diffs/types";
+import { deriveTimelineEntries, formatDuration, formatElapsed } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import {
@@ -29,6 +31,8 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
@@ -48,6 +52,8 @@ import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
   computeStableMessagesTimelineRows,
+  getRenderableCommandOutputLines,
+  hasRenderableCommandOutput,
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
@@ -109,6 +115,7 @@ const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const COMMAND_OUTPUT_TAIL_LINES = 40;
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -1172,11 +1179,322 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
 
+function ToolDetailBlock(props: {
+  title: string;
+  children: ReactNode;
+  mono?: boolean;
+  tone?: "default" | "error";
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="text-[9px] font-medium uppercase tracking-[0.14em] text-muted-foreground/55">
+        {props.title}
+      </p>
+      <div
+        className={cn(
+          "max-h-80 overflow-auto rounded-md border border-border/55 bg-background/80 px-2 py-1.5 text-[11px] leading-5 text-foreground/78",
+          props.mono && "font-mono whitespace-pre-wrap wrap-break-word",
+          props.tone === "error" &&
+            "border-rose-500/20 bg-rose-500/5 text-rose-800 dark:text-rose-200",
+        )}
+      >
+        {props.children}
+      </div>
+    </div>
+  );
+}
+
+function hasExpandableWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
+  if (isCommandWorkEntry(workEntry)) {
+    return Boolean(
+      workEntry.command ||
+      workEntry.rawCommand ||
+      workEntry.output ||
+      workEntry.stdout ||
+      workEntry.stderr ||
+      workEntry.exitCode !== undefined ||
+      workEntry.durationMs !== undefined,
+    );
+  }
+  if (isFileChangeWorkEntry(workEntry)) {
+    return Boolean(workEntry.patch || (workEntry.changedFiles?.length ?? 0) > 0);
+  }
+  return false;
+}
+
+function ToolEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
+  if (isCommandWorkEntry(workEntry)) {
+    return <CommandEntryDetails workEntry={workEntry} />;
+  }
+  if (isFileChangeWorkEntry(workEntry)) {
+    return <FileChangeEntryDetails workEntry={workEntry} />;
+  }
+  return null;
+}
+
+function isCommandWorkEntry(workEntry: TimelineWorkEntry): boolean {
+  if (workEntry.itemType === "command_execution" || workEntry.requestKind === "command") {
+    return true;
+  }
+  if (workEntry.itemType === "file_change" || workEntry.requestKind === "file-change") {
+    return false;
+  }
+  if (workEntry.itemType || workEntry.requestKind) {
+    return (
+      (workEntry.itemType === "dynamic_tool_call" || workEntry.itemType === "mcp_tool_call") &&
+      hasCommandWorkEntryCommand(workEntry)
+    );
+  }
+  return hasCommandWorkEntryCommand(workEntry);
+}
+
+function hasCommandWorkEntryCommand(workEntry: TimelineWorkEntry): boolean {
+  return Boolean(workEntry.command || workEntry.rawCommand);
+}
+
+function isFileChangeWorkEntry(workEntry: TimelineWorkEntry): boolean {
+  if (workEntry.itemType === "file_change" || workEntry.requestKind === "file-change") {
+    return true;
+  }
+  if (workEntry.itemType === "command_execution" || workEntry.requestKind === "command") {
+    return false;
+  }
+  return Boolean(workEntry.patch);
+}
+
+function CommandEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
+  const command = workEntry.command ?? workEntry.rawCommand ?? null;
+  const rawCommand =
+    workEntry.rawCommand && workEntry.rawCommand !== command ? workEntry.rawCommand : null;
+  const hasStreamOutput =
+    hasRenderableCommandOutput(workEntry.stdout) || hasRenderableCommandOutput(workEntry.stderr);
+
+  return (
+    <div className="mt-2 space-y-2 pl-7">
+      {command && (
+        <ToolDetailBlock title="Command" mono>
+          {command}
+        </ToolDetailBlock>
+      )}
+      {rawCommand && <CollapsedRawCommandBlock value={rawCommand} />}
+      <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground/70">
+        <span className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5">
+          Exit code {workEntry.exitCode ?? "unknown"}
+        </span>
+        <span className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5">
+          Duration{" "}
+          {workEntry.durationMs !== undefined ? formatDuration(workEntry.durationMs) : "unknown"}
+        </span>
+      </div>
+      {hasRenderableCommandOutput(workEntry.stdout) ? (
+        <CommandOutputBlock title="Stdout" value={workEntry.stdout} />
+      ) : null}
+      {hasRenderableCommandOutput(workEntry.stderr) ? (
+        <CommandOutputBlock title="Stderr" value={workEntry.stderr} tone="error" />
+      ) : null}
+      {!hasStreamOutput && hasRenderableCommandOutput(workEntry.output) ? (
+        <CommandOutputBlock title="Output" value={workEntry.output} />
+      ) : null}
+    </div>
+  );
+}
+
+function CollapsedRawCommandBlock({ value }: { value: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        className="flex items-center gap-1 text-[9px] font-medium uppercase tracking-[0.14em] text-muted-foreground/55 transition-colors hover:text-foreground/75 focus-visible:outline-2 focus-visible:outline-ring"
+        onClick={() => setExpanded((current) => !current)}
+        aria-expanded={expanded}
+      >
+        <span>Raw command</span>
+        <span className="normal-case tracking-normal">({expanded ? "hide" : "show"})</span>
+      </button>
+      {expanded ? (
+        <div className="max-h-80 overflow-auto rounded-md border border-border/55 bg-background/80 px-2 py-1.5 font-mono text-[11px] leading-5 whitespace-pre-wrap wrap-break-word text-foreground/78">
+          {value}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CommandOutputBlock(props: { title: string; value: string; tone?: "default" | "error" }) {
+  const [showFull, setShowFull] = useState(false);
+  const lines = useMemo(() => getRenderableCommandOutputLines(props.value), [props.value]);
+  const isTruncated = lines.length > COMMAND_OUTPUT_TAIL_LINES;
+  const toggleLabel = `${showFull ? "Collapse" : "Expand"} ${props.title}`;
+  const visibleValue =
+    showFull || !isTruncated
+      ? lines.join("\n")
+      : lines.slice(-COMMAND_OUTPUT_TAIL_LINES).join("\n");
+  const suffix = isTruncated
+    ? showFull
+      ? `${lines.length.toLocaleString()} lines`
+      : `last ${COMMAND_OUTPUT_TAIL_LINES} of ${lines.length.toLocaleString()} lines`
+    : `${lines.length.toLocaleString()} line${lines.length === 1 ? "" : "s"}`;
+
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        className={cn(
+          "flex items-center gap-1 text-[9px] font-medium uppercase tracking-[0.14em] text-muted-foreground/55 transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+          isTruncated ? "cursor-pointer hover:text-foreground/75" : "cursor-default",
+        )}
+        disabled={!isTruncated}
+        aria-expanded={isTruncated ? showFull : undefined}
+        aria-label={isTruncated ? toggleLabel : `${props.title} output`}
+        onClick={() => {
+          if (isTruncated) {
+            setShowFull((value) => !value);
+          }
+        }}
+      >
+        <span>{props.title}</span>
+        <span className="normal-case tracking-normal">({suffix})</span>
+      </button>
+      <button
+        type="button"
+        className={cn(
+          "block max-h-80 w-full overflow-auto rounded-md border border-border/55 bg-background/80 px-2 py-1.5 text-left font-mono text-[11px] leading-5 whitespace-pre-wrap wrap-break-word text-foreground/78",
+          props.tone === "error" &&
+            "border-rose-500/20 bg-rose-500/5 text-rose-800 dark:text-rose-200",
+          isTruncated ? "cursor-pointer" : "cursor-default",
+        )}
+        disabled={!isTruncated}
+        aria-expanded={isTruncated ? showFull : undefined}
+        aria-label={isTruncated ? toggleLabel : `${props.title} output`}
+        onClick={() => {
+          if (isTruncated) {
+            setShowFull((value) => !value);
+          }
+        }}
+      >
+        {visibleValue}
+      </button>
+    </div>
+  );
+}
+
+function FileChangeEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
+  const ctx = use(TimelineRowCtx);
+  const renderablePatch = getRenderablePatch(
+    workEntry.patch,
+    `tool-file-change:${workEntry.id}:${ctx.resolvedTheme}`,
+  );
+  const hasInlineDiff = renderablePatch?.kind === "files";
+
+  return (
+    <div className="mt-2 space-y-2 pl-7">
+      {!hasInlineDiff && (workEntry.changedFiles?.length ?? 0) > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {workEntry.changedFiles?.map((filePath) => {
+            const displayPath = formatWorkspaceRelativePath(filePath, ctx.workspaceRoot);
+            return (
+              <span
+                key={`${workEntry.id}:expanded-file:${filePath}`}
+                className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
+                title={displayPath}
+              >
+                {displayPath}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {hasInlineDiff &&
+        renderablePatch.files.map((fileDiff) => (
+          <FileDiff
+            key={resolveFileDiffPath(fileDiff)}
+            fileDiff={fileDiff}
+            renderCustomHeader={(renderedFileDiff) => (
+              <InlineFileDiffHeader
+                fileDiff={renderedFileDiff}
+                changedFiles={workEntry.changedFiles}
+                workspaceRoot={ctx.workspaceRoot}
+              />
+            )}
+            options={{
+              collapsed: false,
+              diffStyle: "unified",
+              theme: resolveDiffThemeName(ctx.resolvedTheme),
+            }}
+          />
+        ))}
+      {renderablePatch?.kind === "raw" && (
+        <ToolDetailBlock title={renderablePatch.reason} mono>
+          {renderablePatch.text}
+        </ToolDetailBlock>
+      )}
+    </div>
+  );
+}
+
+function InlineFileDiffHeader({
+  fileDiff,
+  changedFiles,
+  workspaceRoot,
+}: {
+  fileDiff: FileDiffMetadata;
+  changedFiles: ReadonlyArray<string> | undefined;
+  workspaceRoot: string | undefined;
+}) {
+  const displayPath = resolveInlineFileDiffDisplayPath(fileDiff, changedFiles, workspaceRoot);
+  const additions = countDiffHunkChangedLines(fileDiff.hunks, "additionLines");
+  const deletions = countDiffHunkChangedLines(fileDiff.hunks, "deletionLines");
+
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/55 bg-background/80 px-2 py-1 text-[11px]">
+      <span className="min-w-0 truncate font-mono text-foreground/85" title={displayPath}>
+        {displayPath}
+      </span>
+      <span className="shrink-0">
+        <DiffStatLabel additions={additions} deletions={deletions} />
+      </span>
+    </div>
+  );
+}
+
+function resolveInlineFileDiffDisplayPath(
+  fileDiff: FileDiffMetadata,
+  changedFiles: ReadonlyArray<string> | undefined,
+  workspaceRoot: string | undefined,
+): string {
+  const rawPath = resolveFileDiffPath(fileDiff);
+  const normalizedRawPath = rawPath.replace(/\\/gu, "/");
+  const matchedChangedFile = changedFiles?.find((filePath) => {
+    const normalizedChangedFile = filePath.replace(/\\/gu, "/");
+    return (
+      normalizedChangedFile === normalizedRawPath ||
+      normalizedChangedFile.endsWith(`/${normalizedRawPath}`) ||
+      normalizedRawPath.endsWith(`/${normalizedChangedFile.replace(/^\/+/u, "")}`)
+    );
+  });
+
+  return formatWorkspaceRelativePath(matchedChangedFile ?? rawPath, workspaceRoot);
+}
+
+function countDiffHunkChangedLines(
+  hunks: ReadonlyArray<Hunk>,
+  lineCountKey: "additionLines" | "deletionLines",
+): number {
+  let count = 0;
+  for (const hunk of hunks) {
+    count += hunk[lineCountKey];
+  }
+  return count;
+}
+
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
 }) {
   const { workEntry, workspaceRoot } = props;
+  const [expanded, setExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
@@ -1191,10 +1509,45 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
+  const canExpand = hasExpandableWorkEntryDetails(workEntry);
+  const ToggleIcon = expanded ? ChevronDownIcon : ChevronRightIcon;
+  const toggleExpanded = useCallback(() => {
+    if (!canExpand) {
+      return;
+    }
+    setExpanded((value) => !value);
+  }, [canExpand]);
+  const handleSummaryKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!canExpand || (event.key !== "Enter" && event.key !== " ")) {
+        return;
+      }
+      event.preventDefault();
+      toggleExpanded();
+    },
+    [canExpand, toggleExpanded],
+  );
 
   return (
-    <div className="rounded-lg px-1 py-1">
-      <div className="flex items-center gap-2 transition-[opacity,translate] duration-200">
+    <div
+      className={cn(
+        "rounded-lg px-1 py-1 transition-colors duration-150",
+        expanded && "bg-background/45",
+      )}
+      data-tool-entry-expanded={expanded ? "true" : "false"}
+    >
+      <div
+        className={cn(
+          "flex items-center gap-2 rounded-md transition-[opacity,translate] duration-200",
+          canExpand &&
+            "cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        )}
+        role={canExpand ? "button" : undefined}
+        tabIndex={canExpand ? 0 : undefined}
+        aria-expanded={canExpand ? expanded : undefined}
+        onClick={toggleExpanded}
+        onKeyDown={handleSummaryKeyDown}
+      >
         <span
           className={cn("flex size-5 shrink-0 items-center justify-center", iconConfig.className)}
         >
@@ -1267,6 +1620,20 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             </Tooltip>
           )}
         </div>
+        {canExpand && (
+          <button
+            type="button"
+            className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/55 transition-colors hover:bg-muted/70 hover:text-foreground/80 focus-visible:outline-2 focus-visible:outline-ring"
+            aria-expanded={expanded}
+            aria-label={expanded ? `Collapse ${heading}` : `Expand ${heading}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleExpanded();
+            }}
+          >
+            <ToggleIcon className="size-3" />
+          </button>
+        )}
       </div>
       {hasChangedFiles && !previewIsChangedFiles && (
         <div className="mt-1 flex flex-wrap gap-1 pl-6">
@@ -1289,6 +1656,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           )}
         </div>
       )}
+      {canExpand && expanded && <ToolEntryDetails workEntry={workEntry} />}
     </div>
   );
 });
