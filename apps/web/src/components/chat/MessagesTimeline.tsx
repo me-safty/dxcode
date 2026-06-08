@@ -18,7 +18,7 @@ import {
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { FileDiff } from "@pierre/diffs/react";
-import type { FileDiffMetadata } from "@pierre/diffs/types";
+import type { FileDiffMetadata, Hunk } from "@pierre/diffs/types";
 import { deriveTimelineEntries, formatDuration, formatElapsed } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
@@ -1483,8 +1483,8 @@ function InlineFileDiffHeader({
   workspaceRoot: string | undefined;
 }) {
   const displayPath = resolveInlineFileDiffDisplayPath(fileDiff, changedFiles, workspaceRoot);
-  const additions = countRenderableDiffLines(fileDiff.additionLines);
-  const deletions = countRenderableDiffLines(fileDiff.deletionLines);
+  const additions = countDiffHunkChangedLines(fileDiff.hunks, "additionLines");
+  const deletions = countDiffHunkChangedLines(fileDiff.hunks, "deletionLines");
 
   return (
     <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/55 bg-background/80 px-2 py-1 text-[11px]">
@@ -1517,12 +1517,13 @@ function resolveInlineFileDiffDisplayPath(
   return formatWorkspaceRelativePath(matchedChangedFile ?? rawPath, workspaceRoot);
 }
 
-function countRenderableDiffLines(lines: ReadonlyArray<string>): number {
+function countDiffHunkChangedLines(
+  hunks: ReadonlyArray<Hunk>,
+  lineCountKey: "additionLines" | "deletionLines",
+): number {
   let count = 0;
-  for (const line of lines) {
-    if (line.length > 0) {
-      count += 1;
-    }
+  for (const hunk of hunks) {
+    count += hunk[lineCountKey];
   }
   return count;
 }
