@@ -1,4 +1,5 @@
 import {
+  type AuthAccessTokenResult,
   type AuthSessionRole,
   type DesktopSshEnvironmentBootstrap,
   type DesktopSshEnvironmentTarget,
@@ -62,6 +63,7 @@ import {
   type EnvironmentConnection,
   type EnvironmentProjectionCatchUpResult,
 } from "./connection";
+
 import { withTimeout } from "./withTimeout";
 import {
   useStore,
@@ -91,6 +93,25 @@ import {
   scheduleCachedEnvironmentStateWrite,
 } from "~/orchestrationStartupCache";
 import type { Thread } from "~/types";
+
+type BearerSessionLike =
+  | AuthAccessTokenResult
+  | {
+      readonly sessionToken: string;
+      readonly role?: AuthSessionRole | null;
+    };
+
+function readBearerSessionToken(session: BearerSessionLike): string {
+  return "access_token" in session ? session.access_token : session.sessionToken;
+}
+
+function readBearerSessionRole(session: BearerSessionLike): AuthSessionRole | null {
+  if (!("access_token" in session)) return session.role ?? null;
+  const scopes = new Set(session.scope.split(" ").filter((scope) => scope.length > 0));
+  return scopes.has("access:read") || scopes.has("access:write") || scopes.has("relay:write")
+    ? "owner"
+    : "client";
+}
 
 type EnvironmentServiceState = {
   readonly queryClient: QueryClient;
@@ -2172,9 +2193,9 @@ async function resolveDesktopSshWebSocketConnectionUrl(
   httpBaseUrl: string,
   bearerToken: string,
 ) {
-  const issued = await getDesktopSshBridge().issueSshWebSocketToken(httpBaseUrl, bearerToken);
+  const issued = await getDesktopSshBridge().issueSshWebSocketTicket(httpBaseUrl, bearerToken);
   const url = new URL(wsBaseUrl, window.location.origin);
-  url.searchParams.set("wsToken", issued.token);
+  url.searchParams.set("ticket", issued.ticket);
   return url.toString();
 }
 
@@ -2252,7 +2273,7 @@ async function issueDesktopSshBearerSession(record: SavedEnvironmentRecord): Pro
   });
   const didPersistBearerToken = await writeSavedEnvironmentBearerToken(
     prepared.record.environmentId,
-    bearerSession.sessionToken,
+    readBearerSessionToken(bearerSession),
   );
   if (!didPersistBearerToken) {
     await persistSavedEnvironmentRegistryRollback(registrySnapshot);
@@ -2261,8 +2282,8 @@ async function issueDesktopSshBearerSession(record: SavedEnvironmentRecord): Pro
 
   return {
     record: prepared.record,
-    bearerToken: bearerSession.sessionToken,
-    role: bearerSession.role ?? null,
+    bearerToken: readBearerSessionToken(bearerSession),
+    role: readBearerSessionRole(bearerSession),
   };
 }
 
@@ -4099,7 +4120,7 @@ export async function addSavedEnvironment(input: {
   await persistSavedEnvironmentRecord(record);
   const didPersistBearerToken = await writeSavedEnvironmentBearerToken(
     environmentId,
-    bearerSession.sessionToken,
+    readBearerSessionToken(bearerSession),
   );
   if (!didPersistBearerToken) {
     await persistSavedEnvironmentRegistryRollback(registrySnapshot);
@@ -4111,8 +4132,8 @@ export async function addSavedEnvironment(input: {
   }
   await removeConnection(environmentId).catch(() => false);
   await ensureSavedEnvironmentConnection(record, {
-    bearerToken: bearerSession.sessionToken,
-    role: bearerSession.role,
+    bearerToken: readBearerSessionToken(bearerSession),
+    role: readBearerSessionRole(bearerSession),
   });
   return record;
 }

@@ -1,7 +1,7 @@
 import type {
-  AuthBearerBootstrapResult,
+  AuthAccessTokenResult,
   AuthSessionState,
-  AuthWebSocketTokenResult,
+  AuthWebSocketTicketResult,
   ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
 
@@ -55,18 +55,27 @@ async function fetchRemoteJson<T>(input: {
   readonly pathname: string;
   readonly method?: "GET" | "POST";
   readonly bearerToken?: string;
-  readonly body?: unknown;
+  readonly body?: unknown | URLSearchParams;
 }): Promise<T> {
   const requestUrl = remoteEndpointUrl(input.httpBaseUrl, input.pathname);
+  const isUrlParamsBody = input.body instanceof URLSearchParams;
   let response: Response;
   try {
     response = await fetch(requestUrl, {
       method: input.method ?? "GET",
       headers: {
-        ...(input.body !== undefined ? { "content-type": "application/json" } : {}),
+        ...(input.body !== undefined
+          ? {
+              "content-type": isUrlParamsBody
+                ? "application/x-www-form-urlencoded"
+                : "application/json",
+            }
+          : {}),
         ...(input.bearerToken ? { authorization: `Bearer ${input.bearerToken}` } : {}),
       },
-      ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
+      ...(input.body !== undefined
+        ? { body: isUrlParamsBody ? input.body.toString() : JSON.stringify(input.body) }
+        : {}),
     });
   } catch (error) {
     throw new Error(
@@ -91,14 +100,17 @@ async function fetchRemoteJson<T>(input: {
 export async function bootstrapRemoteBearerSession(input: {
   readonly httpBaseUrl: string;
   readonly credential: string;
-}): Promise<AuthBearerBootstrapResult> {
-  return fetchRemoteJson<AuthBearerBootstrapResult>({
+}): Promise<AuthAccessTokenResult> {
+  return fetchRemoteJson<AuthAccessTokenResult>({
     httpBaseUrl: input.httpBaseUrl,
-    pathname: "/api/auth/bootstrap/bearer",
+    pathname: "/oauth/token",
     method: "POST",
-    body: {
-      credential: input.credential,
-    },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+      subject_token: input.credential,
+      subject_token_type: "urn:t3:params:oauth:token-type:environment-bootstrap",
+      requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
+    }),
   });
 }
 
@@ -122,28 +134,30 @@ export async function fetchRemoteEnvironmentDescriptor(input: {
   });
 }
 
-export async function issueRemoteWebSocketToken(input: {
+export async function issueRemoteWebSocketTicket(input: {
   readonly httpBaseUrl: string;
   readonly bearerToken: string;
-}): Promise<AuthWebSocketTokenResult> {
-  return fetchRemoteJson<AuthWebSocketTokenResult>({
+}): Promise<AuthWebSocketTicketResult> {
+  return fetchRemoteJson<AuthWebSocketTicketResult>({
     httpBaseUrl: input.httpBaseUrl,
-    pathname: "/api/auth/ws-token",
+    pathname: "/api/auth/websocket-ticket",
     method: "POST",
     bearerToken: input.bearerToken,
   });
 }
+
+export const issueRemoteWebSocketToken = issueRemoteWebSocketTicket;
 
 export async function resolveRemoteWebSocketConnectionUrl(input: {
   readonly wsBaseUrl: string;
   readonly httpBaseUrl: string;
   readonly bearerToken: string;
 }): Promise<string> {
-  const issued = await issueRemoteWebSocketToken({
+  const issued = await issueRemoteWebSocketTicket({
     httpBaseUrl: input.httpBaseUrl,
     bearerToken: input.bearerToken,
   });
   const url = new URL(input.wsBaseUrl, window.location.origin);
-  url.searchParams.set("wsToken", issued.token);
+  url.searchParams.set("ticket", issued.ticket);
   return url.toString();
 }

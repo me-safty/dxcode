@@ -50,7 +50,7 @@ it("formats issued sessions with the bearer token but omits tokens from listings
     {
       sessionId: "session-1" as never,
       token: "secret-session-token",
-      method: "bearer-session-token",
+      method: "bearer-access-token",
       role: "owner",
       subject: "cli-issued-session",
       client: {

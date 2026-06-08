@@ -6,7 +6,11 @@ import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
-import { defineConfig, type Plugin } from "vite";
+import { playwright } from "vite-plus/test/browser-playwright";
+import { defineProject, type TestProjectInlineConfiguration } from "vite-plus/test/config";
+import "vite-plus/test/config";
+import { defineConfig } from "vite-plus";
+import type { Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import {
   resolveWebAssetBrandForConfiguredChannel,
@@ -41,6 +45,43 @@ const buildSourcemap =
     : sourcemapEnv === "hidden"
       ? "hidden"
       : true;
+
+const unitTestProject = {
+  extends: true,
+  test: {
+    name: "unit",
+    include: ["src/**/*.test.{ts,tsx}"],
+    // The web runtime suite exercises auth bootstrap, saved environments,
+    // and websocket subscription lifecycles. Under the full monorepo test
+    // run, those async tests can exceed Vitest's default 5s budget.
+    hookTimeout: 15_000,
+    testTimeout: 15_000,
+  },
+} satisfies TestProjectInlineConfiguration;
+
+const browserTestProject = {
+  extends: true,
+  server: {
+    // Browser tests need concurrent runs to claim the next available port.
+    strictPort: false,
+  },
+  test: {
+    name: "browser",
+    include: ["src/components/**/*.browser.tsx"],
+    hookTimeout: 30_000,
+    testTimeout: 30_000,
+    browser: {
+      enabled: true,
+      provider: playwright() as never,
+      instances: [{ browser: "chromium" }],
+      headless: true,
+      api: {
+        strictPort: false,
+      },
+    },
+    fileParallelism: false,
+  },
+} satisfies TestProjectInlineConfiguration;
 
 function resolveDevProxyTarget(wsUrl: string | undefined): string | undefined {
   if (!wsUrl) {
@@ -77,25 +118,24 @@ function webBrandAssetsPlugin(): Plugin {
           path.join(repoRoot, override.sourceRelativePath),
         ]),
       );
-      server.middlewares.use(async (req, res, next) => {
-        const urlPath = req.url?.split("?")[0];
-        if (!urlPath) {
-          next();
-          return;
-        }
-        const sourcePath = devOverrides.get(urlPath);
-        if (!sourcePath) {
-          next();
-          return;
-        }
-        try {
+      server.middlewares.use((req, res, next) => {
+        const handleRequest = async () => {
+          const urlPath = req.url?.split("?")[0];
+          if (!urlPath) {
+            next();
+            return;
+          }
+          const sourcePath = devOverrides.get(urlPath);
+          if (!sourcePath) {
+            next();
+            return;
+          }
           const data = await fs.readFile(sourcePath);
           res.setHeader("Content-Type", urlPath.endsWith(".ico") ? "image/x-icon" : "image/png");
           res.setHeader("Cache-Control", "no-cache");
           res.end(data);
-        } catch (cause) {
-          next(cause);
-        }
+        };
+        void handleRequest().catch(next);
       });
     },
     async closeBundle() {
@@ -179,6 +219,7 @@ export default defineConfig({
       "@pierre/diffs/worker/worker.js",
       "effect/Array",
       "effect/Order",
+      "react-dom/client",
     ],
   },
   define: {
@@ -225,5 +266,8 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: buildSourcemap,
+  },
+  test: {
+    projects: [defineProject(unitTestProject), defineProject(browserTestProject)],
   },
 });

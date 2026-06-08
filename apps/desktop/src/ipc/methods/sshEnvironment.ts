@@ -9,10 +9,11 @@ import {
   DesktopSshPasswordPromptCancelledType,
   DesktopSshPasswordPromptResolutionInputSchema,
   ExecutionEnvironmentDescriptor,
-  AuthBearerBootstrapResult,
+  AuthAccessTokenResult,
   AuthSessionState,
-  AuthWebSocketTokenResult,
+  AuthWebSocketTicketResult,
 } from "@t3tools/contracts";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -21,6 +22,34 @@ import { makeIpcMethod } from "../DesktopIpc.ts";
 import * as DesktopSshEnvironment from "../../ssh/DesktopSshEnvironment.ts";
 import * as DesktopSshPasswordPrompts from "../../ssh/DesktopSshPasswordPrompts.ts";
 import * as DesktopSshRemoteApi from "../../ssh/DesktopSshRemoteApi.ts";
+
+type DesktopSshEnvironmentRequestOperation =
+  | "fetch-environment-descriptor"
+  | "bootstrap-bearer-session"
+  | "fetch-session-state"
+  | "issue-websocket-ticket";
+
+export class DesktopSshEnvironmentRequestError extends Data.TaggedError(
+  "DesktopSshEnvironmentRequestError",
+)<{
+  readonly operation: DesktopSshEnvironmentRequestOperation;
+  readonly cause: DesktopSshRemoteApi.DesktopSshRemoteApiError;
+  readonly sshHttpStatus: number | null;
+}> {
+  override get message() {
+    const prefix = this.sshHttpStatus === null ? "" : `[ssh_http:${this.sshHttpStatus}] `;
+    return `${prefix}SSH remote API request failed during ${this.operation}.`;
+  }
+}
+
+const mapRemoteApiError =
+  (operation: DesktopSshEnvironmentRequestOperation) =>
+  (cause: DesktopSshRemoteApi.DesktopSshRemoteApiError): DesktopSshEnvironmentRequestError =>
+    new DesktopSshEnvironmentRequestError({
+      operation,
+      cause,
+      sshHttpStatus: cause.sshHttpStatus,
+    });
 
 export const discoverSshHosts = makeIpcMethod({
   channel: IpcChannels.DISCOVER_SSH_HOSTS_CHANNEL,
@@ -70,20 +99,24 @@ export const fetchSshEnvironmentDescriptor = makeIpcMethod({
   result: ExecutionEnvironmentDescriptor,
   handler: Effect.fn("desktop.ipc.sshEnvironment.fetchDescriptor")(function* ({ httpBaseUrl }) {
     const remoteApi = yield* DesktopSshRemoteApi.DesktopSshRemoteApi;
-    return yield* remoteApi.fetchEnvironmentDescriptor({ httpBaseUrl });
+    return yield* remoteApi
+      .fetchEnvironmentDescriptor({ httpBaseUrl })
+      .pipe(Effect.mapError(mapRemoteApiError("fetch-environment-descriptor")));
   }),
 });
 
 export const bootstrapSshBearerSession = makeIpcMethod({
   channel: IpcChannels.BOOTSTRAP_SSH_BEARER_SESSION_CHANNEL,
   payload: DesktopSshBearerBootstrapInputSchema,
-  result: AuthBearerBootstrapResult,
+  result: AuthAccessTokenResult,
   handler: Effect.fn("desktop.ipc.sshEnvironment.bootstrapBearerSession")(function* ({
     httpBaseUrl,
     credential,
   }) {
     const remoteApi = yield* DesktopSshRemoteApi.DesktopSshRemoteApi;
-    return yield* remoteApi.bootstrapBearerSession({ httpBaseUrl, credential });
+    return yield* remoteApi
+      .bootstrapBearerSession({ httpBaseUrl, credential })
+      .pipe(Effect.mapError(mapRemoteApiError("bootstrap-bearer-session")));
   }),
 });
 
@@ -96,20 +129,24 @@ export const fetchSshSessionState = makeIpcMethod({
     bearerToken,
   }) {
     const remoteApi = yield* DesktopSshRemoteApi.DesktopSshRemoteApi;
-    return yield* remoteApi.fetchSessionState({ httpBaseUrl, bearerToken });
+    return yield* remoteApi
+      .fetchSessionState({ httpBaseUrl, bearerToken })
+      .pipe(Effect.mapError(mapRemoteApiError("fetch-session-state")));
   }),
 });
 
-export const issueSshWebSocketToken = makeIpcMethod({
+export const issueSshWebSocketTicket = makeIpcMethod({
   channel: IpcChannels.ISSUE_SSH_WEBSOCKET_TOKEN_CHANNEL,
   payload: DesktopSshBearerRequestInputSchema,
-  result: AuthWebSocketTokenResult,
-  handler: Effect.fn("desktop.ipc.sshEnvironment.issueWebSocketToken")(function* ({
+  result: AuthWebSocketTicketResult,
+  handler: Effect.fn("desktop.ipc.sshEnvironment.issueWebSocketTicket")(function* ({
     httpBaseUrl,
     bearerToken,
   }) {
     const remoteApi = yield* DesktopSshRemoteApi.DesktopSshRemoteApi;
-    return yield* remoteApi.issueWebSocketToken({ httpBaseUrl, bearerToken });
+    return yield* remoteApi
+      .issueWebSocketTicket({ httpBaseUrl, bearerToken })
+      .pipe(Effect.mapError(mapRemoteApiError("issue-websocket-ticket")));
   }),
 });
 

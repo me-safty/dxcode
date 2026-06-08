@@ -17,7 +17,6 @@ const codeHighlightingMock = vi.hoisted(() => {
     resolveHighlighter = resolve;
   });
 
-  // oxlint-disable-next-line unicorn/consistent-function-scoping -- This helper must stay inside vi.hoisted with the mocked highlighter state.
   const renderCodeLines = (code: string) =>
     code
       .split("\n")

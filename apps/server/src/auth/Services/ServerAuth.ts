@@ -1,15 +1,19 @@
 import type {
+  AuthAccessTokenResult,
   AuthBearerBootstrapResult,
+  AuthBrowserSessionResult,
   AuthBootstrapResult,
   AuthClientMetadata,
   AuthClientSession,
   AuthCreatePairingCredentialInput,
+  AuthEnvironmentScope,
   AuthPairingLink,
   AuthPairingCredentialResult,
   AuthSessionId,
   AuthSessionState,
   ServerAuthDescriptor,
   ServerAuthSessionMethod,
+  AuthWebSocketTicketResult,
   AuthWebSocketTokenResult,
 } from "@t3tools/contracts";
 import * as Data from "effect/Data";
@@ -24,6 +28,7 @@ export interface AuthenticatedSession {
   readonly subject: string;
   readonly method: ServerAuthSessionMethod;
   readonly role: SessionRole;
+  readonly scopes: ReadonlySet<AuthEnvironmentScope>;
   readonly expiresAt?: DateTime.DateTime;
 }
 
@@ -48,10 +53,25 @@ export interface ServerAuthShape {
     },
     AuthError
   >;
+  readonly exchangeBootstrapCredentialForBrowserSession: (
+    credential: string,
+    requestMetadata: AuthClientMetadata,
+  ) => Effect.Effect<
+    {
+      readonly response: AuthBrowserSessionResult;
+      readonly sessionToken: string;
+    },
+    AuthError
+  >;
   readonly exchangeBootstrapCredentialForBearerSession: (
     credential: string,
     requestMetadata: AuthClientMetadata,
   ) => Effect.Effect<AuthBearerBootstrapResult, AuthError>;
+  readonly exchangeBootstrapCredentialForAccessToken: (
+    credential: string,
+    requestMetadata: AuthClientMetadata,
+    requestedScopes?: ReadonlyArray<AuthEnvironmentScope>,
+  ) => Effect.Effect<AuthAccessTokenResult, AuthError>;
   readonly issuePairingCredential: (
     input?: AuthCreatePairingCredentialInput & {
       readonly role?: SessionRole;
@@ -78,6 +98,9 @@ export interface ServerAuthShape {
   readonly issueWebSocketToken: (
     session: AuthenticatedSession,
   ) => Effect.Effect<AuthWebSocketTokenResult, AuthError>;
+  readonly issueWebSocketTicket: (
+    session: AuthenticatedSession,
+  ) => Effect.Effect<AuthWebSocketTicketResult, AuthError>;
   readonly issueStartupPairingUrl: (baseUrl: string) => Effect.Effect<string, AuthError>;
 }
 

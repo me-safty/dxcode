@@ -135,6 +135,32 @@ export function runVcsDriverContractSuite<R, E>(input: VcsDriverContractSuiteInp
           assert.include(result.ignoredPaths ?? [], "nested/error.log");
         }),
       );
+
+      it.effect("excludes tracked files that were deleted from disk", () =>
+        Effect.gen(function* () {
+          if (!input.fixture.trackFile || !input.fixture.commit) {
+            return;
+          }
+
+          const cwd = yield* makeTmpDir();
+          const driver = yield* VcsDriver.VcsDriver;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+
+          yield* input.fixture.createRepo(cwd);
+          yield* input.fixture.writeFile(cwd, "kept.ts", "export const kept = true;\n");
+          yield* input.fixture.writeFile(cwd, "deleted.ts", "export const deleted = true;\n");
+          yield* input.fixture.trackFile(cwd, "kept.ts");
+          yield* input.fixture.trackFile(cwd, "deleted.ts");
+          yield* input.fixture.commit(cwd, "Track files");
+          yield* fileSystem.remove(path.join(cwd, "deleted.ts"));
+
+          const result = yield* driver.listWorkspaceFiles(cwd);
+
+          assert.include(result.paths, "kept.ts");
+          assert.notInclude(result.paths, "deleted.ts");
+        }),
+      );
     });
 
     describe("ignored path filtering", () => {

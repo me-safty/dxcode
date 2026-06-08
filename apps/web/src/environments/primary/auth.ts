@@ -1,6 +1,6 @@
 import type {
-  AuthBootstrapInput,
-  AuthBootstrapResult,
+  AuthBrowserSessionRequest,
+  AuthBrowserSessionResult,
   AuthClientMetadata,
   AuthCreatePairingCredentialInput,
   AuthPairingCredentialResult,
@@ -40,7 +40,7 @@ export interface ServerClientSessionRecord {
   readonly sessionId: AuthSessionId;
   readonly subject: string;
   readonly role: "owner" | "client";
-  readonly method: "browser-session-cookie" | "bearer-session-token";
+  readonly method: "browser-session-cookie" | "bearer-access-token" | "bearer-session-token";
   readonly client: AuthClientMetadata;
   readonly issuedAt: string;
   readonly expiresAt: string;
@@ -199,10 +199,10 @@ function toFriendlyBootstrapErrorMessage(status: number, message: string): strin
   return parsedMessage;
 }
 
-async function exchangeBootstrapCredential(credential: string): Promise<AuthBootstrapResult> {
+async function exchangeBootstrapCredential(credential: string): Promise<AuthBrowserSessionResult> {
   return retryTransientBootstrap(async () => {
-    const payload: AuthBootstrapInput = { credential };
-    const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/auth/bootstrap"), {
+    const payload: AuthBrowserSessionRequest = { credential };
+    const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/auth/browser-session"), {
       body: JSON.stringify(payload),
       credentials: "include",
       headers: {
@@ -219,7 +219,7 @@ async function exchangeBootstrapCredential(credential: string): Promise<AuthBoot
       });
     }
 
-    return (await response.json()) as AuthBootstrapResult;
+    return (await response.json()) as AuthBrowserSessionResult;
   });
 }
 

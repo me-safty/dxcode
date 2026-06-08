@@ -1,11 +1,18 @@
 import {
+  AuthAccessTokenType,
+  AuthAccessTokenResult,
   type AuthBearerBootstrapResult,
+  AuthBrowserSessionResult,
   type AuthClientSession,
   type AuthBootstrapResult,
+  type AuthEnvironmentScope,
   type AuthPairingCredentialResult,
   type AuthSessionState,
+  AuthWebSocketTicketResult,
   type AuthWebSocketTokenResult,
 } from "@t3tools/contracts";
+import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
+import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -28,6 +35,7 @@ import {
   SessionCredentialService,
 } from "../Services/SessionCredentialService.ts";
 import { AuthControlPlaneLive, AuthCoreLive } from "./AuthControlPlane.ts";
+import { scopesForSessionRole } from "../scopes.ts";
 
 type BootstrapExchangeResult = {
   readonly response: AuthBootstrapResult;
@@ -36,6 +44,19 @@ type BootstrapExchangeResult = {
 
 const AUTHORIZATION_PREFIX = "Bearer ";
 const WEBSOCKET_TOKEN_QUERY_PARAM = "wsToken";
+const WEBSOCKET_TICKET_QUERY_PARAM = "ticket";
+
+function selectGrantedScopes(input: {
+  readonly role: "owner" | "client";
+  readonly requestedScopes?: ReadonlyArray<AuthEnvironmentScope>;
+}): ReadonlyArray<AuthEnvironmentScope> {
+  const grantedScopes = scopesForSessionRole(input.role);
+  if (!input.requestedScopes || input.requestedScopes.length === 0) {
+    return grantedScopes;
+  }
+  const grantedSet = new Set(grantedScopes);
+  return input.requestedScopes.filter((scope) => grantedSet.has(scope));
+}
 
 export function toBootstrapExchangeAuthError(cause: BootstrapCredentialError): AuthError {
   if (cause.status === 500) {
@@ -83,6 +104,7 @@ export const makeServerAuth = Effect.gen(function* () {
         subject: session.subject,
         method: session.method,
         role: session.role,
+        scopes: new Set(scopesForSessionRole(session.role)),
         ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
       })),
       Effect.mapError(
@@ -118,6 +140,7 @@ export const makeServerAuth = Effect.gen(function* () {
             authenticated: true,
             auth: descriptor,
             role: session.role,
+            scopes: [...session.scopes],
             sessionMethod: session.method,
             ...(session.expiresAt ? { expiresAt: DateTime.toUtc(session.expiresAt) } : {}),
           }) satisfies AuthSessionState,
@@ -163,6 +186,7 @@ export const makeServerAuth = Effect.gen(function* () {
             response: {
               authenticated: true,
               role: session.role,
+              scopes: scopesForSessionRole(session.role),
               sessionMethod: session.method,
               expiresAt: DateTime.toUtc(session.expiresAt),
             } satisfies AuthBootstrapResult,
@@ -171,6 +195,27 @@ export const makeServerAuth = Effect.gen(function* () {
       ),
     );
 
+  const exchangeBootstrapCredentialForBrowserSession: ServerAuthShape["exchangeBootstrapCredentialForBrowserSession"] =
+    (credential, requestMetadata) =>
+      exchangeBootstrapCredential(credential, requestMetadata).pipe(
+        Effect.map(
+          (result) =>
+            ({
+              response: {
+                authenticated: true,
+                role: result.response.role,
+                scopes: result.response.scopes ?? scopesForSessionRole(result.response.role),
+                sessionMethod: result.response.sessionMethod,
+                expiresAt: result.response.expiresAt,
+              } satisfies AuthBrowserSessionResult,
+              sessionToken: result.sessionToken,
+            }) satisfies {
+              readonly response: AuthBrowserSessionResult;
+              readonly sessionToken: string;
+            },
+        ),
+      );
+
   const exchangeBootstrapCredentialForBearerSession: ServerAuthShape["exchangeBootstrapCredentialForBearerSession"] =
     (credential, requestMetadata) =>
       bootstrapCredentials.consume(credential).pipe(
@@ -178,7 +223,7 @@ export const makeServerAuth = Effect.gen(function* () {
         Effect.flatMap((grant) =>
           sessions
             .issue({
-              method: "bearer-session-token",
+              method: "bearer-access-token",
               subject: grant.subject,
               role: grant.role,
               client: {
@@ -201,10 +246,35 @@ export const makeServerAuth = Effect.gen(function* () {
             ({
               authenticated: true,
               role: session.role,
-              sessionMethod: "bearer-session-token",
+              scopes: scopesForSessionRole(session.role),
+              sessionMethod: "bearer-access-token",
               expiresAt: DateTime.toUtc(session.expiresAt),
               sessionToken: session.token,
             }) satisfies AuthBearerBootstrapResult,
+        ),
+      );
+
+  const exchangeBootstrapCredentialForAccessToken: ServerAuthShape["exchangeBootstrapCredentialForAccessToken"] =
+    (credential, requestMetadata, requestedScopes) =>
+      exchangeBootstrapCredentialForBearerSession(credential, requestMetadata).pipe(
+        Effect.flatMap((session) =>
+          Effect.map(Clock.currentTimeMillis, (now) => {
+            const scopeInput = {
+              role: session.role,
+              ...(requestedScopes ? { requestedScopes } : {}),
+            };
+            const scopes = selectGrantedScopes(scopeInput);
+            return {
+              access_token: session.sessionToken,
+              issued_token_type: AuthAccessTokenType,
+              token_type: "Bearer",
+              expires_in: Math.max(
+                0,
+                Math.floor((DateTime.toDate(session.expiresAt).getTime() - now) / 1000),
+              ),
+              scope: encodeOAuthScope(scopes),
+            } satisfies AuthAccessTokenResult;
+          }),
         ),
       );
 
@@ -248,6 +318,12 @@ export const makeServerAuth = Effect.gen(function* () {
               cause,
             }),
         ),
+        Effect.map((pairingLinks) =>
+          pairingLinks.map((pairingLink) => ({
+            ...pairingLink,
+            scopes: pairingLink.scopes ?? scopesForSessionRole(pairingLink.role),
+          })),
+        ),
       );
 
   const revokePairingLink: ServerAuthShape["revokePairingLink"] = (id) =>
@@ -274,6 +350,7 @@ export const makeServerAuth = Effect.gen(function* () {
         clientSessions.map(
           (clientSession): AuthClientSession => ({
             ...clientSession,
+            scopes: clientSession.scopes ?? scopesForSessionRole(clientSession.role),
             current: clientSession.sessionId === currentSessionId,
           }),
         ),
@@ -344,11 +421,24 @@ export const makeServerAuth = Effect.gen(function* () {
       ),
     );
 
+  const issueWebSocketTicket: ServerAuthShape["issueWebSocketTicket"] = (session) =>
+    issueWebSocketToken(session).pipe(
+      Effect.map(
+        (issued) =>
+          ({
+            ticket: issued.token,
+            expiresAt: issued.expiresAt,
+          }) satisfies AuthWebSocketTicketResult,
+      ),
+    );
+
   const authenticateWebSocketUpgrade: ServerAuthShape["authenticateWebSocketUpgrade"] = (request) =>
     Effect.gen(function* () {
       const requestUrl = HttpServerRequest.toURL(request);
       if (Option.isSome(requestUrl)) {
-        const websocketToken = requestUrl.value.searchParams.get(WEBSOCKET_TOKEN_QUERY_PARAM);
+        const websocketToken =
+          requestUrl.value.searchParams.get(WEBSOCKET_TICKET_QUERY_PARAM) ??
+          requestUrl.value.searchParams.get(WEBSOCKET_TOKEN_QUERY_PARAM);
         if (websocketToken && websocketToken.trim().length > 0) {
           return yield* sessions.verifyWebSocketToken(websocketToken).pipe(
             Effect.map((session) => ({
@@ -356,6 +446,7 @@ export const makeServerAuth = Effect.gen(function* () {
               subject: session.subject,
               method: session.method,
               role: session.role,
+              scopes: new Set(scopesForSessionRole(session.role)),
               ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
             })),
             Effect.mapError(
@@ -377,7 +468,9 @@ export const makeServerAuth = Effect.gen(function* () {
     getDescriptor: () => Effect.succeed(descriptor),
     getSessionState,
     exchangeBootstrapCredential,
+    exchangeBootstrapCredentialForBrowserSession,
     exchangeBootstrapCredentialForBearerSession,
+    exchangeBootstrapCredentialForAccessToken,
     issuePairingCredential,
     listPairingLinks,
     revokePairingLink,
@@ -387,6 +480,7 @@ export const makeServerAuth = Effect.gen(function* () {
     authenticateHttpRequest: authenticateRequest,
     authenticateWebSocketUpgrade,
     issueWebSocketToken,
+    issueWebSocketTicket,
     issueStartupPairingUrl,
   } satisfies ServerAuthShape;
 });

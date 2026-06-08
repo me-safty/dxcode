@@ -78,13 +78,13 @@ it.layer(NodeServices.layer)("AuthControlPlane", (it) => {
       const revoked = yield* authControlPlane.revokeSession(issued.sessionId);
       const listedAfterRevoke = yield* authControlPlane.listSessions();
 
-      expect(issued.method).toBe("bearer-session-token");
+      expect(issued.method).toBe("bearer-access-token");
       expect(issued.role).toBe("owner");
       expect(issued.client.deviceType).toBe("bot");
       expect(issued.client.label).toBe("deploy-bot");
       expect(verified.sessionId).toBe(issued.sessionId);
       expect(verified.role).toBe("owner");
-      expect(verified.method).toBe("bearer-session-token");
+      expect(verified.method).toBe("bearer-access-token");
       expect(listedBeforeRevoke).toHaveLength(1);
       expect(listedBeforeRevoke[0]?.sessionId).toBe(issued.sessionId);
       expect("token" in (listedBeforeRevoke[0] ?? {})).toBe(false);
