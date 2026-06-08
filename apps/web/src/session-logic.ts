@@ -579,7 +579,13 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     itemType === "command_execution" ||
     requestKind === "command" ||
     Boolean(commandPreview.command || commandPreview.rawCommand);
-  if (commandResult.output && !commandResult.stdout && !commandResult.stderr && isCommandEntry) {
+  if (
+    commandResult.output &&
+    !commandResult.stdout &&
+    !commandResult.stderr &&
+    !entry.output &&
+    isCommandEntry
+  ) {
     entry.output = commandResult.output;
   }
   if (commandResult.stdout) {
@@ -992,8 +998,9 @@ function extractCommandResult(payload: Record<string, unknown> | null): {
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
   const rawOutput = asRecord(data?.rawOutput);
+  const rawOutputStdout = firstRawStringFromRecord(rawOutput, ["stdout"]);
   const stdout =
-    firstRawStringFromRecord(rawOutput, ["stdout"]) ??
+    rawOutputStdout ??
     firstRawStringFromRecord(itemResult, ["stdout"]) ??
     firstRawStringFromRecord(data, ["stdout"]) ??
     firstRawStringFromRecord(payload, ["stdout"]);
@@ -1032,11 +1039,12 @@ function extractCommandResult(payload: Record<string, unknown> | null): {
     firstNumberFromRecord(data, ["durationMs", "elapsedMs"]) ??
     firstNumberFromRecord(payload, ["durationMs", "elapsedMs"]) ??
     (elapsedSeconds !== null ? elapsedSeconds * 1000 : null);
-  const strippedStdout = stdout ? stripTrailingExitCode(stdout) : null;
+  const strippedStdout = rawOutputStdout ? stripTrailingExitCode(rawOutputStdout) : null;
   const normalizedOutput =
     strippedContent?.exitCode !== undefined ? strippedContent.output : (content ?? null);
 
   return {
+    // `output` is the legacy fallback stream; callers should prefer stdout/stderr when present.
     output: normalizedOutput,
     stdout: strippedStdout?.exitCode !== undefined ? strippedStdout.output : stdout,
     stderr,
@@ -1318,9 +1326,13 @@ function collectPatchStrings(
 
 function extractToolPatch(payload: Record<string, unknown> | null): string | null {
   const patches: string[] = [];
+  const seen = new Set<string>();
+  if (payload) {
+    collectPatchStrings(payload, patches, seen, 0, false);
+  }
   const data = asRecord(payload?.data);
-  collectPatchStrings(data, patches, new Set<string>(), 0, false);
-  collectPatchStrings(asRecord(data?.item), patches, new Set<string>(patches), 0);
+  // Keep traversal bounded; provider payloads can nest raw tool data deeply.
+  collectPatchStrings(data, patches, seen, 0);
   return patches.length > 0 ? patches.join("\n\n") : null;
 }
 function extractWorkLogItemType(

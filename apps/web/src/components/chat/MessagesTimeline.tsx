@@ -1419,7 +1419,7 @@ function FileChangeEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry })
               />
             )}
             options={{
-              collapsed: false,
+              collapsed: true,
               diffStyle: "unified",
               theme: resolveDiffThemeName(ctx.resolvedTheme),
             }}
