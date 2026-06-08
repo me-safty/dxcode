@@ -5,6 +5,7 @@ import {
   PairingPendingSurface,
   PairingRouteSurface,
 } from "../components/auth/PairingRouteSurface";
+import { formatDocumentTitle, useDocumentTitle } from "../lib/documentTitle";
 
 export const Route = createFileRoute("/pair")({
   beforeLoad: async ({ context }) => {
@@ -29,6 +30,7 @@ export const Route = createFileRoute("/pair")({
 function PairRouteView() {
   const { authGateState } = Route.useRouteContext();
   const navigate = useNavigate();
+  useDocumentTitle(formatDocumentTitle("Pair"));
 
   if (!authGateState) {
     return null;

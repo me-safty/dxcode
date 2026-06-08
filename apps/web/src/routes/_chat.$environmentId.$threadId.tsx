@@ -1,12 +1,22 @@
+import { scopeProjectRef } from "@t3tools/client-runtime";
 import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
 
 import ChatView from "../components/ChatView";
 import { threadHasStarted } from "../components/ChatView.logic";
+import { resolveProjectFaviconUrl } from "../components/ProjectFavicon";
 import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../composerDraftStore";
 import { type DiffRouteSearch, parseDiffRouteSearch } from "../diffRouteSearch";
+import { useDocumentFavicon } from "../lib/documentFavicon";
+import {
+  buildThreadTitleSegment,
+  deriveProjectTitleName,
+  deriveWorktreeTitleLabel,
+  formatDocumentTitle,
+  useDocumentTitle,
+} from "../lib/documentTitle";
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
-import { createThreadSelectorByRef } from "../storeSelectors";
+import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { SidebarInset } from "~/components/ui/sidebar";
 
@@ -40,6 +50,25 @@ function ChatThreadRouteView() {
   const serverThreadStarted = threadHasStarted(serverThread);
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
   const diffOpen = search.diff === "1";
+
+  const activeThread = serverThread ?? draftThread;
+  const projectRef = useMemo(
+    () =>
+      activeThread ? scopeProjectRef(activeThread.environmentId, activeThread.projectId) : null,
+    [activeThread],
+  );
+  const project = useStore(useMemo(() => createProjectSelectorByRef(projectRef), [projectRef]));
+  const titleSegment = buildThreadTitleSegment({
+    repoName: deriveProjectTitleName(project),
+    worktreeLabel: deriveWorktreeTitleLabel(activeThread?.worktreePath, activeThread?.branch),
+    threadTitle: serverThread?.title,
+  });
+  useDocumentTitle(formatDocumentTitle(titleSegment));
+  useDocumentFavicon(
+    project
+      ? resolveProjectFaviconUrl({ environmentId: project.environmentId, cwd: project.cwd })
+      : null,
+  );
 
   useEffect(() => {
     if (!threadRef || !bootstrapComplete) {

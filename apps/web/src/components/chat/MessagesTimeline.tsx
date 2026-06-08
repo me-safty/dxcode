@@ -37,6 +37,7 @@ import {
   IconChecklist as ChecklistIcon,
   IconChevronDown as ChevronDownIcon,
   IconChevronRight as ChevronRightIcon,
+  IconMessageQuestion as MessageQuestionIcon,
   IconPencil as SquarePenIcon,
   IconRobot as RobotIcon,
   IconSearch as SearchIcon,
@@ -786,8 +787,25 @@ const WorkActivitySummaryRow = memo(function WorkActivitySummaryRow({
 
 function WorkActivitySummaryItemRow({ item }: { item: WorkActivitySummary["items"][number] }) {
   const ctx = use(TimelineRowCtx);
+  if (item.questionAnswer) {
+    return (
+      <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-5">
+        <span className="wrap-break-word text-muted-foreground/65">
+          {item.questionAnswer.question}
+        </span>
+        <span className="wrap-break-word border-l-2 border-border/60 pl-2 text-foreground/85">
+          {item.questionAnswer.answer}
+        </span>
+      </div>
+    );
+  }
   const turnSummary = item.turnId ? ctx.turnDiffSummaryByTurnId.get(item.turnId) : undefined;
-  const canShowInlineDiff = Boolean(turnSummary && item.changedFilePath);
+  // Prefer the diff the edit tool itself carried (works without a checkpoint
+  // snapshot); fall back to the turn checkpoint diff when there's no payload diff.
+  const editDiff = item.editDiff;
+  const canShowEditDiff = Boolean(editDiff && editDiff.trim().length > 0);
+  const canShowCheckpointDiff = Boolean(turnSummary && item.changedFilePath);
+  const canShowInlineDiff = canShowEditDiff || canShowCheckpointDiff;
   const subagentReport = item.subagent?.report;
   const canShowSubagentReport = Boolean(subagentReport && subagentReport.trim().length > 0);
   const todos = item.todos;
@@ -875,7 +893,9 @@ function WorkActivitySummaryItemRow({ item }: { item: WorkActivitySummary["items
   return (
     <div className="min-w-0">
       {labelWithTooltip}
-      {canShowInlineDiff && expanded && turnSummary && item.changedFilePath ? (
+      {expanded && canShowEditDiff && editDiff ? (
+        <InlineEditDiff editDiff={editDiff} filePath={item.changedFilePath} />
+      ) : canShowInlineDiff && expanded && turnSummary && item.changedFilePath ? (
         <InlineWorkActivityFileDiff turnSummary={turnSummary} filePath={item.changedFilePath} />
       ) : null}
       {!canShowInlineDiff && canShowSubagentReport && expanded && subagentReport ? (
@@ -1008,27 +1028,89 @@ function InlineWorkActivityFileDiff({
           </pre>
         </div>
       ) : fileDiff ? (
-        <div className="max-h-[28rem] overflow-auto">
-          <FileDiff
-            key={buildFileDiffRenderKey(fileDiff)}
-            fileDiff={fileDiff}
-            options={{
-              collapsed: false,
-              diffIndicators: "bars",
-              diffStyle: "unified",
-              lineDiffType: "word-alt",
-              overflow: "scroll",
-              theme: resolveDiffThemeName(ctx.resolvedTheme),
-              themeType: ctx.resolvedTheme as DiffThemeType,
-              unsafeCSS: INLINE_DIFF_RENDER_UNSAFE_CSS,
-            }}
-          />
-        </div>
+        <FileDiffView fileDiff={fileDiff} resolvedTheme={ctx.resolvedTheme} />
       ) : (
         <p className="px-3 py-2 text-[11px] text-muted-foreground/65">
           No diff found for {filePath}.
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Renders an edit's real code change inline from the diff carried in the tool
+ * payload (OpenCode/Codex/Claude), reusing the same `FileDiff` component as the
+ * diff tab. This works without a checkpoint snapshot, so edits show their diff
+ * immediately.
+ */
+function InlineEditDiff({
+  editDiff,
+  filePath,
+}: {
+  editDiff: string;
+  filePath: string | undefined;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const renderablePatch = useMemo(
+    () => getRenderablePatch(editDiff, `timeline-edit:${ctx.resolvedTheme}`),
+    [ctx.resolvedTheme, editDiff],
+  );
+  const fileDiff = useMemo(() => {
+    if (!renderablePatch || renderablePatch.kind !== "files") {
+      return undefined;
+    }
+    if (filePath) {
+      return (
+        findRenderableFileDiff(renderablePatch.files, filePath, ctx.workspaceRoot) ??
+        renderablePatch.files[0]
+      );
+    }
+    return renderablePatch.files[0];
+  }, [ctx.workspaceRoot, filePath, renderablePatch]);
+
+  return (
+    <div className="mt-2 max-w-full overflow-hidden rounded-[10px] border border-border/70 bg-background">
+      {renderablePatch?.kind === "raw" ? (
+        <div className="p-2">
+          <p className="mb-1 text-[11px] text-muted-foreground/65">{renderablePatch.reason}</p>
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap wrap-break-word rounded-md bg-background/70 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground/90">
+            {renderablePatch.text}
+          </pre>
+        </div>
+      ) : fileDiff ? (
+        <FileDiffView fileDiff={fileDiff} resolvedTheme={ctx.resolvedTheme} />
+      ) : (
+        <p className="px-3 py-2 text-[11px] text-muted-foreground/65">No diff to display.</p>
+      )}
+    </div>
+  );
+}
+
+/** Shared compact `FileDiff` renderer used by both checkpoint and payload diffs. */
+function FileDiffView({
+  fileDiff,
+  resolvedTheme,
+}: {
+  fileDiff: FileDiffMetadata;
+  resolvedTheme: DiffThemeType;
+}) {
+  return (
+    <div className="max-h-[28rem] overflow-auto">
+      <FileDiff
+        key={buildFileDiffRenderKey(fileDiff)}
+        fileDiff={fileDiff}
+        options={{
+          collapsed: false,
+          diffIndicators: "bars",
+          diffStyle: "unified",
+          lineDiffType: "word-alt",
+          overflow: "scroll",
+          theme: resolveDiffThemeName(resolvedTheme),
+          themeType: resolvedTheme as DiffThemeType,
+          unsafeCSS: INLINE_DIFF_RENDER_UNSAFE_CSS,
+        }}
+      />
     </div>
   );
 }
@@ -1074,6 +1156,8 @@ function workActivityIcon(category: WorkActivityCategory): TablerIcon {
       return RobotIcon;
     case "todo":
       return ChecklistIcon;
+    case "question":
+      return MessageQuestionIcon;
     case "tool":
       return WrenchIcon;
     case "info":

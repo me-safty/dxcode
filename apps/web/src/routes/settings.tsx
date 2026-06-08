@@ -13,6 +13,18 @@ import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
 import { SidebarInset } from "../components/ui/sidebar";
 import { isElectron } from "../env";
+import { formatDocumentTitle, useDocumentTitle } from "../lib/documentTitle";
+
+const SETTINGS_PAGE_LABELS: Record<string, string> = {
+  "/settings/general": "General",
+  "/settings/source-control": "Source Control",
+  "/settings/providers": "Providers",
+  "/settings/keybindings": "Keybindings",
+  "/settings/connections": "Connections",
+  "/settings/cloud": "Cloud",
+  "/settings/diagnostics": "Diagnostics",
+  "/settings/archived": "Archived",
+};
 
 function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
@@ -36,6 +48,10 @@ function SettingsContentLayout() {
   const canGoBack = useCanGoBack();
   const [restoreSignal, setRestoreSignal] = useState(0);
   const showRestoreDefaults = location.pathname === "/settings/general";
+  const settingsPageLabel = SETTINGS_PAGE_LABELS[location.pathname];
+  useDocumentTitle(
+    formatDocumentTitle(settingsPageLabel ? `${settingsPageLabel} · Settings` : "Settings"),
+  );
   const handleRestored = () => setRestoreSignal((value) => value + 1);
   const navigateBackWithinApp = useCallback(() => {
     if (canGoBack) {

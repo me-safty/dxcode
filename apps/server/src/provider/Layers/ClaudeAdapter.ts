@@ -67,6 +67,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { CLAUDE_OPENCODE_ANTHROPIC_SYSTEM_PROMPT } from "../ClaudeSystemPrompt.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
@@ -517,6 +518,10 @@ function classifyRequestType(toolName: string): CanonicalRequestType {
 
 function isTodoTool(toolName: string): boolean {
   return toolName.toLowerCase().includes("todowrite");
+}
+
+function isAskUserQuestionTool(toolName: string): boolean {
+  return toolName === "AskUserQuestion";
 }
 
 type PlanStep = {
@@ -1888,6 +1893,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
 
       const toolName = block.name;
+      // `AskUserQuestion` is surfaced separately as a structured
+      // user-input.requested/resolved interaction (handleAskUserQuestion).
+      // Skip the raw tool-call lifecycle so the question is not also rendered
+      // as a redundant "AskUserQuestion: {json}" tool row.
+      if (isAskUserQuestionTool(toolName)) {
+        return;
+      }
       const itemType = classifyToolItemType(toolName);
       const toolInput =
         typeof block.input === "object" && block.input !== null
@@ -3053,7 +3065,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
-        systemPrompt: { type: "preset", preset: "claude_code" },
+        // Override Claude Code's built-in preset system prompt with a port of
+        // OpenCode's anthropic.txt base prompt. See ClaudeSystemPrompt.ts.
+        // NOTE: a custom-string systemPrompt bypasses the preset's dynamic
+        // sections (cwd / auto-loaded CLAUDE.md / git status). settingSources
+        // below still loads settings + permissions.
+        systemPrompt: CLAUDE_OPENCODE_ANTHROPIC_SYSTEM_PROMPT,
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is
         // normalized to `xhigh` above and paired with `settings.ultracode`.

@@ -20,11 +20,16 @@ import {
   IconTrash,
   IconCornerDownRight,
   IconPlayerStopFilled,
+  IconCheck,
+  IconCircle,
+  IconCircleDot,
+  IconCircleMinus,
 } from "@tabler/icons-react";
 import type { TurnId } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { TurnDiffSummary } from "../../types";
+import type { ActiveTodosState, TodoItem } from "../../session-logic";
 import { cn } from "~/lib/utils";
 
 export type QueuedMessagePanelItem = {
@@ -161,10 +166,59 @@ function QueuedMessageRow(props: {
   );
 }
 
+function todoStatusIcon(status: TodoItem["status"]) {
+  switch (status) {
+    case "completed":
+      return <IconCheck className="size-3.5 text-emerald-400" />;
+    case "in_progress":
+      return <IconCircleDot className="size-3.5 text-amber-400" />;
+    case "cancelled":
+      return <IconCircleMinus className="size-3.5 text-muted-foreground/50" />;
+    default:
+      return <IconCircle className="size-3.5 text-muted-foreground/45" />;
+  }
+}
+
+function TodoList({ todos }: { todos: ReadonlyArray<TodoItem> }) {
+  const completed = todos.filter((todo) => todo.status === "completed").length;
+  return (
+    <div className="border-b border-border/35 px-3 py-2">
+      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/60">
+        Tasks ({completed}/{todos.length})
+      </div>
+      <ul className="flex flex-col gap-1">
+        {todos.map((todo) => {
+          const status = todo.status ?? "pending";
+          return (
+            <li key={todo.content} className="flex items-start gap-2 text-xs leading-5">
+              <span className="mt-0.5 shrink-0">{todoStatusIcon(status)}</span>
+              <span
+                className={cn(
+                  "min-w-0 wrap-break-word",
+                  status === "completed"
+                    ? "text-muted-foreground/55 line-through"
+                    : status === "cancelled"
+                      ? "text-muted-foreground/45 line-through"
+                      : status === "in_progress"
+                        ? "text-foreground/90"
+                        : "text-muted-foreground/80",
+                )}
+              >
+                {todo.content}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export function QueuedMessagesPanel(props: {
   activeTurnId: TurnId | null;
   activeTurnDiffSummary: TurnDiffSummary | null;
   activeChangeSummary: QueuedMessageDiffSummary | null;
+  activeTodos: ActiveTodosState | null;
   items: readonly QueuedMessagePanelItem[];
   onDelete: (id: string) => void;
   onEdit: (id: string) => void;
@@ -176,6 +230,7 @@ export function QueuedMessagesPanel(props: {
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const diffSummary = props.activeChangeSummary ?? summarizeTurnDiff(props.activeTurnDiffSummary);
+  const todos = props.activeTodos?.todos ?? [];
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -197,7 +252,7 @@ export function QueuedMessagesPanel(props: {
   if (!props.activeTurnId) {
     return null;
   }
-  if (props.items.length === 0 && diffSummary.fileCount === 0) {
+  if (props.items.length === 0 && diffSummary.fileCount === 0 && todos.length === 0) {
     return null;
   }
 
@@ -209,7 +264,7 @@ export function QueuedMessagesPanel(props: {
       <div
         className={cn(
           "flex min-h-9 items-center gap-2 px-3 text-xs",
-          props.items.length > 0 ? "border-b border-border/35" : null,
+          props.items.length > 0 || todos.length > 0 ? "border-b border-border/35" : null,
         )}
       >
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
@@ -230,6 +285,7 @@ export function QueuedMessagesPanel(props: {
           Review
         </Button>
       </div>
+      {todos.length > 0 ? <TodoList todos={todos} /> : null}
       {props.items.length > 0 ? (
         <DndContext
           sensors={sensors}

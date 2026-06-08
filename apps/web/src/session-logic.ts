@@ -21,6 +21,7 @@ import type {
   ThreadSession,
   TurnDiffSummary,
 } from "./types";
+import { extractEditDiff } from "./lib/editDiff";
 
 export type ProviderPickerKind = ProviderDriverKind;
 
@@ -71,6 +72,11 @@ export interface TodoItem {
   priority?: "high" | "medium" | "low";
 }
 
+export interface QuestionAnswer {
+  question: string;
+  answer: string;
+}
+
 export interface WorkLogEntry {
   id: string;
   createdAt: string;
@@ -88,8 +94,12 @@ export interface WorkLogEntry {
   requestKind?: PendingApproval["requestKind"];
   /** Target path for a file-read tool, extracted from structured tool input. */
   readPath?: string;
+  /** Unified-diff patch string for an edit tool, extracted from tool payload. */
+  editDiff?: string;
   subagent?: SubagentInfo;
   todos?: ReadonlyArray<TodoItem>;
+  /** Question/answer pairs for a resolved user-input prompt. */
+  questionAnswers?: ReadonlyArray<QuestionAnswer>;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -120,6 +130,12 @@ export interface ActivePlanState {
     step: string;
     status: "pending" | "inProgress" | "completed";
   }>;
+}
+
+export interface ActiveTodosState {
+  createdAt: string;
+  turnId: TurnId | null;
+  todos: ReadonlyArray<TodoItem>;
 }
 
 export interface LatestProposedPlanState {
@@ -449,6 +465,49 @@ export function deriveActivePlanState(
   };
 }
 
+export function deriveActiveTodos(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | undefined,
+): ActiveTodosState | null {
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  // Tool todo/checklist activities (e.g. OpenCode/Claude `todowrite`) carry the
+  // current todo snapshot on their lifecycle payload.
+  const todoActivities = ordered.filter((activity) => {
+    if (activity.kind !== "tool.updated" && activity.kind !== "tool.completed") {
+      return false;
+    }
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    return Array.isArray(payload?.todos);
+  });
+  // Prefer the latest snapshot from the current turn; fall back to the most
+  // recent across any turn so the list persists across follow-up messages.
+  const latest = Option.firstSomeOf([
+    ...(latestTurnId
+      ? Arr.findLast(todoActivities, (activity) => activity.turnId === latestTurnId)
+      : Option.none()),
+    Arr.last(todoActivities),
+  ]).pipe(Option.getOrNull);
+  if (!latest) {
+    return null;
+  }
+  const payload =
+    latest.payload && typeof latest.payload === "object"
+      ? (latest.payload as Record<string, unknown>)
+      : null;
+  const todos = extractTodos(payload);
+  if (!todos) {
+    return null;
+  }
+  return {
+    createdAt: latest.createdAt,
+    turnId: latest.turnId,
+    todos,
+  };
+}
+
 export function findLatestProposedPlan(
   proposedPlans: ReadonlyArray<ProposedPlan>,
   latestTurnId: TurnId | string | null | undefined,
@@ -514,6 +573,22 @@ export function deriveWorkLogEntries(
   latestTurnId: TurnId | undefined,
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  // Pre-index user-input questions by requestId so the resolved event can be
+  // rendered as a combined "question → answer" row.
+  const questionsByRequestId = new Map<string, ReadonlyArray<UserInputQuestion>>();
+  for (const activity of ordered) {
+    if (activity.kind !== "user-input.requested") continue;
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const requestId = typeof payload?.requestId === "string" ? payload.requestId : null;
+    const questions = parseUserInputQuestions(payload);
+    if (requestId && questions) {
+      questionsByRequestId.set(requestId, questions);
+    }
+  }
+
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of ordered) {
     if (latestTurnId && activity.turnId !== latestTurnId) continue;
@@ -522,7 +597,10 @@ export function deriveWorkLogEntries(
     if (activity.kind === "context-window.updated") continue;
     if (activity.summary === "Checkpoint captured") continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
-    entries.push(toDerivedWorkLogEntry(activity));
+    // The bare "Asked: ..." request row is superseded by the combined
+    // question→answer row built on the resolved event, so drop it.
+    if (activity.kind === "user-input.requested") continue;
+    entries.push(toDerivedWorkLogEntry(activity, questionsByRequestId));
   }
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
@@ -541,13 +619,102 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
   return typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:");
 }
 
-function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
+function deriveUserInputResolvedEntry(
+  activity: OrchestrationThreadActivity,
+  payload: Record<string, unknown> | null,
+  questionsByRequestId?: ReadonlyMap<string, ReadonlyArray<UserInputQuestion>>,
+): DerivedWorkLogEntry {
+  const requestId = typeof payload?.requestId === "string" ? payload.requestId : null;
+  const questions = requestId ? questionsByRequestId?.get(requestId) : undefined;
+  const answers = asRecord(payload?.answers);
+  const pairs = buildUserInputQuestionAnswerPairs(questions, answers);
+
+  const base: DerivedWorkLogEntry = {
+    id: activity.id,
+    createdAt: activity.createdAt,
+    turnId: activity.turnId,
+    label: activity.summary,
+    tone: "info",
+    activityKind: activity.kind,
+  };
+
+  if (pairs.length === 0) {
+    return base;
+  }
+
+  base.questionAnswers = pairs;
+  base.label =
+    pairs.length === 1 ? `Answered: ${pairs[0]!.question}` : `Answered ${pairs.length} questions`;
+  // Plain-text fallback for the tooltip / non-structured contexts.
+  base.detail = pairs.map((pair) => `${pair.question}\n  ${pair.answer}`).join("\n\n");
+  return base;
+}
+
+interface UserInputQuestionAnswerPair {
+  readonly question: string;
+  readonly answer: string;
+}
+
+function buildUserInputQuestionAnswerPairs(
+  questions: ReadonlyArray<UserInputQuestion> | undefined,
+  answers: Record<string, unknown> | null,
+): UserInputQuestionAnswerPair[] {
+  const pairs: UserInputQuestionAnswerPair[] = [];
+  const formatAnswer = (value: unknown): string =>
+    Array.isArray(value)
+      ? value.map((entry) => String(entry)).join(", ")
+      : typeof value === "string"
+        ? value
+        : value == null
+          ? ""
+          : String(value);
+
+  if (questions && questions.length > 0) {
+    for (const question of questions) {
+      const rawAnswer = answers?.[question.id];
+      const answer = formatAnswer(rawAnswer).trim();
+      pairs.push({
+        question: question.question.trim() || question.header.trim(),
+        answer: answer.length > 0 ? answer : "(no answer)",
+      });
+    }
+    return pairs;
+  }
+
+  // No matching request questions — fall back to whatever answers we have,
+  // keyed by their (often human-readable) ids.
+  if (answers) {
+    for (const [key, value] of Object.entries(answers)) {
+      const answer = formatAnswer(value).trim();
+      pairs.push({
+        question: key.trim(),
+        answer: answer.length > 0 ? answer : "(no answer)",
+      });
+    }
+  }
+  return pairs;
+}
+
+function toDerivedWorkLogEntry(
+  activity: OrchestrationThreadActivity,
+  questionsByRequestId?: ReadonlyMap<string, ReadonlyArray<UserInputQuestion>>,
+): DerivedWorkLogEntry {
   const payload =
     activity.payload && typeof activity.payload === "object"
       ? (activity.payload as Record<string, unknown>)
       : null;
+  if (activity.kind === "user-input.resolved") {
+    return deriveUserInputResolvedEntry(activity, payload, questionsByRequestId);
+  }
   const commandPreview = extractToolCommand(payload);
-  const changedFiles = extractChangedFiles(payload);
+  const itemType = extractWorkLogItemType(payload);
+  const requestKind = extractWorkLogRequestKind(payload);
+  // Only treat a tool's structured paths as "changed files" when the tool is an
+  // actual file change. Read/grep/glob inputs also carry `filePath`/`path`, and
+  // counting those as changes mislabels reads as "Edited" rows.
+  const isFileChangeTool = itemType === "file_change" || requestKind === "file-change";
+  const changedFiles = isFileChangeTool ? extractChangedFiles(payload) : [];
+  const editDiff = isFileChangeTool ? extractEditDiff(payload) : undefined;
   const title = extractToolTitle(payload);
   const isTaskActivity = activity.kind === "task.progress" || activity.kind === "task.completed";
   const taskSummary =
@@ -588,8 +755,6 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (activity.kind === "runtime.warning") {
     entry.hidden = true;
   }
-  const itemType = extractWorkLogItemType(payload);
-  const requestKind = extractWorkLogRequestKind(payload);
   if (detail) {
     entry.detail = detail;
   }
@@ -601,6 +766,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
+  }
+  if (editDiff) {
+    entry.editDiff = editDiff;
   }
   if (title) {
     entry.toolTitle = title;
@@ -621,7 +789,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (subagent) {
     entry.subagent = subagent;
   }
-  const readPath = extractReadPath(payload);
+  const readPath = itemType === "file_read" ? extractReadPath(payload) : null;
   if (readPath) {
     entry.readPath = readPath;
   }
@@ -645,8 +813,14 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
 function collapseDerivedWorkLogEntries(
   entries: ReadonlyArray<DerivedWorkLogEntry>,
 ): DerivedWorkLogEntry[] {
+  // Sub-agent step streams (Claude `task.*`) share a stable taskId but interleave
+  // across parallel sub-agents, so adjacency-based collapse cannot merge them.
+  // Fold every entry for a given taskId into its first occurrence first, so one
+  // sub-agent renders as exactly one row (not one row per progress step).
+  const withTasksMerged = mergeTaskEntriesByTaskId(entries);
+
   const collapsed: DerivedWorkLogEntry[] = [];
-  for (const entry of entries) {
+  for (const entry of withTasksMerged) {
     const previous = collapsed.at(-1);
     if (previous && shouldCollapseToolLifecycleEntries(previous, entry)) {
       collapsed[collapsed.length - 1] = mergeDerivedWorkLogEntries(previous, entry);
@@ -655,6 +829,35 @@ function collapseDerivedWorkLogEntries(
     collapsed.push(entry);
   }
   return collapsed;
+}
+
+function mergeTaskEntriesByTaskId(
+  entries: ReadonlyArray<DerivedWorkLogEntry>,
+): DerivedWorkLogEntry[] {
+  const result: DerivedWorkLogEntry[] = [];
+  const indexByTaskId = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.taskId === undefined) {
+      result.push(entry);
+      continue;
+    }
+    const existingIndex = indexByTaskId.get(entry.taskId);
+    if (existingIndex === undefined) {
+      indexByTaskId.set(entry.taskId, result.length);
+      result.push(entry);
+      continue;
+    }
+    // Merge later progress/completion into the first row for this sub-agent,
+    // keeping the original position, id and createdAt so it stays one stable row.
+    const anchor = result[existingIndex]!;
+    const merged = mergeDerivedWorkLogEntries(anchor, entry);
+    result[existingIndex] = {
+      ...merged,
+      id: anchor.id,
+      createdAt: anchor.createdAt,
+    };
+  }
+  return result;
 }
 
 function shouldCollapseToolLifecycleEntries(
@@ -705,6 +908,9 @@ function mergeDerivedWorkLogEntries(
   const taskId = next.taskId ?? previous.taskId;
   const subagent = mergeSubagentInfo(previous.subagent, next.subagent);
   const todos = next.todos ?? previous.todos;
+  const editDiff = next.editDiff ?? previous.editDiff;
+  const readPath = next.readPath ?? previous.readPath;
+  const questionAnswers = next.questionAnswers ?? previous.questionAnswers;
   return {
     ...previous,
     ...next,
@@ -721,6 +927,9 @@ function mergeDerivedWorkLogEntries(
     ...(taskId ? { taskId } : {}),
     ...(subagent ? { subagent } : {}),
     ...(todos ? { todos } : {}),
+    ...(editDiff ? { editDiff } : {}),
+    ...(readPath ? { readPath } : {}),
+    ...(questionAnswers ? { questionAnswers } : {}),
   };
 }
 
@@ -1221,6 +1430,7 @@ function collectChangedFiles(value: unknown, target: string[], seen: Set<string>
     "result",
     "input",
     "data",
+    "state",
     "changes",
     "files",
     "edits",

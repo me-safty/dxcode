@@ -56,6 +56,7 @@ import {
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveActiveTodos,
   findSidebarProposedPlan,
   findLatestProposedPlan,
   deriveWorkLogEntries,
@@ -1245,6 +1246,10 @@ export default function ChatView(props: ChatViewProps) {
   );
   const activePlan = useMemo(
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
+    [activeLatestTurn?.turnId, threadActivities],
+  );
+  const activeTodos = useMemo(
+    () => deriveActiveTodos(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
   const showPlanFollowUpPrompt =
@@ -3965,6 +3970,7 @@ export default function ChatView(props: ChatViewProps) {
                           }
                           activeTurnDiffSummary={activeTurnDiffSummaryForQueue}
                           activeChangeSummary={activeChangeSummaryForQueue}
+                          activeTodos={activeTodos}
                           items={queuedMessagePanelItems}
                           onDelete={(submissionId) =>
                             removeQueuedTurnSubmission(submissionId, { revokeImages: true })

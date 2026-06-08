@@ -439,6 +439,22 @@ describe("file_read labeling", () => {
 
     expect(summaries[0]?.items[0]?.label).toBe("Read files");
   });
+
+  it("ignores shell redirection tokens when extracting a command's read target", () => {
+    const summaries = summarizeWorkActivityEntries(
+      [
+        workEntry({
+          id: "read-redirect",
+          command: "cat README.md 2>/dev/null",
+          itemType: "command_execution",
+          requestKind: "command",
+        }),
+      ],
+      "/repo",
+    );
+
+    expect(summaries[0]?.items[0]?.label).toBe("Read README.md");
+  });
 });
 
 describe("summarizeWorkActivityEntries subagents and todos", () => {
@@ -508,6 +524,36 @@ describe("summarizeWorkActivityEntries subagents and todos", () => {
               { content: "Wire Convex package", status: "pending" },
             ],
           },
+        ],
+      },
+    ]);
+  });
+
+  it("expands a resolved user-input into one timeline row per question/answer", () => {
+    const summaries = summarizeWorkActivityEntries(
+      [
+        workEntry({
+          id: "qa-1",
+          label: "Answered 3 questions",
+          tone: "info",
+          questionAnswers: [
+            { question: "Provider scope?", answer: "All providers now" },
+            { question: "Persistence?", answer: "Dedicated table + service" },
+            { question: "Busy thread?", answer: "Skip & reschedule" },
+          ],
+        }),
+      ],
+      "/repo",
+    );
+
+    expect(summaries).toMatchObject([
+      {
+        category: "question",
+        label: "Answered 3 questions",
+        items: [
+          { label: "Provider scope?", questionAnswer: { answer: "All providers now" } },
+          { label: "Persistence?", questionAnswer: { answer: "Dedicated table + service" } },
+          { label: "Busy thread?", questionAnswer: { answer: "Skip & reschedule" } },
         ],
       },
     ]);

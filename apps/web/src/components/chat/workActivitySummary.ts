@@ -1,4 +1,9 @@
-import { type SubagentInfo, type TodoItem, type WorkLogEntry } from "../../session-logic";
+import {
+  type QuestionAnswer,
+  type SubagentInfo,
+  type TodoItem,
+  type WorkLogEntry,
+} from "../../session-logic";
 import { type TimelineActivityEntry } from "./MessagesTimeline.logic";
 
 export type WorkActivityCategory =
@@ -8,6 +13,7 @@ export type WorkActivityCategory =
   | "command"
   | "subagent"
   | "todo"
+  | "question"
   | "tool"
   | "info"
   | "error";
@@ -19,8 +25,10 @@ export interface WorkActivitySummaryItem {
   debugText?: string;
   turnId?: WorkLogEntry["turnId"];
   changedFilePath?: string;
+  editDiff?: string;
   subagent?: SubagentInfo;
   todos?: ReadonlyArray<TodoItem>;
+  questionAnswer?: QuestionAnswer;
 }
 
 export interface WorkActivitySummary {
@@ -116,6 +124,9 @@ function resolveWorkCategory(entry: WorkLogEntry): WorkActivityCategory {
   if (entry.itemType === "collab_agent_tool_call" || entry.subagent) {
     return "subagent";
   }
+  if ((entry.questionAnswers?.length ?? 0) > 0) {
+    return "question";
+  }
   if ((entry.todos?.length ?? 0) > 0) {
     return "todo";
   }
@@ -201,6 +212,16 @@ function buildSummary(pending: ReadonlyArray<ClassifiedWorkEntry>): WorkActivity
 }
 
 function expandSummaryItems(entry: ClassifiedWorkEntry): WorkActivitySummaryItem[] {
+  if (entry.category === "question" && (entry.entry.questionAnswers?.length ?? 0) > 0) {
+    const debugText = workEntryDebugText(entry.entry, entry.category);
+    return entry.entry.questionAnswers!.map((pair, index) => ({
+      id: `${entry.entry.id}:qa:${index}`,
+      label: pair.question,
+      turnId: entry.entry.turnId,
+      questionAnswer: pair,
+      debugText,
+    }));
+  }
   if (entry.category !== "edit" || (entry.entry.changedFiles?.length ?? 0) <= 1) {
     return [entry.item];
   }
@@ -212,6 +233,7 @@ function expandSummaryItems(entry: ClassifiedWorkEntry): WorkActivitySummaryItem
     label: `${editVerb(entry.entry)} ${displayPath(filePath, entry.workspaceRoot)}`,
     turnId: entry.entry.turnId,
     changedFilePath: displayPath(filePath, entry.workspaceRoot),
+    ...(entry.entry.editDiff ? { editDiff: entry.entry.editDiff } : {}),
     ...(title ? { title } : {}),
     debugText,
   }));
@@ -221,13 +243,23 @@ function summaryLabel(entries: ReadonlyArray<ClassifiedWorkEntry>): string {
   const first = entries[0]!;
   const countsByCategory = new Map<WorkActivityCategory, number>();
   for (const entry of entries) {
-    const itemCount = Math.max(1, expandSummaryItems(entry).length);
+    const itemCount = summaryEntryCount(entry);
     countsByCategory.set(entry.category, (countsByCategory.get(entry.category) ?? 0) + itemCount);
   }
   const fragments = [...countsByCategory].map(([category, count]) =>
     formatCount(count, summaryNoun(category), summaryPluralNoun(category)),
   );
   return `${summaryVerb(first.category)} ${fragments.join(", ")}`;
+}
+
+// How many "things" an entry contributes to its category count. Question and
+// todo entries collapse into a single expandable row, so count their inner
+// items (Q&A pairs / todos) rather than the single row.
+function summaryEntryCount(entry: ClassifiedWorkEntry): number {
+  if (entry.category === "question") {
+    return Math.max(1, entry.entry.questionAnswers?.length ?? 1);
+  }
+  return Math.max(1, expandSummaryItems(entry).length);
 }
 
 function summaryVerb(category: WorkActivityCategory): string {
@@ -243,6 +275,8 @@ function summaryVerb(category: WorkActivityCategory): string {
       return "Delegated to";
     case "todo":
       return "Updated";
+    case "question":
+      return "Answered";
     case "tool":
       return "Used";
     case "info":
@@ -265,6 +299,8 @@ function summaryNoun(category: WorkActivityCategory): string {
       return "subagent";
     case "todo":
       return "todo list";
+    case "question":
+      return "question";
     case "tool":
       return "tool";
     case "info":
@@ -303,6 +339,7 @@ function buildSummaryItem(
     ...(category === "edit" && entry.changedFiles?.length === 1
       ? { changedFilePath: displayPath(entry.changedFiles[0]!, workspaceRoot) }
       : {}),
+    ...(category === "edit" && entry.editDiff ? { editDiff: entry.editDiff } : {}),
     ...(category === "subagent" && entry.subagent ? { subagent: entry.subagent } : {}),
     ...(category === "todo" && entry.todos ? { todos: entry.todos } : {}),
     ...(title && title !== label ? { title } : {}),
@@ -328,6 +365,8 @@ function itemLabel(
       return subagentLabel(entry);
     case "todo":
       return todoLabel(entry);
+    case "question":
+      return questionLabel(entry);
     case "tool":
       return compactEntryLabel(entry);
     case "info":
@@ -335,6 +374,15 @@ function itemLabel(
     case "error":
       return compactEntryLabel(entry);
   }
+}
+
+function questionLabel(entry: WorkLogEntry): string {
+  const pairs = entry.questionAnswers ?? [];
+  if (pairs.length === 0) {
+    return compactEntryLabel(entry);
+  }
+  const suffix = pairs.length > 1 ? ` (+${pairs.length - 1} more)` : "";
+  return `${pairs[0]!.question}${suffix}`;
 }
 
 function subagentLabel(entry: WorkLogEntry): string {
@@ -594,6 +642,15 @@ function extractFilePathFromCommand(tokens: ReadonlyArray<string>): string | nul
   const commandArgs = tokens.slice(commandExecutableIndex(tokens) + 1, endIndex);
   for (let index = 0; index < commandArgs.length; index += 1) {
     const token = commandArgs[index]!;
+    if (isRedirectionToken(token) || hasEmbeddedRedirection(token)) {
+      // Skip the redirection operator and its target (e.g. `2>` `/dev/null`,
+      // or the combined `2>/dev/null`) so shell redirects are never mistaken
+      // for read targets.
+      if (isRedirectionToken(token)) {
+        index += 1;
+      }
+      continue;
+    }
     if (isFlagWithValue(token)) {
       index += 1;
       continue;
@@ -604,6 +661,18 @@ function extractFilePathFromCommand(tokens: ReadonlyArray<string>): string | nul
     fileTokens.push(token);
   }
   return fileTokens.findLast(looksLikePath) ?? null;
+}
+
+// Shell redirection operators (`>`, `>>`, `<`, `2>`, `&>`, `2>&1`, etc.). Their
+// targets (e.g. `/dev/null`) look path-like but are not read/edit targets.
+function isRedirectionToken(token: string): boolean {
+  return /^\d*&?>>?$/u.test(token) || /^<$/u.test(token) || /^\d*>&\d*$/u.test(token);
+}
+
+// Combined redirect+target written as a single token, e.g. `2>/dev/null`,
+// `>out.txt`, `&>/tmp/log`.
+function hasEmbeddedRedirection(token: string): boolean {
+  return /^\d*&?>>?/u.test(token) || token.startsWith("<");
 }
 
 // Provider built-in tools embed their arguments as JSON in the entry detail,
