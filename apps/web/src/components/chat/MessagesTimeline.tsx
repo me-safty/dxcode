@@ -1209,17 +1209,13 @@ function hasExpandableWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
 }
 
 function ToolEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
-  const showCommandDetails = hasCommandWorkEntryDetails(workEntry);
-  const showFileChangeDetails = hasFileChangeWorkEntryDetails(workEntry);
-  if (!showCommandDetails && !showFileChangeDetails) {
-    return null;
+  if (hasCommandWorkEntryDetails(workEntry)) {
+    return <CommandEntryDetails workEntry={workEntry} />;
   }
-  return (
-    <>
-      {showCommandDetails && <CommandEntryDetails workEntry={workEntry} />}
-      {showFileChangeDetails && <FileChangeEntryDetails workEntry={workEntry} />}
-    </>
-  );
+  if (hasFileChangeWorkEntryDetails(workEntry)) {
+    return <FileChangeEntryDetails workEntry={workEntry} />;
+  }
+  return null;
 }
 
 function hasCommandWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
@@ -1237,7 +1233,10 @@ function hasCommandWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
     return false;
   }
   if (workEntry.itemType || workEntry.requestKind) {
-    return workEntry.itemType === "dynamic_tool_call" || workEntry.itemType === "mcp_tool_call";
+    return (
+      (workEntry.itemType === "dynamic_tool_call" || workEntry.itemType === "mcp_tool_call") &&
+      hasCommandWorkEntryCommand(workEntry)
+    );
   }
   return hasCommandWorkEntryCommand(workEntry);
 }
@@ -1259,6 +1258,16 @@ function hasCommandWorkEntryCommand(workEntry: TimelineWorkEntry): boolean {
 }
 
 function hasFileChangeWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
+  if (workEntry.itemType === "file_change" || workEntry.requestKind === "file-change") {
+    return Boolean(workEntry.patch || (workEntry.changedFiles?.length ?? 0) > 0);
+  }
+  if (
+    workEntry.itemType === "command_execution" ||
+    workEntry.itemType === "collab_agent_tool_call" ||
+    workEntry.requestKind === "command"
+  ) {
+    return false;
+  }
   return Boolean(workEntry.patch || (workEntry.changedFiles?.length ?? 0) > 0);
 }
 
