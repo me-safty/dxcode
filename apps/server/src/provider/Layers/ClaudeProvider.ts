@@ -52,55 +52,6 @@ const MINIMUM_CLAUDE_FABLE_5_VERSION = "2.1.169";
 const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
 const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
 
-const CLAUDE_EFFORT_OPTIONS = {
-  fable50: [
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High", isDefault: true },
-    { value: "xhigh", label: "Extra High" },
-    { value: "max", label: "Max" },
-    { value: "ultracode", label: "Ultracode" },
-    { value: "ultrathink", label: "Ultrathink" },
-  ],
-  opus48: [
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High", isDefault: true },
-    { value: "xhigh", label: "Extra High" },
-    { value: "max", label: "Max" },
-    { value: "ultracode", label: "Ultracode" },
-    { value: "ultrathink", label: "Ultrathink" },
-  ],
-  opus47: [
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High" },
-    { value: "xhigh", label: "Extra High", isDefault: true },
-    { value: "max", label: "Max" },
-    { value: "ultrathink", label: "Ultrathink" },
-  ],
-  opus46: [
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High", isDefault: true },
-    { value: "max", label: "Max" },
-    { value: "ultrathink", label: "Ultrathink" },
-  ],
-  sonnet46: [
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High", isDefault: true },
-    { value: "max", label: "Max" },
-    { value: "ultrathink", label: "Ultrathink" },
-  ],
-  opus45: [
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High", isDefault: true },
-    { value: "max", label: "Max" },
-  ],
-} as const;
-
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
     slug: "claude-fable-5",
@@ -211,7 +162,13 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         buildSelectOptionDescriptor({
           id: "effort",
           label: "Reasoning",
-          options: CLAUDE_EFFORT_OPTIONS.opus46,
+          options: [
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High", isDefault: true },
+            { value: "max", label: "Max" },
+            { value: "ultrathink", label: "Ultrathink" },
+          ],
           promptInjectedValues: ["ultrathink"],
         }),
         buildBooleanOptionDescriptor({
@@ -238,7 +195,12 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         buildSelectOptionDescriptor({
           id: "effort",
           label: "Reasoning",
-          options: CLAUDE_EFFORT_OPTIONS.opus45,
+          options: [
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High", isDefault: true },
+            { value: "max", label: "Max" },
+          ],
         }),
         buildBooleanOptionDescriptor({
           id: "fastMode",
@@ -256,7 +218,13 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         buildSelectOptionDescriptor({
           id: "effort",
           label: "Reasoning",
-          options: CLAUDE_EFFORT_OPTIONS.sonnet46,
+          options: [
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High", isDefault: true },
+            { value: "max", label: "Max" },
+            { value: "ultrathink", label: "Ultrathink" },
+          ],
           promptInjectedValues: ["ultrathink"],
         }),
         buildSelectOptionDescriptor({
