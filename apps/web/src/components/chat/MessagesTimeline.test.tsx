@@ -110,6 +110,8 @@ function buildProps() {
     markdownCwd: undefined,
     resolvedTheme: "light" as const,
     timestampFormat: "locale" as const,
+    stickyUserMessageCount: 0,
+    stickyUserMessageMaxLines: 2,
     workspaceRoot: undefined,
     onIsAtEndChange: () => {},
   };

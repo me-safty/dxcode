@@ -3821,6 +3821,8 @@ export default function ChatView(props: ChatViewProps) {
               markdownCwd={gitCwd ?? undefined}
               resolvedTheme={resolvedTheme}
               timestampFormat={timestampFormat}
+              stickyUserMessageCount={settings.stickyUserMessageCount}
+              stickyUserMessageMaxLines={settings.stickyUserMessageMaxLines}
               workspaceRoot={activeWorkspaceRoot}
               skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
               onIsAtEndChange={onIsAtEndChange}
