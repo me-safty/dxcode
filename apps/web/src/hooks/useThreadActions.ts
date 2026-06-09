@@ -108,11 +108,15 @@ export function useThreadActions() {
         await handleNewThreadRef.current(scopeProjectRef(thread.environmentId, thread.projectId));
       }
 
-      await api.orchestration.dispatchCommand({
-        type: "thread.archive",
-        commandId: newCommandId(),
-        threadId: threadRef.threadId,
-      });
+      await Promise.all(
+        withRootLast(archivedThreadIds, threadRef.threadId).map((threadId) =>
+          api.orchestration.dispatchCommand({
+            type: "thread.archive",
+            commandId: newCommandId(),
+            threadId,
+          }),
+        ),
+      );
       refreshArchivedThreadsForEnvironment(threadRef.environmentId);
     },
     [getCurrentRouteThreadRef, resolveThreadTarget],

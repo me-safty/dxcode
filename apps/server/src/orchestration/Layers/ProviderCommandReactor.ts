@@ -812,8 +812,10 @@ const make = Effect.gen(function* () {
     }
     const subagentRelation =
       thread.parentRelation?.kind === "subagent" ? thread.parentRelation : null;
-    const hasSession = thread.session && thread.session.status !== "stopped";
-    if (!hasSession) {
+    const providerThread = subagentRelation
+      ? yield* resolveThread(subagentRelation.rootThreadId)
+      : thread;
+    if (!providerThread?.session || providerThread.session.status === "stopped") {
       return yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
         kind: "provider.turn.interrupt.failed",
@@ -828,7 +830,7 @@ const make = Effect.gen(function* () {
       ? (event.payload.turnId ?? thread.latestTurn?.turnId)
       : undefined;
     yield* providerService.interruptTurn({
-      threadId: event.payload.threadId,
+      threadId: providerThread.id,
       ...(childTurnId ? { turnId: childTurnId } : {}),
     });
     if (subagentRelation) {
