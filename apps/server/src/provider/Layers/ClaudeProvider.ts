@@ -52,6 +52,15 @@ const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
 const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
 
 const CLAUDE_EFFORT_OPTIONS = {
+  fable48: [
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High", isDefault: true },
+    { value: "xhigh", label: "Extra High" },
+    { value: "max", label: "Max" },
+    { value: "ultracode", label: "Ultracode" },
+    { value: "ultrathink", label: "Ultrathink" },
+  ],
   opus48: [
     { value: "low", label: "Low" },
     { value: "medium", label: "Medium" },
@@ -93,6 +102,29 @@ const CLAUDE_EFFORT_OPTIONS = {
 
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
+    slug: "claude-fable-5",
+    name: "Claude Fable 5",
+    isCustom: false,
+    capabilities: createModelCapabilities({
+      optionDescriptors: [
+        buildSelectOptionDescriptor({
+          id: "effort",
+          label: "Reasoning",
+          options: CLAUDE_EFFORT_OPTIONS.fable48,
+          promptInjectedValues: ["ultrathink"],
+        }),
+        buildSelectOptionDescriptor({
+          id: "contextWindow",
+          label: "Context Window",
+          options: [
+            { value: "200k", label: "200k", isDefault: true },
+            { value: "1m", label: "1M" },
+          ],
+        }),
+      ],
+    }),
+  },
+  {
     slug: "claude-opus-4-8",
     name: "Claude Opus 4.8",
     isCustom: false,
@@ -103,6 +135,10 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
           label: "Reasoning",
           options: CLAUDE_EFFORT_OPTIONS.opus48,
           promptInjectedValues: ["ultrathink"],
+        }),
+        buildBooleanOptionDescriptor({
+          id: "fastMode",
+          label: "Fast Mode",
         }),
         buildSelectOptionDescriptor({
           id: "contextWindow",
@@ -126,6 +162,10 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
           label: "Reasoning",
           options: CLAUDE_EFFORT_OPTIONS.opus47,
           promptInjectedValues: ["ultrathink"],
+        }),
+        buildBooleanOptionDescriptor({
+          id: "fastMode",
+          label: "Fast Mode",
         }),
         buildSelectOptionDescriptor({
           id: "contextWindow",
@@ -205,12 +245,6 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         }),
       ],
     }),
-  },
-  {
-    slug: "claude-fable-5",
-    name: "Claude Fable 5",
-    isCustom: false,
-    capabilities: DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   },
   {
     slug: "claude-haiku-4-5",
