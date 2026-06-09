@@ -90,10 +90,36 @@ const THEME_OPTIONS = [
     label: "Light",
   },
   {
+    value: "sepia",
+    label: "Sepia (Warm)",
+  },
+  {
+    value: "gray",
+    label: "Soft Gray",
+  },
+  {
+    value: "dim",
+    label: "Dim (Soft Dark)",
+  },
+  {
     value: "dark",
     label: "Dark",
   },
+  {
+    value: "monokai",
+    label: "Monokai",
+  },
+  {
+    value: "ninja",
+    label: "Ninja",
+  },
+  {
+    value: "dracula",
+    label: "Dracula",
+  },
 ] as const;
+
+const THEME_VALUES = new Set<string>(THEME_OPTIONS.map((option) => option.value));
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
@@ -531,12 +557,12 @@ export function GeneralSettingsPanel() {
             <Select
               value={theme}
               onValueChange={(value) => {
-                if (value === "system" || value === "light" || value === "dark") {
-                  setTheme(value);
+                if (typeof value === "string" && THEME_VALUES.has(value)) {
+                  setTheme(value as Parameters<typeof setTheme>[0]);
                 }
               }}
             >
-              <SelectTrigger className="w-full sm:w-40" aria-label="Theme preference">
+              <SelectTrigger className="w-full sm:w-48" aria-label="Theme preference">
                 <SelectValue>
                   {THEME_OPTIONS.find((option) => option.value === theme)?.label ?? "System"}
                 </SelectValue>
