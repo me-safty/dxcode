@@ -19,9 +19,9 @@ import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { Button } from "./ui/button";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { openInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
@@ -180,15 +180,17 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
 
   return (
     <div className="chat-markdown-codeblock leading-snug">
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-xs"
         className="chat-markdown-copy-button"
         onClick={handleCopy}
         title={copied ? "Copied" : "Copy code"}
         aria-label={copied ? "Copied" : "Copy code"}
       >
         {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
-      </button>
+      </Button>
       {children}
     </div>
   );
@@ -280,16 +282,12 @@ interface MarkdownFileLinkProps {
   href: string;
   targetPath: string;
   displayPath: string;
-  filePath: string;
   label: string;
-  theme: "light" | "dark";
   className?: string | undefined;
 }
 
 const MARKDOWN_LINK_HREF_PATTERN = /\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
-const MARKDOWN_FILE_LINK_CLASS_NAME =
-  "chat-markdown-file-link relative top-[2px] max-w-full no-underline";
-const MARKDOWN_FILE_LINK_ICON_CLASS_NAME = "chat-markdown-file-link-icon size-3.5 shrink-0";
+const MARKDOWN_FILE_LINK_CLASS_NAME = "chat-markdown-file-link max-w-full";
 const MARKDOWN_FILE_LINK_LABEL_CLASS_NAME = "chat-markdown-file-link-label truncate";
 
 function pathParentSegments(path: string): string[] {
@@ -371,9 +369,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   href,
   targetPath,
   displayPath,
-  filePath,
   label,
-  theme,
   className,
 }: MarkdownFileLinkProps) {
   const handleOpen = useCallback(() => {
@@ -475,12 +471,6 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             }}
             onContextMenu={handleContextMenu}
           >
-            <VscodeEntryIcon
-              pathValue={filePath}
-              kind="file"
-              theme={theme}
-              className={cn(MARKDOWN_FILE_LINK_ICON_CLASS_NAME, "text-current")}
-            />
             <span className={MARKDOWN_FILE_LINK_LABEL_CLASS_NAME}>{label}</span>
           </a>
         }
@@ -505,9 +495,7 @@ function areMarkdownFileLinkPropsEqual(
     previous.href === next.href &&
     previous.targetPath === next.targetPath &&
     previous.displayPath === next.displayPath &&
-    previous.filePath === next.filePath &&
     previous.label === next.label &&
-    previous.theme === next.theme &&
     previous.className === next.className
   );
 }
@@ -573,9 +561,7 @@ function ChatMarkdown({
             href={fileLinkMeta.targetPath}
             targetPath={fileLinkMeta.targetPath}
             displayPath={fileLinkMeta.displayPath}
-            filePath={fileLinkMeta.filePath}
             label={labelParts.join(" · ")}
-            theme={resolvedTheme}
             className={props.className}
           />
         );
@@ -602,14 +588,7 @@ function ChatMarkdown({
         );
       },
     }),
-    [
-      diffThemeName,
-      fileLinkParentSuffixByPath,
-      isStreaming,
-      markdownFileLinkMetaByHref,
-      resolvedTheme,
-      skills,
-    ],
+    [diffThemeName, fileLinkParentSuffixByPath, isStreaming, markdownFileLinkMetaByHref, skills],
   );
 
   return (
