@@ -48,6 +48,7 @@ const CLAUDE_PRESENTATION = {
   displayName: "Claude",
   showInteractionModeToggle: true,
 } as const;
+const MINIMUM_CLAUDE_FABLE_5_VERSION = "2.1.169";
 const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
 const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
 
@@ -261,6 +262,10 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
+function supportsClaudeFable5(version: string | null | undefined): boolean {
+  return version ? compareSemverVersions(version, MINIMUM_CLAUDE_FABLE_5_VERSION) >= 0 : false;
+}
+
 function supportsClaudeOpus48(version: string | null | undefined): boolean {
   return version ? compareSemverVersions(version, MINIMUM_CLAUDE_OPUS_4_8_VERSION) >= 0 : false;
 }
@@ -273,6 +278,9 @@ function getBuiltInClaudeModelsForVersion(
   version: string | null | undefined,
 ): ReadonlyArray<ServerProviderModel> {
   return BUILT_IN_MODELS.filter((model) => {
+    if (model.slug === "claude-fable-5") {
+      return supportsClaudeFable5(version);
+    }
     if (model.slug === "claude-opus-4-8") {
       return supportsClaudeOpus48(version);
     }
@@ -281,6 +289,11 @@ function getBuiltInClaudeModelsForVersion(
     }
     return true;
   });
+}
+
+function formatClaudeFable5UpgradeMessage(version: string | null): string {
+  const versionLabel = version ? `v${version}` : "the installed version";
+  return `Claude Code ${versionLabel} is too old for Claude Fable 5. Upgrade to v${MINIMUM_CLAUDE_FABLE_5_VERSION} or newer to access it.`;
 }
 
 function formatClaudeOpus48UpgradeMessage(version: string | null): string {
@@ -728,11 +741,13 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
-  const versionUpgradeMessage = supportsClaudeOpus48(parsedVersion)
+  const versionUpgradeMessage = supportsClaudeFable5(parsedVersion)
     ? undefined
-    : supportsClaudeOpus47(parsedVersion)
-      ? formatClaudeOpus48UpgradeMessage(parsedVersion)
-      : formatClaudeOpus47UpgradeMessage(parsedVersion);
+    : supportsClaudeOpus48(parsedVersion)
+      ? formatClaudeFable5UpgradeMessage(parsedVersion)
+      : supportsClaudeOpus47(parsedVersion)
+        ? formatClaudeOpus48UpgradeMessage(parsedVersion)
+        : formatClaudeOpus47UpgradeMessage(parsedVersion);
 
   const capabilities = resolveCapabilities
     ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
