@@ -62,7 +62,7 @@ import {
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
-import { useUiStateStore } from "~/uiStateStore";
+import { getThreadChangedFilesExpanded, useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
 
@@ -89,6 +89,7 @@ import {
 interface TimelineRowSharedState {
   timestampFormat: TimestampFormat;
   routeThreadKey: string;
+  defaultOpenChangedFiles: boolean;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   workspaceRoot: string | undefined;
@@ -134,6 +135,7 @@ interface MessagesTimelineProps {
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
+  defaultOpenChangedFiles: boolean;
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
@@ -163,6 +165,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   markdownCwd,
   resolvedTheme,
   timestampFormat,
+  defaultOpenChangedFiles,
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
@@ -223,6 +226,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     () => ({
       timestampFormat,
       routeThreadKey,
+      defaultOpenChangedFiles,
       markdownCwd,
       resolvedTheme,
       workspaceRoot,
@@ -235,6 +239,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [
       timestampFormat,
       routeThreadKey,
+      defaultOpenChangedFiles,
       markdownCwd,
       resolvedTheme,
       workspaceRoot,
@@ -436,6 +441,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         <AssistantChangedFilesSection
           turnSummary={row.assistantTurnDiffSummary}
           routeThreadKey={ctx.routeThreadKey}
+          defaultOpenChangedFiles={ctx.defaultOpenChangedFiles}
           resolvedTheme={ctx.resolvedTheme}
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
@@ -657,11 +663,13 @@ const WorkGroupSection = memo(function WorkGroupSection({
 const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection({
   turnSummary,
   routeThreadKey,
+  defaultOpenChangedFiles,
   resolvedTheme,
   onOpenTurnDiff,
 }: {
   turnSummary: TurnDiffSummary | undefined;
   routeThreadKey: string;
+  defaultOpenChangedFiles: boolean;
   resolvedTheme: "light" | "dark";
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
@@ -674,6 +682,7 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
       turnSummary={turnSummary}
       checkpointFiles={checkpointFiles}
       routeThreadKey={routeThreadKey}
+      defaultOpenChangedFiles={defaultOpenChangedFiles}
       resolvedTheme={resolvedTheme}
       onOpenTurnDiff={onOpenTurnDiff}
     />
@@ -686,17 +695,24 @@ function AssistantChangedFilesSectionInner({
   turnSummary,
   checkpointFiles,
   routeThreadKey,
+  defaultOpenChangedFiles,
   resolvedTheme,
   onOpenTurnDiff,
 }: {
   turnSummary: TurnDiffSummary;
   checkpointFiles: TurnDiffSummary["files"];
   routeThreadKey: string;
+  defaultOpenChangedFiles: boolean;
   resolvedTheme: "light" | "dark";
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  const allDirectoriesExpanded = useUiStateStore(
-    (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId] ?? true,
+  const allDirectoriesExpanded = useUiStateStore((store) =>
+    getThreadChangedFilesExpanded(
+      store,
+      routeThreadKey,
+      turnSummary.turnId,
+      defaultOpenChangedFiles,
+    ),
   );
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
   const summaryStat = summarizeTurnDiffStats(checkpointFiles);
@@ -720,7 +736,14 @@ function AssistantChangedFilesSectionInner({
             size="xs"
             variant="outline"
             data-scroll-anchor-ignore
-            onClick={() => setExpanded(routeThreadKey, turnSummary.turnId, !allDirectoriesExpanded)}
+            onClick={() =>
+              setExpanded(
+                routeThreadKey,
+                turnSummary.turnId,
+                !allDirectoriesExpanded,
+                defaultOpenChangedFiles,
+              )
+            }
           >
             {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
           </Button>
