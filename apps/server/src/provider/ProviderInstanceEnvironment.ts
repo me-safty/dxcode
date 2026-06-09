@@ -20,11 +20,12 @@ export function mergeProviderInstanceEnvironment(
 
 export function mergeProviderSessionEnvironment(
   baseEnv: NodeJS.ProcessEnv | undefined,
-  sessionEnv: Readonly<Record<string, string>> | undefined,
+  sessionEnv: NodeJS.ProcessEnv | Readonly<Record<string, string>> | undefined,
 ): NodeJS.ProcessEnv {
   const next = stripManagedRuntimeEnvKeys(baseEnv ?? process.env);
   if (!sessionEnv) return next;
   for (const [key, value] of Object.entries(sessionEnv)) {
+    if (value === undefined) continue;
     next[key] = value;
   }
   return next;

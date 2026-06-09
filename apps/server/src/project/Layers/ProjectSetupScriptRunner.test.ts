@@ -4,7 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { LaunchEnv } from "../../launchEnv/Services/LaunchEnv.ts";
+import { LaunchEnvTestLayer } from "../../launchEnv/Layers/LaunchEnvTest.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { TerminalManager } from "../../terminal/Services/Manager.ts";
 import { ProjectSetupScriptRunner } from "../Services/ProjectSetupScriptRunner.ts";
@@ -22,27 +22,19 @@ const makeProject = (scripts: OrchestrationProject["scripts"]): OrchestrationPro
 });
 
 const TEST_BASE_DIR = "/tmp/t3-setup-script-runner";
-const launchEnvLayer = LaunchEnv.layerTest(TEST_BASE_DIR);
+const launchEnvLayer = LaunchEnvTestLayer.stub({
+  t3Home: TEST_BASE_DIR,
+  projectId: ProjectId.make("project-1"),
+});
 
 const makeProjectionSnapshotQueryLayer = (project: OrchestrationProject) =>
-  Layer.succeed(ProjectionSnapshotQuery, {
-    getCommandReadModel: () => Effect.die("unused"),
-    getSnapshot: () => Effect.die("unused"),
-    getShellSnapshot: () => Effect.die("unused"),
-    getArchivedShellSnapshot: () => Effect.die("unused"),
-    getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 1 }),
-    getCounts: () => Effect.die("unused"),
+  Layer.mock(ProjectionSnapshotQuery)({
     getActiveProjectByWorkspaceRoot: (workspaceRoot) =>
       Effect.succeed(
         workspaceRoot === project.workspaceRoot ? Option.some(project) : Option.none(),
       ),
     getProjectShellById: (projectId) =>
       Effect.succeed(projectId === project.id ? Option.some(project) : Option.none()),
-    getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
-    getThreadCheckpointContext: () => Effect.die("unused"),
-    getFullThreadDiffContext: () => Effect.die("unused"),
-    getThreadShellById: () => Effect.die("unused"),
-    getThreadDetailById: () => Effect.die("unused"),
   });
 
 describe("ProjectSetupScriptRunner", () => {

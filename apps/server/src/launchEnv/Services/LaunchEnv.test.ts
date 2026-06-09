@@ -9,12 +9,13 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
-import { TerminalSessionLookupError } from "./Services/Manager.ts";
-import { bindTerminalLaunchEnvResolverForTest } from "./Layers/TerminalLaunchEnvResolverTest.ts";
+import { TerminalSessionLookupError } from "../../terminal/Services/Manager.ts";
+import { LaunchEnv } from "../Services/LaunchEnv.ts";
+import { LaunchEnvTestLayer } from "../Layers/LaunchEnvTest.ts";
 
 const PROJECT_ID = ProjectId.make("project-1");
 const THREAD_ID = ThreadId.make("thread-1");
-const T3_HOME = "/tmp/t3-resolve-terminal-launch-env";
+const T3_HOME = "/tmp/t3-launch-env";
 const NOW = "2026-01-01T00:00:00.000Z";
 const DEFAULT_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("codex"),
@@ -54,21 +55,20 @@ const makeThread = (
   ...overrides,
 });
 
-const makeResolver = (threads: ReadonlyArray<OrchestrationThreadShell>) =>
-  bindTerminalLaunchEnvResolverForTest({
+const makeTestLayer = (threads: ReadonlyArray<OrchestrationThreadShell>) =>
+  LaunchEnvTestLayer.withFixtures({
     t3Home: T3_HOME,
     projects: [makeProject()],
     threads,
   });
 
-describe("resolveTerminalLaunchEnv", () => {
-  it.effect("resolves launch env for open using the thread project id", () =>
+describe("LaunchEnv.resolveForThread", () => {
+  it.effect("resolves launch env using the thread project id", () =>
     Effect.gen(function* () {
-      const resolver = makeResolver([makeThread()]);
-      const result = yield* resolver.resolveOpenInput({
+      const launchEnv = yield* LaunchEnv;
+      const result = yield* launchEnv.resolveForThread({
         threadId: THREAD_ID,
         terminalId: DEFAULT_TERMINAL_ID,
-        cwd: "/repo/worktrees/a",
       });
 
       assert.deepStrictEqual(result.env, {
@@ -79,66 +79,63 @@ describe("resolveTerminalLaunchEnv", () => {
         T3CODE_WORKTREE_PATH: "/repo/worktrees/a",
       });
       assert.strictEqual(result.worktreePath, "/repo/worktrees/a");
-    }),
+    }).pipe(Effect.provide(makeTestLayer([makeThread()]))),
   );
 
   it.effect("ignores client projectId when the thread already exists", () =>
     Effect.gen(function* () {
+      const launchEnv = yield* LaunchEnv;
       const spoofedProjectId = ProjectId.make("project-spoofed");
-      const resolver = makeResolver([makeThread()]);
-      const result = yield* resolver.resolveOpenInput({
+      const result = yield* launchEnv.resolveForThread({
         threadId: THREAD_ID,
         terminalId: DEFAULT_TERMINAL_ID,
         projectId: spoofedProjectId,
-        cwd: "/repo/worktrees/a",
       });
 
       assert.strictEqual(result.env.T3CODE_PROJECT_ID, "project-1");
-    }),
+      assert.strictEqual(result.projectId, PROJECT_ID);
+    }).pipe(Effect.provide(makeTestLayer([makeThread()]))),
   );
 
   it.effect("resolves launch env for draft threads using client projectId", () =>
     Effect.gen(function* () {
-      const resolver = makeResolver([]);
-      const result = yield* resolver.resolveOpenInput({
+      const launchEnv = yield* LaunchEnv;
+      const result = yield* launchEnv.resolveForThread({
         threadId: THREAD_ID,
         terminalId: DEFAULT_TERMINAL_ID,
         projectId: PROJECT_ID,
-        cwd: "/repo/project",
       });
 
       assert.strictEqual(result.env.T3CODE_PROJECT_ID, "project-1");
       assert.strictEqual(result.env.T3CODE_THREAD_ID, "thread-1");
-    }),
+    }).pipe(Effect.provide(makeTestLayer([]))),
   );
 
   it.effect("fails when the thread is not found and projectId is omitted", () =>
     Effect.gen(function* () {
-      const resolver = makeResolver([]);
+      const launchEnv = yield* LaunchEnv;
       const error = yield* Effect.flip(
-        resolver.resolveOpenInput({
+        launchEnv.resolveForThread({
           threadId: THREAD_ID,
           terminalId: DEFAULT_TERMINAL_ID,
-          cwd: "/repo/worktrees/a",
         }),
       );
 
       assert.instanceOf(error, TerminalSessionLookupError);
-    }),
+    }).pipe(Effect.provide(makeTestLayer([]))),
   );
 
-  it.effect("resolves launch env for restart using the thread project id", () =>
+  it.effect("prefers explicit worktreePath over the thread default", () =>
     Effect.gen(function* () {
-      const resolver = makeResolver([makeThread({ worktreePath: null })]);
-      const result = yield* resolver.resolveRestartInput({
+      const launchEnv = yield* LaunchEnv;
+      const result = yield* launchEnv.resolveForThread({
         threadId: THREAD_ID,
         terminalId: DEFAULT_TERMINAL_ID,
-        cwd: "/repo/project",
-        cols: 120,
-        rows: 40,
+        worktreePath: "/repo/worktrees/b",
       });
 
-      assert.strictEqual(result.env.T3CODE_PROJECT_ID, "project-1");
-    }),
+      assert.strictEqual(result.worktreePath, "/repo/worktrees/b");
+      assert.strictEqual(result.env.T3CODE_WORKTREE_PATH, "/repo/worktrees/b");
+    }).pipe(Effect.provide(makeTestLayer([makeThread()]))),
   );
 });

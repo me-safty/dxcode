@@ -57,7 +57,7 @@ import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Clock from "effect/Clock";
-import { LaunchEnvLive } from "../../launchEnv/Services/LaunchEnv.ts";
+import { makeLaunchEnvLayerLive } from "../../launchEnv/Layers/LaunchEnvLive.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService, type GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
@@ -347,7 +347,9 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(NodeServices.layer),
     );
     const layer = ProviderCommandReactorLive.pipe(
-      Layer.provideMerge(LaunchEnvLive.pipe(Layer.provide(serverConfigLayer))),
+      Layer.provideMerge(
+        makeLaunchEnvLayerLive(SqlitePersistenceMemory).pipe(Layer.provide(serverConfigLayer)),
+      ),
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),

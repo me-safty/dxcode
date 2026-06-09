@@ -376,6 +376,7 @@ export const makeOrchestrationIntegrationHarness = (
       ),
     );
     const serverConfigLayer = ServerConfig.layerTest(workspaceDir, rootDir);
+    const serverConfigLayer = ServerConfig.layerTest(workspaceDir, rootDir);
     const layer = Layer.empty.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(orchestrationReactorLayer),
@@ -384,7 +385,12 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(RepositoryIdentityResolverLive),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(serverConfigLayer),
-      Layer.provideMerge(LaunchEnvLive.pipe(Layer.provide(serverConfigLayer))),
+      Layer.provideMerge(
+        LaunchEnvLive.pipe(
+          Layer.provide(serverConfigLayer),
+          Layer.provide(runtimeServicesLayer),
+        ),
+      ),
       Layer.provideMerge(NodeServices.layer),
     );
 

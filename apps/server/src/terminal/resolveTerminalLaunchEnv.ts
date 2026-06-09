@@ -10,15 +10,22 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
 import { LaunchEnv, type LaunchEnvShape } from "../launchEnv/Services/LaunchEnv.ts";
-import {
-  ProjectionSnapshotQuery,
-  type ProjectionSnapshotQueryShape,
-} from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { TerminalCwdError, TerminalSessionLookupError } from "./Services/Manager.ts";
 
 export type TerminalAttachRuntimeInput = TerminalAttachInput & {
   readonly projectId: ProjectId;
 };
+
+export type TerminalLaunchEnvProjectionShape = Pick<
+  ProjectionSnapshotQueryShape,
+  "getProjectShellById" | "getThreadShellById"
+>;
+
+export class TerminalLaunchEnvProjection extends Context.Service<
+  TerminalLaunchEnvProjection,
+  TerminalLaunchEnvProjectionShape
+>()("t3/terminal/TerminalLaunchEnvProjection") {}
 
 export interface TerminalLaunchEnvResolver {
   readonly resolveOpenInput: (
@@ -46,6 +53,8 @@ type TerminalProjectContextInput = {
   readonly worktreePath?: string | null | undefined;
 };
 
+type TerminalLaunchEnvResolverServices = LaunchEnv | TerminalLaunchEnvProjection;
+
 const terminalSessionLookupError = (input: {
   readonly threadId: string;
   readonly terminalId: string;
@@ -55,12 +64,17 @@ const terminalSessionLookupError = (input: {
     terminalId: input.terminalId,
   });
 
+const provideTerminalLaunchEnvResolverServices = <A, E>(
+  services: Context.Context<TerminalLaunchEnvResolverServices>,
+  effect: Effect.Effect<A, E, TerminalLaunchEnvResolverServices>,
+) => effect.pipe(Effect.provide(services));
+
 const resolveProjectContextForTerminal = Effect.fn("resolveProjectContextForTerminal")(function* (
   input: TerminalProjectContextInput,
 ) {
-  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const projection = yield* TerminalLaunchEnvProjection;
 
-  const threadOption = yield* projectionSnapshotQuery
+  const threadOption = yield* projection
     .getThreadShellById(ThreadId.make(input.threadId))
     .pipe(Effect.mapError(() => terminalSessionLookupError(input)));
 
@@ -86,11 +100,11 @@ const resolveProjectContextForTerminal = Effect.fn("resolveProjectContextForTerm
 export const resolveTerminalLaunchEnv = Effect.fn("resolveTerminalLaunchEnv")(function* (
   input: ResolveTerminalLaunchEnvInput,
 ) {
-  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const projection = yield* TerminalLaunchEnvProjection;
   const launchEnv = yield* LaunchEnv;
   const projectId = input.projectId;
 
-  const projectOption = yield* projectionSnapshotQuery.getProjectShellById(projectId).pipe(
+  const projectOption = yield* projection.getProjectShellById(projectId).pipe(
     Effect.mapError(
       (cause) =>
         new TerminalCwdError({
@@ -202,19 +216,12 @@ export const resolveTerminalAttachInput = Effect.fn("resolveTerminalAttachInput"
   } satisfies TerminalAttachRuntimeInput;
 });
 
-type TerminalLaunchEnvResolverServices = LaunchEnv | ProjectionSnapshotQuery;
-
-const provideTerminalLaunchEnvResolverServices = <A, E>(
-  services: Context.Context<TerminalLaunchEnvResolverServices>,
-  effect: Effect.Effect<A, E, TerminalLaunchEnvResolverServices>,
-) => effect.pipe(Effect.provide(services));
-
 export const bindTerminalLaunchEnvResolver = (
   launchEnv: LaunchEnvShape,
-  projectionSnapshotQuery: ProjectionSnapshotQueryShape,
+  projection: TerminalLaunchEnvProjectionShape,
 ): TerminalLaunchEnvResolver => {
   const services = Context.make(LaunchEnv, launchEnv).pipe(
-    Context.add(ProjectionSnapshotQuery, projectionSnapshotQuery),
+    Context.add(TerminalLaunchEnvProjection, projection),
   );
 
   return {
@@ -226,14 +233,3 @@ export const bindTerminalLaunchEnvResolver = (
       provideTerminalLaunchEnvResolverServices(services, resolveTerminalAttachInput(input)),
   };
 };
-
-export const terminalLaunchEnvResolverTest = (projectId: ProjectId): TerminalLaunchEnvResolver => ({
-  resolveOpenInput: (input) => Effect.succeed(input),
-  resolveRestartInput: (input) => Effect.succeed(input),
-  resolveAttachInput: (input) =>
-    Effect.succeed({
-      ...input,
-      projectId,
-    }),
-});
-

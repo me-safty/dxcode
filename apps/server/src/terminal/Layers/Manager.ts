@@ -1,5 +1,7 @@
 import {
   DEFAULT_TERMINAL_ID,
+  ProjectId,
+  type TerminalAttachInput,
   type TerminalAttachStreamEvent,
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
@@ -11,13 +13,7 @@ import {
 } from "@t3tools/contracts";
 import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
 import { isManagedRuntimeEnvKey } from "../../launchEnv/launchEnvUtils.ts";
-import {
-  bindTerminalLaunchEnvResolver,
-  type TerminalAttachRuntimeInput,
-  type TerminalLaunchEnvResolver,
-} from "../resolveTerminalLaunchEnv.ts";
-import { LaunchEnv } from "../../launchEnv/Services/LaunchEnv.ts";
-import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { LaunchEnv, type LaunchEnvShape } from "../../launchEnv/Services/LaunchEnv.ts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -931,6 +927,10 @@ function normalizedRuntimeEnv(
   return Object.fromEntries(entries.toSorted(([left], [right]) => left.localeCompare(right)));
 }
 
+type TerminalAttachRuntimeInput = TerminalAttachInput & {
+  readonly projectId: ProjectId;
+};
+
 interface TerminalManagerOptions {
   logsDir: string;
   historyLineLimit?: number;
@@ -942,20 +942,18 @@ interface TerminalManagerOptions {
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
   maxRetainedInactiveSessions?: number;
-  launchEnvResolver: TerminalLaunchEnvResolver;
+  launchEnv: LaunchEnvShape;
 }
 
 const makeTerminalManager = Effect.fn("makeTerminalManager")(function* () {
   const { terminalLogsDir } = yield* ServerConfig;
   const ptyAdapter = yield* PtyAdapter;
+  const launchEnv = yield* LaunchEnv;
 
   return yield* makeTerminalManagerWithOptions({
     logsDir: terminalLogsDir,
     ptyAdapter,
-    launchEnvResolver: bindTerminalLaunchEnvResolver(
-      yield* LaunchEnv,
-      yield* ProjectionSnapshotQuery,
-    ),
+    launchEnv,
   });
 });
 
@@ -965,9 +963,49 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     const path = yield* Path.Path;
     const context = yield* Effect.context<never>();
     const runFork = Effect.runForkWith(context);
-    const resolveOpenInput = options.launchEnvResolver.resolveOpenInput;
-    const resolveRestartInput = options.launchEnvResolver.resolveRestartInput;
-    const resolveAttachInput = options.launchEnvResolver.resolveAttachInput;
+    const launchEnv = options.launchEnv;
+
+    const toLaunchEnvInput = (
+      input: Pick<
+        TerminalOpenInput | TerminalRestartInput | TerminalAttachInput,
+        "threadId" | "terminalId" | "projectId" | "worktreePath" | "env"
+      >,
+    ) => ({
+      threadId: input.threadId,
+      terminalId: input.terminalId,
+      ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+      ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
+      ...(input.env !== undefined ? { extraEnv: input.env } : {}),
+    });
+
+    const applyLaunchEnv = <T extends TerminalOpenInput | TerminalRestartInput>(input: T) =>
+      launchEnv.resolveForThread(toLaunchEnvInput(input)).pipe(
+        Effect.map((resolved) => ({
+          ...input,
+          ...(resolved.worktreePath !== undefined ? { worktreePath: resolved.worktreePath } : {}),
+          env: resolved.env,
+        })),
+      );
+
+    const applyLaunchEnvForAttach = (input: TerminalAttachInput) =>
+      launchEnv.resolveForThread(toLaunchEnvInput(input)).pipe(
+        Effect.map(
+          (resolved) =>
+            ({
+              ...input,
+              projectId: resolved.projectId,
+              ...(resolved.worktreePath !== undefined
+                ? { worktreePath: resolved.worktreePath }
+                : {}),
+              env: resolved.env,
+            }) satisfies TerminalAttachRuntimeInput,
+        ),
+      );
+
+    const runWithLaunchEnv = <T extends TerminalOpenInput | TerminalRestartInput, A, E, R>(
+      input: T,
+      run: (resolved: T & { env: Record<string, string> }) => Effect.Effect<A, E, R>,
+    ) => Effect.flatMap(applyLaunchEnv(input), run);
 
     const logsDir = options.logsDir;
     const historyLineLimit = options.historyLineLimit ?? DEFAULT_HISTORY_LINE_LIMIT;
@@ -2024,7 +2062,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     });
 
     const open: TerminalManagerShape["open"] = (input) =>
-      withThreadLock(input.threadId, resolveOpenInput(input).pipe(Effect.flatMap(openLocked)));
+      withThreadLock(input.threadId, runWithLaunchEnv(input, openLocked));
 
     const openOrAttachForStream = (input: TerminalAttachRuntimeInput) =>
       withThreadLock(
@@ -2125,7 +2163,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           return attachEvent ? listener(attachEvent) : Effect.void;
         });
 
-        const resolvedInput = yield* resolveAttachInput(input);
+        const resolvedInput = yield* applyLaunchEnvForAttach(input);
         const initialSnapshot = yield* openOrAttachForStream(resolvedInput);
 
         yield* listener({
@@ -2376,10 +2414,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     });
 
     const restart: TerminalManagerShape["restart"] = (input) =>
-      withThreadLock(
-        input.threadId,
-        resolveRestartInput(input).pipe(Effect.flatMap(restartLocked)),
-      );
+      withThreadLock(input.threadId, runWithLaunchEnv(input, restartLocked));
 
     const close: TerminalManagerShape["close"] = (input) =>
       withThreadLock(
