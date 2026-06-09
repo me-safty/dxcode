@@ -27,6 +27,7 @@ import { type TurnDiffSummary } from "../../types";
 import {
   formatSubagentDuration,
   LiveSubagentDuration,
+  subagentDurationFallbackLabel,
   subagentStatusLabel,
   subagentStatusToneClass,
 } from "../../subagentDisplay";
@@ -1802,7 +1803,7 @@ const SubagentWorkEntryButton = memo(function SubagentWorkEntryButton(props: {
   const startedAt = relation?.startedAt ?? props.parentCreatedAt;
   const completedAt = relation?.completedAt ?? null;
   const statusLabel = subagentStatusLabel(status);
-  const fallbackDurationLabel = status === null ? "status unknown" : "completed";
+  const fallbackDurationLabel = subagentDurationFallbackLabel(status);
   const durationLabel =
     status === "running" ? (
       <LiveSubagentDuration startedAt={startedAt} />

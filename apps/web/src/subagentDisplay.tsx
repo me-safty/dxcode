@@ -48,6 +48,20 @@ export function formatSubagentDuration(startIso: string, endIso: string | null):
   return formatElapsed(startIso, endIso);
 }
 
+export function subagentDurationFallbackLabel(status: SubagentThreadStatus | null): string {
+  switch (status) {
+    case "running":
+      return "running";
+    case "completed":
+    case "errored":
+    case "interrupted":
+    case "stopped":
+      return "duration unknown";
+    case null:
+      return "status unknown";
+  }
+}
+
 export function formatRunningSubagentDuration(startedAt: string): string {
   const elapsed = formatElapsed(startedAt, new Date().toISOString());
   return elapsed ? `running for ${elapsed}` : "running";
