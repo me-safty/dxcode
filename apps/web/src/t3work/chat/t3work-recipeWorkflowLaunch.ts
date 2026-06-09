@@ -2,6 +2,7 @@ import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3to
 import type { ProjectRecipeWorkflowDocument } from "@t3tools/project-recipes";
 
 import type { BackendApi } from "~/t3work/backend/t3work-types";
+import { tryClaimRecipeWorkflowLaunch } from "~/t3work/chat/t3work-recipeLaunchDedup";
 import type { T3workKickoffWorkflow } from "~/t3work/t3work-types";
 
 type RecipeKickoffWorkflow = Extract<T3workKickoffWorkflow, { kind: "recipe" }>;
@@ -62,6 +63,13 @@ export async function launchPendingRecipeWorkflowTurn(input: {
 }): Promise<boolean> {
   if (!canLaunchPendingRecipeWorkflow(input)) {
     return false;
+  }
+
+  // The eager bootstrap kickoff may have already launched this thread's recipe; claim it so a
+  // single Quick Start send never spawns two runs. Either way the send is "handled" (the plain
+  // turn must be skipped), so report true.
+  if (!tryClaimRecipeWorkflowLaunch(input.threadId)) {
+    return true;
   }
 
   await input.backend.launchRecipeWorkflow({

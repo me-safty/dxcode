@@ -379,7 +379,7 @@ type ChatViewProps =
             interactionMode: ProviderInteractionMode;
             createdAt: string;
             hasAttachments: boolean;
-          }) => Promise<boolean>)
+          }) => Promise<boolean | "resolved-input">)
         | undefined;
       /** Optional callback fired after a send consumes composer context attachments. */
       onComposerContextAttachmentsConsumed?: (() => void) | undefined;
@@ -430,7 +430,7 @@ type ChatViewProps =
             interactionMode: ProviderInteractionMode;
             createdAt: string;
             hasAttachments: boolean;
-          }) => Promise<boolean>)
+          }) => Promise<boolean | "resolved-input">)
         | undefined;
       /** Optional callback fired after a send consumes composer context attachments. */
       onComposerContextAttachmentsConsumed?: (() => void) | undefined;
@@ -3027,6 +3027,11 @@ export default function ChatView(props: ChatViewProps) {
         hasAttachments: turnAttachments.length > 0,
       });
       if (handledByOverride) {
+        // A workflow-input resolution posts a plain message with no turn lifecycle, so no server
+        // turn event will clear the optimistic busy state — clear it here.
+        if (handledByOverride === "resolved-input") {
+          resetLocalDispatch();
+        }
         turnStartSucceeded = true;
         return;
       }

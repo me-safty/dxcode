@@ -50,6 +50,17 @@ export interface BackendApi {
   readonly submitRecipeCardAction: (
     input: SubmitProjectRecipeCardActionRequest,
   ) => Promise<SubmitProjectRecipeCardActionResponse>;
+  /**
+   * Answer a workflow's pending `askUser`: posts the user's reply as a real (visible) message on
+   * the thread. The workflow-engine reactor resolves the parked `user.input` from that message
+   * event — no separate agent turn is started, and there is a single resolution path.
+   */
+  readonly resolveWorkflowInput: (input: {
+    readonly threadId: string;
+    readonly text: string;
+    /** The composer's optimistic message id, so the server message reconciles with it. */
+    readonly messageId: string;
+  }) => Promise<void>;
   readonly listThreadPlacements: (input: {
     readonly threadIds?: ReadonlyArray<string>;
   }) => Promise<ReadonlyArray<T3workThreadPlacement>>;

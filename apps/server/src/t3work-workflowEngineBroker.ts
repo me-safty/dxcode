@@ -23,6 +23,7 @@ import {
   type ProjectId,
   type ProviderInteractionMode,
   type RuntimeMode,
+  type T3workMessageExt,
   ThreadId,
 } from "@t3tools/contracts";
 
@@ -137,7 +138,18 @@ export function createWorkflowEngineBroker(deps: WorkflowEngineBrokerDeps): Mess
       const p = payload as UserInputPayload;
       deps.registry.setPending(p.threadId, { runId: deps.runId, correlationId, kind: "user.input" });
       await deps.recordPending?.({ threadId: p.threadId, correlationId, kind: "user.input" });
-      await enqueue(() => deps.dispatch(messageUpsert(deps, p.threadId, "system", p.question)));
+      // Tag the escalation message as awaiting the user's answer (with the owning run) so the UI
+      // can render it as a guided prompt and route the reply back to this run rather than a
+      // free-form chat turn.
+      await enqueue(() =>
+        deps.dispatch(
+          messageUpsert(deps, p.threadId, "system", p.question, {
+            author: { kind: "system", workflowRunId: deps.runId },
+            status: "waiting-for-input",
+            visibleToUser: true,
+          }),
+        ),
+      );
       return;
     }
     // thread.message — one-way; agent-directed messages read as a user turn-input, user-directed
@@ -156,6 +168,7 @@ function messageUpsert(
   threadId: string,
   role: "user" | "system",
   text: string,
+  t3workExt?: T3workMessageExt,
 ): OrchestrationCommand {
   return {
     type: "thread.message.upsert",
@@ -167,6 +180,7 @@ function messageUpsert(
       text,
       turnId: null,
       streaming: false,
+      ...(t3workExt === undefined ? {} : { t3workExt }),
     },
     createdAt: deps.nowIso(),
   };

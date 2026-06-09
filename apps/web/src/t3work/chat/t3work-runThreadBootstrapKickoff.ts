@@ -9,6 +9,7 @@ import {
   appendContextAttachmentsToPrompt,
   prepareThreadContextAttachments,
 } from "~/t3work/chat/t3work-prepareThreadContextAttachments";
+import { tryClaimRecipeWorkflowLaunch } from "~/t3work/chat/t3work-recipeLaunchDedup";
 import { toProjectRecipeWorkflowLaunch } from "~/t3work/chat/t3work-recipeWorkflowLaunch";
 import {
   recordThreadBootstrapEvent,
@@ -119,19 +120,23 @@ export async function runThreadBootstrapKickoff(input: RunThreadBootstrapKickoff
       createdAt: input.createdAt,
     });
 
-    await input.backend.launchRecipeWorkflow({
-      threadId: input.threadId,
-      kickoffMessage: bootstrapMessage,
-      titleSeed: input.title,
-      createdAt: input.createdAt,
-      modelSelection: {
-        instanceId: String(input.kickoffModelSelection.instanceId),
-        model: input.kickoffModelSelection.model,
-      },
-      runtimeMode: input.kickoffRuntimeMode,
-      interactionMode: input.kickoffInteractionMode,
-      launch: toProjectRecipeWorkflowLaunch(input.kickoffWorkflow),
-    });
+    // Claim the launch so a single Quick Start send can't spawn two runs (the composer's
+    // turn-start override can reach launchRecipeWorkflow for the same thread). First claim wins.
+    if (tryClaimRecipeWorkflowLaunch(input.threadId)) {
+      await input.backend.launchRecipeWorkflow({
+        threadId: input.threadId,
+        kickoffMessage: bootstrapMessage,
+        titleSeed: input.title,
+        createdAt: input.createdAt,
+        modelSelection: {
+          instanceId: String(input.kickoffModelSelection.instanceId),
+          model: input.kickoffModelSelection.model,
+        },
+        runtimeMode: input.kickoffRuntimeMode,
+        interactionMode: input.kickoffInteractionMode,
+        launch: toProjectRecipeWorkflowLaunch(input.kickoffWorkflow),
+      });
+    }
     finalizeThreadBootstrapKickoff({
       environmentId: input.environmentId,
       threadId: input.threadId,

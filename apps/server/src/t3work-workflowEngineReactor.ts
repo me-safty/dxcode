@@ -6,11 +6,22 @@
  *
  * For each `thread.message-sent` event it reads the pending ask the workflow registered for
  * that thread:
- *   • a final assistant message (`role: "assistant"`, not streaming) resolves a `thread.turn`
- *     (an `askAgent` / `agent` call) with the assistant text;
+ *   • a final assistant message (`role: "assistant"`, `streaming: false`) resolves a
+ *     `thread.turn` (an `askAgent` / `agent` call) with the assistant text;
  *   • a user message resolves a `user.input` (an `askUser` call) with the user's text.
  * A message that does not match the pending ask's kind (e.g. the user-role prompt the engine
  * itself dispatched to start a turn) is left pending so the right event still resolves it.
+ *
+ * ── Assembling the assistant reply ──────────────────────────────────────────
+ * The final `streaming: false` assistant `thread.message-sent` is only a "this message is
+ * complete" marker: its `text` is the empty string (see the decider's
+ * `thread.message.assistant.complete` case + `ProviderRuntimeIngestion.finalizeAssistantMessage`).
+ * The assistant's actual text arrives in the `streaming: true` delta events that precede it
+ * (one full-text delta in buffered mode, many chunks in streaming mode), all sharing the
+ * `messageId`. So the reactor accumulates assistant deltas per `messageId` while a turn is
+ * awaited on that thread, then resolves the turn with the assembled text when the
+ * `streaming: false` marker lands. Reading `event.payload.text` off the final event directly
+ * would resolve every agent turn with `""` — the interactive model would silently not work.
  *
  * Events are drained through a single worker so resumes never interleave: `resume` awaits the
  * replay to its next suspension (which re-registers the new pending ask) before the next event
@@ -34,26 +45,57 @@ export const T3workWorkflowEngineReactorLive = Layer.effectDiscard(
     const orchestration = yield* OrchestrationEngineService;
     const registry = yield* T3workWorkflowEngineRegistry;
 
+    // Assistant text assembled from `streaming: true` deltas, keyed by `messageId`. Only threads
+    // a workflow is currently awaiting a turn on are buffered, so this stays bounded to in-flight
+    // agent turns; each entry is taken (or dropped) the moment its `streaming: false` marker lands.
+    const assistantTextByMessageId = new Map<string, string>();
+
     const processMessageSent = Effect.fn("processWorkflowEngineMessageSent")(function* (
       event: ThreadMessageSentEvent,
     ) {
-      const { threadId, role, streaming, text } = event.payload;
-      if (streaming || (role !== "assistant" && role !== "user")) return;
+      const { threadId, messageId, role, streaming, text } = event.payload;
+
+      if (streaming) {
+        // The reply text rides on the streaming deltas; the final marker carries none. Buffer the
+        // assistant deltas, but only while a turn is parked on this thread (so non-workflow chat
+        // streaming is not retained).
+        if (role === "assistant" && registry.peekPending(threadId)?.kind === "thread.turn") {
+          assistantTextByMessageId.set(
+            messageId,
+            (assistantTextByMessageId.get(messageId) ?? "") + text,
+          );
+        }
+        return;
+      }
+      if (role !== "assistant" && role !== "user") return;
 
       const pending = registry.takePending(threadId);
-      if (pending === undefined) return;
+      if (pending === undefined) {
+        assistantTextByMessageId.delete(messageId);
+        return;
+      }
 
       const expected = role === "assistant" ? "thread.turn" : "user.input";
       if (pending.kind !== expected) {
         // Not the event this ask awaits (e.g. the engine's own dispatched user prompt that
-        // starts a turn) — re-register so the correct event can resolve it.
+        // starts a turn) — re-register so the correct event can resolve it. Leave any buffered
+        // assistant text in place; the turn's own `streaming: false` marker will consume it.
         registry.setPending(threadId, pending);
         return;
       }
 
       const run = registry.getRun(pending.runId);
-      if (run === undefined) return;
-      yield* Effect.promise(() => run.resume(pending.correlationId, text));
+      if (run === undefined) {
+        assistantTextByMessageId.delete(messageId);
+        return;
+      }
+
+      // An assistant turn resolves with its assembled delta text (the marker's own text is "");
+      // a user reply resolves with the message text directly.
+      const assembled = assistantTextByMessageId.get(messageId);
+      assistantTextByMessageId.delete(messageId);
+      const reply = role === "assistant" ? (assembled ?? text) : text;
+      yield* Effect.promise(() => run.resume(pending.correlationId, reply));
     });
 
     const processSafely = (event: ThreadMessageSentEvent) =>

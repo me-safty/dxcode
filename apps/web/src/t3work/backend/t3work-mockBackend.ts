@@ -122,6 +122,10 @@ export function createMockBackend(): BackendApi {
       return { ok: true };
     },
 
+    async resolveWorkflowInput() {
+      return undefined;
+    },
+
     async listThreadPlacements() {
       return [];
     },

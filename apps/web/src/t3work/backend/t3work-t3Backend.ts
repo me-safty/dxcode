@@ -103,6 +103,18 @@ export function createT3Backend(wsBaseUrl: string): BackendApi {
     );
   }
 
+  async function resolveWorkflowInput(input: {
+    threadId: string;
+    text: string;
+    messageId: string;
+  }) {
+    await postJson<typeof input, { ok: true }>(
+      httpBaseUrl,
+      "/api/t3work/thread/workflow/resolve-input",
+      input,
+    );
+  }
+
   const atlassian = {
     ...createAtlassianBackendApi(httpBaseUrl),
     ...createAtlassianPollingBackendApi(httpBaseUrl),
@@ -122,6 +134,7 @@ export function createT3Backend(wsBaseUrl: string): BackendApi {
     dispatchCommand: dispatch,
     launchRecipeWorkflow,
     submitRecipeCardAction,
+    resolveWorkflowInput,
     listThreadPlacements,
     syncThreadToolContext,
     atlassian,
