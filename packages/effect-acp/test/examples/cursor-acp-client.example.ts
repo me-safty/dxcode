@@ -2,18 +2,21 @@ import * as Effect from "effect/Effect";
 import * as Console from "effect/Console";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import * as NodeOS from "node:os";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import * as AcpClient from "../../src/client.ts";
 
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone example script has no Effect runtime wiring.
+const hostPlatform = NodeOS.platform();
+
 const program = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const platform = yield* HostProcessPlatform;
   const command = ChildProcess.make("cursor-agent", ["acp"], {
     cwd: process.cwd(),
-    shell: platform === "win32",
+    shell: hostPlatform === "win32",
   });
   const handle = yield* spawner.spawn(command);
   const acpLayer = AcpClient.layerChildProcess(handle, {
