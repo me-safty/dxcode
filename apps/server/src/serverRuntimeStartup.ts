@@ -28,6 +28,7 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor.ts";
+import { rehydrateSuspendedWorkflowRuns } from "./t3work-workflowEngineRehydrate.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
@@ -334,6 +335,20 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
         yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope));
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
       }),
+    );
+
+    // Durable workflow runs (Epic 25 §Open question 2): rebuild resume closures for runs that
+    // were suspended on a prior uptime, then restore their pending asks into the registry so the
+    // (already-running) reactor resolves them when the reply lands. Best-effort: a failure here
+    // must not block startup.
+    yield* Effect.logDebug("startup phase: rehydrating suspended workflow runs");
+    yield* runStartupPhase(
+      "workflow.rehydrate",
+      rehydrateSuspendedWorkflowRuns().pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to rehydrate suspended workflow runs", { cause }),
+        ),
+      ),
     );
 
     const welcomeBase = yield* resolveWelcomeBase;

@@ -17,8 +17,14 @@ import {
   T3workAtlassianError,
 } from "./t3work-atlassian-http.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
+import { WorkflowJournalStore } from "./persistence/Services/WorkflowJournalStore.ts";
+import { WorkflowRunRepository } from "./persistence/Services/WorkflowRuns.ts";
 import { toT3workError } from "./t3work-project-repository-utils.ts";
 import { t3workRandomUUID } from "./t3work-random.ts";
+import {
+  buildRunningWorkflowRunRow,
+  makeWorkflowRunLifecycle,
+} from "./t3work-workflowEngineDurability.ts";
 import {
   isProviderInteractionMode,
   isRuntimeMode,
@@ -43,6 +49,8 @@ export const t3workThreadRecipeWorkflowLaunchRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const orchestration = yield* OrchestrationEngineService;
     const registry = yield* T3workWorkflowEngineRegistry;
+    const runRepository = yield* WorkflowRunRepository;
+    const journalStore = yield* WorkflowJournalStore;
     const input = yield* readJsonBody<LaunchProjectRecipeWorkflowRequest>();
 
     const threadIdInput = input.threadId?.trim() ?? "";
@@ -79,11 +87,32 @@ export const t3workThreadRecipeWorkflowLaunchRouteLayer = HttpRouter.add(
     const dispatch = (command: Parameters<typeof orchestration.dispatch>[0]): Promise<void> =>
       Effect.runPromise(orchestration.dispatch(command)).then(() => undefined);
 
+    const runId = t3workRandomUUID();
+    const args = input.launch.parameters ?? {};
+    // Persist the run record + journal in SQLite so a suspend survives a restart (Epic 25
+    // §Open question 2). The lifecycle write-through keeps `workflow_runs` the source of
+    // truth that boot rehydration reads; the in-memory registry stays the reactor's hot index.
+    const lifecycle = makeWorkflowRunLifecycle({
+      repo: runRepository,
+      row: buildRunningWorkflowRunRow({
+        runId,
+        workflowPath,
+        args,
+        launchThreadId: threadIdInput,
+        projectId: thread.projectId,
+        modelSelection,
+        runtimeMode,
+        interactionMode,
+        nowIso: nowIso(),
+      }),
+      nowIso,
+    });
+
     const result = yield* Effect.promise(() =>
       launchWorkflowRecipe({
-        runId: t3workRandomUUID(),
+        runId,
         workflowPath,
-        args: input.launch.parameters ?? {},
+        args,
         runsRoot: `${project.workspaceRoot}/.t3work-runs`,
         launchThreadId: threadIdInput,
         projectId: thread.projectId,
@@ -94,6 +123,8 @@ export const t3workThreadRecipeWorkflowLaunchRouteLayer = HttpRouter.add(
         dispatch,
         newId: () => t3workRandomUUID(),
         nowIso,
+        store: journalStore,
+        lifecycle,
       }),
     );
 

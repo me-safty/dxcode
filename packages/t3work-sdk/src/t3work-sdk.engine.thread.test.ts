@@ -110,7 +110,7 @@ describe("durable workflow engine — Thread model", () => {
     expect(before.bySeq.size).toBe(1);
     expect(before.byCorrelation.size).toBe(0);
 
-    const wrote = appendResolvedEntry({
+    const wrote = await appendResolvedEntry({
       runsRoot,
       runId: run.runId,
       correlationId: run.correlationId,

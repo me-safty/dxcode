@@ -23,9 +23,7 @@ import * as DateTime from "effect/DateTime";
 
 import { WorkflowError } from "./t3work-sdk.errors.ts";
 import type { ReplyResolver } from "./t3work-sdk.handles.ts";
-import { journalFilePath } from "./t3work-sdk.journal.ts";
-import { readJournalEntries } from "./t3work-sdk.journalReader.ts";
-import { JournalWriter } from "./t3work-sdk.journalWriter.ts";
+import { defaultRunsRoot, FsJournalStore, type JournalStore } from "./t3work-sdk.journalStore.ts";
 
 /** The four thread-verb primitives, as the broker sees them. */
 export type HandleKind = "thread.create" | "thread.turn" | "thread.message" | "user.input";
@@ -110,16 +108,21 @@ function brokerNowIso(): string {
  * Host helper: append a `resolved` journal entry for a parked run when an external reply
  * lands, then the host calls `resumeWorkflow`. First-write-wins — returns `false` if the
  * correlation is already settled (a late reply after a dismissal or earlier resolution).
+ *
+ * Writes through a {@link JournalStore}: pass the host's store (the server's SQLite store) so
+ * the reply lands in the same durable medium as the rest of the journal; absent one, it
+ * defaults to the fs store at `runsRoot` (the SDK's standalone path).
  */
-export function appendResolvedEntry(opts: {
-  readonly runsRoot: string;
+export async function appendResolvedEntry(opts: {
+  readonly store?: JournalStore;
+  readonly runsRoot?: string;
   readonly runId: string;
   readonly correlationId: string;
   readonly reply: unknown;
   readonly nowIso?: () => string;
-}): boolean {
-  const journalPath = journalFilePath(opts.runsRoot, opts.runId);
-  const { bySeq, byCorrelation } = readJournalEntries(journalPath);
+}): Promise<boolean> {
+  const store = opts.store ?? new FsJournalStore(opts.runsRoot ?? defaultRunsRoot());
+  const { bySeq, byCorrelation } = await store.readEntries(opts.runId);
   if (byCorrelation.has(opts.correlationId)) return false;
   const sent = [...bySeq.values()].find(
     (entry) => entry.phase === "sent" && entry.correlationId === opts.correlationId,
@@ -129,19 +132,14 @@ export function appendResolvedEntry(opts: {
       `Cannot resolve correlationId '${opts.correlationId}': no matching 'sent' entry in run '${opts.runId}'. The reply has no open handle to settle.`,
     );
   }
-  const writer = new JournalWriter(journalPath);
-  try {
-    const ts = (opts.nowIso ?? brokerNowIso)();
-    writer.appendResolved({
-      correlationId: opts.correlationId,
-      kind: sent.kind,
-      refId: sent.refId,
-      reply: opts.reply,
-      startedAt: ts,
-      endedAt: ts,
-    });
-  } finally {
-    writer.dispose();
-  }
+  const ts = (opts.nowIso ?? brokerNowIso)();
+  await store.appendResolved(opts.runId, {
+    correlationId: opts.correlationId,
+    kind: sent.kind,
+    refId: sent.refId,
+    reply: opts.reply,
+    startedAt: ts,
+    endedAt: ts,
+  });
   return true;
 }

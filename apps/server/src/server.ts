@@ -15,6 +15,8 @@ import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
+import { WorkflowRunRepositoryLive } from "./persistence/Layers/WorkflowRuns.ts";
+import { WorkflowJournalStoreLive } from "./persistence/Layers/SqliteJournalStore.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
@@ -268,6 +270,16 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
+// The workflow-engine singletons share one provideMerge slot (the `pipe` arity is capped):
+// the in-memory run registry (reactor's hot index) + the durable run record + the SQLite
+// journal store. Repo + store get the memoized SqlClient from PersistenceLayerLive (Epic 25
+// §Open question 2); the registry needs nothing.
+const WorkflowEngineDurabilityLive = Layer.mergeAll(
+  T3workWorkflowEngineRegistryLive,
+  WorkflowRunRepositoryLive,
+  WorkflowJournalStoreLive,
+).pipe(Layer.provide(PersistenceLayerLive));
+
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
@@ -285,9 +297,10 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       Layer.provide(OrchestrationLayerLive),
     ),
   ),
-  // Shared singleton: the launch route registers parked runs here and the workflow-engine
-  // reactor resumes them — both resolve the same instance from this layer.
-  Layer.provideMerge(T3workWorkflowEngineRegistryLive),
+  // Shared singletons: the launch route registers parked runs in the registry and writes the
+  // run record + journal through the repo/store; the workflow-engine reactor + boot rehydration
+  // resolve the same instances. See WorkflowEngineDurabilityLive above.
+  Layer.provideMerge(WorkflowEngineDurabilityLive),
   // The instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;

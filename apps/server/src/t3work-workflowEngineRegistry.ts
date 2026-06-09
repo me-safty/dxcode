@@ -9,9 +9,12 @@
  *     The broker records it when it fires an ask; the reactor reads it when a turn completes
  *     or the user replies, then calls the run's `resume`.
  *
- * State is process-local — a durable run-registry (surviving restart) is deferred (Epic 25
- * §Out of scope). A run is suspended on at most one ask per thread at a time, so a single
- * `pendingByThread` slot per thread is sufficient.
+ * State is process-local, but it is no longer the source of truth: it is a hot index rebuilt
+ * at boot from the durable `workflow_runs` table (Epic 25 §Open question 2 — DB-backed
+ * durability). The launch + broker write the run record + pending ask through to SQLite, and
+ * `rehydrateSuspendedWorkflowRuns` re-registers every suspended run here on startup, so a run
+ * parked on a multi-hour ask survives a restart. A run is suspended on at most one ask per
+ * thread at a time, so a single `pendingByThread` slot per thread is sufficient.
  */
 
 import * as Context from "effect/Context";

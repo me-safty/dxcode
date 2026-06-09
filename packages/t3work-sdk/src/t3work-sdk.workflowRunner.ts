@@ -14,9 +14,9 @@ import {
 } from "./t3work-sdk.durableRuntime.ts";
 import { ReplayDriftError, WorkflowError } from "./t3work-sdk.errors.ts";
 import { WorkflowSuspended } from "./t3work-sdk.handles.ts";
-import { journalFilePath, readRunMeta, runDirPath, runMetaFilePath } from "./t3work-sdk.journal.ts";
-import { readJournalEntries } from "./t3work-sdk.journalReader.ts";
-import { JournalWriter } from "./t3work-sdk.journalWriter.ts";
+import type { RunMeta } from "./t3work-sdk.journal.ts";
+import { runDirPath } from "./t3work-sdk.journal.ts";
+import { createStoreSink, type JournalStore } from "./t3work-sdk.journalStore.ts";
 import { executeToolHandler, listRegisteredTools } from "./t3work-sdk.ts";
 import type * as T from "./t3work-sdk.types.ts";
 
@@ -70,13 +70,13 @@ export async function executeRun<O>(opts: {
   readonly ref: T.WorkflowRef<unknown, O>;
   readonly args: unknown;
   readonly runsRoot: string;
+  readonly store: JournalStore;
   readonly options: T.WorkflowRunOptions;
 }): Promise<RunOutcome<O>> {
   const runDir = runDirPath(opts.runsRoot, opts.runId);
-  const journalPath = journalFilePath(opts.runsRoot, opts.runId);
   const log = opts.options.log ?? noopLogger;
-  const { bySeq, byCorrelation } = readJournalEntries(journalPath, (message) => log.warn(message));
-  const writer = new JournalWriter(journalPath);
+  const { bySeq, byCorrelation } = await opts.store.readEntries(opts.runId);
+  const sink = createStoreSink(opts.store, opts.runId);
   const toolRefs = opts.options.tools ?? listRegisteredTools();
   const scripts = opts.options.scripts ?? {};
   const scriptNames = new Map<T.AnyScriptRef, string>(
@@ -89,7 +89,7 @@ export async function executeRun<O>(opts: {
   });
   const runtime: DurableWorkflowRuntime = createDurableWorkflowRuntime({
     journal: bySeq,
-    writer,
+    writer: sink,
     toolCtx,
     scriptCtx,
     scriptNames,
@@ -128,25 +128,27 @@ export async function executeRun<O>(opts: {
     }
     throw error;
   } finally {
-    writer.dispose();
+    // The durability barrier: await every enqueued append (re-throwing a deferred store
+    // error) before the outcome is returned, so the host never parks/completes a run over a
+    // journal write that did not land.
+    await sink.flush();
+    sink.dispose();
   }
 }
 
 /** Verify a resume's args hash matches the recorded runMeta; seq-0 drift boundary. */
 export function assertInputArgsMatch(opts: {
-  readonly runsRoot: string;
-  readonly runId: string;
+  readonly meta: RunMeta | undefined;
   readonly args: unknown;
   readonly absolutePath: string;
 }): void {
-  const meta = readRunMeta(runMetaFilePath(opts.runsRoot, opts.runId));
-  if (meta === undefined) return; // pre-this-version run, no recorded inputs to compare
+  if (opts.meta === undefined) return; // pre-this-version run, no recorded inputs to compare
   const suppliedHash = hashArgs(opts.args);
-  if (meta.argsHash !== suppliedHash) {
+  if (opts.meta.argsHash !== suppliedHash) {
     throw new ReplayDriftError({
       seq: 0,
       reason: "args",
-      expected: { argsHash: hashPrefix(meta.argsHash) },
+      expected: { argsHash: hashPrefix(opts.meta.argsHash) },
       observed: { argsHash: hashPrefix(suppliedHash) },
       filePath: opts.absolutePath,
     });

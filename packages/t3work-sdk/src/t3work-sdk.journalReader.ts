@@ -129,6 +129,45 @@ function unwrapResult(envelope: Wire["result"]): unknown {
   return envelope.v;
 }
 
+/** Fold one parsed wire object into the maps — shared by the fs line reader and the DB
+ * {@link JournalStore} row readers, so the envelope + sent/resolved + first-write rules live once. */
+export function insertWireEntry(maps: JournalMaps, raw: unknown): void {
+  const wire = decodeJournalEntry(raw);
+  if (wire.phase === "resolved") {
+    // First write wins: a dismissal already recorded here makes a late reply a no-op.
+    if (wire.correlationId !== undefined && !maps.byCorrelation.has(wire.correlationId)) {
+      maps.byCorrelation.set(wire.correlationId, {
+        correlationId: wire.correlationId,
+        kind: wire.kind,
+        refId: wire.refId,
+        dismissed: wire.result !== undefined && "dismissed" in wire.result,
+        reply: unwrapResult(wire.result),
+      });
+    }
+    return;
+  }
+  maps.bySeq.set(wire.seq, {
+    seq: wire.seq,
+    callId: wire.callId,
+    kind: wire.kind,
+    refId: wire.refId,
+    argsHash: wire.argsHash,
+    result: unwrapResult(wire.result),
+    ...(wire.phase === "sent" ? { phase: "sent" as const } : {}),
+    ...(wire.correlationId === undefined ? {} : { correlationId: wire.correlationId }),
+    startedAt: wire.startedAt,
+    endedAt: wire.endedAt,
+  });
+}
+
+/** Build the engine's replay maps from parsed wire objects (append order); DB backends call
+ * this on their rows. Torn-tail recovery is fs-only and lives in {@link readJournalEntries}. */
+export function buildJournalMaps(wires: Iterable<unknown>): JournalMaps {
+  const maps: JournalMaps = { bySeq: new Map(), byCorrelation: new Map() };
+  for (const raw of wires) insertWireEntry(maps, raw);
+  return maps;
+}
+
 /**
  * Read and validate every entry in a journal file, splitting it into the `seq`-keyed
  * call/sent map and the `correlationId`-keyed resolved map. A missing file yields empty
@@ -138,9 +177,8 @@ export function readJournalEntries(
   journalPath: string,
   onWarn: (message: string) => void = () => {},
 ): JournalMaps {
-  const bySeq = new Map<number, JournalEntry>();
-  const byCorrelation = new Map<string, ResolvedEntry>();
-  if (!fs.existsSync(journalPath)) return { bySeq, byCorrelation };
+  const maps: JournalMaps = { bySeq: new Map(), byCorrelation: new Map() };
+  if (!fs.existsSync(journalPath)) return maps;
 
   const text = fs.readFileSync(journalPath, "utf8");
   const endsWithNewline = text.endsWith("\n");
@@ -154,32 +192,7 @@ export function readJournalEntries(
     const line = rawLine.trim();
     if (line.length === 0) continue;
     try {
-      const wire = decodeJournalEntry(JSON.parse(line));
-      if (wire.phase === "resolved") {
-        // First write wins: a dismissal already recorded here makes a late reply a no-op.
-        if (wire.correlationId !== undefined && !byCorrelation.has(wire.correlationId)) {
-          byCorrelation.set(wire.correlationId, {
-            correlationId: wire.correlationId,
-            kind: wire.kind,
-            refId: wire.refId,
-            dismissed: wire.result !== undefined && "dismissed" in wire.result,
-            reply: unwrapResult(wire.result),
-          });
-        }
-        continue;
-      }
-      bySeq.set(wire.seq, {
-        seq: wire.seq,
-        callId: wire.callId,
-        kind: wire.kind,
-        refId: wire.refId,
-        argsHash: wire.argsHash,
-        result: unwrapResult(wire.result),
-        ...(wire.phase === "sent" ? { phase: "sent" as const } : {}),
-        ...(wire.correlationId === undefined ? {} : { correlationId: wire.correlationId }),
-        startedAt: wire.startedAt,
-        endedAt: wire.endedAt,
-      });
+      insertWireEntry(maps, JSON.parse(line));
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       if (index === lastContentIndex && !endsWithNewline) {
@@ -193,7 +206,7 @@ export function readJournalEntries(
       });
     }
   }
-  return { bySeq, byCorrelation };
+  return maps;
 }
 
 /** The `seq → JournalEntry` map alone (call/sent entries). Resolved replies are excluded. */

@@ -54,7 +54,7 @@ describe("durable workflow engine — end-to-end Thread model", () => {
     while (isSuspended(result)) {
       expect(i).toBeLessThan(replies.length); // never suspend more times than we have replies
       seenCorrelations.push(result.correlationId);
-      const wrote = appendResolvedEntry({
+      const wrote = await appendResolvedEntry({
         runsRoot,
         runId: result.runId,
         correlationId: result.correlationId,

@@ -30,6 +30,13 @@ import type { MessageBroker, MessageEnvelope } from "@t3work/sdk";
 
 import type { T3workWorkflowEngineRegistryShape } from "./t3work-workflowEngineRegistry.ts";
 
+/** The ask a run is parked on, as the broker knows it when it fires (thread + correlation). */
+export interface WorkflowEnginePendingAsk {
+  readonly threadId: string;
+  readonly correlationId: string;
+  readonly kind: "thread.turn" | "user.input";
+}
+
 export interface WorkflowEngineBrokerDeps {
   readonly runId: string;
   readonly projectId: ProjectId;
@@ -41,6 +48,13 @@ export interface WorkflowEngineBrokerDeps {
   readonly dispatch: (command: OrchestrationCommand) => Promise<void>;
   readonly newId: () => string;
   readonly nowIso: () => string;
+  /**
+   * Durably persist the pending ask (status=suspended + pending columns) before the side
+   * effect dispatches, so a restart finds the parked run in the DB. The in-memory
+   * `registry.setPending` is still set for the live reactor's hot lookups; this mirrors it to
+   * the source of truth. No-op (undefined) on the fs/in-memory path.
+   */
+  readonly recordPending?: (pending: WorkflowEnginePendingAsk) => Promise<void>;
 }
 
 interface ThreadCreatePayload {
@@ -99,6 +113,7 @@ export function createWorkflowEngineBroker(deps: WorkflowEngineBrokerDeps): Mess
     if (kind === "thread.turn") {
       const p = payload as ThreadTurnPayload;
       deps.registry.setPending(p.threadId, { runId: deps.runId, correlationId, kind: "thread.turn" });
+      await deps.recordPending?.({ threadId: p.threadId, correlationId, kind: "thread.turn" });
       await enqueue(() =>
         deps.dispatch({
           type: "thread.turn.start",
@@ -121,6 +136,7 @@ export function createWorkflowEngineBroker(deps: WorkflowEngineBrokerDeps): Mess
     if (kind === "user.input") {
       const p = payload as UserInputPayload;
       deps.registry.setPending(p.threadId, { runId: deps.runId, correlationId, kind: "user.input" });
+      await deps.recordPending?.({ threadId: p.threadId, correlationId, kind: "user.input" });
       await enqueue(() => deps.dispatch(messageUpsert(deps, p.threadId, "system", p.question)));
       return;
     }

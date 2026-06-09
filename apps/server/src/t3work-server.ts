@@ -15,6 +15,9 @@ import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
+import { WorkflowRunRepositoryLive } from "./persistence/Layers/WorkflowRuns.ts";
+import { WorkflowJournalStoreLive } from "./persistence/Layers/SqliteJournalStore.ts";
+import { T3workWorkflowEngineRegistryLive } from "./t3work-workflowEngineRegistry.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
@@ -260,6 +263,15 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
+// Durable workflow-engine singletons (Epic 25 §Open question 2): registry + run record +
+// SQLite journal store, shared in one provideMerge slot. Boot rehydration (in the shared
+// ServerRuntimeStartup) resolves these to rebuild suspended runs.
+const WorkflowEngineDurabilityLive = Layer.mergeAll(
+  T3workWorkflowEngineRegistryLive,
+  WorkflowRunRepositoryLive,
+  WorkflowJournalStoreLive,
+).pipe(Layer.provide(PersistenceLayerLive));
+
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
@@ -269,6 +281,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
+  Layer.provideMerge(WorkflowEngineDurabilityLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
   // The instance registry is the new routing keystone — text generation,

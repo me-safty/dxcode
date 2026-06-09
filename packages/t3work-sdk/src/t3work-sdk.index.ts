@@ -2,6 +2,7 @@ import "./t3work-sdk.globals.ts";
 
 export { appendResolvedEntry, createHostBroker, createMockBroker } from "./t3work-sdk.broker.ts";
 export { builtinTools } from "./t3work-sdk.builtins.ts";
+export { hashArgs } from "./t3work-sdk.canonicalJson.ts";
 export {
   createDurableWorkflowRuntime,
   resumeWorkflow,
@@ -29,6 +30,13 @@ export {
   releaseNotesWrite,
   t3workThreadWrite,
 } from "./t3work-sdk.groups.ts";
+export {
+  createStoreSink,
+  defaultRunsRoot,
+  FsJournalStore,
+} from "./t3work-sdk.journalStore.ts";
+export { buildJournalMaps, insertWireEntry } from "./t3work-sdk.journalReader.ts";
+export { toResolvedWire, toWire } from "./t3work-sdk.journalWriter.ts";
 export { models } from "./t3work-sdk.models.ts";
 export {
   buildScriptTree,
@@ -73,7 +81,10 @@ export type {
   WorkflowThreadPrimitives,
 } from "./t3work-sdk.threadPrimitives.ts";
 export type { ReplayDriftFacet, ReplayDriftReason } from "./t3work-sdk.errors.ts";
-export type { JournalEntry } from "./t3work-sdk.journalReader.ts";
+export type { RunMeta } from "./t3work-sdk.journal.ts";
+export type { JournalEntry, JournalMaps, ResolvedEntry } from "./t3work-sdk.journalReader.ts";
+export type { JournalSink, JournalStore } from "./t3work-sdk.journalStore.ts";
+export type { ResolvedWireInput } from "./t3work-sdk.journalWriter.ts";
 export type { WorkflowMeta } from "./t3work-sdk.loader.ts";
 export type {
   EngineCapability,

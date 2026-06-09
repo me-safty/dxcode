@@ -22,8 +22,10 @@ import {
 } from "./t3work-sdk.engineFixtures.ts";
 import {
   createDurableWorkflowRuntime,
+  createStoreSink,
   defineTool,
   defineToolGroup,
+  FsJournalStore,
   JournalSchemaError,
   JournalSerializeError,
   resumeWorkflow,
@@ -31,9 +33,8 @@ import {
   ToolHandlerCtx,
   WorkflowError,
 } from "./t3work-sdk.index.ts";
-import { ensureRunDir, journalFilePath } from "./t3work-sdk.journal.ts";
+import { journalFilePath } from "./t3work-sdk.journal.ts";
 import { readJournal } from "./t3work-sdk.journalReader.ts";
-import { JournalWriter } from "./t3work-sdk.journalWriter.ts";
 import type { ScriptHandlerCtx } from "./t3work-sdk.types.ts";
 
 beforeEach(resetCounters);
@@ -102,7 +103,7 @@ describe("durable workflow engine — journal", () => {
       },
     };
     for (const tool of [undefTool, mapTool]) {
-      const writer = new JournalWriter(ensureRunDir(runsRoot, `strict-${tool.id}`));
+      const writer = createStoreSink(new FsJournalStore(runsRoot), `strict-${tool.id}`);
       try {
         const runtime = createDurableWorkflowRuntime({
           journal: new Map(), writer, toolCtx: ctx, scriptCtx: { ...ctx },
@@ -170,7 +171,7 @@ describe("durable workflow engine — journal", () => {
       },
     };
     const scriptCtx: ScriptHandlerCtx = { ...toolCtx };
-    const writer = new JournalWriter(ensureRunDir(runsRoot, "unreg-script"));
+    const writer = createStoreSink(new FsJournalStore(runsRoot), "unreg-script");
     try {
       // greetScript is real but the runtime's scriptNames map is empty — reaching
       // callScript with this ref simulates a start/resume registration mismatch.

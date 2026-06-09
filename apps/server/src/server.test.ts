@@ -82,6 +82,8 @@ import {
   type ProjectionSnapshotQueryShape,
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
+import { WorkflowRunRepositoryLive } from "./persistence/Layers/WorkflowRuns.ts";
+import { WorkflowJournalStoreLive } from "./persistence/Layers/SqliteJournalStore.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
 import {
   ProviderRegistry,
@@ -700,7 +702,12 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provideMerge(
-        Layer.mergeAll(T3workThreadToolContextStoreLive, T3workWorkflowEngineRegistryLive),
+        Layer.mergeAll(
+          T3workThreadToolContextStoreLive,
+          T3workWorkflowEngineRegistryLive,
+          WorkflowRunRepositoryLive,
+          WorkflowJournalStoreLive,
+        ),
       ),
     );
 

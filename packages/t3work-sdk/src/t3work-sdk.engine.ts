@@ -25,23 +25,13 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
-import { cwd } from "node:process";
 
 import { hashArgs } from "./t3work-sdk.canonicalJson.ts";
 import {
   WorkflowError,
   WorkflowRunNotFoundError,
 } from "./t3work-sdk.errors.ts";
-import {
-  ensureRunDir,
-  journalExists,
-  journalFilePath,
-  truncateRun,
-  writeRunMeta,
-  runMetaFilePath,
-} from "./t3work-sdk.journal.ts";
-import { readJournal } from "./t3work-sdk.journalReader.ts";
+import { defaultRunsRoot, FsJournalStore, type JournalStore } from "./t3work-sdk.journalStore.ts";
 import type * as T from "./t3work-sdk.types.ts";
 import type { WorkflowRunOptions } from "./t3work-sdk.types.ts";
 import {
@@ -50,11 +40,6 @@ import {
   nowIso,
   type RunOutcome,
 } from "./t3work-sdk.workflowRunner.ts";
-
-const nodeRequire = createRequire(import.meta.url);
-const path = nodeRequire("node:path") as {
-  readonly join: (...parts: ReadonlyArray<string>) => string;
-};
 
 /** Options shared by {@link startWorkflow} and {@link resumeWorkflow}. */
 export type { WorkflowRunOptions } from "./t3work-sdk.types.ts";
@@ -94,17 +79,16 @@ function toRunResult<O>(runId: string, outcome: RunOutcome<O>): WorkflowRunResul
     : { runId, result: outcome.output };
 }
 
-// Dotted so per-run state stays out of project tree listings (and is easy to .gitignore).
-// Spec doc 25 §Open question 2 leaves the long-term home open (SQL-backed local cache);
-// `.t3work-runs/<run-id>/journal.jsonl` is the MVP on-disk shape the spec documents.
-function defaultRunsRoot(): string {
-  return path.join(cwd(), ".t3work-runs");
+// Resolve the journal storage for a run: the injected {@link JournalStore} if the host wired
+// one (e.g. the server's SQLite-backed store), else the default fs store rooted at `runsRoot`.
+function resolveStore(options: WorkflowRunOptions, runsRoot: string): JournalStore {
+  return options.store ?? new FsJournalStore(runsRoot);
 }
 
 /**
- * Run a workflow from scratch: create `.t3work-runs/<run-id>/` + an empty journal, then
- * execute the body, journaling every primitive call. Refuses a `runId` that already has
- * a non-empty journal (pass `overwrite: true` to truncate and restart, or use
+ * Run a workflow from scratch: record the run inputs, then execute the body, journaling every
+ * primitive call through the {@link JournalStore}. Refuses a `runId` that already has a
+ * non-empty journal (pass `overwrite: true` to truncate and restart, or use
  * {@link resumeWorkflow} to continue). Returns the `runId` and the validated result.
  */
 export async function startWorkflow<I, O>(
@@ -113,32 +97,31 @@ export async function startWorkflow<I, O>(
   options: StartWorkflowOptions = {},
 ): Promise<WorkflowRunResult<O> | SuspendedResult> {
   const runsRoot = options.runsRoot ?? defaultRunsRoot();
+  const store = resolveStore(options, runsRoot);
   const runId = options.runId ?? randomUUID();
-  ensureRunDir(runsRoot, runId);
 
-  const journalPath = journalFilePath(runsRoot, runId);
-  const existing = readJournal(journalPath);
-  if (existing.size > 0) {
+  const existing = await store.readEntries(runId);
+  if (existing.bySeq.size > 0) {
     if (options.overwrite !== true) {
       throw new WorkflowError(
-        `Cannot start workflow with runId '${runId}': a journal already exists at '${journalPath}' with ${existing.size} entr${existing.size === 1 ? "y" : "ies"}. Use resumeWorkflow to continue it, pass { overwrite: true } to truncate and restart, or pick a different runId.`,
+        `Cannot start workflow with runId '${runId}': a journal already exists at '${store.locator(runId)}' with ${existing.bySeq.size} entr${existing.bySeq.size === 1 ? "y" : "ies"}. Use resumeWorkflow to continue it, pass { overwrite: true } to truncate and restart, or pick a different runId.`,
       );
     }
-    truncateRun(runsRoot, runId);
+    await store.clear(runId);
   }
 
-  writeRunMeta(runMetaFilePath(runsRoot, runId), {
+  await store.writeRunMeta(runId, {
     workflowPath: ref.absolutePath,
     argsHash: hashArgs(args),
     createdAt: nowIso(),
   });
 
-  const outcome = await executeRun<O>({ runId, ref, args, runsRoot, options });
+  const outcome = await executeRun<O>({ runId, ref, args, runsRoot, store, options });
   return toRunResult(runId, outcome);
 }
 
 /**
- * Resume an existing run: replay the body against `.t3work-runs/<runId>/journal.jsonl`,
+ * Resume an existing run: replay the body against the {@link JournalStore}'s recorded journal,
  * returning recorded results for journaled calls and executing fresh past the recorded
  * frontier. Throws {@link WorkflowRunNotFoundError} if no journal exists for `runId`, and
  * {@link ReplayDriftError} if the supplied args or the body diverge from the recorded run.
@@ -150,10 +133,11 @@ export async function resumeWorkflow<I, O>(
   options: WorkflowRunOptions = {},
 ): Promise<WorkflowRunResult<O> | SuspendedResult> {
   const runsRoot = options.runsRoot ?? defaultRunsRoot();
-  const journalPath = journalFilePath(runsRoot, runId);
-  if (!journalExists(journalPath)) throw new WorkflowRunNotFoundError(journalPath);
-  assertInputArgsMatch({ runsRoot, runId, args, absolutePath: ref.absolutePath });
-  const outcome = await executeRun<O>({ runId, ref, args, runsRoot, options });
+  const store = resolveStore(options, runsRoot);
+  if (!(await store.hasRun(runId))) throw new WorkflowRunNotFoundError(store.locator(runId));
+  const meta = await store.readRunMeta(runId);
+  assertInputArgsMatch({ meta, args, absolutePath: ref.absolutePath });
+  const outcome = await executeRun<O>({ runId, ref, args, runsRoot, store, options });
   return toRunResult(runId, outcome);
 }
 

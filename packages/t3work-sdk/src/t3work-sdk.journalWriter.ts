@@ -1,7 +1,11 @@
 /**
- * Append-only `journal.jsonl` writer. Holds one long-lived append fd and `fsync`s after
- * every line so the entry is durable before the engine returns. Stage-1 durability only;
- * stage-2 atomic-rename lives behind a separate epic.
+ * Wire-encoding for the durable journal plus the fs append primitive.
+ *
+ * A journaled entry has two on-disk shapes — a call/sent line ({@link toWire}) and an
+ * out-of-band reply line ({@link toResolvedWire}) — both plain JSON objects. {@link FsJournalStore}
+ * (the default {@link JournalStore} backend) writes one line per entry with an fsync, so the
+ * entry is durable before the engine returns; a DB backend stores the same object as one row.
+ * Stage-1 durability only; stage-2 atomic-rename lives behind a separate epic.
  */
 
 import { createRequire } from "node:module";
@@ -31,42 +35,19 @@ export interface ResolvedWireInput {
   readonly endedAt: string;
 }
 
-export class JournalWriter {
-  readonly path: string;
-  private fd: number | undefined;
-
-  constructor(journalPath: string) {
-    this.path = journalPath;
-    this.fd = fs.openSync(journalPath, "a");
-  }
-
-  append(entry: JournalEntry): void {
-    this.writeLine(toWire(entry));
-  }
-
-  /** Append a `phase: "resolved"` line keyed by `correlationId` (the out-of-band reply). */
-  appendResolved(input: ResolvedWireInput): void {
-    this.writeLine(toResolvedWire(input));
-  }
-
-  private writeLine(wire: Record<string, unknown>): void {
-    if (this.fd === undefined) {
-      throw new Error(`JournalWriter for '${this.path}' was used after dispose().`);
-    }
-    fs.writeSync(this.fd, `${JSON.stringify(wire)}\n`);
-    fs.fsyncSync(this.fd);
-  }
-
-  dispose(): void {
-    if (this.fd !== undefined) {
-      fs.closeSync(this.fd);
-      this.fd = undefined;
-    }
+/** Append one already-encoded wire object to a journal file, fsync-durable before returning. */
+export function appendWireLine(journalPath: string, wire: Record<string, unknown>): void {
+  const fd = fs.openSync(journalPath, "a");
+  try {
+    fs.writeSync(fd, `${JSON.stringify(wire)}\n`);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
   }
 }
 
 /** Build the on-disk wire object for a call/sent entry. */
-function toWire(entry: JournalEntry): Record<string, unknown> {
+export function toWire(entry: JournalEntry): Record<string, unknown> {
   const base = {
     seq: entry.seq,
     callId: entry.callId,
@@ -86,7 +67,7 @@ function toWire(entry: JournalEntry): Record<string, unknown> {
 }
 
 /** Build the on-disk wire object for a `resolved` line (seq is unused for these). */
-function toResolvedWire(input: ResolvedWireInput): Record<string, unknown> {
+export function toResolvedWire(input: ResolvedWireInput): Record<string, unknown> {
   const result = input.dismissed
     ? { dismissed: true }
     : input.reply === undefined

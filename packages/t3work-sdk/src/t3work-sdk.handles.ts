@@ -15,8 +15,8 @@
 
 import { hashArgs } from "./t3work-sdk.canonicalJson.ts";
 import { CancelledError } from "./t3work-sdk.errors.ts";
+import type { JournalSink } from "./t3work-sdk.journalStore.ts";
 import type { JournalEntry, ResolvedEntry } from "./t3work-sdk.journalReader.ts";
-import type { JournalWriter } from "./t3work-sdk.journalWriter.ts";
 import { assertJournalMatch, gapDrift } from "./t3work-sdk.replayDrift.ts";
 import type { PrimitiveKind } from "./t3work-sdk.types.ts";
 
@@ -49,7 +49,7 @@ export interface HandleSeat {
   readonly maxRecordedSeq: number;
   readonly recordedAt: (seq: number) => JournalEntry | undefined;
   readonly resolvedFor: (correlationId: string) => ResolvedEntry | undefined;
-  readonly writer: JournalWriter;
+  readonly writer: JournalSink;
   /** Update the in-memory resolved map so the same run sees a synchronous resolution. */
   readonly setResolved: (entry: ResolvedEntry) => void;
 }

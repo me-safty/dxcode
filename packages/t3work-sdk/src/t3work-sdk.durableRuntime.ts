@@ -18,8 +18,8 @@
 import { canonicalJsonError, hashArgs } from "./t3work-sdk.canonicalJson.ts";
 import { JournalSchemaError, JournalSerializeError } from "./t3work-sdk.errors.ts";
 import { createHandleDispatch, type HandleDispatch } from "./t3work-sdk.handles.ts";
+import type { JournalSink } from "./t3work-sdk.journalStore.ts";
 import type { JournalEntry, ResolvedEntry } from "./t3work-sdk.journalReader.ts";
-import type { JournalWriter } from "./t3work-sdk.journalWriter.ts";
 import { assertJournalMatch, gapDrift } from "./t3work-sdk.replayDrift.ts";
 import { createToolScriptCalls } from "./t3work-sdk.toolScriptCalls.ts";
 import type * as T from "./t3work-sdk.types.ts";
@@ -28,7 +28,7 @@ import { hostSource } from "./t3work-sdk.workflowGlobals.ts";
 /** Options for the durable runtime config. */
 export interface DurableRuntimeConfig {
   readonly journal: ReadonlyMap<number, JournalEntry>;
-  readonly writer: JournalWriter;
+  readonly writer: JournalSink;
   readonly toolCtx: T.ToolHandlerCtx;
   readonly scriptCtx: T.ScriptHandlerCtx;
   readonly scriptNames: ReadonlyMap<T.AnyScriptRef, string>;

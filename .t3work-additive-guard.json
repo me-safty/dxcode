@@ -16,6 +16,7 @@
     "apps/server/package.json",
     "apps/server/src/server.ts",
     "apps/server/src/server.test.ts",
+    "apps/server/src/serverRuntimeStartup.ts",
     "apps/server/tsdown.config.ts",
     "apps/web/package.json",
     "apps/web/vite.config.ts",
@@ -50,6 +51,10 @@
   ],
   "allowedUnprefixedNewFiles": [
     ".t3work-additive-guard.json",
+    "apps/server/src/persistence/Services/WorkflowRuns.ts",
+    "apps/server/src/persistence/Layers/WorkflowRuns.ts",
+    "apps/server/src/persistence/Services/WorkflowJournalStore.ts",
+    "apps/server/src/persistence/Layers/SqliteJournalStore.ts",
     ".github/agents/**",
     ".github/skills/t3code-runtime-investigation/SKILL.md",
     ".claude/**",

@@ -1,0 +1,223 @@
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlSchema from "effect/unstable/sql/SqlSchema";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
+
+import { ModelSelection } from "@t3tools/contracts";
+import { toPersistenceSqlError } from "../Errors.ts";
+import {
+  ClearWorkflowRunPendingInput,
+  GetWorkflowRunInput,
+  ListWorkflowRunsByStatusInput,
+  SetWorkflowRunPendingInput,
+  SetWorkflowRunStatusInput,
+  WorkflowRun,
+  WorkflowRunRepository,
+  type WorkflowRunRepositoryShape,
+} from "../Services/WorkflowRuns.ts";
+
+// The JSON columns (`args_json`, `model_json`) decode back to their domain shapes on read.
+const WorkflowRunDbRow = WorkflowRun.mapFields(
+  Struct.assign({
+    args: Schema.fromJsonString(Schema.Unknown),
+    modelSelection: Schema.fromJsonString(ModelSelection),
+  }),
+);
+
+const makeWorkflowRunRepository = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+
+  const upsertWorkflowRunRow = SqlSchema.void({
+    Request: WorkflowRun,
+    execute: (row) =>
+      sql`
+        INSERT INTO workflow_runs (
+          run_id,
+          workflow_path,
+          args_json,
+          args_hash,
+          launch_thread_id,
+          project_id,
+          model_json,
+          runtime_mode,
+          interaction_mode,
+          status,
+          pending_thread_id,
+          pending_correlation_id,
+          pending_kind,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          ${row.runId},
+          ${row.workflowPath},
+          ${JSON.stringify(row.args)},
+          ${row.argsHash},
+          ${row.launchThreadId},
+          ${row.projectId},
+          ${JSON.stringify(row.modelSelection)},
+          ${row.runtimeMode},
+          ${row.interactionMode},
+          ${row.status},
+          ${row.pendingThreadId},
+          ${row.pendingCorrelationId},
+          ${row.pendingKind},
+          ${row.createdAt},
+          ${row.updatedAt}
+        )
+        ON CONFLICT (run_id)
+        DO UPDATE SET
+          workflow_path = excluded.workflow_path,
+          args_json = excluded.args_json,
+          args_hash = excluded.args_hash,
+          launch_thread_id = excluded.launch_thread_id,
+          project_id = excluded.project_id,
+          model_json = excluded.model_json,
+          runtime_mode = excluded.runtime_mode,
+          interaction_mode = excluded.interaction_mode,
+          status = excluded.status,
+          pending_thread_id = excluded.pending_thread_id,
+          pending_correlation_id = excluded.pending_correlation_id,
+          pending_kind = excluded.pending_kind,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at
+      `,
+  });
+
+  const getWorkflowRunRow = SqlSchema.findOneOption({
+    Request: GetWorkflowRunInput,
+    Result: WorkflowRunDbRow,
+    execute: ({ runId }) =>
+      sql`
+        SELECT
+          run_id AS "runId",
+          workflow_path AS "workflowPath",
+          args_json AS "args",
+          args_hash AS "argsHash",
+          launch_thread_id AS "launchThreadId",
+          project_id AS "projectId",
+          model_json AS "modelSelection",
+          runtime_mode AS "runtimeMode",
+          interaction_mode AS "interactionMode",
+          status,
+          pending_thread_id AS "pendingThreadId",
+          pending_correlation_id AS "pendingCorrelationId",
+          pending_kind AS "pendingKind",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM workflow_runs
+        WHERE run_id = ${runId}
+      `,
+  });
+
+  const listWorkflowRunRowsByStatus = SqlSchema.findAll({
+    Request: ListWorkflowRunsByStatusInput,
+    Result: WorkflowRunDbRow,
+    execute: ({ status }) =>
+      sql`
+        SELECT
+          run_id AS "runId",
+          workflow_path AS "workflowPath",
+          args_json AS "args",
+          args_hash AS "argsHash",
+          launch_thread_id AS "launchThreadId",
+          project_id AS "projectId",
+          model_json AS "modelSelection",
+          runtime_mode AS "runtimeMode",
+          interaction_mode AS "interactionMode",
+          status,
+          pending_thread_id AS "pendingThreadId",
+          pending_correlation_id AS "pendingCorrelationId",
+          pending_kind AS "pendingKind",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM workflow_runs
+        WHERE status = ${status}
+        ORDER BY created_at ASC, run_id ASC
+      `,
+  });
+
+  const setWorkflowRunStatusRow = SqlSchema.void({
+    Request: SetWorkflowRunStatusInput,
+    execute: ({ runId, status, updatedAt }) =>
+      sql`
+        UPDATE workflow_runs
+        SET status = ${status}, updated_at = ${updatedAt}
+        WHERE run_id = ${runId}
+      `,
+  });
+
+  const setWorkflowRunPendingRow = SqlSchema.void({
+    Request: SetWorkflowRunPendingInput,
+    execute: ({ runId, pendingThreadId, pendingCorrelationId, pendingKind, updatedAt }) =>
+      sql`
+        UPDATE workflow_runs
+        SET status = 'suspended',
+            pending_thread_id = ${pendingThreadId},
+            pending_correlation_id = ${pendingCorrelationId},
+            pending_kind = ${pendingKind},
+            updated_at = ${updatedAt}
+        WHERE run_id = ${runId}
+      `,
+  });
+
+  const clearWorkflowRunPendingRow = SqlSchema.void({
+    Request: ClearWorkflowRunPendingInput,
+    execute: ({ runId, status, updatedAt }) =>
+      sql`
+        UPDATE workflow_runs
+        SET status = ${status},
+            pending_thread_id = NULL,
+            pending_correlation_id = NULL,
+            pending_kind = NULL,
+            updated_at = ${updatedAt}
+        WHERE run_id = ${runId}
+      `,
+  });
+
+  const upsert: WorkflowRunRepositoryShape["upsert"] = (row) =>
+    upsertWorkflowRunRow(row).pipe(
+      Effect.mapError(toPersistenceSqlError("WorkflowRunRepository.upsert:query")),
+    );
+
+  const getById: WorkflowRunRepositoryShape["getById"] = (input) =>
+    getWorkflowRunRow(input).pipe(
+      Effect.mapError(toPersistenceSqlError("WorkflowRunRepository.getById:query")),
+    );
+
+  const listByStatus: WorkflowRunRepositoryShape["listByStatus"] = (input) =>
+    listWorkflowRunRowsByStatus(input).pipe(
+      Effect.mapError(toPersistenceSqlError("WorkflowRunRepository.listByStatus:query")),
+    );
+
+  const setStatus: WorkflowRunRepositoryShape["setStatus"] = (input) =>
+    setWorkflowRunStatusRow(input).pipe(
+      Effect.mapError(toPersistenceSqlError("WorkflowRunRepository.setStatus:query")),
+    );
+
+  const setPending: WorkflowRunRepositoryShape["setPending"] = (input) =>
+    setWorkflowRunPendingRow(input).pipe(
+      Effect.mapError(toPersistenceSqlError("WorkflowRunRepository.setPending:query")),
+    );
+
+  const clearPending: WorkflowRunRepositoryShape["clearPending"] = (input) =>
+    clearWorkflowRunPendingRow(input).pipe(
+      Effect.mapError(toPersistenceSqlError("WorkflowRunRepository.clearPending:query")),
+    );
+
+  return {
+    upsert,
+    getById,
+    listByStatus,
+    setStatus,
+    setPending,
+    clearPending,
+  } satisfies WorkflowRunRepositoryShape;
+});
+
+export const WorkflowRunRepositoryLive = Layer.effect(
+  WorkflowRunRepository,
+  makeWorkflowRunRepository,
+);

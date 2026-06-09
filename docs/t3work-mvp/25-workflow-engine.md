@@ -953,6 +953,7 @@ The step-union runtime has been **deleted** — the durable engine is the only w
 | 25.3  | Composition primitives: `parallel`, `pipeline`, `phase`, `log`, `args`, `budget`, `workflow`; plus the journaled-value primitives `random`, `now`, `uuid`, `wait`, and the `script` / `tool` invocation primitives                       | Implemented |
 | 25.4  | Handle pattern: the `sent`/`resolved` journal split, deterministic `correlationId`, durable suspension (`SuspendedResult`), and the `MessageBroker` host seam                                                                            | Implemented |
 | 25.x  | **Thread model + host wiring + legacy deletion:** `thread`/`spawnThread`/`agent` + the `Thread` verbs over the Handle pattern; the orchestration-backed broker, the launch path (`startWorkflow`), and the resume reactor (turn-done / user-reply → `appendResolvedEntry` + `resumeWorkflow`); the step-union runtime, its routes, and its tests removed | Implemented |
+| 25.x  | **DB-backed durability:** the `JournalStore` seam (default `FsJournalStore`), the server's SQLite store (`workflow_journal`) + `WorkflowRunRepository` (`workflow_runs`), launch/broker write-through, and boot rehydration of suspended runs (§Open question 2). The in-memory registry is now a hot index over a durable DB source of truth | Implemented |
 | 25.5  | Determinism enforcement: lint rules flagging nondeterminism patterns, capability gating at load time                                                                                                                                    | Planned |
 
 Every recipe is authored against the engine (`recipe.ts` + `*.workflow.ts`); there is no
@@ -963,9 +964,27 @@ longer a `recipe.json` / step-union path.
 1. **VM isolation strategy.** Stage 1 trusts project code (current). Stage 2 needs real
    sandboxing — likely via `node:vm` + a frozen-realm pattern, or a worker thread with a
    tightly typed message channel. Decide before phase 25.2 ships.
-2. **Journal storage.** Per-run journal lives in `.t3work-runs/<run-id>/journal.jsonl` for
-   MVP (dotted to keep run state out of project tree listings; gitignored). Long-term may
-   move into the SQL-backed local cache from Epic 16. Append-only either way.
+2. **Journal storage. — RESOLVED (DB-backed durability).** The engine no longer reaches the
+   filesystem directly: it reads + appends through a pluggable **`JournalStore`** seam
+   (`appendEntry` / `appendResolved` / `readEntries` / `readRunMeta` / `writeRunMeta`, plus
+   `hasRun` / `clear` / `locator`). The SDK default is `FsJournalStore`
+   (`.t3work-runs/<run-id>/journal.jsonl` + sibling `runMeta.json`, dotted + gitignored), so
+   standalone use and the SDK suite are unchanged. The synchronous body primitives
+   (`now`/`random`/`uuid`, one-way `thread.create`/`thread.message`) journal through a
+   `createStoreSink` buffer that appends synchronously and exposes an async `flush()` the engine
+   awaits at the suspend/complete boundary — the single durability barrier.
+
+   The **server injects a SQLite-backed store** (`workflow_journal`, one row per wire entry; a
+   `resolved` reply reuses its matching `sent` entry's `seq` so the `(run_id, seq, phase)` PK
+   stays unique) alongside a **`WorkflowRunRepository`** (`workflow_runs`: the run record +
+   pending ask). Both share **one** durability guarantee — the journal and the run record commit
+   to the same DB, so there is no split-brain where the DB says "resume" but the journal is gone.
+   On boot, `rehydrateSuspendedWorkflowRuns` reads `workflow_runs WHERE status='suspended'` and
+   rebuilds each run's resume closure: DATA (workflow path, args, project/model/mode, pending
+   ask) from the row, CODE (broker, dispatch, store, registry, lifecycle) reconstructed from host
+   layers, then `registry.registerRun` + restore the pending ask. The reactor then resolves it
+   identically whether the ask was set this uptime or a prior one. Journal compaction/retention
+   for completed runs, and multi-instance locking, remain future work (single-instance assumed).
 3. **Per-call model selection for cost discipline.** When `meta.model` declares a default and
    a single `agent` / `askAgent` call wants a cheaper model, the per-call `model:` override
    should be a strict subset of the workflow's declared capability for that provider. Surface

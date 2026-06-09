@@ -206,6 +206,8 @@ export type WorkflowRuntime = {
 /** Options shared by `startWorkflow` and `resumeWorkflow`. Re-exported from engine. */
 export interface WorkflowRunOptions {
   readonly runsRoot?: string;
+  // Durable journal storage (default fs at `runsRoot`); host injects SQLite for restart durability (§OQ2).
+  readonly store?: import("./t3work-sdk.journalStore.ts").JournalStore;
   readonly tools?: ReadonlyArray<AnyToolRef>;
   readonly scripts?: Readonly<Record<string, AnyScriptRef>>;
   readonly fetch?: FetchLike;
