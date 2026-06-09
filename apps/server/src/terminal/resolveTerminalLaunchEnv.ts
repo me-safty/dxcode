@@ -202,14 +202,7 @@ export const resolveTerminalAttachInput = Effect.fn("resolveTerminalAttachInput"
   } satisfies TerminalAttachRuntimeInput;
 });
 
-export type TerminalLaunchEnvResolverServices = LaunchEnv | ProjectionSnapshotQuery;
-
-/** Launch env resolution runs in the server runtime, which always provides these services. */
-export const inTerminalRuntimeContext = <A, E>(
-  effect: Effect.Effect<A, E, TerminalLaunchEnvResolverServices>,
-): Effect.Effect<A, E> =>
-  // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
-  effect as Effect.Effect<A, E>;
+type TerminalLaunchEnvResolverServices = LaunchEnv | ProjectionSnapshotQuery;
 
 const provideTerminalLaunchEnvResolverServices = <A, E>(
   services: Context.Context<TerminalLaunchEnvResolverServices>,
@@ -243,3 +236,4 @@ export const terminalLaunchEnvResolverTest = (projectId: ProjectId): TerminalLau
       projectId,
     }),
 });
+

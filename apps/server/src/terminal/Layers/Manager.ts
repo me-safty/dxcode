@@ -12,13 +12,12 @@ import {
 import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
 import { isManagedRuntimeEnvKey } from "../../launchEnv/launchEnvUtils.ts";
 import {
-  inTerminalRuntimeContext,
-  resolveTerminalAttachInput,
-  resolveTerminalOpenInput,
-  resolveTerminalRestartInput,
+  bindTerminalLaunchEnvResolver,
   type TerminalAttachRuntimeInput,
   type TerminalLaunchEnvResolver,
 } from "../resolveTerminalLaunchEnv.ts";
+import { LaunchEnv } from "../../launchEnv/Services/LaunchEnv.ts";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -943,7 +942,7 @@ interface TerminalManagerOptions {
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
   maxRetainedInactiveSessions?: number;
-  launchEnvResolver?: TerminalLaunchEnvResolver;
+  launchEnvResolver: TerminalLaunchEnvResolver;
 }
 
 const makeTerminalManager = Effect.fn("makeTerminalManager")(function* () {
@@ -953,6 +952,10 @@ const makeTerminalManager = Effect.fn("makeTerminalManager")(function* () {
   return yield* makeTerminalManagerWithOptions({
     logsDir: terminalLogsDir,
     ptyAdapter,
+    launchEnvResolver: bindTerminalLaunchEnvResolver(
+      yield* LaunchEnv,
+      yield* ProjectionSnapshotQuery,
+    ),
   });
 });
 
@@ -962,12 +965,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     const path = yield* Path.Path;
     const context = yield* Effect.context<never>();
     const runFork = Effect.runForkWith(context);
-    const resolveOpenInput =
-      options.launchEnvResolver?.resolveOpenInput ?? resolveTerminalOpenInput;
-    const resolveRestartInput =
-      options.launchEnvResolver?.resolveRestartInput ?? resolveTerminalRestartInput;
-    const resolveAttachInput =
-      options.launchEnvResolver?.resolveAttachInput ?? resolveTerminalAttachInput;
+    const resolveOpenInput = options.launchEnvResolver.resolveOpenInput;
+    const resolveRestartInput = options.launchEnvResolver.resolveRestartInput;
+    const resolveAttachInput = options.launchEnvResolver.resolveAttachInput;
 
     const logsDir = options.logsDir;
     const historyLineLimit = options.historyLineLimit ?? DEFAULT_HISTORY_LINE_LIMIT;
@@ -2024,9 +2024,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     });
 
     const open: TerminalManagerShape["open"] = (input) =>
-      inTerminalRuntimeContext(
-        withThreadLock(input.threadId, resolveOpenInput(input).pipe(Effect.flatMap(openLocked))),
-      );
+      withThreadLock(input.threadId, resolveOpenInput(input).pipe(Effect.flatMap(openLocked)));
 
     const openOrAttachForStream = (input: TerminalAttachRuntimeInput) =>
       withThreadLock(
@@ -2109,58 +2107,56 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     const attachStream: TerminalManagerShape["attachStream"] = (input, listener) => {
       let unsubscribe: (() => void) | null = null;
 
-      return inTerminalRuntimeContext(
-        Effect.gen(function* () {
-          const bufferedEvents: TerminalEvent[] = [];
-          let deliverLive = false;
+      return Effect.gen(function* () {
+        const bufferedEvents: TerminalEvent[] = [];
+        let deliverLive = false;
 
-          unsubscribe = yield* subscribe((event) => {
-            if (event.threadId !== input.threadId || event.terminalId !== input.terminalId) {
-              return Effect.void;
-            }
-
-            if (!deliverLive) {
-              bufferedEvents.push(event);
-              return Effect.void;
-            }
-
-            const attachEvent = terminalEventToAttachEvent(event);
-            return attachEvent ? listener(attachEvent) : Effect.void;
-          });
-
-          const resolvedInput = yield* resolveAttachInput(input);
-          const initialSnapshot = yield* openOrAttachForStream(resolvedInput);
-
-          yield* listener({
-            type: "snapshot",
-            snapshot: initialSnapshot,
-          });
-
-          for (const event of bufferedEvents) {
-            if (isDuplicateAttachSnapshotEvent(event, initialSnapshot)) {
-              continue;
-            }
-
-            const attachEvent = terminalEventToAttachEvent(event);
-            if (attachEvent) {
-              yield* listener(attachEvent);
-            }
+        unsubscribe = yield* subscribe((event) => {
+          if (event.threadId !== input.threadId || event.terminalId !== input.terminalId) {
+            return Effect.void;
           }
 
-          deliverLive = true;
-          return () => {
-            unsubscribe?.();
-            unsubscribe = null;
-          };
-        }).pipe(
-          Effect.catchCause((cause) =>
-            Effect.flatMap(
-              Effect.sync(() => {
-                unsubscribe?.();
-                unsubscribe = null;
-              }),
-              () => Effect.failCause(cause),
-            ),
+          if (!deliverLive) {
+            bufferedEvents.push(event);
+            return Effect.void;
+          }
+
+          const attachEvent = terminalEventToAttachEvent(event);
+          return attachEvent ? listener(attachEvent) : Effect.void;
+        });
+
+        const resolvedInput = yield* resolveAttachInput(input);
+        const initialSnapshot = yield* openOrAttachForStream(resolvedInput);
+
+        yield* listener({
+          type: "snapshot",
+          snapshot: initialSnapshot,
+        });
+
+        for (const event of bufferedEvents) {
+          if (isDuplicateAttachSnapshotEvent(event, initialSnapshot)) {
+            continue;
+          }
+
+          const attachEvent = terminalEventToAttachEvent(event);
+          if (attachEvent) {
+            yield* listener(attachEvent);
+          }
+        }
+
+        deliverLive = true;
+        return () => {
+          unsubscribe?.();
+          unsubscribe = null;
+        };
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.flatMap(
+            Effect.sync(() => {
+              unsubscribe?.();
+              unsubscribe = null;
+            }),
+            () => Effect.failCause(cause),
           ),
         ),
       );
@@ -2380,11 +2376,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     });
 
     const restart: TerminalManagerShape["restart"] = (input) =>
-      inTerminalRuntimeContext(
-        withThreadLock(
-          input.threadId,
-          resolveRestartInput(input).pipe(Effect.flatMap(restartLocked)),
-        ),
+      withThreadLock(
+        input.threadId,
+        resolveRestartInput(input).pipe(Effect.flatMap(restartLocked)),
       );
 
     const close: TerminalManagerShape["close"] = (input) =>

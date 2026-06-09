@@ -155,6 +155,7 @@ describe("ProjectSetupScriptRunner", () => {
     expect(open).toHaveBeenCalledWith({
       threadId: "thread-1",
       terminalId: "setup-setup",
+      projectId: ProjectId.make("project-1"),
       cwd: "/repo/worktrees/a",
       worktreePath: "/repo/worktrees/a",
     });

@@ -34,6 +34,7 @@ import * as GitHubCli from "./sourceControl/GitHubCli.ts";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
+import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery.ts";
 import { TerminalManagerLive } from "./terminal/Layers/Manager.ts";
 import * as GitManager from "./git/GitManager.ts";
 import { KeybindingsLive } from "./keybindings.ts";
@@ -224,7 +225,16 @@ const CheckpointingLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
 );
 
-const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
+const TerminalLayerLive = TerminalManagerLive.pipe(
+  Layer.provide(PtyAdapterLive),
+  Layer.provide(LaunchEnvLive),
+  Layer.provide(
+    OrchestrationProjectionSnapshotQueryLive.pipe(
+      Layer.provide(SqlitePersistenceLayerLive),
+      Layer.provide(RepositoryIdentityResolverLive),
+    ),
+  ),
+);
 
 const WorkspaceEntriesLayerLive = WorkspaceEntriesLive.pipe(
   Layer.provide(WorkspacePathsLive),
