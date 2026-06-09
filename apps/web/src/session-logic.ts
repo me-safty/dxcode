@@ -729,7 +729,35 @@ function mergeTextOutput(
   if (previous === next) {
     return next;
   }
-  return `${previous}${previous.endsWith("\n") ? "" : "\n"}${next}`;
+  if (next.startsWith(previous)) {
+    return next;
+  }
+  if (previous.startsWith(next)) {
+    return previous;
+  }
+  const overlap = findSuffixPrefixOverlap(previous, next);
+  if (overlap > 0) {
+    return `${previous}${next.slice(overlap)}`;
+  }
+  const separator = previous.endsWith("\n") || next.startsWith("\n") ? "" : "\n";
+  return `${previous}${separator}${next}`;
+}
+
+function findSuffixPrefixOverlap(previous: string, next: string): number {
+  const maxLength = Math.min(previous.length, next.length);
+  const candidate = `${next.slice(0, maxLength)}\u0000${previous.slice(-maxLength)}`;
+  const prefixLengths = Array.from({ length: candidate.length }, () => 0);
+  for (let index = 1; index < candidate.length; index += 1) {
+    let fallbackIndex = prefixLengths[index - 1] ?? 0;
+    while (fallbackIndex > 0 && candidate[index] !== candidate[fallbackIndex]) {
+      fallbackIndex = prefixLengths[fallbackIndex - 1] ?? 0;
+    }
+    if (candidate[index] === candidate[fallbackIndex]) {
+      fallbackIndex += 1;
+    }
+    prefixLengths[index] = fallbackIndex;
+  }
+  return Math.min(prefixLengths.at(-1) ?? 0, maxLength);
 }
 
 function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | undefined {
@@ -1282,7 +1310,7 @@ function collectPatchStrings(
   }
   if (Array.isArray(value)) {
     for (const entry of value) {
-      collectPatchStrings(entry, patches, seen, depth + 1);
+      collectPatchStrings(entry, patches, seen, depth + 1, includeNested);
       if (patches.length >= MAX_PATCH_STRINGS) {
         return;
       }

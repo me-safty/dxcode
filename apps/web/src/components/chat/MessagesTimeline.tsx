@@ -1205,34 +1205,27 @@ function ToolDetailBlock(props: {
 }
 
 function hasExpandableWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
-  if (isCommandWorkEntry(workEntry)) {
-    return Boolean(
-      workEntry.command ||
-      workEntry.rawCommand ||
-      workEntry.output ||
-      workEntry.stdout ||
-      workEntry.stderr ||
-      workEntry.exitCode !== undefined ||
-      workEntry.durationMs !== undefined,
-    );
-  }
-  if (isFileChangeWorkEntry(workEntry)) {
-    return Boolean(workEntry.patch || (workEntry.changedFiles?.length ?? 0) > 0);
-  }
-  return false;
+  return hasCommandWorkEntryDetails(workEntry) || hasFileChangeWorkEntryDetails(workEntry);
 }
 
 function ToolEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
-  if (isCommandWorkEntry(workEntry)) {
-    return <CommandEntryDetails workEntry={workEntry} />;
+  const showCommandDetails = hasCommandWorkEntryDetails(workEntry);
+  const showFileChangeDetails = hasFileChangeWorkEntryDetails(workEntry);
+  if (!showCommandDetails && !showFileChangeDetails) {
+    return null;
   }
-  if (isFileChangeWorkEntry(workEntry)) {
-    return <FileChangeEntryDetails workEntry={workEntry} />;
-  }
-  return null;
+  return (
+    <>
+      {showCommandDetails && <CommandEntryDetails workEntry={workEntry} />}
+      {showFileChangeDetails && <FileChangeEntryDetails workEntry={workEntry} />}
+    </>
+  );
 }
 
-function isCommandWorkEntry(workEntry: TimelineWorkEntry): boolean {
+function hasCommandWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
+  if (!hasCommandWorkEntryMetadata(workEntry)) {
+    return false;
+  }
   if (workEntry.itemType === "command_execution" || workEntry.requestKind === "command") {
     return true;
   }
@@ -1244,33 +1237,29 @@ function isCommandWorkEntry(workEntry: TimelineWorkEntry): boolean {
     return false;
   }
   if (workEntry.itemType || workEntry.requestKind) {
-    return (
-      (workEntry.itemType === "dynamic_tool_call" || workEntry.itemType === "mcp_tool_call") &&
-      hasCommandWorkEntryCommand(workEntry)
-    );
+    return workEntry.itemType === "dynamic_tool_call" || workEntry.itemType === "mcp_tool_call";
   }
   return hasCommandWorkEntryCommand(workEntry);
+}
+
+function hasCommandWorkEntryMetadata(workEntry: TimelineWorkEntry): boolean {
+  return Boolean(
+    workEntry.command ||
+    workEntry.rawCommand ||
+    workEntry.output ||
+    workEntry.stdout ||
+    workEntry.stderr ||
+    workEntry.exitCode !== undefined ||
+    workEntry.durationMs !== undefined,
+  );
 }
 
 function hasCommandWorkEntryCommand(workEntry: TimelineWorkEntry): boolean {
   return Boolean(workEntry.command || workEntry.rawCommand);
 }
 
-function isFileChangeWorkEntry(workEntry: TimelineWorkEntry): boolean {
-  if (workEntry.itemType === "file_change" || workEntry.requestKind === "file-change") {
-    return true;
-  }
-  if (
-    workEntry.itemType === "command_execution" ||
-    workEntry.itemType === "collab_agent_tool_call" ||
-    workEntry.requestKind === "command"
-  ) {
-    return false;
-  }
-  if (workEntry.patch) {
-    return true;
-  }
-  return false;
+function hasFileChangeWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
+  return Boolean(workEntry.patch || (workEntry.changedFiles?.length ?? 0) > 0);
 }
 
 function CommandEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
