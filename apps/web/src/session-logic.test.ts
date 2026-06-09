@@ -1816,6 +1816,92 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
+  it("drops duplicate subagent control rows for an already rendered child block", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "subagent-spawn",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.completed",
+        summary: "Subagent",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          title: "Subagent",
+          detail: "Run a harmless shell command",
+          data: {
+            item: {
+              id: "call-spawn",
+              prompt: "Run a harmless shell command",
+              tool: "spawnAgent",
+            },
+            subagentChildren: [
+              {
+                childThreadId: "subagent-child-1",
+                titleSeed: "Run a harmless shell command",
+              },
+            ],
+          },
+        },
+      }),
+      makeActivity({
+        id: "subagent-wait",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Subagent",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          title: "Subagent",
+          data: {
+            item: {
+              id: "call-wait",
+              prompt: null,
+              tool: "wait",
+            },
+            subagentChildren: [
+              {
+                childThreadId: "subagent-child-1",
+              },
+            ],
+          },
+        },
+      }),
+      makeActivity({
+        id: "subagent-close",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.completed",
+        summary: "Subagent",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          title: "Subagent",
+          data: {
+            item: {
+              id: "call-close",
+              prompt: null,
+              tool: "closeAgent",
+            },
+            subagentChildren: [
+              {
+                childThreadId: "subagent-child-1",
+              },
+            ],
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "subagent-spawn",
+      itemType: "collab_agent_tool_call",
+      subagentChildren: [
+        {
+          threadId: "subagent-child-1",
+          titleSeed: "Run a harmless shell command",
+        },
+      ],
+    });
+  });
+
   it("uses completed read-file output previews and still collapses the same tool call", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

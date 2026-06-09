@@ -680,10 +680,6 @@ function dedupeSubagentChildWorkEntries(
       return true;
     });
     if (unseenChildren.length === 0) {
-      deduped.push({
-        ...entry,
-        subagentChildren: [],
-      });
       continue;
     }
     deduped.push(
