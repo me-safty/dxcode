@@ -363,12 +363,12 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
         }),
         Effect.map((list) => {
           const wanted = SourceControlProvider.sourceBranch(input);
-          const records = list.map(ForgejoPullRequests.normalizeForgejoPullRequestRecord);
-          const byBranch = records.filter((record) => record.headRefName === wanted);
-          const matched = byBranch.length > 0 ? byBranch : records;
-          if (input.state === "merged") return matched.filter((r) => r.state === "merged");
-          if (input.state === "closed") return matched.filter((r) => r.state === "closed");
-          return matched;
+          const byBranch = list
+            .map(ForgejoPullRequests.normalizeForgejoPullRequestRecord)
+            .filter((record) => record.headRefName === wanted);
+          if (input.state === "merged") return byBranch.filter((record) => record.state === "merged");
+          if (input.state === "closed") return byBranch.filter((record) => record.state === "closed");
+          return byBranch;
         }),
       ),
     getPullRequest: (input) =>
@@ -399,6 +399,7 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
           });
         }
         const credential = yield* keyStore.getCredential(locator.host);
+        // Route to /user/repos when creating under your own account; otherwise treat the owner as an org.
         const isOwnAccount = credential !== null && credential.name === locator.owner;
         const endpoint = isOwnAccount
           ? `/user/repos`
@@ -475,9 +476,21 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
         ) {
           remoteName = input.context.remoteName;
         } else if (!isCrossRepository) {
-          remoteName =
-            (yield* git.resolvePrimaryRemoteName(input.cwd).pipe(Effect.orElseSucceed(() => null))) ??
-            destination.owner;
+          const primaryRemote = yield* git
+            .resolvePrimaryRemoteName(input.cwd)
+            .pipe(Effect.orElseSucceed(() => null));
+          if (primaryRemote) {
+            remoteName = primaryRemote;
+          } else {
+            const raw = yield* getRepositoryFromLocator(destination);
+            const cloneUrls = normalizeRepositoryCloneUrls(raw, destination.host);
+            const originRemoteUrl = yield* readConfigValueNullable(input.cwd, "remote.origin.url");
+            remoteName = yield* git.ensureRemote({
+              cwd: input.cwd,
+              preferredName: destination.owner,
+              url: shouldPreferSshRemote(originRemoteUrl) ? cloneUrls.sshUrl : cloneUrls.url,
+            });
+          }
         } else {
           const originRemoteUrl = yield* readConfigValueNullable(input.cwd, "remote.origin.url");
           const httpUrl = pullRequest.head.repo?.clone_url?.trim() ?? "";
