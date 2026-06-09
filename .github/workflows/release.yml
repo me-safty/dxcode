@@ -165,7 +165,7 @@ jobs:
             --github-output
 
   relay_public_config:
-    name: Resolve T3 Cloud public config
+    name: Resolve T3 Connect public config
     needs: preflight
     if: ${{ false }} # Disabled for the fork: no production relay config.
     runs-on: t3code-arc
