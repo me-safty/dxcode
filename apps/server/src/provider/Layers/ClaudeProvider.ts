@@ -53,7 +53,7 @@ const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
 const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
 
 const CLAUDE_EFFORT_OPTIONS = {
-  fable48: [
+  fable50: [
     { value: "low", label: "Low" },
     { value: "medium", label: "Medium" },
     { value: "high", label: "High", isDefault: true },
@@ -111,7 +111,15 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         buildSelectOptionDescriptor({
           id: "effort",
           label: "Reasoning",
-          options: CLAUDE_EFFORT_OPTIONS.fable48,
+          options: [
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High", isDefault: true },
+            { value: "xhigh", label: "Extra High" },
+            { value: "max", label: "Max" },
+            { value: "ultracode", label: "Ultracode" },
+            { value: "ultrathink", label: "Ultrathink" },
+          ],
           promptInjectedValues: ["ultrathink"],
         }),
         buildSelectOptionDescriptor({
@@ -134,7 +142,15 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         buildSelectOptionDescriptor({
           id: "effort",
           label: "Reasoning",
-          options: CLAUDE_EFFORT_OPTIONS.opus48,
+          options: [
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High", isDefault: true },
+            { value: "xhigh", label: "Extra High" },
+            { value: "max", label: "Max" },
+            { value: "ultracode", label: "Ultracode" },
+            { value: "ultrathink", label: "Ultrathink" },
+          ],
           promptInjectedValues: ["ultrathink"],
         }),
         buildBooleanOptionDescriptor({
@@ -161,7 +177,14 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         buildSelectOptionDescriptor({
           id: "effort",
           label: "Reasoning",
-          options: CLAUDE_EFFORT_OPTIONS.opus47,
+          options: [
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High" },
+            { value: "xhigh", label: "Extra High", isDefault: true },
+            { value: "max", label: "Max" },
+            { value: "ultrathink", label: "Ultrathink" },
+          ],
           promptInjectedValues: ["ultrathink"],
         }),
         buildBooleanOptionDescriptor({
@@ -347,7 +370,7 @@ export function normalizeClaudeCliEffort(
   if (effort === "ultracode") {
     return "xhigh";
   }
-  if (effort === "xhigh" && model !== "claude-opus-4-8") {
+  if (effort === "xhigh" && model !== "claude-fable-5" && model !== "claude-opus-4-8") {
     return "max";
   }
   if (effort === "max" && model === "claude-sonnet-4-6") {
