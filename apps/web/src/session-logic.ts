@@ -761,15 +761,6 @@ function mergeTextOutput(
   if (previous.startsWith(next)) {
     return previous;
   }
-  for (
-    let overlapLength = Math.min(previous.length, next.length);
-    overlapLength > 1;
-    overlapLength -= 1
-  ) {
-    if (previous.endsWith(next.slice(0, overlapLength))) {
-      return `${previous}${next.slice(overlapLength)}`;
-    }
-  }
   const separator = previous.endsWith("\n") || next.startsWith("\n") ? "" : "\n";
   return `${previous}${separator}${next}`;
 }

@@ -449,6 +449,39 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('aria-label="Expand Dynamic patch tool"');
   });
 
+  it("renders mixed dynamic tool command and patch metadata", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Dynamic edit tool",
+              tone: "tool",
+              itemType: "dynamic_tool_call",
+              command: "apply_patch",
+              stdout: "updated files",
+              changedFiles: ["apps/web/src/session-logic.ts"],
+              patch:
+                "diff --git a/apps/web/src/session-logic.ts b/apps/web/src/session-logic.ts\n--- a/apps/web/src/session-logic.ts\n+++ b/apps/web/src/session-logic.ts\n@@ -1 +1 @@\n-old\n+new\n",
+              exitCode: 0,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("apply_patch");
+    expect(markup).toContain("apps/web/src/session-logic.ts");
+    expect(markup).toContain('aria-label="Expand Dynamic edit tool"');
+  });
+
   it("renders review comment contexts as structured cards instead of raw tags", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

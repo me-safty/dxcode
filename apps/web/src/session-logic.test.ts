@@ -1059,7 +1059,7 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.stdout).toBe("line 1\nline 2");
   });
 
-  it("deduplicates suffix-overlapping incremental command output chunks", () => {
+  it("keeps distinct suffix-overlapping command output chunks", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "command-tool-output-update",
@@ -1098,7 +1098,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const [entry] = deriveWorkLogEntries(activities, undefined);
-    expect(entry?.stdout).toBe("foobar");
+    expect(entry?.stdout).toBe("foo\noobar");
   });
 
   it("preserves existing newlines between incremental command output chunks", () => {
