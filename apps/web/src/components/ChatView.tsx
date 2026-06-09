@@ -86,11 +86,17 @@ import {
   resolvePlanFollowUpSubmission,
 } from "../proposedPlan";
 import {
+  appendPlanReviewFeedbackToDraft,
+  formatPlanReviewFeedback,
+  type PlanReviewAnnotation,
+} from "../proposedPlanReview";
+import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
   type ChatMessage,
+  type ProposedPlan,
   type SessionPhase,
   type Thread,
   type TurnDiffSummary,
@@ -148,6 +154,7 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
+import { PlanReviewPanel } from "./PlanReviewPanel";
 import { ChatHeader } from "./chat/ChatHeader";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
@@ -866,9 +873,14 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  const [reviewingProposedPlan, setReviewingProposedPlan] = useState<ProposedPlan | null>(null);
+  const [planReviewAnnotationsByPlanId, setPlanReviewAnnotationsByPlanId] = useState<
+    Record<string, PlanReviewAnnotation[]>
+  >({});
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
+  const planSidebarWasOpenBeforeReviewRef = useRef(false);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
   // Used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
   const planSidebarOpenOnNextThreadRef = useRef(false);
@@ -2403,6 +2415,7 @@ export default function ChatView(props: ChatViewProps) {
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
       if (open) {
+        setReviewingProposedPlan(null);
         planSidebarDismissedForTurnRef.current =
           activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
       } else {
@@ -2412,10 +2425,61 @@ export default function ChatView(props: ChatViewProps) {
     });
   }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
   const closePlanSidebar = useCallback(() => {
+    setReviewingProposedPlan(null);
     setPlanSidebarOpen(false);
     planSidebarDismissedForTurnRef.current =
       activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
   }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+  const openPlanReview = useCallback(
+    (proposedPlan: ProposedPlan) => {
+      planSidebarWasOpenBeforeReviewRef.current = planSidebarOpen;
+      setReviewingProposedPlan(proposedPlan);
+      planSidebarDismissedForTurnRef.current = null;
+      setPlanSidebarOpen(true);
+    },
+    [planSidebarOpen],
+  );
+  const closePlanReview = useCallback(() => {
+    setReviewingProposedPlan(null);
+    setPlanSidebarOpen(planSidebarWasOpenBeforeReviewRef.current);
+  }, []);
+  const updatePlanReviewAnnotations = useCallback(
+    (annotations: PlanReviewAnnotation[]) => {
+      if (!reviewingProposedPlan) return;
+      setPlanReviewAnnotationsByPlanId((existing) => ({
+        ...existing,
+        [reviewingProposedPlan.id]: annotations,
+      }));
+    },
+    [reviewingProposedPlan],
+  );
+  const finishPlanReview = useCallback(() => {
+    if (!reviewingProposedPlan) return;
+    const annotations = planReviewAnnotationsByPlanId[reviewingProposedPlan.id] ?? [];
+    const feedback = formatPlanReviewFeedback(annotations);
+    if (feedback.trim().length === 0) return;
+
+    const nextPrompt = appendPlanReviewFeedbackToDraft(promptRef.current, feedback);
+    const nextCursor = collapseExpandedComposerCursor(nextPrompt, nextPrompt.length);
+    promptRef.current = nextPrompt;
+    setComposerDraftPrompt(composerDraftTarget, nextPrompt);
+    composerRef.current?.resetCursorState({
+      cursor: nextCursor,
+      prompt: nextPrompt,
+      detectTrigger: true,
+    });
+    setReviewingProposedPlan(null);
+    setPlanSidebarOpen(planSidebarWasOpenBeforeReviewRef.current);
+    window.requestAnimationFrame(() => {
+      composerRef.current?.focusAt(nextCursor);
+    });
+  }, [
+    composerDraftTarget,
+    composerRef,
+    planReviewAnnotationsByPlanId,
+    reviewingProposedPlan,
+    setComposerDraftPrompt,
+  ]);
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -2495,6 +2559,9 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     setPullRequestDialogState(null);
+    setReviewingProposedPlan(null);
+    setPlanReviewAnnotationsByPlanId({});
+    planSidebarWasOpenBeforeReviewRef.current = false;
     isAtEndRef.current = true;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
@@ -3814,6 +3881,7 @@ export default function ChatView(props: ChatViewProps) {
               activeThreadEnvironmentId={activeThread.environmentId}
               routeThreadKey={routeThreadKey}
               onOpenTurnDiff={onOpenTurnDiff}
+              onReviewProposedPlan={openPlanReview}
               revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
               onRevertUserMessage={onRevertUserMessage}
               isRevertingCheckpoint={isRevertingCheckpoint}
@@ -3971,17 +4039,31 @@ export default function ChatView(props: ChatViewProps) {
 
         {/* Plan sidebar */}
         {planSidebarOpen && !shouldUsePlanSidebarSheet ? (
-          <PlanSidebar
-            activePlan={activePlan}
-            activeProposedPlan={sidebarProposedPlan}
-            label={planSidebarLabel}
-            environmentId={environmentId}
-            markdownCwd={gitCwd ?? undefined}
-            workspaceRoot={activeWorkspaceRoot}
-            timestampFormat={timestampFormat}
-            mode="sidebar"
-            onClose={closePlanSidebar}
-          />
+          reviewingProposedPlan ? (
+            <div className="h-full w-[min(760px,50vw)] min-w-[420px] shrink-0 border-l border-border/70">
+              <PlanReviewPanel
+                proposedPlan={reviewingProposedPlan}
+                markdownCwd={gitCwd ?? undefined}
+                annotations={planReviewAnnotationsByPlanId[reviewingProposedPlan.id] ?? []}
+                onAnnotationsChange={updatePlanReviewAnnotations}
+                onDone={finishPlanReview}
+                onBack={closePlanReview}
+              />
+            </div>
+          ) : (
+            <PlanSidebar
+              activePlan={activePlan}
+              activeProposedPlan={sidebarProposedPlan}
+              label={planSidebarLabel}
+              environmentId={environmentId}
+              markdownCwd={gitCwd ?? undefined}
+              workspaceRoot={activeWorkspaceRoot}
+              timestampFormat={timestampFormat}
+              mode="sidebar"
+              onClose={closePlanSidebar}
+              onReviewPlan={openPlanReview}
+            />
+          )
         ) : null}
       </div>
       {/* end horizontal flex container */}
@@ -4004,18 +4086,33 @@ export default function ChatView(props: ChatViewProps) {
         />
       ))}
       {shouldUsePlanSidebarSheet ? (
-        <RightPanelSheet open={planSidebarOpen} onClose={closePlanSidebar}>
-          <PlanSidebar
-            activePlan={activePlan}
-            activeProposedPlan={sidebarProposedPlan}
-            label={planSidebarLabel}
-            environmentId={environmentId}
-            markdownCwd={gitCwd ?? undefined}
-            workspaceRoot={activeWorkspaceRoot}
-            timestampFormat={timestampFormat}
-            mode="sheet"
-            onClose={closePlanSidebar}
-          />
+        <RightPanelSheet
+          open={planSidebarOpen}
+          onClose={reviewingProposedPlan ? closePlanReview : closePlanSidebar}
+        >
+          {reviewingProposedPlan ? (
+            <PlanReviewPanel
+              proposedPlan={reviewingProposedPlan}
+              markdownCwd={gitCwd ?? undefined}
+              annotations={planReviewAnnotationsByPlanId[reviewingProposedPlan.id] ?? []}
+              onAnnotationsChange={updatePlanReviewAnnotations}
+              onDone={finishPlanReview}
+              onBack={closePlanReview}
+            />
+          ) : (
+            <PlanSidebar
+              activePlan={activePlan}
+              activeProposedPlan={sidebarProposedPlan}
+              label={planSidebarLabel}
+              environmentId={environmentId}
+              markdownCwd={gitCwd ?? undefined}
+              workspaceRoot={activeWorkspaceRoot}
+              timestampFormat={timestampFormat}
+              mode="sheet"
+              onClose={closePlanSidebar}
+              onReviewPlan={openPlanReview}
+            />
+          )}
         </RightPanelSheet>
       ) : null}
 
