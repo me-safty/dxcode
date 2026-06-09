@@ -1350,6 +1350,15 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           assert.strictEqual(status.status, "ready");
           assert.strictEqual(status.installed, true);
           assert.strictEqual(status.auth.status, "authenticated");
+          assert.deepStrictEqual(
+            status.models.find((model) => model.slug === "claude-fable-5"),
+            {
+              slug: "claude-fable-5",
+              name: "Claude Fable 5",
+              isCustom: false,
+              capabilities: { optionDescriptors: [] },
+            },
+          );
         }).pipe(
           Effect.provide(
             mockSpawnerLayer((args) => {

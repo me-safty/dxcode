@@ -207,6 +207,12 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     }),
   },
   {
+    slug: "claude-fable-5",
+    name: "Claude Fable 5",
+    isCustom: false,
+    capabilities: DEFAULT_CLAUDE_MODEL_CAPABILITIES,
+  },
+  {
     slug: "claude-haiku-4-5",
     name: "Claude Haiku 4.5",
     isCustom: false,
