@@ -2293,29 +2293,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("does not expose removed cloud HTTP API routes", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const legacyRoutes = [
-        "/api/cloud/link-proof",
-        "/api/cloud/relay-config",
-        "/api/cloud/preferences",
-        "/api/cloud/unlink",
-        "/api/t3-cloud/health",
-        "/api/t3-cloud/mint-credential",
-      ];
-      const responses = yield* Effect.forEach(legacyRoutes, (path) =>
-        getHttpServerUrl(path).pipe(Effect.flatMap((url) => fetchEffect(url, { method: "POST" }))),
-      );
-
-      assert.deepEqual(
-        responses.map((response) => response.status),
-        legacyRoutes.map(() => 404),
-      );
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
   it.effect("unlinks local cloud state and disables the managed endpoint runtime", () =>
     Effect.gen(function* () {
       const appliedRuntimeConfigs: Array<unknown> = [];

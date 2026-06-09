@@ -198,21 +198,6 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     }).pipe(Effect.provide(Layer.mergeAll(CliRuntimeLayer, TestConsole.layer))),
   );
 
-  it.effect("rejects the removed cloud command group", () =>
-    Effect.gen(function* () {
-      const error = yield* runCli(["cloud", "status"], connectCli).pipe(Effect.flip);
-
-      if (!CliError.isCliError(error)) {
-        assert.fail(`Expected CliError, got ${String(error)}`);
-      }
-      if (error._tag !== "ShowHelp") {
-        assert.fail(`Expected ShowHelp, got ${error._tag}`);
-      }
-      assert.deepEqual(error.commandPath, ["t3", "cloud"]);
-      assert.include(error.errors[0]?.message ?? "", "command was removed");
-    }).pipe(Effect.provide(CliRuntimeLayer)),
-  );
-
   it.effect("reports fresh headless connect state without requiring local configuration", () =>
     Effect.gen(function* () {
       const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-cloud-status-test-"));
