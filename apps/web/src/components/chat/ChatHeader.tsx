@@ -9,8 +9,9 @@ import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
-import { DiffIcon, TerminalSquareIcon } from "lucide-react";
+import { CornerLeftUpIcon, DiffIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
@@ -41,6 +42,7 @@ interface ChatHeaderProps {
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
+  onOpenParentThread?: (() => void) | undefined;
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
 }
@@ -88,6 +90,7 @@ export const ChatHeader = memo(function ChatHeader({
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
+  onOpenParentThread,
   onToggleTerminal,
   onToggleDiff,
 }: ChatHeaderProps) {
@@ -99,12 +102,34 @@ export const ChatHeader = memo(function ChatHeader({
     <div className="@container/header-actions flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-wrap items-center gap-2 overflow-hidden sm:flex-1 sm:flex-nowrap sm:gap-3">
         <MainSidebarTrigger />
-        <h2
-          className="min-w-0 flex-1 basis-40 truncate text-sm font-medium text-foreground"
-          title={activeThreadTitle}
-        >
-          {activeThreadTitle}
-        </h2>
+        <div className="flex min-w-0 flex-1 basis-40 items-center gap-1.5">
+          <h2
+            className="min-w-0 shrink truncate text-sm font-medium text-foreground"
+            title={activeThreadTitle}
+          >
+            {activeThreadTitle}
+          </h2>
+          {onOpenParentThread && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="outline"
+                    className="shrink-0"
+                    aria-label="Open parent conversation"
+                    onClick={onOpenParentThread}
+                  />
+                }
+              >
+                <CornerLeftUpIcon className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">Open parent conversation</TooltipPopup>
+            </Tooltip>
+          )}
+          <span className="min-w-0 flex-1" aria-hidden="true" />
+        </div>
         {activeProjectName && (
           <Badge
             variant="outline"

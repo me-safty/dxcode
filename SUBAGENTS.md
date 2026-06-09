@@ -8,10 +8,10 @@ The current behavior is:
 
 - A Codex subagent is represented as its own conversation thread.
 - Active subagent threads appear in the sidebar nested under the direct parent that spawned them.
-- Completed, errored, interrupted, or stopped subagent threads are hidden from the sidebar but remain reachable from the parent conversation view.
+- Completed, errored, interrupted, or stopped subagent threads are normally hidden from the sidebar but remain reachable from the parent conversation view. When a terminal subagent conversation is the active route, that subagent and any intermediate subagent ancestors are shown in the sidebar at their normal nested positions until the user navigates away.
 - A parent conversation view shows only parent-owned output and subagent summary blocks for direct children.
 - A child conversation view shows only that child's output, tool calls, diffs, MCP calls, and other actions. Grandchildren appear only as blocks inside their direct parent child view.
-- Users cannot prompt or steer a subagent. The child view exposes stop control only while the child is running.
+- Users cannot prompt or steer a subagent. The child view exposes stop control only while the child is running and a header button for returning to its direct parent conversation.
 - Stopping a parent does not automatically stop running children. Stopping a child explicitly targets that child.
 - Archive/delete actions are exposed only for root parent conversations and should include descendant subagent threads as part of that root lifecycle.
 
@@ -69,21 +69,21 @@ Review fixes added preservation guards so a normal root/default projection upser
 
 ## Web Implementation
 
-1. Sidebar nesting is driven by `parentRelation`. Active subagents render under their direct parent only. Terminal subagents are omitted from the sidebar but remain available through the parent summary block.
+1. Sidebar nesting is driven by `parentRelation`. Active subagents render under their direct parent only. Terminal subagents are omitted from the sidebar during normal parent browsing, but the currently open terminal child path remains visible and indented while that child or nested descendant is selected.
 
 2. Conversation detail routing accepts hidden child threads through projected/synthetic shells. A child thread can be opened from its parent block even after it has disappeared from the active sidebar.
 
-3. Parent timelines render direct child summary blocks from `subagentChildren`. The block text is `Subagent - <title>`, where title generation uses the child title seed derived from the initial subagent prompt when available. Duration and status display use shared helpers.
+3. Parent timelines render direct child summary blocks from `subagentChildren`. The block text is `Subagent` while the generated child title is pending or still the placeholder, then `Subagent - <title>` once a generated child title is available. The child title is generated from the child title seed derived from the initial subagent prompt when available, and raw child prompts are not used as the visible title fallback. Duration and status display use shared helpers, with running children described as `Working for <duration>` and completed children described as `Completed in <duration>`.
 
 4. Parent timelines do not render child output, child shell commands, child file diffs, child MCP calls, or child action boxes. Those entries appear only inside the child thread view.
 
 5. Child timelines render their own output/actions and can render their own direct child summary blocks. This gives arbitrary-depth nesting without showing grandchildren in the original root parent view.
 
-6. Child conversation views replace the normal composer with a subagent control bar. Users cannot send prompts to a subagent. While a child is running, the available user control is stop.
+6. Child conversation views replace the normal composer with a subagent control bar. Users cannot send prompts to a subagent. While a child is running, the available user control is stop. The chat header also includes an up-navigation button that opens the direct parent conversation.
 
 7. Review fixes removed duplicate compact subagent rows from Codex control sequences such as `wait` and `closeAgent`. Parent timelines now de-dupe child reference rows when all referenced child thread ids were already represented.
 
-8. Shared subagent display helpers keep duration and fallback labels consistent across parent blocks and child controls. Terminal child rows with missing completion timestamps show an explicit unknown-duration fallback instead of implying successful completion.
+8. Shared subagent display helpers keep duration and fallback labels consistent across parent blocks and child controls. Terminal child rows with missing completion timestamps show an explicit unknown-duration fallback instead of implying successful completion, and active children use `working` wording instead of `running` wording.
 
 ## Decisions Captured
 

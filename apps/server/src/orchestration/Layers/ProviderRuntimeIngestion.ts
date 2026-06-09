@@ -42,6 +42,7 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 
@@ -726,6 +727,7 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const textGeneration = yield* TextGeneration;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
@@ -774,6 +776,68 @@ const make = Effect.gen(function* () {
     }
     return (yield* Ref.get(syntheticChildShellById)).get(threadId);
   });
+
+  const maybeGenerateSubagentThreadTitle = Effect.fn("maybeGenerateSubagentThreadTitle")(
+    function* (input: {
+      readonly childThreadId: ThreadId;
+      readonly titleSeed: string | null;
+      readonly cwd: string;
+      readonly createdAt: string;
+    }) {
+      const titleSeed = input.titleSeed?.trim();
+      if (!titleSeed) {
+        return;
+      }
+
+      yield* Effect.gen(function* () {
+        const { textGenerationModelSelection: modelSelection } =
+          yield* serverSettingsService.getSettings;
+        const generated = yield* textGeneration.generateThreadTitle({
+          cwd: input.cwd,
+          message: titleSeed,
+          modelSelection,
+        });
+        if (!generated.title.trim()) {
+          return;
+        }
+
+        const latestChild = yield* resolveThreadShell(input.childThreadId);
+        if (
+          !latestChild ||
+          (latestChild.title.trim() !== titleSeed && latestChild.title.trim() !== "Subagent")
+        ) {
+          return;
+        }
+
+        yield* orchestrationEngine.dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.make(`provider:subagent-thread-title:${input.childThreadId}`),
+          threadId: input.childThreadId,
+          title: generated.title,
+        });
+        yield* Ref.update(syntheticChildShellById, (current) => {
+          const cached = current.get(input.childThreadId);
+          if (!cached) {
+            return current;
+          }
+          const next = new Map(current);
+          next.set(input.childThreadId, {
+            ...cached,
+            title: generated.title,
+            updatedAt: input.createdAt,
+          });
+          return next;
+        });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("provider runtime ingestion failed to generate subagent title", {
+            threadId: input.childThreadId,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
+    },
+  );
 
   const rememberAssistantMessageId = (threadId: ThreadId, turnId: TurnId, messageId: MessageId) =>
     Cache.getOption(turnMessageIdsByTurnKey, providerTurnKey(threadId, turnId)).pipe(
@@ -1352,7 +1416,7 @@ const make = Effect.gen(function* () {
                 status: existingRelation?.status ?? "running",
               };
               if (!existingChild) {
-                const title = parentRelation.titleSeed ?? "Subagent";
+                const title = "Subagent";
                 yield* Ref.update(syntheticChildShellById, (current) => {
                   const next = new Map(current);
                   next.set(child.childThreadId, {
@@ -1393,6 +1457,12 @@ const make = Effect.gen(function* () {
                   parentRelation,
                   createdAt: now,
                 });
+                yield* maybeGenerateSubagentThreadTitle({
+                  childThreadId: child.childThreadId,
+                  titleSeed: parentRelation.titleSeed,
+                  cwd: thread.worktreePath ?? process.cwd(),
+                  createdAt: now,
+                }).pipe(Effect.forkScoped);
               }
               yield* Ref.update(syntheticChildShellById, (current) => {
                 const cached = current.get(child.childThreadId);

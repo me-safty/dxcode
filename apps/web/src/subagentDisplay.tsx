@@ -51,7 +51,7 @@ export function formatSubagentDuration(startIso: string, endIso: string | null):
 export function subagentDurationFallbackLabel(status: SubagentThreadStatus | null): string {
   switch (status) {
     case "running":
-      return "running";
+      return "Working";
     case "completed":
     case "errored":
     case "interrupted":
@@ -64,7 +64,29 @@ export function subagentDurationFallbackLabel(status: SubagentThreadStatus | nul
 
 export function formatRunningSubagentDuration(startedAt: string): string {
   const elapsed = formatElapsed(startedAt, new Date().toISOString());
-  return elapsed ? `running for ${elapsed}` : "running";
+  return elapsed ? `Working for ${elapsed}` : "Working";
+}
+
+export function formatTerminalSubagentStatusDuration(
+  status: Exclude<SubagentThreadStatus, "running"> | null,
+  duration: string | null,
+): string {
+  if (!duration) {
+    return subagentDurationFallbackLabel(status);
+  }
+
+  switch (status) {
+    case "completed":
+      return `Completed in ${duration}`;
+    case "errored":
+      return `Errored after ${duration}`;
+    case "interrupted":
+      return `Interrupted after ${duration}`;
+    case "stopped":
+      return `Stopped after ${duration}`;
+    case null:
+      return subagentDurationFallbackLabel(null);
+  }
 }
 
 export function LiveSubagentDuration({ startedAt }: { startedAt: string }) {

@@ -66,8 +66,8 @@ import {
   formatElapsed,
 } from "../session-logic";
 import {
+  formatTerminalSubagentStatusDuration,
   LiveSubagentDuration,
-  subagentStatusLabel,
   subagentStatusToneClass,
   type SubagentThreadStatus,
 } from "../subagentDisplay";
@@ -136,7 +136,7 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
-import { buildDraftThreadRouteParams } from "../threadRoutes";
+import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -228,11 +228,14 @@ function SubagentControlBar(props: {
   stopping: boolean;
   onStop: () => void;
 }) {
-  const duration =
+  const statusDuration =
     props.status === "running" ? (
       <LiveSubagentDuration startedAt={props.startedAt} />
     ) : (
-      (formatElapsed(props.startedAt, props.completedAt ?? undefined) ?? "done")
+      formatTerminalSubagentStatusDuration(
+        props.status,
+        formatElapsed(props.startedAt, props.completedAt ?? undefined),
+      )
     );
 
   return (
@@ -249,9 +252,7 @@ function SubagentControlBar(props: {
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-foreground">Subagent - {props.title}</p>
-          <p className="truncate text-xs text-muted-foreground">
-            {subagentStatusLabel(props.status)} · {duration}
-          </p>
+          <p className="truncate text-xs text-muted-foreground">{statusDuration}</p>
         </div>
         {props.status === "running" ? (
           <Button
@@ -1026,6 +1027,19 @@ export default function ChatView(props: ChatViewProps) {
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const activeThreadSubagentRelation =
     activeThread?.parentRelation?.kind === "subagent" ? activeThread.parentRelation : null;
+  const activeThreadParentRef =
+    activeThread && activeThreadSubagentRelation
+      ? scopeThreadRef(activeThread.environmentId, activeThreadSubagentRelation.parentThreadId)
+      : null;
+  const openActiveThreadParent = useCallback(() => {
+    if (!activeThreadParentRef) {
+      return;
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(activeThreadParentRef),
+    });
+  }, [activeThreadParentRef, navigate]);
   useEffect(() => {
     if (
       pendingSubagentStopThreadId !== null &&
@@ -3874,6 +3888,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
+          {...(activeThreadParentRef ? { onOpenParentThread: openActiveThreadParent } : {})}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
         />

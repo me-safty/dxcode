@@ -20,6 +20,8 @@ import {
   removeEnvironmentState,
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
+  selectSidebarThreadsAcrossEnvironments,
+  selectSidebarThreadsAcrossEnvironmentsForRoute,
   selectThreadByRef,
   selectThreadExistsByRef,
   setThreadBranch,
@@ -27,7 +29,12 @@ import {
   type AppState,
   type EnvironmentState,
 } from "./store";
-import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
+import {
+  DEFAULT_INTERACTION_MODE,
+  DEFAULT_RUNTIME_MODE,
+  type SidebarThreadSummary,
+  type Thread,
+} from "./types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 const remoteEnvironmentId = EnvironmentId.make("environment-remote");
@@ -84,6 +91,29 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     latestTurn: null,
     branch: null,
     worktreePath: null,
+    ...overrides,
+  };
+}
+
+function makeSidebarThreadSummary(
+  overrides: Partial<SidebarThreadSummary> = {},
+): SidebarThreadSummary {
+  return {
+    id: ThreadId.make("thread-1"),
+    environmentId: localEnvironmentId,
+    projectId: ProjectId.make("project-1"),
+    title: "Thread",
+    interactionMode: DEFAULT_INTERACTION_MODE,
+    session: null,
+    createdAt: "2026-02-13T00:00:00.000Z",
+    archivedAt: null,
+    latestTurn: null,
+    branch: null,
+    worktreePath: null,
+    latestUserMessageAt: "2026-02-13T00:00:00.000Z",
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
     ...overrides,
   };
 }
@@ -220,6 +250,120 @@ function projectsOf(state: AppState) {
 function threadsOf(state: AppState) {
   return selectThreadsAcrossEnvironments(state);
 }
+
+function makeSidebarState(summaries: readonly SidebarThreadSummary[]): AppState {
+  const projectId = ProjectId.make("project-1");
+  return makeEmptyState({
+    projectIds: [projectId],
+    projectById: {
+      [projectId]: {
+        id: projectId,
+        environmentId: localEnvironmentId,
+        name: "Project",
+        cwd: "/tmp/project",
+        defaultModelSelection: null,
+        scripts: [],
+      },
+    },
+    threadIds: summaries.map((thread) => thread.id),
+    threadIdsByProjectId: {
+      [projectId]: summaries.map((thread) => thread.id),
+    },
+    sidebarThreadSummaryById: Object.fromEntries(
+      summaries.map((thread) => [thread.id, thread] as const),
+    ),
+  });
+}
+
+function makeSubagentParentRelation(input: {
+  rootThreadId: ThreadId;
+  parentThreadId: ThreadId;
+  status: "running" | "completed" | "errored" | "interrupted" | "stopped";
+  depth?: number;
+}) {
+  return {
+    kind: "subagent",
+    rootThreadId: input.rootThreadId,
+    parentThreadId: input.parentThreadId,
+    parentTurnId: null,
+    parentItemId: "item-subagent" as never,
+    parentActivitySequence: 1,
+    providerThreadId: `provider-${input.parentThreadId}`,
+    titleSeed: null,
+    depth: input.depth ?? 1,
+    startedAt: "2026-02-13T00:01:00.000Z",
+    completedAt: input.status === "running" ? null : "2026-02-13T00:02:00.000Z",
+    status: input.status,
+  } satisfies NonNullable<SidebarThreadSummary["parentRelation"]>;
+}
+
+describe("selectSidebarThreadsAcrossEnvironmentsForRoute", () => {
+  it("hides completed subagent children outside the active route path", () => {
+    const parent = makeSidebarThreadSummary({ id: ThreadId.make("parent") });
+    const child = makeSidebarThreadSummary({
+      id: ThreadId.make("child"),
+      parentRelation: makeSubagentParentRelation({
+        rootThreadId: parent.id,
+        parentThreadId: parent.id,
+        status: "completed",
+      }),
+    });
+    const state = makeSidebarState([parent, child]);
+
+    expect(selectSidebarThreadsAcrossEnvironments(state).map((thread) => thread.id)).toEqual([
+      parent.id,
+    ]);
+  });
+
+  it("includes a completed child while that child route is active", () => {
+    const parent = makeSidebarThreadSummary({ id: ThreadId.make("parent") });
+    const child = makeSidebarThreadSummary({
+      id: ThreadId.make("child"),
+      parentRelation: makeSubagentParentRelation({
+        rootThreadId: parent.id,
+        parentThreadId: parent.id,
+        status: "completed",
+      }),
+    });
+    const state = makeSidebarState([parent, child]);
+
+    expect(
+      selectSidebarThreadsAcrossEnvironmentsForRoute(
+        state,
+        scopeThreadRef(localEnvironmentId, child.id),
+      ).map((thread) => thread.id),
+    ).toEqual([parent.id, child.id]);
+  });
+
+  it("includes intermediate completed children for nested active subagents", () => {
+    const parent = makeSidebarThreadSummary({ id: ThreadId.make("parent") });
+    const child = makeSidebarThreadSummary({
+      id: ThreadId.make("child"),
+      parentRelation: makeSubagentParentRelation({
+        rootThreadId: parent.id,
+        parentThreadId: parent.id,
+        status: "completed",
+      }),
+    });
+    const grandchild = makeSidebarThreadSummary({
+      id: ThreadId.make("grandchild"),
+      parentRelation: makeSubagentParentRelation({
+        rootThreadId: parent.id,
+        parentThreadId: child.id,
+        status: "completed",
+        depth: 2,
+      }),
+    });
+    const state = makeSidebarState([parent, child, grandchild]);
+
+    expect(
+      selectSidebarThreadsAcrossEnvironmentsForRoute(
+        state,
+        scopeThreadRef(localEnvironmentId, grandchild.id),
+      ).map((thread) => thread.id),
+    ).toEqual([parent.id, child.id, grandchild.id]);
+  });
+});
 
 function makeEvent<T extends OrchestrationEvent["type"]>(
   type: T,

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { subagentDurationFallbackLabel } from "./subagentDisplay";
+import {
+  formatRunningSubagentDuration,
+  formatTerminalSubagentStatusDuration,
+  subagentDurationFallbackLabel,
+} from "./subagentDisplay";
 
 describe("subagentDurationFallbackLabel", () => {
   it("does not report terminal subagents without completion time as completed", () => {
@@ -11,7 +15,19 @@ describe("subagentDurationFallbackLabel", () => {
   });
 
   it("keeps distinct fallback labels for running and unknown relations", () => {
-    expect(subagentDurationFallbackLabel("running")).toBe("running");
+    expect(subagentDurationFallbackLabel("running")).toBe("Working");
     expect(subagentDurationFallbackLabel(null)).toBe("status unknown");
+  });
+});
+
+describe("formatRunningSubagentDuration", () => {
+  it("uses working wording for active subagents", () => {
+    expect(formatRunningSubagentDuration(new Date().toISOString())).toMatch(/^Working( for .+)?$/);
+  });
+});
+
+describe("formatTerminalSubagentStatusDuration", () => {
+  it("formats successful completion as completed in duration", () => {
+    expect(formatTerminalSubagentStatusDuration("completed", "5s")).toBe("Completed in 5s");
   });
 });

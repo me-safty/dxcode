@@ -1944,15 +1944,69 @@ export function selectThreadShellsAcrossEnvironments(state: AppState): ThreadShe
   );
 }
 
-function shouldShowThreadInSidebar(thread: SidebarThreadSummary): boolean {
-  return thread.parentRelation?.kind !== "subagent" || thread.parentRelation.status === "running";
+function sidebarThreadSummaryKey(thread: Pick<SidebarThreadSummary, "environmentId" | "id">) {
+  return `${thread.environmentId}:${thread.id}`;
+}
+
+function collectActiveSubagentSidebarPathKeys(
+  state: AppState,
+  activeThreadRef: ScopedThreadRef | null | undefined,
+): ReadonlySet<string> {
+  if (!activeThreadRef) {
+    return new Set();
+  }
+
+  const activeEnvironmentState = selectEnvironmentState(state, activeThreadRef.environmentId);
+  let current = activeEnvironmentState.sidebarThreadSummaryById[activeThreadRef.threadId] ?? null;
+  const pathKeys = new Set<string>();
+  const visitedKeys = new Set<string>();
+
+  while (current?.parentRelation?.kind === "subagent") {
+    const currentKey = sidebarThreadSummaryKey(current);
+    if (visitedKeys.has(currentKey)) {
+      break;
+    }
+    visitedKeys.add(currentKey);
+    pathKeys.add(currentKey);
+
+    const parent = selectEnvironmentState(state, current.environmentId).sidebarThreadSummaryById[
+      current.parentRelation.parentThreadId
+    ];
+    if (!parent) {
+      break;
+    }
+    current = parent;
+  }
+
+  return pathKeys;
+}
+
+function shouldShowThreadInSidebar(
+  thread: SidebarThreadSummary,
+  activeSubagentPathKeys: ReadonlySet<string> = new Set(),
+): boolean {
+  return (
+    thread.parentRelation?.kind !== "subagent" ||
+    thread.parentRelation.status === "running" ||
+    activeSubagentPathKeys.has(sidebarThreadSummaryKey(thread))
+  );
 }
 
 export function selectSidebarThreadsAcrossEnvironments(state: AppState): SidebarThreadSummary[] {
+  return selectSidebarThreadsAcrossEnvironmentsForRoute(state, null);
+}
+
+export function selectSidebarThreadsAcrossEnvironmentsForRoute(
+  state: AppState,
+  activeThreadRef: ScopedThreadRef | null | undefined,
+): SidebarThreadSummary[] {
+  const activeSubagentPathKeys = collectActiveSubagentSidebarPathKeys(state, activeThreadRef);
   return getEnvironmentEntries(state).flatMap(([environmentId, environmentState]) =>
     environmentState.threadIds.flatMap((threadId) => {
       const thread = environmentState.sidebarThreadSummaryById[threadId];
-      return thread && thread.environmentId === environmentId && shouldShowThreadInSidebar(thread)
+      return thread &&
+        thread.environmentId === environmentId &&
+        shouldShowThreadInSidebar(thread, activeSubagentPathKeys)
         ? [thread]
         : [];
     }),
@@ -1963,15 +2017,24 @@ export function selectSidebarThreadsForProjectRef(
   state: AppState,
   ref: ScopedProjectRef | null | undefined,
 ): SidebarThreadSummary[] {
+  return selectSidebarThreadsForProjectRefForRoute(state, ref, null);
+}
+
+export function selectSidebarThreadsForProjectRefForRoute(
+  state: AppState,
+  ref: ScopedProjectRef | null | undefined,
+  activeThreadRef: ScopedThreadRef | null | undefined,
+): SidebarThreadSummary[] {
   if (!ref) {
     return [];
   }
 
+  const activeSubagentPathKeys = collectActiveSubagentSidebarPathKeys(state, activeThreadRef);
   const environmentState = selectEnvironmentState(state, ref.environmentId);
   const threadIds = environmentState.threadIdsByProjectId[ref.projectId] ?? EMPTY_THREAD_IDS;
   return threadIds.flatMap((threadId) => {
     const thread = environmentState.sidebarThreadSummaryById[threadId];
-    return thread && shouldShowThreadInSidebar(thread) ? [thread] : [];
+    return thread && shouldShowThreadInSidebar(thread, activeSubagentPathKeys) ? [thread] : [];
   });
 }
 
@@ -1979,9 +2042,21 @@ export function selectSidebarThreadsForProjectRefs(
   state: AppState,
   refs: readonly ScopedProjectRef[],
 ): SidebarThreadSummary[] {
+  return selectSidebarThreadsForProjectRefsForRoute(state, refs, null);
+}
+
+export function selectSidebarThreadsForProjectRefsForRoute(
+  state: AppState,
+  refs: readonly ScopedProjectRef[],
+  activeThreadRef: ScopedThreadRef | null | undefined,
+): SidebarThreadSummary[] {
   if (refs.length === 0) return [];
-  if (refs.length === 1) return selectSidebarThreadsForProjectRef(state, refs[0]);
-  return refs.flatMap((ref) => selectSidebarThreadsForProjectRef(state, ref));
+  if (refs.length === 1) {
+    return selectSidebarThreadsForProjectRefForRoute(state, refs[0], activeThreadRef);
+  }
+  return refs.flatMap((ref) =>
+    selectSidebarThreadsForProjectRefForRoute(state, ref, activeThreadRef),
+  );
 }
 
 export function selectBootstrapCompleteForActiveEnvironment(state: AppState): boolean {

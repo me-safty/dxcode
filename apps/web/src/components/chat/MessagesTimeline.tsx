@@ -26,9 +26,8 @@ import { deriveTimelineEntries, formatDuration, formatElapsed } from "../../sess
 import { type TurnDiffSummary } from "../../types";
 import {
   formatSubagentDuration,
+  formatTerminalSubagentStatusDuration,
   LiveSubagentDuration,
-  subagentDurationFallbackLabel,
-  subagentStatusLabel,
   subagentStatusToneClass,
 } from "../../subagentDisplay";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
@@ -1798,17 +1797,17 @@ const SubagentWorkEntryButton = memo(function SubagentWorkEntryButton(props: {
   );
   const relation =
     childShell?.parentRelation?.kind === "subagent" ? childShell.parentRelation : null;
-  const title = childShell?.title ?? props.titleSeed ?? "Subagent";
+  const rawTitle = childShell?.title?.trim();
+  const title = rawTitle && rawTitle !== "Subagent" ? rawTitle : null;
+  const displayTitle = title ? `Subagent - ${title}` : "Subagent";
   const status = relation?.status ?? null;
   const startedAt = relation?.startedAt ?? props.parentCreatedAt;
   const completedAt = relation?.completedAt ?? null;
-  const statusLabel = subagentStatusLabel(status);
-  const fallbackDurationLabel = subagentDurationFallbackLabel(status);
-  const durationLabel =
+  const statusDurationLabel =
     status === "running" ? (
       <LiveSubagentDuration startedAt={startedAt} />
     ) : (
-      (formatSubagentDuration(startedAt, completedAt) ?? fallbackDurationLabel)
+      formatTerminalSubagentStatusDuration(status, formatSubagentDuration(startedAt, completedAt))
     );
 
   const openChildThread = useCallback(() => {
@@ -1821,9 +1820,9 @@ const SubagentWorkEntryButton = memo(function SubagentWorkEntryButton(props: {
   return (
     <button
       type="button"
-      className="group flex w-full items-center gap-2 rounded-lg border border-border/55 bg-background/60 px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-background/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      className="group flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-background/55 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       onClick={openChildThread}
-      title={`Open Subagent - ${title}`}
+      title={`Open ${displayTitle}`}
     >
       <span
         className={cn(
@@ -1836,10 +1835,10 @@ const SubagentWorkEntryButton = memo(function SubagentWorkEntryButton(props: {
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs font-medium text-foreground/82">
-          Subagent - {title}
+          {displayTitle}
         </span>
         <span className="block truncate text-[10px] text-muted-foreground/62">
-          {statusLabel} · {durationLabel}
+          {statusDurationLabel}
         </span>
       </span>
       <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/45 transition-colors group-hover:text-foreground/75" />
