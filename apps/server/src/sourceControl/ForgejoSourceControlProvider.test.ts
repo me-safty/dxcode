@@ -30,6 +30,23 @@ describe("Forgejo discovery", () => {
     });
   });
 
+  it("refines an unknown remote whose host differs only in case", () => {
+    const refined = discovery.refineUnknownRemote!({
+      cwd: "/repo",
+      context: {
+        provider: { kind: "unknown", name: "Git.Example.Org", baseUrl: "https://Git.Example.Org" },
+        remoteName: "origin",
+        remoteUrl: "git@Git.Example.Org:owner/repo.git",
+      },
+      auth: { stdout: authOutput, stderr: "", exitCode: ChildProcessSpawner.ExitCode(0) },
+    });
+    assert.deepStrictEqual(refined, {
+      kind: "forgejo",
+      name: "Forgejo",
+      baseUrl: "https://Git.Example.Org",
+    });
+  });
+
   it("does not refine a host that is not logged in", () => {
     const refined = discovery.refineUnknownRemote!({
       cwd: "/repo",
