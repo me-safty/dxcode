@@ -96,21 +96,6 @@ function buildUserTimelineEntry(text: string) {
   };
 }
 
-function buildAssistantTimelineEntry(text: string) {
-  return {
-    id: "entry-assistant-1",
-    kind: "message" as const,
-    createdAt: MESSAGE_CREATED_AT,
-    message: {
-      id: "message-assistant-1" as never,
-      role: "assistant" as const,
-      text,
-      createdAt: MESSAGE_CREATED_AT,
-      streaming: false,
-    },
-  };
-}
-
 describe("MessagesTimeline", () => {
   afterEach(() => {
     scrollToEndSpy.mockReset();
@@ -131,9 +116,9 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-1",
               createdAt: "2026-04-13T12:00:00.000Z",
-              label: "thinking",
+              label: "read files",
               detail: "Inspecting repository state",
-              tone: "thinking",
+              tone: "tool",
             },
           },
         ]}
@@ -144,7 +129,7 @@ describe("MessagesTimeline", () => {
       await expect
         .element(page.getByText("Send a message to start the conversation."))
         .not.toBeInTheDocument();
-      await expect.element(page.getByText("Thinking - Inspecting repository state")).toBeVisible();
+      await expect.element(page.getByText("Inspecting repository state")).toBeVisible();
       expect(document.querySelector('[data-testid="legend-list"] [title]')).toBeNull();
     } finally {
       await screen.unmount();
@@ -231,16 +216,16 @@ describe("MessagesTimeline", () => {
               entry: {
                 id: "work-1",
                 createdAt: "2026-04-13T12:00:00.000Z",
-                label: "thinking",
+                label: "read files",
                 detail: "Inspecting repository state",
-                tone: "thinking",
+                tone: "tool",
               },
             },
           ]}
         />,
       );
 
-      await expect.element(page.getByText("Thinking - Inspecting repository state")).toBeVisible();
+      await expect.element(page.getByText("Inspecting repository state")).toBeVisible();
       expect(props.onIsAtEndChange).toHaveBeenCalledWith(true);
       expect(scrollToEndSpy).toHaveBeenCalledWith({ animated: false });
       expect(requestAnimationFrameSpy).toHaveBeenCalled();
