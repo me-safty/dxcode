@@ -144,6 +144,167 @@
   }
 }
 
+/* Sepia (Warm Light): cream paper surfaces, warm-brown text. Light, but low glare
+   and reduced blue light for easier reading. */
+:root[data-theme="sepia"] {
+  color-scheme: light;
+  --background: #f3ead6;
+  --app-chrome-background: var(--background);
+  --foreground: #463a29;
+  --card: #f9f1de;
+  --card-foreground: #463a29;
+  --popover: #f9f1de;
+  --popover-foreground: #463a29;
+  --primary: oklch(0.488 0.217 264);
+  --primary-foreground: #fbf6ea;
+  --secondary: rgb(70 58 41 / 6%);
+  --secondary-foreground: #463a29;
+  --muted: rgb(70 58 41 / 6%);
+  --muted-foreground: #796c54;
+  --accent: rgb(70 58 41 / 8%);
+  --accent-foreground: #463a29;
+  --destructive: var(--color-red-600);
+  --border: rgb(70 58 41 / 14%);
+  --input: rgb(70 58 41 / 18%);
+  --ring: oklch(0.488 0.217 264);
+  --destructive-foreground: var(--color-red-700);
+  --info: var(--color-blue-600);
+  --info-foreground: var(--color-blue-700);
+  --success: var(--color-emerald-600);
+  --success-foreground: var(--color-emerald-700);
+  --warning: var(--color-amber-600);
+  --warning-foreground: var(--color-amber-700);
+}
+
+/* Soft Gray (Dimmed Light): neutral light-gray surfaces instead of pure white,
+   taking the glare off the standard light theme. */
+:root[data-theme="gray"] {
+  color-scheme: light;
+  --background: #e7e7ea;
+  --app-chrome-background: var(--background);
+  --foreground: #2c2c31;
+  --card: #f1f1f3;
+  --card-foreground: #2c2c31;
+  --popover: #f1f1f3;
+  --popover-foreground: #2c2c31;
+  --primary: oklch(0.488 0.217 264);
+  --primary-foreground: var(--color-white);
+  --secondary: rgb(0 0 0 / 5%);
+  --secondary-foreground: #2c2c31;
+  --muted: rgb(0 0 0 / 5%);
+  --muted-foreground: #61616a;
+  --accent: rgb(0 0 0 / 6%);
+  --accent-foreground: #2c2c31;
+  --destructive: var(--color-red-500);
+  --border: rgb(0 0 0 / 10%);
+  --input: rgb(0 0 0 / 12%);
+  --ring: oklch(0.488 0.217 264);
+  --destructive-foreground: var(--color-red-700);
+  --info: var(--color-blue-500);
+  --info-foreground: var(--color-blue-700);
+  --success: var(--color-emerald-500);
+  --success-foreground: var(--color-emerald-700);
+  --warning: var(--color-amber-500);
+  --warning-foreground: var(--color-amber-700);
+}
+
+/* Dim (Soft Dark): muted slate surfaces rather than near-black, for gentler
+   contrast in low light. Inherits accent/semantic colors from the dark palette;
+   selector wins over the `@variant dark` block via the extra `.dark` + attribute. */
+:root.dark[data-theme="dim"] {
+  color-scheme: dark;
+  --background: #1c2128;
+  --app-chrome-background: var(--background);
+  --foreground: #c9d1d9;
+  --card: #22272e;
+  --card-foreground: #c9d1d9;
+  --popover: #22272e;
+  --popover-foreground: #c9d1d9;
+  --secondary-foreground: #c9d1d9;
+  --muted-foreground: #8b949e;
+  --accent-foreground: #c9d1d9;
+  --border: rgb(255 255 255 / 9%);
+  --input: rgb(255 255 255 / 12%);
+}
+
+/* Monokai: the classic olive-dark editor palette with green/pink/cyan accents. */
+:root.dark[data-theme="monokai"] {
+  color-scheme: dark;
+  --background: #272822;
+  --app-chrome-background: var(--background);
+  --foreground: #f8f8f2;
+  --card: #2f302a;
+  --card-foreground: #f8f8f2;
+  --popover: #32332c;
+  --popover-foreground: #f8f8f2;
+  --primary: #a6e22e;
+  --primary-foreground: #1e1f1a;
+  --secondary-foreground: #f8f8f2;
+  --muted-foreground: #a59f85;
+  --accent-foreground: #f8f8f2;
+  --border: rgb(255 255 255 / 8%);
+  --input: rgb(255 255 255 / 10%);
+  --ring: #a6e22e;
+  --destructive: #f92672;
+  --destructive-foreground: #f92672;
+  --info: #66d9ef;
+  --info-foreground: #66d9ef;
+  --success: #a6e22e;
+  --success-foreground: #a6e22e;
+  --warning: #e6db74;
+  --warning-foreground: #e6db74;
+}
+
+/* Ninja: stealth near-black with a sharp katana-red accent. */
+:root.dark[data-theme="ninja"] {
+  color-scheme: dark;
+  --background: #0a0a0b;
+  --app-chrome-background: var(--background);
+  --foreground: #e4e4e7;
+  --card: #141416;
+  --card-foreground: #e4e4e7;
+  --popover: #161618;
+  --popover-foreground: #e4e4e7;
+  --primary: #e5484d;
+  --primary-foreground: #fbeaea;
+  --secondary-foreground: #e4e4e7;
+  --muted-foreground: #8a8a92;
+  --accent-foreground: #e4e4e7;
+  --border: rgb(255 255 255 / 7%);
+  --input: rgb(255 255 255 / 9%);
+  --ring: #e5484d;
+  --destructive: #e5484d;
+  --destructive-foreground: #f87171;
+}
+
+/* Dracula: the popular purple-tinted dark editor palette. */
+:root.dark[data-theme="dracula"] {
+  color-scheme: dark;
+  --background: #282a36;
+  --app-chrome-background: var(--background);
+  --foreground: #f8f8f2;
+  --card: #2f313f;
+  --card-foreground: #f8f8f2;
+  --popover: #343746;
+  --popover-foreground: #f8f8f2;
+  --primary: #bd93f9;
+  --primary-foreground: #21222c;
+  --secondary-foreground: #f8f8f2;
+  --muted-foreground: #9aa0bd;
+  --accent-foreground: #f8f8f2;
+  --border: rgb(255 255 255 / 8%);
+  --input: rgb(255 255 255 / 10%);
+  --ring: #bd93f9;
+  --destructive: #ff5555;
+  --destructive-foreground: #ff6e6e;
+  --info: #8be9fd;
+  --info-foreground: #8be9fd;
+  --success: #50fa7b;
+  --success-foreground: #50fa7b;
+  --warning: #f1fa8c;
+  --warning-foreground: #f1fa8c;
+}
+
 body {
   font-family:
     "DM Sans",

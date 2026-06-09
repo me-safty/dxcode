@@ -1,10 +1,44 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
-type Theme = "light" | "dark" | "system";
+type Theme =
+  | "light"
+  | "dark"
+  | "system"
+  | "sepia"
+  | "gray"
+  | "dim"
+  | "monokai"
+  | "ninja"
+  | "dracula";
+type DesktopTheme = "light" | "dark" | "system";
 type ThemeSnapshot = {
   theme: Theme;
   systemDark: boolean;
 };
+
+const THEME_VALUES: readonly Theme[] = [
+  "light",
+  "dark",
+  "system",
+  "sepia",
+  "gray",
+  "dim",
+  "monokai",
+  "ninja",
+  "dracula",
+];
+// Themes that should activate the `.dark` class (Tailwind `dark:` utilities + dark CSS selectors).
+const DARK_FAMILY: ReadonlySet<Theme> = new Set<Theme>([
+  "dark",
+  "dim",
+  "monokai",
+  "ninja",
+  "dracula",
+]);
+
+function isTheme(value: unknown): value is Theme {
+  return typeof value === "string" && (THEME_VALUES as readonly string[]).includes(value);
+}
 
 const STORAGE_KEY = "t3code:theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
@@ -34,8 +68,22 @@ function getSystemDark() {
 function getStored(): Theme {
   if (!hasThemeStorage()) return DEFAULT_THEME_SNAPSHOT.theme;
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw === "light" || raw === "dark" || raw === "system") return raw;
+  if (isTheme(raw)) return raw;
   return DEFAULT_THEME_SNAPSHOT.theme;
+}
+
+// Resolve a theme to the concrete palette name applied via the `data-theme` attribute.
+// "system" follows the OS preference; every other theme maps to itself.
+function resolvePalette(theme: Theme): Exclude<Theme, "system"> {
+  if (theme === "system") return getSystemDark() ? "dark" : "light";
+  return theme;
+}
+
+// The desktop bridge only understands light/dark/system, so collapse the extra
+// palettes onto their nearest family for native window chrome.
+function desktopThemeFor(theme: Theme): DesktopTheme {
+  if (theme === "system" || theme === "light" || theme === "dark") return theme;
+  return DARK_FAMILY.has(theme) ? "dark" : "light";
 }
 
 function ensureThemeColorMetaTag(): HTMLMetaElement {
@@ -92,8 +140,9 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
   if (suppressTransitions) {
     document.documentElement.classList.add("no-transitions");
   }
-  const isDark = theme === "dark" || (theme === "system" && getSystemDark());
-  document.documentElement.classList.toggle("dark", isDark);
+  const palette = resolvePalette(theme);
+  document.documentElement.classList.toggle("dark", DARK_FAMILY.has(palette));
+  document.documentElement.setAttribute("data-theme", palette);
   syncBrowserChromeTheme();
   syncDesktopTheme(theme);
   if (suppressTransitions) {
@@ -109,13 +158,14 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
 function syncDesktopTheme(theme: Theme) {
   if (typeof window === "undefined") return;
   const bridge = window.desktopBridge;
-  if (!bridge || typeof bridge.setTheme !== "function" || lastDesktopTheme === theme) {
+  const desktopTheme = desktopThemeFor(theme);
+  if (!bridge || typeof bridge.setTheme !== "function" || lastDesktopTheme === desktopTheme) {
     return;
   }
 
-  lastDesktopTheme = theme;
-  void bridge.setTheme(theme).catch(() => {
-    if (lastDesktopTheme === theme) {
+  lastDesktopTheme = desktopTheme;
+  void bridge.setTheme(desktopTheme).catch(() => {
+    if (lastDesktopTheme === desktopTheme) {
       lastDesktopTheme = null;
     }
   });
@@ -175,8 +225,8 @@ export function useTheme() {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const theme = snapshot.theme;
 
-  const resolvedTheme: "light" | "dark" =
-    theme === "system" ? (snapshot.systemDark ? "dark" : "light") : theme;
+  const palette = theme === "system" ? (snapshot.systemDark ? "dark" : "light") : theme;
+  const resolvedTheme: "light" | "dark" = DARK_FAMILY.has(palette) ? "dark" : "light";
 
   const setTheme = useCallback((next: Theme) => {
     if (!hasThemeStorage()) return;
