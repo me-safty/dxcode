@@ -1209,13 +1209,17 @@ function hasExpandableWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
 }
 
 function ToolEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
-  if (hasCommandWorkEntryDetails(workEntry)) {
-    return <CommandEntryDetails workEntry={workEntry} />;
+  const hasCommandDetails = hasCommandWorkEntryDetails(workEntry);
+  const hasFileChangeDetails = hasFileChangeWorkEntryDetails(workEntry);
+  if (!hasCommandDetails && !hasFileChangeDetails) {
+    return null;
   }
-  if (hasFileChangeWorkEntryDetails(workEntry)) {
-    return <FileChangeEntryDetails workEntry={workEntry} />;
-  }
-  return null;
+  return (
+    <>
+      {hasCommandDetails ? <CommandEntryDetails workEntry={workEntry} /> : null}
+      {hasFileChangeDetails ? <FileChangeEntryDetails workEntry={workEntry} /> : null}
+    </>
+  );
 }
 
 function hasCommandWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
