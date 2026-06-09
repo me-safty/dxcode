@@ -810,7 +810,12 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
-    const hasSession = thread.session && thread.session.status !== "stopped";
+    const subagentRelation =
+      thread.parentRelation?.kind === "subagent" ? thread.parentRelation : null;
+    const routedThreadId = subagentRelation?.parentThreadId ?? event.payload.threadId;
+    const routedThread =
+      routedThreadId === event.payload.threadId ? thread : yield* resolveThread(routedThreadId);
+    const hasSession = routedThread?.session && routedThread.session.status !== "stopped";
     if (!hasSession) {
       return yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -822,8 +827,25 @@ const make = Effect.gen(function* () {
       });
     }
 
-    // Orchestration turn ids are not provider turn ids, so interrupt by session.
-    yield* providerService.interruptTurn({ threadId: event.payload.threadId });
+    const childTurnId = subagentRelation
+      ? (event.payload.turnId ?? thread.latestTurn?.turnId)
+      : undefined;
+    yield* providerService.interruptTurn({
+      threadId: routedThreadId,
+      ...(childTurnId ? { turnId: childTurnId } : {}),
+    });
+    if (subagentRelation) {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.meta.update",
+        commandId: yield* serverCommandId("subagent-interrupt-status"),
+        threadId: event.payload.threadId,
+        parentRelation: {
+          ...subagentRelation,
+          completedAt: event.payload.createdAt,
+          status: "stopped",
+        },
+      });
+    }
   });
 
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (

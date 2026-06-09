@@ -9,7 +9,7 @@ import {
   ProviderDriverKind,
   type ToolLifecycleItemType,
   type UserInputQuestion,
-  type ThreadId,
+  ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
 
@@ -62,10 +62,16 @@ export interface WorkLogEntry {
   patch?: string;
   changedFiles?: ReadonlyArray<string>;
   subagentPrompt?: string;
+  subagentChildren?: ReadonlyArray<SubagentWorkLogChild>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
+}
+
+export interface SubagentWorkLogChild {
+  threadId: ThreadId;
+  titleSeed?: string;
 }
 
 const MAX_PATCH_SEARCH_DEPTH = 4;
@@ -504,8 +510,8 @@ export function deriveWorkLogEntries(
     if (isPlanBoundaryToolActivity(activity)) continue;
     entries.push(toDerivedWorkLogEntry(activity));
   }
-  return collapseDerivedWorkLogEntries(
-    entries.filter((entry) => !isEmptySubagentWorkLogEntry(entry)),
+  return dedupeSubagentChildWorkEntries(
+    collapseDerivedWorkLogEntries(entries.filter((entry) => !isEmptySubagentWorkLogEntry(entry))),
   ).map(({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry);
 }
 
@@ -571,6 +577,8 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     itemType === "collab_agent_tool_call" ? extractSubagentOutput(payload) : null;
   const subagentPrompt =
     itemType === "collab_agent_tool_call" ? extractSubagentPrompt(payload, detail) : null;
+  const subagentChildren =
+    itemType === "collab_agent_tool_call" ? extractSubagentChildren(payload) : [];
   if (detail) {
     entry.detail = detail;
   }
@@ -617,6 +625,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (subagentPrompt) {
     entry.subagentPrompt = subagentPrompt;
   }
+  if (subagentChildren.length > 0) {
+    entry.subagentChildren = subagentChildren;
+  }
   if (title) {
     entry.toolTitle = title;
   }
@@ -651,12 +662,45 @@ function collapseDerivedWorkLogEntries(
   return collapsed;
 }
 
+function dedupeSubagentChildWorkEntries(
+  entries: ReadonlyArray<DerivedWorkLogEntry>,
+): DerivedWorkLogEntry[] {
+  const seenChildThreadIds = new Set<string>();
+  const deduped: DerivedWorkLogEntry[] = [];
+  for (const entry of entries) {
+    if (entry.itemType !== "collab_agent_tool_call" || !entry.subagentChildren?.length) {
+      deduped.push(entry);
+      continue;
+    }
+    const unseenChildren = entry.subagentChildren.filter((child) => {
+      if (seenChildThreadIds.has(child.threadId)) {
+        return false;
+      }
+      seenChildThreadIds.add(child.threadId);
+      return true;
+    });
+    if (unseenChildren.length === 0) {
+      continue;
+    }
+    deduped.push(
+      unseenChildren.length === entry.subagentChildren.length
+        ? entry
+        : {
+            ...entry,
+            subagentChildren: unseenChildren,
+          },
+    );
+  }
+  return deduped;
+}
+
 function isEmptySubagentWorkLogEntry(entry: DerivedWorkLogEntry): boolean {
   return (
     entry.itemType === "collab_agent_tool_call" &&
     !entry.detail &&
     !entry.subagentPrompt &&
-    !entry.output
+    !entry.output &&
+    (entry.subagentChildren?.length ?? 0) === 0
   );
 }
 
@@ -717,6 +761,10 @@ function mergeDerivedWorkLogEntries(
     itemType === "collab_agent_tool_call"
       ? (previous.subagentPrompt ?? next.subagentPrompt)
       : (next.subagentPrompt ?? previous.subagentPrompt);
+  const subagentChildren =
+    itemType === "collab_agent_tool_call"
+      ? mergeSubagentChildren(previous.subagentChildren, next.subagentChildren)
+      : (next.subagentChildren ?? previous.subagentChildren);
   const toolTitle = next.toolTitle ?? previous.toolTitle;
   const requestKind = next.requestKind ?? previous.requestKind;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
@@ -737,12 +785,33 @@ function mergeDerivedWorkLogEntries(
     ...(patch ? { patch } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
     ...(subagentPrompt ? { subagentPrompt } : {}),
+    ...(subagentChildren && subagentChildren.length > 0 ? { subagentChildren } : {}),
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
     ...(requestKind ? { requestKind } : {}),
     ...(collapseKey ? { collapseKey } : {}),
     ...(toolCallId ? { toolCallId } : {}),
   };
+}
+
+function mergeSubagentChildren(
+  previous: ReadonlyArray<SubagentWorkLogChild> | undefined,
+  next: ReadonlyArray<SubagentWorkLogChild> | undefined,
+): ReadonlyArray<SubagentWorkLogChild> | undefined {
+  const merged = [...(previous ?? []), ...(next ?? [])];
+  if (merged.length === 0) {
+    return undefined;
+  }
+  const byThreadId = new Map<ThreadId, SubagentWorkLogChild>();
+  for (const child of merged) {
+    const existing = byThreadId.get(child.threadId);
+    const titleSeed = existing?.titleSeed ?? child.titleSeed;
+    byThreadId.set(child.threadId, {
+      threadId: child.threadId,
+      ...(titleSeed ? { titleSeed } : {}),
+    });
+  }
+  return [...byThreadId.values()];
 }
 
 function mergeTextOutput(
@@ -1441,6 +1510,29 @@ function extractSubagentPrompt(
     firstStringFromRecord(item, ["prompt", "message", "description", "task"]) ??
     fallbackDetail
   );
+}
+
+function extractSubagentChildren(
+  payload: Record<string, unknown> | null,
+): ReadonlyArray<SubagentWorkLogChild> {
+  const data = asRecord(payload?.data);
+  const children = Array.isArray(data?.subagentChildren) ? data.subagentChildren : [];
+  const result: SubagentWorkLogChild[] = [];
+  const seen = new Set<string>();
+  for (const value of children) {
+    const record = asRecord(value);
+    const rawThreadId = asTrimmedString(record?.childThreadId) ?? asTrimmedString(record?.threadId);
+    if (!rawThreadId || seen.has(rawThreadId)) {
+      continue;
+    }
+    seen.add(rawThreadId);
+    const titleSeed = asTrimmedString(record?.titleSeed);
+    result.push({
+      threadId: ThreadId.make(rawThreadId),
+      ...(titleSeed ? { titleSeed } : {}),
+    });
+  }
+  return result;
 }
 
 function extractWorkLogItemType(

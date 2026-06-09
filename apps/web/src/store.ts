@@ -257,6 +257,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    parentRelation: thread.parentRelation,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
   };
@@ -286,6 +287,7 @@ function mapThreadShell(
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    parentRelation: thread.parentRelation,
   };
   const session = thread.session ? mapSession(thread.session) : null;
   const turnState: ThreadTurnState = {
@@ -305,6 +307,7 @@ function mapThreadShell(
     latestTurn: thread.latestTurn,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    parentRelation: thread.parentRelation,
     latestUserMessageAt: thread.latestUserMessageAt,
     hasPendingApprovals: thread.hasPendingApprovals,
     hasPendingUserInput: thread.hasPendingUserInput,
@@ -334,6 +337,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    parentRelation: thread.parentRelation,
   };
 }
 
@@ -372,6 +376,28 @@ function latestTurnsEqual(
   );
 }
 
+function threadParentRelationsEqual(
+  left: ThreadShell["parentRelation"] | undefined,
+  right: ThreadShell["parentRelation"] | undefined,
+): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  if (left.kind !== right.kind || left.rootThreadId !== right.rootThreadId) return false;
+  if (left.kind === "root" || right.kind === "root") return left.kind === right.kind;
+  return (
+    left.parentThreadId === right.parentThreadId &&
+    left.parentTurnId === right.parentTurnId &&
+    left.parentItemId === right.parentItemId &&
+    left.parentActivitySequence === right.parentActivitySequence &&
+    left.providerThreadId === right.providerThreadId &&
+    left.titleSeed === right.titleSeed &&
+    left.depth === right.depth &&
+    left.startedAt === right.startedAt &&
+    left.completedAt === right.completedAt &&
+    left.status === right.status
+  );
+}
+
 function threadSessionsEqual(
   left: ThreadSession | null | undefined,
   right: ThreadSession | null | undefined,
@@ -406,6 +432,7 @@ function sidebarThreadSummariesEqual(
     latestTurnsEqual(left.latestTurn, right.latestTurn) &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
+    threadParentRelationsEqual(left.parentRelation, right.parentRelation) &&
     left.latestUserMessageAt === right.latestUserMessageAt &&
     left.hasPendingApprovals === right.hasPendingApprovals &&
     left.hasPendingUserInput === right.hasPendingUserInput &&
@@ -429,7 +456,8 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.archivedAt === right.archivedAt &&
     left.updatedAt === right.updatedAt &&
     left.branch === right.branch &&
-    left.worktreePath === right.worktreePath
+    left.worktreePath === right.worktreePath &&
+    threadParentRelationsEqual(left.parentRelation, right.parentRelation)
   );
 }
 
@@ -1913,11 +1941,17 @@ export function selectThreadShellsAcrossEnvironments(state: AppState): ThreadShe
   );
 }
 
+function shouldShowThreadInSidebar(thread: SidebarThreadSummary): boolean {
+  return thread.parentRelation?.kind !== "subagent" || thread.parentRelation.status === "running";
+}
+
 export function selectSidebarThreadsAcrossEnvironments(state: AppState): SidebarThreadSummary[] {
   return getEnvironmentEntries(state).flatMap(([environmentId, environmentState]) =>
     environmentState.threadIds.flatMap((threadId) => {
       const thread = environmentState.sidebarThreadSummaryById[threadId];
-      return thread && thread.environmentId === environmentId ? [thread] : [];
+      return thread && thread.environmentId === environmentId && shouldShowThreadInSidebar(thread)
+        ? [thread]
+        : [];
     }),
   );
 }
@@ -1934,7 +1968,7 @@ export function selectSidebarThreadsForProjectRef(
   const threadIds = environmentState.threadIdsByProjectId[ref.projectId] ?? EMPTY_THREAD_IDS;
   return threadIds.flatMap((threadId) => {
     const thread = environmentState.sidebarThreadSummaryById[threadId];
-    return thread ? [thread] : [];
+    return thread && shouldShowThreadInSidebar(thread) ? [thread] : [];
   });
 }
 

@@ -2,8 +2,11 @@ import {
   type EnvironmentId,
   type MessageId,
   type ServerProviderSkill,
+  type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime";
+import { useNavigate } from "@tanstack/react-router";
 import {
   createContext,
   memo,
@@ -20,7 +23,7 @@ import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { FileDiff } from "@pierre/diffs/react";
 import type { FileDiffMetadata, Hunk } from "@pierre/diffs/types";
 import { deriveTimelineEntries, formatDuration, formatElapsed } from "../../session-logic";
-import { type TurnDiffSummary } from "../../types";
+import { type ThreadShell, type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import {
   getRenderablePatch,
@@ -71,6 +74,8 @@ import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
+import { buildThreadRouteParams } from "../../threadRoutes";
+import { useStore } from "../../store";
 
 import {
   buildInlineTerminalContextText,
@@ -1121,11 +1126,18 @@ function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
 function workEntryPreview(
   workEntry: Pick<
     TimelineWorkEntry,
-    "detail" | "command" | "changedFiles" | "itemType" | "output" | "subagentPrompt"
+    | "detail"
+    | "command"
+    | "changedFiles"
+    | "itemType"
+    | "output"
+    | "subagentPrompt"
+    | "subagentChildren"
   >,
   workspaceRoot: string | undefined,
 ) {
   if (workEntry.command) return workEntry.command;
+  if ((workEntry.subagentChildren?.length ?? 0) > 0) return null;
   if (workEntry.itemType === "collab_agent_tool_call") {
     const { prompt, output } = resolveSubagentDisplayParts(workEntry);
     return prompt ?? output;
@@ -1253,6 +1265,9 @@ function hasExpandableWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
     return true;
   }
   if (workEntry.itemType === "collab_agent_tool_call") {
+    if ((workEntry.subagentChildren?.length ?? 0) > 0) {
+      return false;
+    }
     const { prompt, output } = resolveSubagentDisplayParts(workEntry);
     return Boolean(prompt || output);
   }
@@ -1570,6 +1585,9 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
 }) {
   const { workEntry, workspaceRoot } = props;
   const [expanded, setExpanded] = useState(false);
+  if (workEntry.itemType === "collab_agent_tool_call" && workEntry.subagentChildren?.length) {
+    return <SubagentWorkEntryRows workEntry={workEntry} />;
+  }
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
@@ -1735,3 +1753,152 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
     </div>
   );
 });
+
+const SubagentWorkEntryRows = memo(function SubagentWorkEntryRows({
+  workEntry,
+}: {
+  workEntry: TimelineWorkEntry;
+}) {
+  return (
+    <div className="space-y-1 py-0.5">
+      {workEntry.subagentChildren?.map((child) => (
+        <SubagentWorkEntryButton
+          key={`${workEntry.id}:subagent:${child.threadId}`}
+          parentCreatedAt={workEntry.createdAt}
+          threadId={child.threadId}
+          {...((child.titleSeed ?? workEntry.subagentPrompt ?? workEntry.detail)
+            ? { titleSeed: child.titleSeed ?? workEntry.subagentPrompt ?? workEntry.detail }
+            : {})}
+        />
+      ))}
+    </div>
+  );
+});
+
+const SubagentWorkEntryButton = memo(function SubagentWorkEntryButton(props: {
+  parentCreatedAt: string;
+  threadId: ThreadId;
+  titleSeed?: string;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const navigate = useNavigate();
+  const childShell = useStore(
+    useCallback(
+      (state) =>
+        state.environmentStateById[ctx.activeThreadEnvironmentId]?.threadShellById[props.threadId],
+      [ctx.activeThreadEnvironmentId, props.threadId],
+    ),
+  );
+  const relation =
+    childShell?.parentRelation?.kind === "subagent" ? childShell.parentRelation : null;
+  const title = childShell?.title ?? props.titleSeed ?? "Subagent";
+  const status = relation?.status ?? "running";
+  const startedAt = relation?.startedAt ?? props.parentCreatedAt;
+  const completedAt = relation?.completedAt ?? null;
+  const statusLabel = subagentStatusLabel(status);
+  const durationLabel =
+    status === "running" ? (
+      <LiveSubagentDuration startedAt={startedAt} />
+    ) : (
+      (formatSubagentDuration(startedAt, completedAt) ?? "completed")
+    );
+
+  const openChildThread = useCallback(() => {
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(ctx.activeThreadEnvironmentId, props.threadId)),
+    });
+  }, [ctx.activeThreadEnvironmentId, navigate, props.threadId]);
+
+  return (
+    <button
+      type="button"
+      className="group flex w-full items-center gap-2 rounded-lg border border-border/55 bg-background/60 px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-background/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      onClick={openChildThread}
+      title={`Open Subagent - ${title}`}
+    >
+      <span
+        className={cn(
+          "flex size-5 shrink-0 items-center justify-center rounded-full border",
+          subagentStatusClassName(status),
+        )}
+        aria-hidden="true"
+      >
+        <BotIcon className="size-3" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-medium text-foreground/82">
+          Subagent - {title}
+        </span>
+        <span className="block truncate text-[10px] text-muted-foreground/62">
+          {statusLabel} · {durationLabel}
+        </span>
+      </span>
+      <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/45 transition-colors group-hover:text-foreground/75" />
+    </button>
+  );
+});
+
+type SubagentThreadStatus = Extract<
+  NonNullable<ThreadShell["parentRelation"]>,
+  { kind: "subagent" }
+>["status"];
+
+function subagentStatusLabel(status: SubagentThreadStatus): string {
+  switch (status) {
+    case "running":
+      return "Running";
+    case "errored":
+      return "Errored";
+    case "interrupted":
+      return "Interrupted";
+    case "stopped":
+      return "Stopped";
+    case "completed":
+      return "Completed";
+  }
+}
+
+function subagentStatusClassName(status: SubagentThreadStatus): string {
+  switch (status) {
+    case "running":
+      return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
+    case "errored":
+      return "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300";
+    case "interrupted":
+    case "stopped":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+    case "completed":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  }
+}
+
+function formatSubagentDuration(startIso: string, endIso: string | null): string | null {
+  if (!endIso) {
+    return null;
+  }
+  return formatElapsed(startIso, endIso);
+}
+
+function LiveSubagentDuration({ startedAt }: { startedAt: string }) {
+  const textRef = useRef<HTMLSpanElement>(null);
+  const initialText = formatSubagentRunningDuration(startedAt);
+
+  useEffect(() => {
+    const updateText = () => {
+      if (textRef.current) {
+        textRef.current.textContent = formatSubagentRunningDuration(startedAt);
+      }
+    };
+    updateText();
+    const id = setInterval(updateText, 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
+
+  return <span ref={textRef}>{initialText}</span>;
+}
+
+function formatSubagentRunningDuration(startedAt: string): string {
+  const elapsed = formatElapsed(startedAt, new Date().toISOString());
+  return elapsed ? `running for ${elapsed}` : "running";
+}
