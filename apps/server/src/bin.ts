@@ -25,26 +25,6 @@ class ConnectPublicConfigMissingError extends CliError.UserError {
   }
 }
 
-const removedCloudCommandMessage = "The `t3 cloud` command was removed. Use `t3 connect`.";
-
-class RemovedCloudCommandError extends CliError.UserError {
-  override get message() {
-    return removedCloudCommandMessage;
-  }
-}
-
-const removedCloudCommand = Command.make("cloud").pipe(
-  Command.withHidden,
-  Command.withHandler(() =>
-    Effect.fail(
-      new CliError.ShowHelp({
-        commandPath: ["t3", "cloud"],
-        errors: [new RemovedCloudCommandError({ cause: removedCloudCommandMessage })],
-      }),
-    ),
-  ),
-);
-
 const connectUnavailableCommand = Command.make("connect").pipe(
   Command.withDescription("T3 Connect is unavailable in builds without public configuration."),
   Command.withHidden,
@@ -68,7 +48,6 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       authCommand,
       projectCommand,
       cloudEnabled ? connectCommand : connectUnavailableCommand,
-      removedCloudCommand,
     ]),
   );
 
