@@ -1,5 +1,4 @@
 import type { ProviderInstanceEnvironment } from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
 
 export function mergeProviderInstanceEnvironment(
   environment: ProviderInstanceEnvironment | undefined,
@@ -15,7 +14,3 @@ export function mergeProviderInstanceEnvironment(
   }
   return next;
 }
-
-export const mergeProviderInstanceEnvironmentEffect = (
-  environment: ProviderInstanceEnvironment | undefined,
-) => Effect.sync(() => mergeProviderInstanceEnvironment(environment));

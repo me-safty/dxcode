@@ -406,7 +406,7 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
         vi.spyOn(fsPromises, "readdir").mockRejectedValueOnce(denied);
 
         const result = yield* workspaceEntries.browse({
-          partialPath: appendSeparator(cwd),
+          partialPath: yield* appendSeparator(cwd),
         });
         expect(result).toEqual({ parentPath: cwd, entries: [] });
       }),

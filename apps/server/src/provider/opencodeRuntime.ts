@@ -32,6 +32,7 @@ import { isWindowsCommandNotFound } from "../processRunner.ts";
 import { collectStreamAsString } from "./providerSnapshot.ts";
 import * as NetService from "@t3tools/shared/Net";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { sanitizeShellModeArgs } from "@t3tools/shared/shell";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString);
 const OPENCODE_EMPTY_CONFIG_CONTENT = "{}";
 
@@ -281,8 +282,10 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
 
   const runOpenCodeCommand: OpenCodeRuntimeShape["runOpenCodeCommand"] = (input) =>
     Effect.gen(function* () {
+      // The opencode binary may be an npm-installed `.cmd` shim, so Windows
+      // spawns through cmd.exe shell mode with explicitly sanitized arguments.
       const child = yield* spawner.spawn(
-        ChildProcess.make(input.binaryPath, [...input.args], {
+        ChildProcess.make(input.binaryPath, sanitizeShellModeArgs(input.args, hostPlatform), {
           shell: hostPlatform === "win32",
           ...(input.environment ? { env: input.environment } : { extendEnv: true }),
         }),
@@ -339,7 +342,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
 
       const child = yield* spawner
         .spawn(
-          ChildProcess.make(input.binaryPath, args, {
+          ChildProcess.make(input.binaryPath, sanitizeShellModeArgs(args, hostPlatform), {
             detached: hostPlatform !== "win32",
             shell: hostPlatform === "win32",
             env: {

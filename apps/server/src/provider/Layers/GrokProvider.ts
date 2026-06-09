@@ -14,7 +14,9 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { createModelCapabilities } from "@t3tools/shared/model";
+import { sanitizeShellModeArgs } from "@t3tools/shared/shell";
 
 import {
   buildServerProvider,
@@ -149,16 +151,20 @@ const discoverGrokModelsViaAcp = (
 const runGrokVersionCommand = (
   grokSettings: GrokSettings,
   environment: NodeJS.ProcessEnv = process.env,
-) => {
-  const command = grokSettings.binaryPath || "grok";
-  return spawnAndCollect(
-    command,
-    ChildProcess.make(command, ["--version"], {
-      env: environment,
-      shell: process.platform === "win32",
-    }),
-  );
-};
+) =>
+  Effect.gen(function* () {
+    const hostPlatform = yield* HostProcessPlatform;
+    const command = grokSettings.binaryPath || "grok";
+    // The provider binary may be an npm-installed `.cmd` shim, so Windows spawns
+    // through cmd.exe shell mode with explicitly sanitized arguments.
+    return yield* spawnAndCollect(
+      command,
+      ChildProcess.make(command, sanitizeShellModeArgs(["--version"], hostPlatform), {
+        env: environment,
+        shell: hostPlatform === "win32",
+      }),
+    );
+  });
 
 export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(function* (
   grokSettings: GrokSettings,

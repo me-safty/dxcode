@@ -12,6 +12,11 @@ export const TAILSCALE_STATUS_TIMEOUT_MS = 1_500;
 export const TAILSCALE_SERVE_TIMEOUT_MS = 10_000;
 export const TAILSCALE_PROBE_TIMEOUT_MS = 2_500;
 
+// tailscale is a real executable everywhere (`tailscale.exe` on Windows), so
+// it is always spawned directly rather than through cmd.exe shell mode.
+const tailscaleCommandForPlatform = (platform: NodeJS.Platform): string =>
+  platform === "win32" ? "tailscale.exe" : "tailscale";
+
 export class TailscaleCommandError extends Data.TaggedError("TailscaleCommandError")<{
   readonly command: readonly string[];
   readonly message: string;
@@ -138,11 +143,7 @@ export const readTailscaleStatus: Effect.Effect<
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const hostPlatform = yield* HostProcessPlatform;
   const child = yield* spawner
-    .spawn(
-      ChildProcess.make("tailscale", args, {
-        shell: hostPlatform === "win32",
-      }),
-    )
+    .spawn(ChildProcess.make(tailscaleCommandForPlatform(hostPlatform), args))
     .pipe(
       Effect.mapError((cause) =>
         tailscaleCommandError(
@@ -218,11 +219,7 @@ const runTailscaleCommand = (
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const hostPlatform = yield* HostProcessPlatform;
     const child = yield* spawner
-      .spawn(
-        ChildProcess.make("tailscale", args, {
-          shell: hostPlatform === "win32",
-        }),
-      )
+      .spawn(ChildProcess.make(tailscaleCommandForPlatform(hostPlatform), args))
       .pipe(
         Effect.mapError((cause) =>
           tailscaleCommandError(

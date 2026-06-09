@@ -38,6 +38,7 @@ import {
   resolveSshTarget,
   runSshCommand,
   SSH_COMMAND,
+  sshCommandForPlatform,
   targetConnectionKey,
 } from "./command.ts";
 import {
@@ -1084,10 +1085,9 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
   });
   const child = yield* spawner
     .spawn(
-      ChildProcess.make(SSH_COMMAND, args, {
+      ChildProcess.make(sshCommandForPlatform(hostPlatform), args, {
         env: childEnvironment,
         extendEnv: true,
-        shell: hostPlatform === "win32",
         stdin: {
           stream: Stream.empty,
           endOnDone: true,

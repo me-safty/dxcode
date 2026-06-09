@@ -328,12 +328,6 @@ const BuildEnvConfig = Config.all({
   mockUpdateServerPort: Config.string("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
 });
 
-const ElectronBuilderEnvConfig = Config.all({
-  debug: Config.string("DEBUG").pipe(Config.option),
-  npmConfigMsvsVersion: Config.string("npm_config_msvs_version").pipe(Config.option),
-  gypMsvsVersion: Config.string("GYP_MSVS_VERSION").pipe(Config.option),
-});
-
 const MockUpdateServerPortSchema = Schema.NumberFromString.check(
   Schema.isInt(),
   Schema.isBetween({ minimum: 1, maximum: 65535 }),
@@ -959,15 +953,24 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     { label: "vp install --prod --no-optional", verbose: options.verbose },
   );
 
-  const currentBuildEnv = yield* ElectronBuilderEnvConfig;
-  const buildEnv: NodeJS.ProcessEnv = {};
+  // electron-builder treats several set-but-empty variables (e.g. CSC_LINK="")
+  // as enabled, so copy the host env and scrub empty values instead of relying
+  // on `extendEnv` merging.
+  const buildEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+  };
+  for (const [key, value] of Object.entries(buildEnv)) {
+    if (value === "") {
+      delete buildEnv[key];
+    }
+  }
   if (!options.signed) {
     buildEnv.CSC_IDENTITY_AUTO_DISCOVERY = "false";
-    buildEnv.CSC_LINK = undefined;
-    buildEnv.CSC_KEY_PASSWORD = undefined;
-    buildEnv.APPLE_API_KEY = undefined;
-    buildEnv.APPLE_API_KEY_ID = undefined;
-    buildEnv.APPLE_API_ISSUER = undefined;
+    delete buildEnv.CSC_LINK;
+    delete buildEnv.CSC_KEY_PASSWORD;
+    delete buildEnv.APPLE_API_KEY;
+    delete buildEnv.APPLE_API_KEY_ID;
+    delete buildEnv.APPLE_API_ISSUER;
   }
 
   if (hostPlatform === "win32") {
@@ -976,16 +979,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       buildEnv.PYTHON = python;
       buildEnv.npm_config_python = python;
     }
-    buildEnv.npm_config_msvs_version =
-      Option.getOrUndefined(currentBuildEnv.npmConfigMsvsVersion) ?? "2022";
-    buildEnv.GYP_MSVS_VERSION = Option.getOrUndefined(currentBuildEnv.gypMsvsVersion) ?? "2022";
+    buildEnv.npm_config_msvs_version = buildEnv.npm_config_msvs_version ?? "2022";
+    buildEnv.GYP_MSVS_VERSION = buildEnv.GYP_MSVS_VERSION ?? "2022";
   }
   if (options.verbose) {
-    const debug = Option.getOrUndefined(currentBuildEnv.debug);
     buildEnv.DEBUG =
-      debug === undefined || debug === ""
+      buildEnv.DEBUG === undefined
         ? "electron-builder,electron-builder:*"
-        : `${debug},electron-builder,electron-builder:*`;
+        : `${buildEnv.DEBUG},electron-builder,electron-builder:*`;
   }
 
   yield* Effect.log(
@@ -995,7 +996,6 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     ChildProcess.make({
       cwd: repoRoot,
       env: buildEnv,
-      extendEnv: true,
       // Windows needs shell mode to resolve .cmd shims.
       shell: useWindowsShell,
     })`vp exec --filter @t3tools/desktop -- electron-builder --projectDir ${stageAppDir} ${platformConfig.cliFlag} --${options.arch} --publish never`,

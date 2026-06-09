@@ -16,6 +16,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { type ClaudeSettings, type ModelSelection } from "@t3tools/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { sanitizeShellModeArgs } from "@t3tools/shared/shell";
 
 import { TextGenerationError } from "@t3tools/contracts";
 import { type TextGenerationShape } from "./TextGeneration.ts";
@@ -160,18 +161,23 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
       const command = ChildProcess.make(
         claudeSettings.binaryPath || "claude",
-        [
-          "-p",
-          "--output-format",
-          "json",
-          "--json-schema",
-          jsonSchemaStr,
-          "--model",
-          resolveClaudeApiModelId(modelSelection),
-          ...(cliEffort ? ["--effort", cliEffort] : []),
-          ...(settingsJson ? ["--settings", settingsJson] : []),
-          "--dangerously-skip-permissions",
-        ],
+        // The provider binary may be an npm-installed `.cmd` shim, so Windows
+        // spawns through cmd.exe shell mode with explicitly sanitized arguments.
+        sanitizeShellModeArgs(
+          [
+            "-p",
+            "--output-format",
+            "json",
+            "--json-schema",
+            jsonSchemaStr,
+            "--model",
+            resolveClaudeApiModelId(modelSelection),
+            ...(cliEffort ? ["--effort", cliEffort] : []),
+            ...(settingsJson ? ["--settings", settingsJson] : []),
+            "--dangerously-skip-permissions",
+          ],
+          hostPlatform,
+        ),
         {
           env: claudeEnvironment,
           cwd,

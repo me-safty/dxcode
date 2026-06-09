@@ -54,13 +54,11 @@ const runFriendlyLabelCommand = Effect.fn("runFriendlyLabelCommand")(function* (
   args: readonly string[],
 ) {
   const processRunner = yield* ProcessRunner;
-  const hostPlatform = yield* HostProcessPlatform;
   const result = yield* processRunner
     .run({
       command,
       args,
       timeoutBehavior: "timedOutResult",
-      shell: hostPlatform === "win32",
     })
     .pipe(Effect.option);
 

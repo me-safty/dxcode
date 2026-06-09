@@ -19,6 +19,14 @@ const DEFAULT_SSH_COMMAND_TIMEOUT_MS = 60_000;
 const MAX_SSH_ERROR_OUTPUT_LENGTH = 4_000;
 export const SSH_COMMAND = "ssh";
 
+/**
+ * ssh is a real executable everywhere (`ssh.exe` on Windows), so it is always
+ * spawned directly — cmd.exe shell mode would re-tokenize arguments such as
+ * identity-file paths containing spaces.
+ */
+export const sshCommandForPlatform = (platform: NodeJS.Platform): string =>
+  platform === "win32" ? "ssh.exe" : "ssh";
+
 const encoder = new TextEncoder();
 
 export interface SshCommandResult {
@@ -201,10 +209,9 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
   });
   const child = yield* spawner
     .spawn(
-      ChildProcess.make("ssh", args, {
+      ChildProcess.make(sshCommandForPlatform(hostPlatform), args, {
         env: environment,
         extendEnv: true,
-        shell: hostPlatform === "win32",
         stdin: {
           stream: stdinStream(input.stdin),
           endOnDone: true,

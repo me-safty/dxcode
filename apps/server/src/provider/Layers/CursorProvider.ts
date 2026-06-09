@@ -28,6 +28,7 @@ import {
   getProviderOptionStringSelectionValue,
 } from "@t3tools/shared/model";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { sanitizeShellModeArgs } from "@t3tools/shared/shell";
 
 import {
   buildBooleanOptionDescriptor,
@@ -933,10 +934,16 @@ const runCursorCommand = (
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const hostPlatform = yield* HostProcessPlatform;
-    const command = ChildProcess.make(cursorSettings.binaryPath, [...args], {
-      ...(environment ? { env: environment } : { extendEnv: true }),
-      shell: hostPlatform === "win32",
-    });
+    // The provider binary may be an npm-installed `.cmd` shim, so Windows spawns
+    // through cmd.exe shell mode with explicitly sanitized arguments.
+    const command = ChildProcess.make(
+      cursorSettings.binaryPath,
+      sanitizeShellModeArgs(args, hostPlatform),
+      {
+        ...(environment ? { env: environment } : { extendEnv: true }),
+        shell: hostPlatform === "win32",
+      },
+    );
 
     const child = yield* spawner.spawn(command);
     const [stdout, stderr, exitCode] = yield* Effect.all(

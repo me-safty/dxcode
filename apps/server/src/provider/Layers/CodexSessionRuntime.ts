@@ -17,6 +17,7 @@ import {
   TurnId,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { sanitizeShellModeArgs } from "@t3tools/shared/shell";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -725,12 +726,15 @@ export const makeCodexSessionRuntime = (
       ...options.environment,
       ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
     };
-    const child = yield* spawner
-      .spawn(
-        ChildProcess.make(options.binaryPath, ["app-server", ...(options.appServerArgs ?? [])], {
-          cwd: options.cwd,
-          env,
-          extendEnv: options.environment === undefined,
+      const child = yield* spawner
+        .spawn(
+        ChildProcess.make(
+          options.binaryPath,
+          sanitizeShellModeArgs(["app-server", ...(options.appServerArgs ?? [])], hostPlatform),
+          {
+            cwd: options.cwd,
+            env,
+            extendEnv: options.environment === undefined,
           forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER,
           shell: hostPlatform === "win32",
         }),

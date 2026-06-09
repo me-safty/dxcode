@@ -15,6 +15,7 @@ import {
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import {
   isCommandAvailableForPlatform,
+  sanitizeShellModeArgs,
   type PlatformCommandAvailabilityOptions,
 } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
@@ -289,8 +290,6 @@ export const resolveAvailableEditors = Effect.fn("externalLauncher.resolveAvaila
   },
 );
 
-export const getAvailableEditors = resolveAvailableEditors;
-
 /**
  * ExternalLauncherShape - Service API for browser and editor launch actions.
  */
@@ -393,7 +392,7 @@ export const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProce
   yield* launchAndUnref(
     {
       command: launch.command,
-      args: isWin32 ? launch.args.map((arg) => `"${arg}"`) : [...launch.args],
+      args: sanitizeShellModeArgs(launch.args, platform),
       options: {
         detached: true,
         shell: isWin32,

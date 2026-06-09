@@ -278,11 +278,12 @@ const runProcess = Effect.fn("runProcess")(
     readonly errorMessage: string;
   }) {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const hostPlatform = yield* HostProcessPlatform;
+    // `ps` and `powershell.exe` are real executables; spawning through cmd.exe
+    // shell mode would re-tokenize the PowerShell `-Command` payload (which
+    // contains pipes) before PowerShell ever sees it.
     const child = yield* spawner.spawn(
       ChildProcess.make(input.command, input.args, {
         cwd: process.cwd(),
-        shell: hostPlatform === "win32",
       }),
     );
     const [stdout, stderr, exitCode] = yield* Effect.all(

@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  escapeWindowsShellArg,
   extractPathFromShellOutput,
   isCommandAvailableForPlatform,
   listLoginShellCandidates,
@@ -16,7 +17,47 @@ import {
   resolveCommandPathForPlatform,
   resolveKnownWindowsCliDirs,
   resolveWindowsEnvironment,
+  sanitizeShellModeArgs,
 } from "./shell.ts";
+
+describe("escapeWindowsShellArg", () => {
+  it("quotes plain arguments", () => {
+    expect(escapeWindowsShellArg("--version")).toBe('^"--version^"');
+  });
+
+  it("preserves embedded whitespace through quoting", () => {
+    expect(escapeWindowsShellArg("C:\\Users\\John Doe\\project")).toBe(
+      '^"C:\\Users\\John^ Doe\\project^"',
+    );
+  });
+
+  it("escapes embedded double quotes for CommandLineToArgvW", () => {
+    expect(escapeWindowsShellArg('say "hi"')).toBe('^"say^ \\^"hi\\^"^"');
+  });
+
+  it("doubles trailing backslashes so the closing quote survives", () => {
+    expect(escapeWindowsShellArg("C:\\dir\\")).toBe('^"C:\\dir\\\\^"');
+  });
+
+  it("escapes cmd.exe metacharacters", () => {
+    expect(escapeWindowsShellArg("a|b&c>d")).toBe('^"a^|b^&c^>d^"');
+    expect(escapeWindowsShellArg("100%")).toBe('^"100^%^"');
+  });
+
+  it("handles empty arguments", () => {
+    expect(escapeWindowsShellArg("")).toBe('^"^"');
+  });
+});
+
+describe("sanitizeShellModeArgs", () => {
+  it("escapes arguments on win32", () => {
+    expect(sanitizeShellModeArgs(["--goto", "a b"], "win32")).toEqual(['^"--goto^"', '^"a^ b^"']);
+  });
+
+  it("returns arguments untouched on other platforms", () => {
+    expect(sanitizeShellModeArgs(["--goto", "a b"], "darwin")).toEqual(["--goto", "a b"]);
+  });
+});
 
 describe("extractPathFromShellOutput", () => {
   it("extracts the path between capture markers", () => {

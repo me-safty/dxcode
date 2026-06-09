@@ -7,6 +7,7 @@ import * as Stdio from "effect/Stdio";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { sanitizeShellModeArgs } from "@t3tools/shared/shell";
 
 import * as CodexRpc from "./_generated/meta.gen.ts";
 import * as CodexError from "./errors.ts";
@@ -284,12 +285,18 @@ export const layerCommand = (
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const platform = yield* HostProcessPlatform;
-      const command = ChildProcess.make(options.command, [...(options.args ?? [])], {
-        ...(options.cwd ? { cwd: options.cwd } : {}),
-        ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
-        forceKillAfter: DEFAULT_APP_SERVER_FORCE_KILL_AFTER,
-        shell: platform === "win32",
-      });
+      // The codex binary may be an npm-installed `.cmd` shim, so Windows spawns
+      // through cmd.exe shell mode with explicitly sanitized arguments.
+      const command = ChildProcess.make(
+        options.command,
+        sanitizeShellModeArgs(options.args ?? [], platform),
+        {
+          ...(options.cwd ? { cwd: options.cwd } : {}),
+          ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
+          forceKillAfter: DEFAULT_APP_SERVER_FORCE_KILL_AFTER,
+          shell: platform === "win32",
+        },
+      );
       return yield* spawner.spawn(command).pipe(
         Effect.mapError(
           (cause) =>

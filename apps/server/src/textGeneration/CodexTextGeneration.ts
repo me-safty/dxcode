@@ -10,6 +10,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { type CodexSettings, type ModelSelection } from "@t3tools/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { sanitizeShellModeArgs } from "@t3tools/shared/shell";
 
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
@@ -185,24 +186,29 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       const serviceTier = getCodexServiceTierOptionValue(modelSelection);
       const command = ChildProcess.make(
         codexConfig.binaryPath || "codex",
-        [
-          "exec",
-          "--ephemeral",
-          "--skip-git-repo-check",
-          "-s",
-          "read-only",
-          "--model",
-          modelSelection.model,
-          "--config",
-          `model_reasoning_effort="${reasoningEffort}"`,
-          ...(serviceTier ? ["--config", `service_tier="${serviceTier}"`] : []),
-          "--output-schema",
-          schemaPath,
-          "--output-last-message",
-          outputPath,
-          ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
-          "-",
-        ],
+        // The provider binary may be an npm-installed `.cmd` shim, so Windows
+        // spawns through cmd.exe shell mode with explicitly sanitized arguments.
+        sanitizeShellModeArgs(
+          [
+            "exec",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "-s",
+            "read-only",
+            "--model",
+            modelSelection.model,
+            "--config",
+            `model_reasoning_effort="${reasoningEffort}"`,
+            ...(serviceTier ? ["--config", `service_tier="${serviceTier}"`] : []),
+            "--output-schema",
+            schemaPath,
+            "--output-last-message",
+            outputPath,
+            ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
+            "-",
+          ],
+          hostPlatform,
+        ),
         {
           env: {
             ...resolvedEnvironment,

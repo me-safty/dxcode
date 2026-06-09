@@ -43,12 +43,22 @@ export const fixPath = Effect.fn("fixPath")(function* (
 
   try {
     if (platform === "win32") {
+      // PATH hydration must never take down server startup: a JS `catch`
+      // around `yield*` does not see Effect defects, so downgrade them to a
+      // warning explicitly.
       const repairedEnvironment = yield* resolveWindowsEnvironment(env, {
         readEnvironment: options.readWindowsEnvironment ?? readEnvironmentFromWindowsShell,
         ...(options.isWindowsCommandAvailable
           ? { commandAvailable: options.isWindowsCommandAvailable }
           : {}),
-      });
+      }).pipe(
+        Effect.catchDefect((defect) =>
+          Effect.sync(() => {
+            logWarning("Failed to hydrate PATH from the user environment.", defect);
+            return {} as Partial<NodeJS.ProcessEnv>;
+          }),
+        ),
+      );
       for (const [key, value] of Object.entries(repairedEnvironment)) {
         if (value !== undefined) {
           env[key] = value;
