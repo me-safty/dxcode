@@ -489,7 +489,12 @@ export function BranchToolbarBranchSelector({
       cancelAnimationFrame(frame);
       cancelAnimationFrame(nestedFrame);
     };
-  }, [filteredBranchPickerItems.length, isBranchMenuOpen, updateBranchListScrollFades]);
+  }, [
+    deferredTrimmedBranchQuery,
+    filteredBranchPickerItems.length,
+    isBranchMenuOpen,
+    updateBranchListScrollFades,
+  ]);
 
   useEffect(() => {
     if (!isBranchMenuOpen) {
@@ -649,7 +654,10 @@ export function BranchToolbarBranchSelector({
                     fetchNextBranchPage();
                   }
                 }}
-                onLayout={updateBranchListScrollFades}
+                onLayout={() => {
+                  updateBranchListScrollFades();
+                  maybeFetchNextBranchPage();
+                }}
                 onScroll={() => {
                   updateBranchListScrollFades();
                   maybeFetchNextBranchPage();
