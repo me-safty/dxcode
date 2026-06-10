@@ -66,7 +66,7 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts";
-import { makeLaunchEnvLayerLive } from "./launchEnv/Layers/LaunchEnvLive.ts";
+import { LaunchEnvLayerLive } from "./launchEnv/Layers/LaunchEnvLive.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
@@ -145,11 +145,10 @@ const PlatformServicesLive = Layer.unwrap(
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
 
-const LaunchEnvLayerLive = makeLaunchEnvLayerLive(SqlitePersistenceLayerLive);
-
 const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
 
-const ReactorLayerLive = LaunchEnvLayerLive.pipe(
+const ReactorLayerLive = Layer.empty.pipe(
+  Layer.provideMerge(LaunchEnvLayerLive),
   Layer.provideMerge(
     Layer.empty.pipe(
       Layer.provideMerge(OrchestrationReactorLive),
