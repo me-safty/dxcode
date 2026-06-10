@@ -72,7 +72,6 @@ import {
   selectSidebarThreadsForProjectRefs,
   selectSidebarThreadsAcrossEnvironments,
   selectThreadByRef,
-  selectThreadsAcrossEnvironments,
   useStore,
 } from "../store";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -201,7 +200,6 @@ import {
 } from "../sidebarProjectGrouping";
 import { SidebarProviderUpdatePill } from "./sidebar/SidebarProviderUpdatePill";
 import { WorktreeCleanupDialog } from "./WorktreeCleanupDialog";
-import type { WorktreeThreadRef } from "../worktreeCleanup";
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",
@@ -1089,21 +1087,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     SidebarProjectGroupingMode | "inherit"
   >("inherit");
   const sidebarSettings = useSettings();
-  const sidebarLiveThreads = useStore(selectThreadsAcrossEnvironments);
   const [worktreeCleanupTarget, setWorktreeCleanupTarget] = useState<{
     environmentId: EnvironmentId;
     cwd: string;
   } | null>(null);
-  const sidebarThreadRefs: WorktreeThreadRef[] = useMemo(
-    () =>
-      sidebarLiveThreads
-        .filter((thread) => thread.environmentId === worktreeCleanupTarget?.environmentId)
-        .map((thread) => ({
-          worktreePath: thread.worktreePath,
-          isArchived: thread.archivedAt !== null,
-        })),
-    [sidebarLiveThreads, worktreeCleanupTarget],
-  );
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const confirmArchiveButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -2281,7 +2268,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           environmentId={worktreeCleanupTarget.environmentId}
           cwd={worktreeCleanupTarget.cwd}
           scope={sidebarSettings.worktreeCleanupScope}
-          threadRefs={sidebarThreadRefs}
           onOpenChange={(next) => {
             if (!next) setWorktreeCleanupTarget(null);
           }}

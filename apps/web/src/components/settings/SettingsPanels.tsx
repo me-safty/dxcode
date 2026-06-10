@@ -48,7 +48,7 @@ import {
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { useShallow } from "zustand/react/shallow";
-import { selectProjectsAcrossEnvironments, selectThreadsAcrossEnvironments, useStore } from "../../store";
+import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
@@ -80,7 +80,6 @@ import {
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { WorktreeCleanupDialog } from "../WorktreeCleanupDialog";
-import { type WorktreeThreadRef } from "../../worktreeCleanup";
 import { useServerObservability, useServerProviders } from "../../rpc/serverState";
 
 const THEME_OPTIONS = [
@@ -1399,27 +1398,10 @@ export function ArchivedThreadsPanel() {
   } = useArchivedThreadSnapshots(environmentIds);
 
   const settings = useSettings();
-  const liveThreads = useStore(selectThreadsAcrossEnvironments);
   const [cleanupTarget, setCleanupTarget] = useState<{
     environmentId: EnvironmentId;
     cwd: string;
   } | null>(null);
-
-  const cleanupThreadRefs: WorktreeThreadRef[] = useMemo(() => {
-    const targetEnvironmentId = cleanupTarget?.environmentId;
-    const live = liveThreads
-      .filter((thread) => thread.environmentId === targetEnvironmentId)
-      .map((thread) => ({
-        worktreePath: thread.worktreePath,
-        isArchived: thread.archivedAt !== null,
-      }));
-    const archived = archivedSnapshots
-      .filter(({ environmentId }) => environmentId === targetEnvironmentId)
-      .flatMap(({ snapshot }) =>
-        snapshot.threads.map((thread) => ({ worktreePath: thread.worktreePath, isArchived: true })),
-      );
-    return [...live, ...archived];
-  }, [liveThreads, archivedSnapshots, cleanupTarget]);
 
   const archivedGroups = useMemo(() => {
     const projectsByEnvironmentAndId = new Map(
@@ -1639,7 +1621,6 @@ export function ArchivedThreadsPanel() {
           environmentId={cleanupTarget.environmentId}
           cwd={cleanupTarget.cwd}
           scope={settings.worktreeCleanupScope}
-          threadRefs={cleanupThreadRefs}
           onOpenChange={(next) => {
             if (!next) {
               setCleanupTarget(null);
