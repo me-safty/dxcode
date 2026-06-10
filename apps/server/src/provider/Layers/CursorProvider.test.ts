@@ -72,7 +72,7 @@ const makeMockAgentWrapper = Effect.fn("makeMockAgentWrapper")(function* (
   });
   const wrapperPath = path.join(dir, "fake-agent.sh");
   // @effect-diagnostics-next-line preferSchemaOverJson:off
-  const bunCommand = JSON.stringify("bun");
+  const mockAgentCommand = JSON.stringify(process.execPath);
   // @effect-diagnostics-next-line preferSchemaOverJson:off
   const mockAgentPathJson = JSON.stringify(mockAgentPath);
   const envExports = Object.entries(extraEnv ?? {})
@@ -80,7 +80,7 @@ const makeMockAgentWrapper = Effect.fn("makeMockAgentWrapper")(function* (
     .join("\n");
   const script = `#!/bin/sh
 ${envExports}
-exec ${bunCommand} ${mockAgentPathJson} "$@"
+exec ${mockAgentCommand} ${mockAgentPathJson} "$@"
 `;
   yield* fileSystem.writeFileString(wrapperPath, script);
   yield* fileSystem.chmod(wrapperPath, 0o755);
@@ -97,7 +97,7 @@ const makeMockAgentWithAboutWrapper = Effect.fn("makeMockAgentWithAboutWrapper")
   });
   const wrapperPath = path.join(dir, "fake-agent.sh");
   // @effect-diagnostics-next-line preferSchemaOverJson:off
-  const bunCommand = JSON.stringify("bun");
+  const mockAgentCommand = JSON.stringify(process.execPath);
   // @effect-diagnostics-next-line preferSchemaOverJson:off
   const mockAgentPathJson = JSON.stringify(mockAgentPath);
   const script = `#!/bin/sh
@@ -106,7 +106,7 @@ if [ "$1" = "about" ]; then
   printf 'User Email          cursor@example.com\\n'
   exit 0
 fi
-exec ${bunCommand} ${mockAgentPathJson} "$@"
+exec ${mockAgentCommand} ${mockAgentPathJson} "$@"
 `;
   yield* fileSystem.writeFileString(wrapperPath, script);
   yield* fileSystem.chmod(wrapperPath, 0o755);
@@ -174,7 +174,7 @@ const makeMockAgentWithPersistentChildWrapper = Effect.fn(
   const survivedPath = path.join(dir, "survived");
   const wrapperPath = path.join(dir, "fake-agent.sh");
   // @effect-diagnostics-next-line preferSchemaOverJson:off
-  const bunCommand = JSON.stringify("bun");
+  const mockAgentCommand = JSON.stringify(process.execPath);
   // @effect-diagnostics-next-line preferSchemaOverJson:off
   const mockAgentPathJson = JSON.stringify(mockAgentPath);
   // @effect-diagnostics-next-line preferSchemaOverJson:off
@@ -185,7 +185,7 @@ const makeMockAgentWithPersistentChildWrapper = Effect.fn(
   sleep 1
   printf 'survived\\n' > ${survivedPathJson}
 ) &
-exec ${bunCommand} ${mockAgentPathJson} "$@"
+exec ${mockAgentCommand} ${mockAgentPathJson} "$@"
 `;
   yield* fileSystem.writeFileString(wrapperPath, script);
   yield* fileSystem.chmod(wrapperPath, 0o755);
@@ -203,14 +203,14 @@ const makeInvocationLogWrapper = Effect.fn("makeInvocationLogWrapper")(function*
   const invocationLogPath = path.join(dir, "invoked");
   const wrapperPath = path.join(dir, "fake-agent.sh");
   // @effect-diagnostics-next-line preferSchemaOverJson:off
-  const bunCommand = JSON.stringify("bun");
+  const mockAgentCommand = JSON.stringify(process.execPath);
   // @effect-diagnostics-next-line preferSchemaOverJson:off
   const mockAgentPathJson = JSON.stringify(mockAgentPath);
   // @effect-diagnostics-next-line preferSchemaOverJson:off
   const invocationLogPathJson = JSON.stringify(invocationLogPath);
   const script = `#!/bin/sh
 printf 'invoked\\n' > ${invocationLogPathJson}
-exec ${bunCommand} ${mockAgentPathJson} "$@"
+exec ${mockAgentCommand} ${mockAgentPathJson} "$@"
 `;
   yield* fileSystem.writeFileString(wrapperPath, script);
   yield* fileSystem.chmod(wrapperPath, 0o755);
