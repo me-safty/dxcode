@@ -33,9 +33,9 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
 
   return (
-    <div className="mt-4 rounded-2xl border border-input bg-card/40 p-2 pt-4 shadow-xs/5 not-dark:bg-clip-padding">
-      <div className="sticky top-2 z-10 mb-3 flex items-center justify-between gap-2 bg-card/72 px-2 backdrop-blur-md before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-inherit before:content-['']">
-        <p className="flex self-start items-center gap-1 font-medium text-foreground text-xs leading-4">
+    <div className="relative mt-4 rounded-2xl bg-card/40 shadow-xs/5 not-dark:bg-clip-padding after:pointer-events-none after:absolute after:inset-0 after:z-20 after:rounded-2xl after:border after:border-input">
+      <div className="sticky top-0 z-10 mb-3 flex items-center justify-between gap-2 rounded-t-2xl bg-card/72 p-3 backdrop-blur-md">
+        <p className="flex items-center gap-1 font-medium text-foreground text-xs leading-4">
           <span>{files.length} changed files</span>
           {hasNonZeroStat(summaryStat) && (
             <DiffStatLabel
@@ -51,7 +51,6 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
             type="button"
             size="xs"
             variant="outline"
-            className="px-1.5"
             data-scroll-anchor-ignore
             onClick={onToggleAllDirectories}
           >
@@ -61,21 +60,22 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
             type="button"
             size="xs"
             variant="outline"
-            className="px-1.5"
             onClick={() => onOpenTurnDiff(turnId, files[0]?.path)}
           >
             View diff
           </Button>
         </div>
       </div>
-      <ChangedFilesTree
-        key={`changed-files-tree:${turnId}`}
-        turnId={turnId}
-        files={files}
-        allDirectoriesExpanded={allDirectoriesExpanded}
-        resolvedTheme={resolvedTheme}
-        onOpenTurnDiff={onOpenTurnDiff}
-      />
+      <div className="px-2 pb-2">
+        <ChangedFilesTree
+          key={`changed-files-tree:${turnId}`}
+          turnId={turnId}
+          files={files}
+          allDirectoriesExpanded={allDirectoriesExpanded}
+          resolvedTheme={resolvedTheme}
+          onOpenTurnDiff={onOpenTurnDiff}
+        />
+      </div>
     </div>
   );
 });
