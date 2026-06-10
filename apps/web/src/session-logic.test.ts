@@ -1210,6 +1210,215 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
+  it("collapses interleaved lifecycle rows for the same tool call id", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tool-a-update",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Read File",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Read File",
+          detail: "Read File",
+          data: { toolCallId: "tool-a" },
+        },
+      }),
+      makeActivity({
+        id: "task-progress",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "task.progress",
+        summary: "Thinking",
+        tone: "info",
+      }),
+      makeActivity({
+        id: "tool-a-complete",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.completed",
+        summary: "Read File completed",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Read File",
+          detail: "Read File",
+          data: { toolCallId: "tool-a" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      id: "tool-a-complete",
+      stableId: "tool-a-update",
+      createdAt: "2026-02-23T00:00:01.000Z",
+      toolCallId: "tool-a",
+    });
+    expect(entries[1]).toMatchObject({
+      id: "task-progress",
+      label: "Thinking",
+    });
+  });
+
+  it("collapses parallel tool calls without replacing first-event identities", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tool-a-update",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Read A",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Read A",
+          detail: "Read A",
+          data: { toolCallId: "tool-a" },
+        },
+      }),
+      makeActivity({
+        id: "tool-b-update",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.updated",
+        summary: "Read B",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Read B",
+          detail: "Read B",
+          data: { toolCallId: "tool-b" },
+        },
+      }),
+      makeActivity({
+        id: "tool-a-complete",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.completed",
+        summary: "Read A completed",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Read A",
+          detail: "Read A",
+          data: { toolCallId: "tool-a" },
+        },
+      }),
+      makeActivity({
+        id: "tool-b-complete",
+        createdAt: "2026-02-23T00:00:04.000Z",
+        kind: "tool.completed",
+        summary: "Read B completed",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Read B",
+          detail: "Read B",
+          data: { toolCallId: "tool-b" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.id)).toEqual(["tool-a-complete", "tool-b-complete"]);
+    expect(entries.map((entry) => entry.stableId)).toEqual(["tool-a-update", "tool-b-update"]);
+  });
+
+  it("does not collapse a reused tool call id into a completed entry", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tool-update-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Tool call",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Tool call",
+          detail: "Tool call",
+          data: { toolCallId: "tool-reused" },
+        },
+      }),
+      makeActivity({
+        id: "tool-complete-1",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Tool call completed",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Tool call",
+          detail: "Tool call",
+          data: { toolCallId: "tool-reused" },
+        },
+      }),
+      makeActivity({
+        id: "tool-update-2",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.updated",
+        summary: "Tool call",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Tool call",
+          detail: "Tool call",
+          data: { toolCallId: "tool-reused" },
+        },
+      }),
+      makeActivity({
+        id: "tool-complete-2",
+        createdAt: "2026-02-23T00:00:04.000Z",
+        kind: "tool.completed",
+        summary: "Tool call completed",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Tool call",
+          detail: "Tool call",
+          data: { toolCallId: "tool-reused" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+
+    expect(entries.map((entry) => entry.id)).toEqual(["tool-complete-1", "tool-complete-2"]);
+    expect(entries.map((entry) => entry.stableId)).toEqual(["tool-update-1", "tool-update-2"]);
+  });
+
+  it("keeps interleaved label-keyed lifecycle rows separate", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tool-update",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Tool call",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Tool call",
+          detail: "Tool call",
+        },
+      }),
+      makeActivity({
+        id: "task-progress",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "task.progress",
+        summary: "Thinking",
+        tone: "info",
+      }),
+      makeActivity({
+        id: "tool-complete",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.completed",
+        summary: "Tool call completed",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Tool call",
+          detail: "Tool call",
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "tool-update",
+      "task-progress",
+      "tool-complete",
+    ]);
+  });
+
   it("keeps separate tool entries when an identical call starts after the prior one completed", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

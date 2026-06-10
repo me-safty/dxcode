@@ -3458,7 +3458,7 @@ export default function ChatView(props: ChatViewProps) {
     // Scroll to the current end *before* adding the optimistic message.
     // This marks the timeline as at-end so maintainScrollAtEnd automatically
     // pins to the new item when the data changes.
-    scrollToEnd(false);
+    markTimelineAtEnd();
 
     setOptimisticUserMessages((existing) => [
       ...existing,

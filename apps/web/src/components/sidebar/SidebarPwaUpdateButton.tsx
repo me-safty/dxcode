@@ -7,7 +7,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 export function SidebarPwaUpdateButton() {
   const status = usePwaServiceWorkerUpdateStore((state) => state.status);
   const errorMessage = usePwaServiceWorkerUpdateStore((state) => state.errorMessage);
-  const isCheckingForUpdate = usePwaServiceWorkerUpdateStore((state) => state.isCheckingForUpdate);
+  const checkPhase = usePwaServiceWorkerUpdateStore((state) => state.checkPhase);
   const reloadForUpdate = usePwaServiceWorkerUpdateStore((state) => state.reloadForUpdate);
 
   if (isElectron) {
@@ -15,9 +15,10 @@ export function SidebarPwaUpdateButton() {
   }
 
   if (status === "idle") {
-    if (!isCheckingForUpdate) {
+    if (checkPhase === "idle") {
       return null;
     }
+    const label = checkPhase === "downloading" ? "Downloading update…" : "Checking for updates…";
     return (
       <div
         role="status"
@@ -25,7 +26,7 @@ export function SidebarPwaUpdateButton() {
         className="flex h-7 w-full items-center gap-2 rounded-lg border border-border/70 bg-muted/40 px-2 text-[13px] font-medium text-muted-foreground shadow-xs md:text-xs"
       >
         <Loader2Icon className="size-3.5 animate-spin" />
-        <span className="truncate">Checking for updates…</span>
+        <span className="truncate">{label}</span>
       </div>
     );
   }

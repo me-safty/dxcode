@@ -435,8 +435,159 @@ describe("deriveMessagesTimelineRows", () => {
       revertTurnCountByUserMessageId: new Map(),
     });
 
-    expect(recentRows[0]?.id).toBe("work-group:work-recent");
-    expect(prependedRows[0]?.id).toBe("work-group:work-recent");
+    expect(recentRows[0]?.id).toBe("work-group:after:start");
+    expect(prependedRows[0]?.id).toBe("work-group:after:start");
+  });
+
+  it("keeps a work-group row id stable when new work entries append", () => {
+    const message = {
+      id: "message-1" as never,
+      role: "user" as const,
+      text: "Do the thing",
+      turnId: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      streaming: false,
+    };
+    const firstWorkEntry = {
+      id: "work-1",
+      createdAt: "2026-01-01T00:00:01Z",
+      label: "read",
+      tone: "tool" as const,
+    };
+    const secondWorkEntry = {
+      id: "work-2",
+      createdAt: "2026-01-01T00:00:02Z",
+      label: "edit",
+      tone: "tool" as const,
+    };
+
+    const initialRows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "entry-message-1",
+          kind: "message",
+          createdAt: message.createdAt,
+          message,
+        },
+        {
+          id: "entry-work-1",
+          kind: "work",
+          createdAt: firstWorkEntry.createdAt,
+          entry: firstWorkEntry,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+    const appendedRows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "entry-message-1",
+          kind: "message",
+          createdAt: message.createdAt,
+          message,
+        },
+        {
+          id: "entry-work-1",
+          kind: "work",
+          createdAt: firstWorkEntry.createdAt,
+          entry: firstWorkEntry,
+        },
+        {
+          id: "entry-work-2",
+          kind: "work",
+          createdAt: secondWorkEntry.createdAt,
+          entry: secondWorkEntry,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(initialRows[1]?.id).toBe("work-group:after:entry-message-1");
+    expect(appendedRows[1]?.id).toBe(initialRows[1]?.id);
+  });
+
+  it("keeps the head work-group id stable when a work run splits", () => {
+    const firstWorkEntry = {
+      id: "work-1",
+      createdAt: "2026-01-01T00:00:01Z",
+      label: "read",
+      tone: "tool" as const,
+    };
+    const secondWorkEntry = {
+      id: "work-2",
+      createdAt: "2026-01-01T00:00:03Z",
+      label: "edit",
+      tone: "tool" as const,
+    };
+    const message = {
+      id: "message-1" as never,
+      role: "assistant" as const,
+      text: "Progress",
+      turnId: null,
+      createdAt: "2026-01-01T00:00:02Z",
+      streaming: false,
+    };
+
+    const groupedRows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "entry-work-1",
+          kind: "work",
+          createdAt: firstWorkEntry.createdAt,
+          entry: firstWorkEntry,
+        },
+        {
+          id: "entry-work-2",
+          kind: "work",
+          createdAt: secondWorkEntry.createdAt,
+          entry: secondWorkEntry,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+    const splitRows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "entry-work-1",
+          kind: "work",
+          createdAt: firstWorkEntry.createdAt,
+          entry: firstWorkEntry,
+        },
+        {
+          id: "entry-message-1",
+          kind: "message",
+          createdAt: message.createdAt,
+          message,
+        },
+        {
+          id: "entry-work-2",
+          kind: "work",
+          createdAt: secondWorkEntry.createdAt,
+          entry: secondWorkEntry,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(groupedRows[0]?.id).toBe("work-group:after:start");
+    expect(splitRows[0]?.id).toBe(groupedRows[0]?.id);
+    expect(splitRows[2]?.id).toBe("work-group:after:entry-message-1");
   });
 });
 
@@ -492,36 +643,42 @@ describe("computeStableMessagesTimelineRows", () => {
     expect(repeated.result).toBe(initial.result);
   });
 
-  it("reuses work rows when equivalent timeline derivations create new grouped arrays", () => {
-    const firstWorkEntry = {
-      id: "work-1",
-      createdAt: "2026-01-01T00:00:00Z",
-      label: "thinking",
-      detail: "Inspecting repository state",
-      tone: "thinking" as const,
-    };
-    const secondWorkEntry = {
-      id: "work-2",
-      createdAt: "2026-01-01T00:00:01Z",
-      label: "read",
-      detail: "Reading package.json",
-      tone: "tool" as const,
-    };
-
+  it("reuses work rows when equivalent timeline derivations create new entry objects", () => {
     const createRows = () =>
       deriveMessagesTimelineRows({
         timelineEntries: [
           {
             id: "entry-work-1",
             kind: "work",
-            createdAt: firstWorkEntry.createdAt,
-            entry: firstWorkEntry,
+            createdAt: "2026-01-01T00:00:00Z",
+            entry: {
+              id: "work-1",
+              stableId: "stable-work-1",
+              createdAt: "2026-01-01T00:00:00Z",
+              label: "read",
+              detail: "Reading package.json",
+              command: "cat package.json",
+              rawCommand: "cat package.json",
+              changedFiles: ["package.json"],
+              tone: "tool",
+              toolTitle: "Read File",
+              itemType: "dynamic_tool_call",
+              requestKind: "command",
+              toolCallId: "tool-read-1",
+            },
           },
           {
             id: "entry-work-2",
             kind: "work",
-            createdAt: secondWorkEntry.createdAt,
-            entry: secondWorkEntry,
+            createdAt: "2026-01-01T00:00:01Z",
+            entry: {
+              id: "work-2",
+              stableId: "stable-work-2",
+              createdAt: "2026-01-01T00:00:01Z",
+              label: "thinking",
+              detail: "Inspecting repository state",
+              tone: "thinking",
+            },
           },
         ],
         completionDividerBeforeEntryId: null,
@@ -539,6 +696,10 @@ describe("computeStableMessagesTimelineRows", () => {
     const secondRows = createRows();
 
     expect(secondRows[0]).not.toBe(firstRows[0]);
+    if (firstRows[0]?.kind !== "work" || secondRows[0]?.kind !== "work") {
+      throw new Error("expected work rows");
+    }
+    expect(secondRows[0].groupedEntries[0]).not.toBe(firstRows[0].groupedEntries[0]);
 
     const repeated = computeStableMessagesTimelineRows(secondRows, initial);
 

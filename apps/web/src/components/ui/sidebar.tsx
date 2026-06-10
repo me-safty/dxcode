@@ -348,9 +348,9 @@ function Sidebar({
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
   const { toggleSidebar, openMobile } = useSidebar();
   const updateStatus = usePwaServiceWorkerUpdateStore((state) => state.status);
-  const isCheckingForUpdate = usePwaServiceWorkerUpdateStore((state) => state.isCheckingForUpdate);
+  const checkPhase = usePwaServiceWorkerUpdateStore((state) => state.checkPhase);
   const updateAvailable = updateStatus === "ready";
-  const showCheckingIndicator = isCheckingForUpdate && !updateAvailable;
+  const showCheckingIndicator = checkPhase !== "idle" && !updateAvailable;
 
   return (
     <Button

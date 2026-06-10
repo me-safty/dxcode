@@ -1,16 +1,10 @@
-import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import type { DesktopUpdateState } from "@t3tools/contracts";
 
 export const desktopUpdateQueryKeys = {
   all: ["desktop", "update"] as const,
   state: () => ["desktop", "update", "state"] as const,
 };
-
-export const setDesktopUpdateStateQueryData = (
-  queryClient: QueryClient,
-  state: DesktopUpdateState | null,
-) => queryClient.setQueryData(desktopUpdateQueryKeys.state(), state);
 
 export function desktopUpdateStateQueryOptions() {
   return queryOptions({
@@ -34,7 +28,10 @@ export function useDesktopUpdateState() {
     if (!bridge || typeof bridge.onUpdateState !== "function") return;
 
     return bridge.onUpdateState((nextState) => {
-      setDesktopUpdateStateQueryData(queryClient, nextState);
+      // Main-process update pushes are the source of truth. Do not write IPC
+      // action result snapshots into this cache because they can lag a newer
+      // UPDATE_STATE_CHANNEL transition.
+      queryClient.setQueryData(desktopUpdateQueryKeys.state(), nextState);
     });
   }, [queryClient]);
 

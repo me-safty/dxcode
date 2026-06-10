@@ -2,22 +2,48 @@ import { registerSW } from "virtual:pwa-register";
 
 import { isElectron } from "../env";
 import {
-  setPwaServiceWorkerCheckingForUpdate,
+  setPwaServiceWorkerUpdateCheckPhase,
   showPwaServiceWorkerUpdateAvailable,
 } from "./serviceWorkerUpdateState";
 
 // How often to ask the browser to re-fetch the service worker and look for a
 // newer build while the app is left open.
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
-const STARTUP_UPDATE_CHECK_MIN_VISIBLE_MS = 800;
+const UPDATE_INSTALL_WAIT_TIMEOUT_MS = 60_000;
 
-type CheckForUpdateOptions = {
-  minVisibleMs?: number;
-};
-
-function delay(ms: number): Promise<void> {
+function waitForServiceWorkerInstalled(worker: ServiceWorker): Promise<void> {
   return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
+    if (worker.state !== "installing") {
+      resolve();
+      return;
+    }
+
+    let timeoutId: number | undefined;
+
+    const cleanup = () => {
+      worker.removeEventListener("statechange", handleStateChange);
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+
+    const finish = () => {
+      cleanup();
+      resolve();
+    };
+
+    const handleStateChange = () => {
+      if (worker.state !== "installing") {
+        finish();
+      }
+    };
+
+    worker.addEventListener("statechange", handleStateChange);
+    if (worker.state !== "installing") {
+      finish();
+      return;
+    }
+    timeoutId = window.setTimeout(finish, UPDATE_INSTALL_WAIT_TIMEOUT_MS);
   });
 }
 
@@ -45,25 +71,24 @@ export function registerPwaServiceWorker(): void {
       }
 
       let checkInFlight = false;
-      const checkForUpdate = async (options: CheckForUpdateOptions = {}): Promise<void> => {
+      const checkForUpdate = async (): Promise<void> => {
         if (checkInFlight || navigator.onLine === false) {
           return;
         }
         checkInFlight = true;
-        const startedAt = Date.now();
-        setPwaServiceWorkerCheckingForUpdate(true);
+        setPwaServiceWorkerUpdateCheckPhase("checking");
         try {
           await registration.update();
+          const installingWorker = registration.installing;
+          if (installingWorker) {
+            setPwaServiceWorkerUpdateCheckPhase("downloading");
+            await waitForServiceWorkerInstalled(installingWorker);
+          }
         } catch (error) {
           console.warn("PWA service worker update check failed", error);
         } finally {
-          const minimumVisibleMs = options.minVisibleMs ?? 0;
-          const remainingVisibleMs = minimumVisibleMs - (Date.now() - startedAt);
-          if (remainingVisibleMs > 0) {
-            await delay(remainingVisibleMs);
-          }
           checkInFlight = false;
-          setPwaServiceWorkerCheckingForUpdate(false);
+          setPwaServiceWorkerUpdateCheckPhase("idle");
         }
       };
 
@@ -79,7 +104,7 @@ export function registerPwaServiceWorker(): void {
         }
       });
 
-      void checkForUpdate({ minVisibleMs: STARTUP_UPDATE_CHECK_MIN_VISIBLE_MS });
+      void checkForUpdate();
     },
   });
 }

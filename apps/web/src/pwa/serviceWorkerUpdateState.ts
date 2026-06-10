@@ -3,20 +3,16 @@ import { create } from "zustand";
 type ServiceWorkerUpdater = () => Promise<void>;
 
 export type PwaServiceWorkerUpdateStatus = "idle" | "ready" | "updating";
+export type PwaUpdateCheckPhase = "idle" | "checking" | "downloading";
 
 interface PwaServiceWorkerUpdateState {
+  checkPhase: PwaUpdateCheckPhase;
   errorMessage: string | null;
   status: PwaServiceWorkerUpdateStatus;
-  /**
-   * True while a background check for a newer service worker is in flight.
-   * Tracked separately from `status` because a check can run while the app is
-   * idle or while an update is already pending.
-   */
-  isCheckingForUpdate: boolean;
   updateServiceWorker: ServiceWorkerUpdater | null;
   reloadForUpdate: () => void;
   showUpdateAvailable: (updateServiceWorker: ServiceWorkerUpdater) => void;
-  setCheckingForUpdate: (checking: boolean) => void;
+  setCheckPhase: (phase: PwaUpdateCheckPhase) => void;
 }
 
 function describeUpdateError(error: unknown): string {
@@ -24,15 +20,13 @@ function describeUpdateError(error: unknown): string {
 }
 
 export const usePwaServiceWorkerUpdateStore = create<PwaServiceWorkerUpdateState>((set, get) => ({
+  checkPhase: "idle",
   errorMessage: null,
   status: "idle",
-  isCheckingForUpdate: false,
   updateServiceWorker: null,
 
-  setCheckingForUpdate: (checking) => {
-    set((state) =>
-      state.isCheckingForUpdate === checking ? state : { isCheckingForUpdate: checking },
-    );
+  setCheckPhase: (phase) => {
+    set((state) => (state.checkPhase === phase ? state : { checkPhase: phase }));
   },
 
   reloadForUpdate: () => {
@@ -88,6 +82,6 @@ export function showPwaServiceWorkerUpdateAvailable(
   usePwaServiceWorkerUpdateStore.getState().showUpdateAvailable(updateServiceWorker);
 }
 
-export function setPwaServiceWorkerCheckingForUpdate(checking: boolean): void {
-  usePwaServiceWorkerUpdateStore.getState().setCheckingForUpdate(checking);
+export function setPwaServiceWorkerUpdateCheckPhase(phase: PwaUpdateCheckPhase): void {
+  usePwaServiceWorkerUpdateStore.getState().setCheckPhase(phase);
 }
