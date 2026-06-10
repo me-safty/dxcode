@@ -33,8 +33,8 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
 
   return (
-    <div className="mt-4 rounded-2xl border border-input bg-background p-2 pt-4 shadow-xs/5 not-dark:bg-clip-padding dark:bg-input/32">
-      <div className="sticky top-2 z-10 mb-3 flex items-center justify-between gap-2 bg-background px-2 before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-inherit before:content-[''] dark:bg-[color-mix(in_srgb,var(--input)_32%,var(--background))]">
+    <div className="mt-4 rounded-2xl border border-input bg-card/40 p-2 pt-4 shadow-xs/5 not-dark:bg-clip-padding">
+      <div className="sticky top-2 z-10 mb-3 flex items-center justify-between gap-2 bg-card/72 px-2 backdrop-blur-md before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-inherit before:content-['']">
         <p className="flex self-start items-center gap-1 font-medium text-foreground text-xs leading-4">
           <span>{files.length} changed files</span>
           {hasNonZeroStat(summaryStat) && (
