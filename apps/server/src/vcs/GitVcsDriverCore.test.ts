@@ -334,6 +334,26 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(result.worktrees[0]?.isDirty, true);
       }),
     );
+
+    it.effect("computes the on-disk byte size of a worktree", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const created = yield* driver.createWorktree({
+          cwd,
+          refName: initialBranch,
+          newRefName: "feature-size",
+          path: null,
+        });
+
+        const { sizeBytes } = yield* driver.worktreeSize({ path: created.worktree.path });
+
+        // A real checkout always has tracked files on disk.
+        assert.isAbove(sizeBytes, 0);
+      }),
+    );
   });
 
   describe("commit context", () => {

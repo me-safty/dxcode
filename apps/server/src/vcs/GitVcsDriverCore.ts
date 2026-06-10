@@ -2251,6 +2251,39 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return { worktrees };
   });
 
+  const directorySizeBytes = (rootPath: string): Effect.Effect<number, never> => {
+    const walk = (current: string): Effect.Effect<number, never> =>
+      fileSystem.readDirectory(current).pipe(
+        Effect.flatMap((entries) =>
+          Effect.forEach(
+            entries,
+            (entry) => {
+              const childPath = path.join(current, entry);
+              return fileSystem.stat(childPath).pipe(
+                Effect.flatMap((info) =>
+                  info.type === "Directory"
+                    ? walk(childPath)
+                    : Effect.succeed(Number(info.size)),
+                ),
+                Effect.orElseSucceed(() => 0),
+              );
+            },
+            { concurrency: 8 },
+          ),
+        ),
+        Effect.map((sizes) => sizes.reduce((total, size) => total + size, 0)),
+        Effect.orElseSucceed(() => 0),
+      );
+    return walk(rootPath);
+  };
+
+  const worktreeSize: GitVcsDriver.GitVcsDriverShape["worktreeSize"] = Effect.fn("worktreeSize")(
+    function* (input) {
+      const sizeBytes = yield* directorySizeBytes(input.path);
+      return { sizeBytes };
+    },
+  );
+
   const renameBranch: GitVcsDriver.GitVcsDriverShape["renameBranch"] = Effect.fn("renameBranch")(
     function* (input) {
       if (input.oldBranch === input.newBranch) {
@@ -2415,6 +2448,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     setBranchUpstream,
     removeWorktree,
     listManagedWorktrees,
+    worktreeSize,
     renameBranch,
     createRef,
     switchRef,
