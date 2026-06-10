@@ -99,17 +99,12 @@ export const makeLaunchEnv = Effect.fn("makeLaunchEnv")(function* () {
       ...(worktreePath !== undefined ? { worktreePath } : {}),
     });
 
-    return {
+    const result = {
       projectId,
       worktreePath,
       env,
-    } satisfies typeof input extends { projectId?: infer P }
-      ? {
-          projectId: P | typeof projectId;
-          worktreePath?: string | null | undefined;
-          env: Record<string, string>;
-        }
-      : never;
+    };
+    return result;
   });
 
   return {

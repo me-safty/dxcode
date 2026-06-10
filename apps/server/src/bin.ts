@@ -14,37 +14,13 @@ import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 import { LaunchEnv } from "./launchEnv/Services/LaunchEnv.ts";
-import { LaunchEnvThreadLookupError } from "./launchEnv/Services/LaunchEnvErrors.ts";
-import { TerminalManager, TerminalSessionLookupError } from "./terminal/Services/Manager.ts";
-
-const terminalManagerStub = {
-  open: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  attachStream: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  write: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  resize: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  clear: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  restart: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  close: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  subscribe: () => Effect.succeed(() => {}),
-  subscribeMetadata: () => Effect.succeed(() => {}),
-};
-
-const launchEnvStub = {
-  resolve: () => Effect.succeed({} as Record<string, string>),
-  resolveForThread: () =>
-    Effect.fail(
-      new LaunchEnvThreadLookupError({
-        threadId: "",
-        terminalId: "",
-      }),
-    ),
-};
+import { TerminalManager } from "./terminal/Services/Manager.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(
   NodeServices.layer,
   NetService.layer,
-  Layer.succeed(TerminalManager, terminalManagerStub),
-  Layer.succeed(LaunchEnv, launchEnvStub),
+  Layer.mock(TerminalManager)({}),
+  Layer.mock(LaunchEnv)({}),
 );
 
 const connectPublicConfigMissingMessage =

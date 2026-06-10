@@ -19,7 +19,6 @@ import * as CliError from "effect/unstable/cli/CliError";
 import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/unstable/cli";
 
-import { defaultLaunchEnvTestLayer } from "./launchEnv/Layers/LaunchEnvTest.ts";
 import { cli, makeCli } from "./bin.ts";
 import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "./config.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -35,25 +34,14 @@ import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { environmentAuthenticatedAuthLayer } from "./auth/http.ts";
-import { TerminalManager, TerminalSessionLookupError } from "./terminal/Services/Manager.ts";
-
-const terminalManagerStub = {
-  open: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  attachStream: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  write: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  resize: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  clear: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  restart: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  close: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
-  subscribe: () => Effect.succeed(() => {}),
-  subscribeMetadata: () => Effect.succeed(() => {}),
-};
+import { LaunchEnv } from "./launchEnv/Services/LaunchEnv.ts";
+import { TerminalManager } from "./terminal/Services/Manager.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(
   NodeServices.layer,
   NetService.layer,
-  defaultLaunchEnvTestLayer,
-  Layer.succeed(TerminalManager, terminalManagerStub),
+  Layer.mock(TerminalManager)({}),
+  Layer.mock(LaunchEnv)({}),
 );
 class ProjectCliHttpApi extends HttpApi.make("environment").add(EnvironmentOrchestrationHttpApi) {}
 

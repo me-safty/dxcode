@@ -1037,11 +1037,6 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         ),
       );
 
-    const runWithLaunchEnv = <T extends TerminalOpenInput | TerminalRestartInput, A, E, R>(
-      input: T,
-      run: (resolved: T & { env: Record<string, string> }) => Effect.Effect<A, E, R>,
-    ) => Effect.flatMap(applyLaunchEnv(input), run);
-
     const logsDir = options.logsDir;
     const historyLineLimit = options.historyLineLimit ?? DEFAULT_HISTORY_LINE_LIMIT;
     const platform = options.platform ?? process.platform;
@@ -2097,7 +2092,13 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     });
 
     const open: TerminalManagerShape["open"] = (input) =>
-      withThreadLock(input.threadId, runWithLaunchEnv(input, openLocked));
+      withThreadLock(
+        input.threadId,
+        Effect.gen(function* () {
+          const resolvedInput = yield* applyLaunchEnv(input);
+          return yield* openLocked(resolvedInput);
+        }),
+      );
 
     const openOrAttachForStream = (input: TerminalAttachRuntimeInput) =>
       withThreadLock(
@@ -2372,84 +2373,85 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     const restart: TerminalManagerShape["restart"] = (input) =>
       withThreadLock(
         input.threadId,
-        runWithLaunchEnv(input, (input: TerminalRestartInput) =>
-          Effect.gen(function* () {
-            yield* increment(terminalRestartsTotal, { scope: "thread" });
-            const terminalId = input.terminalId;
-            yield* assertValidCwd(input.cwd);
-            const nextRuntimeEnv = normalizedRuntimeEnv(input.env);
+        Effect.gen(function* () {
+          const resolvedInput = yield* applyLaunchEnv(input);
+          yield* increment(terminalRestartsTotal, { scope: "thread" });
+          const terminalId = resolvedInput.terminalId;
+          yield* assertValidCwd(resolvedInput.cwd);
+          const nextRuntimeEnv = normalizedRuntimeEnv(resolvedInput.env);
 
-            const sessionKey = toSessionKey(input.threadId, terminalId);
-            const existingSession = yield* getSession(input.threadId, terminalId);
-            let session: TerminalSessionState;
-            if (Option.isNone(existingSession)) {
-              const cols = input.cols ?? DEFAULT_OPEN_COLS;
-              const rows = input.rows ?? DEFAULT_OPEN_ROWS;
-              session = {
-                threadId: input.threadId,
-                terminalId,
-                cwd: input.cwd,
-                worktreePath: input.worktreePath ?? null,
-                status: "starting",
-                pid: null,
-                history: "",
-                pendingHistoryControlSequence: "",
-                pendingProcessEvents: [],
-                pendingProcessEventIndex: 0,
-                processEventDrainRunning: false,
-                exitCode: null,
-                exitSignal: null,
-                updatedAt: yield* nowIso,
-                eventSequence: 0,
-                cols,
-                rows,
-                process: null,
-                unsubscribeData: null,
-                unsubscribeExit: null,
-                hasRunningSubprocess: false,
-                childCommandLabel: null,
-                runtimeEnv: nextRuntimeEnv,
-              };
-              const createdSession = session;
-              yield* modifyManagerState((state) => {
-                const sessions = new Map(state.sessions);
-                sessions.set(sessionKey, createdSession);
-                return [undefined, { ...state, sessions }] as const;
-              });
-              yield* evictInactiveSessionsIfNeeded();
-            } else {
-              session = existingSession.value;
-              yield* stopProcess(session);
-              session.cwd = input.cwd;
-              session.worktreePath = input.worktreePath ?? null;
-              session.runtimeEnv = nextRuntimeEnv;
-            }
+          const sessionKey = toSessionKey(resolvedInput.threadId, terminalId);
+          const existingSession = yield* getSession(resolvedInput.threadId, terminalId);
+          let session: TerminalSessionState;
+          if (Option.isNone(existingSession)) {
+            const cols = resolvedInput.cols ?? DEFAULT_OPEN_COLS;
+            const rows = resolvedInput.rows ?? DEFAULT_OPEN_ROWS;
+            session = {
+              threadId: resolvedInput.threadId,
+              terminalId,
+              cwd: resolvedInput.cwd,
+              worktreePath: resolvedInput.worktreePath ?? null,
+              status: "starting",
+              pid: null,
+              history: "",
+              pendingHistoryControlSequence: "",
+              pendingProcessEvents: [],
+              pendingProcessEventIndex: 0,
+              processEventDrainRunning: false,
+              exitCode: null,
+              exitSignal: null,
+              updatedAt: yield* nowIso,
+              eventSequence: 0,
+              cols,
+              rows,
+              process: null,
+              unsubscribeData: null,
+              unsubscribeExit: null,
+              hasRunningSubprocess: false,
+              childCommandLabel: null,
+              runtimeEnv: nextRuntimeEnv,
+            };
+            const createdSession = session;
+            yield* modifyManagerState((state) => {
+              const sessions = new Map(state.sessions);
+              sessions.set(sessionKey, createdSession);
+              return [undefined, { ...state, sessions }] as const;
+            });
+            yield* evictInactiveSessionsIfNeeded();
+          } else {
+            session = existingSession.value;
+            yield* stopProcess(session);
+            session.cwd = resolvedInput.cwd;
+            session.worktreePath = resolvedInput.worktreePath ?? null;
+            session.runtimeEnv = nextRuntimeEnv;
+          }
 
-            const cols = input.cols ?? session.cols;
-            const rows = input.rows ?? session.rows;
+          const cols = resolvedInput.cols ?? session.cols;
+          const rows = resolvedInput.rows ?? session.rows;
 
-            session.history = "";
-            session.pendingHistoryControlSequence = "";
-            session.pendingProcessEvents = [];
-            session.pendingProcessEventIndex = 0;
-            session.processEventDrainRunning = false;
-            yield* persistHistory(input.threadId, terminalId, session.history);
-            yield* startSession(
-              session,
-              {
-                threadId: input.threadId,
-                terminalId,
-                cwd: input.cwd,
-                ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
-                cols,
-                rows,
-                ...(input.env ? { env: input.env } : {}),
-              },
-              "restarted",
-            );
-            return snapshot(session);
-          }),
-        ),
+          session.history = "";
+          session.pendingHistoryControlSequence = "";
+          session.pendingProcessEvents = [];
+          session.pendingProcessEventIndex = 0;
+          session.processEventDrainRunning = false;
+          yield* persistHistory(resolvedInput.threadId, terminalId, session.history);
+          yield* startSession(
+            session,
+            {
+              threadId: resolvedInput.threadId,
+              terminalId,
+              cwd: resolvedInput.cwd,
+              ...(resolvedInput.worktreePath !== undefined
+                ? { worktreePath: resolvedInput.worktreePath }
+                : {}),
+              cols,
+              rows,
+              ...(resolvedInput.env ? { env: resolvedInput.env } : {}),
+            },
+            "restarted",
+          );
+          return snapshot(session);
+        }),
       );
 
     const close: TerminalManagerShape["close"] = (input) =>
