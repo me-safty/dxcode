@@ -1474,46 +1474,41 @@ describe("deriveTimelineEntries", () => {
       },
     });
   });
-
 });
 
 describe("deriveWorkLogEntries context window handling", () => {
   it("excludes context window updates from the work log", () => {
-    const entries = deriveWorkLogEntries(
-      [
-        makeActivity({
-          id: "context-1",
-          turnId: "turn-1",
-          kind: "context-window.updated",
-          summary: "Context window updated",
-          tone: "info",
-        }),
-        makeActivity({
-          id: "tool-1",
-          turnId: "turn-1",
-          kind: "tool.completed",
-          summary: "Ran command",
-          tone: "tool",
-        }),
-      ],
-    );
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        id: "context-1",
+        turnId: "turn-1",
+        kind: "context-window.updated",
+        summary: "Context window updated",
+        tone: "info",
+      }),
+      makeActivity({
+        id: "tool-1",
+        turnId: "turn-1",
+        kind: "tool.completed",
+        summary: "Ran command",
+        tone: "tool",
+      }),
+    ]);
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.label).toBe("Ran command");
   });
 
   it("keeps context compaction activities as normal work log entries", () => {
-    const entries = deriveWorkLogEntries(
-      [
-        makeActivity({
-          id: "compaction-1",
-          turnId: "turn-1",
-          kind: "context-compaction",
-          summary: "Context compacted",
-          tone: "info",
-        }),
-      ],
-    );
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        id: "compaction-1",
+        turnId: "turn-1",
+        kind: "context-compaction",
+        summary: "Context compacted",
+        tone: "info",
+      }),
+    ]);
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.label).toBe("Context compacted");
