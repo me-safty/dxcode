@@ -7,6 +7,7 @@ import * as Layer from "effect/Layer";
 import {
   SourceControlProviderError,
   type SourceControlProviderDiscoveryItem,
+  type SourceControlProviderInfo,
 } from "@t3tools/contracts";
 import type { SourceControlProviderKind } from "@t3tools/contracts";
 import { detectSourceControlProviderFromRemoteUrl } from "@t3tools/shared/sourceControl";
@@ -46,6 +47,11 @@ export interface SourceControlProviderRegistryShape {
   readonly resolve: (input: {
     readonly cwd: string;
   }) => Effect.Effect<SourceControlProvider.SourceControlProviderShape, SourceControlProviderError>;
+  readonly refineRemoteProvider: (input: {
+    readonly cwd: string;
+    readonly remoteName: string;
+    readonly remoteUrl: string;
+  }) => Effect.Effect<SourceControlProviderInfo | null>;
   readonly discover: Effect.Effect<ReadonlyArray<SourceControlProviderDiscoveryItem>>;
 }
 
@@ -215,6 +221,18 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
       get,
       resolveHandle,
       resolve: (input) => resolveHandle(input).pipe(Effect.map((handle) => handle.provider)),
+      refineRemoteProvider: (input) => {
+        const provider = detectSourceControlProviderFromRemoteUrl(input.remoteUrl);
+        if (provider === null) {
+          return Effect.succeed(null);
+        }
+        return SourceControlProviderDiscovery.refineUnknownRemoteProvider({
+          specs: discoverySpecs,
+          process,
+          cwd: input.cwd,
+          context: { provider, remoteName: input.remoteName, remoteUrl: input.remoteUrl },
+        }).pipe(Effect.map((context) => context?.provider ?? provider));
+      },
       discover: Effect.all(
         discoverySpecs.map((spec) =>
           SourceControlProviderDiscovery.probeSourceControlProvider({

@@ -219,3 +219,39 @@ it.effect("falls back to a non-origin remote when origin is not configured", () 
     assert.strictEqual(provider.kind, "azure-devops");
   }),
 );
+
+it.effect("refineRemoteProvider refines a logged-in Forgejo remote on a non-origin upstream", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry({
+      remotes: [{ name: "origin", url: "git@github.com:pingdotgg/t3code.git" }],
+      process: {
+        run: (input) =>
+          input.command === "fj"
+            ? Effect.succeed(processOutput("pat-s@git.example.org"))
+            : Effect.succeed(processOutput("")),
+      },
+    });
+
+    const provider = yield* registry.refineRemoteProvider({
+      cwd: "/repo",
+      remoteName: "upstream",
+      remoteUrl: "git@git.example.org:owner/repo.git",
+    });
+
+    assert.strictEqual(provider?.kind, "forgejo");
+  }),
+);
+
+it.effect("refineRemoteProvider leaves a host with no matching login unrefined", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry({ remotes: [] });
+
+    const provider = yield* registry.refineRemoteProvider({
+      cwd: "/repo",
+      remoteName: "origin",
+      remoteUrl: "git@git.example.org:owner/repo.git",
+    });
+
+    assert.strictEqual(provider?.kind, "unknown");
+  }),
+);

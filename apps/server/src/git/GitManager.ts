@@ -798,9 +798,13 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       branch === null
         ? "origin"
         : ((yield* readConfigValueNullable(cwd, `branch.${branch}.remote`)) ?? "origin");
+    const preferredRemoteUrl = yield* readConfigValueNullable(
+      cwd,
+      `remote.${preferredRemoteName}.url`,
+    );
+    const remoteName = preferredRemoteUrl ? preferredRemoteName : "origin";
     const remoteUrl =
-      (yield* readConfigValueNullable(cwd, `remote.${preferredRemoteName}.url`)) ??
-      (yield* readConfigValueNullable(cwd, "remote.origin.url"));
+      preferredRemoteUrl ?? (yield* readConfigValueNullable(cwd, "remote.origin.url"));
     if (!remoteUrl) return null;
 
     const detected = detectSourceControlProviderFromGitRemoteUrl(remoteUrl);
@@ -809,13 +813,12 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     }
 
     // Forgejo has no canonical hostname, so static detection returns "unknown" for its
-    // self-hosted instances. Ask the registry to refine via `fj auth list`, but only adopt
-    // the result when it resolves to Forgejo so other providers keep their existing status
-    // behavior. Cached per cwd by the registry.
-    const handle = yield* sourceControlProviders
-      .resolveHandle({ cwd })
+    // self-hosted instances. Refine THIS branch's remote via `fj auth list` (not origin),
+    // but only adopt the result when it resolves to Forgejo so other providers keep their
+    // existing status behavior.
+    const refined = yield* sourceControlProviders
+      .refineRemoteProvider({ cwd, remoteName, remoteUrl })
       .pipe(Effect.orElseSucceed(() => null));
-    const refined = handle?.context?.provider ?? null;
     return refined?.kind === "forgejo" ? refined : detected;
   });
 
