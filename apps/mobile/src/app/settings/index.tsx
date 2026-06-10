@@ -13,6 +13,7 @@ import { setLiveActivityUpdatesEnabled } from "../../features/agent-awareness/li
 import { requestAgentNotificationPermission } from "../../features/agent-awareness/notificationPermissions";
 import { refreshAgentAwarenessRegistration } from "../../features/agent-awareness/remoteRegistration";
 import { refreshManagedRelayEnvironments } from "../../features/cloud/managedRelayState";
+import { useClerkSettingsSheetDetent } from "../../features/cloud/ClerkSettingsSheetDetent";
 import {
   hasCloudPublicConfig,
   resolveRelayClerkTokenOptions,
@@ -66,6 +67,7 @@ function LocalSettingsRouteScreen() {
 function ConfiguredSettingsRouteScreen() {
   const insets = useSafeAreaInsets();
   const { push } = useRouter();
+  const { expand: expandClerkSheet } = useClerkSettingsSheetDetent();
   const { getToken, isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
   const { user } = useUser();
   const { savedConnectionsById } = useRemoteEnvironmentState();
@@ -265,11 +267,9 @@ function ConfiguredSettingsRouteScreen() {
       push("/settings/waitlist");
       return;
     }
-    Alert.alert(
-      "T3 Cloud unavailable",
-      "Native T3 Cloud account management is not available in this build.",
-    );
-  }, [isLoaded, isSignedIn, push]);
+    expandClerkSheet();
+    push("/settings/auth");
+  }, [expandClerkSheet, isLoaded, isSignedIn, push]);
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
