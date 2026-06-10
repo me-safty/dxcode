@@ -263,6 +263,56 @@ describe("ChatMarkdown", () => {
     }
   });
 
+  it("navigates hash links within the clicked markdown message", async () => {
+    const source = [
+      "A claim with supporting context.[^context]",
+      "",
+      "[^context]: Supporting footnote text.",
+    ].join("\n");
+    const originalUrl = window.location.href;
+    const scrollIntoView = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    const screen = await render(
+      <div>
+        <ChatMarkdown text={source} cwd="/repo/project" />
+        <ChatMarkdown text={source} cwd="/repo/project" />
+      </div>,
+    );
+
+    try {
+      const markdownRoots = document.querySelectorAll<HTMLElement>(".chat-markdown");
+      const secondRoot = markdownRoots[1];
+      const secondReference =
+        secondRoot?.querySelector<HTMLAnchorElement>('a[data-footnote-ref=""]');
+      const secondFootnote = secondRoot?.querySelector<HTMLElement>(
+        "section[data-footnotes] li[id]",
+      );
+      expect(secondReference).not.toBeNull();
+      expect(secondFootnote).not.toBeNull();
+
+      secondReference?.click();
+
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.instances[0]).toBe(secondFootnote);
+      expect(window.location.hash).toBe(secondReference?.hash);
+
+      const secondBackref = secondRoot?.querySelector<HTMLAnchorElement>(
+        "a[data-footnote-backref]",
+      );
+      expect(secondBackref).not.toBeNull();
+      secondBackref?.click();
+
+      const secondReferenceTarget = secondReference?.closest<HTMLElement>("[id]");
+      expect(scrollIntoView).toHaveBeenCalledTimes(2);
+      expect(scrollIntoView.mock.instances[1]).toBe(secondReferenceTarget);
+    } finally {
+      scrollIntoView.mockRestore();
+      window.history.replaceState(window.history.state, "", originalUrl);
+      await screen.unmount();
+    }
+  });
+
   describe("code block chrome", () => {
     it("shows icon-only language titles, text fallbacks, and filename overrides", async () => {
       const source = [

@@ -825,6 +825,66 @@ function plainHastText(node: unknown): string | null {
   return parts.every((part) => part !== null) ? parts.join("") : null;
 }
 
+const SANITIZED_FRAGMENT_PREFIX = "user-content-";
+
+function decodeMarkdownFragmentId(href: string): string {
+  const encodedId = href.slice(1);
+  try {
+    return decodeURIComponent(encodedId);
+  } catch {
+    return encodedId;
+  }
+}
+
+function normalizeSanitizedFragmentId(id: string): string {
+  let normalizedId = id;
+  while (normalizedId.startsWith(SANITIZED_FRAGMENT_PREFIX)) {
+    normalizedId = normalizedId.slice(SANITIZED_FRAGMENT_PREFIX.length);
+  }
+  return normalizedId;
+}
+
+function findMarkdownFragmentTarget(anchor: HTMLAnchorElement, href: string): HTMLElement | null {
+  const decodedId = decodeMarkdownFragmentId(href);
+  const normalizedId = normalizeSanitizedFragmentId(decodedId);
+  const matchesFragment = (element: HTMLElement) =>
+    element.id === decodedId || normalizeSanitizedFragmentId(element.id) === normalizedId;
+  const markdownRoot = anchor.closest<HTMLElement>(".chat-markdown");
+  if (markdownRoot) {
+    const localTargets = Array.from(markdownRoot.querySelectorAll<HTMLElement>("[id]"));
+    const localTarget = localTargets.find(matchesFragment);
+    if (localTarget) return localTarget;
+  }
+
+  return (
+    document.getElementById(decodedId) ??
+    Array.from(document.querySelectorAll<HTMLElement>("[id]")).find(matchesFragment) ??
+    null
+  );
+}
+
+function handleMarkdownFragmentClick(event: ReactMouseEvent<HTMLAnchorElement>, href: string) {
+  if (
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  ) {
+    return;
+  }
+
+  const target = findMarkdownFragmentTarget(event.currentTarget, href);
+  if (!target) return;
+
+  event.preventDefault();
+  const nextUrl = new URL(window.location.href);
+  nextUrl.hash = href.slice(1);
+  window.history.pushState(window.history.state, "", nextUrl);
+  target.scrollIntoView({ block: "nearest" });
+}
+
 function MarkdownExternalLinkContent({
   host,
   plainText,
@@ -1072,12 +1132,19 @@ function ChatMarkdown({
         if (!fileLinkMeta) {
           const faviconHost = resolveExternalLinkHost(href);
           const isSameDocumentLink = href?.startsWith("#") ?? false;
+          const onClick = props.onClick;
           const link = (
             <a
               {...props}
               href={href}
               target={isSameDocumentLink ? undefined : "_blank"}
               rel={isSameDocumentLink ? undefined : "noopener noreferrer"}
+              onClick={(event) => {
+                onClick?.(event);
+                if (isSameDocumentLink && href) {
+                  handleMarkdownFragmentClick(event, href);
+                }
+              }}
             >
               {faviconHost ? (
                 <MarkdownExternalLinkContent host={faviconHost} plainText={plainHastText(node)}>
