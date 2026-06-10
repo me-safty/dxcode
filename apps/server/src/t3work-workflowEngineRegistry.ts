@@ -43,6 +43,11 @@ export interface T3workWorkflowEngineRegistryShape {
   readonly setPending: (threadId: string, pending: WorkflowPendingAsk) => void;
   /** Read and remove the pending ask for a thread (first matching reply wins). */
   readonly takePending: (threadId: string) => WorkflowPendingAsk | undefined;
+  /** Read the pending ask for a thread WITHOUT removing it. The reactor uses this to decide
+   * whether a streaming assistant delta is worth buffering (only while a turn is awaited on the
+   * thread); it must not consume the ask, which is settled by the matching `streaming: false`
+   * event. */
+  readonly peekPending: (threadId: string) => WorkflowPendingAsk | undefined;
 }
 
 export class T3workWorkflowEngineRegistry extends Context.Service<
@@ -72,6 +77,7 @@ export function makeWorkflowEngineRegistry(): T3workWorkflowEngineRegistryShape 
       if (pending !== undefined) pendingByThread.delete(threadId);
       return pending;
     },
+    peekPending: (threadId) => pendingByThread.get(threadId),
   };
 }
 

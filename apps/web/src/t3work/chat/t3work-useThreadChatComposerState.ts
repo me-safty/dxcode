@@ -1,9 +1,14 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import type { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime";
 
+import { usePrimaryEnvironmentId } from "~/environments/primary";
+import { useStore } from "~/store";
+import { createThreadSelectorByRef } from "~/storeSelectors";
 import type { BackendApi } from "~/t3work/backend/t3work-types";
 import { prepareThreadContextAttachments } from "~/t3work/chat/t3work-prepareThreadContextAttachments";
 import { launchPendingRecipeWorkflowTurn } from "~/t3work/chat/t3work-recipeWorkflowLaunch";
+import { isThreadWaitingForRecipeInput } from "~/t3work/chat/t3work-recipeAwaitingInput";
 import { useAddToChatComposerDropTarget } from "~/t3work/hooks/t3work-useAddToChatComposerDropTarget";
 import { useT3WorkAddToChatStore } from "~/t3work/t3work-addToChatStore";
 import type { T3WorkContextAttachment } from "~/t3work/t3work-contextAttachment";
@@ -21,6 +26,14 @@ export function useThreadChatComposerState(input: {
   kickoffWorkflow: T3workKickoffWorkflow | undefined;
   hasServerLaunchActivity: boolean;
 }) {
+  const environmentId = usePrimaryEnvironmentId();
+  const threadRef = useMemo(
+    () => (environmentId ? scopeThreadRef(environmentId, input.threadId as never) : null),
+    [environmentId, input.threadId],
+  );
+  const serverThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
+  const waitingForRecipeInput = isThreadWaitingForRecipeInput(serverThread);
+
   const pendingProjectContextCount = useT3WorkAddToChatStore(
     (state) => (state.pendingByProjectId[input.projectId] ?? []).length,
   );
@@ -101,6 +114,21 @@ export function useThreadChatComposerState(input: {
         return false;
       }
 
+      // Answering a workflow's pending askUser: post the reply as a real (visible) message via the
+      // resolve route. The workflow-engine reactor resolves the parked user.input from that message
+      // event — so the reply renders normally, no stray agent turn starts, and there is a single
+      // resolution path.
+      if (waitingForRecipeInput) {
+        await input.backend.resolveWorkflowInput({
+          threadId: turnStart.threadId,
+          text: turnStart.messageText,
+          messageId: turnStart.messageId,
+        });
+        // "resolved-input" tells ChatView this send posted a message with no turn lifecycle, so it
+        // should clear its optimistic busy state itself (no turn event will arrive to clear it).
+        return "resolved-input" as const;
+      }
+
       return launchPendingRecipeWorkflowTurn({
         backend: input.backend,
         threadId: turnStart.threadId,
@@ -116,7 +144,13 @@ export function useThreadChatComposerState(input: {
         hasAttachments: turnStart.hasAttachments,
       });
     },
-    [input.backend, input.hasServerLaunchActivity, input.kickoffPending, input.kickoffWorkflow],
+    [
+      input.backend,
+      input.hasServerLaunchActivity,
+      input.kickoffPending,
+      input.kickoffWorkflow,
+      waitingForRecipeInput,
+    ],
   );
 
   return {

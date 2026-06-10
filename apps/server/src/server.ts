@@ -99,7 +99,10 @@ import {
 import { t3workAtlassianOAuthExchangeRouteLayer } from "./t3work-atlassian-oauth-routes.ts";
 import { t3workProjectWorkspaceDiscoverRecipesRouteLayer } from "./t3work-project-workspace-recipe-routes.ts";
 import { t3workProjectWorkspaceWriteContextFilesRouteLayer } from "./t3work-project-workspace-write-routes.ts";
-import { t3workThreadRecipeWorkflowLaunchRouteLayer } from "./t3work-thread-recipe-workflow-routes.ts";
+import {
+  t3workThreadRecipeWorkflowLaunchRouteLayer,
+  t3workThreadWorkflowResolveInputRouteLayer,
+} from "./t3work-thread-recipe-workflow-routes.ts";
 import {
   t3workGitHubAssetRouteLayer,
   t3workGitHubInboxRouteLayer,
@@ -393,6 +396,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   t3workProjectWorkspaceDiscoverRecipesRouteLayer,
   t3workThreadPlacementRouteLayer,
   t3workThreadRecipeWorkflowLaunchRouteLayer,
+  t3workThreadWorkflowResolveInputRouteLayer,
   t3workThreadToolContextRouteLayer,
   t3workProjectWorkspaceWriteContextFilesRouteLayer,
   otlpTracesProxyRouteLayer,
