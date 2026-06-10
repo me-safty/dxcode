@@ -168,12 +168,10 @@ const TimelineHarness = forwardRef<TimelineHarnessHandle>(function TimelineHarne
       <MessagesTimeline
         isWorking={false}
         activeTurnInProgress={false}
-        activeTurnId={null}
         activeTurnStartedAt={null}
         listRef={listRef}
         timelineEntries={timelineEntries}
-        completionDividerBeforeEntryId={null}
-        completionSummary={null}
+        latestTurn={null}
         turnDiffSummaryByAssistantMessageId={emptyTurnDiffSummary}
         routeThreadKey="environment-local:thread-code-block-height"
         onOpenTurnDiff={() => {}}

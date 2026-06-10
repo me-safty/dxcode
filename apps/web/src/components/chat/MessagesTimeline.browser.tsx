@@ -2,9 +2,10 @@ import "../../index.css";
 
 import { EnvironmentId } from "@t3tools/contracts";
 import { createRef } from "react";
+import type { LegendListRef } from "@legendapp/list/react";
 import type { VirtualizedListHandle } from "../virtualization/VirtualizedList";
-import { page } from "vitest/browser";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { page } from "vite-plus/test/browser";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
 import { getVscodeIconUrlForEntry } from "../../vscode-icons";
@@ -12,61 +13,38 @@ import { getVscodeIconUrlForEntry } from "../../vscode-icons";
 const scrollToEndSpy = vi.fn();
 const getStateSpy = vi.fn(() => ({ isAtEnd: true }));
 
-vi.mock("../virtualization/VirtualizedList", async () => {
+vi.mock("@legendapp/list/react", async () => {
   const React = await import("react");
 
-  function VirtualizedList(props: {
+  function LegendList(props: {
     data: Array<{ id: string }>;
     keyExtractor: (item: { id: string }) => string;
-    renderItem: (args: { item: { id: string }; index: number }) => React.ReactNode;
+    renderItem: (args: { item: { id: string } }) => React.ReactNode;
     ListHeaderComponent?: React.ReactNode;
     ListFooterComponent?: React.ReactNode;
-    ref?: React.Ref<VirtualizedListHandle>;
-    className?: string;
-    style?: React.CSSProperties;
-    "data-testid"?: string;
+    ref?: React.Ref<LegendListRef>;
   }) {
-    const rootRef = React.useRef<HTMLDivElement | null>(null);
     React.useImperativeHandle(
       props.ref,
       () =>
         ({
-          scrollToEnd: (options?: { animated?: boolean }) => {
-            scrollToEndSpy(options);
-            const node = rootRef.current;
-            if (!node) return;
-            node.scrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
-          },
-          scrollToOffset: ({ offset }: { offset: number; animated?: boolean }) => {
-            const node = rootRef.current;
-            if (!node) return;
-            node.scrollTop = offset;
-          },
-          scrollIndexIntoView: ({ index }: { index: number; animated?: boolean }) => {
-            rootRef.current?.children.item(index)?.scrollIntoView({ block: "nearest" });
-          },
-          getScrollableNode: () => rootRef.current,
+          scrollToEnd: scrollToEndSpy,
           getState: getStateSpy,
-        }) as unknown as VirtualizedListHandle,
+        }) as unknown as LegendListRef,
     );
 
     return (
-      <div
-        className={props.className}
-        data-testid={props["data-testid"] ?? "virtualized-list"}
-        ref={rootRef}
-        style={{ ...props.style, minHeight: 720, overflowY: "auto" }}
-      >
+      <div data-testid="legend-list">
         {props.ListHeaderComponent}
-        {props.data.map((item, index) => (
-          <div key={props.keyExtractor(item)}>{props.renderItem({ item, index })}</div>
+        {props.data.map((item) => (
+          <div key={props.keyExtractor(item)}>{props.renderItem({ item })}</div>
         ))}
         {props.ListFooterComponent}
       </div>
     );
   }
 
-  return { VirtualizedList };
+  return { LegendList };
 });
 
 import { MessagesTimeline } from "./MessagesTimeline";
@@ -77,11 +55,9 @@ function buildProps() {
   return {
     isWorking: false,
     activeTurnInProgress: false,
-    activeTurnId: null,
     activeTurnStartedAt: null,
     listRef: createRef<VirtualizedListHandle | null>(),
-    completionDividerBeforeEntryId: null,
-    completionSummary: null,
+    latestTurn: null,
     turnDiffSummaryByAssistantMessageId: new Map(),
     routeThreadKey: "environment-local:thread-1",
     onOpenTurnDiff: vi.fn(),
@@ -104,19 +80,9 @@ function buildLongUserMessageText(tail = "deep hidden detail only after expand")
   ).join("\n");
 }
 
-function buildUserTimelineEntry(
-  text: string,
-  attachments?: Array<{
-    type: "image";
-    id: string;
-    name: string;
-    mimeType: string;
-    sizeBytes: number;
-    previewUrl?: string;
-  }>,
-) {
+function buildUserTimelineEntry(text: string) {
   return {
-    id: "entry-user-1",
+    id: "entry-1",
     kind: "message" as const,
     createdAt: MESSAGE_CREATED_AT,
     message: {
@@ -125,22 +91,11 @@ function buildUserTimelineEntry(
       text,
       createdAt: MESSAGE_CREATED_AT,
       streaming: false,
-      ...(attachments ? { attachments } : {}),
     },
   };
 }
 
-function buildAssistantTimelineEntry(
-  text: string,
-  attachments?: Array<{
-    type: "image";
-    id: string;
-    name: string;
-    mimeType: string;
-    sizeBytes: number;
-    previewUrl?: string;
-  }>,
-) {
+function buildAssistantTimelineEntry(text: string) {
   return {
     id: "entry-assistant-1",
     kind: "message" as const,
@@ -151,7 +106,6 @@ function buildAssistantTimelineEntry(
       text,
       createdAt: MESSAGE_CREATED_AT,
       streaming: false,
-      ...(attachments ? { attachments } : {}),
     },
   };
 }
@@ -161,6 +115,7 @@ describe("MessagesTimeline", () => {
     scrollToEndSpy.mockReset();
     getStateSpy.mockClear();
     vi.restoreAllMocks();
+    document.body.innerHTML = "";
   });
 
   it("renders activity rows instead of the empty placeholder when a thread has non-message timeline data", async () => {
@@ -175,9 +130,9 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-1",
               createdAt: "2026-04-13T12:00:00.000Z",
-              label: "thinking",
+              label: "read files",
               detail: "Inspecting repository state",
-              tone: "thinking",
+              tone: "tool",
             },
           },
         ]}
@@ -188,7 +143,7 @@ describe("MessagesTimeline", () => {
       await expect
         .element(page.getByText("Send a message to start the conversation."))
         .not.toBeInTheDocument();
-      await expect.element(page.getByText("Thinking - Inspecting repository state")).toBeVisible();
+      await expect.element(page.getByText("Inspecting repository state")).toBeVisible();
       expect(document.querySelector('[data-testid="legend-list"] [title]')).toBeNull();
     } finally {
       await screen.unmount();
@@ -247,21 +202,6 @@ describe("MessagesTimeline", () => {
     }
   });
 
-  it("shows a loading placeholder while an existing thread detail snapshot is still hydrating", async () => {
-    const screen = await render(
-      <MessagesTimeline {...buildProps()} timelineEntries={[]} isInitialLoading />,
-    );
-
-    try {
-      await expect.element(page.getByText("Loading conversation...")).toBeVisible();
-      await expect
-        .element(page.getByText("Send a message to start the conversation."))
-        .not.toBeInTheDocument();
-    } finally {
-      await screen.unmount();
-    }
-  });
-
   it("snaps to the bottom when timeline rows appear after an initially empty render", async () => {
     const requestAnimationFrameSpy = vi
       .spyOn(window, "requestAnimationFrame")
@@ -290,88 +230,19 @@ describe("MessagesTimeline", () => {
               entry: {
                 id: "work-1",
                 createdAt: "2026-04-13T12:00:00.000Z",
-                label: "thinking",
+                label: "read files",
                 detail: "Inspecting repository state",
-                tone: "thinking",
+                tone: "tool",
               },
             },
           ]}
         />,
       );
 
-      await expect.element(page.getByText("Thinking - Inspecting repository state")).toBeVisible();
+      await expect.element(page.getByText("Inspecting repository state")).toBeVisible();
       expect(props.onIsAtEndChange).toHaveBeenCalledWith(true);
       expect(scrollToEndSpy).toHaveBeenCalledWith({ animated: false });
       expect(requestAnimationFrameSpy).toHaveBeenCalled();
-    } finally {
-      await screen.unmount();
-    }
-  });
-
-  it("reports pointer, wheel, and touch scroll intent from the list surface", async () => {
-    const onUserScrollIntent = vi.fn();
-    const screen = await render(
-      <MessagesTimeline
-        {...buildProps()}
-        onUserScrollIntent={onUserScrollIntent}
-        timelineEntries={[
-          {
-            id: "work-1",
-            kind: "work",
-            createdAt: "2026-04-13T12:00:00.000Z",
-            entry: {
-              id: "work-1",
-              createdAt: "2026-04-13T12:00:00.000Z",
-              label: "thinking",
-              detail: "Inspecting repository state",
-              tone: "thinking",
-            },
-          },
-        ]}
-      />,
-    );
-
-    try {
-      const list = document.querySelector("[data-testid='messages-timeline-list']");
-      expect(list).not.toBeNull();
-
-      list?.parentElement?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-      list?.dispatchEvent(new WheelEvent("wheel", { bubbles: true }));
-      list?.dispatchEvent(new Event("touchmove", { bubbles: true }));
-
-      expect(onUserScrollIntent).toHaveBeenCalledTimes(3);
-    } finally {
-      await screen.unmount();
-    }
-  });
-
-  it("requests manual older history from the older button", async () => {
-    const onLoadOlderThreadDetail = vi.fn();
-    const screen = await render(
-      <MessagesTimeline
-        {...buildProps()}
-        hasOlderThreadDetail
-        onLoadOlderThreadDetail={onLoadOlderThreadDetail}
-        timelineEntries={[
-          {
-            id: "work-1",
-            kind: "work",
-            createdAt: "2026-04-13T12:00:00.000Z",
-            entry: {
-              id: "work-1",
-              createdAt: "2026-04-13T12:00:00.000Z",
-              label: "thinking",
-              detail: "Inspecting repository state",
-              tone: "thinking",
-            },
-          },
-        ]}
-      />,
-    );
-
-    try {
-      await page.getByRole("button", { name: "Older" }).click();
-      expect(onLoadOlderThreadDetail).toHaveBeenCalledWith();
     } finally {
       await screen.unmount();
     }
@@ -460,96 +331,6 @@ describe("MessagesTimeline", () => {
     }
   });
 
-  it("renders user image thumbnails and expands all previewable images", async () => {
-    const props = buildProps();
-    const onImageExpand = vi.fn();
-    const screen = await render(
-      <MessagesTimeline
-        {...props}
-        onImageExpand={onImageExpand}
-        timelineEntries={[
-          buildUserTimelineEntry("See these", [
-            {
-              type: "image",
-              id: "image-1",
-              name: "first.png",
-              mimeType: "image/png",
-              sizeBytes: 4,
-              previewUrl: "/attachments/image-1",
-            },
-            {
-              type: "image",
-              id: "image-2",
-              name: "second.png",
-              mimeType: "image/png",
-              sizeBytes: 5,
-              previewUrl: "/attachments/image-2",
-            },
-          ]),
-        ]}
-      />,
-    );
-
-    try {
-      const firstImage = document.querySelector<HTMLImageElement>('img[alt="first.png"]');
-      const secondImage = document.querySelector<HTMLImageElement>('img[alt="second.png"]');
-      expect(firstImage?.getAttribute("src")).toBe("/attachments/image-1");
-      expect(secondImage?.getAttribute("src")).toBe("/attachments/image-2");
-
-      const secondPreviewButton = document.querySelector<HTMLButtonElement>(
-        'button[aria-label="Preview second.png"]',
-      );
-      expect(secondPreviewButton).not.toBeNull();
-      secondPreviewButton?.click();
-
-      expect(onImageExpand).toHaveBeenCalledWith({
-        images: [
-          { src: "/attachments/image-1", name: "first.png" },
-          { src: "/attachments/image-2", name: "second.png" },
-        ],
-        index: 1,
-      });
-    } finally {
-      await screen.unmount();
-    }
-  });
-
-  it("renders assistant image-only messages without the empty-response fallback", async () => {
-    const props = buildProps();
-    const onImageExpand = vi.fn();
-    const screen = await render(
-      <MessagesTimeline
-        {...props}
-        onImageExpand={onImageExpand}
-        timelineEntries={[
-          buildAssistantTimelineEntry("", [
-            {
-              type: "image",
-              id: "assistant-image-1",
-              name: "generated.png",
-              mimeType: "image/png",
-              sizeBytes: 4,
-              previewUrl: "/attachments/assistant-image-1",
-            },
-          ]),
-        ]}
-      />,
-    );
-
-    try {
-      await expect.element(page.getByAltText("generated.png")).toBeInTheDocument();
-      await expect.element(page.getByText("(empty response)")).not.toBeInTheDocument();
-
-      await page.getByRole("button", { name: "Preview generated.png" }).click();
-      expect(onImageExpand).toHaveBeenCalledWith({
-        images: [{ src: "/attachments/assistant-image-1", name: "generated.png" }],
-        index: 0,
-      });
-    } finally {
-      await screen.unmount();
-    }
-  });
-
   it("renders user messages as markdown with chat-style line breaks", async () => {
     const screen = await render(
       <MessagesTimeline
@@ -629,6 +410,80 @@ describe("MessagesTimeline", () => {
       expect(icon?.getAttribute("src")).toBe(
         getVscodeIconUrlForEntry("/repo/project/path/to/package.json", "file", "dark"),
       );
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("folds settled-turn work behind a Worked-for row and expands it on click", async () => {
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-commentary",
+            kind: "message" as const,
+            createdAt: "2026-04-13T12:00:00.000Z",
+            message: {
+              id: "message-commentary" as never,
+              role: "assistant" as const,
+              text: "Let me look around first.",
+              turnId: "turn-1" as never,
+              createdAt: "2026-04-13T12:00:00.000Z",
+              completedAt: "2026-04-13T12:00:02.000Z",
+              streaming: false,
+            },
+          },
+          {
+            id: "entry-work",
+            kind: "work" as const,
+            createdAt: "2026-04-13T12:00:05.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-04-13T12:00:05.000Z",
+              turnId: "turn-1" as never,
+              label: "read files",
+              detail: "Inspecting repository state",
+              tone: "tool" as const,
+            },
+          },
+          {
+            id: "entry-final",
+            kind: "message" as const,
+            createdAt: "2026-04-13T12:00:20.000Z",
+            message: {
+              id: "message-final" as never,
+              role: "assistant" as const,
+              text: "All done.",
+              turnId: "turn-1" as never,
+              createdAt: "2026-04-13T12:00:20.000Z",
+              completedAt: "2026-04-13T12:00:30.000Z",
+              streaming: false,
+            },
+          },
+        ]}
+      />,
+    );
+
+    try {
+      const foldButton = page.getByRole("button", { name: "Worked for 30s" });
+      await expect.element(foldButton).toBeVisible();
+      await expect.element(foldButton).toHaveAttribute("aria-expanded", "false");
+
+      expect(document.body.textContent).toContain("All done.");
+      expect(document.body.textContent).not.toContain("Let me look around first.");
+      expect(document.body.textContent).not.toContain("Inspecting repository state");
+
+      await foldButton.click();
+
+      await expect.element(foldButton).toHaveAttribute("aria-expanded", "true");
+      expect(document.body.textContent).toContain("Let me look around first.");
+      expect(document.body.textContent).toContain("Inspecting repository state");
+
+      await foldButton.click();
+
+      await expect.element(foldButton).toHaveAttribute("aria-expanded", "false");
+      expect(document.body.textContent).not.toContain("Inspecting repository state");
     } finally {
       await screen.unmount();
     }
