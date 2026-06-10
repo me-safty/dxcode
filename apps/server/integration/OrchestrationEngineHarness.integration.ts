@@ -376,7 +376,6 @@ export const makeOrchestrationIntegrationHarness = (
       ),
     );
     const serverConfigLayer = ServerConfig.layerTest(workspaceDir, rootDir);
-    const serverConfigLayer = ServerConfig.layerTest(workspaceDir, rootDir);
     const layer = Layer.empty.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(orchestrationReactorLayer),
