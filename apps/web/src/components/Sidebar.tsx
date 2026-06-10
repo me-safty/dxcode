@@ -1481,13 +1481,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           };
         };
 
-        const iconForAction: Record<"rename" | "grouping" | "copy-path" | "delete", string> = {
-          rename: "pencil",
-          grouping: "folder-tree",
-          "copy-path": "copy",
-          delete: "trash",
-        };
-
         const buildTargetedItem = (
           action: "rename" | "grouping" | "copy-path" | "delete",
           label: string,
@@ -1504,14 +1497,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 ...(options?.isDisabled?.(singleMember) ? { disabled: true } : {}),
               }),
               label,
-              icon: iconForAction[action],
+              ...(action === "delete" ? { icon: "trash" } : {}),
             };
           }
 
           return {
             id: `${action}:submenu`,
             label,
-            icon: iconForAction[action],
+            ...(action === "delete" ? { icon: "trash" } : {}),
             children: project.memberProjects.map((member) =>
               makeLeaf(action, member, {
                 ...(options?.destructive ? { destructive: true } : {}),
@@ -1942,7 +1935,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
-          { id: "delete", label: "Delete", destructive: true },
+          { id: "delete", label: "Delete", destructive: true, icon: "trash" },
         ],
         position,
       );

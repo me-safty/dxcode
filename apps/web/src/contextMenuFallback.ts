@@ -57,7 +57,7 @@ function createIconElement(name: string, tone: "neutral" | "destructive"): SVGSV
   svg.setAttribute("stroke-linejoin", "round");
   svg.setAttribute(
     "class",
-    tone === "destructive" ? "size-4 shrink-0" : "size-4 shrink-0 text-muted-foreground",
+    tone === "destructive" ? "size-3.5 shrink-0" : "size-3.5 shrink-0 text-muted-foreground",
   );
   for (const node of paths) {
     const child = document.createElementNS(SVG_NS, node.tag);
