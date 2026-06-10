@@ -1,10 +1,11 @@
-import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon, Trash2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   defaultInstanceIdForDriver,
   type DesktopUpdateChannel,
+  type EnvironmentId,
   PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
   type ProviderInstanceConfig,
@@ -47,7 +48,7 @@ import {
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { useShallow } from "zustand/react/shallow";
-import { selectProjectsAcrossEnvironments, useStore } from "../../store";
+import { selectProjectsAcrossEnvironments, selectThreadsAcrossEnvironments, useStore } from "../../store";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
@@ -78,6 +79,8 @@ import {
   useRelativeTimeTick,
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { WorktreeCleanupDialog } from "../WorktreeCleanupDialog";
+import { type WorktreeThreadRef } from "../../worktreeCleanup";
 import { useServerObservability, useServerProviders } from "../../rpc/serverState";
 
 const THEME_OPTIONS = [
@@ -1395,6 +1398,24 @@ export function ArchivedThreadsPanel() {
     refresh: refreshArchivedThreads,
   } = useArchivedThreadSnapshots(environmentIds);
 
+  const settings = useSettings();
+  const liveThreads = useStore(selectThreadsAcrossEnvironments);
+  const [cleanupTarget, setCleanupTarget] = useState<{
+    environmentId: EnvironmentId;
+    cwd: string;
+  } | null>(null);
+
+  const cleanupThreadRefs: WorktreeThreadRef[] = useMemo(() => {
+    const live = liveThreads.map((thread) => ({
+      worktreePath: thread.worktreePath,
+      isArchived: thread.archivedAt !== null,
+    }));
+    const archived = archivedSnapshots.flatMap(({ snapshot }) =>
+      snapshot.threads.map((thread) => ({ worktreePath: thread.worktreePath, isArchived: true })),
+    );
+    return [...live, ...archived];
+  }, [liveThreads, archivedSnapshots]);
+
   const archivedGroups = useMemo(() => {
     const projectsByEnvironmentAndId = new Map(
       archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
@@ -1514,6 +1535,23 @@ export function ArchivedThreadsPanel() {
             title={project.name}
             icon={<ProjectFavicon environmentId={project.environmentId} cwd={project.cwd} />}
           >
+            <SettingsRow
+              title="Clean up worktrees"
+              description="Remove managed worktrees for this repository."
+              control={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 shrink-0 cursor-pointer px-2.5"
+                  onClick={() =>
+                    setCleanupTarget({ environmentId: project.environmentId, cwd: project.cwd })
+                  }
+                >
+                  Clean up
+                </Button>
+              }
+            />
             {projectThreads.map((thread) => (
               <SettingsRow
                 key={thread.id}
@@ -1536,35 +1574,66 @@ export function ArchivedThreadsPanel() {
                   </>
                 }
                 control={
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
-                    onClick={() =>
-                      void unarchiveThread(scopeThreadRef(thread.environmentId, thread.id))
-                        .then(() => refreshArchivedThreads())
-                        .catch((error) => {
-                          toastManager.add(
-                            stackedThreadToast({
-                              type: "error",
-                              title: "Failed to unarchive thread",
-                              description:
-                                error instanceof Error ? error.message : "An error occurred.",
-                            }),
-                          );
-                        })
-                    }
-                  >
-                    <ArchiveX className="size-3.5" />
-                    <span>Unarchive</span>
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 cursor-pointer gap-1.5 px-2.5 text-destructive"
+                      onClick={() =>
+                        void confirmAndDeleteThread(
+                          scopeThreadRef(thread.environmentId, thread.id),
+                        ).then(() => refreshArchivedThreads())
+                      }
+                    >
+                      <Trash2 className="size-3.5" />
+                      <span>Delete</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                      onClick={() =>
+                        void unarchiveThread(scopeThreadRef(thread.environmentId, thread.id))
+                          .then(() => refreshArchivedThreads())
+                          .catch((error) => {
+                            toastManager.add(
+                              stackedThreadToast({
+                                type: "error",
+                                title: "Failed to unarchive thread",
+                                description:
+                                  error instanceof Error ? error.message : "An error occurred.",
+                              }),
+                            );
+                          })
+                      }
+                    >
+                      <ArchiveX className="size-3.5" />
+                      <span>Unarchive</span>
+                    </Button>
+                  </div>
                 }
               />
             ))}
           </SettingsSection>
         ))
       )}
+      {cleanupTarget ? (
+        <WorktreeCleanupDialog
+          open
+          environmentId={cleanupTarget.environmentId}
+          cwd={cleanupTarget.cwd}
+          scope={settings.worktreeCleanupScope}
+          threadRefs={cleanupThreadRefs}
+          onOpenChange={(next) => {
+            if (!next) {
+              setCleanupTarget(null);
+              refreshArchivedThreads();
+            }
+          }}
+        />
+      ) : null}
     </SettingsPageContainer>
   );
 }
