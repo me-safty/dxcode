@@ -336,6 +336,49 @@ it.effect("fetches a full page regardless of the caller limit so the branch PR i
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("matches the head fork owner when the selector is owner:branch", () =>
+  Effect.gen(function* () {
+    const list = [
+      {
+        ...forgejoPullRequest,
+        number: 10,
+        head: { ref: "shared", repo: { full_name: "owner/repo" } },
+      },
+      {
+        ...forgejoPullRequest,
+        number: 20,
+        head: { ref: "shared", repo: { full_name: "forker/repo", owner: { login: "forker" } } },
+      },
+    ];
+    const { layerEffect } = makeLayer({ response: () => Response.json(list) });
+
+    const layer = yield* layerEffect;
+    yield* Effect.gen(function* () {
+      const forgejo = yield* ForgejoApi.ForgejoApi;
+
+      const fork = yield* forgejo.listPullRequests({
+        cwd: "/repo",
+        headSelector: "forker:shared",
+        state: "open",
+      });
+      assert.deepStrictEqual(
+        fork.map((record) => record.number),
+        [20],
+      );
+
+      const base = yield* forgejo.listPullRequests({
+        cwd: "/repo",
+        headSelector: "owner:shared",
+        state: "open",
+      });
+      assert.deepStrictEqual(
+        base.map((record) => record.number),
+        [10],
+      );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("createRepository posts to /user/repos for own account", () =>
   Effect.gen(function* () {
     const { execute, layerEffect } = makeLayer({

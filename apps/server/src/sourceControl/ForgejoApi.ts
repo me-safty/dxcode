@@ -388,20 +388,33 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
               },
             ),
             ForgejoPullRequests.ForgejoPullRequestListSchema,
+          ).pipe(
+            Effect.map((list) => {
+              const wanted = SourceControlProvider.sourceBranch(input);
+              const wantedOwner = (
+                input.source?.owner ??
+                SourceControlProvider.parseSourceControlOwnerRef(input.headSelector)?.owner
+              )?.toLowerCase();
+              const byBranch = list
+                .map(ForgejoPullRequests.normalizeForgejoPullRequestRecord)
+                .filter((record) => {
+                  if (record.headRefName !== wanted) return false;
+                  if (wantedOwner === undefined) return true;
+                  // Same-repo PRs omit the head owner, so fall back to the base repo owner.
+                  const headOwner = (
+                    record.headRepositoryOwnerLogin ?? locator.owner
+                  ).toLowerCase();
+                  return headOwner === wantedOwner;
+                });
+              const byState =
+                input.state === "merged"
+                  ? byBranch.filter((record) => record.state === "merged")
+                  : input.state === "closed"
+                    ? byBranch.filter((record) => record.state === "closed")
+                    : byBranch;
+              return input.limit !== undefined ? byState.slice(0, input.limit) : byState;
+            }),
           );
-        }),
-        Effect.map((list) => {
-          const wanted = SourceControlProvider.sourceBranch(input);
-          const byBranch = list
-            .map(ForgejoPullRequests.normalizeForgejoPullRequestRecord)
-            .filter((record) => record.headRefName === wanted);
-          const byState =
-            input.state === "merged"
-              ? byBranch.filter((record) => record.state === "merged")
-              : input.state === "closed"
-                ? byBranch.filter((record) => record.state === "closed")
-                : byBranch;
-          return input.limit !== undefined ? byState.slice(0, input.limit) : byState;
         }),
       ),
     getPullRequest: (input) =>
