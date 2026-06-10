@@ -60,6 +60,8 @@ import type {
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
+  OrchestrationSetExternalThreadMutedInput,
+  OrchestrationSetExternalThreadMutedResult,
   OrchestrationShellSnapshot,
   OrchestrationShellStreamItem,
   OrchestrationSubscribeThreadInput,
@@ -605,6 +607,9 @@ export interface EnvironmentApi {
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;
     getArchivedShellSnapshot: () => Promise<OrchestrationShellSnapshot>;
+    setExternalThreadMuted: (
+      input: OrchestrationSetExternalThreadMutedInput,
+    ) => Promise<OrchestrationSetExternalThreadMutedResult>;
     subscribeShell: (
       callback: (event: OrchestrationShellStreamItem) => void,
       options?: {

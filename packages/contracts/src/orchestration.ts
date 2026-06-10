@@ -28,6 +28,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
+  setExternalThreadMuted: "orchestration.setExternalThreadMuted",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
 } as const;
@@ -330,6 +331,11 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+export const OrchestrationExternalThreadLinkState = Schema.Struct({
+  muted: Schema.Boolean,
+});
+export type OrchestrationExternalThreadLinkState = typeof OrchestrationExternalThreadLinkState.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -353,6 +359,7 @@ export const OrchestrationThread = Schema.Struct({
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  externalThreadLink: Schema.optionalKey(Schema.NullOr(OrchestrationExternalThreadLinkState)),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -396,6 +403,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
+  externalThreadLink: Schema.optionalKey(Schema.NullOr(OrchestrationExternalThreadLinkState)),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
@@ -1206,6 +1214,19 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
+export const OrchestrationSetExternalThreadMutedInput = Schema.Struct({
+  threadId: ThreadId,
+  muted: Schema.Boolean,
+});
+export type OrchestrationSetExternalThreadMutedInput =
+  typeof OrchestrationSetExternalThreadMutedInput.Type;
+
+export const OrchestrationSetExternalThreadMutedResult = Schema.Struct({
+  externalThreadLink: Schema.NullOr(OrchestrationExternalThreadLinkState),
+});
+export type OrchestrationSetExternalThreadMutedResult =
+  typeof OrchestrationSetExternalThreadMutedResult.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -1226,6 +1247,10 @@ export const OrchestrationRpcSchemas = {
   getArchivedShellSnapshot: {
     input: Schema.Struct({}),
     output: OrchestrationShellSnapshot,
+  },
+  setExternalThreadMuted: {
+    input: OrchestrationSetExternalThreadMutedInput,
+    output: OrchestrationSetExternalThreadMutedResult,
   },
   subscribeThread: {
     input: OrchestrationSubscribeThreadInput,

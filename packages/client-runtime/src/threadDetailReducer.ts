@@ -96,6 +96,7 @@ export function applyThreadDetailEvent(
           activities: [],
           checkpoints: [],
           session: null,
+          externalThreadLink: null,
         },
       };
 

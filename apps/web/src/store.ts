@@ -259,6 +259,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     worktreePath: thread.worktreePath,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
+    externalThreadLink: thread.externalThreadLink ?? null,
   };
 }
 
@@ -286,6 +287,7 @@ function mapThreadShell(
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    externalThreadLink: thread.externalThreadLink ?? null,
   };
   const session = thread.session ? mapSession(thread.session) : null;
   const turnState: ThreadTurnState = {
@@ -309,6 +311,7 @@ function mapThreadShell(
     hasPendingApprovals: thread.hasPendingApprovals,
     hasPendingUserInput: thread.hasPendingUserInput,
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
+    externalThreadLink: thread.externalThreadLink ?? null,
   };
   return {
     shell,
@@ -334,6 +337,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    externalThreadLink: thread.externalThreadLink ?? null,
   };
 }
 
@@ -389,6 +393,15 @@ function threadSessionsEqual(
   );
 }
 
+function externalThreadLinksEqual(
+  left: SidebarThreadSummary["externalThreadLink"] | undefined,
+  right: SidebarThreadSummary["externalThreadLink"],
+): boolean {
+  if (left === right) return true;
+  if (left == null || right == null) return false;
+  return left.muted === right.muted;
+}
+
 function sidebarThreadSummariesEqual(
   left: SidebarThreadSummary | undefined,
   right: SidebarThreadSummary,
@@ -409,7 +422,8 @@ function sidebarThreadSummariesEqual(
     left.latestUserMessageAt === right.latestUserMessageAt &&
     left.hasPendingApprovals === right.hasPendingApprovals &&
     left.hasPendingUserInput === right.hasPendingUserInput &&
-    left.hasActionableProposedPlan === right.hasActionableProposedPlan
+    left.hasActionableProposedPlan === right.hasActionableProposedPlan &&
+    externalThreadLinksEqual(left.externalThreadLink, right.externalThreadLink)
   );
 }
 
@@ -429,7 +443,8 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.archivedAt === right.archivedAt &&
     left.updatedAt === right.updatedAt &&
     left.branch === right.branch &&
-    left.worktreePath === right.worktreePath
+    left.worktreePath === right.worktreePath &&
+    externalThreadLinksEqual(left.externalThreadLink, right.externalThreadLink)
   );
 }
 
@@ -1281,6 +1296,7 @@ function applyEnvironmentOrchestrationEvent(
           activities: [],
           checkpoints: [],
           session: null,
+          externalThreadLink: null,
         },
         environmentId,
       );
@@ -1955,6 +1971,45 @@ export function setThreadBranch(
   return commitEnvironmentState(state, threadRef.environmentId, nextEnvironmentState);
 }
 
+export function setThreadExternalThreadLink(
+  state: AppState,
+  threadRef: ScopedThreadRef,
+  externalThreadLink: SidebarThreadSummary["externalThreadLink"],
+): AppState {
+  const environmentState = getStoredEnvironmentState(state, threadRef.environmentId);
+  const shell = environmentState.threadShellById[threadRef.threadId];
+  const summary = environmentState.sidebarThreadSummaryById[threadRef.threadId];
+  let nextEnvironmentState = environmentState;
+
+  if (shell && !externalThreadLinksEqual(shell.externalThreadLink, externalThreadLink)) {
+    nextEnvironmentState = {
+      ...nextEnvironmentState,
+      threadShellById: {
+        ...nextEnvironmentState.threadShellById,
+        [threadRef.threadId]: {
+          ...shell,
+          externalThreadLink,
+        },
+      },
+    };
+  }
+
+  if (summary && !externalThreadLinksEqual(summary.externalThreadLink, externalThreadLink)) {
+    nextEnvironmentState = {
+      ...nextEnvironmentState,
+      sidebarThreadSummaryById: {
+        ...nextEnvironmentState.sidebarThreadSummaryById,
+        [threadRef.threadId]: {
+          ...summary,
+          externalThreadLink,
+        },
+      },
+    };
+  }
+
+  return commitEnvironmentState(state, threadRef.environmentId, nextEnvironmentState);
+}
+
 interface AppStore extends AppState {
   setActiveEnvironmentId: (environmentId: EnvironmentId) => void;
   removeEnvironmentState: (environmentId: EnvironmentId) => void;
@@ -1974,6 +2029,10 @@ interface AppStore extends AppState {
     threadRef: ScopedThreadRef,
     branch: string | null,
     worktreePath: string | null,
+  ) => void;
+  setThreadExternalThreadLink: (
+    threadRef: ScopedThreadRef,
+    externalThreadLink: SidebarThreadSummary["externalThreadLink"],
   ) => void;
 }
 
@@ -1996,4 +2055,6 @@ export const useStore = create<AppStore>((set) => ({
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),
   setThreadBranch: (threadRef, branch, worktreePath) =>
     set((state) => setThreadBranch(state, threadRef, branch, worktreePath)),
+  setThreadExternalThreadLink: (threadRef, externalThreadLink) =>
+    set((state) => setThreadExternalThreadLink(state, threadRef, externalThreadLink)),
 }));

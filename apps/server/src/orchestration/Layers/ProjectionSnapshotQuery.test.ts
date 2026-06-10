@@ -44,6 +44,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_state`;
       yield* sql`DELETE FROM projection_thread_proposed_plans`;
       yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM external_thread_links`;
 
       yield* sql`
         INSERT INTO projection_projects (
@@ -65,6 +66,33 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           '2026-02-24T00:00:00.000Z',
           '2026-02-24T00:00:01.000Z',
           NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO external_thread_links (
+          source,
+          external_thread_id,
+          t3_thread_id,
+          project_id,
+          primary_external_message_id,
+          url,
+          muted,
+          metadata_json,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'slack',
+          'slack-thread-1',
+          'thread-1',
+          'project-1',
+          'slack-message-1',
+          'https://slack.test/archives/C1/p1',
+          1,
+          '{}',
+          '2026-02-24T00:00:02.500Z',
+          '2026-02-24T00:00:02.600Z'
         )
       `;
 
@@ -363,6 +391,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             lastError: null,
             updatedAt: "2026-02-24T00:00:07.000Z",
           },
+          externalThreadLink: {
+            muted: true,
+          },
         },
       ]);
 
@@ -432,6 +463,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           hasPendingApprovals: true,
           hasPendingUserInput: false,
           hasActionableProposedPlan: false,
+          externalThreadLink: {
+            muted: true,
+          },
         },
       ]);
 

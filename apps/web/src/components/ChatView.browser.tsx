@@ -264,6 +264,9 @@ function createMockEnvironmentApi(input: {
       getArchivedShellSnapshot: (() => {
         throw new Error("Not implemented in browser test.");
       }) as EnvironmentApi["orchestration"]["getArchivedShellSnapshot"],
+      setExternalThreadMuted: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["orchestration"]["setExternalThreadMuted"],
       subscribeShell: (() => () => undefined) as EnvironmentApi["orchestration"]["subscribeShell"],
       subscribeThread: (() => () =>
         undefined) as EnvironmentApi["orchestration"]["subscribeThread"],

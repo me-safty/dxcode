@@ -1,6 +1,7 @@
 import type {
   EnvironmentId,
   ModelSelection,
+  OrchestrationExternalThreadLinkState,
   OrchestrationLatestTurn,
   OrchestrationProposedPlanId,
   RepositoryIdentity,
@@ -115,6 +116,7 @@ export interface Thread {
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  externalThreadLink?: OrchestrationExternalThreadLinkState | null;
 }
 
 export interface ThreadShell {
@@ -132,6 +134,7 @@ export interface ThreadShell {
   updatedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
+  externalThreadLink?: OrchestrationExternalThreadLinkState | null;
 }
 
 export interface ThreadTurnState {
@@ -156,6 +159,7 @@ export interface SidebarThreadSummary {
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
+  externalThreadLink?: OrchestrationExternalThreadLinkState | null;
 }
 
 export interface ThreadSession {

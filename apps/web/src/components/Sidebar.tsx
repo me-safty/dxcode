@@ -14,6 +14,8 @@ import {
   IconSearch as SearchIcon,
   IconSettings as SettingsIcon,
   IconTerminal2 as TerminalIcon,
+  IconVolume,
+  IconVolumeOff,
 } from "@tabler/icons-react";
 import {
   SidebarWorktreePrStatus,
@@ -366,6 +368,7 @@ interface SidebarThreadRowProps {
   ) => Promise<void>;
   cancelRename: () => void;
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
+  attemptSetExternalThreadMuted: (threadRef: ScopedThreadRef, muted: boolean) => Promise<void>;
 }
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
@@ -390,6 +393,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     commitRename,
     cancelRename,
     attemptArchiveThread,
+    attemptSetExternalThreadMuted,
     thread,
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
@@ -422,10 +426,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const emphasizeRow = isHighlighted || needsReview;
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
+  const externalThreadLink = thread.externalThreadLink ?? null;
+  const hasExternalThreadLink = externalThreadLink !== null;
+  const nextExternalThreadMuted = !(externalThreadLink?.muted ?? false);
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
     : !isThreadRunning
-      ? "pointer-events-none transition-opacity duration-150 max-sm:pr-6 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
+      ? hasExternalThreadLink
+        ? "pointer-events-none transition-opacity duration-150 max-sm:pr-12 sm:pr-6"
+        : "pointer-events-none transition-opacity duration-150 max-sm:pr-6 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
       : "pointer-events-none";
   const clearConfirmingArchive = useCallback(() => {
     setConfirmingArchiveThreadKey((current) => (current === threadKey ? null : current));
@@ -564,7 +573,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     },
     [attemptArchiveThread, threadRef],
   );
+  const handleExternalMuteClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      clearConfirmingArchive();
+      void attemptSetExternalThreadMuted(threadRef, nextExternalThreadMuted);
+    },
+    [attemptSetExternalThreadMuted, clearConfirmingArchive, nextExternalThreadMuted, threadRef],
+  );
   const rowButtonRender = useMemo(() => <div role="button" tabIndex={0} />, []);
+  const externalMuteLabel = nextExternalThreadMuted
+    ? "Mute external replies"
+    : "Resume external replies";
+  const ExternalMuteIcon = externalThreadLink?.muted ? IconVolumeOff : IconVolume;
 
   return (
     <SidebarMenuSubItem
@@ -658,7 +680,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               </button>
             ) : !isThreadRunning ? (
               appSettingsConfirmThreadArchive ? (
-                <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                <div
+                  className={`pointer-events-none absolute top-1/2 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100 ${
+                    hasExternalThreadLink ? "max-sm:right-6 sm:right-1" : "right-1"
+                  }`}
+                >
                   <button
                     type="button"
                     data-thread-selection-safe
@@ -675,7 +701,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                      <div
+                        className={`pointer-events-none absolute top-1/2 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100 ${
+                          hasExternalThreadLink ? "max-sm:right-6 sm:right-1" : "right-1"
+                        }`}
+                      >
                         <button
                           type="button"
                           data-thread-selection-safe
@@ -694,8 +724,52 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 </Tooltip>
               )
             ) : null}
+            {hasExternalThreadLink && !isThreadRunning && !isConfirmingArchive ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <div className="pointer-events-auto absolute top-1/2 right-1 -translate-y-1/2 sm:hidden">
+                      <button
+                        type="button"
+                        data-thread-selection-safe
+                        data-testid={`thread-external-mute-${thread.id}`}
+                        aria-label={`${externalMuteLabel} for ${thread.title}`}
+                        aria-pressed={externalThreadLink?.muted ?? false}
+                        className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                        onPointerDown={stopPropagationOnPointerDown}
+                        onClick={handleExternalMuteClick}
+                      >
+                        <ExternalMuteIcon className="size-3.5" />
+                      </button>
+                    </div>
+                  }
+                />
+                <TooltipPopup side="top">{externalMuteLabel}</TooltipPopup>
+              </Tooltip>
+            ) : null}
             <span className={threadMetaClassName}>
               <span className="inline-flex items-center gap-1">
+                {hasExternalThreadLink && !isThreadRunning ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          data-thread-selection-safe
+                          data-testid={`thread-external-mute-desktop-${thread.id}`}
+                          aria-label={`${externalMuteLabel} for ${thread.title}`}
+                          aria-pressed={externalThreadLink?.muted ?? false}
+                          className="pointer-events-auto hidden size-5 cursor-pointer items-center justify-center text-muted-foreground/50 opacity-0 transition-[color,opacity] duration-150 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:opacity-100 sm:inline-flex"
+                          onPointerDown={stopPropagationOnPointerDown}
+                          onClick={handleExternalMuteClick}
+                        >
+                          <ExternalMuteIcon className="size-3.5" />
+                        </button>
+                      }
+                    />
+                    <TooltipPopup side="top">{externalMuteLabel}</TooltipPopup>
+                  </Tooltip>
+                ) : null}
                 {jumpLabel ? (
                   <Tooltip>
                     <TooltipTrigger
@@ -775,6 +849,7 @@ interface SidebarProjectThreadListProps {
   ) => Promise<void>;
   cancelRename: () => void;
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
+  attemptSetExternalThreadMuted: (threadRef: ScopedThreadRef, muted: boolean) => Promise<void>;
   openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
   expandThreadListForProject: (projectKey: string) => void;
   collapseThreadListForProject: (projectKey: string) => void;
@@ -815,6 +890,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     commitRename,
     cancelRename,
     attemptArchiveThread,
+    attemptSetExternalThreadMuted,
     openPrLink,
     expandThreadListForProject,
     collapseThreadListForProject,
@@ -851,6 +927,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         commitRename={commitRename}
         cancelRename={cancelRename}
         attemptArchiveThread={attemptArchiveThread}
+        attemptSetExternalThreadMuted={attemptSetExternalThreadMuted}
       />
     );
   };
@@ -985,6 +1062,7 @@ interface SidebarProjectItemProps {
   newThreadShortcutLabel: string | null;
   handleNewThread: ReturnType<typeof useNewThreadHandler>["handleNewThread"];
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
+  setExternalThreadMuted: ReturnType<typeof useThreadActions>["setExternalThreadMuted"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
   threadJumpLabelByKey: ReadonlyMap<string, string>;
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void;
@@ -1005,6 +1083,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     newThreadShortcutLabel,
     handleNewThread,
     archiveThread,
+    setExternalThreadMuted,
     deleteThread,
     threadJumpLabelByKey,
     attachThreadListAutoAnimateRef,
@@ -1841,6 +1920,23 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [archiveThread],
   );
 
+  const attemptSetExternalThreadMuted = useCallback(
+    async (threadRef: ScopedThreadRef, muted: boolean) => {
+      try {
+        await setExternalThreadMuted(threadRef, muted);
+      } catch (error) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: muted ? "Failed to mute thread" : "Failed to resume thread",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      }
+    },
+    [setExternalThreadMuted],
+  );
+
   const cancelRename = useCallback(() => {
     setRenamingThreadKey(null);
     renamingInputRef.current = null;
@@ -2162,6 +2258,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         commitRename={commitRename}
         cancelRename={cancelRename}
         attemptArchiveThread={attemptArchiveThread}
+        attemptSetExternalThreadMuted={attemptSetExternalThreadMuted}
         openPrLink={openPrLink}
         expandThreadListForProject={expandThreadListForProject}
         collapseThreadListForProject={collapseThreadListForProject}
@@ -2593,6 +2690,7 @@ interface SidebarProjectsContentProps {
   handleProjectDragCancel: (event: DragCancelEvent) => void;
   handleNewThread: ReturnType<typeof useNewThreadHandler>["handleNewThread"];
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
+  setExternalThreadMuted: ReturnType<typeof useThreadActions>["setExternalThreadMuted"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
   sortedProjects: readonly SidebarProjectSnapshot[];
   expandedThreadListsByProject: ReadonlySet<string>;
@@ -2634,6 +2732,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     handleProjectDragCancel,
     handleNewThread,
     archiveThread,
+    setExternalThreadMuted,
     deleteThread,
     sortedProjects,
     expandedThreadListsByProject,
@@ -2786,6 +2885,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                         newThreadShortcutLabel={newThreadShortcutLabel}
                         handleNewThread={handleNewThread}
                         archiveThread={archiveThread}
+                        setExternalThreadMuted={setExternalThreadMuted}
                         deleteThread={deleteThread}
                         threadJumpLabelByKey={threadJumpLabelByKey}
                         attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
@@ -2818,6 +2918,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 newThreadShortcutLabel={newThreadShortcutLabel}
                 handleNewThread={handleNewThread}
                 archiveThread={archiveThread}
+                setExternalThreadMuted={setExternalThreadMuted}
                 deleteThread={deleteThread}
                 threadJumpLabelByKey={threadJumpLabelByKey}
                 attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
@@ -2859,7 +2960,7 @@ export default function Sidebar() {
   const sidebarThreadPreviewCount = useSettings((s) => s.sidebarThreadPreviewCount);
   const { updateSettings } = useUpdateSettings();
   const { handleNewThread } = useNewThreadHandler();
-  const { archiveThread, deleteThread } = useThreadActions();
+  const { archiveThread, deleteThread, setExternalThreadMuted } = useThreadActions();
   const { isMobile, setOpenMobile } = useSidebar();
   const routeThreadRef = useParams({
     strict: false,
@@ -3497,6 +3598,7 @@ export default function Sidebar() {
             handleProjectDragCancel={handleProjectDragCancel}
             handleNewThread={handleNewThread}
             archiveThread={archiveThread}
+            setExternalThreadMuted={setExternalThreadMuted}
             deleteThread={deleteThread}
             sortedProjects={sortedProjects}
             expandedThreadListsByProject={expandedThreadListsByProject}

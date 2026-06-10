@@ -165,6 +165,9 @@ export interface WsRpcClient {
     readonly getArchivedShellSnapshot: RpcUnaryNoArgMethod<
       typeof ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot
     >;
+    readonly setExternalThreadMuted: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.setExternalThreadMuted
+    >;
     readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
   };
@@ -358,6 +361,10 @@ export function createWsRpcClient(
       getArchivedShellSnapshot: () =>
         transport.request((client) =>
           client[ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]({}),
+        ),
+      setExternalThreadMuted: (input) =>
+        transport.request((client) =>
+          client[ORCHESTRATION_WS_METHODS.setExternalThreadMuted](input),
         ),
       subscribeShell: (listener, options) =>
         transport.subscribe(

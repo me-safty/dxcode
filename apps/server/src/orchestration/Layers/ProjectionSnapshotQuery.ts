@@ -77,8 +77,12 @@ const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    externalThreadLinkCount: Schema.Number,
+    externalThreadLinkMuted: Schema.Number,
   }),
 );
+type ProjectionThreadDbRow = Schema.Schema.Type<typeof ProjectionThreadDbRowSchema>;
+type ExternalThreadLinkState = NonNullable<OrchestrationThread["externalThreadLink"]>;
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
     payload: Schema.fromJsonString(Schema.Unknown),
@@ -223,6 +227,14 @@ function mapSessionRow(
   };
 }
 
+function mapExternalThreadLinkState(row: ProjectionThreadDbRow): ExternalThreadLinkState | null {
+  return row.externalThreadLinkCount > 0
+    ? {
+        muted: row.externalThreadLinkMuted > 0,
+      }
+    : null;
+}
+
 function mapProjectShellRow(
   row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
   repositoryIdentity: OrchestrationProject["repositoryIdentity"],
@@ -337,7 +349,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          deleted_at AS "deletedAt"
+          deleted_at AS "deletedAt",
+          (
+            SELECT COUNT(*)
+            FROM external_thread_links
+            WHERE external_thread_links.t3_thread_id = projection_threads.thread_id
+          ) AS "externalThreadLinkCount",
+          (
+            SELECT CASE
+              WHEN COUNT(*) > 0 AND MIN(external_thread_links.muted) = 1 THEN 1
+              ELSE 0
+            END
+            FROM external_thread_links
+            WHERE external_thread_links.t3_thread_id = projection_threads.thread_id
+          ) AS "externalThreadLinkMuted"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
       `,
@@ -365,7 +390,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          deleted_at AS "deletedAt"
+          deleted_at AS "deletedAt",
+          (
+            SELECT COUNT(*)
+            FROM external_thread_links
+            WHERE external_thread_links.t3_thread_id = projection_threads.thread_id
+          ) AS "externalThreadLinkCount",
+          (
+            SELECT CASE
+              WHEN COUNT(*) > 0 AND MIN(external_thread_links.muted) = 1 THEN 1
+              ELSE 0
+            END
+            FROM external_thread_links
+            WHERE external_thread_links.t3_thread_id = projection_threads.thread_id
+          ) AS "externalThreadLinkMuted"
         FROM projection_threads
         WHERE deleted_at IS NULL
           AND archived_at IS NULL
@@ -395,7 +433,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          deleted_at AS "deletedAt"
+          deleted_at AS "deletedAt",
+          (
+            SELECT COUNT(*)
+            FROM external_thread_links
+            WHERE external_thread_links.t3_thread_id = projection_threads.thread_id
+          ) AS "externalThreadLinkCount",
+          (
+            SELECT CASE
+              WHEN COUNT(*) > 0 AND MIN(external_thread_links.muted) = 1 THEN 1
+              ELSE 0
+            END
+            FROM external_thread_links
+            WHERE external_thread_links.t3_thread_id = projection_threads.thread_id
+          ) AS "externalThreadLinkMuted"
         FROM projection_threads
         WHERE deleted_at IS NULL
           AND archived_at IS NOT NULL
@@ -757,7 +808,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          deleted_at AS "deletedAt"
+          deleted_at AS "deletedAt",
+          (
+            SELECT COUNT(*)
+            FROM external_thread_links
+            WHERE external_thread_links.t3_thread_id = projection_threads.thread_id
+          ) AS "externalThreadLinkCount",
+          (
+            SELECT CASE
+              WHEN COUNT(*) > 0 AND MIN(external_thread_links.muted) = 1 THEN 1
+              ELSE 0
+            END
+            FROM external_thread_links
+            WHERE external_thread_links.t3_thread_id = projection_threads.thread_id
+          ) AS "externalThreadLinkMuted"
         FROM projection_threads
         WHERE thread_id = ${threadId}
           AND deleted_at IS NULL
@@ -1191,6 +1255,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 activities: activitiesByThread.get(row.threadId) ?? [],
                 checkpoints: checkpointsByThread.get(row.threadId) ?? [],
                 session: sessionsByThread.get(row.threadId) ?? null,
+                externalThreadLink: mapExternalThreadLinkState(row),
               }));
 
               const snapshot = {
@@ -1389,6 +1454,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   activities: [],
                   checkpoints: [],
                   session: sessionByThread.get(row.threadId) ?? null,
+                  externalThreadLink: mapExternalThreadLinkState(row),
                 });
               }
 
@@ -1517,6 +1583,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       hasPendingApprovals: row.pendingApprovalCount > 0,
                       hasPendingUserInput: row.pendingUserInputCount > 0,
                       hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                      externalThreadLink: mapExternalThreadLinkState(row),
                     } satisfies OrchestrationThreadShell)
                   : Result.failVoid,
               ),
@@ -1651,6 +1718,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   hasPendingApprovals: row.pendingApprovalCount > 0,
                   hasPendingUserInput: row.pendingUserInputCount > 0,
                   hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                  externalThreadLink: mapExternalThreadLinkState(row),
                 }),
               ),
               updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
@@ -1891,6 +1959,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
         hasPendingUserInput: threadRow.value.pendingUserInputCount > 0,
         hasActionableProposedPlan: threadRow.value.hasActionableProposedPlan > 0,
+        externalThreadLink: mapExternalThreadLinkState(threadRow.value),
       } satisfies OrchestrationThreadShell);
     });
 
@@ -2022,6 +2091,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           completedAt: row.completedAt,
         })),
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
+        externalThreadLink: mapExternalThreadLinkState(threadRow.value),
       };
 
       return Option.some(

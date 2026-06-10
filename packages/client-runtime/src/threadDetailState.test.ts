@@ -56,6 +56,7 @@ const BASE_THREAD: OrchestrationThread = {
   activities: [],
   checkpoints: [],
   session: null,
+  externalThreadLink: null,
 };
 
 const TARGET = {

@@ -98,6 +98,16 @@ export function useThreadActions() {
     refreshArchivedThreadsForEnvironment(target.environmentId);
   }, []);
 
+  const setExternalThreadMuted = useCallback(async (target: ScopedThreadRef, muted: boolean) => {
+    const api = readEnvironmentApi(target.environmentId);
+    if (!api) return;
+    const result = await api.orchestration.setExternalThreadMuted({
+      threadId: target.threadId,
+      muted,
+    });
+    useStore.getState().setThreadExternalThreadLink(target, result.externalThreadLink);
+  }, []);
+
   const deleteThread = useCallback(
     async (target: ScopedThreadRef, opts: { deletedThreadKeys?: ReadonlySet<string> } = {}) => {
       const api = readEnvironmentApi(target.environmentId);
@@ -288,5 +298,6 @@ export function useThreadActions() {
     unarchiveThread,
     deleteThread,
     confirmAndDeleteThread,
+    setExternalThreadMuted,
   };
 }

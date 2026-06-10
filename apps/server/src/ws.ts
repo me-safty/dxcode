@@ -68,6 +68,7 @@ import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
+import { ExternalIntegrationRepository } from "./persistence/Services/ExternalIntegrations.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
@@ -131,6 +132,7 @@ const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.dispatchCommand, AuthOrchestrationOperateScope],
+  [ORCHESTRATION_WS_METHODS.setExternalThreadMuted, AuthOrchestrationOperateScope],
   [ORCHESTRATION_WS_METHODS.getTurnDiff, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getFullThreadDiff, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.replayEvents, AuthOrchestrationReadScope],
@@ -232,6 +234,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
       const crypto = yield* Crypto.Crypto;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
       const orchestrationEngine = yield* OrchestrationEngineService;
+      const externalIntegrations = yield* ExternalIntegrationRepository;
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
       const keybindings = yield* Keybindings;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
@@ -925,6 +928,42 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                     message: "Failed to load archived orchestration shell snapshot",
                     cause,
                   }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.setExternalThreadMuted]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.setExternalThreadMuted,
+            Effect.gen(function* () {
+              const links = yield* externalIntegrations.listThreadLinksByThread(input.threadId);
+              if (links.length === 0) {
+                return {
+                  externalThreadLink: null,
+                };
+              }
+
+              const updatedAt = yield* nowIso;
+              yield* Effect.forEach(
+                links,
+                (link) =>
+                  externalIntegrations.setThreadMuted({
+                    source: link.source,
+                    externalThreadId: link.externalThreadId,
+                    muted: input.muted,
+                    updatedAt,
+                  }),
+                { concurrency: "unbounded" },
+              );
+
+              return {
+                externalThreadLink: {
+                  muted: input.muted,
+                },
+              };
+            }).pipe(
+              Effect.mapError((cause) =>
+                toDispatchCommandError(cause, "Failed to update external thread mute state."),
               ),
             ),
             { "rpc.aggregate": "orchestration" },
