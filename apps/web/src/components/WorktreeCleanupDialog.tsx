@@ -1,5 +1,6 @@
 import type { EnvironmentId, VcsManagedWorktree } from "@t3tools/contracts";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import { ensureEnvironmentApi } from "../environmentApi";
 import { useArchivedThreadSnapshots } from "../lib/archivedThreadsState";
@@ -61,7 +62,9 @@ export function WorktreeCleanupDialog({
   // entry points (sidebar + archived panel) classify identically and archived
   // worktrees are never mistaken for orphaned ones.
   const environmentIds = useMemo(() => [environmentId], [environmentId]);
-  const liveThreads = useStore((state) => selectThreadsForEnvironment(state, environmentId));
+  const liveThreads = useStore(
+    useShallow((state) => selectThreadsForEnvironment(state, environmentId)),
+  );
   const { snapshots: archivedSnapshots, isLoading: archivedLoading } =
     useArchivedThreadSnapshots(environmentIds);
   const threadRefs = useMemo<WorktreeThreadRef[]>(() => {
