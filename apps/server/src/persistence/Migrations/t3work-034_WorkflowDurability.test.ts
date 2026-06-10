@@ -19,7 +19,7 @@ interface TableRow {
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
-layer("t3work-032_WorkflowDurability", (it) => {
+layer("t3work-034_WorkflowDurability", (it) => {
   it.effect("creates workflow_journal + workflow_runs cleanly without disturbing projections", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

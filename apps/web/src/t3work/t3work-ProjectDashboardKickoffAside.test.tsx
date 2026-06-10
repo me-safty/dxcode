@@ -123,6 +123,12 @@ describe("ProjectDashboardKickoffAside", () => {
       },
       setCollapsed: () => undefined,
       userOverrides: { sections: [] },
+      personalization: { composition: { sections: [] }, items: {} },
+      hideSection: () => undefined,
+      moveSection: () => undefined,
+      hideItem: () => undefined,
+      pinItem: () => undefined,
+      unpinItem: () => undefined,
     });
   });
 

@@ -1,5 +1,4 @@
 import type {
-  AuthSessionRole,
   EnvironmentId,
   ExecutionEnvironmentDescriptor,
   PersistedSavedEnvironmentRecord,
@@ -65,7 +64,9 @@ export interface ProjectShellServerState {
 
 export interface ProjectShellAuthState {
   readonly status: "checking" | "authenticated" | "unauthenticated";
-  readonly role: AuthSessionRole | null;
+  // Upstream replaced AuthSessionRole with scope-based authorization; keep the
+  // legacy literal shape until the project shell adopts scopes.
+  readonly role: "owner" | "client" | null;
   readonly descriptor: ExecutionEnvironmentDescriptor | null;
 }
 
