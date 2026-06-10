@@ -151,3 +151,9 @@ describe("ServerSettingsPatch string normalization", () => {
     expect(encoded.providers?.codex?.binaryPath).toBe("/opt/homebrew/bin/codex");
   });
 });
+
+describe("worktreeCleanupScope", () => {
+  it("defaults to orphaned", () => {
+    expect(DEFAULT_SERVER_SETTINGS.worktreeCleanupScope).toBe("orphaned");
+  });
+});
