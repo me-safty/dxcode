@@ -312,6 +312,30 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
     );
   });
 
+  describe("managed worktrees", () => {
+    it.effect("lists managed worktrees under the worktrees dir with dirty status", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        yield* driver.createWorktree({
+          cwd,
+          refName: initialBranch,
+          newRefName: "feature-a",
+          path: null,
+        });
+
+        const result = yield* driver.listManagedWorktrees({ cwd });
+
+        assert.equal(result.worktrees.length, 1);
+        assert.equal(result.worktrees[0]?.refName, "feature-a");
+        // Fresh worktree branch has no remote => treated as dirty (unpushed).
+        assert.equal(result.worktrees[0]?.isDirty, true);
+      }),
+    );
+  });
+
   describe("commit context", () => {
     it.effect("stages selected files and commits only those files", () =>
       Effect.gen(function* () {

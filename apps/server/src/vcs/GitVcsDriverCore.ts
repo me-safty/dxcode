@@ -2155,6 +2155,102 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
   });
 
+  const readWorktreeDirty = (worktreePath: string): Effect.Effect<boolean, never> =>
+    Effect.gen(function* () {
+      const statusResult = yield* executeGit(
+        "GitVcsDriver.listManagedWorktrees.status",
+        worktreePath,
+        ["status", "--porcelain"],
+        { timeoutMs: 10_000, allowNonZeroExit: true },
+      ).pipe(Effect.orElseSucceed(() => null));
+      if (statusResult && statusResult.stdout.trim().length > 0) {
+        return true;
+      }
+      const remoteContains = yield* executeGit(
+        "GitVcsDriver.listManagedWorktrees.remoteContains",
+        worktreePath,
+        ["branch", "--remotes", "--contains", "HEAD"],
+        { timeoutMs: 10_000, allowNonZeroExit: true },
+      ).pipe(Effect.orElseSucceed(() => null));
+      const hasRemoteContainingHead =
+        remoteContains !== null &&
+        remoteContains.exitCode === 0 &&
+        remoteContains.stdout.trim().length > 0;
+      // No remote branch contains HEAD => there is unpushed work.
+      return !hasRemoteContainingHead;
+    });
+
+  const resolveRealPath = (p: string): Effect.Effect<string, never> =>
+    fileSystem.realPath(p).pipe(Effect.orElseSucceed(() => p));
+
+  const listManagedWorktrees: GitVcsDriver.GitVcsDriverShape["listManagedWorktrees"] = Effect.fn(
+    "listManagedWorktrees",
+  )(function* (input) {
+    const result = yield* executeGit(
+      "GitVcsDriver.listManagedWorktrees",
+      input.cwd,
+      ["worktree", "list", "--porcelain"],
+      { timeoutMs: 10_000, allowNonZeroExit: true },
+    );
+    if (result.exitCode !== 0) {
+      return { worktrees: [] };
+    }
+
+    const realWorktreesDir = yield* resolveRealPath(worktreesDir);
+    const isUnderWorktreesDir = (candidate: string): boolean => {
+      const normalized = path.resolve(candidate);
+      return normalized === realWorktreesDir || normalized.startsWith(realWorktreesDir + path.sep);
+    };
+
+    const rawCandidates: { path: string; refName: string }[] = [];
+    let currentPath: string | null = null;
+    let currentBranch: string | null = null;
+    const flush = () => {
+      if (currentPath && isUnderWorktreesDir(currentPath)) {
+        rawCandidates.push({
+          path: currentPath,
+          refName: currentBranch ?? path.basename(currentPath),
+        });
+      }
+      currentPath = null;
+      currentBranch = null;
+    };
+    for (const line of result.stdout.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        flush();
+        currentPath = line.slice("worktree ".length).trim();
+      } else if (line.startsWith("branch refs/heads/")) {
+        currentBranch = line.slice("branch refs/heads/".length).trim();
+      } else if (line.trim() === "") {
+        flush();
+      }
+    }
+    flush();
+
+    const candidates = rawCandidates;
+
+    const existing = yield* Effect.forEach(
+      candidates,
+      (candidate) =>
+        fileSystem.stat(candidate.path).pipe(
+          Effect.as(Option.some(candidate)),
+          Effect.orElseSucceed(() => Option.none<{ path: string; refName: string }>()),
+        ),
+      { concurrency: 8 },
+    ).pipe(Effect.map((options) => options.flatMap((o) => (Option.isSome(o) ? [o.value] : []))));
+
+    const worktrees = yield* Effect.forEach(
+      existing,
+      (candidate) =>
+        readWorktreeDirty(candidate.path).pipe(
+          Effect.map((isDirty) => ({ path: candidate.path, refName: candidate.refName, isDirty })),
+        ),
+      { concurrency: 4 },
+    );
+
+    return { worktrees };
+  });
+
   const renameBranch: GitVcsDriver.GitVcsDriverShape["renameBranch"] = Effect.fn("renameBranch")(
     function* (input) {
       if (input.oldBranch === input.newBranch) {
@@ -2318,6 +2414,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     fetchRemoteTrackingBranch,
     setBranchUpstream,
     removeWorktree,
+    listManagedWorktrees,
     renameBranch,
     createRef,
     switchRef,
