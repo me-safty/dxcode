@@ -7,6 +7,9 @@ import {
   GitRunStackedActionResult,
   GitRunStackedActionInput,
   GitResolvePullRequestResult,
+  VcsListManagedWorktreesResult,
+  VcsRemoveWorktreesInput,
+  VcsWorktreeSizeResult,
 } from "./git.ts";
 
 const decodeCreateWorktreeInput = Schema.decodeUnknownSync(VcsCreateWorktreeInput);
@@ -112,5 +115,28 @@ describe("GitRunStackedActionResult", () => {
     if (parsed.toast.cta.kind === "run_action") {
       expect(parsed.toast.cta.action.kind).toBe("create_pr");
     }
+  });
+});
+
+describe("managed worktree schemas", () => {
+  it("decodes a managed worktrees result", () => {
+    const decoded = Schema.decodeUnknownSync(VcsListManagedWorktreesResult)({
+      worktrees: [{ path: "/wt/a", refName: "feature-a", isDirty: false }],
+    });
+    expect(decoded.worktrees[0]?.isDirty).toBe(false);
+  });
+
+  it("decodes a worktree size result", () => {
+    const decoded = Schema.decodeUnknownSync(VcsWorktreeSizeResult)({ sizeBytes: 4096 });
+    expect(decoded.sizeBytes).toBe(4096);
+  });
+
+  it("decodes a batch remove input with per-item force", () => {
+    const decoded = Schema.decodeUnknownSync(VcsRemoveWorktreesInput)({
+      cwd: "/repo",
+      items: [{ path: "/wt/a", force: true }, { path: "/wt/b" }],
+    });
+    expect(decoded.items.length).toBe(2);
+    expect(decoded.items[0]?.force).toBe(true);
   });
 });
