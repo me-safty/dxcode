@@ -81,7 +81,14 @@ export const make = Effect.fn("makeForgejoKeyStore")(function* () {
   return ForgejoKeyStore.of({
     listHosts: readStore.pipe(Effect.map((store) => Array.from(store.keys()))),
     getCredential: (host) =>
-      readStore.pipe(Effect.map((store) => store.get(host.trim().toLowerCase()) ?? null)),
+      readStore.pipe(
+        Effect.map((store) => {
+          // Remote URLs may carry a `:port`, but `fj` keys keys.json by bare hostname.
+          // Try the exact host first, then fall back to the port-stripped hostname.
+          const wanted = host.trim().toLowerCase();
+          return store.get(wanted) ?? store.get(wanted.replace(/:\d+$/u, "")) ?? null;
+        }),
+      ),
     authHeader: (credential) =>
       /oauth/iu.test(credential.type)
         ? (["Authorization", `Bearer ${credential.token}`] as const)

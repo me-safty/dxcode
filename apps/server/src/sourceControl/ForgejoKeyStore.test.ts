@@ -51,6 +51,18 @@ it.effect("lists hosts and returns credentials", () =>
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("matches a bare-hostname credential when the lookup host carries a port", () =>
+  Effect.gen(function* () {
+    const layer = yield* layerWithKeysFile(sampleKeys);
+    yield* Effect.gen(function* () {
+      const store = yield* ForgejoKeyStore.ForgejoKeyStore;
+      const credential = yield* store.getCredential("git.example.org:3000");
+      assert.ok(credential);
+      assert.strictEqual(credential.token, "pat-token");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("degrades to an empty store on malformed JSON", () =>
   Effect.gen(function* () {
     const layer = yield* layerWithKeysFile("{ not valid json");

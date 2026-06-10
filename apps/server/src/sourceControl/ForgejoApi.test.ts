@@ -47,6 +47,7 @@ const keysJson = JSON.stringify({
 function makeLayer(input: {
   readonly response: (request: HttpClientRequest.HttpClientRequest) => Response;
   readonly git?: Partial<GitVcsDriver.GitVcsDriverShape>;
+  readonly remotes?: ReadonlyArray<{ readonly name: string; readonly url: string }>;
 }) {
   const execute = vi.fn((request: HttpClientRequest.HttpClientRequest) =>
     Effect.succeed(HttpClientResponse.fromWeb(request, input.response(request))),
@@ -82,17 +83,18 @@ function makeLayer(input: {
     ...input.git,
   } satisfies Partial<GitVcsDriver.GitVcsDriverShape>;
 
+  const remoteList = (
+    input.remotes ?? [{ name: "origin", url: "git@git.example.org:owner/repo.git" }]
+  ).map((remote) => ({
+    name: remote.name,
+    url: remote.url,
+    pushUrl: Option.none(),
+    isPrimary: remote.name === "origin",
+  }));
   const driver = {
     listRemotes: () =>
       Effect.succeed({
-        remotes: [
-          {
-            name: "origin",
-            url: "git@git.example.org:owner/repo.git",
-            pushUrl: Option.none(),
-            isPrimary: true,
-          },
-        ],
+        remotes: remoteList,
         freshness: {
           source: "live-local" as const,
           observedAt: DateTime.makeUnsafe("1970-01-01T00:00:00.000Z"),
@@ -198,6 +200,25 @@ it.effect("reads repository clone URLs and default branch from Forgejo", () =>
         sshUrl: "git@git.example.org:owner/repo.git",
       });
       assert.strictEqual(defaultBranch, "main");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("resolves a bare owner/repo spec via the sole logged-in host with no remotes", () =>
+  Effect.gen(function* () {
+    const { execute, layerEffect } = makeLayer({
+      response: () => Response.json(repositoryJson),
+      remotes: [],
+    });
+
+    const layer = yield* layerEffect;
+    yield* Effect.gen(function* () {
+      const forgejo = yield* ForgejoApi.ForgejoApi;
+      yield* forgejo.getRepositoryCloneUrls({ cwd: "/repo", repository: "owner/repo" });
+      assert.strictEqual(
+        execute.mock.calls[0]?.[0].url,
+        "https://git.example.org/api/v1/repos/owner/repo",
+      );
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );

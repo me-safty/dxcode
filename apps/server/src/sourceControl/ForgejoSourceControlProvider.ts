@@ -90,7 +90,7 @@ function refineUnknownForgejoRemote(
   const host = input.context.provider.name.toLowerCase();
   const authenticated = parseForgejoAuthHosts(
     SourceControlProviderDiscovery.combinedAuthOutput(input.auth),
-  ).some((entry) => entry.host === host);
+  ).some((entry) => ForgejoApi.forgejoHostsMatch(entry.host, host));
   if (!authenticated) return null;
   return {
     kind: "forgejo",

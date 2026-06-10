@@ -112,6 +112,19 @@ function parseRepoPath(pathname: string): { owner: string; repo: string } | null
   return owner && repo ? { owner, repo } : null;
 }
 
+export function stripHostPort(host: string): string {
+  return host.trim().toLowerCase().replace(/:\d+$/u, "");
+}
+
+// `fj` keys its login store and `fj auth list` output by bare hostname, while remote URLs
+// can carry a `:port`. Match host identities port-insensitively (but keep the full host for
+// constructing API base URLs, which need the port).
+export function forgejoHostsMatch(a: string, b: string): boolean {
+  const an = a.trim().toLowerCase();
+  const bn = b.trim().toLowerCase();
+  return an === bn || stripHostPort(an) === stripHostPort(bn);
+}
+
 export function parseForgejoRemoteUrl(remoteUrl: string): ForgejoRepositoryLocator | null {
   const trimmed = remoteUrl.trim();
   if (trimmed.startsWith("git@")) {
@@ -261,13 +274,17 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
     readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly repository?: string;
   }) {
+    const hosts = yield* keyStore.listHosts;
     const contextHost =
       input.context?.provider.kind === "forgejo"
         ? (parseForgejoRemoteUrl(input.context.remoteUrl)?.host ?? null)
         : null;
+    // Mirror createRepository: when exactly one Forgejo instance is logged in, accept a bare
+    // `owner/repo` spec (e.g. the add-project clone flow, which runs in a dir with no remotes).
+    const fallbackHost = contextHost ?? (hosts.length === 1 ? hosts[0]! : null);
 
     if (input.repository !== undefined) {
-      const fromSpec = parseForgejoRepositorySpec(input.repository, contextHost);
+      const fromSpec = parseForgejoRepositorySpec(input.repository, fallbackHost);
       if (fromSpec) return fromSpec;
     }
 
@@ -276,7 +293,6 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
       if (fromContext) return fromContext;
     }
 
-    const hosts = yield* keyStore.listHosts;
     const handle = yield* vcsRegistry.resolve({ cwd: input.cwd }).pipe(
       Effect.mapError(
         (cause) =>
@@ -302,7 +318,7 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
       const parsed = parseForgejoRemoteUrl(remote.url);
       if (!parsed) continue;
       const isForgejo =
-        hosts.includes(parsed.host) ||
+        hosts.some((host) => forgejoHostsMatch(host, parsed.host)) ||
         detectSourceControlProviderFromRemoteUrl(remote.url)?.kind === "forgejo";
       if (isForgejo) return parsed;
     }

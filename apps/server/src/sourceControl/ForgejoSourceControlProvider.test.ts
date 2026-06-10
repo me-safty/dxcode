@@ -47,6 +47,27 @@ describe("Forgejo discovery", () => {
     });
   });
 
+  it("refines a remote whose host carries a port not present in the login store", () => {
+    const refined = discovery.refineUnknownRemote!({
+      cwd: "/repo",
+      context: {
+        provider: {
+          kind: "unknown",
+          name: "git.example.org:3000",
+          baseUrl: "https://git.example.org:3000",
+        },
+        remoteName: "origin",
+        remoteUrl: "https://git.example.org:3000/owner/repo.git",
+      },
+      auth: { stdout: authOutput, stderr: "", exitCode: ChildProcessSpawner.ExitCode(0) },
+    });
+    assert.deepStrictEqual(refined, {
+      kind: "forgejo",
+      name: "Forgejo",
+      baseUrl: "https://git.example.org:3000",
+    });
+  });
+
   it("does not refine a host that is not logged in", () => {
     const refined = discovery.refineUnknownRemote!({
       cwd: "/repo",
