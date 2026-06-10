@@ -35,6 +35,14 @@ describe("totalSelectedBytes", () => {
     ];
     expect(totalSelectedBytes(rows)).toBe(1024);
   });
+
+  it("excludes dirty rows that are selected but not forced (matches what gets removed)", () => {
+    const rows = [
+      row({ sizeBytes: 1024 }),
+      row({ isDirty: true, force: false, sizeBytes: 4096 }),
+    ];
+    expect(totalSelectedBytes(rows)).toBe(1024);
+  });
 });
 
 describe("isRowRemovable", () => {

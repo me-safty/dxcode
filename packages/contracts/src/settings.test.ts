@@ -156,4 +156,9 @@ describe("worktreeCleanupScope", () => {
   it("defaults to orphaned", () => {
     expect(DEFAULT_SERVER_SETTINGS.worktreeCleanupScope).toBe("orphaned");
   });
+
+  it("survives a settings patch round-trip so the setting persists", () => {
+    const patch = decodeServerSettingsPatch({ worktreeCleanupScope: "orphaned-archived" });
+    expect(patch.worktreeCleanupScope).toBe("orphaned-archived");
+  });
 });

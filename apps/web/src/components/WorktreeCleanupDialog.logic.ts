@@ -20,13 +20,6 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(exponent === 0 ? 0 : 1)} ${units[exponent]}`;
 }
 
-export function totalSelectedBytes(rows: readonly CleanupRowState[]): number {
-  return rows.reduce(
-    (sum, row) => (row.selected && row.sizeBytes !== null ? sum + row.sizeBytes : sum),
-    0,
-  );
-}
-
 export function isRowRemovable(row: CleanupRowState): boolean {
   if (row.classification === "active") {
     return false;
@@ -38,6 +31,13 @@ export function isRowRemovable(row: CleanupRowState): boolean {
     return false;
   }
   return true;
+}
+
+export function totalSelectedBytes(rows: readonly CleanupRowState[]): number {
+  return rows.reduce(
+    (sum, row) => (isRowRemovable(row) && row.sizeBytes !== null ? sum + row.sizeBytes : sum),
+    0,
+  );
 }
 
 export function buildRemovalItems(
