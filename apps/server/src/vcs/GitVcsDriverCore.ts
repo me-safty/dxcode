@@ -2284,6 +2284,32 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
+  const removeWorktrees: GitVcsDriver.GitVcsDriverShape["removeWorktrees"] = Effect.fn(
+    "removeWorktrees",
+  )(function* (input) {
+    const results = yield* Effect.forEach(
+      input.items,
+      (item) => {
+        const args = ["worktree", "remove"];
+        if (item.force) {
+          args.push("--force");
+        }
+        args.push(item.path);
+        return executeGit("GitVcsDriver.removeWorktrees", input.cwd, args, {
+          timeoutMs: 15_000,
+          fallbackErrorMessage: "git worktree remove failed",
+        }).pipe(
+          Effect.as({ path: item.path, ok: true as const }),
+          Effect.catch((error) =>
+            Effect.succeed({ path: item.path, ok: false as const, error: error.message }),
+          ),
+        );
+      },
+      { concurrency: 1 },
+    );
+    return { results };
+  });
+
   const renameBranch: GitVcsDriver.GitVcsDriverShape["renameBranch"] = Effect.fn("renameBranch")(
     function* (input) {
       if (input.oldBranch === input.newBranch) {
@@ -2449,6 +2475,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     removeWorktree,
     listManagedWorktrees,
     worktreeSize,
+    removeWorktrees,
     renameBranch,
     createRef,
     switchRef,

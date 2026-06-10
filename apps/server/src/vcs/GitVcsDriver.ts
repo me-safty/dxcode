@@ -29,6 +29,8 @@ import {
   type VcsListManagedWorktreesResult,
   type VcsWorktreeSizeInput,
   type VcsWorktreeSizeResult,
+  type VcsRemoveWorktreesInput,
+  type VcsRemoveWorktreesResult,
   type VcsStatusInput,
   type VcsStatusResult,
 } from "@t3tools/contracts";
@@ -218,6 +220,9 @@ export interface GitVcsDriverShape {
   readonly worktreeSize: (
     input: VcsWorktreeSizeInput,
   ) => Effect.Effect<VcsWorktreeSizeResult, GitCommandError>;
+  readonly removeWorktrees: (
+    input: VcsRemoveWorktreesInput,
+  ) => Effect.Effect<VcsRemoveWorktreesResult, GitCommandError>;
   readonly renameBranch: (
     input: GitRenameBranchInput,
   ) => Effect.Effect<GitRenameBranchResult, GitCommandError>;

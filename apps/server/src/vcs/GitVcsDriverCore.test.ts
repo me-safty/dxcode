@@ -354,6 +354,35 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.isAbove(sizeBytes, 0);
       }),
     );
+
+    it.effect("batch-removes worktrees and reports per-path outcomes", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const a = yield* driver.createWorktree({
+          cwd,
+          refName: initialBranch,
+          newRefName: "rm-a",
+          path: null,
+        });
+
+        const { results } = yield* driver.removeWorktrees({
+          cwd,
+          items: [
+            { path: a.worktree.path, force: true },
+            { path: "/does/not/exist", force: true },
+          ],
+        });
+
+        assert.equal(results.length, 2);
+        assert.equal(results.find((r) => r.path === a.worktree.path)?.ok, true);
+        const missing = results.find((r) => r.path === "/does/not/exist");
+        assert.equal(missing?.ok, false);
+        assert.isString(missing?.error);
+      }),
+    );
   });
 
   describe("commit context", () => {
