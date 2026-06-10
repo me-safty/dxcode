@@ -306,6 +306,36 @@ it.effect("listPullRequests filters by head branch and returns empty on no match
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("fetches a full page regardless of the caller limit so the branch PR is found", () =>
+  Effect.gen(function* () {
+    const list = [
+      { ...forgejoPullRequest, number: 7, head: { ref: "other", repo: { full_name: "owner/repo" } } },
+      {
+        ...forgejoPullRequest,
+        number: 42,
+        head: { ref: "feature/forgejo", repo: { full_name: "owner/repo" } },
+      },
+    ];
+    const { execute, layerEffect } = makeLayer({ response: () => Response.json(list) });
+
+    const layer = yield* layerEffect;
+    yield* Effect.gen(function* () {
+      const forgejo = yield* ForgejoApi.ForgejoApi;
+      const matched = yield* forgejo.listPullRequests({
+        cwd: "/repo",
+        headSelector: "owner:feature/forgejo",
+        state: "open",
+        limit: 1,
+      });
+
+      assert.strictEqual(matched.length, 1);
+      assert.strictEqual(matched[0]?.number, 42);
+      const params = execute.mock.calls[0]?.[0].urlParams.params ?? [];
+      assert.ok(params.some((param) => param[0] === "limit" && param[1] === "50"));
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("createRepository posts to /user/repos for own account", () =>
   Effect.gen(function* () {
     const { execute, layerEffect } = makeLayer({

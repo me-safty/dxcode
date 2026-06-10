@@ -30,6 +30,11 @@ export class ForgejoApiError extends Schema.TaggedErrorClass<ForgejoApiError>()(
 }
 const isForgejoApiErrorValue = Schema.is(ForgejoApiError);
 
+// Forgejo's pulls list cannot filter by head branch, so we over-fetch a page of recently
+// updated PRs and filter in memory. This is the per-fetch page size (Forgejo's API max),
+// independent of the caller's `limit` (which caps the matching results).
+const PULL_REQUEST_PAGE_SIZE = 50;
+
 const ForgejoRepositorySchema = Schema.Struct({
   full_name: TrimmedNonEmptyString,
   clone_url: Schema.optional(Schema.NullOr(Schema.String)),
@@ -363,7 +368,9 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
       resolveRepository(input).pipe(
         Effect.flatMap((locator) => {
           const apiState = input.state === "open" ? "open" : input.state === "all" ? "all" : "closed";
-          const limit = Math.max(1, Math.min(input.limit ?? 20, 50));
+          // Fetch a full page (not the caller's `limit`): Forgejo can't filter by head branch,
+          // so a small limit (e.g. status passes 1) would hide the branch's PR behind unrelated
+          // recently-updated PRs. The caller's `limit` is applied to the filtered matches below.
           return executeJson(
             "listPullRequests",
             locator.host,
@@ -372,7 +379,13 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
                 locator.host,
                 `/repos/${encodeURIComponent(locator.owner)}/${encodeURIComponent(locator.repo)}/pulls`,
               ),
-              { urlParams: { state: apiState, sort: "recentupdate", limit: String(limit) } },
+              {
+                urlParams: {
+                  state: apiState,
+                  sort: "recentupdate",
+                  limit: String(PULL_REQUEST_PAGE_SIZE),
+                },
+              },
             ),
             ForgejoPullRequests.ForgejoPullRequestListSchema,
           );
@@ -382,9 +395,13 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
           const byBranch = list
             .map(ForgejoPullRequests.normalizeForgejoPullRequestRecord)
             .filter((record) => record.headRefName === wanted);
-          if (input.state === "merged") return byBranch.filter((record) => record.state === "merged");
-          if (input.state === "closed") return byBranch.filter((record) => record.state === "closed");
-          return byBranch;
+          const byState =
+            input.state === "merged"
+              ? byBranch.filter((record) => record.state === "merged")
+              : input.state === "closed"
+                ? byBranch.filter((record) => record.state === "closed")
+                : byBranch;
+          return input.limit !== undefined ? byState.slice(0, input.limit) : byState;
         }),
       ),
     getPullRequest: (input) =>
