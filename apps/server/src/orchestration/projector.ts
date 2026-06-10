@@ -183,6 +183,9 @@ export function projectEvent(
             id: payload.projectId,
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
+            kind: payload.kind ?? "project",
+            contextMarkdown: payload.contextMarkdown ?? "",
+            contextVersion: payload.contextVersion ?? 0,
             defaultModelSelection: payload.defaultModelSelection,
             scripts: payload.scripts,
             createdAt: payload.createdAt,
@@ -217,6 +220,12 @@ export function projectEvent(
                     ? { defaultModelSelection: payload.defaultModelSelection }
                     : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
+                  ...(payload.contextMarkdown !== undefined
+                    ? { contextMarkdown: payload.contextMarkdown }
+                    : {}),
+                  ...(payload.contextVersion !== undefined
+                    ? { contextVersion: payload.contextVersion }
+                    : {}),
                   updatedAt: payload.updatedAt,
                 }
               : project,
@@ -268,6 +277,9 @@ export function projectEvent(
             activities: [],
             checkpoints: [],
             session: null,
+            ...(payload.sectionContextSnapshot
+              ? { sectionContextSnapshot: payload.sectionContextSnapshot }
+              : {}),
           },
           event.type,
           "thread",

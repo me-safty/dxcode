@@ -197,10 +197,23 @@ export const ProjectScript = Schema.Struct({
 });
 export type ProjectScript = typeof ProjectScript.Type;
 
+export const ProjectKind = Schema.Literals(["project", "section"]);
+export type ProjectKind = typeof ProjectKind.Type;
+
+export const SectionContextSnapshot = Schema.Struct({
+  title: TrimmedNonEmptyString,
+  markdown: Schema.String,
+  version: NonNegativeInt,
+});
+export type SectionContextSnapshot = typeof SectionContextSnapshot.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
+  kind: Schema.optionalKey(ProjectKind),
+  contextMarkdown: Schema.optionalKey(Schema.String),
+  contextVersion: Schema.optionalKey(NonNegativeInt),
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
@@ -353,6 +366,7 @@ export const OrchestrationThread = Schema.Struct({
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  sectionContextSnapshot: Schema.optionalKey(SectionContextSnapshot),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -368,6 +382,9 @@ export const OrchestrationProjectShell = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
+  kind: Schema.optionalKey(ProjectKind),
+  contextMarkdown: Schema.optionalKey(Schema.String),
+  contextVersion: Schema.optionalKey(NonNegativeInt),
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
@@ -396,6 +413,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
+  sectionContextSnapshot: Schema.optionalKey(SectionContextSnapshot),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
@@ -458,6 +476,8 @@ export const ProjectCreateCommand = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   createWorkspaceRootIfMissing: Schema.optional(Schema.Boolean),
+  kind: Schema.optional(ProjectKind),
+  contextMarkdown: Schema.optional(Schema.String),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   createdAt: IsoDateTime,
 });
@@ -470,6 +490,7 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  contextMarkdown: Schema.optional(Schema.String),
 });
 
 const ProjectDeleteCommand = Schema.Struct({
@@ -802,6 +823,9 @@ export const ProjectCreatedPayload = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
+  kind: Schema.optionalKey(ProjectKind),
+  contextMarkdown: Schema.optionalKey(Schema.String),
+  contextVersion: Schema.optionalKey(NonNegativeInt),
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
@@ -816,6 +840,8 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  contextMarkdown: Schema.optional(Schema.String),
+  contextVersion: Schema.optional(NonNegativeInt),
   updatedAt: IsoDateTime,
 });
 
@@ -837,6 +863,7 @@ export const ThreadCreatedPayload = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+  sectionContextSnapshot: Schema.optionalKey(SectionContextSnapshot),
 });
 
 export const ThreadDeletedPayload = Schema.Struct({

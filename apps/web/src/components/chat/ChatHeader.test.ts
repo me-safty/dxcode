@@ -10,6 +10,7 @@ describe("shouldShowOpenInPicker", () => {
     expect(
       shouldShowOpenInPicker({
         activeProjectName: "codething-mvp",
+        activeProjectIsSection: false,
         activeThreadEnvironmentId: primaryEnvironmentId,
         primaryEnvironmentId,
       }),
@@ -20,6 +21,7 @@ describe("shouldShowOpenInPicker", () => {
     expect(
       shouldShowOpenInPicker({
         activeProjectName: "codething-mvp",
+        activeProjectIsSection: false,
         activeThreadEnvironmentId: EnvironmentId.make("environment-remote"),
         primaryEnvironmentId: null,
       }),
@@ -30,6 +32,7 @@ describe("shouldShowOpenInPicker", () => {
     expect(
       shouldShowOpenInPicker({
         activeProjectName: "codething-mvp",
+        activeProjectIsSection: false,
         activeThreadEnvironmentId: EnvironmentId.make("environment-remote"),
         primaryEnvironmentId,
       }),
@@ -40,6 +43,18 @@ describe("shouldShowOpenInPicker", () => {
     expect(
       shouldShowOpenInPicker({
         activeProjectName: undefined,
+        activeProjectIsSection: false,
+        activeThreadEnvironmentId: primaryEnvironmentId,
+        primaryEnvironmentId,
+      }),
+    ).toBe(false);
+  });
+
+  it("hides the picker for sections", () => {
+    expect(
+      shouldShowOpenInPicker({
+        activeProjectName: "Jellyfin",
+        activeProjectIsSection: true,
         activeThreadEnvironmentId: primaryEnvironmentId,
         primaryEnvironmentId,
       }),

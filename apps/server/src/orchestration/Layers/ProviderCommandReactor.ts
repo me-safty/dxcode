@@ -7,6 +7,7 @@ import {
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
+  type OrchestrationThread,
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
@@ -59,6 +60,24 @@ type ProviderIntentEvent = Extract<
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : undefined;
+}
+
+function withSectionContext(message: string, thread: OrchestrationThread): string {
+  const context = thread.sectionContextSnapshot;
+  if (!context || context.markdown.trim().length === 0) {
+    return message;
+  }
+  const userMessageCount = thread.messages.filter((entry) => entry.role === "user").length;
+  if (userMessageCount > 1) {
+    return message;
+  }
+  return `<task_section_context title="${context.title}" version="${context.version}">
+${context.markdown}
+</task_section_context>
+
+<user_request>
+${message}
+</user_request>`;
 }
 
 function mapProviderSessionStatusToOrchestrationStatus(
@@ -547,7 +566,7 @@ const make = Effect.gen(function* () {
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
-    const normalizedInput = toNonEmptyProviderInput(input.messageText);
+    const normalizedInput = toNonEmptyProviderInput(withSectionContext(input.messageText, thread));
     const normalizedAttachments = input.attachments ?? [];
     const activeSession = yield* providerService
       .listSessions()

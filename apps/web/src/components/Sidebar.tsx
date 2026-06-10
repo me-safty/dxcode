@@ -4,6 +4,7 @@ import {
   ChevronRightIcon,
   CloudIcon,
   FolderPlusIcon,
+  PlusIcon,
   ListTodoIcon,
   SearchIcon,
   SettingsIcon,
@@ -41,6 +42,8 @@ import {
   type ContextMenuItem,
   type DesktopUpdateState,
   ProjectId,
+  ProviderInstanceId,
+  DEFAULT_MODEL,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
   type ThreadEnvMode,
@@ -63,9 +66,9 @@ import {
 } from "@t3tools/contracts/settings";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
-import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
+import { APP_BASE_NAME, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isMacPlatform, newCommandId } from "../lib/utils";
+import { isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import {
   selectProjectByRef,
   selectProjectsAcrossEnvironments,
@@ -124,6 +127,7 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
 import {
   Menu,
   MenuGroup,
@@ -1066,6 +1070,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     null,
   );
   const [projectRenameTitle, setProjectRenameTitle] = useState("");
+  const [projectRenameContext, setProjectRenameContext] = useState("");
   const [projectGroupingTarget, setProjectGroupingTarget] =
     useState<SidebarProjectGroupMember | null>(null);
   const [projectGroupingSelection, setProjectGroupingSelection] = useState<
@@ -1276,6 +1281,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const openProjectRenameDialog = useCallback((member: SidebarProjectGroupMember) => {
     setProjectRenameTarget(member);
     setProjectRenameTitle(member.name);
+    setProjectRenameContext(member.contextMarkdown ?? "");
   }, []);
 
   const openProjectGroupingDialog = useCallback(
@@ -1501,7 +1507,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
         const clicked = await api.contextMenu.show(
           [
-            buildTargetedItem("rename", "Rename project"),
+            buildTargetedItem(
+              "rename",
+              project.kind === "section" ? "Edit section" : "Rename project",
+            ),
             buildTargetedItem("grouping", "Project grouping…"),
             buildTargetedItem("copy-path", "Copy Project Path"),
             buildTargetedItem("delete", "Remove project", {
@@ -1820,6 +1829,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const closeProjectRenameDialog = useCallback(() => {
     setProjectRenameTarget(null);
     setProjectRenameTitle("");
+    setProjectRenameContext("");
   }, []);
 
   const submitProjectRename = useCallback(async () => {
@@ -1836,7 +1846,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       return;
     }
 
-    if (trimmed === projectRenameTarget.name) {
+    if (
+      trimmed === projectRenameTarget.name &&
+      (projectRenameTarget.kind !== "section" ||
+        projectRenameContext === (projectRenameTarget.contextMarkdown ?? ""))
+    ) {
       closeProjectRenameDialog();
       return;
     }
@@ -1859,6 +1873,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         commandId: newCommandId(),
         projectId: projectRenameTarget.id,
         title: trimmed,
+        ...(projectRenameTarget.kind === "section"
+          ? { contextMarkdown: projectRenameContext }
+          : {}),
       });
       closeProjectRenameDialog();
     } catch (error) {
@@ -1870,7 +1887,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         }),
       );
     }
-  }, [closeProjectRenameDialog, projectRenameTarget, projectRenameTitle]);
+  }, [closeProjectRenameDialog, projectRenameContext, projectRenameTarget, projectRenameTitle]);
 
   const closeProjectGroupingDialog = useCallback(() => {
     setProjectGroupingTarget(null);
@@ -2121,10 +2138,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       >
         <DialogPopup className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Rename project</DialogTitle>
+            <DialogTitle>
+              {projectRenameTarget?.kind === "section" ? "Edit section" : "Rename project"}
+            </DialogTitle>
             <DialogDescription>
               {projectRenameTarget
-                ? `Update the title for ${projectRenameTarget.cwd}.`
+                ? projectRenameTarget.kind === "section"
+                  ? "Update the shared context used by newly created tasks."
+                  : `Update the title for ${projectRenameTarget.cwd}.`
                 : "Update the project title."}
             </DialogDescription>
           </DialogHeader>
@@ -2143,6 +2164,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 }}
               />
             </div>
+            {projectRenameTarget?.kind === "section" ? (
+              <div className="grid gap-1.5">
+                <span className="text-xs font-medium text-foreground">Shared context</span>
+                <Textarea
+                  aria-label="Shared context"
+                  className="min-h-48"
+                  value={projectRenameContext}
+                  onChange={(event) => setProjectRenameContext(event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Changes apply only to new tasks.</p>
+              </div>
+            ) : null}
             {projectRenameTarget?.environmentLabel ? (
               <p className="text-xs text-muted-foreground">
                 Environment: {projectRenameTarget.environmentLabel}
@@ -2240,19 +2273,21 @@ const SidebarProjectListRow = memo(function SidebarProjectListRow(props: Sidebar
   );
 });
 
-function T3Wordmark() {
+function AppWordmark() {
+  const [primaryName, ...secondaryNameParts] = APP_BASE_NAME.split(/\s+/);
+  const secondaryName = secondaryNameParts.join(" ");
+
   return (
-    <svg
-      aria-label="T3"
-      className="h-2.5 w-auto shrink-0 text-foreground"
-      viewBox="15.5309 37 94.3941 56.96"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M33.4509 93V47.56H15.5309V37H64.3309V47.56H46.4109V93H33.4509ZM86.7253 93.96C82.832 93.96 78.9653 93.4533 75.1253 92.44C71.2853 91.3733 68.032 89.88 65.3653 87.96L70.4053 78.04C72.5386 79.5867 75.0186 80.8133 77.8453 81.72C80.672 82.6267 83.5253 83.08 86.4053 83.08C89.6586 83.08 92.2186 82.44 94.0853 81.16C95.952 79.88 96.8853 78.12 96.8853 75.88C96.8853 73.7467 96.0586 72.0667 94.4053 70.84C92.752 69.6133 90.0853 69 86.4053 69H80.4853V60.44L96.0853 42.76L97.5253 47.4H68.1653V37H107.365V45.4L91.8453 63.08L85.2853 59.32H89.0453C95.9253 59.32 101.125 60.8667 104.645 63.96C108.165 67.0533 109.925 71.0267 109.925 75.88C109.925 79.0267 109.099 81.9867 107.445 84.76C105.792 87.48 103.259 89.6933 99.8453 91.4C96.432 93.1067 92.0586 93.96 86.7253 93.96Z"
-        fill="currentColor"
-      />
-    </svg>
+    <>
+      <span className="shrink-0 text-sm font-semibold tracking-tight text-foreground">
+        {primaryName}
+      </span>
+      {secondaryName ? (
+        <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
+          {secondaryName}
+        </span>
+      ) : null}
+    </>
   );
 }
 
@@ -2463,13 +2498,7 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
               className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
               to="/"
             >
-              <T3Wordmark />
-              <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
-                Code
-              </span>
-              <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-                {APP_STAGE_LABEL}
-              </span>
+              <AppWordmark />
             </Link>
           }
         />
@@ -2580,6 +2609,8 @@ interface SidebarProjectsContentProps {
   suppressProjectClickForContextMenuRef: React.RefObject<boolean>;
   attachProjectListAutoAnimateRef: (node: HTMLElement | null) => void;
   projectsLength: number;
+  sections: readonly SidebarProjectSnapshot[];
+  openAddSection: () => void;
 }
 
 const SidebarProjectsContent = memo(function SidebarProjectsContent(
@@ -2621,6 +2652,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     suppressProjectClickForContextMenuRef,
     attachProjectListAutoAnimateRef,
     projectsLength,
+    sections,
+    openAddSection,
   } = props;
 
   const handleProjectSortOrderChange = useCallback(
@@ -2696,6 +2729,58 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           </Alert>
         </SidebarGroup>
       ) : null}
+      <SidebarGroup className="px-2 py-2">
+        <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            Sections
+          </span>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Add section"
+                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                  onClick={openAddSection}
+                />
+              }
+            >
+              <PlusIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup side="right">Add section</TooltipPopup>
+          </Tooltip>
+        </div>
+        <SidebarMenu>
+          {sections.map((section) => (
+            <SidebarProjectListRow
+              key={section.projectKey}
+              project={section}
+              isThreadListExpanded={expandedThreadListsByProject.has(section.projectKey)}
+              activeRouteThreadKey={
+                activeRouteProjectKey === section.projectKey ? routeThreadKey : null
+              }
+              newThreadShortcutLabel={newThreadShortcutLabel}
+              handleNewThread={handleNewThread}
+              archiveThread={archiveThread}
+              deleteThread={deleteThread}
+              threadJumpLabelByKey={threadJumpLabelByKey}
+              attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+              expandThreadListForProject={expandThreadListForProject}
+              collapseThreadListForProject={collapseThreadListForProject}
+              dragInProgressRef={dragInProgressRef}
+              suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
+              suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
+              isManualProjectSorting={false}
+              dragHandleProps={null}
+            />
+          ))}
+        </SidebarMenu>
+        {sections.length === 0 ? (
+          <div className="px-2 py-3 text-center text-xs text-muted-foreground/60">
+            No sections yet
+          </div>
+        ) : null}
+      </SidebarGroup>
       <SidebarGroup className="px-2 py-2">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
@@ -2839,6 +2924,10 @@ export default function Sidebar() {
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
   const keybindings = useServerKeybindings();
   const openAddProjectCommandPalette = useCommandPaletteStore((store) => store.openAddProject);
+  const [sectionDialogOpen, setSectionDialogOpen] = useState(false);
+  const [sectionTitle, setSectionTitle] = useState("");
+  const [sectionContext, setSectionContext] = useState("");
+  const [sectionSubmitting, setSectionSubmitting] = useState(false);
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -2883,24 +2972,34 @@ export default function Sidebar() {
     [orderedProjects],
   );
 
-  const sidebarProjects = useMemo<SidebarProjectSnapshot[]>(() => {
-    return buildSidebarProjectSnapshots({
-      projects: orderedProjects,
-      settings: projectGroupingSettings,
+  const buildSnapshots = useCallback(
+    (items: typeof orderedProjects) => {
+      return buildSidebarProjectSnapshots({
+        projects: items,
+        settings: projectGroupingSettings,
+        primaryEnvironmentId,
+        resolveEnvironmentLabel: (environmentId) => {
+          const rt = savedEnvironmentRuntimeById[environmentId];
+          const saved = savedEnvironmentRegistry[environmentId];
+          return rt?.descriptor?.label ?? saved?.label ?? null;
+        },
+      });
+    },
+    [
+      projectGroupingSettings,
       primaryEnvironmentId,
-      resolveEnvironmentLabel: (environmentId) => {
-        const rt = savedEnvironmentRuntimeById[environmentId];
-        const saved = savedEnvironmentRegistry[environmentId];
-        return rt?.descriptor?.label ?? saved?.label ?? null;
-      },
-    });
-  }, [
-    orderedProjects,
-    projectGroupingSettings,
-    primaryEnvironmentId,
-    savedEnvironmentRegistry,
-    savedEnvironmentRuntimeById,
-  ]);
+      savedEnvironmentRegistry,
+      savedEnvironmentRuntimeById,
+    ],
+  );
+  const sidebarProjects = useMemo(
+    () => buildSnapshots(orderedProjects.filter((project) => project.kind !== "section")),
+    [buildSnapshots, orderedProjects],
+  );
+  const sidebarSections = useMemo(
+    () => buildSnapshots(orderedProjects.filter((project) => project.kind === "section")),
+    [buildSnapshots, orderedProjects],
+  );
 
   const sidebarProjectByKey = useMemo(
     () => new Map(sidebarProjects.map((project) => [project.projectKey, project] as const)),
@@ -3098,6 +3197,42 @@ export default function Sidebar() {
     visibleThreads,
   ]);
   const isManualProjectSorting = sidebarProjectSortOrder === "manual";
+  const createSection = useCallback(async () => {
+    const title = sectionTitle.trim();
+    if (!title || !primaryEnvironmentId) return;
+    const api = readEnvironmentApi(primaryEnvironmentId);
+    if (!api) return;
+    setSectionSubmitting(true);
+    try {
+      const projectId = newProjectId();
+      await api.orchestration.dispatchCommand({
+        type: "project.create",
+        commandId: newCommandId(),
+        projectId,
+        title,
+        workspaceRoot: ".",
+        kind: "section",
+        contextMarkdown: sectionContext,
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: DEFAULT_MODEL,
+        },
+        createdAt: new Date().toISOString(),
+      });
+      setSectionDialogOpen(false);
+      setSectionTitle("");
+      setSectionContext("");
+      await handleNewThread(scopeProjectRef(primaryEnvironmentId, projectId), { envMode: "local" });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Failed to create section",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    } finally {
+      setSectionSubmitting(false);
+    }
+  }, [handleNewThread, primaryEnvironmentId, sectionContext, sectionTitle]);
   const visibleSidebarThreadKeys = useMemo(
     () =>
       sortedProjects.flatMap((project) => {
@@ -3483,13 +3618,61 @@ export default function Sidebar() {
             suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
             suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
             attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
-            projectsLength={projects.length}
+            projectsLength={projects.filter((project) => project.kind !== "section").length}
+            sections={sidebarSections}
+            openAddSection={() => setSectionDialogOpen(true)}
           />
 
           <SidebarSeparator />
           <SidebarChromeFooter />
         </>
       )}
+      <Dialog open={sectionDialogOpen} onOpenChange={setSectionDialogOpen}>
+        <DialogPopup className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Create section</DialogTitle>
+            <DialogDescription>
+              New tasks in this section receive a snapshot of the shared context.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4">
+            <div className="grid gap-1.5">
+              <span className="text-xs font-medium text-foreground">Section name</span>
+              <Input
+                autoFocus
+                aria-label="Section name"
+                placeholder="Jellyfin"
+                value={sectionTitle}
+                onChange={(event) => setSectionTitle(event.target.value)}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <span className="text-xs font-medium text-foreground">Shared context</span>
+              <Textarea
+                aria-label="Shared context"
+                className="min-h-48"
+                placeholder="Describe this section, the tools available on the VM, and any rules the agent should follow."
+                value={sectionContext}
+                onChange={(event) => setSectionContext(event.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Context updates apply to newly created tasks.
+              </p>
+            </div>
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSectionDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={sectionSubmitting || sectionTitle.trim().length === 0}
+              onClick={() => void createSection()}
+            >
+              Create section
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
     </>
   );
 }

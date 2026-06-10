@@ -1829,12 +1829,13 @@ export default function ChatView(props: ChatViewProps) {
     if (!completionSummary) return null;
     return deriveCompletionDividerBeforeEntryId(timelineEntries, activeLatestTurn);
   }, [activeLatestTurn, completionSummary, latestTurnSettled, timelineEntries]);
-  const gitCwd = activeProject
-    ? projectScriptCwd({
-        project: { cwd: activeProject.cwd },
-        worktreePath: activeThread?.worktreePath ?? null,
-      })
-    : null;
+  const gitCwd =
+    activeProject && activeProject.kind !== "section"
+      ? projectScriptCwd({
+          project: { cwd: activeProject.cwd },
+          worktreePath: activeThread?.worktreePath ?? null,
+        })
+      : null;
   const gitStatusQuery = useVcsStatus({ environmentId, cwd: gitCwd });
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
@@ -3741,6 +3742,7 @@ export default function ChatView(props: ChatViewProps) {
           {...(routeKind === "draft" && draftId ? { draftId } : {})}
           activeThreadTitle={activeThread.title}
           activeProjectName={activeProject?.name}
+          activeProjectIsSection={activeProject?.kind === "section"}
           isGitRepo={isGitRepo}
           openInCwd={gitCwd}
           activeProjectScripts={activeProject?.scripts}

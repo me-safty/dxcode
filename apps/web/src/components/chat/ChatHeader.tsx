@@ -24,6 +24,7 @@ interface ChatHeaderProps {
   draftId?: DraftId;
   activeThreadTitle: string;
   activeProjectName: string | undefined;
+  activeProjectIsSection: boolean;
   isGitRepo: boolean;
   openInCwd: string | null;
   activeProjectScripts: ProjectScript[] | undefined;
@@ -46,11 +47,13 @@ interface ChatHeaderProps {
 
 export function shouldShowOpenInPicker(input: {
   readonly activeProjectName: string | undefined;
+  readonly activeProjectIsSection: boolean;
   readonly activeThreadEnvironmentId: EnvironmentId;
   readonly primaryEnvironmentId: EnvironmentId | null;
 }): boolean {
   return (
     Boolean(input.activeProjectName) &&
+    !input.activeProjectIsSection &&
     input.primaryEnvironmentId !== null &&
     input.activeThreadEnvironmentId === input.primaryEnvironmentId
   );
@@ -62,6 +65,7 @@ export const ChatHeader = memo(function ChatHeader({
   draftId,
   activeThreadTitle,
   activeProjectName,
+  activeProjectIsSection,
   isGitRepo,
   openInCwd,
   activeProjectScripts,
@@ -84,6 +88,7 @@ export const ChatHeader = memo(function ChatHeader({
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
+    activeProjectIsSection,
     activeThreadEnvironmentId,
     primaryEnvironmentId,
   });
@@ -106,7 +111,7 @@ export const ChatHeader = memo(function ChatHeader({
             <span className="min-w-0 truncate">{activeProjectName}</span>
           </Badge>
         )}
-        {activeProjectName && !isGitRepo && (
+        {activeProjectName && !activeProjectIsSection && !isGitRepo && (
           <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
             No Git
           </Badge>
@@ -131,7 +136,7 @@ export const ChatHeader = memo(function ChatHeader({
             openInCwd={openInCwd}
           />
         )}
-        {activeProjectName && (
+        {activeProjectName && !activeProjectIsSection && (
           <GitActionsControl
             gitCwd={gitCwd}
             activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}

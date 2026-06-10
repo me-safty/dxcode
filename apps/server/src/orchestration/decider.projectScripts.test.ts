@@ -94,6 +94,68 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
     }),
   );
 
+  it.effect("snapshots section context when creating a task thread", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const projectId = asProjectId("jellyfin");
+      const initial = createEmptyReadModel(now);
+      const withSection = yield* projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-section-create"),
+        aggregateKind: "project",
+        aggregateId: projectId,
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-section-create"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-section-create"),
+        metadata: {},
+        payload: {
+          projectId,
+          title: "Jellyfin",
+          workspaceRoot: "/tmp/sections/jellyfin",
+          kind: "section",
+          contextMarkdown: "Use the configured Jellyfin tools.",
+          contextVersion: 3,
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.create",
+          commandId: CommandId.make("cmd-section-thread-create"),
+          threadId: ThreadId.make("section-thread"),
+          projectId,
+          title: "Recommend a movie",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+        },
+        readModel: withSection,
+      });
+
+      const event = Array.isArray(result) ? result[0] : result;
+      expect(event.type).toBe("thread.created");
+      expect(event.payload).toMatchObject({
+        sectionContextSnapshot: {
+          title: "Jellyfin",
+          markdown: "Use the configured Jellyfin tools.",
+          version: 3,
+        },
+      });
+    }),
+  );
+
   it.effect("emits user message and turn-start-requested events for thread.turn.start", () =>
     Effect.gen(function* () {
       const now = "2026-01-01T00:00:00.000Z";

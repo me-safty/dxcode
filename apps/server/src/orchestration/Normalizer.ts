@@ -48,13 +48,18 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
         );
 
     if (command.type === "project.create") {
+      const requestedWorkspaceRoot =
+        command.kind === "section"
+          ? path.join(serverConfig.sectionsDir, command.projectId)
+          : command.workspaceRoot;
       return {
         ...command,
         workspaceRoot: yield* normalizeProjectWorkspaceRootForCreate(
-          command.workspaceRoot,
-          command.createWorkspaceRootIfMissing,
+          requestedWorkspaceRoot,
+          command.kind === "section" ? true : command.createWorkspaceRootIfMissing,
         ),
-        createWorkspaceRootIfMissing: command.createWorkspaceRootIfMissing === true,
+        createWorkspaceRootIfMissing:
+          command.kind === "section" || command.createWorkspaceRootIfMissing === true,
       } satisfies OrchestrationCommand;
     }
 

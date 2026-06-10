@@ -124,6 +124,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: command.projectId,
           title: command.title,
           workspaceRoot: command.workspaceRoot,
+          kind: command.kind ?? "project",
+          contextMarkdown: command.contextMarkdown ?? "",
+          contextVersion: command.contextMarkdown ? 1 : 0,
           defaultModelSelection: command.defaultModelSelection ?? null,
           scripts: [],
           createdAt: command.createdAt,
@@ -133,7 +136,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.meta.update": {
-      yield* requireProject({
+      const project = yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
@@ -155,6 +158,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ? { defaultModelSelection: command.defaultModelSelection }
             : {}),
           ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
+          ...(command.contextMarkdown !== undefined
+            ? {
+                contextMarkdown: command.contextMarkdown,
+                contextVersion: (project.contextVersion ?? 0) + 1,
+              }
+            : {}),
           updatedAt: occurredAt,
         },
       };
@@ -212,7 +221,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.create": {
-      yield* requireProject({
+      const project = yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
@@ -241,6 +250,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           worktreePath: command.worktreePath,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
+          ...(project.kind === "section"
+            ? {
+                sectionContextSnapshot: {
+                  title: project.title,
+                  markdown: project.contextMarkdown ?? "",
+                  version: project.contextVersion ?? 0,
+                },
+              }
+            : {}),
         },
       };
     }

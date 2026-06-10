@@ -233,6 +233,9 @@ function mapProject(
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     scripts: mapProjectScripts(project.scripts),
+    kind: project.kind ?? "project",
+    contextMarkdown: project.contextMarkdown ?? "",
+    contextVersion: project.contextVersion ?? 0,
   };
 }
 
@@ -259,6 +262,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     worktreePath: thread.worktreePath,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
+    sectionContextSnapshot: thread.sectionContextSnapshot,
   };
 }
 

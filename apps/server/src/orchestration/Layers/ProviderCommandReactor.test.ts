@@ -142,6 +142,7 @@ describe("ProviderCommandReactor", () => {
     readonly baseDir?: string;
     readonly threadModelSelection?: ModelSelection;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
+    readonly sectionContext?: string;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
     const baseDir = input?.baseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "t3code-reactor-"));
@@ -375,6 +376,9 @@ describe("ProviderCommandReactor", () => {
         projectId: asProjectId("project-1"),
         title: "Provider Project",
         workspaceRoot: "/tmp/provider-project",
+        ...(input?.sectionContext !== undefined
+          ? { kind: "section" as const, contextMarkdown: input.sectionContext }
+          : {}),
         defaultModelSelection: modelSelection,
         createdAt: now,
       }),
@@ -451,6 +455,63 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("sends section context with only the first user turn", async () => {
+    const harness = await createHarness({
+      sectionContext: "Use the configured Jellyfin tools and never delete media.",
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-section-turn-start-1"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("section-user-message-1"),
+          role: "user",
+          text: "Recommend a movie.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      input: `<task_section_context title="Provider Project" version="1">
+Use the configured Jellyfin tools and never delete media.
+</task_section_context>
+
+<user_request>
+Recommend a movie.
+</user_request>`,
+    });
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-section-turn-start-2"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("section-user-message-2"),
+          role: "user",
+          text: "Something shorter.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      input: "Something shorter.",
+    });
   });
 
   it("generates a thread title on the first turn", async () => {

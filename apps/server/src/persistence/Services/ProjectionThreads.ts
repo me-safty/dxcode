@@ -13,6 +13,7 @@ import {
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
+  SectionContextSnapshot,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -41,6 +42,7 @@ export const ProjectionThread = Schema.Struct({
   pendingUserInputCount: NonNegativeInt,
   hasActionableProposedPlan: NonNegativeInt,
   deletedAt: Schema.NullOr(IsoDateTime),
+  sectionContextSnapshot: Schema.optionalKey(Schema.NullOr(SectionContextSnapshot)),
 });
 export type ProjectionThread = typeof ProjectionThread.Type;
 

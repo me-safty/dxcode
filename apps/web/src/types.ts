@@ -16,6 +16,8 @@ import type {
   CheckpointRef,
   ProviderInteractionMode,
   RuntimeMode,
+  ProjectKind,
+  SectionContextSnapshot,
 } from "@t3tools/contracts";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
@@ -91,6 +93,9 @@ export interface Project {
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
   scripts: ProjectScript[];
+  kind?: ProjectKind | undefined;
+  contextMarkdown?: string | undefined;
+  contextVersion?: number | undefined;
 }
 
 export interface Thread {
@@ -115,6 +120,7 @@ export interface Thread {
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  sectionContextSnapshot?: SectionContextSnapshot | undefined;
 }
 
 export interface ThreadShell {

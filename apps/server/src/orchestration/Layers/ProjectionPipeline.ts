@@ -468,6 +468,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             projectId: event.payload.projectId,
             title: event.payload.title,
             workspaceRoot: event.payload.workspaceRoot,
+            kind: event.payload.kind ?? "project",
+            contextMarkdown: event.payload.contextMarkdown ?? "",
+            contextVersion: event.payload.contextVersion ?? 0,
             defaultModelSelection: event.payload.defaultModelSelection,
             scripts: event.payload.scripts,
             createdAt: event.payload.createdAt,
@@ -493,6 +496,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ? { defaultModelSelection: event.payload.defaultModelSelection }
               : {}),
             ...(event.payload.scripts !== undefined ? { scripts: event.payload.scripts } : {}),
+            ...(event.payload.contextMarkdown !== undefined
+              ? { contextMarkdown: event.payload.contextMarkdown }
+              : {}),
+            ...(event.payload.contextVersion !== undefined
+              ? { contextVersion: event.payload.contextVersion }
+              : {}),
             updatedAt: event.payload.updatedAt,
           });
           return;
@@ -586,6 +595,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pendingUserInputCount: 0,
             hasActionableProposedPlan: 0,
             deletedAt: null,
+            sectionContextSnapshot: event.payload.sectionContextSnapshot ?? null,
           });
           return;
 
