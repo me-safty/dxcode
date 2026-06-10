@@ -28,4 +28,5 @@ export {
   resetEnvironmentServiceForTests,
   startEnvironmentConnectionService,
   subscribeEnvironmentConnections,
+  waitForEnvironmentReconnectIdle,
 } from "./service";

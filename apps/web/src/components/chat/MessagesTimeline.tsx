@@ -520,7 +520,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           skills={ctx.skills}
           footer={
             <>
-              <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100 max-sm:opacity-100">
+              <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
                 {displayedUserMessage.copyText && (
                   <MessageCopyButton text={displayedUserMessage.copyText} />
                 )}
@@ -636,7 +636,7 @@ function AssistantCopyButton({ row }: { row: Extract<TimelineRow, { kind: "messa
   }
 
   return (
-    <div className="flex items-center opacity-0 transition-opacity duration-200 group-hover/assistant:opacity-100 max-sm:opacity-100">
+    <div className="flex items-center opacity-0 transition-opacity duration-200  group-hover/assistant:opacity-100">
       <MessageCopyButton
         text={assistantCopyState.text ?? ""}
         size="icon-xs"
@@ -793,7 +793,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
       <div className="space-y-0.5">
         {visibleEntries.map((workEntry) => (
           <SimpleWorkEntryRow
-            key={`work-row:${workEntry.id}`}
+            key={`work-row:${workEntry.stableId ?? workEntry.id}`}
             workEntry={workEntry}
             workspaceRoot={workspaceRoot}
           />
@@ -1281,8 +1281,11 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
   const [isNewEntry] = useState(() => {
-    if (seenWorkEntryIds.has(workEntry.id)) return false;
-    seenWorkEntryIds.add(workEntry.id);
+    // Track by the lifecycle-stable identity, not `id` (which changes on every
+    // tool update), so the fade-in animation plays once per tool call.
+    const seenKey = workEntry.stableId ?? workEntry.id;
+    if (seenWorkEntryIds.has(seenKey)) return false;
+    seenWorkEntryIds.add(seenKey);
     return true;
   });
 

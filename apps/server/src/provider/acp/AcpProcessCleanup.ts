@@ -3,19 +3,11 @@ import { execFileSync } from "node:child_process";
 
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type * as ChildProcess from "effect/unstable/process/ChildProcess";
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
 export const ACP_PROCESS_TERMINATE_GRACE = "250 millis" as const satisfies Duration.Input;
-
-const realSleep = (duration: Duration.Input): Effect.Effect<void> =>
-  Effect.promise(
-    () =>
-      new Promise<void>((resolve) => {
-        // @effect-diagnostics-next-line globalTimers:off
-        setTimeout(resolve, Duration.toMillis(duration));
-      }),
-  );
 
 function readProcessRows(): ReadonlyArray<{ readonly pid: number; readonly ppid: number }> {
   try {
@@ -129,10 +121,12 @@ const signalProcessTree = (input: {
       });
     }
 
-    for (const pid of input.descendantPids.toReversed()) {
-      yield* signalPid({ pid, signal: input.signal });
+    if (!sentToProcessGroup) {
+      for (const pid of input.descendantPids.toReversed()) {
+        yield* signalPid({ pid, signal: input.signal });
+      }
+      yield* signalPid({ pid: input.rootPid, signal: input.signal });
     }
-    yield* signalPid({ pid: input.rootPid, signal: input.signal });
 
     yield* Effect.logDebug("ACP process tree cleanup signal sent", {
       "acp.process.label": input.label,
@@ -144,6 +138,12 @@ const signalProcessTree = (input: {
       cursor_process_tree_killed: input.signal === "SIGKILL",
     });
   }).pipe(Effect.ignore);
+
+const waitForRootExit = (
+  child: ChildProcessSpawner.ChildProcessHandle,
+  grace: Duration.Input,
+): Effect.Effect<boolean> =>
+  child.exitCode.pipe(Effect.exit, Effect.timeoutOption(grace), Effect.map(Option.isSome));
 
 export const terminateAcpProcessTree = (input: {
   readonly child: ChildProcessSpawner.ChildProcessHandle;
@@ -167,16 +167,19 @@ export const terminateAcpProcessTree = (input: {
         descendantPids,
         signal: "SIGTERM",
       }).pipe(
-        Effect.andThen(realSleep(grace)),
-        Effect.andThen(
-          signalProcessTree({
+        Effect.andThen(waitForRootExit(input.child, grace)),
+        Effect.flatMap((rootExited) => {
+          if (rootExited && descendantPids.length === 0) {
+            return Effect.void;
+          }
+          return signalProcessTree({
             label: input.label,
             rootPid,
             processGroupId,
             descendantPids,
             signal: "SIGKILL",
-          }),
-        ),
+          });
+        }),
       ),
     ),
     Effect.ignore,

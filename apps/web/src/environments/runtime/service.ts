@@ -180,6 +180,7 @@ interface ConnectionHealthRecovery {
 
 interface TerminalOutputStallRecovery {
   nextAllowedAt: number;
+  recreateAttemptCount: number;
   promise: Promise<void> | null;
 }
 
@@ -259,6 +260,7 @@ const lastAppliedProjectionVersionByEnvironment = new Map<
     readonly updatedAt: string | null;
   }
 >();
+const shellSnapshotSyncCountByEnvironment = new Map<EnvironmentId, number>();
 const projectionRecoveryByEnvironment = new Map<EnvironmentId, ProjectionRecovery>();
 const connectionHealthRecoveryByEnvironment = new Map<EnvironmentId, ConnectionHealthRecovery>();
 const terminalOutputStallRecoveryByEnvironment = new Map<
@@ -315,7 +317,12 @@ const CONNECTION_HEALTH_RECOVERY_RECONNECT_TIMEOUT_MS = 15_000;
 const TERMINAL_OUTPUT_STALL_CHECK_INTERVAL_MS = 2_000;
 const TERMINAL_OUTPUT_STALL_THRESHOLD_MS = 4_000;
 const TERMINAL_OUTPUT_STALL_RECOVERY_COOLDOWN_MS = 30_000;
+const TERMINAL_OUTPUT_STALL_RECREATE_COOLDOWN_MS = 60_000;
+const TERMINAL_OUTPUT_STALL_RECREATE_MAX_ATTEMPTS = 2;
 const TERMINAL_OUTPUT_STALL_RECONNECT_TIMEOUT_MS = 8_000;
+const TERMINAL_OUTPUT_STALL_VERIFY_TIMEOUT_MS = 5_000;
+const TERMINAL_OUTPUT_STALL_VERIFY_POLL_MS = 100;
+const ENVIRONMENT_RECONNECT_IDLE_WAIT_MS = 2_500;
 const BROWSER_RESUME_RECONCILE_COOLDOWN_MS = 2_000;
 const BROWSER_RESUME_RECONCILE_TIMEOUT_MS = 1_500;
 const BROWSER_RESUME_HEARTBEAT_TICK_MS = 15_000;
@@ -350,6 +357,12 @@ function createDeferredPromise<T>() {
       resolve = null;
     },
   };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function getBrowserHiddenDuration(now: number): number | null {
@@ -772,6 +785,17 @@ function readLastAppliedProjectionVersion(environmentId: EnvironmentId): {
   return lastAppliedProjectionVersionByEnvironment.get(environmentId) ?? null;
 }
 
+function readShellSnapshotSyncCount(environmentId: EnvironmentId): number {
+  return shellSnapshotSyncCountByEnvironment.get(environmentId) ?? 0;
+}
+
+function markShellSnapshotSynced(environmentId: EnvironmentId): void {
+  shellSnapshotSyncCountByEnvironment.set(
+    environmentId,
+    readShellSnapshotSyncCount(environmentId) + 1,
+  );
+}
+
 function markAppliedProjectionSnapshot(
   environmentId: EnvironmentId,
   snapshot: Pick<OrchestrationShellSnapshot, "snapshotSequence" | "updatedAt">,
@@ -1172,12 +1196,97 @@ function canRecoverTerminalOutputStalls(): boolean {
   return true;
 }
 
+function isTerminalOutputStallCandidateStillPresent(
+  candidate: TerminalOutputStallCandidate,
+): boolean {
+  return selectTerminalOutputStallCandidates({
+    stallThresholdMs: TERMINAL_OUTPUT_STALL_THRESHOLD_MS,
+  }).some(
+    (nextCandidate) =>
+      nextCandidate.threadRef.environmentId === candidate.threadRef.environmentId &&
+      nextCandidate.threadRef.threadId === candidate.threadRef.threadId &&
+      nextCandidate.terminalId === candidate.terminalId,
+  );
+}
+
+async function waitForTerminalOutputStallRecoveryEvidence(input: {
+  readonly candidate: TerminalOutputStallCandidate;
+  readonly connection: EnvironmentConnection;
+  readonly initialShellSnapshotSyncCount: number;
+}): Promise<"candidate-cleared" | "connection-replaced" | "shell-snapshot-synced" | "timeout"> {
+  const environmentId = input.connection.environmentId;
+  const deadline = Date.now() + TERMINAL_OUTPUT_STALL_VERIFY_TIMEOUT_MS;
+
+  for (;;) {
+    if (readEnvironmentConnection(environmentId) !== input.connection) {
+      return "connection-replaced";
+    }
+    if (readShellSnapshotSyncCount(environmentId) > input.initialShellSnapshotSyncCount) {
+      return "shell-snapshot-synced";
+    }
+    if (!isTerminalOutputStallCandidateStillPresent(input.candidate)) {
+      return "candidate-cleared";
+    }
+    if (Date.now() >= deadline) {
+      return "timeout";
+    }
+    await sleep(Math.min(TERMINAL_OUTPUT_STALL_VERIFY_POLL_MS, deadline - Date.now()));
+  }
+}
+
+async function recreateEnvironmentConnectionForRecovery(
+  connection: EnvironmentConnection,
+  reason: string,
+): Promise<EnvironmentConnection | null> {
+  const environmentId = connection.environmentId;
+  if (readEnvironmentConnection(environmentId) !== connection) {
+    return readEnvironmentConnection(environmentId);
+  }
+
+  recordResumeDiagnostic("environment-connection-recreate", {
+    reason,
+    env: environmentId,
+    data: {
+      kind: connection.kind,
+    },
+  });
+
+  if (connection.kind === "primary") {
+    await removeConnection(environmentId).catch(() => false);
+    return createPrimaryEnvironmentConnection();
+  }
+
+  const record = getSavedEnvironmentRecord(environmentId);
+  if (!record) {
+    throw new Error(`Saved environment ${environmentId} is not registered.`);
+  }
+
+  await removeConnection(environmentId).catch(() => false);
+  return await ensureSavedEnvironmentConnection(record);
+}
+
 function queueTerminalOutputStallRecovery(
   connection: EnvironmentConnection,
   candidate: TerminalOutputStallCandidate,
 ): void {
   const environmentId = connection.environmentId;
   const now = Date.now();
+  if (
+    browserResumeReconciliationByEnvironment.has(environmentId) ||
+    browserResumeReconnectRetryByEnvironment.has(environmentId)
+  ) {
+    recordResumeDiagnostic("terminal-output-stall-recovery", {
+      reason: "browser-resume-in-flight-suppressed",
+      env: environmentId,
+      data: {
+        lastOutputAt: candidate.lastOutputAt,
+        lastWriteSuccessAt: candidate.lastWriteSuccessAt,
+        terminalId: candidate.terminalId,
+        threadId: candidate.threadRef.threadId,
+      },
+    });
+    return;
+  }
   const existing = terminalOutputStallRecoveryByEnvironment.get(environmentId);
   if (existing?.promise) {
     return;
@@ -1202,6 +1311,7 @@ function queueTerminalOutputStallRecovery(
 
   const recovery: TerminalOutputStallRecovery = existing ?? {
     nextAllowedAt: 0,
+    recreateAttemptCount: 0,
     promise: null,
   };
   terminalOutputStallRecoveryByEnvironment.set(environmentId, recovery);
@@ -1221,6 +1331,7 @@ function queueTerminalOutputStallRecovery(
 
   recovery.promise = (async () => {
     try {
+      const initialShellSnapshotSyncCount = readShellSnapshotSyncCount(environmentId);
       await withTimeout(
         connection.client.reconnect(),
         TERMINAL_OUTPUT_STALL_RECONNECT_TIMEOUT_MS,
@@ -1229,14 +1340,59 @@ function queueTerminalOutputStallRecovery(
       if (readEnvironmentConnection(environmentId) !== connection) {
         return;
       }
-      recovery.nextAllowedAt = Date.now() + TERMINAL_OUTPUT_STALL_RECOVERY_COOLDOWN_MS;
+      const evidence = await waitForTerminalOutputStallRecoveryEvidence({
+        candidate,
+        connection,
+        initialShellSnapshotSyncCount,
+      });
+      if (readEnvironmentConnection(environmentId) !== connection) {
+        return;
+      }
+      if (evidence !== "timeout") {
+        recovery.recreateAttemptCount = 0;
+        recovery.nextAllowedAt = Date.now() + TERMINAL_OUTPUT_STALL_RECOVERY_COOLDOWN_MS;
+        recordResumeDiagnostic("terminal-output-stall-recovery", {
+          reason: "forced-transport-reconnect-success",
+          env: environmentId,
+          data: {
+            evidence,
+            terminalId: candidate.terminalId,
+            threadId: candidate.threadRef.threadId,
+          },
+        });
+        return;
+      }
+
       recordResumeDiagnostic("terminal-output-stall-recovery", {
-        reason: "forced-transport-reconnect-success",
+        reason: "forced-transport-reconnect-ineffective",
         env: environmentId,
         data: {
           terminalId: candidate.terminalId,
           threadId: candidate.threadRef.threadId,
+          writesSinceLastOutput: candidate.writesSinceLastOutput,
         },
+      });
+      if (recovery.recreateAttemptCount >= TERMINAL_OUTPUT_STALL_RECREATE_MAX_ATTEMPTS) {
+        recovery.nextAllowedAt = Date.now() + TERMINAL_OUTPUT_STALL_RECREATE_COOLDOWN_MS;
+        recordResumeDiagnostic("terminal-output-stall-recovery", {
+          reason: "connection-recreate-attempt-cap",
+          env: environmentId,
+          data: {
+            attemptCount: recovery.recreateAttemptCount,
+            terminalId: candidate.terminalId,
+            threadId: candidate.threadRef.threadId,
+          },
+        });
+        return;
+      }
+
+      recovery.recreateAttemptCount += 1;
+      await recreateEnvironmentConnectionForRecovery(connection, "terminal-output-stall-recovery");
+      recovery.nextAllowedAt = Date.now() + TERMINAL_OUTPUT_STALL_RECREATE_COOLDOWN_MS;
+      terminalOutputStallRecoveryByEnvironment.set(environmentId, {
+        nextAllowedAt: recovery.nextAllowedAt,
+        recreateAttemptCount: recovery.recreateAttemptCount,
+        promise: null,
       });
     } catch (error) {
       if (readEnvironmentConnection(environmentId) !== connection) {
@@ -2771,6 +2927,7 @@ function createEnvironmentConnectionHandlers() {
   return {
     applyShellEvent,
     syncShellSnapshot: (snapshot: OrchestrationShellSnapshot, environmentId: EnvironmentId) => {
+      markShellSnapshotSynced(environmentId);
       if (
         !shouldApplyProjectionSnapshot({
           current: readLastAppliedProjectionVersion(environmentId),
@@ -2948,6 +3105,7 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
   }
 
   lastAppliedProjectionVersionByEnvironment.delete(environmentId);
+  shellSnapshotSyncCountByEnvironment.delete(environmentId);
   projectionRecoveryByEnvironment.delete(environmentId);
   connectionHealthRecoveryByEnvironment.delete(environmentId);
   terminalOutputStallRecoveryByEnvironment.delete(environmentId);
@@ -3619,7 +3777,8 @@ function driveStuckShellBootstrapSelfHeal(): void {
     }
     if (
       browserResumeReconciliationByEnvironment.has(environmentId) ||
-      browserResumeReconnectRetryByEnvironment.has(environmentId)
+      browserResumeReconnectRetryByEnvironment.has(environmentId) ||
+      terminalOutputStallRecoveryByEnvironment.get(environmentId)?.promise
     ) {
       continue;
     }
@@ -3689,6 +3848,19 @@ function queueEnvironmentBrowserResumeReconciliation(
         hiddenDurationMs: options.hiddenDurationMs,
         inFlightReason: scheduledRetry.reason,
         inFlightForceReconnect: scheduledRetry.options.forceReconnect,
+      },
+    });
+    return;
+  }
+
+  if (terminalOutputStallRecoveryByEnvironment.get(environmentId)?.promise) {
+    recordResumeDiagnostic("browser-resume-queue", {
+      reason,
+      env: environmentId,
+      data: {
+        action: "coalesced-terminal-output-stall-recovery",
+        forceReconnect: options.forceReconnect,
+        hiddenDurationMs: options.hiddenDurationMs,
       },
     });
     return;
@@ -4139,6 +4311,48 @@ export function readEnvironmentConnection(
   return environmentConnections.get(environmentId) ?? null;
 }
 
+function listEnvironmentReconnectInFlightPromises(environmentId: EnvironmentId): Promise<void>[] {
+  const promises: Promise<void>[] = [];
+  const browserResumePromise = browserResumeReconciliationByEnvironment.get(environmentId)?.promise;
+  if (browserResumePromise) {
+    promises.push(browserResumePromise);
+  }
+  const terminalStallPromise = terminalOutputStallRecoveryByEnvironment.get(environmentId)?.promise;
+  if (terminalStallPromise) {
+    promises.push(terminalStallPromise);
+  }
+  const connectionHealthPromise = connectionHealthRecoveryByEnvironment.get(environmentId)?.promise;
+  if (connectionHealthPromise) {
+    promises.push(connectionHealthPromise);
+  }
+  return promises;
+}
+
+export async function waitForEnvironmentReconnectIdle(
+  environmentId: EnvironmentId,
+  timeoutMs = ENVIRONMENT_RECONNECT_IDLE_WAIT_MS,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    const promises = listEnvironmentReconnectInFlightPromises(environmentId);
+    const hasQueuedBrowserResumeRetry = browserResumeReconnectRetryByEnvironment.has(environmentId);
+    if (promises.length === 0 && !hasQueuedBrowserResumeRetry) {
+      return true;
+    }
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      return false;
+    }
+
+    await Promise.race([
+      promises.length > 0 ? Promise.allSettled(promises).then(() => undefined) : sleep(remainingMs),
+      sleep(Math.min(50, remainingMs)),
+    ]);
+  }
+}
+
 export function requireEnvironmentConnection(environmentId: EnvironmentId): EnvironmentConnection {
   const connection = readEnvironmentConnection(environmentId);
   if (!connection) {
@@ -4423,6 +4637,7 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   browserResumeReconciliationByEnvironment.clear();
   activeThreadProjectionReconciliationByEnvironment.clear();
   lastAppliedProjectionVersionByEnvironment.clear();
+  shellSnapshotSyncCountByEnvironment.clear();
   projectionRecoveryByEnvironment.clear();
   connectionHealthRecoveryByEnvironment.clear();
   terminalOutputStallRecoveryByEnvironment.clear();

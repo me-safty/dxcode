@@ -188,18 +188,50 @@ export function createEnvironmentConnection(
       input.applyShellEvent(item, environmentId);
     },
     {
+      onSubscriptionError: (info) => {
+        recordResumeDiagnostic("subscription-error", {
+          ...(info.tag === undefined ? {} : { reason: info.tag }),
+          env: environmentId,
+          data: {
+            attempt: info.attempt,
+            error: info.error,
+            staleSession: info.staleSession,
+            tag: info.tag ?? null,
+            transportError: info.transportError,
+            willRetryInMs: info.willRetryInMs,
+          },
+        });
+      },
       onResubscribe: () => {
         if (disposed) {
           return;
         }
         bootstrapGate.reset();
       },
+      tag: "shell",
     },
   );
 
   const unsubTerminalEvent = input.client.terminal.onEvent(
     (event: Parameters<Parameters<WsRpcClient["terminal"]["onEvent"]>[0]>[0]) => {
       input.applyTerminalEvent(event, environmentId);
+    },
+    {
+      onSubscriptionError: (info) => {
+        recordResumeDiagnostic("subscription-error", {
+          ...(info.tag === undefined ? {} : { reason: info.tag }),
+          env: environmentId,
+          data: {
+            attempt: info.attempt,
+            error: info.error,
+            staleSession: info.staleSession,
+            tag: info.tag ?? null,
+            transportError: info.transportError,
+            willRetryInMs: info.willRetryInMs,
+          },
+        });
+      },
+      tag: "terminal-events",
     },
   );
 

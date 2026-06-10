@@ -11,6 +11,7 @@ import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -2292,7 +2293,7 @@ it.effect("ProjectionSnapshotQuery coalesces concurrent shell snapshot loads", (
   }),
 );
 
-it.effect("ProjectionSnapshotQuery clears a coalesced shell snapshot load on owner interrupt", () =>
+it.effect("ProjectionSnapshotQuery retries a coalesced waiter when the owner is interrupted", () =>
   Effect.gen(function* () {
     const firstResolverEntered = yield* Deferred.make<void>();
     const secondResolverEntered = yield* Deferred.make<void>();
@@ -2360,9 +2361,11 @@ it.effect("ProjectionSnapshotQuery clears a coalesced shell snapshot load on own
 
       const firstFiber = yield* snapshotQuery.getShellSnapshot().pipe(Effect.forkScoped);
       yield* Deferred.await(firstResolverEntered);
+      const secondFiber = yield* snapshotQuery.getShellSnapshot().pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
       yield* Fiber.interrupt(firstFiber);
 
-      const secondFiber = yield* snapshotQuery.getShellSnapshot().pipe(Effect.forkScoped);
       yield* Deferred.await(secondResolverEntered).pipe(Effect.timeout("1 second"));
       yield* Deferred.succeed(releaseSecondResolver, undefined).pipe(Effect.ignore);
       const secondSnapshot = yield* Fiber.join(secondFiber).pipe(Effect.timeout("1 second"));
@@ -2370,6 +2373,100 @@ it.effect("ProjectionSnapshotQuery clears a coalesced shell snapshot load on own
       assert.deepStrictEqual(resolveCalls, ["/tmp/interrupted-root", "/tmp/interrupted-root"]);
       assert.equal(secondSnapshot.projects.length, 1);
       assert.equal(secondSnapshot.projects[0]?.id, asProjectId("project-interrupt"));
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("ProjectionSnapshotQuery clears a coalesced shell snapshot load after owner defect", () =>
+  Effect.gen(function* () {
+    const resolverEntered = yield* Deferred.make<void>();
+    const releaseResolver = yield* Deferred.make<void>();
+    const resolveCalls: string[] = [];
+    const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
+      Layer.provideMerge(
+        Layer.succeed(RepositoryIdentityResolver, {
+          resolve: (cwd: string) =>
+            Effect.gen(function* () {
+              const callNumber = resolveCalls.push(cwd);
+              if (callNumber === 1) {
+                yield* Deferred.succeed(resolverEntered, undefined).pipe(Effect.ignore);
+                yield* Deferred.await(releaseResolver);
+                return yield* Effect.die(new Error("repository identity resolver failed"));
+              }
+
+              return {
+                canonicalKey: `github.com/acme${cwd}`,
+                locator: {
+                  source: "git-remote" as const,
+                  remoteName: "origin",
+                  remoteUrl: `https://github.com/acme${cwd}.git`,
+                },
+                rootPath: cwd,
+              };
+            }),
+        }),
+      ),
+      Layer.provideMerge(SqlitePersistenceMemory),
+    );
+
+    yield* Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-defect',
+          'Defect Project',
+          '/tmp/defect-root',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-04-07T00:00:00.000Z',
+          '2026-04-07T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      const firstFiber = yield* snapshotQuery
+        .getShellSnapshot()
+        .pipe(Effect.exit, Effect.forkScoped);
+      yield* Deferred.await(resolverEntered);
+      const secondFiber = yield* snapshotQuery
+        .getShellSnapshot()
+        .pipe(Effect.exit, Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      yield* Deferred.succeed(releaseResolver, undefined).pipe(Effect.ignore);
+
+      const [firstExit, secondExit] = yield* Effect.all([
+        Fiber.join(firstFiber),
+        Fiber.join(secondFiber),
+      ]);
+
+      assert.equal(Exit.hasDies(firstExit), true);
+      assert.equal(Exit.hasDies(secondExit), true);
+
+      const freshSnapshot = yield* snapshotQuery
+        .getShellSnapshot()
+        .pipe(Effect.timeout("1 second"));
+
+      assert.deepStrictEqual(resolveCalls, ["/tmp/defect-root", "/tmp/defect-root"]);
+      assert.equal(freshSnapshot.projects.length, 1);
+      assert.equal(freshSnapshot.projects[0]?.id, asProjectId("project-defect"));
     }).pipe(Effect.provide(layer));
   }),
 );

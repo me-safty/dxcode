@@ -34,6 +34,7 @@ import {
 import * as Arr from "effect/Array";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
@@ -501,9 +502,18 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
+  interface ShellSnapshotOwnerInterrupted {
+    readonly _tag: "ShellSnapshotOwnerInterrupted";
+  }
+  const shellSnapshotOwnerInterrupted: ShellSnapshotOwnerInterrupted = {
+    _tag: "ShellSnapshotOwnerInterrupted",
+  };
+  const isShellSnapshotOwnerInterrupted = (
+    error: ProjectionRepositoryError | ShellSnapshotOwnerInterrupted,
+  ): error is ShellSnapshotOwnerInterrupted => error._tag === "ShellSnapshotOwnerInterrupted";
   type ShellSnapshotInFlight = Deferred.Deferred<
     Schema.Schema.Type<typeof OrchestrationShellSnapshot>,
-    ProjectionRepositoryError
+    ProjectionRepositoryError | ShellSnapshotOwnerInterrupted
   >;
   type ShellSnapshotInFlightSelection =
     | {
@@ -519,6 +529,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     ShellSnapshotInFlight,
   ];
   const shellSnapshotInFlightRef = yield* Ref.make<ShellSnapshotInFlight | null>(null);
+  const shellSnapshotInFlightWaiterRetryLimit = 3;
   const repositoryIdentityResolutionConcurrency = 4;
   const resolveRepositoryIdentitiesForProjects = Effect.fn(
     "ProjectionSnapshotQuery.resolveRepositoryIdentitiesForProjects",
@@ -2101,12 +2112,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         }),
       );
 
-  const getShellSnapshot: ProjectionSnapshotQueryShape["getShellSnapshot"] = () =>
+  const makeShellSnapshotOwnerInterruptedError = () =>
+    toPersistenceSqlError("ProjectionSnapshotQuery.getShellSnapshot:coalescedOwnerInterrupted")(
+      new Error("Coalesced shell snapshot owner was interrupted repeatedly."),
+    );
+
+  const getShellSnapshotAttempt = (
+    remainingWaiterRetries: number,
+  ): ReturnType<ProjectionSnapshotQueryShape["getShellSnapshot"]> =>
     Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
         const deferred = yield* Deferred.make<
           Schema.Schema.Type<typeof OrchestrationShellSnapshot>,
-          ProjectionRepositoryError
+          ProjectionRepositoryError | ShellSnapshotOwnerInterrupted
         >();
         const inFlight: ShellSnapshotInFlightSelection = yield* Ref.modify(
           shellSnapshotInFlightRef,
@@ -2127,23 +2145,39 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         );
 
         if (!inFlight.owner) {
-          return yield* restore(Deferred.await(inFlight.deferred));
+          return yield* restore(Deferred.await(inFlight.deferred)).pipe(
+            Effect.catchIf(isShellSnapshotOwnerInterrupted, () =>
+              remainingWaiterRetries > 0
+                ? getShellSnapshotAttempt(remainingWaiterRetries - 1)
+                : Effect.fail(makeShellSnapshotOwnerInterruptedError()),
+            ),
+          );
         }
 
         return yield* restore(loadShellSnapshot()).pipe(
           Effect.onExit((exit) =>
             Effect.uninterruptible(
               Effect.gen(function* () {
-                yield* Deferred.done(inFlight.deferred, exit);
-                yield* Ref.update(shellSnapshotInFlightRef, (current) =>
-                  current === inFlight.deferred ? null : current,
-                );
+                if (Exit.hasInterrupts(exit) && !Exit.hasDies(exit)) {
+                  yield* Ref.update(shellSnapshotInFlightRef, (current) =>
+                    current === inFlight.deferred ? null : current,
+                  );
+                  yield* Deferred.fail(inFlight.deferred, shellSnapshotOwnerInterrupted);
+                } else {
+                  yield* Deferred.done(inFlight.deferred, exit);
+                  yield* Ref.update(shellSnapshotInFlightRef, (current) =>
+                    current === inFlight.deferred ? null : current,
+                  );
+                }
               }),
             ),
           ),
         );
       }),
     );
+
+  const getShellSnapshot: ProjectionSnapshotQueryShape["getShellSnapshot"] = () =>
+    getShellSnapshotAttempt(shellSnapshotInFlightWaiterRetryLimit);
 
   const getArchivedShellSnapshot: ProjectionSnapshotQueryShape["getArchivedShellSnapshot"] = () =>
     sql

@@ -631,6 +631,63 @@ function summarizeResumeDiagnostics() {
   return getResumeDiagnosticsEntries().slice(-MAX_RESUME_DIAGNOSTIC_ENTRIES);
 }
 
+function summarizeSubscriptionLoopHealth(nowMs: number) {
+  const summaries = new Map<
+    string,
+    {
+      env: string;
+      errorCount: number;
+      lastAttempt: number | null;
+      lastError: string | null;
+      lastErrorAt: string | null;
+      lastErrorAgeMs: number | null;
+      lastWillRetryInMs: number | null;
+      loopAlive: boolean;
+      retryingNow: boolean;
+      tag: string;
+      transportError: boolean | null;
+    }
+  >();
+
+  for (const entry of getResumeDiagnosticsEntries()) {
+    if (entry.kind !== "subscription-error") {
+      continue;
+    }
+    const data = entry.data ?? {};
+    const env = entry.env ?? "unknown";
+    const tag =
+      typeof data.tag === "string" && data.tag.length > 0
+        ? data.tag
+        : entry.reason && entry.reason.length > 0
+          ? entry.reason
+          : "unknown";
+    const key = `${env}\u0000${tag}`;
+    const willRetryInMs =
+      typeof data.willRetryInMs === "number" && Number.isFinite(data.willRetryInMs)
+        ? data.willRetryInMs
+        : null;
+    const lastErrorAgeMs = Math.max(0, Math.round(nowMs - entry.ts));
+    summaries.set(key, {
+      env,
+      errorCount: (summaries.get(key)?.errorCount ?? 0) + 1,
+      lastAttempt:
+        typeof data.attempt === "number" && Number.isFinite(data.attempt) ? data.attempt : null,
+      lastError: typeof data.error === "string" ? data.error : null,
+      lastErrorAgeMs,
+      lastErrorAt: new Date(entry.ts).toISOString(),
+      lastWillRetryInMs: willRetryInMs,
+      loopAlive: willRetryInMs !== null,
+      retryingNow: willRetryInMs !== null && lastErrorAgeMs <= willRetryInMs + 1_000,
+      tag,
+      transportError: typeof data.transportError === "boolean" ? data.transportError : null,
+    });
+  }
+
+  return [...summaries.values()].sort((left, right) =>
+    left.env === right.env ? left.tag.localeCompare(right.tag) : left.env.localeCompare(right.env),
+  );
+}
+
 function buildInterpretation(input: {
   readonly pendingRequestCount: number;
   readonly slowRequestCount: number;
@@ -736,6 +793,7 @@ export function buildWebSocketDiagnosticsReport(context: WebSocketDiagnosticsCon
   const status = getWsConnectionStatus();
   const uiState = getWsConnectionUiState(status);
   const terminalDiagnostics = summarizeTerminalDiagnostics(context);
+  const subscriptionLoopHealth = summarizeSubscriptionLoopHealth(nowMs);
   const rpcRequests = summarizeRpcRequests(nowMs);
   const redactedStatus = {
     ...status,
@@ -768,6 +826,7 @@ export function buildWebSocketDiagnosticsReport(context: WebSocketDiagnosticsCon
     rpcRequests,
     serverConfig: summarizeServerConfig(),
     serverConfigUpdatedNotification: getServerConfigUpdatedNotification(),
+    subscriptionLoopHealth,
     terminal: terminalDiagnostics,
     websocket: {
       msSinceConnected: msSinceIso(status.connectedAt, nowMs),
@@ -867,6 +926,14 @@ export function buildWebSocketDiagnosticsReport(context: WebSocketDiagnosticsCon
     "",
     "## Interpretation",
     ...interpretation.map((note) => `- ${note}`),
+    "",
+    "## Subscription loop health",
+    ...(subscriptionLoopHealth.length === 0
+      ? ["- No subscription errors recorded."]
+      : subscriptionLoopHealth.map(
+          (loop) =>
+            `- ${loop.env} ${loop.tag}: errors=${loop.errorCount.toString()} last=${loop.lastError ?? "unknown"} retry=${formatMs(loop.lastWillRetryInMs)} loopAlive=${String(loop.loopAlive)} retryingNow=${String(loop.retryingNow)}`,
+        )),
     "",
     "## Raw snapshot",
     jsonBlock(redactRecordValues(report)),

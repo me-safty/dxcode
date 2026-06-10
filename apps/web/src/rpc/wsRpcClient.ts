@@ -17,7 +17,7 @@ import * as Stream from "effect/Stream";
 
 import { type WsRpcProtocolClient } from "./protocol";
 import { resetWsReconnectBackoff } from "./wsConnectionState";
-import { WsTransport } from "./wsTransport";
+import { WsTransport, type SubscriptionErrorInfo } from "./wsTransport";
 
 type RpcTag = keyof WsRpcProtocolClient & string;
 type RpcMethod<TTag extends RpcTag> = WsRpcProtocolClient[TTag];
@@ -25,6 +25,8 @@ type RpcInput<TTag extends RpcTag> = Parameters<RpcMethod<TTag>>[0];
 
 interface StreamSubscriptionOptions {
   readonly onResubscribe?: () => void;
+  readonly onSubscriptionError?: (info: SubscriptionErrorInfo) => void;
+  readonly tag?: string;
 }
 
 type RpcUnaryMethod<TTag extends RpcTag> =
@@ -312,7 +314,7 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       onEvent: (listener, options) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeTerminalEvents]({}), listener, {
           ...options,
-          tag: WS_METHODS.subscribeTerminalEvents,
+          tag: options?.tag ?? WS_METHODS.subscribeTerminalEvents,
         }),
     },
     projects: {
@@ -359,7 +361,7 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
             current = applyGitStatusStreamEvent(current, event);
             listener(current);
           },
-          { ...options, tag: WS_METHODS.subscribeVcsStatus },
+          { ...options, tag: options?.tag ?? WS_METHODS.subscribeVcsStatus },
         );
       },
       listRefs: (input) => transport.request((client) => client[WS_METHODS.vcsListRefs](input)),
@@ -444,17 +446,17 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       subscribeConfig: (listener, options) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerConfig]({}), listener, {
           ...options,
-          tag: WS_METHODS.subscribeServerConfig,
+          tag: options?.tag ?? WS_METHODS.subscribeServerConfig,
         }),
       subscribeLifecycle: (listener, options) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerLifecycle]({}), listener, {
           ...options,
-          tag: WS_METHODS.subscribeServerLifecycle,
+          tag: options?.tag ?? WS_METHODS.subscribeServerLifecycle,
         }),
       subscribeAuthAccess: (listener, options) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeAuthAccess]({}), listener, {
           ...options,
-          tag: WS_METHODS.subscribeAuthAccess,
+          tag: options?.tag ?? WS_METHODS.subscribeAuthAccess,
         }),
     },
     orchestration: {
@@ -481,13 +483,13 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.subscribe(
           (client) => client[ORCHESTRATION_WS_METHODS.subscribeShell]({}),
           listener,
-          { ...options, tag: ORCHESTRATION_WS_METHODS.subscribeShell },
+          { ...options, tag: options?.tag ?? ORCHESTRATION_WS_METHODS.subscribeShell },
         ),
       subscribeThread: (input, listener, options) =>
         transport.subscribe(
           (client) => client[ORCHESTRATION_WS_METHODS.subscribeThread](input),
           listener,
-          { ...options, tag: ORCHESTRATION_WS_METHODS.subscribeThread },
+          { ...options, tag: options?.tag ?? ORCHESTRATION_WS_METHODS.subscribeThread },
         ),
     },
   };
