@@ -1096,11 +1096,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   } | null>(null);
   const sidebarThreadRefs: WorktreeThreadRef[] = useMemo(
     () =>
-      sidebarLiveThreads.map((thread) => ({
-        worktreePath: thread.worktreePath,
-        isArchived: thread.archivedAt !== null,
-      })),
-    [sidebarLiveThreads],
+      sidebarLiveThreads
+        .filter((thread) => thread.environmentId === worktreeCleanupTarget?.environmentId)
+        .map((thread) => ({
+          worktreePath: thread.worktreePath,
+          isArchived: thread.archivedAt !== null,
+        })),
+    [sidebarLiveThreads, worktreeCleanupTarget],
   );
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);

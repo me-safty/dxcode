@@ -1406,15 +1406,20 @@ export function ArchivedThreadsPanel() {
   } | null>(null);
 
   const cleanupThreadRefs: WorktreeThreadRef[] = useMemo(() => {
-    const live = liveThreads.map((thread) => ({
-      worktreePath: thread.worktreePath,
-      isArchived: thread.archivedAt !== null,
-    }));
-    const archived = archivedSnapshots.flatMap(({ snapshot }) =>
-      snapshot.threads.map((thread) => ({ worktreePath: thread.worktreePath, isArchived: true })),
-    );
+    const targetEnvironmentId = cleanupTarget?.environmentId;
+    const live = liveThreads
+      .filter((thread) => thread.environmentId === targetEnvironmentId)
+      .map((thread) => ({
+        worktreePath: thread.worktreePath,
+        isArchived: thread.archivedAt !== null,
+      }));
+    const archived = archivedSnapshots
+      .filter(({ environmentId }) => environmentId === targetEnvironmentId)
+      .flatMap(({ snapshot }) =>
+        snapshot.threads.map((thread) => ({ worktreePath: thread.worktreePath, isArchived: true })),
+      );
     return [...live, ...archived];
-  }, [liveThreads, archivedSnapshots]);
+  }, [liveThreads, archivedSnapshots, cleanupTarget]);
 
   const archivedGroups = useMemo(() => {
     const projectsByEnvironmentAndId = new Map(
