@@ -7,6 +7,8 @@ import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
+import { getVscodeIconUrlForEntry } from "../../vscode-icons";
+
 const scrollToEndSpy = vi.fn();
 const getStateSpy = vi.fn(() => ({ isAtEnd: true }));
 
@@ -600,6 +602,33 @@ describe("MessagesTimeline", () => {
       expect(userFileLink?.getAttribute("href")).toBe("/repo/project/path/to/package.json");
       expect(assistantFileLink?.textContent).toContain("package.json");
       expect(assistantFileLink?.getAttribute("href")).toBe("/repo/project/path/to/package.json");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("uses the file path without line suffix for markdown file tag icons", async () => {
+    const fileLink = "[package.json](path/to/package.json:25)";
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        markdownCwd="/repo/project"
+        timelineEntries={[buildAssistantTimelineEntry(`Updated ${fileLink}`)]}
+      />,
+    );
+
+    try {
+      const assistantFileLink = document.querySelector(
+        '[data-message-role="assistant"] .chat-markdown-file-link',
+      );
+      const icon = assistantFileLink?.querySelector("img");
+
+      expect(assistantFileLink?.textContent).toContain("package.json");
+      expect(assistantFileLink?.textContent).toContain("L25");
+      expect(assistantFileLink?.getAttribute("href")).toBe("/repo/project/path/to/package.json:25");
+      expect(icon?.getAttribute("src")).toBe(
+        getVscodeIconUrlForEntry("/repo/project/path/to/package.json", "file", "dark"),
+      );
     } finally {
       await screen.unmount();
     }

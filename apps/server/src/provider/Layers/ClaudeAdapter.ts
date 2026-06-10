@@ -31,6 +31,7 @@ import {
   type ProviderApprovalDecision,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ModelSelection,
   ProviderItemId,
   type ProviderRuntimeEvent,
   type ProviderRuntimeTurnStatus,
@@ -204,6 +205,13 @@ interface ToolInFlight {
   readonly lastEmittedInputFingerprint?: string;
 }
 
+interface ClaudeTaskState {
+  readonly id: string;
+  subject: string;
+  status: PlanStep["status"];
+  readonly blockedBy: Set<string>;
+}
+
 interface ClaudeSessionContext {
   session: ProviderSession;
   readonly promptQueue: Queue.Queue<PromptQueueItem>;
@@ -221,6 +229,7 @@ interface ClaudeSessionContext {
     items: Array<unknown>;
   }>;
   readonly inFlightTools: Map<number, ToolInFlight>;
+  readonly claudeTasks: Map<string, ClaudeTaskState>;
   turnState: ClaudeTurnState | undefined;
   lastKnownContextWindow: number | undefined;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
@@ -228,6 +237,7 @@ interface ClaudeSessionContext {
   lastKnownOAuthUsageFingerprint: string | undefined;
   readonly statuslineCapturePath: string | undefined;
   lastKnownStatuslineUsageFingerprint: string | undefined;
+  lastKnownTotalProcessedTokens: number | undefined;
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
   stopped: boolean;
@@ -238,7 +248,7 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly setModel: (model?: string) => Promise<void>;
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
-  readonly getContextUsage: () => Promise<SDKControlGetContextUsageResponse>;
+  readonly getContextUsage?: () => Promise<SDKControlGetContextUsageResponse>;
   readonly close: () => void;
 }
 
@@ -571,60 +581,219 @@ function maxClaudeContextWindowFromModelUsage(
   return maxContextWindow;
 }
 
-function normalizeClaudeTokenUsage(
+function selectedClaudeContextWindow(
+  modelSelection: ModelSelection | undefined,
+): number | undefined {
+  const optionValue = getModelSelectionStringOptionValue(modelSelection, "contextWindow");
+  if (optionValue === "1m") {
+    return 1_000_000;
+  }
+  if (optionValue === "200k") {
+    return 200_000;
+  }
+  const caps = getClaudeModelCapabilities(modelSelection?.model);
+  const hasContextWindowOption = getProviderOptionDescriptors({ caps }).some(
+    (descriptor) => descriptor.type === "select" && descriptor.id === "contextWindow",
+  );
+  if (hasContextWindowOption) {
+    return 200_000;
+  }
+  switch (modelSelection?.model) {
+    case "claude-opus-4-8":
+    case "claude-opus-4-7":
+      return 1_000_000;
+  }
+  return undefined;
+}
+
+function finiteNonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : undefined;
+}
+
+function finitePositiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.round(value)
+    : undefined;
+}
+
+function claudeUsageInputTokens(usage: Record<string, unknown>): number {
+  return (
+    (finiteNonNegativeInteger(usage.input_tokens) ?? 0) +
+    (finiteNonNegativeInteger(usage.cache_creation_input_tokens) ?? 0) +
+    (finiteNonNegativeInteger(usage.cache_read_input_tokens) ?? 0)
+  );
+}
+
+function claudeUsageOutputTokens(usage: Record<string, unknown>): number {
+  return finiteNonNegativeInteger(usage.output_tokens) ?? 0;
+}
+
+function lastClaudeUsageIteration(
+  value: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const iterations = Array.isArray(value.iterations) ? value.iterations : [];
+  return iterations.findLast(
+    (iteration): iteration is Record<string, unknown> =>
+      iteration !== null && typeof iteration === "object" && !Array.isArray(iteration),
+  );
+}
+
+function claudeTotalProcessedTokens(value: unknown): number | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const usage = value as Record<string, unknown>;
+  const explicitTotal = finiteNonNegativeInteger(usage.total_tokens);
+  if (explicitTotal !== undefined && explicitTotal > 0) {
+    return explicitTotal;
+  }
+
+  const total = claudeUsageInputTokens(usage) + claudeUsageOutputTokens(usage);
+  return total > 0 ? total : undefined;
+}
+
+function makeClaudeTokenUsageSnapshot(input: {
+  readonly activeTokens: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly contextWindow?: number;
+  readonly totalProcessedTokens?: number;
+  readonly lastUsedTokens?: number;
+  readonly compactsAutomatically?: boolean;
+}): ThreadTokenUsageSnapshot | undefined {
+  const activeTokens = finiteNonNegativeInteger(input.activeTokens);
+  if (activeTokens === undefined || activeTokens <= 0) {
+    return undefined;
+  }
+
+  const maxTokens = finitePositiveInteger(input.contextWindow);
+  const usedTokens = maxTokens !== undefined ? Math.min(activeTokens, maxTokens) : activeTokens;
+  const lastUsedTokens =
+    finiteNonNegativeInteger(input.lastUsedTokens) ??
+    (maxTokens !== undefined ? Math.min(activeTokens, maxTokens) : activeTokens);
+  const totalProcessedTokens = finiteNonNegativeInteger(input.totalProcessedTokens);
+  const inputTokens = finiteNonNegativeInteger(input.inputTokens);
+  const outputTokens = finiteNonNegativeInteger(input.outputTokens);
+
+  return {
+    usedTokens,
+    lastUsedTokens,
+    ...(totalProcessedTokens !== undefined && totalProcessedTokens > usedTokens
+      ? { totalProcessedTokens }
+      : {}),
+    ...(inputTokens !== undefined && inputTokens > 0 ? { inputTokens } : {}),
+    ...(outputTokens !== undefined && outputTokens > 0 ? { outputTokens } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(input.compactsAutomatically !== undefined
+      ? { compactsAutomatically: input.compactsAutomatically }
+      : {}),
+  };
+}
+
+function normalizeClaudeActiveTokenUsage(
   value: unknown,
   contextWindow?: number,
+  totalProcessedTokens?: number,
 ): ThreadTokenUsageSnapshot | undefined {
   if (!value || typeof value !== "object") {
     return undefined;
   }
 
   const usage = value as Record<string, unknown>;
-  const inputTokens =
-    (typeof usage.input_tokens === "number" && Number.isFinite(usage.input_tokens)
-      ? usage.input_tokens
-      : 0) +
-    (typeof usage.cache_creation_input_tokens === "number" &&
-    Number.isFinite(usage.cache_creation_input_tokens)
-      ? usage.cache_creation_input_tokens
-      : 0) +
-    (typeof usage.cache_read_input_tokens === "number" &&
-    Number.isFinite(usage.cache_read_input_tokens)
-      ? usage.cache_read_input_tokens
-      : 0);
-  const outputTokens =
-    typeof usage.output_tokens === "number" && Number.isFinite(usage.output_tokens)
-      ? usage.output_tokens
-      : 0;
-  const derivedTotalProcessedTokens = inputTokens + outputTokens;
-  const totalProcessedTokens =
-    (typeof usage.total_tokens === "number" && Number.isFinite(usage.total_tokens)
-      ? usage.total_tokens
-      : undefined) ?? (derivedTotalProcessedTokens > 0 ? derivedTotalProcessedTokens : undefined);
-  if (totalProcessedTokens === undefined || totalProcessedTokens <= 0) {
+  const activeUsage = lastClaudeUsageIteration(usage) ?? usage;
+  const inputTokens = claudeUsageInputTokens(activeUsage);
+  const outputTokens = claudeUsageOutputTokens(activeUsage);
+  const activeTokens = claudeTotalProcessedTokens(activeUsage) ?? inputTokens + outputTokens;
+  if (activeTokens <= 0) {
     return undefined;
   }
 
-  const maxTokens =
-    typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
-      ? contextWindow
-      : undefined;
-  const usedTokens =
-    maxTokens !== undefined ? Math.min(totalProcessedTokens, maxTokens) : totalProcessedTokens;
+  return makeClaudeTokenUsageSnapshot({
+    activeTokens,
+    inputTokens,
+    outputTokens,
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(totalProcessedTokens !== undefined ? { totalProcessedTokens } : {}),
+  });
+}
 
+function normalizeClaudeContextUsageApiSnapshot(
+  value: SDKControlGetContextUsageResponse,
+  totalProcessedTokens?: number,
+): ThreadTokenUsageSnapshot | undefined {
+  return makeClaudeTokenUsageSnapshot({
+    activeTokens: value.totalTokens,
+    contextWindow: value.maxTokens,
+    ...(totalProcessedTokens !== undefined ? { totalProcessedTokens } : {}),
+    compactsAutomatically: value.isAutoCompactEnabled,
+  });
+}
+
+function compactBoundaryTokenUsageSnapshot(
+  message: Record<string, unknown>,
+  contextWindow?: number,
+  totalProcessedTokens?: number,
+): ThreadTokenUsageSnapshot | undefined {
+  const metadata = message.compact_metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return undefined;
+  }
+
+  const compactMetadata = metadata as Record<string, unknown>;
+  const postTokens = finiteNonNegativeInteger(compactMetadata.post_tokens);
+  if (postTokens === undefined || postTokens <= 0) {
+    return undefined;
+  }
+
+  const preTokens = finiteNonNegativeInteger(compactMetadata.pre_tokens);
+  return makeClaudeTokenUsageSnapshot({
+    activeTokens: postTokens,
+    ...(preTokens !== undefined ? { lastUsedTokens: preTokens } : {}),
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(totalProcessedTokens !== undefined ? { totalProcessedTokens } : {}),
+  });
+}
+
+function normalizeClaudeTaskProgressTokenUsage(
+  value: unknown,
+  context: ClaudeSessionContext,
+): ThreadTokenUsageSnapshot | undefined {
+  const totalTokens = claudeTotalProcessedTokens(value);
+  if (totalTokens === undefined || totalTokens <= 0) {
+    return undefined;
+  }
+
+  const lastUsedTokens = context.lastKnownTokenUsage?.usedTokens;
+  const activeTokens =
+    lastUsedTokens !== undefined ? Math.max(totalTokens, lastUsedTokens) : totalTokens;
+  if (lastUsedTokens !== undefined && activeTokens === lastUsedTokens) {
+    return undefined;
+  }
+
+  const usage = value as Record<string, unknown>;
+  const snapshot = makeClaudeTokenUsageSnapshot({
+    activeTokens,
+    ...(context.lastKnownContextWindow !== undefined
+      ? { contextWindow: context.lastKnownContextWindow }
+      : {}),
+    totalProcessedTokens: Math.max(
+      totalTokens,
+      context.lastKnownTotalProcessedTokens ?? totalTokens,
+    ),
+  });
+  if (!snapshot) {
+    return undefined;
+  }
+
+  const toolUses = finiteNonNegativeInteger(usage.tool_uses);
+  const durationMs = finiteNonNegativeInteger(usage.duration_ms);
   return {
-    usedTokens,
-    lastUsedTokens: usedTokens,
-    ...(totalProcessedTokens > usedTokens ? { totalProcessedTokens } : {}),
-    ...(inputTokens > 0 ? { inputTokens } : {}),
-    ...(outputTokens > 0 ? { outputTokens } : {}),
-    ...(maxTokens !== undefined ? { maxTokens } : {}),
-    ...(typeof usage.tool_uses === "number" && Number.isFinite(usage.tool_uses)
-      ? { toolUses: usage.tool_uses }
-      : {}),
-    ...(typeof usage.duration_ms === "number" && Number.isFinite(usage.duration_ms)
-      ? { durationMs: usage.duration_ms }
-      : {}),
+    ...snapshot,
+    ...(toolUses !== undefined ? { toolUses } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
   };
 }
 
@@ -808,6 +977,143 @@ function extractPlanStepsFromTodoInput(input: Record<string, unknown>): PlanStep
             ? "inProgress"
             : "pending",
     }));
+}
+
+function isClaudeTaskTool(toolName: string): boolean {
+  return toolName === "TaskCreate" || toolName === "TaskUpdate" || toolName === "TaskList";
+}
+
+function normalizeClaudeTaskStatus(value: unknown): PlanStep["status"] {
+  return value === "completed" ? "completed" : value === "in_progress" ? "inProgress" : "pending";
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function readTrimmedStringArray(value: unknown): Array<string> {
+  return Array.isArray(value)
+    ? value.flatMap((entry) => {
+        const text = readString(entry);
+        return text ? [text] : [];
+      })
+    : [];
+}
+
+function readClaudeToolUseResult(message: SDKMessage): Record<string, unknown> | undefined {
+  if (message.type !== "user") {
+    return undefined;
+  }
+  const result = (message as { readonly tool_use_result?: unknown }).tool_use_result;
+  return result !== null && typeof result === "object" && !Array.isArray(result)
+    ? (result as Record<string, unknown>)
+    : undefined;
+}
+
+function readClaudeTaskFromResult(
+  result: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const task = result?.task;
+  return task !== null && typeof task === "object" && !Array.isArray(task)
+    ? (task as Record<string, unknown>)
+    : undefined;
+}
+
+function applyClaudeTaskToolResult(
+  tasks: Map<string, ClaudeTaskState>,
+  tool: ToolInFlight,
+  result: Record<string, unknown> | undefined,
+): boolean {
+  if (!isClaudeTaskTool(tool.toolName)) {
+    return false;
+  }
+
+  let changed = false;
+  if (tool.toolName === "TaskList") {
+    const resultTasks = result?.tasks;
+    if (!Array.isArray(resultTasks)) {
+      return false;
+    }
+    tasks.clear();
+    for (const entry of resultTasks) {
+      if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+        continue;
+      }
+      const task = entry as Record<string, unknown>;
+      const id = readString(task.id);
+      const subject = readString(task.subject);
+      if (!id || !subject) {
+        continue;
+      }
+      tasks.set(id, {
+        id,
+        subject,
+        status: normalizeClaudeTaskStatus(task.status),
+        blockedBy: new Set(readTrimmedStringArray(task.blockedBy)),
+      });
+    }
+    return tasks.size > 0;
+  }
+
+  if (tool.toolName === "TaskCreate") {
+    const resultTask = readClaudeTaskFromResult(result);
+    const id = readString(resultTask?.id);
+    const subject = readString(resultTask?.subject) ?? readString(tool.input.subject);
+    if (!id || !subject) {
+      return false;
+    }
+    tasks.set(id, {
+      id,
+      subject,
+      status: normalizeClaudeTaskStatus(tool.input.status),
+      blockedBy: new Set(readTrimmedStringArray(tool.input.blockedBy)),
+    });
+    return true;
+  }
+
+  const taskId = readString(tool.input.taskId) ?? readString(result?.taskId);
+  if (!taskId) {
+    return false;
+  }
+  const task = tasks.get(taskId);
+  if (!task) {
+    return false;
+  }
+  const subject = readString(tool.input.subject);
+  if (subject && task.subject !== subject) {
+    task.subject = subject;
+    changed = true;
+  }
+  if (typeof tool.input.status === "string") {
+    const status = normalizeClaudeTaskStatus(tool.input.status);
+    if (task.status !== status) {
+      task.status = status;
+      changed = true;
+    }
+  }
+  for (const dependency of readTrimmedStringArray(tool.input.addBlockedBy)) {
+    if (!task.blockedBy.has(dependency)) {
+      task.blockedBy.add(dependency);
+      changed = true;
+    }
+  }
+  for (const dependency of readTrimmedStringArray(tool.input.removeBlockedBy)) {
+    if (task.blockedBy.delete(dependency)) {
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function planStepsFromClaudeTasks(tasks: Map<string, ClaudeTaskState>): PlanStep[] {
+  return Array.from(tasks.values()).map((task) => {
+    const blockedBy = Array.from(task.blockedBy);
+    const blockedSuffix = blockedBy.length > 0 ? ` (blocked by #${blockedBy.join(", #")})` : "";
+    return {
+      step: `${task.subject}${blockedSuffix}`,
+      status: task.status,
+    };
+  });
 }
 
 function summarizeToolRequest(toolName: string, input: Record<string, unknown>): string {
@@ -1505,9 +1811,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (context.stopped) {
       return;
     }
+    const getContextUsage = context.query.getContextUsage;
+    if (!getContextUsage) {
+      return;
+    }
 
     const usage = yield* Effect.tryPromise({
-      try: () => context.query.getContextUsage(),
+      try: () => getContextUsage(),
       catch: (cause) => toMessage(cause, "Claude context usage refresh failed."),
     }).pipe(
       Effect.timeoutOption(CLAUDE_USAGE_REFRESH_TIMEOUT),
@@ -2060,6 +2370,70 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     });
   });
 
+  const emitThreadTokenUsage = Effect.fn("emitThreadTokenUsage")(function* (
+    context: ClaudeSessionContext,
+    usage: ThreadTokenUsageSnapshot | undefined,
+    options?: {
+      readonly rawMethod?: string;
+      readonly rawPayload?: unknown;
+    },
+  ) {
+    if (!usage) {
+      return;
+    }
+
+    context.lastKnownTokenUsage = usage;
+    context.lastKnownTotalProcessedTokens =
+      usage.totalProcessedTokens ?? context.lastKnownTotalProcessedTokens;
+
+    const turnState = context.turnState;
+    const stamp = yield* makeEventStamp();
+    yield* offerRuntimeEvent({
+      type: "thread.token-usage.updated",
+      eventId: stamp.eventId,
+      provider: PROVIDER,
+      createdAt: stamp.createdAt,
+      threadId: context.session.threadId,
+      ...(turnState ? { turnId: turnState.turnId } : {}),
+      payload: {
+        usage,
+      },
+      providerRefs: nativeProviderRefs(context),
+      ...(options?.rawMethod || options?.rawPayload
+        ? {
+            raw: {
+              source: "claude.sdk.message" as const,
+              ...(options.rawMethod ? { method: options.rawMethod } : {}),
+              payload: options.rawPayload,
+            },
+          }
+        : {}),
+    });
+  });
+
+  const queryCurrentContextUsage = Effect.fn("queryCurrentContextUsage")(function* (
+    context: ClaudeSessionContext,
+    totalProcessedTokens?: number,
+  ) {
+    if (!context.query.getContextUsage) {
+      return undefined;
+    }
+
+    const usage = yield* Effect.promise(async () => {
+      try {
+        return await context.query.getContextUsage?.();
+      } catch {
+        return undefined;
+      }
+    });
+    if (!usage) {
+      return undefined;
+    }
+
+    context.lastKnownContextWindow = usage.maxTokens;
+    return normalizeClaudeContextUsageApiSnapshot(usage, totalProcessedTokens);
+  });
+
   const emitProposedPlanCompleted = Effect.fn("emitProposedPlanCompleted")(function* (
     context: ClaudeSessionContext,
     input: {
@@ -2107,6 +2481,42 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     });
   });
 
+  const emitClaudeTaskPlanUpdated = Effect.fn("emitClaudeTaskPlanUpdated")(function* (
+    context: ClaudeSessionContext,
+    input: {
+      readonly toolUseId: string;
+      readonly rawMethod: string;
+      readonly rawPayload: unknown;
+    },
+  ) {
+    const plan = planStepsFromClaudeTasks(context.claudeTasks);
+    if (plan.length === 0) {
+      return;
+    }
+
+    const stamp = yield* makeEventStamp();
+    yield* offerRuntimeEvent({
+      type: "turn.plan.updated",
+      eventId: stamp.eventId,
+      provider: PROVIDER,
+      createdAt: stamp.createdAt,
+      threadId: context.session.threadId,
+      ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+      payload: {
+        explanation: "Claude Tasks",
+        plan,
+      },
+      providerRefs: nativeProviderRefs(context, {
+        providerItemId: input.toolUseId,
+      }),
+      raw: {
+        source: "claude.sdk.message",
+        method: input.rawMethod,
+        payload: input.rawPayload,
+      },
+    });
+  });
+
   const completeTurn = Effect.fn("completeTurn")(function* (
     context: ClaudeSessionContext,
     status: ProviderRuntimeTurnStatus,
@@ -2118,61 +2528,87 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       context.lastKnownContextWindow = resultContextWindow;
     }
 
-    // The SDK result.usage contains *accumulated* totals across all API calls
-    // (input_tokens, cache_read_input_tokens, etc. summed over every request).
-    // This does NOT represent the current context window size.
-    // Instead, use the last known context-window-accurate usage from task_progress
-    // events and treat the accumulated total as totalProcessedTokens.
-    const accumulatedSnapshot = normalizeClaudeTokenUsage(
-      result?.usage,
-      resultContextWindow ?? context.lastKnownContextWindow,
-    );
-    const accumulatedTotalProcessedTokens =
-      accumulatedSnapshot?.totalProcessedTokens ?? accumulatedSnapshot?.usedTokens;
-    const lastGoodUsage = context.lastKnownTokenUsage;
     const maxTokens = resultContextWindow ?? context.lastKnownContextWindow;
+    const accumulatedTotalProcessedTokens = claudeTotalProcessedTokens(result?.usage);
+    if (accumulatedTotalProcessedTokens !== undefined) {
+      context.lastKnownTotalProcessedTokens = accumulatedTotalProcessedTokens;
+    }
+
+    const contextUsageSnapshot = yield* queryCurrentContextUsage(
+      context,
+      accumulatedTotalProcessedTokens ?? context.lastKnownTotalProcessedTokens,
+    );
+    const resultUsageRecord =
+      result?.usage && typeof result.usage === "object" && !Array.isArray(result.usage)
+        ? (result.usage as Record<string, unknown>)
+        : undefined;
+    const hasResultUsageIteration =
+      resultUsageRecord !== undefined && lastClaudeUsageIteration(resultUsageRecord) !== undefined;
+    const resultHasActiveUsage =
+      resultUsageRecord !== undefined &&
+      (hasResultUsageIteration ||
+        claudeUsageInputTokens(resultUsageRecord) + claudeUsageOutputTokens(resultUsageRecord) > 0);
+    const resultTotalOnly =
+      resultUsageRecord !== undefined &&
+      !resultHasActiveUsage &&
+      claudeTotalProcessedTokens(resultUsageRecord) !== undefined;
+    const resultIterationSnapshot = resultUsageRecord
+      ? normalizeClaudeActiveTokenUsage(
+          resultUsageRecord,
+          maxTokens,
+          accumulatedTotalProcessedTokens ?? context.lastKnownTotalProcessedTokens,
+        )
+      : undefined;
+    const lastGoodUsage = context.lastKnownTokenUsage;
     const resultCostUsd =
       typeof result?.total_cost_usd === "number" && Number.isFinite(result.total_cost_usd)
         ? result.total_cost_usd
         : undefined;
-    const usageSnapshot: ThreadTokenUsageSnapshot | undefined = lastGoodUsage
+    const baseUsageSnapshot: ThreadTokenUsageSnapshot | undefined =
+      contextUsageSnapshot ??
+      (resultTotalOnly && lastGoodUsage
+        ? {
+            ...lastGoodUsage,
+            ...(typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0
+              ? { maxTokens }
+              : {}),
+            ...(typeof accumulatedTotalProcessedTokens === "number" &&
+            Number.isFinite(accumulatedTotalProcessedTokens) &&
+            accumulatedTotalProcessedTokens > lastGoodUsage.usedTokens
+              ? {
+                  totalProcessedTokens: accumulatedTotalProcessedTokens,
+                }
+              : {}),
+          }
+        : resultIterationSnapshot) ??
+      (lastGoodUsage
+        ? {
+            ...lastGoodUsage,
+            ...(typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0
+              ? { maxTokens }
+              : {}),
+            ...(typeof accumulatedTotalProcessedTokens === "number" &&
+            Number.isFinite(accumulatedTotalProcessedTokens) &&
+            accumulatedTotalProcessedTokens > lastGoodUsage.usedTokens
+              ? {
+                  totalProcessedTokens: accumulatedTotalProcessedTokens,
+                }
+              : {}),
+          }
+        : undefined);
+    const usageSnapshot: ThreadTokenUsageSnapshot | undefined = baseUsageSnapshot
       ? {
-          ...lastGoodUsage,
-          ...(typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0
-            ? { maxTokens }
-            : {}),
-          ...(typeof accumulatedTotalProcessedTokens === "number" &&
-          Number.isFinite(accumulatedTotalProcessedTokens) &&
-          accumulatedTotalProcessedTokens > lastGoodUsage.usedTokens
-            ? {
-                totalProcessedTokens: accumulatedTotalProcessedTokens,
-              }
-            : {}),
+          ...baseUsageSnapshot,
           ...(resultCostUsd !== undefined ? { costUsd: resultCostUsd } : {}),
         }
-      : accumulatedSnapshot
-        ? {
-            ...accumulatedSnapshot,
-            ...(resultCostUsd !== undefined ? { costUsd: resultCostUsd } : {}),
-          }
-        : undefined;
+      : undefined;
 
     const turnState = context.turnState;
     if (!turnState) {
-      if (usageSnapshot) {
-        const usageStamp = yield* makeEventStamp();
-        yield* offerRuntimeEvent({
-          type: "thread.token-usage.updated",
-          eventId: usageStamp.eventId,
-          provider: PROVIDER,
-          createdAt: usageStamp.createdAt,
-          threadId: context.session.threadId,
-          payload: {
-            usage: usageSnapshot,
-          },
-          providerRefs: {},
-        });
-      }
+      yield* emitThreadTokenUsage(context, usageSnapshot, {
+        rawMethod: "claude/result",
+        rawPayload: result ?? { status },
+      });
 
       const stamp = yield* makeEventStamp();
       yield* offerRuntimeEvent({
@@ -2243,21 +2679,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       items: [...turnState.items],
     });
 
-    if (usageSnapshot) {
-      const usageStamp = yield* makeEventStamp();
-      yield* offerRuntimeEvent({
-        type: "thread.token-usage.updated",
-        eventId: usageStamp.eventId,
-        provider: PROVIDER,
-        createdAt: usageStamp.createdAt,
-        threadId: context.session.threadId,
-        turnId: turnState.turnId,
-        payload: {
-          usage: usageSnapshot,
-        },
-        providerRefs: nativeProviderRefs(context),
-      });
-    }
+    yield* emitThreadTokenUsage(context, usageSnapshot, {
+      rawMethod: "claude/result",
+      rawPayload: result ?? { status },
+    });
 
     const stamp = yield* makeEventStamp();
     yield* offerRuntimeEvent({
@@ -2301,6 +2726,23 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     const { event } = message;
+
+    if (event.type === "message_delta") {
+      if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined) {
+        return;
+      }
+
+      const snapshot = normalizeClaudeActiveTokenUsage(
+        event.usage,
+        context.lastKnownContextWindow,
+        context.lastKnownTotalProcessedTokens,
+      );
+      yield* emitThreadTokenUsage(context, snapshot, {
+        rawMethod: "claude/stream_event/message_delta",
+        rawPayload: message,
+      });
+      return;
+    }
 
     if (event.type === "content_block_delta") {
       if (
@@ -2564,6 +3006,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
       const [index, tool] = toolEntry;
       const itemStatus = toolResult.isError ? "failed" : "completed";
+      const toolUseResult = readClaudeToolUseResult(message);
       const toolData = {
         toolName: tool.toolName,
         input: tool.input,
@@ -2647,6 +3090,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           payload: message,
         },
       });
+
+      if (
+        !toolResult.isError &&
+        applyClaudeTaskToolResult(context.claudeTasks, tool, toolUseResult)
+      ) {
+        yield* emitClaudeTaskPlanUpdated(context, {
+          toolUseId: tool.itemId,
+          rawMethod: "claude/user",
+          rawPayload: message,
+        });
+      }
 
       context.inFlightTools.delete(index);
     }
@@ -2807,6 +3261,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
         return;
       case "compact_boundary":
+        yield* emitThreadTokenUsage(
+          context,
+          compactBoundaryTokenUsageSnapshot(
+            message as unknown as Record<string, unknown>,
+            context.lastKnownContextWindow,
+            context.lastKnownTotalProcessedTokens,
+          ),
+          {
+            rawMethod: "claude/system/compact_boundary",
+            rawPayload: message,
+          },
+        );
         yield* offerRuntimeEvent({
           ...base,
           type: "thread.state.changed",
@@ -2865,25 +3331,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
         return;
       case "task_progress":
-        if (message.usage) {
-          const normalizedUsage = normalizeClaudeTokenUsage(
-            message.usage,
-            context.lastKnownContextWindow,
-          );
-          if (normalizedUsage) {
-            context.lastKnownTokenUsage = normalizedUsage;
-            const usageStamp = yield* makeEventStamp();
-            yield* offerRuntimeEvent({
-              ...base,
-              eventId: usageStamp.eventId,
-              createdAt: usageStamp.createdAt,
-              type: "thread.token-usage.updated",
-              payload: {
-                usage: normalizedUsage,
-              },
-            });
-          }
-        }
+        yield* emitThreadTokenUsage(
+          context,
+          normalizeClaudeTaskProgressTokenUsage(message.usage, context),
+          {
+            rawMethod: "claude/system/task_progress",
+            rawPayload: message,
+          },
+        );
         yield* offerRuntimeEvent({
           ...base,
           type: "task.progress",
@@ -2897,25 +3352,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
         return;
       case "task_notification":
-        if (message.usage) {
-          const normalizedUsage = normalizeClaudeTokenUsage(
-            message.usage,
-            context.lastKnownContextWindow,
-          );
-          if (normalizedUsage) {
-            context.lastKnownTokenUsage = normalizedUsage;
-            const usageStamp = yield* makeEventStamp();
-            yield* offerRuntimeEvent({
-              ...base,
-              eventId: usageStamp.eventId,
-              createdAt: usageStamp.createdAt,
-              type: "thread.token-usage.updated",
-              payload: {
-                usage: normalizedUsage,
-              },
-            });
-          }
-        }
+        yield* emitThreadTokenUsage(
+          context,
+          normalizeClaudeTaskProgressTokenUsage(message.usage, context),
+          {
+            rawMethod: "claude/system/task_notification",
+            rawPayload: message,
+          },
+        );
         yield* offerRuntimeEvent({
           ...base,
           type: "task.completed",
@@ -3339,6 +3783,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
       const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
       const inFlightTools = new Map<number, ToolInFlight>();
+      const claudeTasks = new Map<string, ClaudeTaskState>();
 
       const contextRef = yield* Ref.make<ClaudeSessionContext | undefined>(undefined);
 
@@ -3639,6 +4084,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const caps = getClaudeModelCapabilities(modelSelection?.model);
       const descriptors = getProviderOptionDescriptors({ caps });
       const apiModelId = modelSelection ? resolveClaudeApiModelId(modelSelection) : undefined;
+      const initialContextWindow = selectedClaudeContextWindow(modelSelection);
       const rawEffort = getModelSelectionStringOptionValue(modelSelection, "effort");
       const effort = resolveClaudeEffort(caps, rawEffort) ?? null;
       const fastModeSupported = descriptors.some(
@@ -3777,13 +4223,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         pendingUserInputs,
         turns: [],
         inFlightTools,
+        claudeTasks,
         turnState: undefined,
-        lastKnownContextWindow: undefined,
+        lastKnownContextWindow: initialContextWindow,
         lastKnownTokenUsage: undefined,
         lastKnownRateLimits: undefined,
         lastKnownOAuthUsageFingerprint: undefined,
         statuslineCapturePath,
         lastKnownStatuslineUsageFingerprint: undefined,
+        lastKnownTotalProcessedTokens: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
         stopped: false,
