@@ -38,7 +38,6 @@ import {
   ComboboxEmpty,
   ComboboxInput,
   ComboboxItem,
-  ComboboxList,
   ComboboxListVirtualized,
   ComboboxPopup,
   ComboboxStatus,
@@ -282,7 +281,6 @@ export function BranchToolbarBranchSelector({
     (_currentBranch: string | null, optimisticBranch: string | null) => optimisticBranch,
   );
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
-  const shouldVirtualizeBranchList = filteredBranchPickerItems.length > 40;
   const totalBranchCount = branchRefState.data?.totalCount ?? 0;
   const branchStatusText = isInitialBranchesLoadPending
     ? "Loading refs..."
@@ -423,7 +421,8 @@ export function BranchToolbarBranchSelector({
   );
 
   const branchListScrollElementRef = useRef<HTMLElement | null>(null);
-  const [branchListBottomFadeVisible, setBranchListBottomFadeVisible] = useState(false);
+  const [showTopBranchScrollFade, setShowTopBranchScrollFade] = useState(false);
+  const [showBottomBranchScrollFade, setShowBottomBranchScrollFade] = useState(false);
   const fetchNextBranchPage = useCallback(() => {
     if (!hasNextPage || isFetchingNextPage) {
       return;
@@ -454,86 +453,55 @@ export function BranchToolbarBranchSelector({
     fetchNextBranchPage();
   }, [fetchNextBranchPage, hasNextPage, isBranchMenuOpen, isFetchingNextPage]);
 
-  const syncBranchListScrollChrome = useCallback((scrollEl: HTMLElement | null) => {
-    if (!scrollEl) {
-      setBranchListBottomFadeVisible(false);
+  const branchListRef = useRef<LegendListRef | null>(null);
+  const updateBranchListScrollFades = useCallback(() => {
+    const scrollElement = branchListRef.current?.getScrollableNode?.();
+    if (!(scrollElement instanceof HTMLElement)) {
       return;
     }
-    const { scrollTop, scrollHeight, clientHeight } = scrollEl;
-    const canScroll = scrollHeight > clientHeight + 1;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-    setBranchListBottomFadeVisible(canScroll && distanceFromBottom > 6);
-  }, []);
-
-  const branchListRef = useRef<LegendListRef | null>(null);
-  const setBranchListRef = useCallback((element: HTMLDivElement | null) => {
-    branchListScrollElementRef.current = element?.parentElement ?? null;
+    branchListScrollElementRef.current = scrollElement;
+    const maxScrollOffset = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+    setShowTopBranchScrollFade(scrollElement.scrollTop > 1);
+    setShowBottomBranchScrollFade(maxScrollOffset - scrollElement.scrollTop > 1);
   }, []);
 
   useEffect(() => {
     if (isBranchMenuOpen) {
       return;
     }
-    setBranchListBottomFadeVisible(false);
+    setShowTopBranchScrollFade(false);
+    setShowBottomBranchScrollFade(false);
   }, [isBranchMenuOpen]);
 
   useLayoutEffect(() => {
-    if (!isBranchMenuOpen || !shouldVirtualizeBranchList) {
+    if (!isBranchMenuOpen) {
       return;
     }
 
-    let frame = 0;
-    const measure = () => {
-      const el = branchListRef.current?.getScrollableNode?.();
-      if (el instanceof HTMLElement) {
-        branchListScrollElementRef.current = el;
-        syncBranchListScrollChrome(el);
-        return;
-      }
-      frame = requestAnimationFrame(measure);
+    setShowTopBranchScrollFade(false);
+    setShowBottomBranchScrollFade(filteredBranchPickerItems.length > 8);
+    let nestedFrame = 0;
+    const frame = requestAnimationFrame(() => {
+      updateBranchListScrollFades();
+      nestedFrame = requestAnimationFrame(updateBranchListScrollFades);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(nestedFrame);
     };
-    frame = requestAnimationFrame(measure);
-    return () => cancelAnimationFrame(frame);
-  }, [
-    isBranchMenuOpen,
-    shouldVirtualizeBranchList,
-    filteredBranchPickerItems.length,
-    syncBranchListScrollChrome,
-  ]);
+  }, [filteredBranchPickerItems.length, isBranchMenuOpen, updateBranchListScrollFades]);
 
   useEffect(() => {
     if (!isBranchMenuOpen) {
       return;
     }
 
-    if (shouldVirtualizeBranchList) {
-      branchListRef.current?.scrollToOffset?.({ offset: 0, animated: false });
-    } else {
-      branchListScrollElementRef.current?.scrollTo({ top: 0 });
-    }
-  }, [deferredTrimmedBranchQuery, isBranchMenuOpen, shouldVirtualizeBranchList]);
+    branchListRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+  }, [deferredTrimmedBranchQuery, isBranchMenuOpen]);
 
   useEffect(() => {
-    const scrollElement = branchListScrollElementRef.current;
-    if (!scrollElement || !isBranchMenuOpen || shouldVirtualizeBranchList) {
-      return;
-    }
-
-    const handleScroll = () => {
-      maybeFetchNextBranchPage();
-    };
-
-    scrollElement.addEventListener("scroll", handleScroll, { passive: true });
-    handleScroll();
-    return () => {
-      scrollElement.removeEventListener("scroll", handleScroll);
-    };
-  }, [isBranchMenuOpen, maybeFetchNextBranchPage, shouldVirtualizeBranchList]);
-
-  useEffect(() => {
-    if (shouldVirtualizeBranchList) return;
     maybeFetchNextBranchPage();
-  }, [refs.length, maybeFetchNextBranchPage, shouldVirtualizeBranchList]);
+  }, [refs.length, maybeFetchNextBranchPage]);
 
   const triggerLabel = getBranchTriggerLabel({
     activeWorktreePath,
@@ -579,6 +547,7 @@ export function BranchToolbarBranchSelector({
           key={itemValue}
           index={index}
           value={itemValue}
+          className="pe-1.5"
           onClick={() => createRef(trimmedBranchQuery)}
         >
           <span className="truncate">Create new ref &quot;{trimmedBranchQuery}&quot;</span>
@@ -606,6 +575,7 @@ export function BranchToolbarBranchSelector({
         key={itemValue}
         index={index}
         value={itemValue}
+        className="pe-1.5"
         onClick={() => selectBranch(refName)}
       >
         <div className="flex w-full min-w-0 items-center justify-between gap-2">
@@ -621,7 +591,7 @@ export function BranchToolbarBranchSelector({
       items={branchPickerItems}
       filteredItems={filteredBranchPickerItems}
       autoHighlight
-      virtualized={shouldVirtualizeBranchList}
+      virtualized
       onItemHighlighted={(_value, eventDetails) => {
         if (!isBranchMenuOpen || eventDetails.index < 0 || eventDetails.reason !== "keyboard") {
           return;
@@ -666,50 +636,32 @@ export function BranchToolbarBranchSelector({
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ComboboxEmpty>No refs found.</ComboboxEmpty>
           <div className="relative min-h-0 w-full max-h-56 flex-1 overflow-hidden">
-            {shouldVirtualizeBranchList ? (
-              <>
-                <ComboboxListVirtualized className="not-empty:ps-1 not-empty:pe-0 not-empty:pt-2 not-empty:pb-1">
-                  <LegendList<string>
-                    ref={branchListRef}
-                    data={filteredBranchPickerItems}
-                    keyExtractor={(item) => item}
-                    renderItem={({ item, index }) => renderPickerItem(item, index)}
-                    estimatedItemSize={28}
-                    drawDistance={336}
-                    onEndReached={() => {
-                      if (hasNextPage && !isFetchingNextPage) {
-                        fetchNextBranchPage();
-                      }
-                    }}
-                    onScroll={() => {
-                      const target = branchListRef.current?.getScrollableNode?.();
-                      if (target instanceof HTMLElement) {
-                        branchListScrollElementRef.current = target;
-                        syncBranchListScrollChrome(target);
-                      }
-                      maybeFetchNextBranchPage();
-                    }}
-                    style={{ maxHeight: "14rem" }}
-                  />
-                </ComboboxListVirtualized>
-                <div
-                  aria-hidden
-                  className={cn(
-                    "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-popover to-transparent transition-opacity duration-150",
-                    branchListBottomFadeVisible ? "opacity-100" : "opacity-0",
-                  )}
-                />
-              </>
-            ) : (
-              <ComboboxList
-                ref={setBranchListRef}
-                className="h-full max-h-56 min-h-0 not-empty:ps-1 not-empty:pe-0 not-empty:pt-2 not-empty:pb-1"
-              >
-                {filteredBranchPickerItems.map((itemValue, index) =>
-                  renderPickerItem(itemValue, index),
+            <ComboboxListVirtualized className="size-full min-w-0 p-0">
+              <LegendList<string>
+                ref={branchListRef}
+                data={filteredBranchPickerItems}
+                keyExtractor={(item) => item}
+                renderItem={({ item, index }) => renderPickerItem(item, index)}
+                estimatedItemSize={28}
+                drawDistance={336}
+                onEndReached={() => {
+                  if (hasNextPage && !isFetchingNextPage) {
+                    fetchNextBranchPage();
+                  }
+                }}
+                onLayout={updateBranchListScrollFades}
+                onScroll={() => {
+                  updateBranchListScrollFades();
+                  maybeFetchNextBranchPage();
+                }}
+                className={cn(
+                  "scrollbar-gutter-stable overflow-x-hidden overscroll-y-contain ps-1 pe-0 pt-2 pb-1 [--fade-size:1.5rem]",
+                  showTopBranchScrollFade && "mask-t-from-[calc(100%-var(--fade-size))]",
+                  showBottomBranchScrollFade && "mask-b-from-[calc(100%-var(--fade-size))]",
                 )}
-              </ComboboxList>
-            )}
+                style={{ maxHeight: "14rem" }}
+              />
+            </ComboboxListVirtualized>
           </div>
           {branchStatusText ? <ComboboxStatus>{branchStatusText}</ComboboxStatus> : null}
         </div>
