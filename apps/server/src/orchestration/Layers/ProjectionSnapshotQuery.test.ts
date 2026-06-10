@@ -9,7 +9,9 @@ import {
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -440,6 +442,145 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.equal(threadDetail._tag, "Some");
       if (threadDetail._tag === "Some") {
         assert.deepEqual(threadDetail.value, snapshot.threads[0]);
+      }
+    }),
+  );
+
+  it.effect("includes repaired queued-dispatch messages in detail snapshot order", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-reconnect-queued',
+          'Reconnect queued project',
+          '/tmp/reconnect-queued',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-05-01T00:00:00.000Z',
+          '2026-05-01T00:00:00.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-reconnect-queued',
+          'project-reconnect-queued',
+          'Reconnect queued thread',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'default',
+          NULL,
+          NULL,
+          NULL,
+          '2026-05-01T00:05:00.000Z',
+          0,
+          0,
+          0,
+          '2026-05-01T00:00:00.000Z',
+          '2026-05-01T00:05:00.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id,
+          thread_id,
+          turn_id,
+          role,
+          text,
+          attachments_json,
+          is_streaming,
+          created_at,
+          updated_at
+        )
+        VALUES
+          (
+            'message-before-dispatch',
+            'thread-reconnect-queued',
+            NULL,
+            'assistant',
+            'before dispatch',
+            '[]',
+            0,
+            '2026-05-01T00:02:00.000Z',
+            '2026-05-01T00:02:00.000Z'
+          ),
+          (
+            'message-queued-dispatch',
+            'thread-reconnect-queued',
+            NULL,
+            'user',
+            'queued dispatch',
+            '[]',
+            0,
+            '2026-05-01T00:05:00.000Z',
+            '2026-05-01T00:05:00.000Z'
+          ),
+          (
+            'message-after-dispatch',
+            'thread-reconnect-queued',
+            NULL,
+            'assistant',
+            'after dispatch',
+            '[]',
+            0,
+            '2026-05-01T00:06:00.000Z',
+            '2026-05-01T00:06:00.000Z'
+          )
+      `;
+
+      const detail = yield* snapshotQuery.getThreadDetailSnapshotById(
+        ThreadId.make("thread-reconnect-queued"),
+      );
+
+      assert.equal(detail._tag, "Some");
+      if (detail._tag === "Some") {
+        assert.deepEqual(
+          detail.value.thread.messages.map((message) => message.id),
+          [
+            asMessageId("message-before-dispatch"),
+            asMessageId("message-queued-dispatch"),
+            asMessageId("message-after-dispatch"),
+          ],
+        );
+        assert.equal(
+          detail.value.thread.messages.find(
+            (message) => message.id === asMessageId("message-queued-dispatch"),
+          )?.createdAt,
+          "2026-05-01T00:05:00.000Z",
+        );
       }
     }),
   );
@@ -2069,4 +2210,166 @@ it.effect(
       assert.equal(fullSnapshot.projects[2]?.repositoryIdentity?.rootPath, "/tmp/deleted-root");
     }).pipe(Effect.provide(layer));
   },
+);
+
+it.effect("ProjectionSnapshotQuery coalesces concurrent shell snapshot loads", () =>
+  Effect.gen(function* () {
+    const resolverEntered = yield* Deferred.make<void>();
+    const releaseResolver = yield* Deferred.make<void>();
+    const resolveCalls: string[] = [];
+    const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
+      Layer.provideMerge(
+        Layer.succeed(RepositoryIdentityResolver, {
+          resolve: (cwd: string) =>
+            Effect.gen(function* () {
+              resolveCalls.push(cwd);
+              yield* Deferred.succeed(resolverEntered, undefined).pipe(Effect.ignore);
+              yield* Deferred.await(releaseResolver);
+              return {
+                canonicalKey: `github.com/acme${cwd}`,
+                locator: {
+                  source: "git-remote" as const,
+                  remoteName: "origin",
+                  remoteUrl: `https://github.com/acme${cwd}.git`,
+                },
+                rootPath: cwd,
+              };
+            }),
+        }),
+      ),
+      Layer.provideMerge(SqlitePersistenceMemory),
+    );
+
+    yield* Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-concurrent',
+          'Concurrent Project',
+          '/tmp/concurrent-root',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-04-05T00:00:00.000Z',
+          '2026-04-05T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      const firstFiber = yield* snapshotQuery.getShellSnapshot().pipe(Effect.forkScoped);
+      yield* Deferred.await(resolverEntered);
+      const secondFiber = yield* snapshotQuery.getShellSnapshot().pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      yield* Deferred.succeed(releaseResolver, undefined);
+
+      const [firstSnapshot, secondSnapshot] = yield* Effect.all([
+        Fiber.join(firstFiber),
+        Fiber.join(secondFiber),
+      ]);
+
+      assert.deepStrictEqual(resolveCalls, ["/tmp/concurrent-root"]);
+      assert.equal(firstSnapshot.projects.length, 1);
+      assert.equal(secondSnapshot.projects.length, 1);
+      assert.deepStrictEqual(firstSnapshot.projects, secondSnapshot.projects);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("ProjectionSnapshotQuery clears a coalesced shell snapshot load on owner interrupt", () =>
+  Effect.gen(function* () {
+    const firstResolverEntered = yield* Deferred.make<void>();
+    const secondResolverEntered = yield* Deferred.make<void>();
+    const releaseSecondResolver = yield* Deferred.make<void>();
+    const resolveCalls: string[] = [];
+    const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
+      Layer.provideMerge(
+        Layer.succeed(RepositoryIdentityResolver, {
+          resolve: (cwd: string) =>
+            Effect.gen(function* () {
+              const callNumber = resolveCalls.push(cwd);
+              if (callNumber === 1) {
+                yield* Deferred.succeed(firstResolverEntered, undefined).pipe(Effect.ignore);
+                return yield* Effect.never;
+              }
+
+              yield* Deferred.succeed(secondResolverEntered, undefined).pipe(Effect.ignore);
+              yield* Deferred.await(releaseSecondResolver);
+              return {
+                canonicalKey: `github.com/acme${cwd}`,
+                locator: {
+                  source: "git-remote" as const,
+                  remoteName: "origin",
+                  remoteUrl: `https://github.com/acme${cwd}.git`,
+                },
+                rootPath: cwd,
+              };
+            }),
+        }),
+      ),
+      Layer.provideMerge(SqlitePersistenceMemory),
+    );
+
+    yield* Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-interrupt',
+          'Interrupted Project',
+          '/tmp/interrupted-root',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-04-06T00:00:00.000Z',
+          '2026-04-06T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      const firstFiber = yield* snapshotQuery.getShellSnapshot().pipe(Effect.forkScoped);
+      yield* Deferred.await(firstResolverEntered);
+      yield* Fiber.interrupt(firstFiber);
+
+      const secondFiber = yield* snapshotQuery.getShellSnapshot().pipe(Effect.forkScoped);
+      yield* Deferred.await(secondResolverEntered).pipe(Effect.timeout("1 second"));
+      yield* Deferred.succeed(releaseSecondResolver, undefined).pipe(Effect.ignore);
+      const secondSnapshot = yield* Fiber.join(secondFiber).pipe(Effect.timeout("1 second"));
+
+      assert.deepStrictEqual(resolveCalls, ["/tmp/interrupted-root", "/tmp/interrupted-root"]);
+      assert.equal(secondSnapshot.projects.length, 1);
+      assert.equal(secondSnapshot.projects[0]?.id, asProjectId("project-interrupt"));
+    }).pipe(Effect.provide(layer));
+  }),
 );

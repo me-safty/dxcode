@@ -22,6 +22,7 @@ import { useIsMobile } from "~/hooks/useMediaQuery";
 import { useMobileEdgeSwipe } from "~/hooks/useMobileEdgeSwipe";
 import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
 import * as Schema from "effect/Schema";
+import { isToastPortalDismissalRequest } from "./sheetDismissal";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
@@ -145,6 +146,7 @@ function SidebarProvider({
     action: "close",
     enabled: isMobile && openMobile,
     onSwipe: () => setOpenMobile(false),
+    requireScrollableStartPosition: true,
     side: "left",
     startArea: "screen",
     startSurface: "panel",
@@ -244,7 +246,19 @@ function Sidebar({
   if (isMobile) {
     return (
       <SidebarInstanceContext value={instanceContextValue}>
-        <Sheet modal={false} onOpenChange={setOpenMobile} open={openMobile} {...props}>
+        <Sheet
+          modal={false}
+          onOpenChange={(open, eventDetails) => {
+            if (!open && isToastPortalDismissalRequest(eventDetails)) {
+              eventDetails.cancel();
+              return;
+            }
+
+            setOpenMobile(open);
+          }}
+          open={openMobile}
+          {...props}
+        >
           <SheetPopup
             allowOutsidePointerEvents
             className={cn(

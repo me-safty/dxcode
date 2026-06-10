@@ -27,7 +27,6 @@ function createDeferredPromise<T>() {
 const {
   activeRunStackedActionDeferredRef,
   currentGitStatusRef,
-  exportSourceControlDiagnosticsSpy,
   generateCommitMessageMutateAsyncSpy,
   hasServerThreadRef,
   navigateSpy,
@@ -71,7 +70,6 @@ const {
       pr: null,
     } as VcsStatusResult,
   },
-  exportSourceControlDiagnosticsSpy: vi.fn(() => Promise.resolve("downloaded")),
   generateCommitMessageMutateAsyncSpy: vi.fn(() =>
     Promise.resolve({ commitMessage: "Update staged files" }),
   ),
@@ -305,7 +303,6 @@ vi.mock("~/lib/gitStatusState", () => ({
 }));
 
 vi.mock("~/lib/sourceControlDiagnostics", () => ({
-  exportSourceControlDiagnostics: exportSourceControlDiagnosticsSpy,
   recordSourceControlDiagnosticEvent: recordSourceControlDiagnosticEventSpy,
   recordSourceControlDisabledSnapshot: recordSourceControlDisabledSnapshotSpy,
   sourceControlActionDisabledReasons: vi.fn(
@@ -570,42 +567,6 @@ describe("SourceControlPanel git action runner", () => {
       expect(document.body.textContent).not.toContain("Unstaged Changes");
       expect(document.querySelector('[role="checkbox"]')).toBeNull();
       expect(document.querySelectorAll('img[aria-hidden="true"]').length).toBeGreaterThanOrEqual(2);
-    } finally {
-      await screen.unmount();
-      host.remove();
-    }
-  });
-
-  it("exports source-control diagnostics from the panel header", async () => {
-    currentGitStatusRef.current = createPanelStatus({
-      unstagedFiles: [{ path: "src/app.ts", status: "modified", insertions: 1, deletions: 0 }],
-    });
-    const { host, screen } = await renderPanel();
-
-    try {
-      const exportButton = document.querySelector<HTMLButtonElement>(
-        'button[aria-label="Export source-control diagnostics"]',
-      );
-      expect(exportButton).not.toBeNull();
-      exportButton?.click();
-
-      await vi.waitFor(() => {
-        expect(exportSourceControlDiagnosticsSpy).toHaveBeenCalledWith({
-          currentSnapshot: expect.objectContaining({
-            cwd: GIT_CWD,
-            environmentId: ENVIRONMENT_A,
-            actionDisabled: false,
-            actionDisabledReasons: [],
-            unstagedFileCount: 1,
-          }),
-        });
-      });
-      expect(toastAddSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "success",
-          title: "Source-control diagnostics downloaded",
-        }),
-      );
     } finally {
       await screen.unmount();
       host.remove();

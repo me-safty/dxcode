@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   hasActiveTextSelection,
   isMobileEdgeSwipeStart,
+  isScrollPositionAtStart,
   MOBILE_EDGE_SWIPE_OPEN_INTENT_TIMEOUT_MS,
   resolveMobileEdgeSwipeDecision,
 } from "./useMobileEdgeSwipe";
@@ -76,10 +77,30 @@ describe("resolveMobileEdgeSwipeDecision", () => {
     ).toBe("close");
   });
 
-  it("stays pending during vertical scrolling so it does not fight the swipe", () => {
-    expect(resolveMobileEdgeSwipeDecision({ deltaX: 18, deltaY: 40, side: "left" })).toBe(
-      "pending",
-    );
+  it("cancels vertical scrolling so it does not open a panel", () => {
+    expect(resolveMobileEdgeSwipeDecision({ deltaX: 18, deltaY: 40, side: "left" })).toBe("cancel");
+  });
+
+  it("opens the right panel on a quick horizontally dominant flick before the sustained distance", () => {
+    expect(
+      resolveMobileEdgeSwipeDecision({
+        deltaX: -28,
+        deltaY: 6,
+        side: "right",
+        velocityX: -0.9,
+      }),
+    ).toBe("open");
+  });
+
+  it("cancels a fast vertical scroll with incidental leftward movement instead of opening the right panel", () => {
+    expect(
+      resolveMobileEdgeSwipeDecision({
+        deltaX: -28,
+        deltaY: 30,
+        side: "right",
+        velocityX: -0.9,
+      }),
+    ).toBe("cancel");
   });
 
   it("closes a panel on a quick horizontal flick before the sustained distance", () => {
@@ -118,7 +139,7 @@ describe("resolveMobileEdgeSwipeDecision", () => {
     ).toBe("cancel");
   });
 
-  it("still flick-closes when a quick horizontal flick also drifts vertically", () => {
+  it("cancels a fast vertical scroll with incidental rightward movement instead of closing the right panel", () => {
     expect(
       resolveMobileEdgeSwipeDecision({
         action: "close",
@@ -127,7 +148,7 @@ describe("resolveMobileEdgeSwipeDecision", () => {
         side: "right",
         velocityX: 0.9,
       }),
-    ).toBe("close");
+    ).toBe("cancel");
   });
 
   it("accepts starts within the configured left edge band", () => {
@@ -172,5 +193,17 @@ describe("hasActiveTextSelection", () => {
     expect(hasActiveTextSelection({ isCollapsed: true, rangeCount: 1 })).toBe(false);
     expect(hasActiveTextSelection({ isCollapsed: false, rangeCount: 0 })).toBe(false);
     expect(hasActiveTextSelection(null)).toBe(false);
+  });
+});
+
+describe("isScrollPositionAtStart", () => {
+  it("allows dismiss capture at the top threshold", () => {
+    expect(isScrollPositionAtStart(0)).toBe(true);
+    expect(isScrollPositionAtStart(1)).toBe(true);
+  });
+
+  it("blocks dismiss capture after scrolling past the top threshold", () => {
+    expect(isScrollPositionAtStart(1.1)).toBe(false);
+    expect(isScrollPositionAtStart(24)).toBe(false);
   });
 });

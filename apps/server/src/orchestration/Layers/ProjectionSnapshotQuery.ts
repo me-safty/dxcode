@@ -32,9 +32,11 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
@@ -499,6 +501,24 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
+  type ShellSnapshotInFlight = Deferred.Deferred<
+    Schema.Schema.Type<typeof OrchestrationShellSnapshot>,
+    ProjectionRepositoryError
+  >;
+  type ShellSnapshotInFlightSelection =
+    | {
+        readonly deferred: ShellSnapshotInFlight;
+        readonly owner: false;
+      }
+    | {
+        readonly deferred: ShellSnapshotInFlight;
+        readonly owner: true;
+      };
+  type ShellSnapshotInFlightRefUpdate = readonly [
+    ShellSnapshotInFlightSelection,
+    ShellSnapshotInFlight,
+  ];
+  const shellSnapshotInFlightRef = yield* Ref.make<ShellSnapshotInFlight | null>(null);
   const repositoryIdentityResolutionConcurrency = 4;
   const resolveRepositoryIdentitiesForProjects = Effect.fn(
     "ProjectionSnapshotQuery.resolveRepositoryIdentitiesForProjects",
@@ -1949,7 +1969,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         }),
       );
 
-  const getShellSnapshot: ProjectionSnapshotQueryShape["getShellSnapshot"] = () =>
+  const loadShellSnapshot: ProjectionSnapshotQueryShape["getShellSnapshot"] = () =>
     sql
       .withTransaction(
         Effect.all([
@@ -2080,6 +2100,50 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           return toPersistenceSqlError("ProjectionSnapshotQuery.getShellSnapshot:query")(error);
         }),
       );
+
+  const getShellSnapshot: ProjectionSnapshotQueryShape["getShellSnapshot"] = () =>
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const deferred = yield* Deferred.make<
+          Schema.Schema.Type<typeof OrchestrationShellSnapshot>,
+          ProjectionRepositoryError
+        >();
+        const inFlight: ShellSnapshotInFlightSelection = yield* Ref.modify(
+          shellSnapshotInFlightRef,
+          (current): ShellSnapshotInFlightRefUpdate => {
+            if (current !== null) {
+              const selected: ShellSnapshotInFlightSelection = {
+                deferred: current,
+                owner: false,
+              };
+              return [selected, current] as const;
+            }
+            const selected: ShellSnapshotInFlightSelection = {
+              deferred,
+              owner: true,
+            };
+            return [selected, deferred] as const;
+          },
+        );
+
+        if (!inFlight.owner) {
+          return yield* restore(Deferred.await(inFlight.deferred));
+        }
+
+        return yield* restore(loadShellSnapshot()).pipe(
+          Effect.onExit((exit) =>
+            Effect.uninterruptible(
+              Effect.gen(function* () {
+                yield* Deferred.done(inFlight.deferred, exit);
+                yield* Ref.update(shellSnapshotInFlightRef, (current) =>
+                  current === inFlight.deferred ? null : current,
+                );
+              }),
+            ),
+          ),
+        );
+      }),
+    );
 
   const getArchivedShellSnapshot: ProjectionSnapshotQueryShape["getArchivedShellSnapshot"] = () =>
     sql

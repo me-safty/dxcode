@@ -617,7 +617,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           attachments: queuedTurn.attachments,
           turnId: null,
           streaming: false,
-          createdAt: queuedTurn.createdAt,
+          createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
       };

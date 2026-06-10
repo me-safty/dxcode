@@ -11,7 +11,6 @@ import {
   GitBranchIcon,
   GitCommitIcon,
   GitPullRequestArrowIcon,
-  DownloadIcon,
   ListTreeIcon,
   MinusIcon,
   PanelRightCloseIcon,
@@ -98,7 +97,6 @@ import {
 } from "~/lib/gitReactQuery";
 import { refreshGitStatus } from "~/lib/gitStatusState";
 import {
-  exportSourceControlDiagnostics,
   recordSourceControlDiagnosticEvent,
   recordSourceControlDisabledSnapshot,
   sourceControlActionDisabledReasons,
@@ -704,28 +702,6 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
     void refreshGitStatus({ environmentId, cwd }).catch(() => undefined);
   }, [environmentId, cwd]);
 
-  const handleExportSourceControlDiagnostics = useCallback(() => {
-    void exportSourceControlDiagnostics({ currentSnapshot: sourceControlDisabledSnapshot })
-      .then((result) => {
-        toastManager.add({
-          type: "success",
-          title:
-            result === "downloaded"
-              ? "Source-control diagnostics downloaded"
-              : result === "copied"
-                ? "Source-control diagnostics copied to clipboard"
-                : "Source-control diagnostics shared",
-        });
-      })
-      .catch((error: unknown) => {
-        toastManager.add({
-          type: "error",
-          title: "Could not export source-control diagnostics",
-          description: error instanceof Error ? error.message : "An unexpected error occurred.",
-        });
-      });
-  }, [sourceControlDisabledSnapshot]);
-
   const handleSourceControlPointerUpCapture = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const hitElement = document.elementFromPoint(event.clientX, event.clientY);
@@ -1002,22 +978,6 @@ export default function SourceControlPanel({ mode = "sidebar", onClose }: Source
                 <RefreshCwIcon className="size-3.5" />
               </TooltipTrigger>
               <TooltipPopup side="bottom">Refresh</TooltipPopup>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="outline"
-                    aria-label="Export source-control diagnostics"
-                    title="Export source-control diagnostics"
-                    onClick={handleExportSourceControlDiagnostics}
-                  />
-                }
-              >
-                <DownloadIcon className="size-3.5" />
-              </TooltipTrigger>
-              <TooltipPopup side="bottom">Export diagnostics</TooltipPopup>
             </Tooltip>
             <Button
               size="icon-xs"

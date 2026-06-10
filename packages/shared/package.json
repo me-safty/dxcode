@@ -107,10 +107,6 @@
       "types": "./src/orchestrationThreadDetailFingerprint.ts",
       "import": "./src/orchestrationThreadDetailFingerprint.ts"
     },
-    "./orchestrationThreadDetailEvents": {
-      "types": "./src/orchestrationThreadDetailEvents.ts",
-      "import": "./src/orchestrationThreadDetailEvents.ts"
-    },
     "./webFeatureFlags": {
       "types": "./src/webFeatureFlags.ts",
       "import": "./src/webFeatureFlags.ts"

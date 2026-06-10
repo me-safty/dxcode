@@ -88,7 +88,32 @@ async function openNotificationUrl(url) {
   }
 
   const targetClient = selectNotificationClient(sameOriginClients, url);
-  return focusClientAndPostNotificationClick(targetClient, url);
+  return navigateFocusAndPostNotificationClick(targetClient, url);
+}
+
+async function navigateFocusAndPostNotificationClick(client, url) {
+  if (!client) {
+    return self.clients.openWindow(url);
+  }
+
+  if (clientMatchesNotificationUrl(client.url, url)) {
+    return focusClientAndPostNotificationClick(client, url);
+  }
+
+  const navigatedClient = await navigateNotificationClient(client, url);
+  return focusClientAndPostNotificationClick(navigatedClient || client, url);
+}
+
+async function navigateNotificationClient(client, url) {
+  if (!client || !("navigate" in client)) {
+    return null;
+  }
+
+  try {
+    return await client.navigate(url);
+  } catch {
+    return null;
+  }
 }
 
 async function focusClientAndPostNotificationClick(client, url) {

@@ -16,6 +16,7 @@ import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { BackNavigationBlocker } from "../components/BackNavigationBlocker";
 import { CommandPalette } from "../components/CommandPalette";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
+import { OfflineBanner } from "../components/OfflineBanner";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
 import { PwaPushNotificationPrompt } from "../components/pwa-push-notification-prompt";
 import {
@@ -152,6 +153,7 @@ function RootRouteView() {
   return (
     <ToastProvider>
       <AnchoredToastProvider>
+        <OfflineBanner />
         <BackNavigationBlocker />
         {authGateRevalidationRequired ? <BackgroundAuthRevalidator /> : null}
         {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}

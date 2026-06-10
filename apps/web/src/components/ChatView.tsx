@@ -2514,6 +2514,7 @@ export default function ChatView(props: ChatViewProps) {
     action: "close",
     enabled: shouldUsePlanSidebarSheet && planSidebarOpen,
     onSwipe: closePlanSidebar,
+    requireScrollableStartPosition: true,
     side: "right",
     startArea: "screen",
     startSurface: "panel",

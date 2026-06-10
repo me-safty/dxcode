@@ -5777,9 +5777,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       const palette = page.getByTestId("command-palette");
       await expect.element(palette).toBeInTheDocument();
+      const input = await waitForCommandPaletteInput("Search commands, projects, and threads...");
       await expect
         .element(page.getByPlaceholder("Search commands, projects, and threads..."))
         .toBeInTheDocument();
+      expect(document.activeElement).not.toBe(input);
     } finally {
       await mounted.cleanup();
     }

@@ -70,6 +70,7 @@ import {
 } from "../types";
 import { readEnvironmentApi } from "~/environmentApi";
 import { readEnvironmentConnection } from "~/environments/runtime";
+import { withTimeout } from "~/environments/runtime/withTimeout";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { readLocalApi } from "~/localApi";
 import { isTransportConnectionErrorMessage } from "~/rpc/transportError";
@@ -88,6 +89,7 @@ const TOUCH_LONG_PRESS_MOVE_TOLERANCE_PX = 10;
 const TERMINAL_OPEN_RETRY_DELAYS_MS = [250, 500, 1_000] as const;
 const TERMINAL_OPEN_RETRY_MAX_DELAY_MS = 2_000;
 const TERMINAL_RETRY_BOOTSTRAP_WAIT_MS = 5_000;
+const TERMINAL_MANUAL_RECONNECT_TIMEOUT_MS = 8_000;
 
 type TerminalOpenReason = "manual-resync" | "mount" | "retry" | "user-restart";
 
@@ -1678,6 +1680,40 @@ export function TerminalViewport({
       run();
     }
 
+    async function reconnectTerminalTransport(reason: "manual-resync" | "user-restart") {
+      const connection = readEnvironmentConnection(environmentId);
+      if (!connection) {
+        recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-skipped", {
+          reason,
+        });
+        return;
+      }
+
+      recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-started", {
+        reason,
+      });
+      try {
+        await withTimeout(
+          connection.client.reconnect(),
+          TERMINAL_MANUAL_RECONNECT_TIMEOUT_MS,
+          () =>
+            new Error(
+              `Terminal transport reconnect timed out after ${TERMINAL_MANUAL_RECONNECT_TIMEOUT_MS.toString()}ms.`,
+            ),
+        );
+        recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-success", {
+          reason,
+        });
+      } catch (error) {
+        recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-failed", {
+          message: errorMessage(error, "Terminal transport reconnect failed"),
+          reason,
+          transientTransport: isTransportConnectionError(error),
+        });
+        throw error;
+      }
+    }
+
     async function manualResyncTerminal() {
       if (disposed) {
         return;
@@ -1689,6 +1725,7 @@ export function TerminalViewport({
         size: readTerminalSize(),
       });
       try {
+        await reconnectTerminalTransport("manual-resync");
         const snapshot = await performTerminalOpen("manual-resync", generation);
         if (!snapshot) {
           return;
@@ -1725,6 +1762,7 @@ export function TerminalViewport({
         rows: activeTerminal.rows,
       };
       try {
+        await reconnectTerminalTransport("user-restart");
         const snapshot = await terminalApi.restart({
           threadId,
           terminalId,

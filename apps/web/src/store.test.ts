@@ -1801,7 +1801,7 @@ describe("incremental orchestration updates", () => {
         role: queuedTurn.role,
         text: queuedTurn.text,
         turnId: null,
-        createdAt: queuedTurn.createdAt,
+        createdAt: "2026-02-13T00:03:00.000Z",
         completedAt: "2026-02-13T00:03:00.000Z",
         streaming: false,
       },
@@ -1826,6 +1826,37 @@ describe("incremental orchestration updates", () => {
       "queued message 1",
     ]);
     expect(threadsOf(sent)[0]?.messages).toHaveLength(1);
+  });
+
+  it("orders synthesized queued messages by dispatch time", () => {
+    const queuedTurn = makeQueuedTurn(1);
+    const existingMessage = makeMessage(2);
+    const thread = makeThread({
+      messages: [existingMessage],
+      queuedTurns: [queuedTurn],
+    });
+    const state = makeState(thread);
+
+    const dispatched = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.queued-turn-dispatched", {
+        threadId: thread.id,
+        messageId: queuedTurn.messageId,
+        dispatchedAt: "2026-02-13T00:03:00.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    expect(threadsOf(dispatched)[0]?.messages.map((message) => message.id)).toEqual([
+      existingMessage.id,
+      queuedTurn.messageId,
+    ]);
+    expect(
+      threadsOf(dispatched)[0]?.messages.find((message) => message.id === queuedTurn.messageId),
+    ).toMatchObject({
+      createdAt: "2026-02-13T00:03:00.000Z",
+      completedAt: "2026-02-13T00:03:00.000Z",
+    });
   });
 
   it("does not synthesize a queued message when the dispatched turn is not known locally", () => {

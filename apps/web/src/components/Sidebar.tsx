@@ -2419,7 +2419,7 @@ function SalchiLogo() {
       alt=""
       aria-hidden="true"
       className="size-5 shrink-0 object-contain [image-rendering:pixelated]"
-      src="/salchi-pwa-192.png"
+      src="/salchi-logo.png"
     />
   );
 }

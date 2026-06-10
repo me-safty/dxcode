@@ -1,5 +1,10 @@
 import { scopedThreadKey } from "@t3tools/client-runtime";
-import type { ScopedThreadRef, TerminalSessionSnapshot } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  type ScopedThreadRef,
+  type TerminalSessionSnapshot,
+  ThreadId,
+} from "@t3tools/contracts";
 
 const MAX_TERMINAL_DIAGNOSTIC_EVENTS = 500;
 const MAX_RECENT_TERMINAL_DIAGNOSTIC_EVENTS = 120;
@@ -35,6 +40,10 @@ export type TerminalDiagnosticKind =
   | "terminal-restart-confirmed"
   | "terminal-restart-failed"
   | "terminal-restart-success"
+  | "terminal-transport-reconnect-failed"
+  | "terminal-transport-reconnect-skipped"
+  | "terminal-transport-reconnect-started"
+  | "terminal-transport-reconnect-success"
   | "viewport-mounted"
   | "viewport-unmounted"
   | "write-error"
@@ -130,6 +139,16 @@ export interface TerminalDiagnosticsSnapshot {
   readonly threadKey: string | null;
   readonly totalEventCount: number;
   readonly totalWriteAttemptCount: number;
+}
+
+export interface TerminalOutputStallCandidate {
+  readonly lastOutputAt: number | null;
+  readonly lastWriteSuccessAt: number;
+  readonly msSinceLastOutput: number | null;
+  readonly msSinceLastWriteSuccess: number;
+  readonly terminalId: string;
+  readonly threadRef: ScopedThreadRef;
+  readonly writesSinceLastOutput: number;
 }
 
 let nextEventId = 1;
@@ -555,6 +574,86 @@ export function getTerminalDiagnosticsSnapshot(input?: {
     totalEventCount: events.length,
     totalWriteAttemptCount,
   };
+}
+
+export function selectTerminalOutputStallCandidates(input: {
+  readonly minWritesSinceLastOutput?: number;
+  readonly nowMs?: number;
+  readonly stallThresholdMs: number;
+}): ReadonlyArray<TerminalOutputStallCandidate> {
+  const snapshotNowMs = input.nowMs ?? nowMs();
+  const minWritesSinceLastOutput = input.minWritesSinceLastOutput ?? 1;
+  const summaries = new Map<
+    string,
+    {
+      environmentId: string;
+      lastOutputAt: number | null;
+      lastWriteSuccessAt: number | null;
+      terminalId: string;
+      threadId: string;
+      writesSinceLastOutput: number;
+    }
+  >();
+
+  for (const event of events) {
+    const key = `${event.threadKey}\u0000${event.terminalId}`;
+    const summary = summaries.get(key) ?? {
+      environmentId: event.environmentId,
+      lastOutputAt: null,
+      lastWriteSuccessAt: null,
+      terminalId: event.terminalId,
+      threadId: event.threadId,
+      writesSinceLastOutput: 0,
+    };
+
+    if (event.kind === "terminal-event-applied" && event.data?.eventType === "output") {
+      summary.lastOutputAt = numericDataField(event.data, "eventAppliedAt") ?? event.ts;
+      summary.writesSinceLastOutput = 0;
+    } else if (event.kind === "write-success") {
+      summary.lastWriteSuccessAt = event.ts;
+      if (summary.lastOutputAt === null || event.ts >= summary.lastOutputAt) {
+        summary.writesSinceLastOutput += 1;
+      }
+    }
+
+    summaries.set(key, summary);
+  }
+
+  const candidates: TerminalOutputStallCandidate[] = [];
+  for (const summary of summaries.values()) {
+    if (
+      summary.lastWriteSuccessAt === null ||
+      summary.writesSinceLastOutput < minWritesSinceLastOutput
+    ) {
+      continue;
+    }
+
+    const msSinceLastWriteSuccess = Math.max(
+      0,
+      Math.round(snapshotNowMs - summary.lastWriteSuccessAt),
+    );
+    if (msSinceLastWriteSuccess < input.stallThresholdMs) {
+      continue;
+    }
+
+    candidates.push({
+      lastOutputAt: summary.lastOutputAt,
+      lastWriteSuccessAt: summary.lastWriteSuccessAt,
+      msSinceLastOutput:
+        summary.lastOutputAt === null
+          ? null
+          : Math.max(0, Math.round(snapshotNowMs - summary.lastOutputAt)),
+      msSinceLastWriteSuccess,
+      terminalId: summary.terminalId,
+      threadRef: {
+        environmentId: EnvironmentId.make(summary.environmentId),
+        threadId: ThreadId.make(summary.threadId),
+      },
+      writesSinceLastOutput: summary.writesSinceLastOutput,
+    });
+  }
+
+  return candidates;
 }
 
 export function resetTerminalDiagnosticsForTests(): void {

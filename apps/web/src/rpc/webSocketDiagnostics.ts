@@ -2,7 +2,6 @@ import type { KnownEnvironment } from "@t3tools/client-runtime";
 import { scopedThreadKey } from "@t3tools/client-runtime";
 import type { EnvironmentId, ScopedThreadRef, TerminalEvent, ThreadId } from "@t3tools/contracts";
 
-import { useComposerDraftStore, type DraftThreadState } from "../composerDraftStore";
 import {
   getPrimaryKnownEnvironment,
   readPrimaryEnvironmentDescriptor,
@@ -17,7 +16,6 @@ import { downloadPlanAsTextFile } from "../proposedPlan";
 import { getThreadFromEnvironmentState } from "../threadDerivation";
 import { selectEnvironmentState, useStore } from "../store";
 import { getTerminalDiagnosticsSnapshot } from "../lib/terminalDiagnosticsState";
-import { useLocalDispatchStore } from "../localDispatchStore";
 import {
   getPendingRpcAckRequests,
   getSlowRpcAckRequests,
@@ -25,7 +23,6 @@ import {
 } from "./requestLatencyState";
 import { getServerConfig, getServerConfigUpdatedNotification } from "./serverState";
 import { getWsConnectionStatus, getWsConnectionUiState } from "./wsConnectionState";
-import type { SidebarThreadSummary } from "../types";
 import {
   selectTerminalEventEntries,
   selectThreadTerminalState,
@@ -34,7 +31,6 @@ import {
 
 const MAX_RECENT_TERMINAL_EVENTS = 20;
 const MAX_RESUME_DIAGNOSTIC_ENTRIES = 500;
-const MAX_MISSING_SIDEBAR_THREAD_IDS = 50;
 const REDACTED = "<redacted>";
 
 export interface WebSocketDiagnosticsContext {
@@ -279,74 +275,6 @@ function summarizeEnvironmentConnections(activeEnvironmentId: EnvironmentId) {
   });
 }
 
-function summarizeSidebarThreadSummary(
-  summary: SidebarThreadSummary | null | undefined,
-): JsonObject | null {
-  if (!summary) {
-    return null;
-  }
-
-  return {
-    archivedAt: summary.archivedAt,
-    branch: summary.branch,
-    createdAt: summary.createdAt,
-    environmentId: summary.environmentId,
-    hasActionableProposedPlan: summary.hasActionableProposedPlan,
-    hasPendingApprovals: summary.hasPendingApprovals,
-    hasPendingUserInput: summary.hasPendingUserInput,
-    id: summary.id,
-    interactionMode: summary.interactionMode,
-    latestTurn: summary.latestTurn,
-    latestUserMessageAt: summary.latestUserMessageAt,
-    projectId: summary.projectId,
-    session: summary.session,
-    title: summary.title,
-    updatedAt: summary.updatedAt ?? null,
-    worktreePath: summary.worktreePath,
-  };
-}
-
-function summarizeLocalDispatchByKey(threadKey: string | null): JsonObject | null {
-  if (!threadKey) {
-    return null;
-  }
-  const localDispatch =
-    useLocalDispatchStore.getState().localDispatchByThreadKey[threadKey] ?? null;
-  if (!localDispatch) {
-    return null;
-  }
-
-  return {
-    latestTurnCompletedAt: localDispatch.latestTurnCompletedAt,
-    latestTurnRequestedAt: localDispatch.latestTurnRequestedAt,
-    latestTurnStartedAt: localDispatch.latestTurnStartedAt,
-    latestTurnTurnId: localDispatch.latestTurnTurnId,
-    preparingWorktree: localDispatch.preparingWorktree,
-    startedAt: localDispatch.startedAt,
-  };
-}
-
-function summarizeDraftThread(draftThread: DraftThreadState | null | undefined): JsonObject | null {
-  if (!draftThread) {
-    return null;
-  }
-
-  return {
-    branch: draftThread.branch,
-    createdAt: draftThread.createdAt,
-    environmentId: draftThread.environmentId,
-    envMode: draftThread.envMode,
-    interactionMode: draftThread.interactionMode,
-    logicalProjectKey: draftThread.logicalProjectKey,
-    projectId: draftThread.projectId,
-    promotedTo: draftThread.promotedTo ?? null,
-    runtimeMode: draftThread.runtimeMode,
-    sourceProposedPlan: draftThread.sourceProposedPlan ?? null,
-    threadId: draftThread.threadId,
-    worktreePath: draftThread.worktreePath,
-  };
-}
-
 function summarizeAppStore(context: WebSocketDiagnosticsContext) {
   const appState = useStore.getState();
   const activeRef: ScopedThreadRef = {
@@ -361,43 +289,6 @@ function summarizeAppStore(context: WebSocketDiagnosticsContext) {
     activeEnvironmentState,
     context.activeThreadId,
   );
-  const activeThreadKey = scopedThreadKey(activeRef);
-  const activeThreadInThreadIds = activeEnvironmentState.threadIds.includes(context.activeThreadId);
-  const activeThreadInProjectThreadIds = activeThread
-    ? (activeEnvironmentState.threadIdsByProjectId[activeThread.projectId] ?? []).includes(
-        context.activeThreadId,
-      )
-    : null;
-  const activeSidebarSummary =
-    activeEnvironmentState.sidebarThreadSummaryById[context.activeThreadId];
-  const missingSidebarSummaryThreadIds = activeEnvironmentState.threadIds.filter(
-    (threadId) => activeEnvironmentState.sidebarThreadSummaryById[threadId] === undefined,
-  );
-  const localDispatchState = useLocalDispatchStore.getState();
-  const draftStore = useComposerDraftStore.getState();
-  const activeDraftThread = draftStore.getDraftThreadByRef(activeRef);
-  const promotedDraftsMissingSidebarSummary: JsonObject[] = [];
-  for (const [draftThreadKey, draftThread] of Object.entries(draftStore.draftThreadsByThreadKey)) {
-    if (!draftThread.promotedTo) {
-      continue;
-    }
-    const promotedEnvironmentState = selectEnvironmentState(
-      appState,
-      draftThread.promotedTo.environmentId,
-    );
-    if (
-      promotedEnvironmentState.sidebarThreadSummaryById[draftThread.promotedTo.threadId] !==
-      undefined
-    ) {
-      continue;
-    }
-    promotedDraftsMissingSidebarSummary.push({
-      draftThreadId: draftThread.threadId,
-      draftThreadKey,
-      projectId: draftThread.projectId,
-      promotedTo: draftThread.promotedTo,
-    });
-  }
 
   return {
     activeEnvironmentId: appState.activeEnvironmentId,
@@ -421,35 +312,13 @@ function summarizeAppStore(context: WebSocketDiagnosticsContext) {
           worktreePath: activeThread.worktreePath,
         }
       : null,
-    activeThreadDiagnostics: {
-      activeDraftThread: summarizeDraftThread(activeDraftThread),
-      activeLocalDispatch: summarizeLocalDispatchByKey(activeThreadKey),
-      activeThreadHasSidebarSummary: activeSidebarSummary !== undefined,
-      activeThreadInProjectThreadIds,
-      activeThreadInThreadIds,
-      activeThreadSidebarSummary: summarizeSidebarThreadSummary(activeSidebarSummary),
-      localDispatchThreadCount: Object.keys(localDispatchState.localDispatchByThreadKey).length,
-      missingSidebarSummaryThreadCount: missingSidebarSummaryThreadIds.length,
-      missingSidebarSummaryThreadIds: missingSidebarSummaryThreadIds.slice(
-        0,
-        MAX_MISSING_SIDEBAR_THREAD_IDS,
-      ),
-      promotedDraftsMissingSidebarSummary: promotedDraftsMissingSidebarSummary.slice(
-        0,
-        MAX_MISSING_SIDEBAR_THREAD_IDS,
-      ),
-      promotedDraftsMissingSidebarSummaryCount: promotedDraftsMissingSidebarSummary.length,
-    },
-    activeThreadKey,
+    activeThreadKey: scopedThreadKey(activeRef),
     environmentStates: Object.entries(appState.environmentStateById).map(
       ([environmentId, environmentState]) => ({
         active: environmentId === appState.activeEnvironmentId,
         activeThreadEnvironment: environmentId === context.activeThreadEnvironmentId,
         bootstrapComplete: environmentState.bootstrapComplete,
         environmentId,
-        missingSidebarSummaryThreadCount: environmentState.threadIds.filter(
-          (threadId) => environmentState.sidebarThreadSummaryById[threadId] === undefined,
-        ).length,
         projectCount: environmentState.projectIds.length,
         sidebarThreadCount: Object.keys(environmentState.sidebarThreadSummaryById).length,
         threadCount: environmentState.threadIds.length,
@@ -763,10 +632,7 @@ function summarizeResumeDiagnostics() {
 }
 
 function buildInterpretation(input: {
-  readonly activeThreadExists: boolean;
-  readonly activeThreadHasSidebarSummary: boolean | null;
   readonly pendingRequestCount: number;
-  readonly promotedDraftsMissingSidebarSummaryCount: number;
   readonly slowRequestCount: number;
   readonly status: ReturnType<typeof getWsConnectionStatus>;
   readonly terminalClientDiagnostics: ReturnType<typeof getTerminalDiagnosticsSnapshot>;
@@ -792,14 +658,6 @@ function buildInterpretation(input: {
   }
   if (input.terminalRunningCount > 0) {
     notes.push(`${input.terminalRunningCount.toString()} terminal session(s) are marked running.`);
-  }
-  if (input.activeThreadExists && input.activeThreadHasSidebarSummary === false) {
-    notes.push("Active thread exists but does not have an authoritative sidebar summary yet.");
-  }
-  if (input.promotedDraftsMissingSidebarSummaryCount > 0) {
-    notes.push(
-      `${input.promotedDraftsMissingSidebarSummaryCount.toString()} promoted draft thread(s) are waiting for server sidebar summaries.`,
-    );
   }
   if ((input.terminalClientDiagnostics.countsByKind["write-error"] ?? 0) > 0) {
     notes.push(
@@ -879,8 +737,6 @@ export function buildWebSocketDiagnosticsReport(context: WebSocketDiagnosticsCon
   const uiState = getWsConnectionUiState(status);
   const terminalDiagnostics = summarizeTerminalDiagnostics(context);
   const rpcRequests = summarizeRpcRequests(nowMs);
-  const appStore = summarizeAppStore(context);
-  const activeThreadDiagnostics = appStore.activeThreadDiagnostics;
   const redactedStatus = {
     ...status,
     socketUrl: redactUrl(status.socketUrl),
@@ -892,11 +748,7 @@ export function buildWebSocketDiagnosticsReport(context: WebSocketDiagnosticsCon
       terminalDiagnostics.activeThreadTerminalState.activeTerminalId
     ] ?? null;
   const interpretation = buildInterpretation({
-    activeThreadExists: appStore.activeThread !== null,
-    activeThreadHasSidebarSummary: activeThreadDiagnostics.activeThreadHasSidebarSummary,
     pendingRequestCount: rpcRequests.pending.length,
-    promotedDraftsMissingSidebarSummaryCount:
-      activeThreadDiagnostics.promotedDraftsMissingSidebarSummaryCount,
     slowRequestCount: rpcRequests.slow.length,
     status,
     terminalClientDiagnostics: terminalDiagnostics.clientDiagnostics,
@@ -905,7 +757,7 @@ export function buildWebSocketDiagnosticsReport(context: WebSocketDiagnosticsCon
   });
 
   const report = {
-    appStore,
+    appStore: summarizeAppStore(context),
     browser: readBrowserSnapshot(nowMs),
     environmentConnections: summarizeEnvironmentConnections(context.activeThreadEnvironmentId),
     primaryEnvironment: {

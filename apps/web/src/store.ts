@@ -855,7 +855,7 @@ function mapDispatchedQueuedTurnMessage(queuedTurn: QueuedTurn, dispatchedAt: st
     role: queuedTurn.role,
     text: queuedTurn.text,
     turnId: null,
-    createdAt: queuedTurn.createdAt,
+    createdAt: dispatchedAt,
     completedAt: dispatchedAt,
     streaming: false,
     ...(queuedTurn.attachments.length > 0 ? { attachments: [...queuedTurn.attachments] } : {}),

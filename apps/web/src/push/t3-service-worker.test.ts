@@ -31,7 +31,7 @@ interface ServiceWorkerTestHarness {
     readonly url: string;
     readonly focused?: boolean;
     readonly visibilityState?: "hidden" | "visible";
-    readonly navigate?: ReturnType<typeof vi.fn>;
+    readonly navigateResult?: "self" | "null" | "throw";
   }) => void;
 }
 
@@ -84,16 +84,23 @@ this.__t3ServiceWorkerTestExports = {
       })),
     addClient: (options) => {
       const navigateBody =
-        options.navigate === undefined
+        options.navigateResult === undefined
           ? ""
           : `async navigate(url) {
     this.navigateCalls.push(url);
-    return typeof navigateImpl === "function" ? navigateImpl(url) : undefined;
+    const navigateResult = ${JSON.stringify(options.navigateResult)};
+    if (navigateResult === "throw") {
+      throw new Error("navigate failed");
+    }
+    if (navigateResult === "null") {
+      return null;
+    }
+    this.url = url;
+    return this;
   },`;
       vm.runInContext(
         `
 {
-const navigateImpl = ${options.navigate ? options.navigate.toString() : "undefined"};
 __windowClients.push({
   url: ${JSON.stringify(options.url)},
   focused: ${options.focused === true},
@@ -168,7 +175,7 @@ describe("t3-service-worker notification click navigation", () => {
   });
 
   it("focuses an exact-url client without navigating", async () => {
-    harness.addClient({ url: TARGET_URL, focused: true });
+    harness.addClient({ url: TARGET_URL, focused: true, navigateResult: "self" });
 
     await openNotificationUrl(harness, TARGET_URL);
 
@@ -186,7 +193,7 @@ describe("t3-service-worker notification click navigation", () => {
   });
 
   it("treats trailing-slash variants as an exact-url match", async () => {
-    harness.addClient({ url: `${TARGET_URL}/`, focused: true });
+    harness.addClient({ url: `${TARGET_URL}/`, focused: true, navigateResult: "self" });
 
     await openNotificationUrl(harness, TARGET_URL);
 
@@ -197,17 +204,18 @@ describe("t3-service-worker notification click navigation", () => {
     expect(harness.openWindowCalls).toEqual([]);
   });
 
-  it("focuses and postMessages a different same-origin client without navigating", async () => {
+  it("navigates a focused same-origin client before posting the click message", async () => {
     harness.addClient({
       url: HOME_URL,
       focused: true,
-      navigate: vi.fn(),
+      navigateResult: "self",
     });
 
     await openNotificationUrl(harness, TARGET_URL);
 
-    const client = harness.getClients().find((entry) => entry.url === HOME_URL);
-    expect(client?.navigateCalls).toEqual([]);
+    const [client] = harness.getClients();
+    expect(client?.url).toBe(TARGET_URL);
+    expect(client?.navigateCalls).toEqual([TARGET_URL]);
     expect(client?.focusCalls).toBe(1);
     expect(client?.postMessageCalls).toEqual([
       {
@@ -219,17 +227,64 @@ describe("t3-service-worker notification click navigation", () => {
     expect(harness.openWindowCalls).toEqual([]);
   });
 
-  it("focuses and postMessages a hidden same-origin client without opening a new window", async () => {
+  it("navigates a hidden same-origin client without opening a new window", async () => {
     harness.addClient({
       url: HOME_URL,
       visibilityState: "hidden",
-      navigate: vi.fn(),
+      navigateResult: "self",
     });
 
     await openNotificationUrl(harness, TARGET_URL);
 
     const [client] = harness.getClients();
-    expect(client?.navigateCalls).toEqual([]);
+    expect(client?.url).toBe(TARGET_URL);
+    expect(client?.navigateCalls).toEqual([TARGET_URL]);
+    expect(client?.focusCalls).toBe(1);
+    expect(client?.postMessageCalls).toEqual([
+      {
+        type: "t3.notification-click",
+        url: TARGET_URL,
+        openedAt: expect.any(Number),
+      },
+    ]);
+    expect(harness.openWindowCalls).toEqual([]);
+  });
+
+  it("falls back to focus and postMessage when navigation returns null", async () => {
+    harness.addClient({
+      url: HOME_URL,
+      focused: true,
+      navigateResult: "null",
+    });
+
+    await openNotificationUrl(harness, TARGET_URL);
+
+    const [client] = harness.getClients();
+    expect(client?.url).toBe(HOME_URL);
+    expect(client?.navigateCalls).toEqual([TARGET_URL]);
+    expect(client?.focusCalls).toBe(1);
+    expect(client?.postMessageCalls).toEqual([
+      {
+        type: "t3.notification-click",
+        url: TARGET_URL,
+        openedAt: expect.any(Number),
+      },
+    ]);
+    expect(harness.openWindowCalls).toEqual([]);
+  });
+
+  it("falls back to focus and postMessage when navigation throws", async () => {
+    harness.addClient({
+      url: HOME_URL,
+      focused: true,
+      navigateResult: "throw",
+    });
+
+    await openNotificationUrl(harness, TARGET_URL);
+
+    const [client] = harness.getClients();
+    expect(client?.url).toBe(HOME_URL);
+    expect(client?.navigateCalls).toEqual([TARGET_URL]);
     expect(client?.focusCalls).toBe(1);
     expect(client?.postMessageCalls).toEqual([
       {
@@ -245,12 +300,12 @@ describe("t3-service-worker notification click navigation", () => {
     harness.addClient({
       url: HOME_URL,
       focused: true,
-      navigate: vi.fn(),
+      navigateResult: "self",
     });
     harness.addClient({
       url: TARGET_URL,
       focused: false,
-      navigate: vi.fn(),
+      navigateResult: "self",
     });
 
     await openNotificationUrl(harness, TARGET_URL);

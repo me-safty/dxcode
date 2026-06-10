@@ -14,7 +14,9 @@ const {
   fitAddonFitSpy,
   fitAddonLoadSpy,
   environmentApiById,
+  environmentConnectionById,
   readEnvironmentApiMock,
+  readEnvironmentConnectionMock,
   readLocalApiMock,
 } = vi.hoisted(() => ({
   terminalConstructorSpy: vi.fn(),
@@ -41,7 +43,11 @@ const {
       };
     }
   >(),
+  environmentConnectionById: new Map<string, { client: { reconnect: ReturnType<typeof vi.fn> } }>(),
   readEnvironmentApiMock: vi.fn((environmentId: string) => environmentApiById.get(environmentId)),
+  readEnvironmentConnectionMock: vi.fn((environmentId: string) =>
+    environmentConnectionById.get(environmentId),
+  ),
   readLocalApiMock: vi.fn<
     () =>
       | {
@@ -189,6 +195,10 @@ vi.mock("~/environmentApi", () => ({
     return api;
   }),
   readEnvironmentApi: readEnvironmentApiMock,
+}));
+
+vi.mock("~/environments/runtime", () => ({
+  readEnvironmentConnection: readEnvironmentConnectionMock,
 }));
 
 vi.mock("~/localApi", () => ({
@@ -422,6 +432,7 @@ describe("TerminalViewport", () => {
   afterEach(() => {
     vi.useRealTimers();
     environmentApiById.clear();
+    environmentConnectionById.clear();
     terminalInstances.length = 0;
     terminalLineTextByRow.clear();
     readEnvironmentApiMock.mockClear();
@@ -437,6 +448,7 @@ describe("TerminalViewport", () => {
     terminalWriteSpy.mockClear();
     fitAddonFitSpy.mockClear();
     fitAddonLoadSpy.mockClear();
+    readEnvironmentConnectionMock.mockClear();
   });
 
   it("does not create a terminal when APIs are unavailable", async () => {
@@ -653,7 +665,9 @@ describe("TerminalViewport", () => {
 
   it("manual resync request reopens and rehydrates the terminal", async () => {
     const environment = createEnvironmentApi();
+    const reconnect = vi.fn(async () => undefined);
     environmentApiById.set("environment-a", environment);
+    environmentConnectionById.set("environment-a", { client: { reconnect } });
 
     const mounted = await mountTerminalViewport({
       threadRef: scopeThreadRef("environment-a" as never, THREAD_ID),
@@ -667,8 +681,12 @@ describe("TerminalViewport", () => {
       await mounted.rerender({ resyncRequestId: 1 });
 
       await vi.waitFor(() => {
+        expect(reconnect).toHaveBeenCalledTimes(1);
         expect(environment.terminal.open).toHaveBeenCalledTimes(2);
       });
+      expect(reconnect.mock.invocationCallOrder[0]).toBeLessThan(
+        environment.terminal.open.mock.invocationCallOrder[1] ?? 0,
+      );
       expect(environment.terminal.restart).not.toHaveBeenCalled();
     } finally {
       await mounted.cleanup();
@@ -677,7 +695,9 @@ describe("TerminalViewport", () => {
 
   it("manual restart request restarts without any automatic restart", async () => {
     const environment = createEnvironmentApi();
+    const reconnect = vi.fn(async () => undefined);
     environmentApiById.set("environment-a", environment);
+    environmentConnectionById.set("environment-a", { client: { reconnect } });
 
     const mounted = await mountTerminalViewport({
       threadRef: scopeThreadRef("environment-a" as never, THREAD_ID),
@@ -691,8 +711,12 @@ describe("TerminalViewport", () => {
       expect(environment.terminal.restart).not.toHaveBeenCalled();
       await mounted.rerender({ restartRequestId: 1 });
       await vi.waitFor(() => {
+        expect(reconnect).toHaveBeenCalledTimes(1);
         expect(environment.terminal.restart).toHaveBeenCalledTimes(1);
       });
+      expect(reconnect.mock.invocationCallOrder[0]).toBeLessThan(
+        environment.terminal.restart.mock.invocationCallOrder[0] ?? 0,
+      );
       expect(environment.terminal.open).toHaveBeenCalledTimes(1);
     } finally {
       await mounted.cleanup();

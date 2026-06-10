@@ -9,6 +9,7 @@ import {
   recordTerminalWriteStart,
   recordTerminalWriteSuccess,
   resetTerminalDiagnosticsForTests,
+  selectTerminalOutputStallCandidates,
   summarizeTerminalInput,
 } from "./terminalDiagnosticsState";
 
@@ -89,6 +90,52 @@ describe("terminalDiagnosticsState", () => {
     expect(snapshot.pendingWrites).toEqual([]);
     expect(snapshot.countsByKind["write-error"]).toBe(1);
     expect(JSON.stringify(snapshot)).toContain("write failed");
+  });
+
+  it("selects terminal output stalls after successful writes age past the threshold", () => {
+    const attempt = recordTerminalWriteStart({
+      data: "a",
+      source: "xterm-on-data",
+      terminalId: "default",
+      threadRef,
+    });
+    recordTerminalWriteSuccess({
+      attempt,
+      terminalId: "default",
+      threadRef,
+    });
+
+    expect(
+      selectTerminalOutputStallCandidates({
+        nowMs: Date.now() + 3_999,
+        stallThresholdMs: 4_000,
+      }),
+    ).toEqual([]);
+
+    expect(
+      selectTerminalOutputStallCandidates({
+        nowMs: Date.now() + 4_000,
+        stallThresholdMs: 4_000,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        terminalId: "default",
+        threadRef,
+        writesSinceLastOutput: 1,
+      }),
+    ]);
+
+    recordTerminalDiagnostic(threadRef, "default", "terminal-event-applied", {
+      eventAppliedAt: Date.now() + 4_001,
+      eventType: "output",
+    });
+
+    expect(
+      selectTerminalOutputStallCandidates({
+        nowMs: Date.now() + 8_500,
+        stallThresholdMs: 4_000,
+      }),
+    ).toEqual([]);
   });
 
   it("summarizes terminal recovery state without preserving typed input", () => {

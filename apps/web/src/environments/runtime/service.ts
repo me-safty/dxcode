@@ -30,6 +30,10 @@ import {
 } from "~/composerDraftStore";
 import { ensureLocalApi } from "~/localApi";
 import { collectActiveTerminalThreadIds } from "~/lib/terminalStateCleanup";
+import {
+  selectTerminalOutputStallCandidates,
+  type TerminalOutputStallCandidate,
+} from "~/lib/terminalDiagnosticsState";
 import { deriveOrchestrationBatchEffects } from "~/orchestrationEventEffects";
 import { projectQueryKeys } from "~/lib/projectReactQuery";
 import { providerQueryKeys } from "~/lib/providerReactQuery";
@@ -73,12 +77,12 @@ import {
   selectThreadsAcrossEnvironments,
 } from "~/store";
 import { computeOrchestrationThreadDetailFingerprint } from "@t3tools/shared/orchestrationThreadDetailFingerprint";
-import { isThreadDetailOrchestrationEvent } from "@t3tools/shared/orchestrationThreadDetailEvents";
-import { useTerminalStateStore } from "~/terminalStateStore";
+import { selectThreadTerminalState, useTerminalStateStore } from "~/terminalStateStore";
 import { useUiStateStore } from "~/uiStateStore";
 import type { WsProtocolCloseContext } from "../../rpc/protocol";
 import { getServerConfig } from "../../rpc/serverState";
 import { isTransportConnectionErrorMessage } from "../../rpc/transportError";
+import { getWsConnectionStatus, getWsConnectionUiState } from "../../rpc/wsConnectionState";
 import { WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
 import { appendVersionMismatchHint, resolveServerConfigVersionMismatch } from "../../versionSkew";
@@ -174,6 +178,11 @@ interface ConnectionHealthRecovery {
   promise: Promise<void> | null;
 }
 
+interface TerminalOutputStallRecovery {
+  nextAllowedAt: number;
+  promise: Promise<void> | null;
+}
+
 interface RecentBrowserResumeContext {
   readonly reason: string;
   readonly hiddenDurationMs: number;
@@ -252,6 +261,10 @@ const lastAppliedProjectionVersionByEnvironment = new Map<
 >();
 const projectionRecoveryByEnvironment = new Map<EnvironmentId, ProjectionRecovery>();
 const connectionHealthRecoveryByEnvironment = new Map<EnvironmentId, ConnectionHealthRecovery>();
+const terminalOutputStallRecoveryByEnvironment = new Map<
+  EnvironmentId,
+  TerminalOutputStallRecovery
+>();
 
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
@@ -299,6 +312,10 @@ const CONNECTION_HEALTH_RECOVERY_COOLDOWN_MS = 30_000;
 const CONNECTION_HEALTH_RECOVERY_BACKOFF_BASE_MS = 30_000;
 const CONNECTION_HEALTH_RECOVERY_BACKOFF_MAX_MS = 2 * 60_000;
 const CONNECTION_HEALTH_RECOVERY_RECONNECT_TIMEOUT_MS = 15_000;
+const TERMINAL_OUTPUT_STALL_CHECK_INTERVAL_MS = 2_000;
+const TERMINAL_OUTPUT_STALL_THRESHOLD_MS = 4_000;
+const TERMINAL_OUTPUT_STALL_RECOVERY_COOLDOWN_MS = 30_000;
+const TERMINAL_OUTPUT_STALL_RECONNECT_TIMEOUT_MS = 8_000;
 const BROWSER_RESUME_RECONCILE_COOLDOWN_MS = 2_000;
 const BROWSER_RESUME_RECONCILE_TIMEOUT_MS = 1_500;
 const BROWSER_RESUME_HEARTBEAT_TICK_MS = 15_000;
@@ -934,6 +951,17 @@ function getOrchestrationEventThreadId(event: OrchestrationEvent): ThreadId | nu
   return "threadId" in event.payload ? event.payload.threadId : null;
 }
 
+function isThreadDetailReplayEvent(event: OrchestrationEvent): boolean {
+  return (
+    event.type === "thread.message-sent" ||
+    event.type === "thread.proposed-plan-upserted" ||
+    event.type === "thread.activity-appended" ||
+    event.type === "thread.turn-diff-completed" ||
+    event.type === "thread.reverted" ||
+    event.type === "thread.session-set"
+  );
+}
+
 function reconcileThreadDetailSubscriptionsAfterRecoveredEvents(
   events: ReadonlyArray<OrchestrationEvent>,
   environmentId: EnvironmentId,
@@ -951,7 +979,7 @@ function reconcileThreadDetailSubscriptionsAfterRecoveredEvents(
       continue;
     }
 
-    if (isThreadDetailOrchestrationEvent(event)) {
+    if (isThreadDetailReplayEvent(event)) {
       markThreadDetailSequence(entry, event.sequence);
     }
     scheduleThreadDetailReconcileIfBehind(environmentId, threadId, event.sequence);
@@ -1132,6 +1160,133 @@ function queueEnvironmentConnectionHealthRecovery(
       }
     }
   })();
+}
+
+function canRecoverTerminalOutputStalls(): boolean {
+  if (getWsConnectionUiState(getWsConnectionStatus()) !== "connected") {
+    return false;
+  }
+  if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+    return false;
+  }
+  return true;
+}
+
+function queueTerminalOutputStallRecovery(
+  connection: EnvironmentConnection,
+  candidate: TerminalOutputStallCandidate,
+): void {
+  const environmentId = connection.environmentId;
+  const now = Date.now();
+  const existing = terminalOutputStallRecoveryByEnvironment.get(environmentId);
+  if (existing?.promise) {
+    return;
+  }
+  if (existing && now < existing.nextAllowedAt) {
+    recordResumeDiagnostic("terminal-output-stall-recovery", {
+      reason: "cooldown-suppressed",
+      env: environmentId,
+      data: {
+        cooldownRemainingMs: existing.nextAllowedAt - now,
+        lastOutputAt: candidate.lastOutputAt,
+        lastWriteSuccessAt: candidate.lastWriteSuccessAt,
+        msSinceLastOutput: candidate.msSinceLastOutput,
+        msSinceLastWriteSuccess: candidate.msSinceLastWriteSuccess,
+        terminalId: candidate.terminalId,
+        threadId: candidate.threadRef.threadId,
+        writesSinceLastOutput: candidate.writesSinceLastOutput,
+      },
+    });
+    return;
+  }
+
+  const recovery: TerminalOutputStallRecovery = existing ?? {
+    nextAllowedAt: 0,
+    promise: null,
+  };
+  terminalOutputStallRecoveryByEnvironment.set(environmentId, recovery);
+  recordResumeDiagnostic("terminal-output-stall-recovery", {
+    reason: "forced-transport-reconnect",
+    env: environmentId,
+    data: {
+      lastOutputAt: candidate.lastOutputAt,
+      lastWriteSuccessAt: candidate.lastWriteSuccessAt,
+      msSinceLastOutput: candidate.msSinceLastOutput,
+      msSinceLastWriteSuccess: candidate.msSinceLastWriteSuccess,
+      terminalId: candidate.terminalId,
+      threadId: candidate.threadRef.threadId,
+      writesSinceLastOutput: candidate.writesSinceLastOutput,
+    },
+  });
+
+  recovery.promise = (async () => {
+    try {
+      await withTimeout(
+        connection.client.reconnect(),
+        TERMINAL_OUTPUT_STALL_RECONNECT_TIMEOUT_MS,
+        () => new Error("Terminal output stall transport reconnect timed out."),
+      );
+      if (readEnvironmentConnection(environmentId) !== connection) {
+        return;
+      }
+      recovery.nextAllowedAt = Date.now() + TERMINAL_OUTPUT_STALL_RECOVERY_COOLDOWN_MS;
+      recordResumeDiagnostic("terminal-output-stall-recovery", {
+        reason: "forced-transport-reconnect-success",
+        env: environmentId,
+        data: {
+          terminalId: candidate.terminalId,
+          threadId: candidate.threadRef.threadId,
+        },
+      });
+    } catch (error) {
+      if (readEnvironmentConnection(environmentId) !== connection) {
+        return;
+      }
+      recovery.nextAllowedAt = Date.now() + TERMINAL_OUTPUT_STALL_RECOVERY_COOLDOWN_MS;
+      recordResumeDiagnostic("terminal-output-stall-recovery", {
+        reason: "forced-transport-reconnect-failed",
+        env: environmentId,
+        data: {
+          error: formatUnknownError(error),
+          terminalId: candidate.terminalId,
+          threadId: candidate.threadRef.threadId,
+        },
+      });
+    } finally {
+      if (terminalOutputStallRecoveryByEnvironment.get(environmentId) === recovery) {
+        recovery.promise = null;
+      }
+    }
+  })();
+}
+
+function recoverTerminalOutputStalls(): void {
+  if (!canRecoverTerminalOutputStalls()) {
+    return;
+  }
+
+  const terminalStateByThreadKey = useTerminalStateStore.getState().terminalStateByThreadKey;
+  const candidates = selectTerminalOutputStallCandidates({
+    stallThresholdMs: TERMINAL_OUTPUT_STALL_THRESHOLD_MS,
+  });
+  const recoveredEnvironmentIds = new Set<EnvironmentId>();
+  for (const candidate of candidates) {
+    const terminalState = selectThreadTerminalState(terminalStateByThreadKey, candidate.threadRef);
+    if (!terminalState.terminalOpen || !terminalState.terminalIds.includes(candidate.terminalId)) {
+      continue;
+    }
+
+    const environmentId = candidate.threadRef.environmentId;
+    if (recoveredEnvironmentIds.has(environmentId)) {
+      continue;
+    }
+    const connection = readEnvironmentConnection(environmentId);
+    if (!connection) {
+      continue;
+    }
+    recoveredEnvironmentIds.add(environmentId);
+    queueTerminalOutputStallRecovery(connection, candidate);
+  }
 }
 
 function queueEnvironmentConnectionHealthRecoveryIfIdle(
@@ -2795,6 +2950,7 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
   lastAppliedProjectionVersionByEnvironment.delete(environmentId);
   projectionRecoveryByEnvironment.delete(environmentId);
   connectionHealthRecoveryByEnvironment.delete(environmentId);
+  terminalOutputStallRecoveryByEnvironment.delete(environmentId);
   browserResumeReconnectRetryByEnvironment.delete(environmentId);
   browserResumeShellBootstrapTimeoutByEnvironment.delete(environmentId);
   environmentConnections.delete(environmentId);
@@ -3952,6 +4108,20 @@ function subscribeBrowserResumeReconnects(): () => void {
   };
 }
 
+function subscribeTerminalOutputStallRecovery(): () => void {
+  if (typeof window === "undefined") {
+    return NOOP;
+  }
+
+  const intervalId = setInterval(
+    recoverTerminalOutputStalls,
+    TERMINAL_OUTPUT_STALL_CHECK_INTERVAL_MS,
+  );
+  return () => {
+    clearInterval(intervalId);
+  };
+}
+
 export function subscribeEnvironmentConnections(listener: () => void): () => void {
   environmentConnectionListeners.add(listener);
   return () => {
@@ -4211,6 +4381,7 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
     .catch(() => undefined);
 
   const unsubscribeBrowserResumeReconnects = subscribeBrowserResumeReconnects();
+  const unsubscribeTerminalOutputStallRecovery = subscribeTerminalOutputStallRecovery();
 
   activeService = {
     queryClient,
@@ -4219,6 +4390,7 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
     stop: () => {
       unsubscribeSavedEnvironments();
       unsubscribeBrowserResumeReconnects();
+      unsubscribeTerminalOutputStallRecovery();
       queryInvalidationThrottler.cancel();
     },
   };
@@ -4253,6 +4425,7 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   lastAppliedProjectionVersionByEnvironment.clear();
   projectionRecoveryByEnvironment.clear();
   connectionHealthRecoveryByEnvironment.clear();
+  terminalOutputStallRecoveryByEnvironment.clear();
   pendingSavedEnvironmentConnections.clear();
   for (const key of Array.from(threadDetailSubscriptions.keys())) {
     disposeThreadDetailSubscriptionByKey(key);

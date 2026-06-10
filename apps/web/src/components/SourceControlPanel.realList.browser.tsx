@@ -24,7 +24,6 @@ function createDeferredPromise<T>() {
 
 const {
   currentGitStatusRef,
-  exportSourceControlDiagnosticsSpy,
   generateCommitMessageMutateAsyncSpy,
   refreshGitStatusSpy,
   recordSourceControlDiagnosticEventSpy,
@@ -42,7 +41,6 @@ const {
   currentGitStatusRef: {
     current: null as VcsStatusResult | null,
   },
-  exportSourceControlDiagnosticsSpy: vi.fn(() => Promise.resolve("downloaded")),
   generateCommitMessageMutateAsyncSpy: vi.fn(() =>
     Promise.resolve({ commitMessage: "Update changed files" }),
   ),
@@ -170,7 +168,6 @@ vi.mock("~/lib/gitStatusState", () => ({
 }));
 
 vi.mock("~/lib/sourceControlDiagnostics", () => ({
-  exportSourceControlDiagnostics: exportSourceControlDiagnosticsSpy,
   recordSourceControlDiagnosticEvent: recordSourceControlDiagnosticEventSpy,
   recordSourceControlDisabledSnapshot: recordSourceControlDisabledSnapshotSpy,
   sourceControlActionDisabledReasons: vi.fn(

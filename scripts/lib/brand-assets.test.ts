@@ -13,54 +13,42 @@ describe("brand-assets", () => {
   it("maps server publish web assets to production icons", () => {
     expect(PUBLISH_ICON_OVERRIDES).toEqual([
       {
-        sourceRelativePath: BRAND_ASSET_PATHS.salchiWebFaviconIco,
-        targetRelativePath: "dist/client/favicon.ico",
+        sourceRelativePath: BRAND_ASSET_PATHS.salchiWebLogoPng,
+        targetRelativePath: "dist/client/salchi-logo.png",
       },
       {
-        sourceRelativePath: BRAND_ASSET_PATHS.salchiWebFavicon16Png,
-        targetRelativePath: "dist/client/favicon-16x16.png",
+        sourceRelativePath: BRAND_ASSET_PATHS.salchiIconPng,
+        targetRelativePath: "dist/client/salchi-pwa-192.png",
       },
       {
-        sourceRelativePath: BRAND_ASSET_PATHS.salchiWebFavicon32Png,
-        targetRelativePath: "dist/client/favicon-32x32.png",
-      },
-      {
-        sourceRelativePath: BRAND_ASSET_PATHS.salchiWebAppleTouchIconPng,
-        targetRelativePath: "dist/client/apple-touch-icon.png",
-      },
-      {
-        sourceRelativePath: BRAND_ASSET_PATHS.salchiWebPwa192Png,
-        targetRelativePath: "dist/client/pwa-192.png",
-      },
-      {
-        sourceRelativePath: BRAND_ASSET_PATHS.salchiWebPwa512Png,
-        targetRelativePath: "dist/client/pwa-512.png",
+        sourceRelativePath: BRAND_ASSET_PATHS.salchiIconPng,
+        targetRelativePath: "dist/client/salchi-pwa-512.png",
       },
     ]);
   });
 
   it("maps server build web assets to development icons", () => {
     expect(DEVELOPMENT_ICON_OVERRIDES[0]).toEqual({
-      sourceRelativePath: BRAND_ASSET_PATHS.salchiWebFaviconIco,
-      targetRelativePath: "dist/client/favicon.ico",
+      sourceRelativePath: BRAND_ASSET_PATHS.salchiWebLogoPng,
+      targetRelativePath: "dist/client/salchi-logo.png",
     });
   });
 
   it("can target hosted web dist directly", () => {
     expect(resolveWebIconOverrides("production", "apps/web/dist")).toContainEqual({
-      sourceRelativePath: BRAND_ASSET_PATHS.salchiWebAppleTouchIconPng,
-      targetRelativePath: "apps/web/dist/apple-touch-icon.png",
+      sourceRelativePath: BRAND_ASSET_PATHS.salchiWebLogoPng,
+      targetRelativePath: "apps/web/dist/salchi-logo.png",
     });
     expect(resolveWebIconOverrides("production", "apps/web/dist")).toContainEqual({
-      sourceRelativePath: BRAND_ASSET_PATHS.salchiWebPwa512Png,
-      targetRelativePath: "apps/web/dist/pwa-512.png",
+      sourceRelativePath: BRAND_ASSET_PATHS.salchiIconPng,
+      targetRelativePath: "apps/web/dist/salchi-pwa-512.png",
     });
   });
 
   it("maps hosted nightly web assets to nightly icons", () => {
     expect(resolveWebIconOverrides("nightly", "apps/web/dist")).toContainEqual({
-      sourceRelativePath: BRAND_ASSET_PATHS.salchiWebFaviconIco,
-      targetRelativePath: "apps/web/dist/favicon.ico",
+      sourceRelativePath: BRAND_ASSET_PATHS.salchiIconPng,
+      targetRelativePath: "apps/web/dist/salchi-pwa-192.png",
     });
   });
 

@@ -46,6 +46,7 @@ import {
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { useSettings } from "../hooks/useSettings";
 import { readLocalApi } from "../localApi";
 import {
@@ -391,6 +392,7 @@ function CommandPaletteDialog() {
 }
 
 function OpenCommandPaletteDialog() {
+  const isMobile = useIsMobile();
   const navigate = useNavigate();
   const setOpen = useCommandPaletteStore((store) => store.setOpen);
   const openIntent = useCommandPaletteStore((store) => store.openIntent);
@@ -1529,6 +1531,7 @@ function OpenCommandPaletteDialog() {
       aria-label="Command palette"
       className="overflow-hidden p-0"
       data-testid="command-palette"
+      initialFocus={isMobile ? false : undefined}
       finalFocus={() => {
         composerHandleRef?.current?.focusAtEnd();
         return false;
@@ -1550,6 +1553,7 @@ function OpenCommandPaletteDialog() {
       >
         <div className="relative">
           <CommandInput
+            autoFocus={!isMobile}
             className={
               addProjectCloneFlow?.step === "repository"
                 ? "pe-32"

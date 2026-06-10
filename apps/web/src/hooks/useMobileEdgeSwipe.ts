@@ -14,6 +14,7 @@ export const MOBILE_EDGE_SWIPE_PANEL_ATTRIBUTE = "data-mobile-edge-swipe-panel";
 // Mark a subtree where a horizontal drag should scroll/select content (e.g.
 // markdown code blocks and inline code) instead of opening or dismissing a panel.
 export const MOBILE_EDGE_SWIPE_BLOCK_ATTRIBUTE = "data-mobile-edge-swipe-block";
+export const MOBILE_EDGE_SWIPE_SCROLL_START_TOLERANCE_PX = 1;
 
 // A quick horizontal flick can trigger the action well before the sustained
 // drag distance is reached. This lets the gesture win over a scrollable body,
@@ -77,13 +78,12 @@ export function resolveMobileEdgeSwipeDecision({
     horizontalDistance >= verticalDistance * MOBILE_EDGE_SWIPE_HORIZONTAL_DOMINANCE_RATIO;
 
   // Quick flick in the action direction: trigger before the sustained drag
-  // distance, so the gesture beats a scrollable body that would otherwise
-  // cancel the swipe. Vertical motion is intentionally ignored here — only
-  // horizontal intent matters, so flicking while the body scrolls up/down still
-  // works. A slow horizontal scroll never reaches the velocity threshold.
+  // distance, while still requiring horizontal dominance so fast vertical
+  // scrolling with incidental sideways motion does not open or close a panel.
   if (
     actionDistance >= MOBILE_EDGE_SWIPE_FLICK_DISTANCE_PX &&
-    actionVelocity >= MOBILE_EDGE_SWIPE_FLICK_VELOCITY_PX_PER_MS
+    actionVelocity >= MOBILE_EDGE_SWIPE_FLICK_VELOCITY_PX_PER_MS &&
+    isHorizontallyDominant
   ) {
     return action;
   }
@@ -100,6 +100,15 @@ export function resolveMobileEdgeSwipeDecision({
     return action;
   }
 
+  if (
+    verticalDistance >= MOBILE_EDGE_SWIPE_VERTICAL_CANCEL_DISTANCE_PX &&
+    !isHorizontallyDominant
+  ) {
+    return "cancel";
+  }
+
+  // Reuse the cancel threshold as an opposite-direction dead zone once the drag
+  // has moved meaningfully away from the requested panel action.
   if (actionDistance <= -MOBILE_EDGE_SWIPE_VERTICAL_CANCEL_DISTANCE_PX) {
     return "cancel";
   }
@@ -113,8 +122,15 @@ export function hasActiveTextSelection(
   return Boolean(selection && selection.rangeCount > 0 && !selection.isCollapsed);
 }
 
+export function isScrollPositionAtStart(
+  scrollPosition: number,
+  tolerance = MOBILE_EDGE_SWIPE_SCROLL_START_TOLERANCE_PX,
+): boolean {
+  return scrollPosition <= tolerance;
+}
+
 function isBlockedTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) {
+  if (typeof Element === "undefined" || !(target instanceof Element)) {
     return false;
   }
 
@@ -130,6 +146,40 @@ function isBlockedTarget(target: EventTarget | null): boolean {
       ].join(","),
     ),
   );
+}
+
+function isVerticallyScrollable(element: HTMLElement): boolean {
+  return element.scrollHeight > element.clientHeight + MOBILE_EDGE_SWIPE_SCROLL_START_TOLERANCE_PX;
+}
+
+function findNearestVerticalScrollableElement(target: EventTarget | null): HTMLElement | null {
+  if (typeof Element === "undefined" || !(target instanceof Element)) {
+    return null;
+  }
+
+  for (let element: Element | null = target; element; element = element.parentElement) {
+    if (
+      typeof HTMLElement !== "undefined" &&
+      element instanceof HTMLElement &&
+      isVerticallyScrollable(element)
+    ) {
+      return element;
+    }
+
+    if (element.hasAttribute(MOBILE_EDGE_SWIPE_PANEL_ATTRIBUTE)) {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+export function isNearestVerticalScrollableAtStart(
+  target: EventTarget | null,
+  tolerance = MOBILE_EDGE_SWIPE_SCROLL_START_TOLERANCE_PX,
+): boolean {
+  const scrollable = findNearestVerticalScrollableElement(target);
+  return scrollable === null || isScrollPositionAtStart(scrollable.scrollTop, tolerance);
 }
 
 function isAcceptedStartSurface({
@@ -169,6 +219,7 @@ export function useMobileEdgeSwipe({
   edgeWidth = MOBILE_EDGE_SWIPE_EDGE_WIDTH_PX,
   enabled,
   onSwipe,
+  requireScrollableStartPosition = false,
   side,
   startArea = "edge",
   startSurface = "any",
@@ -178,6 +229,7 @@ export function useMobileEdgeSwipe({
   readonly edgeWidth?: number;
   readonly enabled: boolean;
   readonly onSwipe: () => void;
+  readonly requireScrollableStartPosition?: boolean;
   readonly side: MobileEdgeSwipeSide;
   readonly startArea?: MobileEdgeSwipeStartArea;
   readonly startSurface?: MobileEdgeSwipeStartSurface;
@@ -218,6 +270,7 @@ export function useMobileEdgeSwipe({
         hasActiveTextSelection(window.getSelection()) ||
         (blockedByOpenPanelSide !== undefined && hasOpenSwipePanel(blockedByOpenPanelSide)) ||
         !isAcceptedStartSurface({ side, startSurface, target }) ||
+        (requireScrollableStartPosition && !isNearestVerticalScrollableAtStart(target)) ||
         !isMobileEdgeSwipeStart({
           edgeWidth,
           side,
