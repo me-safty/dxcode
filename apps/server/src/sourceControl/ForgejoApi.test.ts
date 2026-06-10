@@ -149,7 +149,7 @@ function makeLayer(input: {
 }
 
 it("parseForgejoRepositorySpec handles clone URLs and bare specs", () => {
-  const expected = { host: "git.example.org", owner: "owner", repo: "repo" };
+  const expected = { host: "git.example.org", owner: "owner", repo: "repo", scheme: "https" };
   assert.deepStrictEqual(
     ForgejoApi.parseForgejoRepositorySpec("https://git.example.org/owner/repo", null),
     expected,
@@ -170,7 +170,12 @@ it("parseForgejoRepositorySpec handles clone URLs and bare specs", () => {
     host: "git.example.org",
     owner: "owner",
     repo: "repo",
+    scheme: "https",
   });
+  assert.deepStrictEqual(
+    ForgejoApi.parseForgejoRepositorySpec("http://git.example.org/owner/repo", null),
+    { host: "git.example.org", owner: "owner", repo: "repo", scheme: "http" },
+  );
   assert.strictEqual(ForgejoApi.parseForgejoRepositorySpec("owner/repo", null), null);
 });
 
@@ -200,6 +205,25 @@ it.effect("parses pull request responses from the Forgejo REST API", () =>
       assert.strictEqual(
         execute.mock.calls[0]?.[0].url,
         "https://git.example.org/api/v1/repos/owner/repo/pulls/42",
+      );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("uses the http scheme for plain-http Forgejo remotes", () =>
+  Effect.gen(function* () {
+    const { execute, layerEffect } = makeLayer({
+      response: () => Response.json(forgejoPullRequest),
+      remotes: [{ name: "origin", url: "http://git.example.org/owner/repo.git" }],
+    });
+
+    const layer = yield* layerEffect;
+    yield* Effect.gen(function* () {
+      const forgejo = yield* ForgejoApi.ForgejoApi;
+      yield* forgejo.getPullRequest({ cwd: "/repo", reference: "#42" });
+      assert.strictEqual(
+        execute.mock.calls[0]?.[0].url,
+        "http://git.example.org/api/v1/repos/owner/repo/pulls/42",
       );
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),

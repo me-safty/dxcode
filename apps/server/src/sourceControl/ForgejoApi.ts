@@ -47,6 +47,7 @@ export interface ForgejoRepositoryLocator {
   readonly host: string;
   readonly owner: string;
   readonly repo: string;
+  readonly scheme: "http" | "https";
 }
 
 export interface ForgejoApiShape {
@@ -138,12 +139,14 @@ export function parseForgejoRemoteUrl(remoteUrl: string): ForgejoRepositoryLocat
     if (colon < 0) return null;
     const host = trimmed.slice(hostStart, colon).toLowerCase();
     const parsed = parseRepoPath(trimmed.slice(colon + 1));
-    return parsed ? { host, ...parsed } : null;
+    // SSH remotes don't imply an API scheme; default to https.
+    return parsed ? { host, scheme: "https", ...parsed } : null;
   }
   try {
     const url = new URL(trimmed);
     const parsed = parseRepoPath(url.pathname);
-    return parsed ? { host: url.host.toLowerCase(), ...parsed } : null;
+    const scheme = url.protocol === "http:" ? "http" : "https";
+    return parsed ? { host: url.host.toLowerCase(), scheme, ...parsed } : null;
   } catch {
     return null;
   }
@@ -165,10 +168,10 @@ export function parseForgejoRepositorySpec(
     const repo = parts.at(-1);
     const owner = parts.at(-2);
     const host = parts.slice(0, -2).join("/").toLowerCase();
-    return owner && repo && host ? { host, owner, repo } : null;
+    return owner && repo && host ? { host, owner, repo, scheme: "https" } : null;
   }
   if (parts.length === 2 && fallbackHost) {
-    return { host: fallbackHost.toLowerCase(), owner: parts[0]!, repo: parts[1]! };
+    return { host: fallbackHost.toLowerCase(), owner: parts[0]!, repo: parts[1]!, scheme: "https" };
   }
   return null;
 }
@@ -237,7 +240,8 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
 
-  const apiUrl = (host: string, path: string) => `https://${host}/api/v1${path}`;
+  const apiUrl = (locator: Pick<ForgejoRepositoryLocator, "host" | "scheme">, path: string) =>
+    `${locator.scheme}://${locator.host}/api/v1${path}`;
 
   const withAuth = (host: string, request: HttpClientRequest.HttpClientRequest) =>
     keyStore.getCredential(host).pipe(
@@ -346,7 +350,7 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
       locator.host,
       HttpClientRequest.get(
         apiUrl(
-          locator.host,
+          locator,
           `/repos/${encodeURIComponent(locator.owner)}/${encodeURIComponent(locator.repo)}`,
         ),
       ),
@@ -359,7 +363,7 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
       locator.host,
       HttpClientRequest.get(
         apiUrl(
-          locator.host,
+          locator,
           `/repos/${encodeURIComponent(locator.owner)}/${encodeURIComponent(locator.repo)}/pulls/${encodeURIComponent(normalizeChangeRequestId(reference))}`,
         ),
       ),
@@ -382,7 +386,7 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
             locator.host,
             HttpClientRequest.get(
               apiUrl(
-                locator.host,
+                locator,
                 `/repos/${encodeURIComponent(locator.owner)}/${encodeURIComponent(locator.repo)}/pulls`,
               ),
               {
@@ -459,7 +463,7 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
         const raw = yield* executeJson(
           "createRepository",
           locator.host,
-          HttpClientRequest.post(apiUrl(locator.host, endpoint)).pipe(
+          HttpClientRequest.post(apiUrl(locator, endpoint)).pipe(
             HttpClientRequest.bodyJsonUnsafe({
               name: locator.repo,
               private: input.visibility === "private",
@@ -492,7 +496,7 @@ export const make = Effect.fn("makeForgejoApi")(function* () {
           locator.host,
           HttpClientRequest.post(
             apiUrl(
-              locator.host,
+              locator,
               `/repos/${encodeURIComponent(locator.owner)}/${encodeURIComponent(locator.repo)}/pulls`,
             ),
           ).pipe(
