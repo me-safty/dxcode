@@ -168,6 +168,16 @@ describe("expandCollapsedComposerCursor", () => {
     );
   });
 
+  it("maps collapsed markdown file links to their expanded source offsets", () => {
+    const text = "what's in [AGENTS.md](AGENTS.md) please";
+    const collapsedCursorAfterMention = "what's in ".length + 2;
+    const expandedCursorAfterMention = "what's in [AGENTS.md](AGENTS.md) ".length;
+
+    expect(expandCollapsedComposerCursor(text, collapsedCursorAfterMention)).toBe(
+      expandedCursorAfterMention,
+    );
+  });
+
   it("allows path trigger detection to close after selecting a mention", () => {
     const text = "what's in my @AGENTS.md ";
     const collapsedCursorAfterMention = "what's in my ".length + 2;
@@ -206,6 +216,16 @@ describe("collapseExpandedComposerCursor", () => {
     const text = 'what is in @"My File.md" please';
     const collapsedCursorAfterMention = "what is in ".length + 2;
     const expandedCursorAfterMention = 'what is in @"My File.md" '.length;
+
+    expect(collapseExpandedComposerCursor(text, expandedCursorAfterMention)).toBe(
+      collapsedCursorAfterMention,
+    );
+  });
+
+  it("maps expanded markdown file link cursors back to collapsed offsets", () => {
+    const text = "what's in [AGENTS.md](AGENTS.md) please";
+    const collapsedCursorAfterMention = "what's in ".length + 2;
+    const expandedCursorAfterMention = "what's in [AGENTS.md](AGENTS.md) ".length;
 
     expect(collapseExpandedComposerCursor(text, expandedCursorAfterMention)).toBe(
       collapsedCursorAfterMention,
@@ -280,10 +300,10 @@ describe("insertPathMention", () => {
     });
   });
 
-  it("quotes inserted path mentions containing whitespace", () => {
+  it("inserts whitespace path mentions as plain path text", () => {
     expect(insertPathMention("Inspect", "Inspect".length, "docs/My File.md")).toEqual({
-      text: 'Inspect @"docs/My File.md" ',
-      cursor: 'Inspect @"docs/My File.md" '.length,
+      text: "Inspect @docs/My File.md ",
+      cursor: "Inspect @docs/My File.md ".length,
     });
   });
 

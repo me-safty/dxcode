@@ -20,6 +20,7 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
+import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import {
   createModelSelection,
   getProviderOptionBooleanSelectionValue,
@@ -47,7 +48,6 @@ import {
   resolvePathMentionInsertion,
   replaceTextRange,
 } from "../../composer-logic";
-import { serializeComposerMentionPath } from "../../composer-editor-mentions";
 import {
   COMPOSER_NATIVE_INPUT_SETTLE_MS,
   type ComposerNativeInputChangeMetadata,
@@ -223,6 +223,13 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
       ? autoReviewAccessConfig
       : runtimeModeConfig[props.runtimeMode];
   const RuntimeModeIcon = accessOption.icon;
+  const interactionModeTooltip =
+    props.interactionMode === "plan"
+      ? "Plan mode — click to return to normal build mode"
+      : "Default mode — click to enter plan mode";
+  const planSidebarTooltip = props.planSidebarOpen
+    ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
+    : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`;
 
   return (
     <>
@@ -230,23 +237,26 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 
       {props.showInteractionModeToggle ? (
         <>
-          <Button
-            variant="ghost"
-            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-            size="sm"
-            type="button"
-            onClick={props.onToggleInteractionMode}
-            title={
-              props.interactionMode === "plan"
-                ? "Plan mode — click to return to normal build mode"
-                : "Default mode — click to enter plan mode"
-            }
-          >
-            <BotIcon />
-            <span className="sr-only sm:not-sr-only">
-              {props.interactionMode === "plan" ? "Plan" : "Build"}
-            </span>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                  size="sm"
+                  type="button"
+                  onClick={props.onToggleInteractionMode}
+                  aria-label={interactionModeTooltip}
+                />
+              }
+            >
+              <BotIcon />
+              <span className="sr-only sm:not-sr-only">
+                {props.interactionMode === "plan" ? "Plan" : "Build"}
+              </span>
+            </TooltipTrigger>
+            <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
+          </Tooltip>
 
           <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
         </>
@@ -284,26 +294,29 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
       {props.showPlanToggle ? (
         <>
           <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-          <Button
-            variant="ghost"
-            className={cn(
-              "shrink-0 whitespace-nowrap px-2 sm:px-3",
-              props.planSidebarOpen
-                ? "text-blue-400 hover:text-blue-300"
-                : "text-muted-foreground/70 hover:text-foreground/80",
-            )}
-            size="sm"
-            type="button"
-            onClick={props.onTogglePlanSidebar}
-            title={
-              props.planSidebarOpen
-                ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
-                : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`
-            }
-          >
-            <ListTodoIcon />
-            <span className="sr-only sm:not-sr-only">{props.planSidebarLabel}</span>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  className={cn(
+                    "shrink-0 whitespace-nowrap px-2 sm:px-3",
+                    props.planSidebarOpen
+                      ? "text-blue-400 hover:text-blue-300"
+                      : "text-muted-foreground/70 hover:text-foreground/80",
+                  )}
+                  size="sm"
+                  type="button"
+                  onClick={props.onTogglePlanSidebar}
+                  aria-label={planSidebarTooltip}
+                />
+              }
+            >
+              <ListTodoIcon />
+              <span className="sr-only sm:not-sr-only">{props.planSidebarLabel}</span>
+            </TooltipTrigger>
+            <TooltipPopup side="top">{planSidebarTooltip}</TooltipPopup>
+          </Tooltip>
         </>
       ) : null}
     </>
@@ -1634,7 +1647,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
       if (item.type === "path") {
-        const replacement = `@${serializeComposerMentionPath(item.path)} `;
+        const replacement = `${serializeComposerFileLink(item.path)} `;
         const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
           snapshot.value,
           trigger.rangeEnd,
