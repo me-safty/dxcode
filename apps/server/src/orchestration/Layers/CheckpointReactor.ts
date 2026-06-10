@@ -2,6 +2,7 @@ import {
   CommandId,
   EventId,
   MessageId,
+  type OrchestrationCheckpointAttribution,
   type ProjectId,
   ThreadId,
   TurnId,
@@ -21,10 +22,18 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { parseTurnDiffFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
 import {
   checkpointRefForThreadTurn,
+  checkpointAttributedRefForThreadTurn,
+  checkpointStartRefForThreadTurn,
   resolveThreadWorkspaceCwd,
 } from "../../checkpointing/Utils.ts";
-import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts";
+import { normalizeTouchedPath } from "../../checkpointing/TouchedPaths.ts";
+import {
+  CHECKPOINT_DIFF_PATHSPEC_LIMIT,
+  CheckpointStore,
+} from "../../checkpointing/Services/CheckpointStore.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { TurnFileSnapshots } from "../../persistence/Services/TurnFileSnapshots.ts";
+import { TurnFileSnapshotsLive } from "../../persistence/Layers/TurnFileSnapshots.ts";
 import { CheckpointReactor, type CheckpointReactorShape } from "../Services/CheckpointReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -81,6 +90,7 @@ const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
   const checkpointStore = yield* CheckpointStore;
+  const turnFileSnapshots = yield* TurnFileSnapshots;
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
@@ -211,6 +221,205 @@ const make = Effect.gen(function* () {
     return cwd;
   });
 
+  const checkpointFilesFromDiff = (diff: string) =>
+    parseTurnDiffFilesFromUnifiedDiff(diff).map((file) => ({
+      path: file.path,
+      kind: "modified" as const,
+      additions: file.additions,
+      deletions: file.deletions,
+    }));
+
+  const normalizeSnapshotRows = (
+    rows: ReadonlyArray<{
+      readonly path: string;
+      readonly blobSha: string | null;
+      readonly deleted: boolean;
+    }>,
+    cwd: string,
+  ) => {
+    const rowsByPath = new Map<
+      string,
+      {
+        readonly path: string;
+        readonly blobSha: string | null;
+        readonly deleted: boolean;
+      }
+    >();
+    for (const row of rows) {
+      const normalizedPath = normalizeTouchedPath(row.path, cwd);
+      if (!normalizedPath) {
+        continue;
+      }
+      rowsByPath.set(normalizedPath, {
+        path: normalizedPath,
+        blobSha: row.blobSha,
+        deleted: row.deleted,
+      });
+    }
+    return [...rowsByPath.values()].toSorted((left, right) => left.path.localeCompare(right.path));
+  };
+
+  const resolveOverlayEntries = Effect.fn("resolveOverlayEntries")(function* (input: {
+    readonly cwd: string;
+    readonly endCheckpointRef: ReturnType<typeof checkpointRefForThreadTurn>;
+    readonly rows: ReturnType<typeof normalizeSnapshotRows>;
+    readonly threadId: ThreadId;
+    readonly turnId: TurnId;
+  }) {
+    const entries: Array<{ readonly path: string; readonly blobSha: string | null }> = [];
+    for (const row of input.rows) {
+      if (row.deleted || row.blobSha !== null) {
+        entries.push({
+          path: row.path,
+          blobSha: row.deleted ? null : row.blobSha,
+        });
+        continue;
+      }
+
+      const blobShaResult = yield* checkpointStore
+        .readCheckpointFileBlob({
+          cwd: input.cwd,
+          checkpointRef: input.endCheckpointRef,
+          path: row.path,
+        })
+        .pipe(Effect.result);
+      if (blobShaResult._tag === "Failure") {
+        yield* Effect.logWarning("checkpoint attribution path-only overlay lookup failed", {
+          threadId: input.threadId,
+          turnId: input.turnId,
+          path: row.path,
+          detail: blobShaResult.failure.message,
+        });
+        return null;
+      }
+
+      entries.push({
+        path: row.path,
+        blobSha: blobShaResult.success,
+      });
+    }
+    return entries;
+  });
+
+  const buildAttributedTurnDiff = Effect.fn("buildAttributedTurnDiff")(function* (input: {
+    readonly cwd: string;
+    readonly threadId: ThreadId;
+    readonly turnId: TurnId;
+    readonly turnCount: number;
+    readonly fromCheckpointRef: ReturnType<typeof checkpointRefForThreadTurn>;
+    readonly targetCheckpointRef: ReturnType<typeof checkpointRefForThreadTurn>;
+  }) {
+    const storedRows = yield* turnFileSnapshots.getByTurn({
+      threadId: input.threadId,
+      turnId: input.turnId,
+    });
+    const rows = normalizeSnapshotRows(storedRows, input.cwd);
+    const attributedCheckpointRef = checkpointAttributedRefForThreadTurn(
+      input.threadId,
+      input.turnCount,
+    );
+
+    let attribution: OrchestrationCheckpointAttribution = "unattributed";
+    let toCheckpointRef = input.targetCheckpointRef;
+    let paths: ReadonlyArray<string> | undefined;
+
+    if (rows.length > CHECKPOINT_DIFF_PATHSPEC_LIMIT) {
+      yield* Effect.logWarning("checkpoint attribution skipped: touched path count exceeds cap", {
+        threadId: input.threadId,
+        turnId: input.turnId,
+        pathCount: rows.length,
+        pathLimit: CHECKPOINT_DIFF_PATHSPEC_LIMIT,
+      });
+    } else if (rows.length > 0) {
+      const hasEditSnapshotRows = rows.some((row) => row.deleted || row.blobSha !== null);
+      if (hasEditSnapshotRows) {
+        const overlayEntries = yield* resolveOverlayEntries({
+          cwd: input.cwd,
+          endCheckpointRef: input.targetCheckpointRef,
+          rows,
+          threadId: input.threadId,
+          turnId: input.turnId,
+        });
+
+        if (overlayEntries !== null) {
+          const overlayResult = yield* checkpointStore
+            .captureOverlayCheckpoint({
+              cwd: input.cwd,
+              baseCheckpointRef: input.fromCheckpointRef,
+              checkpointRef: attributedCheckpointRef,
+              entries: overlayEntries,
+            })
+            .pipe(Effect.result);
+
+          if (overlayResult._tag === "Success") {
+            attribution = "edit-snapshots";
+            toCheckpointRef = attributedCheckpointRef;
+          } else {
+            yield* Effect.logWarning("checkpoint attribution overlay capture failed", {
+              threadId: input.threadId,
+              turnId: input.turnId,
+              detail: overlayResult.failure.message,
+            });
+          }
+        }
+      }
+
+      if (attribution !== "edit-snapshots") {
+        attribution = "touched-paths";
+        paths = rows.map((row) => row.path);
+      }
+    }
+
+    const diff = yield* checkpointStore.diffCheckpoints({
+      cwd: input.cwd,
+      fromCheckpointRef: input.fromCheckpointRef,
+      toCheckpointRef,
+      fallbackFromToHead: false,
+      ignoreWhitespace: false,
+      ...(paths !== undefined ? { paths } : {}),
+    });
+
+    return { diff, attribution };
+  });
+
+  const captureTurnStartCheckpoint = Effect.fn("captureTurnStartCheckpoint")(function* (input: {
+    readonly threadId: ThreadId;
+    readonly cwd: string;
+    readonly currentTurnCount: number;
+    readonly createdAt: string;
+  }) {
+    const baselineCheckpointRef = checkpointRefForThreadTurn(
+      input.threadId,
+      input.currentTurnCount,
+    );
+    const baselineExists = yield* checkpointStore.hasCheckpointRef({
+      cwd: input.cwd,
+      checkpointRef: baselineCheckpointRef,
+    });
+    if (!baselineExists) {
+      yield* checkpointStore.captureCheckpoint({
+        cwd: input.cwd,
+        checkpointRef: baselineCheckpointRef,
+      });
+      yield* receiptBus.publish({
+        type: "checkpoint.baseline.captured",
+        threadId: input.threadId,
+        checkpointTurnCount: input.currentTurnCount,
+        checkpointRef: baselineCheckpointRef,
+        createdAt: input.createdAt,
+      });
+    }
+
+    const turnStartRef = checkpointStartRefForThreadTurn(
+      input.threadId,
+      input.currentTurnCount + 1,
+    );
+    yield* checkpointStore.captureCheckpoint({
+      cwd: input.cwd,
+      checkpointRef: turnStartRef,
+    });
+  });
+
   // Shared tail for both capture paths: creates the git checkpoint ref, diffs
   // it against the previous turn, then dispatches the domain events to update
   // the orchestration read model.
@@ -231,18 +440,34 @@ const make = Effect.gen(function* () {
     readonly createdAt: string;
   }) {
     const fromTurnCount = Math.max(0, input.turnCount - 1);
-    const fromCheckpointRef = checkpointRefForThreadTurn(input.threadId, fromTurnCount);
+    const fallbackFromCheckpointRef = checkpointRefForThreadTurn(input.threadId, fromTurnCount);
+    const turnStartCheckpointRef = checkpointStartRefForThreadTurn(input.threadId, input.turnCount);
     const targetCheckpointRef = checkpointRefForThreadTurn(input.threadId, input.turnCount);
 
-    const fromCheckpointExists = yield* checkpointStore.hasCheckpointRef({
+    const turnStartCheckpointExists = yield* checkpointStore.hasCheckpointRef({
       cwd: input.cwd,
-      checkpointRef: fromCheckpointRef,
+      checkpointRef: turnStartCheckpointRef,
     });
+    const fromCheckpointRef = turnStartCheckpointExists
+      ? turnStartCheckpointRef
+      : fallbackFromCheckpointRef;
+    const fromCheckpointExists = turnStartCheckpointExists
+      ? true
+      : yield* checkpointStore.hasCheckpointRef({
+          cwd: input.cwd,
+          checkpointRef: fallbackFromCheckpointRef,
+        });
     if (!fromCheckpointExists) {
       yield* Effect.logWarning("checkpoint capture missing pre-turn baseline", {
         threadId: input.threadId,
         turnId: input.turnId,
         fromTurnCount,
+      });
+    } else if (!turnStartCheckpointExists) {
+      yield* Effect.logWarning("checkpoint capture missing turn-start baseline; using fallback", {
+        threadId: input.threadId,
+        turnId: input.turnId,
+        turnCount: input.turnCount,
       });
     }
 
@@ -255,40 +480,47 @@ const make = Effect.gen(function* () {
     // reflects files created or deleted during this turn.
     yield* workspaceEntries.invalidate(input.cwd);
 
-    const files = yield* checkpointStore
-      .diffCheckpoints({
-        cwd: input.cwd,
-        fromCheckpointRef,
-        toCheckpointRef: targetCheckpointRef,
-        fallbackFromToHead: false,
-        ignoreWhitespace: false,
-      })
-      .pipe(
-        Effect.map((diff) =>
-          parseTurnDiffFilesFromUnifiedDiff(diff).map((file) => ({
-            path: file.path,
-            kind: "modified" as const,
-            additions: file.additions,
-            deletions: file.deletions,
-          })),
-        ),
-        Effect.tapError((error) =>
-          appendCaptureFailureActivity({
-            threadId: input.threadId,
-            turnId: input.turnId,
-            detail: `Checkpoint captured, but turn diff summary is unavailable: ${error.message}`,
-            createdAt: input.createdAt,
-          }),
-        ),
-        Effect.catch((error) =>
-          Effect.logWarning("failed to derive checkpoint file summary", {
-            threadId: input.threadId,
-            turnId: input.turnId,
-            turnCount: input.turnCount,
-            detail: error.message,
-          }).pipe(Effect.as([])),
-        ),
-      );
+    const diffSummary = yield* buildAttributedTurnDiff({
+      cwd: input.cwd,
+      threadId: input.threadId,
+      turnId: input.turnId,
+      turnCount: input.turnCount,
+      fromCheckpointRef,
+      targetCheckpointRef,
+    }).pipe(
+      Effect.catch((error) =>
+        checkpointStore
+          .diffCheckpoints({
+            cwd: input.cwd,
+            fromCheckpointRef,
+            toCheckpointRef: targetCheckpointRef,
+            fallbackFromToHead: false,
+            ignoreWhitespace: false,
+          })
+          .pipe(
+            Effect.map((diff) => ({ diff, attribution: "unattributed" as const })),
+            Effect.tapError((fallbackError) =>
+              appendCaptureFailureActivity({
+                threadId: input.threadId,
+                turnId: input.turnId,
+                detail: `Checkpoint captured, but turn diff summary is unavailable: ${fallbackError.message}`,
+                createdAt: input.createdAt,
+              }),
+            ),
+            Effect.catch((fallbackError) =>
+              Effect.logWarning("failed to derive checkpoint file summary", {
+                threadId: input.threadId,
+                turnId: input.turnId,
+                turnCount: input.turnCount,
+                detail: fallbackError.message,
+                attributionDetail: error.message,
+              }).pipe(Effect.as({ diff: "", attribution: "unattributed" as const })),
+            ),
+          ),
+      ),
+    );
+
+    const files = checkpointFilesFromDiff(diffSummary.diff);
 
     const assistantMessageId =
       input.assistantMessageId ??
@@ -306,9 +538,14 @@ const make = Effect.gen(function* () {
       checkpointRef: targetCheckpointRef,
       status: input.status,
       files,
+      attribution: diffSummary.attribution,
       assistantMessageId,
       checkpointTurnCount: input.turnCount,
       createdAt: input.createdAt,
+    });
+    yield* turnFileSnapshots.deleteByTurn({
+      threadId: input.threadId,
+      turnId: input.turnId,
     });
     yield* receiptBus.publish({
       type: "checkpoint.diff.finalized",
@@ -502,24 +739,10 @@ const make = Effect.gen(function* () {
         (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
         0,
       );
-      const baselineCheckpointRef = checkpointRefForThreadTurn(thread.id, currentTurnCount);
-      const baselineExists = yield* checkpointStore.hasCheckpointRef({
-        cwd: checkpointCwd,
-        checkpointRef: baselineCheckpointRef,
-      });
-      if (baselineExists) {
-        return;
-      }
-
-      yield* checkpointStore.captureCheckpoint({
-        cwd: checkpointCwd,
-        checkpointRef: baselineCheckpointRef,
-      });
-      yield* receiptBus.publish({
-        type: "checkpoint.baseline.captured",
+      yield* captureTurnStartCheckpoint({
         threadId: thread.id,
-        checkpointTurnCount: currentTurnCount,
-        checkpointRef: baselineCheckpointRef,
+        cwd: checkpointCwd,
+        currentTurnCount,
         createdAt: event.createdAt,
       });
     },
@@ -584,24 +807,10 @@ const make = Effect.gen(function* () {
       (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
       0,
     );
-    const baselineCheckpointRef = checkpointRefForThreadTurn(threadId, currentTurnCount);
-    const baselineExists = yield* checkpointStore.hasCheckpointRef({
-      cwd: checkpointCwd,
-      checkpointRef: baselineCheckpointRef,
-    });
-    if (baselineExists) {
-      return;
-    }
-
-    yield* checkpointStore.captureCheckpoint({
-      cwd: checkpointCwd,
-      checkpointRef: baselineCheckpointRef,
-    });
-    yield* receiptBus.publish({
-      type: "checkpoint.baseline.captured",
+    yield* captureTurnStartCheckpoint({
       threadId,
-      checkpointTurnCount: currentTurnCount,
-      checkpointRef: baselineCheckpointRef,
+      cwd: checkpointCwd,
+      currentTurnCount,
       createdAt: event.occurredAt,
     });
   });
@@ -704,11 +913,18 @@ const make = Effect.gen(function* () {
     const staleCheckpointRefs = thread.checkpoints
       .filter((checkpoint) => checkpoint.checkpointTurnCount > event.payload.turnCount)
       .map((checkpoint) => checkpoint.checkpointRef);
+    const staleAuxiliaryCheckpointRefs = Array.from(
+      { length: Math.max(0, currentTurnCount - event.payload.turnCount) },
+      (_, index) => event.payload.turnCount + index + 1,
+    ).flatMap((turnCount) => [
+      checkpointStartRefForThreadTurn(event.payload.threadId, turnCount),
+      checkpointAttributedRefForThreadTurn(event.payload.threadId, turnCount),
+    ]);
 
-    if (staleCheckpointRefs.length > 0) {
+    if (staleCheckpointRefs.length > 0 || staleAuxiliaryCheckpointRefs.length > 0) {
       yield* checkpointStore.deleteCheckpointRefs({
         cwd: sessionRuntime.value.cwd,
-        checkpointRefs: staleCheckpointRefs,
+        checkpointRefs: [...staleCheckpointRefs, ...staleAuxiliaryCheckpointRefs],
       });
     }
 
@@ -859,4 +1075,6 @@ const make = Effect.gen(function* () {
   } satisfies CheckpointReactorShape;
 });
 
-export const CheckpointReactorLive = Layer.effect(CheckpointReactor, make);
+export const CheckpointReactorLive = Layer.effect(CheckpointReactor, make).pipe(
+  Layer.provide(TurnFileSnapshotsLive),
+);

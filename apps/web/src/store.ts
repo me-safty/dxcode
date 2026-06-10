@@ -282,6 +282,7 @@ function mapTurnDiffSummary(checkpoint: OrchestrationCheckpointSummary): TurnDif
     assistantMessageId: checkpoint.assistantMessageId ?? undefined,
     checkpointTurnCount: checkpoint.checkpointTurnCount,
     checkpointRef: checkpoint.checkpointRef,
+    attribution: checkpoint.attribution,
     files: checkpoint.files.map((file) => ({ ...file })),
   };
 }
@@ -671,6 +672,7 @@ function turnDiffSummariesEqual(left: TurnDiffSummary, right: TurnDiffSummary): 
     left.completedAt === right.completedAt &&
     left.status === right.status &&
     left.checkpointRef === right.checkpointRef &&
+    left.attribution === right.attribution &&
     left.checkpointTurnCount === right.checkpointTurnCount &&
     left.assistantMessageId === right.assistantMessageId &&
     turnDiffFilesEqual(left.files, right.files)
@@ -2527,6 +2529,7 @@ function applyEnvironmentOrchestrationEvent(
             checkpointRef: event.payload.checkpointRef,
             status: event.payload.status,
             files: event.payload.files,
+            attribution: event.payload.attribution,
             assistantMessageId: event.payload.assistantMessageId,
             completedAt: event.payload.completedAt,
           });

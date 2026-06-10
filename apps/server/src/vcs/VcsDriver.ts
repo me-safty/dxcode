@@ -17,6 +17,16 @@ export interface VcsCaptureCheckpointInput {
   readonly checkpointRef: CheckpointRef;
 }
 
+export interface VcsCaptureOverlayCheckpointInput {
+  readonly cwd: string;
+  readonly baseCheckpointRef: CheckpointRef;
+  readonly checkpointRef: CheckpointRef;
+  readonly entries: ReadonlyArray<{
+    readonly path: string;
+    readonly blobSha: string | null;
+  }>;
+}
+
 export interface VcsRestoreCheckpointInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
@@ -29,6 +39,7 @@ export interface VcsDiffCheckpointsInput {
   readonly toCheckpointRef: CheckpointRef;
   readonly fallbackFromToHead?: boolean;
   readonly ignoreWhitespace: boolean;
+  readonly paths?: ReadonlyArray<string>;
 }
 
 export interface VcsDeleteCheckpointRefsInput {
@@ -36,8 +47,22 @@ export interface VcsDeleteCheckpointRefsInput {
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
 }
 
+export interface VcsHashFileBlobInput {
+  readonly cwd: string;
+  readonly path: string;
+}
+
+export interface VcsReadCheckpointFileBlobInput {
+  readonly cwd: string;
+  readonly checkpointRef: CheckpointRef;
+  readonly path: string;
+}
+
 export interface VcsCheckpointOps {
   readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<void, VcsError>;
+  readonly captureOverlayCheckpoint: (
+    input: VcsCaptureOverlayCheckpointInput,
+  ) => Effect.Effect<void, VcsError>;
   readonly hasCheckpointRef: (
     input: Omit<VcsRestoreCheckpointInput, "fallbackToHead">,
   ) => Effect.Effect<boolean, VcsError>;
@@ -45,6 +70,10 @@ export interface VcsCheckpointOps {
     input: VcsRestoreCheckpointInput,
   ) => Effect.Effect<boolean, VcsError>;
   readonly diffCheckpoints: (input: VcsDiffCheckpointsInput) => Effect.Effect<string, VcsError>;
+  readonly hashFileBlob: (input: VcsHashFileBlobInput) => Effect.Effect<string | null, VcsError>;
+  readonly readCheckpointFileBlob: (
+    input: VcsReadCheckpointFileBlobInput,
+  ) => Effect.Effect<string | null, VcsError>;
   readonly deleteCheckpointRefs: (
     input: VcsDeleteCheckpointRefsInput,
   ) => Effect.Effect<void, VcsError>;

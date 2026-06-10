@@ -884,7 +884,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const isMobileViewport = useMediaQuery("max-sm");
-  const isComposerCollapsedMobile = isMobileViewport && !isComposerFocused;
+  // Dismissing the mobile keyboard blurs the editor, but active @file and
+  // $skill suggestion menus should remain available for touch selection.
+  const mobileSelectionMenuKeepsComposerExpanded =
+    composerTrigger?.kind === "path" || composerTrigger?.kind === "skill";
+  const isComposerCollapsedMobile =
+    isMobileViewport && !isComposerFocused && !mobileSelectionMenuKeepsComposerExpanded;
 
   // ------------------------------------------------------------------
   // Refs

@@ -6,6 +6,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  OrchestrationCheckpointAttribution,
   OrchestrationCheckpointFile,
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
@@ -115,6 +116,9 @@ const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
 const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
   Struct.assign({
     files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
+    attribution: OrchestrationCheckpointAttribution.pipe(
+      Schema.withDecodingDefault(Effect.succeed("unattributed")),
+    ),
   }),
 );
 type ProjectionThreadMessageDbRow = Schema.Schema.Type<typeof ProjectionThreadMessageDbRowSchema>;
@@ -379,6 +383,7 @@ function mapCheckpointRow(
     checkpointRef: row.checkpointRef,
     status: row.status,
     files: row.files,
+    attribution: row.attribution,
     assistantMessageId: row.assistantMessageId,
     completedAt: row.completedAt,
   };
@@ -839,6 +844,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "status",
+          COALESCE(checkpoint_attribution, 'unattributed') AS "attribution",
           checkpoint_files_json AS "files",
           assistant_message_id AS "assistantMessageId",
           completed_at AS "completedAt"
@@ -1362,6 +1368,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "status",
+          COALESCE(checkpoint_attribution, 'unattributed') AS "attribution",
           checkpoint_files_json AS "files",
           assistant_message_id AS "assistantMessageId",
           completed_at AS "completedAt"
@@ -1383,6 +1390,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "status",
+          COALESCE(checkpoint_attribution, 'unattributed') AS "attribution",
           checkpoint_files_json AS "files",
           assistant_message_id AS "assistantMessageId",
           completed_at AS "completedAt"
@@ -1405,6 +1413,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "status",
+          COALESCE(checkpoint_attribution, 'unattributed') AS "attribution",
           checkpoint_files_json AS "files",
           assistant_message_id AS "assistantMessageId",
           completed_at AS "completedAt"
@@ -1633,6 +1642,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   checkpointRef: row.checkpointRef,
                   status: row.status,
                   files: row.files,
+                  attribution: row.attribution,
                   assistantMessageId: row.assistantMessageId,
                   completedAt: row.completedAt,
                 });
@@ -2443,6 +2453,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             checkpointRef: row.checkpointRef,
             status: row.status,
             files: row.files,
+            attribution: row.attribution,
             assistantMessageId: row.assistantMessageId,
             completedAt: row.completedAt,
           }),

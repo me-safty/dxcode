@@ -1195,6 +1195,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               checkpointTurnCount: null,
               checkpointRef: null,
               checkpointStatus: null,
+              checkpointAttribution: null,
               checkpointFiles: [],
             });
             yield* deleteConsumedPendingTurnStart;
@@ -1243,6 +1244,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             checkpointTurnCount: null,
             checkpointRef: null,
             checkpointStatus: null,
+            checkpointAttribution: null,
             checkpointFiles: [],
           });
           return;
@@ -1280,6 +1282,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             checkpointTurnCount: null,
             checkpointRef: null,
             checkpointStatus: null,
+            checkpointAttribution: null,
             checkpointFiles: [],
           });
           return;
@@ -1305,6 +1308,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               checkpointTurnCount: event.payload.checkpointTurnCount,
               checkpointRef: event.payload.checkpointRef,
               checkpointStatus: event.payload.status,
+              checkpointAttribution: event.payload.attribution,
               checkpointFiles: event.payload.files,
               startedAt: existingTurn.value.startedAt ?? event.payload.completedAt,
               requestedAt: existingTurn.value.requestedAt ?? event.payload.completedAt,
@@ -1326,6 +1330,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             checkpointTurnCount: event.payload.checkpointTurnCount,
             checkpointRef: event.payload.checkpointRef,
             checkpointStatus: event.payload.status,
+            checkpointAttribution: event.payload.attribution,
             checkpointFiles: event.payload.files,
           });
           return;

@@ -36,6 +36,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { TurnFileSnapshotsLive } from "../../persistence/Layers/TurnFileSnapshots.ts";
+import { TurnFileSnapshots } from "../../persistence/Services/TurnFileSnapshots.ts";
 import {
   ProviderService,
   type ProviderServiceShape,
@@ -51,6 +53,10 @@ import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts"
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { WorkspacePathsLive } from "../../workspace/Layers/WorkspacePaths.ts";
+import {
+  CheckpointStore,
+  type CheckpointStoreShape,
+} from "../../checkpointing/Services/CheckpointStore.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
 function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
@@ -194,7 +200,10 @@ async function waitForThread(
 
 describe("ProviderRuntimeIngestion", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderRuntimeIngestionService | ProjectionSnapshotQuery,
+    | OrchestrationEngineService
+    | ProviderRuntimeIngestionService
+    | ProjectionSnapshotQuery
+    | TurnFileSnapshots,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -226,6 +235,7 @@ describe("ProviderRuntimeIngestion", () => {
     const attachmentsDir = path.join(serverBaseDir, "userdata", "attachments");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
     const provider = createProviderServiceHarness();
+    const hashedPaths: string[] = [];
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
@@ -238,11 +248,28 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provide(RepositoryIdentityResolverLive),
       Layer.provide(SqlitePersistenceMemory),
     );
+    const checkpointStore: CheckpointStoreShape = {
+      isGitRepository: () => Effect.succeed(true),
+      captureCheckpoint: () => Effect.void,
+      captureOverlayCheckpoint: () => Effect.void,
+      hasCheckpointRef: () => Effect.succeed(true),
+      restoreCheckpoint: () => Effect.succeed(true),
+      diffCheckpoints: () => Effect.succeed(""),
+      hashFileBlob: ({ path }) =>
+        Effect.sync(() => {
+          hashedPaths.push(path);
+          return "0000000000000000000000000000000000000000";
+        }),
+      readCheckpointFileBlob: () => Effect.succeed(null),
+      deleteCheckpointRefs: () => Effect.void,
+    };
     const layer = ProviderRuntimeIngestionLive.pipe(
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
+      Layer.provideMerge(TurnFileSnapshotsLive),
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
+      Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), serverBaseDir)),
       Layer.provideMerge(WorkspacePathsLive),
@@ -252,6 +279,7 @@ describe("ProviderRuntimeIngestion", () => {
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService));
+    const turnFileSnapshots = await runtime.runPromise(Effect.service(TurnFileSnapshots));
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(ingestion.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(ingestion.drain);
@@ -323,6 +351,9 @@ describe("ProviderRuntimeIngestion", () => {
       emit: provider.emit,
       setProviderSession: provider.setSession,
       drain,
+      hashedPaths,
+      readSnapshots: (threadId: ThreadId, turnId: TurnId) =>
+        Effect.runPromise(turnFileSnapshots.getByTurn({ threadId, turnId })),
     };
   }
 
@@ -734,6 +765,7 @@ describe("ProviderRuntimeIngestion", () => {
         checkpointRef: CheckpointRef.make("checkpoint:late-turn-state"),
         status: "ready",
         files: [],
+        attribution: "unattributed",
         assistantMessageId: asMessageId("assistant:late-turn-state"),
         checkpointTurnCount: 1,
         completedAt,
@@ -3157,6 +3189,81 @@ describe("ProviderRuntimeIngestion", () => {
     expect(checkpoint?.assistantMessageId).toBe("assistant:item-p1-assistant");
     expect(checkpoint?.checkpointRef).toBe("provider-diff:evt-turn-diff-updated");
     expect(thread.latestTurn?.state).not.toBe("completed");
+  });
+
+  it("records touched paths with edit-time blobs and preserves them across provider diff updates", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("turn-touched-paths");
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-file-change-item"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId,
+      turnId,
+      itemId: asItemId("item-file-change"),
+      payload: {
+        itemType: "file_change",
+        data: {
+          input: {
+            file_path: path.join(harness.workspaceRoot, "src/app.ts"),
+          },
+        },
+      },
+    });
+    await harness.drain();
+
+    harness.emit({
+      type: "turn.diff.updated",
+      eventId: asEventId("evt-touched-paths-diff"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId,
+      turnId,
+      payload: {
+        unifiedDiff: [
+          "diff --git a/src/app.ts b/src/app.ts",
+          "index 1111111..2222222 100644",
+          "--- a/src/app.ts",
+          "+++ b/src/app.ts",
+          "@@ -1 +1 @@",
+          "-old",
+          "+new",
+          "diff --git a/src/other.ts b/src/other.ts",
+          "new file mode 100644",
+          "--- /dev/null",
+          "+++ b/src/other.ts",
+          "@@ -0,0 +1 @@",
+          "+other",
+          "",
+        ].join("\n"),
+      },
+    });
+    await harness.drain();
+
+    const snapshots = await harness.readSnapshots(threadId, turnId);
+    expect(harness.hashedPaths).toEqual(["src/app.ts"]);
+    expect(snapshots).toEqual([
+      {
+        threadId,
+        turnId,
+        path: "src/app.ts",
+        blobSha: "0000000000000000000000000000000000000000",
+        deleted: false,
+        updatedAt: "2026-01-01T00:00:01.000Z",
+      },
+      {
+        threadId,
+        turnId,
+        path: "src/other.ts",
+        blobSha: null,
+        deleted: false,
+        updatedAt: "2026-01-01T00:00:01.000Z",
+      },
+    ]);
   });
 
   it("projects context window updates into normalized thread activities", async () => {

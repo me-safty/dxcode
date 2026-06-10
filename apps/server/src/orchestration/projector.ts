@@ -610,6 +610,7 @@ export function projectEvent(
             checkpointRef: payload.checkpointRef,
             status: payload.status,
             files: payload.files,
+            attribution: payload.attribution,
             assistantMessageId: payload.assistantMessageId,
             completedAt: payload.completedAt,
           },

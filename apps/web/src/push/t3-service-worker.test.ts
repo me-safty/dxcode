@@ -340,7 +340,29 @@ describe("t3-service-worker notification click navigation", () => {
     expect(harness.openWindowCalls).toEqual([]);
   });
 
-  it("falls back to focus, postMessage, and openWindow when navigation returns null", async () => {
+  it("focuses and posts without opening a new window when navigate is unavailable", async () => {
+    harness.addClient({
+      url: HOME_URL,
+      focused: true,
+    });
+
+    await openNotificationUrl(harness, TARGET_URL);
+
+    const [client] = harness.getClients();
+    expect(client?.url).toBe(HOME_URL);
+    expect(client?.navigateCalls).toEqual([]);
+    expect(client?.focusCalls).toBe(1);
+    expect(client?.postMessageCalls).toEqual([
+      {
+        type: "t3.notification-click",
+        url: TARGET_URL,
+        openedAt: expect.any(Number),
+      },
+    ]);
+    expect(harness.openWindowCalls).toEqual([]);
+  });
+
+  it("focuses and posts without opening a new window when navigation returns null", async () => {
     harness.addClient({
       url: HOME_URL,
       focused: true,
@@ -360,10 +382,10 @@ describe("t3-service-worker notification click navigation", () => {
         openedAt: expect.any(Number),
       },
     ]);
-    expect(harness.openWindowCalls).toEqual([TARGET_URL]);
+    expect(harness.openWindowCalls).toEqual([]);
   });
 
-  it("falls back to focus, postMessage, and openWindow when navigation throws", async () => {
+  it("focuses and posts without opening a new window when navigation throws", async () => {
     harness.addClient({
       url: HOME_URL,
       focused: true,
@@ -383,7 +405,7 @@ describe("t3-service-worker notification click navigation", () => {
         openedAt: expect.any(Number),
       },
     ]);
-    expect(harness.openWindowCalls).toEqual([TARGET_URL]);
+    expect(harness.openWindowCalls).toEqual([]);
   });
 
   it("posts the notification click when focus throws", async () => {

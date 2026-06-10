@@ -115,11 +115,12 @@ async function navigateFocusAndPostNotificationClick(client, click) {
   }
 
   const navigatedClient = await navigateNotificationClient(client, click.url);
-  const focusedClient = await focusClientAndPostNotificationClick(navigatedClient || client, click);
-  if (!navigatedClient) {
-    await openWindowAndPostNotificationClick(click);
+  if (navigatedClient) {
+    return focusClientAndPostNotificationClick(navigatedClient, click);
   }
-  return focusedClient;
+
+  const focusedClient = await focusClientAndPostNotificationClick(client, click);
+  return focusedClient || openWindowAndPostNotificationClick(click);
 }
 
 async function navigateNotificationClient(client, url) {

@@ -252,6 +252,7 @@ function makeOrchestrationThread(
         summary.status === "ready" || summary.status === "missing" || summary.status === "error"
           ? summary.status
           : "ready",
+      attribution: summary.attribution ?? "unattributed",
       files: summary.files.map((file) => ({
         path: file.path,
         kind: file.kind ?? "modified",
@@ -1959,6 +1960,7 @@ describe("incremental orchestration updates", () => {
         checkpointRef: CheckpointRef.make("checkpoint-1"),
         status: "ready",
         files: [],
+        attribution: "unattributed",
         assistantMessageId: MessageId.make("assistant-1"),
         completedAt: "2026-02-27T00:00:04.000Z",
       }),

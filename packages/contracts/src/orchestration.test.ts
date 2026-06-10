@@ -22,6 +22,7 @@ import {
   ThreadTurnStartCommand,
   ThreadCreatedPayload,
   ThreadTurnDiff,
+  ThreadTurnDiffCompletedPayload,
   ThreadTurnStartRequestedPayload,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
@@ -29,6 +30,9 @@ import { ProviderInstanceId } from "./providerInstance.ts";
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput);
 const decodeThreadTurnDiff = Schema.decodeUnknownEffect(ThreadTurnDiff);
+const decodeThreadTurnDiffCompletedPayload = Schema.decodeUnknownEffect(
+  ThreadTurnDiffCompletedPayload,
+);
 const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateCommand);
 const decodeProjectCreatedPayload = Schema.decodeUnknownEffect(ProjectCreatedPayload);
 const decodeProjectMetaUpdatedPayload = Schema.decodeUnknownEffect(ProjectMetaUpdatedPayload);
@@ -112,6 +116,23 @@ it.effect("rejects thread turn diff when fromTurnCount > toTurnCount", () =>
       }),
     );
     assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("decodes historical turn diff completed payloads as unattributed", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnDiffCompletedPayload({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      checkpointTurnCount: 1,
+      checkpointRef: "refs/t3/checkpoints/thread-1/turn/1",
+      status: "ready",
+      files: [],
+      assistantMessageId: null,
+      completedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.attribution, "unattributed");
   }),
 );
 

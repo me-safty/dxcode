@@ -12,6 +12,10 @@ import {
 export const NOTIFICATION_CLICK_MESSAGE_TYPE = "t3.notification-click";
 
 let lastNotificationNavigationTarget: NotificationNavigationTarget | null = null;
+let replayInFlight: Promise<void> | null = null;
+
+const PENDING_NOTIFICATION_CLICK_TTL_MS = 2 * 60 * 1000;
+const PENDING_NOTIFICATION_CLICK_RETRY_DELAYS_MS = [250, 500, 1000] as const;
 
 interface NotificationClickClientMessage {
   readonly type: typeof NOTIFICATION_CLICK_MESSAGE_TYPE;
@@ -136,6 +140,7 @@ export function getLastNotificationNavigationTarget(): NotificationNavigationTar
 
 export function resetNotificationNavigationStateForTests(): void {
   lastNotificationNavigationTarget = null;
+  replayInFlight = null;
 }
 
 export function installServiceWorkerNotificationNavigation(router: AppRouter): () => void {
@@ -146,7 +151,7 @@ export function installServiceWorkerNotificationNavigation(router: AppRouter): (
   const serviceWorker = navigator.serviceWorker;
   const cleanupCallbacks: Array<() => void> = [];
   const replayPendingClick = (reason: string) => {
-    void consumePendingNotificationClick(router, reason);
+    void replayPendingNotificationClick(router, reason);
   };
   const handleMessage = (event: MessageEvent<unknown>) => {
     if (!isNotificationClickClientMessage(event.data)) {
@@ -169,6 +174,12 @@ export function installServiceWorkerNotificationNavigation(router: AppRouter): (
   };
 
   serviceWorker.addEventListener("message", handleMessage);
+  if ("startMessages" in serviceWorker) {
+    const startMessages = serviceWorker.startMessages;
+    if (typeof startMessages === "function") {
+      startMessages.call(serviceWorker);
+    }
+  }
   cleanupCallbacks.push(() => {
     serviceWorker.removeEventListener("message", handleMessage);
   });
@@ -205,12 +216,50 @@ export function installServiceWorkerNotificationNavigation(router: AppRouter): (
   };
 }
 
+function replayPendingNotificationClick(router: AppRouter, reason: string): Promise<void> {
+  if (replayInFlight !== null) {
+    return replayInFlight;
+  }
+
+  const replay = consumePendingNotificationClick(router, reason, {
+    retryDelaysMs: hasPendingNotificationClickCache()
+      ? PENDING_NOTIFICATION_CLICK_RETRY_DELAYS_MS
+      : [],
+  });
+  const replayWithCleanup = replay.finally(() => {
+    if (replayInFlight === replayWithCleanup) {
+      replayInFlight = null;
+    }
+  });
+  replayInFlight = replayWithCleanup;
+  return replayWithCleanup;
+}
+
 export async function consumePendingNotificationClick(
   router: AppRouter,
   reason = "manual",
+  options: {
+    readonly retryDelaysMs?: ReadonlyArray<number>;
+  } = {},
 ): Promise<void> {
-  const pending = await readPendingNotificationClick();
+  const pending = await readPendingNotificationClickWithRetry(options.retryDelaysMs ?? []);
   if (pending === null) {
+    return;
+  }
+
+  const pendingAgeMs = Date.now() - pending.openedAt;
+  if (pendingAgeMs > PENDING_NOTIFICATION_CLICK_TTL_MS) {
+    recordResumeDiagnostic("notification-navigation-pending", {
+      reason: "stale",
+      data: {
+        replayReason: reason,
+        url: pending.url,
+        openedAt: pending.openedAt,
+        ageMs: pendingAgeMs,
+        ttlMs: PENDING_NOTIFICATION_CLICK_TTL_MS,
+      },
+    });
+    await clearPendingNotificationClick();
     return;
   }
 
@@ -231,6 +280,35 @@ export async function consumePendingNotificationClick(
     });
   }
   await clearPendingNotificationClick();
+}
+
+async function readPendingNotificationClickWithRetry(
+  retryDelaysMs: ReadonlyArray<number>,
+): Promise<Awaited<ReturnType<typeof readPendingNotificationClick>>> {
+  const pending = await readPendingNotificationClick();
+  if (pending !== null) {
+    return pending;
+  }
+
+  for (const delayMs of retryDelaysMs) {
+    await sleep(delayMs);
+    const retryPending = await readPendingNotificationClick();
+    if (retryPending !== null) {
+      return retryPending;
+    }
+  }
+
+  return null;
+}
+
+function hasPendingNotificationClickCache(): boolean {
+  return typeof window !== "undefined" && "caches" in window;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function handleNotificationClickNavigation(

@@ -38,7 +38,14 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
+import { TurnFileSnapshots } from "../../persistence/Services/TurnFileSnapshots.ts";
+import { TurnFileSnapshotsLive } from "../../persistence/Layers/TurnFileSnapshots.ts";
 import { isGitRepository } from "../../git/Utils.ts";
+import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts";
+import {
+  extractTouchedPathsFromRuntimeEvent,
+  normalizeTouchedPath,
+} from "../../checkpointing/TouchedPaths.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -701,6 +708,8 @@ const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
+  const turnFileSnapshots = yield* TurnFileSnapshots;
+  const checkpointStore = yield* CheckpointStore;
   const serverSettingsService = yield* ServerSettingsService;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -1440,6 +1449,93 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const recordTouchedPathsForTurn = Effect.fn("recordTouchedPathsForTurn")(function* (input: {
+    readonly event: ProviderRuntimeEvent;
+    readonly threadId: ThreadId;
+    readonly turnId: TurnId;
+  }) {
+    const extractedPaths = extractTouchedPathsFromRuntimeEvent(input.event);
+    if (extractedPaths.length === 0) {
+      return;
+    }
+
+    const checkpointContext = yield* projectionSnapshotQuery
+      .getThreadCheckpointContext(input.threadId)
+      .pipe(
+        Effect.map(Option.getOrUndefined),
+        Effect.catch(() => Effect.void),
+      );
+    const workspaceCwd =
+      checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot ?? undefined;
+    if (!workspaceCwd || !isGitRepository(workspaceCwd)) {
+      return;
+    }
+
+    const pathsBySnapshotKind = new Map<string, "edit-snapshot" | "path-only">();
+    for (const entry of extractedPaths) {
+      const normalizedPath = normalizeTouchedPath(entry.path, workspaceCwd);
+      if (!normalizedPath) {
+        continue;
+      }
+      const existing = pathsBySnapshotKind.get(normalizedPath);
+      if (existing !== "edit-snapshot") {
+        pathsBySnapshotKind.set(normalizedPath, entry.snapshotKind);
+      }
+    }
+
+    for (const [relativePath, snapshotKind] of pathsBySnapshotKind.entries()) {
+      if (snapshotKind === "path-only") {
+        yield* turnFileSnapshots.upsertSnapshot({
+          threadId: input.threadId,
+          turnId: input.turnId,
+          path: relativePath,
+          blobSha: null,
+          deleted: false,
+          preserveExistingSnapshot: true,
+          updatedAt: input.event.createdAt,
+        });
+        continue;
+      }
+
+      const blobShaResult = yield* checkpointStore
+        .hashFileBlob({
+          cwd: workspaceCwd,
+          path: relativePath,
+        })
+        .pipe(Effect.result);
+
+      if (blobShaResult._tag === "Failure") {
+        yield* Effect.logWarning("provider runtime ingestion failed to hash touched file", {
+          eventId: input.event.eventId,
+          eventType: input.event.type,
+          threadId: input.threadId,
+          turnId: input.turnId,
+          path: relativePath,
+          detail: blobShaResult.failure.message,
+        });
+        yield* turnFileSnapshots.upsertSnapshot({
+          threadId: input.threadId,
+          turnId: input.turnId,
+          path: relativePath,
+          blobSha: null,
+          deleted: false,
+          preserveExistingSnapshot: true,
+          updatedAt: input.event.createdAt,
+        });
+        continue;
+      }
+
+      yield* turnFileSnapshots.upsertSnapshot({
+        threadId: input.threadId,
+        turnId: input.turnId,
+        path: relativePath,
+        blobSha: blobShaResult.success,
+        deleted: blobShaResult.success === null,
+        updatedAt: input.event.createdAt,
+      });
+    }
+  });
+
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
       const thread = yield* resolveThreadShell(event.threadId);
@@ -1458,6 +1554,22 @@ const make = Effect.gen(function* () {
       const now = event.createdAt;
       const eventTurnId = toTurnId(event.turnId);
       const activeTurnId = thread.session?.activeTurnId ?? null;
+
+      if (eventTurnId) {
+        yield* recordTouchedPathsForTurn({
+          event,
+          threadId: thread.id,
+          turnId: eventTurnId,
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("provider runtime ingestion failed to record touched paths", {
+              eventId: event.eventId,
+              eventType: event.type,
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        );
+      }
 
       const conflictsWithActiveTurn =
         activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
@@ -1955,6 +2067,7 @@ const make = Effect.gen(function* () {
               checkpointRef: CheckpointRef.make(`provider-diff:${event.eventId}`),
               status: "missing",
               files: [],
+              attribution: "unattributed",
               assistantMessageId,
               checkpointTurnCount: maxCheckpointTurnCount(checkpointContext.checkpoints) + 1,
               createdAt: now,
@@ -2027,4 +2140,4 @@ const make = Effect.gen(function* () {
 export const ProviderRuntimeIngestionLive = Layer.effect(
   ProviderRuntimeIngestionService,
   make,
-).pipe(Layer.provide(ProjectionTurnRepositoryLive));
+).pipe(Layer.provide(Layer.mergeAll(ProjectionTurnRepositoryLive, TurnFileSnapshotsLive)));

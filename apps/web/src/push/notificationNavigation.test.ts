@@ -38,10 +38,13 @@ function createCacheStorageMock() {
 function stubServiceWorker(options: { readonly cacheStorage?: CacheStorage } = {}) {
   const serviceWorkerTarget = new EventTarget();
   const windowTarget = new EventTarget();
+  const documentTarget = new EventTarget();
+  const startMessages = vi.fn();
   vi.stubGlobal("navigator", {
     serviceWorker: {
       addEventListener: serviceWorkerTarget.addEventListener.bind(serviceWorkerTarget),
       removeEventListener: serviceWorkerTarget.removeEventListener.bind(serviceWorkerTarget),
+      startMessages,
     },
   });
   vi.stubGlobal("window", {
@@ -49,6 +52,11 @@ function stubServiceWorker(options: { readonly cacheStorage?: CacheStorage } = {
     addEventListener: windowTarget.addEventListener.bind(windowTarget),
     location: { origin: ORIGIN },
     removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+  });
+  vi.stubGlobal("document", {
+    addEventListener: documentTarget.addEventListener.bind(documentTarget),
+    removeEventListener: documentTarget.removeEventListener.bind(documentTarget),
+    visibilityState: "visible",
   });
 
   return {
@@ -60,6 +68,10 @@ function stubServiceWorker(options: { readonly cacheStorage?: CacheStorage } = {
     dispatchWindowEvent(type: string) {
       windowTarget.dispatchEvent(new Event(type));
     },
+    dispatchDocumentEvent(type: string) {
+      documentTarget.dispatchEvent(new Event(type));
+    },
+    startMessages,
   };
 }
 
@@ -76,8 +88,24 @@ async function flushAsync(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 5; i++) {
+    await Promise.resolve();
+  }
+}
+
+async function drainPendingReplayRetries(): Promise<void> {
+  for (const delayMs of [250, 500, 1000]) {
+    await vi.advanceTimersByTimeAsync(delayMs);
+    await flushMicrotasks();
+  }
+  await vi.runAllTimersAsync();
+  await flushMicrotasks();
+}
+
 describe("notificationNavigation", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     resetNotificationNavigationStateForTests();
     vi.restoreAllMocks();
@@ -192,6 +220,17 @@ describe("notificationNavigation", () => {
     expect(router.navigate).toHaveBeenCalledTimes(1);
   });
 
+  it("starts service worker message delivery when installed", () => {
+    const serviceWorker = stubServiceWorker();
+    const router = makeRouter();
+
+    const cleanup = installServiceWorkerNotificationNavigation(router);
+
+    expect(serviceWorker.startMessages).toHaveBeenCalledTimes(1);
+
+    cleanup();
+  });
+
   it("replays a persisted notification target on startup", async () => {
     const service = await import("../environments/runtime/service");
     const reconcileSpy = vi
@@ -239,6 +278,7 @@ describe("notificationNavigation", () => {
   });
 
   it("replays a persisted notification target on focus", async () => {
+    vi.useFakeTimers();
     const service = await import("../environments/runtime/service");
     vi.spyOn(service, "reconcileAfterNotificationClick").mockImplementation(() => undefined);
     const { cacheStorage } = createCacheStorageMock();
@@ -248,7 +288,8 @@ describe("notificationNavigation", () => {
     const router = makeRouter();
 
     const cleanup = installServiceWorkerNotificationNavigation(router);
-    await flushAsync();
+    await flushMicrotasks();
+    await drainPendingReplayRetries();
     expect(router.navigate).not.toHaveBeenCalled();
 
     await writePendingNotificationClick({
@@ -256,7 +297,8 @@ describe("notificationNavigation", () => {
       openedAt: Date.now(),
     });
     serviceWorker.dispatchWindowEvent("focus");
-    await flushAsync();
+    await vi.advanceTimersByTimeAsync(0);
+    await flushMicrotasks();
 
     expect(router.navigate).toHaveBeenCalledWith({
       to: "/$environmentId/$threadId",
@@ -268,6 +310,78 @@ describe("notificationNavigation", () => {
     });
 
     cleanup();
+  });
+
+  it("retries replay when a pending notification click is written after visibility resumes", async () => {
+    vi.useFakeTimers();
+    const service = await import("../environments/runtime/service");
+    vi.spyOn(service, "reconcileAfterNotificationClick").mockImplementation(() => undefined);
+    const { cacheStorage } = createCacheStorageMock();
+    const serviceWorker = stubServiceWorker({
+      cacheStorage: cacheStorage as unknown as CacheStorage,
+    });
+    const router = makeRouter();
+
+    const cleanup = installServiceWorkerNotificationNavigation(router);
+    await flushMicrotasks();
+    await drainPendingReplayRetries();
+    expect(router.navigate).not.toHaveBeenCalled();
+
+    serviceWorker.dispatchDocumentEvent("visibilitychange");
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(100);
+    await writePendingNotificationClick({
+      url: "/env-3/thread-3",
+      openedAt: Date.now(),
+    });
+    await vi.advanceTimersByTimeAsync(150);
+    await flushMicrotasks();
+
+    expect(router.navigate).toHaveBeenCalledWith({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId: "env-3",
+        threadId: "thread-3",
+      },
+      search: {},
+    });
+    await expect(readPendingNotificationClick()).resolves.toBeNull();
+
+    cleanup();
+  });
+
+  it("clears stale persisted notification clicks without navigating", async () => {
+    const service = await import("../environments/runtime/service");
+    const resumeDiagnostics = await import("../environments/runtime/resumeDiagnostics");
+    const reconcileSpy = vi
+      .spyOn(service, "reconcileAfterNotificationClick")
+      .mockImplementation(() => undefined);
+    const diagnosticSpy = vi.spyOn(resumeDiagnostics, "recordResumeDiagnostic");
+    const { cacheStorage } = createCacheStorageMock();
+    stubServiceWorker({ cacheStorage: cacheStorage as unknown as CacheStorage });
+    const router = makeRouter();
+    const openedAt = Date.now() - 2 * 60 * 1000 - 1;
+
+    await writePendingNotificationClick({
+      url: "/env-4/thread-4",
+      openedAt,
+    });
+    await consumePendingNotificationClick(router, "test");
+
+    expect(router.navigate).not.toHaveBeenCalled();
+    expect(reconcileSpy).not.toHaveBeenCalled();
+    expect(diagnosticSpy).toHaveBeenCalledWith(
+      "notification-navigation-pending",
+      expect.objectContaining({
+        reason: "stale",
+        data: expect.objectContaining({
+          replayReason: "test",
+          url: "/env-4/thread-4",
+          openedAt,
+        }),
+      }),
+    );
+    await expect(readPendingNotificationClick()).resolves.toBeNull();
   });
 
   it("clears malformed or cross-origin persisted notification targets", async () => {

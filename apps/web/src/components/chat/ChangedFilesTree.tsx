@@ -1,4 +1,4 @@
-import { type TurnId } from "@t3tools/contracts";
+import { type OrchestrationCheckpointAttribution, type TurnId } from "@t3tools/contracts";
 import { memo, useCallback, useMemo, useState } from "react";
 import { type TurnDiffFileChange } from "../../types";
 import { buildTurnDiffTree, type TurnDiffTreeNode } from "../../lib/turnDiffTree";
@@ -12,11 +12,13 @@ const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {};
 export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
   turnId: TurnId;
   files: ReadonlyArray<TurnDiffFileChange>;
+  attribution?: OrchestrationCheckpointAttribution | undefined;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId } = props;
+  const { attribution, files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId } =
+    props;
   const treeNodes = useMemo(() => buildTurnDiffTree(files), [files]);
   const directoryPathsKey = useMemo(
     () => collectDirectoryPaths(treeNodes).join("\u0000"),
@@ -121,7 +123,21 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
     );
   };
 
-  return <div className="space-y-0.5">{treeNodes.map((node) => renderTreeNode(node, 0))}</div>;
+  const attributionNote =
+    attribution === "unattributed"
+      ? "May include changes from other threads in this workspace."
+      : attribution === "touched-paths"
+        ? "Limited to detected paths; same-file overlaps may be approximate."
+        : null;
+
+  return (
+    <div className="space-y-1">
+      {attributionNote ? (
+        <p className="px-1 text-[10px] leading-snug text-muted-foreground/70">{attributionNote}</p>
+      ) : null}
+      <div className="space-y-0.5">{treeNodes.map((node) => renderTreeNode(node, 0))}</div>
+    </div>
+  );
 });
 
 function collectDirectoryPaths(nodes: ReadonlyArray<TurnDiffTreeNode>): string[] {

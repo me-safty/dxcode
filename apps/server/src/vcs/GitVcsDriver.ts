@@ -242,6 +242,8 @@ export class GitVcsDriver extends Context.Service<GitVcsDriver, GitVcsDriverShap
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
 const CHECKPOINT_DIFF_MAX_OUTPUT_BYTES = 10_000_000;
+const CHECKPOINT_DIFF_PATHSPEC_LIMIT = 500;
+const ZERO_BLOB_SHA = "0000000000000000000000000000000000000000";
 const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
   "-c",
   "core.fsmonitor=false",
@@ -744,6 +746,98 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       }).pipe(Effect.ensuring(cleanupTempIndex));
     }),
 
+    captureOverlayCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureOverlayCheckpoint")(
+      function* (input) {
+        const operation = "GitVcsDriver.checkpoints.captureOverlayCheckpoint";
+        const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
+        const tempIndexPath = path.join(gitCommonDir, `t3-checkpoint-index-${randomUUID()}`);
+        const commitEnv: NodeJS.ProcessEnv = {
+          ...process.env,
+          GIT_INDEX_FILE: tempIndexPath,
+          GIT_AUTHOR_NAME: "Salchi",
+          GIT_AUTHOR_EMAIL: "t3code@users.noreply.github.com",
+          GIT_COMMITTER_NAME: "Salchi",
+          GIT_COMMITTER_EMAIL: "t3code@users.noreply.github.com",
+        };
+
+        const cleanupTempIndex = fileSystem
+          .remove(tempIndexPath, { force: true })
+          .pipe(Effect.ignore);
+
+        yield* Effect.gen(function* () {
+          yield* execute({
+            operation,
+            cwd: input.cwd,
+            args: ["read-tree", `${input.baseCheckpointRef}^{tree}`],
+            env: commitEnv,
+          });
+
+          if (input.entries.length > 0) {
+            const entriesByPath = new Map<string, string | null>();
+            for (const entry of input.entries) {
+              entriesByPath.set(entry.path, entry.blobSha);
+            }
+
+            const indexInfo = [...entriesByPath.entries()]
+              .map(([entryPath, blobSha]) =>
+                blobSha === null
+                  ? `0 ${ZERO_BLOB_SHA}\t${entryPath}\n`
+                  : `100644 ${blobSha}\t${entryPath}\n`,
+              )
+              .join("");
+            yield* execute({
+              operation,
+              cwd: input.cwd,
+              args: ["update-index", "--index-info"],
+              stdin: indexInfo,
+              env: commitEnv,
+            });
+          }
+
+          const writeTreeResult = yield* execute({
+            operation,
+            cwd: input.cwd,
+            args: ["write-tree"],
+            env: commitEnv,
+          });
+          const treeOid = writeTreeResult.stdout.trim();
+          if (treeOid.length === 0) {
+            return yield* new VcsProcessExitError({
+              operation,
+              command: "git write-tree",
+              cwd: input.cwd,
+              exitCode: 0,
+              detail: "git write-tree returned an empty tree oid.",
+            });
+          }
+
+          const message = `t3 attributed checkpoint ref=${input.checkpointRef}`;
+          const commitTreeResult = yield* execute({
+            operation,
+            cwd: input.cwd,
+            args: ["commit-tree", treeOid, "-m", message],
+            env: commitEnv,
+          });
+          const commitOid = commitTreeResult.stdout.trim();
+          if (commitOid.length === 0) {
+            return yield* new VcsProcessExitError({
+              operation,
+              command: "git commit-tree",
+              cwd: input.cwd,
+              exitCode: 0,
+              detail: "git commit-tree returned an empty commit oid.",
+            });
+          }
+
+          yield* execute({
+            operation,
+            cwd: input.cwd,
+            args: ["update-ref", input.checkpointRef, commitOid],
+          });
+        }).pipe(Effect.ensuring(cleanupTempIndex));
+      },
+    ),
+
     hasCheckpointRef: (input) =>
       resolveCheckpointCommit(input.cwd, input.checkpointRef).pipe(
         Effect.map((commit) => commit !== null),
@@ -830,6 +924,11 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
           `${fromRevision}^{commit}`,
           `${input.toCheckpointRef}^{commit}`,
+          ...(input.paths &&
+          input.paths.length > 0 &&
+          input.paths.length <= CHECKPOINT_DIFF_PATHSPEC_LIMIT
+            ? ["--", ...input.paths]
+            : []),
         ],
         allowNonZeroExit: true,
         maxOutputBytes: CHECKPOINT_DIFF_MAX_OUTPUT_BYTES,
@@ -847,6 +946,50 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
 
       return result.stdout;
     }),
+
+    hashFileBlob: Effect.fn("GitVcsDriver.checkpoints.hashFileBlob")(function* (input) {
+      const operation = "GitVcsDriver.checkpoints.hashFileBlob";
+      const result = yield* execute({
+        operation,
+        cwd: input.cwd,
+        args: ["hash-object", "-w", "--", input.path],
+        allowNonZeroExit: true,
+      });
+      if (result.exitCode !== 0) {
+        return null;
+      }
+
+      const blobSha = result.stdout.trim();
+      if (blobSha.length === 0) {
+        return yield* new VcsProcessExitError({
+          operation,
+          command: "git hash-object",
+          cwd: input.cwd,
+          exitCode: 0,
+          detail: "git hash-object returned an empty blob sha.",
+        });
+      }
+      return blobSha;
+    }),
+
+    readCheckpointFileBlob: Effect.fn("GitVcsDriver.checkpoints.readCheckpointFileBlob")(
+      function* (input) {
+        const result = yield* execute({
+          operation: "GitVcsDriver.checkpoints.readCheckpointFileBlob",
+          cwd: input.cwd,
+          args: ["ls-tree", "-z", `${input.checkpointRef}^{commit}`, "--", input.path],
+          allowNonZeroExit: true,
+        });
+        if (result.exitCode !== 0 || result.stdout.length === 0) {
+          return null;
+        }
+
+        const firstEntry = result.stdout.split("\0")[0] ?? "";
+        const metadata = firstEntry.split("\t")[0] ?? "";
+        const parts = metadata.split(" ");
+        return parts[2]?.trim() || null;
+      },
+    ),
 
     deleteCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.deleteCheckpointRefs")(
       function* (input) {

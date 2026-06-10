@@ -1691,6 +1691,19 @@ async function waitForComposerMenuItem(itemId: string): Promise<HTMLElement> {
   );
 }
 
+async function expectComposerMenuItemVisible(itemId: string): Promise<HTMLElement> {
+  const item = await waitForComposerMenuItem(itemId);
+  await vi.waitFor(
+    () => {
+      const rect = item.getBoundingClientRect();
+      expect(rect.width).toBeGreaterThan(0);
+      expect(rect.height).toBeGreaterThan(0);
+    },
+    { timeout: 8_000, interval: 16 },
+  );
+  return item;
+}
+
 async function expectNoComposerMenuItem(itemId: string): Promise<void> {
   await waitForLayout();
   expect(document.querySelector<HTMLElement>(`[data-composer-item-id="${itemId}"]`)).toBeNull();
@@ -7539,6 +7552,56 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("keeps the file mention menu open after mobile composer blur", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mobile-file-menu-blur-target" as MessageId,
+        targetText: "mobile file menu blur thread",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.projectsSearchEntries) {
+          return {
+            entries: [{ kind: "file", path: "src/App.tsx" }],
+            truncated: false,
+          };
+        }
+
+        return undefined;
+      },
+    });
+
+    try {
+      const expandComposerButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Expand composer"]'),
+        "Unable to find collapsed mobile composer expand control.",
+      );
+      expandComposerButton.click();
+      await waitForLayout();
+
+      const composerEditor = await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("@src");
+      await expectComposerMenuItemVisible("path:file:src/App.tsx");
+
+      composerEditor.blur();
+      await waitForLayout();
+
+      expect(document.activeElement).not.toBe(composerEditor);
+      await expectComposerMenuItemVisible("path:file:src/App.tsx");
+      await vi.waitFor(
+        () => {
+          const composerSurface = document.querySelector<HTMLElement>(
+            "[data-chat-composer-mobile-collapsed]",
+          );
+          expect(composerSurface?.dataset.chatComposerMobileCollapsed).toBe("false");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("does not open the slash-command menu during native composition input", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -7630,6 +7693,65 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await insertComposerNativeText("insertCompositionText", "$");
 
       await expectNoComposerMenuItem("skill:codex:agent-browser");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the skills menu open after mobile composer blur", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mobile-skill-menu-blur-target" as MessageId,
+        targetText: "mobile skill menu blur thread",
+      }),
+      configureFixture: (nextFixture) => {
+        const provider = nextFixture.serverConfig.providers[0];
+        if (!provider) {
+          throw new Error("Expected default provider in test fixture.");
+        }
+        (
+          provider as {
+            skills: ServerConfig["providers"][number]["skills"];
+          }
+        ).skills = [
+          {
+            name: "agent-browser",
+            displayName: "Agent Browser",
+            description: "Open pages, click around, and inspect web apps.",
+            path: "/Users/test/.agents/skills/agent-browser/SKILL.md",
+            enabled: true,
+          },
+        ];
+      },
+    });
+
+    try {
+      const expandComposerButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Expand composer"]'),
+        "Unable to find collapsed mobile composer expand control.",
+      );
+      expandComposerButton.click();
+      await waitForLayout();
+
+      const composerEditor = await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("$agent");
+      await expectComposerMenuItemVisible("skill:codex:agent-browser");
+
+      composerEditor.blur();
+      await waitForLayout();
+
+      expect(document.activeElement).not.toBe(composerEditor);
+      await expectComposerMenuItemVisible("skill:codex:agent-browser");
+      await vi.waitFor(
+        () => {
+          const composerSurface = document.querySelector<HTMLElement>(
+            "[data-chat-composer-mobile-collapsed]",
+          );
+          expect(composerSurface?.dataset.chatComposerMobileCollapsed).toBe("false");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }

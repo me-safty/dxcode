@@ -935,6 +935,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           checkpointRef: command.checkpointRef,
           status: command.status,
           files: command.files,
+          attribution: command.attribution ?? "unattributed",
           assistantMessageId: command.assistantMessageId ?? null,
           completedAt: command.completedAt,
         },

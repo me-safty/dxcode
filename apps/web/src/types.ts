@@ -16,6 +16,7 @@ import type {
   ProviderDriverKind,
   ProviderInstanceId,
   CheckpointRef,
+  OrchestrationCheckpointAttribution,
   ProviderInteractionMode,
   RuntimeMode,
 } from "@t3tools/contracts";
@@ -83,6 +84,7 @@ export interface TurnDiffSummary {
   status?: string | undefined;
   files: TurnDiffFileChange[];
   checkpointRef?: CheckpointRef | undefined;
+  attribution?: OrchestrationCheckpointAttribution | undefined;
   assistantMessageId?: MessageId | undefined;
   checkpointTurnCount?: number | undefined;
 }

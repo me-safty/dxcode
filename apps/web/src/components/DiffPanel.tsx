@@ -393,6 +393,12 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const selectedCheckpointTurnCount =
     selectedTurn &&
     (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId]);
+  const selectedTurnAttributionNote =
+    selectedTurn?.attribution === "unattributed"
+      ? "May include changes from other threads in this workspace."
+      : selectedTurn?.attribution === "touched-paths"
+        ? "Limited to detected paths; same-file overlaps may be approximate."
+        : null;
   const selectedCheckpointRange = useMemo(
     () =>
       typeof selectedCheckpointTurnCount === "number"
@@ -983,6 +989,11 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           </div>
         ) : (
           <>
+            {selectedTurnAttributionNote ? (
+              <p className="border-b border-border/60 px-4 py-1.5 text-[11px] text-muted-foreground/75">
+                {selectedTurnAttributionNote}
+              </p>
+            ) : null}
             <div
               ref={patchViewportRef}
               className="diff-panel-viewport min-h-0 min-w-0 flex-1 overflow-hidden"
