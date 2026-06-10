@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { type OrchestrationCommand, ProjectId } from "@t3tools/contracts";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vite-plus/test";
 
 import { launchWorkflowRecipe } from "./t3work-workflowEngineLaunch.ts";
 import { makeWorkflowEngineRegistry } from "./t3work-workflowEngineRegistry.ts";

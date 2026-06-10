@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { afterAll } from "vitest";
+import { afterAll } from "vite-plus/test";
 import {
   CommandId,
   MessageId,

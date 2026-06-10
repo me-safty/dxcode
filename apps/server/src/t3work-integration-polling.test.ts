@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { createT3workPollFingerprint, toT3workPollResult } from "./t3work-integration-polling.ts";
 

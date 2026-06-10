@@ -8,7 +8,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   cleanupRunsRoot,

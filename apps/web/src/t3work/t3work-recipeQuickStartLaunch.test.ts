@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { createQueryable, type ProjectShellProject } from "@t3tools/project-context";
 import { getBundledT3WorkRecipe } from "@t3tools/t3work-skill-packs";
 

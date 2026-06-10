@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ProjectShellProject } from "@t3tools/project-context";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { buildSidecarSectionHost } from "./t3work-sidecarSectionHost";
 import { getT3workSidecarSectionComponent } from "./t3work-sidecarSectionRegistry";

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { BackendApi } from "~/t3work/backend/t3work-types";
 import { runThreadBootstrap } from "~/t3work/chat/t3work-runThreadBootstrap";

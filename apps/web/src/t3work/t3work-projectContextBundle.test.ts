@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import type { ProjectShellProject } from "@t3tools/project-context";
 
 import { buildProjectContextBundle } from "~/t3work/t3work-projectContextBundle";

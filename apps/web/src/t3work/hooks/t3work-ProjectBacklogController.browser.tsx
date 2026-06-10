@@ -1,5 +1,5 @@
 import { StrictMode, useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
 import type { AtlassianBacklogResponse, BackendApi } from "~/t3work/backend/t3work-types";

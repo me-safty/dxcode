@@ -1,6 +1,6 @@
 import settingsPanelsSource from "../components/settings/SettingsPanels.tsx?raw";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   readT3workWorkMode,

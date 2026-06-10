@@ -2,7 +2,7 @@
 
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { T3workSidecarSectionFrame } from "~/t3work/t3work-sidecarSectionFrame";
 import { T3workSidecarSectionItemMenu } from "~/t3work/t3work-sidecarSectionMenu";

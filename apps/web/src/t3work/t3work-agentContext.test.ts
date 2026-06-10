@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { buildAddToChatAgentContextCapabilities } from "~/t3work/t3work-agentContext";
 import type { AddToChatRequest } from "~/t3work/t3work-addToChatUtils";

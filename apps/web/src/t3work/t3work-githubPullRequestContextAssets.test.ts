@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { createMockGitHubBackendApi } from "~/t3work/backend/t3work-mockBackendGitHub";
 import { buildGitHubActivityContextBundle } from "~/t3work/t3work-githubActivityContextPayload";

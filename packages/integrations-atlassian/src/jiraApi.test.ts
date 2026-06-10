@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AtlassianNetworkError } from "./client.ts";
 import { JiraApiClient, JIRA_API_TIMEOUT_MS } from "./jiraApi.ts";

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { buildVisibleBacklogHierarchy } from "./t3work-projectBacklogPresentation";
 import { createProjectBacklogTestTicket as createTicket } from "./t3work-projectBacklogTestUtils";

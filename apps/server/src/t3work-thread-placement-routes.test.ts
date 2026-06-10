@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { resolveT3workThreadPlacement } from "./t3work-thread-placement-routes.ts";
 

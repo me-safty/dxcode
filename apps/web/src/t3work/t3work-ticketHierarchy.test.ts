@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { buildProjectTicketHierarchy } from "./t3work-ticketHierarchy";
 import type { ProjectTicket } from "./t3work-types";
 

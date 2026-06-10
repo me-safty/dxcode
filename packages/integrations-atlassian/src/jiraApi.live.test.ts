@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import type { JiraProject } from "./client.ts";
 import { JiraApiClient, type JiraApiAuth } from "./jiraApi.ts";

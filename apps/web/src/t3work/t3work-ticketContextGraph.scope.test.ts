@@ -1,5 +1,5 @@
 import type { ProjectShellProject, ResourceSnapshot } from "@t3tools/project-context";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const integrationCacheHarness = vi.hoisted(() => ({
   readIntegrationCache: vi.fn(),

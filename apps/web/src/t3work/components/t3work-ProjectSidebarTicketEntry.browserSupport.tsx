@@ -115,8 +115,8 @@ export function findDraggableRow(host: HTMLElement, displayId: string): HTMLElem
 }
 
 export function createNativeApiMock(input?: {
-  showContextMenu?: ReturnType<typeof import("vitest").vi.fn>;
-  setClientSettings?: ReturnType<typeof import("vitest").vi.fn>;
+  showContextMenu?: ReturnType<typeof import("vite-plus/test").vi.fn>;
+  setClientSettings?: ReturnType<typeof import("vite-plus/test").vi.fn>;
 }): NonNullable<Window["nativeApi"]> {
   return {
     contextMenu: {

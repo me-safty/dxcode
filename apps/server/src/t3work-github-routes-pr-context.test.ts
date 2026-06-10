@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 

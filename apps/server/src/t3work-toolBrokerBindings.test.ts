@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { createQueryable } from "@t3tools/project-context";
 
 import * as Effect from "effect/Effect";

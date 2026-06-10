@@ -1,7 +1,7 @@
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { ProjectShellProject } from "@t3tools/project-context";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import type { Project, Thread } from "~/types";
 import type { ProjectThread } from "~/t3work/t3work-types";

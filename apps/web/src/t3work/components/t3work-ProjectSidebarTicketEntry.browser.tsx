@@ -1,6 +1,6 @@
 import "../t3work-index.css";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
 import { __resetLocalApiForTests } from "~/localApi";

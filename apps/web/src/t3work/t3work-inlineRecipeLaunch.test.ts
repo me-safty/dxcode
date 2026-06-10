@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createDefaultProjectDashboardBacklogState } from "~/t3work/t3work-projectDashboardBacklogStateShared";
 import { launchProjectDashboardBacklogDeterministicWorkflow } from "~/t3work/t3work-deterministicWorkflowLaunch";

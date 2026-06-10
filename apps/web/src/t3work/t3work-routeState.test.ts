@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { parseT3workRouteSearch, parseT3workViewFromPath } from "~/t3work/t3work-routeState";
 

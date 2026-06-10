@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import {
   ATLASSIAN_RESOURCES_CACHE_MAX_AGE_MS,
   ATLASSIAN_RESOURCES_POLL_INTERVAL_MS,

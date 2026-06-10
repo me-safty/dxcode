@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   DEFAULT_T3WORK_THREAD_TOOL_IDS,

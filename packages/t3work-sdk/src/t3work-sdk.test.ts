@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
 import type * as ValidWorkflowModule from "./__fixtures__/t3work-sdk.valid.workflow.ts";

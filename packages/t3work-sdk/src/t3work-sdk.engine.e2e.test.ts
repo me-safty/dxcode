@@ -10,7 +10,7 @@
  * user-reply events; here the replies are canned so the whole pipeline is deterministic.
  */
 
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { cleanupRunsRoot, e2eReviewWorkflow, resetCounters, runsRoot } from "./t3work-sdk.engineFixtures.ts";
 import {

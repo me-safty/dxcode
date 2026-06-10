@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { resolveSidecarComposition, type SidecarComposition } from "@t3tools/project-recipes";
 
 const { mockPersistStoredSidecarPersonalization, mockUseServerConfig } = vi.hoisted(() => ({

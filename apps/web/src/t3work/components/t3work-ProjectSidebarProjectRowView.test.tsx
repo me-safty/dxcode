@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ProjectShellProject } from "@t3tools/project-context";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { ProjectSidebarProjectRowView } from "./t3work-ProjectSidebarProjectRowView";
 import type { ProjectRowProps } from "./t3work-projectSidebarProjectRowTypes";

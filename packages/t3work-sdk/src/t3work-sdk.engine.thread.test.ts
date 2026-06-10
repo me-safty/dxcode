@@ -13,7 +13,7 @@
  *   7. schema retry      — an ask whose replies never satisfy the schema → SchemaExhaustedError.
  */
 
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   agentPrimitiveWorkflow,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import type { ProjectShellProject } from "@t3tools/project-context";
 
 import { buildT3workSidecarRecipeQuickStarts } from "~/t3work/t3work-sidecarRecipes";

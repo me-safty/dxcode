@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import { resolveSidecarSectionItemOrder } from "@t3tools/project-recipes";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 const { mockUseQuickStarts } = vi.hoisted(() => ({
   mockUseQuickStarts: vi.fn(),

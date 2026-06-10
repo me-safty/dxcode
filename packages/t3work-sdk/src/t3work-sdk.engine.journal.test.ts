@@ -7,7 +7,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 import * as Schema from "effect/Schema";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   bigintResultWorkflow,

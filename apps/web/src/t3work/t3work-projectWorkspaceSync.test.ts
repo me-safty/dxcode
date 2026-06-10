@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { ProjectShellProject } from "@t3tools/project-context";
 import { T3WORK_PROJECT_CONTEXT_ENTRYPOINT_PATH } from "~/t3work/t3work-projectSetup";
 

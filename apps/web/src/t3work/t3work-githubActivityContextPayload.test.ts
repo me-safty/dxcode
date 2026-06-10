@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { buildGitHubActivityContextBundle } from "~/t3work/t3work-githubActivityContextPayload";
 import { buildJiraTicketEntryPoint } from "~/t3work/t3work-contextCachePaths";

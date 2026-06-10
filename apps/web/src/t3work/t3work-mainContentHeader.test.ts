@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { getT3workMainContentHeaderClassName } from "./t3work-mainContentHeader";
 

@@ -1,7 +1,7 @@
 import { forwardRef, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ProjectShellProject } from "@t3tools/project-context";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { createLucideReactMock } from "./t3work-createLucideReactMock";
 import { ProjectDashboardKickoffAside } from "./t3work-ProjectDashboardKickoffAside";

@@ -27,7 +27,7 @@ import type { JournalStore } from "@t3work/sdk";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { afterAll } from "vitest";
+import { afterAll } from "vite-plus/test";
 
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { WorkflowJournalStoreLive } from "./persistence/Layers/SqliteJournalStore.ts";

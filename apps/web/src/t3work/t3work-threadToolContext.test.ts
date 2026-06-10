@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { mergeProjectThreads } from "~/t3work/hooks/t3work-threadBridge";
 import {
