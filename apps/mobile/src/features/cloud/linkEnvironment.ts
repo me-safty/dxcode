@@ -117,13 +117,7 @@ function withDevCause(message: string, cause: unknown): string {
   return detail ? `${message} (${detail})` : message;
 }
 
-type RelayProtectedErrorLike = {
-  readonly _tag: RelayProtectedErrorType["_tag"];
-  readonly reason?: string;
-  readonly traceId?: string;
-};
-
-function relayProtectedErrorMessage(error: RelayProtectedErrorLike): string {
+function relayProtectedErrorMessage(error: RelayProtectedErrorType): string {
   switch (error._tag) {
     case "RelayAuthInvalidError":
       switch (error.reason) {
@@ -134,54 +128,27 @@ function relayProtectedErrorMessage(error: RelayProtectedErrorLike): string {
           return "Relay rejected the DPoP proof.";
         case "not_authorized":
           return "Relay rejected the authenticated request.";
-        default:
-          return "Relay rejected the cloud session token.";
       }
     case "RelayEnvironmentLinkProofExpiredError":
       return "Relay rejected an expired environment link proof.";
     case "RelayEnvironmentLinkProofInvalidError":
-      return `Relay rejected the environment link proof (${error.reason ?? "unknown"}).`;
+      return `Relay rejected the environment link proof (${error.reason}).`;
     case "RelayEnvironmentConnectNotAuthorizedError":
       return "Relay rejected the environment connection request.";
     case "RelayEnvironmentEndpointUnavailableError":
-      return `Relay could not reach the environment endpoint (${error.reason ?? "unknown"}).`;
+      return `Relay could not reach the environment endpoint (${error.reason}).`;
     case "RelayEnvironmentEndpointTimedOutError":
       return "Relay timed out while contacting the environment endpoint.";
     case "RelayEnvironmentLinkFailedError":
-      return `Relay could not link the environment (${error.reason ?? "unknown"}).`;
+      return `Relay could not link the environment (${error.reason}).`;
     case "RelayEnvironmentLinkUnavailableError":
-      return `Relay cannot provision the managed endpoint (${error.reason ?? "unknown"}).`;
+      return `Relay cannot provision the managed endpoint (${error.reason}).`;
     case "RelayAgentActivityPublishProofExpiredError":
       return "Relay rejected an expired agent activity publish proof.";
     case "RelayAgentActivityPublishProofInvalidError":
-      return `Relay rejected the agent activity publish proof (${error.reason ?? "unknown"}).`;
+      return `Relay rejected the agent activity publish proof (${error.reason}).`;
     case "RelayInternalError":
-      return `Relay encountered an internal error (${error.reason ?? "unknown"}, trace ${error.traceId ?? "unknown"}).`;
-  }
-}
-
-function isRelayProtectedErrorLike(
-  cause: Record<string, unknown>,
-): cause is RelayProtectedErrorLike {
-  if (isRelayProtectedError(cause)) {
-    return true;
-  }
-  switch (cause._tag) {
-    case "RelayAuthInvalidError":
-    case "RelayEnvironmentLinkProofInvalidError":
-    case "RelayEnvironmentConnectNotAuthorizedError":
-    case "RelayEnvironmentEndpointUnavailableError":
-    case "RelayEnvironmentLinkFailedError":
-    case "RelayEnvironmentLinkUnavailableError":
-    case "RelayAgentActivityPublishProofInvalidError":
-    case "RelayInternalError":
-      return typeof cause.reason === "string";
-    case "RelayEnvironmentLinkProofExpiredError":
-    case "RelayEnvironmentEndpointTimedOutError":
-    case "RelayAgentActivityPublishProofExpiredError":
-      return true;
-    default:
-      return false;
+      return `Relay encountered an internal error (${error.reason}, trace ${error.traceId}).`;
   }
 }
 
@@ -196,22 +163,14 @@ function decodedRelayClientError(message: string) {
   };
 }
 
-function findRelayProtectedError(cause: unknown): RelayProtectedErrorLike | null {
+function findRelayProtectedError(cause: unknown): RelayProtectedErrorType | null {
+  if (isRelayProtectedError(cause)) {
+    return cause;
+  }
   if (typeof cause !== "object" || cause === null) {
     return null;
   }
-  if (
-    "_tag" in cause &&
-    typeof cause._tag === "string" &&
-    cause._tag.startsWith("Relay") &&
-    isRelayProtectedErrorLike(cause as Record<string, unknown>)
-  ) {
-    return cause as RelayProtectedErrorLike;
-  }
-  return (
-    ("cause" in cause ? findRelayProtectedError(cause.cause) : null) ??
-    ("reason" in cause ? findRelayProtectedError(cause.reason) : null)
-  );
+  return "cause" in cause ? findRelayProtectedError(cause.cause) : null;
 }
 
 function findEnvironmentCloudApiError(cause: unknown): { readonly message: string } | null {

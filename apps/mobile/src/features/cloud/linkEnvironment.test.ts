@@ -654,10 +654,11 @@ describe("mobile cloud link environment client", () => {
           connection: savedConnection,
         }),
       ).pipe(Effect.flip);
-      expect(error._tag).toBe("CloudEnvironmentLinkError");
-      expect(error.message).toBe(
-        "https://relay.example.test/v1/client/environment-links failed: Relay rejected the environment link proof (origin_not_allowed).",
-      );
+      expect(error).toMatchObject({
+        _tag: "CloudEnvironmentLinkError",
+        message:
+          "https://relay.example.test/v1/client/environment-links failed: Relay rejected the environment link proof (origin_not_allowed).",
+      });
       expect(fetchMock).toHaveBeenCalledTimes(3);
     }),
   );
@@ -998,10 +999,11 @@ describe("mobile cloud link environment client", () => {
           },
         }),
       ).pipe(Effect.flip);
-      expect(error._tag).toBe("CloudEnvironmentLinkError");
-      expect(error.message).toBe(
-        "https://relay.example.test/v1/environments/env-1/connect failed: Relay rejected the DPoP proof.",
-      );
+      expect(error).toMatchObject({
+        _tag: "CloudEnvironmentLinkError",
+        message:
+          "https://relay.example.test/v1/environments/env-1/connect failed: Relay rejected the DPoP proof.",
+      });
     }),
   );
 

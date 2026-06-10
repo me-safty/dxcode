@@ -440,8 +440,10 @@ describe("web cloud link environment client", () => {
           clerkToken: "clerk-token",
         }),
       ).pipe(Effect.flip);
-      expect(error._tag).toBe("CloudEnvironmentLinkError");
-      expect(error.message).toBe("https://relay.example.test/v1/client/environment-links failed");
+      expect(error).toMatchObject({
+        _tag: "CloudEnvironmentLinkError",
+        message: "https://relay.example.test/v1/client/environment-links failed",
+      });
     }),
   );
 
@@ -738,8 +740,10 @@ describe("web cloud link environment client", () => {
           clerkToken: "clerk-token",
         }),
       ).pipe(Effect.flip);
-      expect(error._tag).toBe("CloudEnvironmentLinkError");
-      expect(error.message).toBe("https://relay.example.test/v1/client/environment-links failed");
+      expect(error).toMatchObject({
+        _tag: "CloudEnvironmentLinkError",
+        message: "https://relay.example.test/v1/client/environment-links failed",
+      });
     }),
   );
 
@@ -770,10 +774,11 @@ describe("web cloud link environment client", () => {
           clerkToken: "clerk-token",
         }),
       ).pipe(Effect.flip);
-      expect(error._tag).toBe("CloudEnvironmentLinkError");
-      expect(error.message).toBe(
-        "https://relay.example.test/v1/client/environment-links failed: Relay rejected the environment link proof (origin_not_allowed).",
-      );
+      expect(error).toMatchObject({
+        _tag: "CloudEnvironmentLinkError",
+        message:
+          "https://relay.example.test/v1/client/environment-links failed: Relay rejected the environment link proof (origin_not_allowed).",
+      });
     }),
   );
 

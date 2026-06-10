@@ -1,7 +1,6 @@
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import * as Cause from "effect/Cause";
 import { HttpClient } from "effect/unstable/http";
 import {
   EnvironmentCloudEndpointUnavailableError,
@@ -28,7 +27,6 @@ import {
   makeEnvironmentHttpApiClient,
   ManagedRelayClient,
   ManagedRelayDpopSigner,
-  type ManagedRelayClientError,
   type WsRpcClient,
 } from "@t3tools/client-runtime";
 
@@ -126,13 +124,7 @@ const isEnvironmentCloudApiError = Schema.is(
   ]),
 );
 
-type RelayProtectedErrorLike = {
-  readonly _tag: RelayProtectedErrorType["_tag"];
-  readonly reason?: string;
-  readonly traceId?: string;
-};
-
-function relayProtectedErrorMessage(error: RelayProtectedErrorLike): string {
+function relayProtectedErrorMessage(error: RelayProtectedErrorType): string {
   switch (error._tag) {
     case "RelayAuthInvalidError":
       switch (error.reason) {
@@ -143,127 +135,49 @@ function relayProtectedErrorMessage(error: RelayProtectedErrorLike): string {
           return "Relay rejected the DPoP proof.";
         case "not_authorized":
           return "Relay rejected the authenticated request.";
-        default:
-          return "Relay rejected the cloud session token.";
       }
     case "RelayEnvironmentLinkProofExpiredError":
       return "Relay rejected an expired environment link proof.";
     case "RelayEnvironmentLinkProofInvalidError":
-      return `Relay rejected the environment link proof (${error.reason ?? "unknown"}).`;
+      return `Relay rejected the environment link proof (${error.reason}).`;
     case "RelayEnvironmentConnectNotAuthorizedError":
       return "Relay rejected the environment connection request.";
     case "RelayEnvironmentEndpointUnavailableError":
-      return `Relay could not reach the environment endpoint (${error.reason ?? "unknown"}).`;
+      return `Relay could not reach the environment endpoint (${error.reason}).`;
     case "RelayEnvironmentEndpointTimedOutError":
       return "Relay timed out while contacting the environment endpoint.";
     case "RelayEnvironmentLinkFailedError":
-      return `Relay could not link the environment (${error.reason ?? "unknown"}).`;
+      return `Relay could not link the environment (${error.reason}).`;
     case "RelayEnvironmentLinkUnavailableError":
-      return `Relay cannot provision the managed endpoint (${error.reason ?? "unknown"}).`;
+      return `Relay cannot provision the managed endpoint (${error.reason}).`;
     case "RelayAgentActivityPublishProofExpiredError":
       return "Relay rejected an expired agent activity publish proof.";
     case "RelayAgentActivityPublishProofInvalidError":
-      return `Relay rejected the agent activity publish proof (${error.reason ?? "unknown"}).`;
+      return `Relay rejected the agent activity publish proof (${error.reason}).`;
     case "RelayInternalError":
-      return `Relay encountered an internal error (${error.reason ?? "unknown"}, trace ${error.traceId ?? "unknown"}).`;
-  }
-}
-
-function isRelayProtectedErrorLike(
-  cause: Record<string, unknown>,
-): cause is RelayProtectedErrorLike {
-  if (isRelayProtectedError(cause)) {
-    return true;
-  }
-  switch (cause._tag) {
-    case "RelayAuthInvalidError":
-    case "RelayEnvironmentLinkProofInvalidError":
-    case "RelayEnvironmentConnectNotAuthorizedError":
-    case "RelayEnvironmentEndpointUnavailableError":
-    case "RelayEnvironmentLinkFailedError":
-    case "RelayEnvironmentLinkUnavailableError":
-    case "RelayAgentActivityPublishProofInvalidError":
-    case "RelayInternalError":
-      return typeof cause.reason === "string";
-    case "RelayEnvironmentLinkProofExpiredError":
-    case "RelayEnvironmentEndpointTimedOutError":
-    case "RelayAgentActivityPublishProofExpiredError":
-      return true;
-    default:
-      return false;
+      return `Relay encountered an internal error (${error.reason}, trace ${error.traceId}).`;
   }
 }
 
 function decodedRelayClientError(message: string) {
   return (cause: unknown) => {
-    const summarizedCause = summarizeRelayClientErrorCause(cause);
-    const relayError = findRelayProtectedError(cause) ?? findRelayProtectedError(summarizedCause);
+    const relayError = findRelayProtectedError(cause);
     const detail = relayError ? relayProtectedErrorMessage(relayError) : null;
     return new CloudEnvironmentLinkError({
       message: detail ? `${message}: ${detail}` : message,
-      cause: relayError ?? summarizedCause,
+      cause,
     });
   };
 }
 
-function mapRelayClientError<A, R>(
-  message: string,
-): (
-  effect: Effect.Effect<A, ManagedRelayClientError, R>,
-) => Effect.Effect<A, CloudEnvironmentLinkError, R> {
-  const decode = decodedRelayClientError(message);
-  return (effect) =>
-    effect.pipe(Effect.catchCause((cause) => Effect.fail(decode(Cause.squash(cause)))));
-}
-
-function summarizeRelayClientErrorCause(cause: unknown): unknown {
-  if (typeof cause !== "object" || cause === null) {
+function findRelayProtectedError(cause: unknown): RelayProtectedErrorType | null {
+  if (isRelayProtectedError(cause)) {
     return cause;
   }
-  const record = cause as Record<string, unknown>;
-  if (typeof record._tag === "string") {
-    const summary: Record<string, unknown> = { _tag: record._tag };
-    for (const key of ["message", "code", "reason", "traceId", "description"] as const) {
-      if (typeof record[key] === "string") {
-        summary[key] = record[key];
-      }
-    }
-    if ("cause" in record) {
-      summary.cause = summarizeRelayClientErrorCause(record.cause);
-    }
-    if (typeof record.reason === "object" && record.reason !== null) {
-      summary.reason = summarizeRelayClientErrorCause(record.reason);
-    }
-    return summary;
-  }
-  if (cause instanceof Error) {
-    return {
-      name: cause.name,
-      message: cause.message,
-      ...("cause" in cause ? { cause: summarizeRelayClientErrorCause(cause.cause) } : {}),
-    };
-  }
-  return {
-    type: Object.getPrototypeOf(cause)?.constructor?.name ?? "Object",
-  };
-}
-
-function findRelayProtectedError(cause: unknown): RelayProtectedErrorLike | null {
   if (typeof cause !== "object" || cause === null) {
     return null;
   }
-  if (
-    "_tag" in cause &&
-    typeof cause._tag === "string" &&
-    cause._tag.startsWith("Relay") &&
-    isRelayProtectedErrorLike(cause as Record<string, unknown>)
-  ) {
-    return cause as RelayProtectedErrorLike;
-  }
-  return (
-    ("cause" in cause ? findRelayProtectedError(cause.cause) : null) ??
-    ("reason" in cause ? findRelayProtectedError(cause.reason) : null)
-  );
+  return "cause" in cause ? findRelayProtectedError(cause.cause) : null;
 }
 
 function findEnvironmentCloudApiError(cause: unknown): { readonly message: string } | null {
@@ -648,7 +562,11 @@ export function linkEnvironmentToCloud(input: {
         },
       })
       .pipe(
-        mapRelayClientError(`${configuredRelayUrl}/v1/client/environment-link-challenges failed`),
+        Effect.mapError(
+          decodedRelayClientError(
+            `${configuredRelayUrl}/v1/client/environment-link-challenges failed`,
+          ),
+        ),
       );
     const proof = yield* environmentClient.connect
       .linkProof({
@@ -675,7 +593,11 @@ export function linkEnvironmentToCloud(input: {
           managedTunnelsEnabled: true,
         },
       })
-      .pipe(mapRelayClientError(`${configuredRelayUrl}/v1/client/environment-links failed`));
+      .pipe(
+        Effect.mapError(
+          decodedRelayClientError(`${configuredRelayUrl}/v1/client/environment-links failed`),
+        ),
+      );
     yield* ensureLinkedEnvironmentMatches({
       expectedEnvironmentId: input.environment.environmentId,
       expectedProviderKind: MANAGED_ENDPOINT_PROVIDER_KIND,
@@ -728,7 +650,11 @@ export function linkPrimaryEnvironmentToCloud(input: {
         },
       })
       .pipe(
-        mapRelayClientError(`${configuredRelayUrl}/v1/client/environment-link-challenges failed`),
+        Effect.mapError(
+          decodedRelayClientError(
+            `${configuredRelayUrl}/v1/client/environment-link-challenges failed`,
+          ),
+        ),
       );
     const proof = yield* environmentClient.connect
       .linkProof({
@@ -758,7 +684,11 @@ export function linkPrimaryEnvironmentToCloud(input: {
           managedTunnelsEnabled: true,
         },
       })
-      .pipe(mapRelayClientError(`${configuredRelayUrl}/v1/client/environment-links failed`));
+      .pipe(
+        Effect.mapError(
+          decodedRelayClientError(`${configuredRelayUrl}/v1/client/environment-links failed`),
+        ),
+      );
     yield* ensureLinkedEnvironmentMatches({
       expectedEnvironmentId: target.environmentId,
       expectedProviderKind: MANAGED_ENDPOINT_PROVIDER_KIND,
