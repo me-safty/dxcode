@@ -4126,6 +4126,7 @@ export default function ChatView(props: ChatViewProps) {
                               onChangeActivePendingUserInputCustomAnswer
                             }
                             onProviderModelSelect={onProviderModelSelect}
+                            getModelDisabledReason={getModelDisabledReason}
                             toggleInteractionMode={toggleInteractionMode}
                             handleRuntimeModeChange={handleRuntimeModeChange}
                             handleInteractionModeChange={handleInteractionModeChange}

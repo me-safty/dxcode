@@ -11,8 +11,10 @@ import React, {
   memo,
   useEffect,
   useMemo,
+  useState,
   type ReactNode,
 } from "react";
+import { GlobeIcon } from "lucide-react";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
@@ -831,7 +833,7 @@ function ChatMarkdown({
           />
         );
       },
-      pre({ node: _node, ref, children, ...props }) {
+      pre({ node, ref, children, ...props }) {
         const codeBlock = extractCodeBlock(children);
         if (!codeBlock) {
           return (

@@ -428,6 +428,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             text={displayedUserMessage.visibleText}
             terminalContexts={terminalContexts}
             skills={ctx.skills}
+            markdownCwd={ctx.markdownCwd}
           />
         </div>
         <div className="mt-1 flex min-h-6 items-center justify-end gap-2 pr-2 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/user:opacity-100">
@@ -1261,6 +1262,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  markdownCwd: string | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasVisibleBody = props.text.trim().length > 0 || props.terminalContexts.length > 0;

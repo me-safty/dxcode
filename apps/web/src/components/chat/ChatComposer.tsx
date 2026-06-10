@@ -188,9 +188,6 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
     props.interactionMode === "plan"
       ? "Plan mode — click to return to normal build mode"
       : "Default mode — click to enter plan mode";
-  const planSidebarTooltip = props.planSidebarOpen
-    ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
-    : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`;
 
   const interactionModeToggle = props.showInteractionModeToggle ? (
     <>
@@ -214,7 +211,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
           }
         >
           {props.interactionMode === "plan" ? (
-            <PencilRulerIcon className="text-current opacity-100" />
+            <PenLineIcon className="text-current opacity-100" />
           ) : (
             <BotIcon />
           )}
