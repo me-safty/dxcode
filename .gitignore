@@ -5,6 +5,7 @@ node_modules
 *.log
 *.tsbuildinfo
 apps/*/dist
+infra/*/dist
 .astro
 packages/*/dist
 .env
@@ -32,3 +33,8 @@ dist-electron/
 apps/server/~/.t3code/
 ~/.t3code/
 .t3work-runs/
+node_modules/
+.alchemy/
+*.log
+.env*
+!.env.example
