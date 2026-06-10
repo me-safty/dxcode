@@ -22,7 +22,6 @@ const workspaceFiles = [
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
   "apps/server/package.json",
-  "apps/desktop/package.json",
   "apps/web/package.json",
   "apps/mobile/package.json",
   "apps/mobile/deps/react-native-nitro-markdown-0.5.0.tgz",
@@ -222,7 +221,6 @@ try {
 
   for (const relativePath of [
     "apps/server/package.json",
-    "apps/desktop/package.json",
     "apps/web/package.json",
     "packages/contracts/package.json",
   ]) {

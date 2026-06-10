@@ -6,7 +6,6 @@ packages:
   - "scripts"
 
 onlyBuiltDependencies:
-  - electron
   - esbuild
   - msgpackr-extract
   - node-pty

@@ -25,7 +25,6 @@ const BASE_SERVER_PORT = 13773;
 const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
-const DESKTOP_DEV_LOOPBACK_HOST = "127.0.0.1";
 const DEV_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::1", "::"] as const;
 
 export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
@@ -43,7 +42,6 @@ const MODE_ARGS = {
   ],
   "dev:server": ["run", "--filter=t3", "dev"],
   "dev:web": ["run", "--filter=@t3tools/web", "dev"],
-  "dev:desktop": ["run", "--filter=@t3tools/desktop", "--filter=@t3tools/web", "dev"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
 type DevMode = keyof typeof MODE_ARGS;
@@ -162,37 +160,24 @@ export function createDevRunnerEnv({
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
     const resolvedBaseDir = yield* resolveBaseDir(t3Home);
-    const isDesktopMode = mode === "dev:desktop";
-
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
       PORT: String(webPort),
-      VITE_DEV_SERVER_URL:
-        devUrl?.toString() ??
-        `http://${isDesktopMode ? DESKTOP_DEV_LOOPBACK_HOST : "localhost"}:${webPort}`,
+      VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://localhost:${webPort}`,
       MORECODE_T3CODE_HOME: resolvedBaseDir,
     };
 
-    if (!isDesktopMode) {
-      output.MORECODE_T3CODE_PORT = String(serverPort);
-      output.VITE_HTTP_URL = `http://localhost:${serverPort}`;
-      output.VITE_WS_URL = `ws://localhost:${serverPort}`;
-    } else {
-      output.MORECODE_T3CODE_PORT = String(serverPort);
-      output.VITE_HTTP_URL = `http://${DESKTOP_DEV_LOOPBACK_HOST}:${serverPort}`;
-      output.VITE_WS_URL = `ws://${DESKTOP_DEV_LOOPBACK_HOST}:${serverPort}`;
-      delete output.MORECODE_T3CODE_MODE;
-      delete output.MORECODE_T3CODE_NO_BROWSER;
-      delete output.MORECODE_T3CODE_HOST;
-    }
+    output.MORECODE_T3CODE_PORT = String(serverPort);
+    output.VITE_HTTP_URL = `http://localhost:${serverPort}`;
+    output.VITE_WS_URL = `ws://localhost:${serverPort}`;
 
-    if (!isDesktopMode && host !== undefined) {
+    if (host !== undefined) {
       output.MORECODE_T3CODE_HOST = host;
     }
 
-    if (!isDesktopMode && noBrowser !== undefined) {
+    if (noBrowser !== undefined) {
       output.MORECODE_T3CODE_NO_BROWSER = noBrowser ? "1" : "0";
-    } else if (!isDesktopMode) {
+    } else {
       delete output.MORECODE_T3CODE_NO_BROWSER;
     }
 
@@ -217,11 +202,6 @@ export function createDevRunnerEnv({
 
     if (mode === "dev:server" || mode === "dev:web") {
       output.MORECODE_T3CODE_MODE = "web";
-      delete output.MORECODE_T3CODE_DESKTOP_WS_URL;
-    }
-
-    if (isDesktopMode) {
-      output.HOST = DESKTOP_DEV_LOOPBACK_HOST;
       delete output.MORECODE_T3CODE_DESKTOP_WS_URL;
     }
 

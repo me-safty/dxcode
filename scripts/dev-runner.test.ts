@@ -15,17 +15,6 @@ import {
 
 it.layer(NodeServices.layer)("dev-runner", (it) => {
   describe("getDevRunnerModeArgs", () => {
-    it.effect("lets Vite+ honor the desktop dev task graph", () =>
-      Effect.sync(() => {
-        assert.deepStrictEqual(getDevRunnerModeArgs("dev:desktop"), [
-          "run",
-          "--filter=@t3tools/desktop",
-          "--filter=@t3tools/web",
-          "dev",
-        ]);
-      }),
-    );
-
     it.effect("places Vite+ run flags before the task name", () =>
       Effect.sync(() => {
         assert.deepStrictEqual(getDevRunnerModeArgs("dev"), [
@@ -187,42 +176,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         });
 
         assert.equal(env.MORECODE_T3CODE_HOME, path.resolve("/tmp/my-t3"));
-      }),
-    );
-
-    it.effect("pins desktop dev to a stable backend port and websocket url", () =>
-      Effect.gen(function* () {
-        const path = yield* Path.Path;
-        const env = yield* createDevRunnerEnv({
-          mode: "dev:desktop",
-          baseEnv: {
-            MORECODE_T3CODE_PORT: "13773",
-            MORECODE_T3CODE_MODE: "web",
-            MORECODE_T3CODE_NO_BROWSER: "0",
-            MORECODE_T3CODE_HOST: "0.0.0.0",
-            VITE_WS_URL: "ws://localhost:13773",
-          },
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: "/tmp/my-t3",
-          noBrowser: true,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: "127.0.0.1",
-          port: 4222,
-          devUrl: undefined,
-        });
-
-        assert.equal(env.MORECODE_T3CODE_HOME, path.resolve("/tmp/my-t3"));
-        assert.equal(env.PORT, "5733");
-        assert.equal(env.VITE_DEV_SERVER_URL, "http://127.0.0.1:5733");
-        assert.equal(env.HOST, "127.0.0.1");
-        assert.equal(env.MORECODE_T3CODE_PORT, "4222");
-        assert.equal(env.VITE_HTTP_URL, "http://127.0.0.1:4222");
-        assert.equal(env.MORECODE_T3CODE_MODE, undefined);
-        assert.equal(env.MORECODE_T3CODE_NO_BROWSER, undefined);
-        assert.equal(env.MORECODE_T3CODE_HOST, undefined);
-        assert.equal(env.VITE_WS_URL, "ws://127.0.0.1:4222");
       }),
     );
 

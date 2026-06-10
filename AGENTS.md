@@ -1,6 +1,7 @@
 # AGENTS.md
 
 # First Priorities
+
 ## Task Completion Requirements
 
 - `vp check` and `vp run typecheck` must pass before considering tasks completed.
@@ -9,7 +10,7 @@
 
 ## Project Snapshot
 
-more Code is a minimal web GUI for using coding agents like Codex and Claude. It is intended to allow agents to work inside of a Linux VM (i.e a workstation for AI agents to do work in)
+more Code is a minimal web GUI for using coding agents like Codex and Claude. It is intended to allow you to do work in a remote environment with agents and linux in mind.
 
 # Secondary Priorities
 

@@ -7,7 +7,6 @@ import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 
 import { resolvePrimaryEnvironmentHttpUrl } from "../environments/primary";
-import { isElectron } from "../env";
 import { APP_VERSION } from "~/branding";
 
 const DEFAULT_EXPORT_INTERVAL_MS = 1_000;
@@ -15,7 +14,7 @@ const CLIENT_TRACING_RESOURCE = {
   serviceName: "t3-web",
   attributes: {
     "service.runtime": "t3-web",
-    "service.mode": isElectron ? "electron" : "browser",
+    "service.mode": "browser",
     "service.version": APP_VERSION,
   },
 } as const;
