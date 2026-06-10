@@ -38,6 +38,7 @@ import {
   BotIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   ChevronUpIcon,
   CircleAlertIcon,
   EyeIcon,
@@ -67,6 +68,7 @@ import {
   resolveAssistantMessageCopyState,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
+  type TimelineLatestTurn,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -110,6 +112,7 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onToggleTurnFold: (turnId: TurnId) => void;
 }
 
 interface TimelineRowActivityState {
@@ -135,8 +138,7 @@ interface MessagesTimelineProps {
   activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
-  completionDividerBeforeEntryId: string | null;
-  completionSummary: string | null;
+  latestTurn: TimelineLatestTurn | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
@@ -164,8 +166,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   activeTurnStartedAt,
   listRef,
   timelineEntries,
-  completionDividerBeforeEntryId,
-  completionSummary,
+  latestTurn,
   turnDiffSummaryByAssistantMessageId,
   routeThreadKey,
   onOpenTurnDiff,
@@ -181,12 +182,54 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
 }: MessagesTimelineProps) {
+  const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
+  const onToggleTurnFold = useCallback((turnId: TurnId) => {
+    setExpandedTurnIds((existing) => {
+      const next = new Set(existing);
+      if (next.has(turnId)) {
+        next.delete(turnId);
+      } else {
+        next.add(turnId);
+      }
+      return next;
+    });
+  }, []);
+
+  // An in-session interrupt leaves its turn expanded so the user keeps their
+  // place; the next turn (or a reload, since this is local state) folds it.
+  const previousLatestTurnRef = useRef(latestTurn);
+  useEffect(() => {
+    const previous = previousLatestTurnRef.current;
+    previousLatestTurnRef.current = latestTurn;
+    if (!latestTurn || previous?.turnId === undefined) {
+      return;
+    }
+    if (latestTurn.turnId === previous.turnId) {
+      if (previous.state === "running" && latestTurn.state === "interrupted") {
+        setExpandedTurnIds((existing) => {
+          const next = new Set(existing);
+          next.add(latestTurn.turnId);
+          return next;
+        });
+      }
+      return;
+    }
+    setExpandedTurnIds((existing) => {
+      if (!existing.has(previous.turnId)) {
+        return existing;
+      }
+      const next = new Set(existing);
+      next.delete(previous.turnId);
+      return next;
+    });
+  }, [latestTurn]);
+
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
         timelineEntries,
-        completionDividerBeforeEntryId,
-        completionDividerDuration: completionSummary?.replace(/^Worked for\s+/u, "") ?? null,
+        latestTurn,
+        expandedTurnIds,
         isWorking,
         activeTurnInProgress,
         activeTurnId: activeTurnId ?? null,
@@ -196,8 +239,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       }),
     [
       timelineEntries,
-      completionDividerBeforeEntryId,
-      completionSummary,
+      latestTurn,
+      expandedTurnIds,
       isWorking,
       activeTurnInProgress,
       activeTurnId,
@@ -245,6 +288,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onToggleTurnFold,
     }),
     [
       timestampFormat,
@@ -257,6 +301,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onToggleTurnFold,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -329,7 +374,11 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
   return (
     <div
       className={cn(
-        "pb-4",
+        // Commentary (non-terminal assistant) rows carry no metadata row, so
+        // they sit closer to the work that follows them.
+        row.kind === "message" && row.message.role === "assistant" && !row.showAssistantMeta
+          ? "pb-2"
+          : "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
       data-timeline-row-id={row.id}
@@ -338,6 +387,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
       {row.kind === "work" ? <WorkGroupSection groupedEntries={row.groupedEntries} /> : null}
+      {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
@@ -445,15 +495,32 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
   );
 }
 
+function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-fold" }> }) {
+  const ctx = use(TimelineRowCtx);
+  const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
+
+  return (
+    <div className="border-b border-border/60 pb-2 pt-1">
+      <button
+        type="button"
+        aria-expanded={row.expanded}
+        data-scroll-anchor-ignore
+        onClick={() => ctx.onToggleTurnFold(row.turnId)}
+        className="flex items-center gap-1 px-1 text-xs text-muted-foreground tabular-nums transition-colors hover:text-foreground"
+      >
+        <span>{row.label}</span>
+        <Icon className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
 
   return (
     <>
-      {row.showCompletionDivider && (
-        <AssistantCompletionDivider duration={row.completionDividerDuration} />
-      )}
       <div className="relative min-w-0 px-1 py-0.5">
         <ChatMarkdown
           text={messageText}
@@ -489,18 +556,6 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         ) : null}
       </div>
     </>
-  );
-}
-
-function AssistantCompletionDivider({ duration }: { duration: string | null | undefined }) {
-  return (
-    <div className="my-3 flex items-center gap-3">
-      <span className="h-px flex-1 bg-border" />
-      <span className="text-xs text-muted-foreground tabular-nums">
-        {duration ? `Worked for ${duration}` : "Worked for 0s"}
-      </span>
-      <span className="h-px flex-1 bg-border" />
-    </div>
   );
 }
 

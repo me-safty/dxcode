@@ -250,8 +250,7 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
       ],
-      completionDividerBeforeEntryId: "assistant-final-entry",
-      completionDividerDuration: null,
+      expandedTurnIds: new Set(["turn-1" as never]),
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -266,7 +265,6 @@ describe("deriveMessagesTimelineRows", () => {
     expect(assistantRows).toHaveLength(2);
     expect(assistantRows[0]?.showAssistantCopyButton).toBe(false);
     expect(assistantRows[1]?.showAssistantCopyButton).toBe(true);
-    expect(assistantRows[1]?.showCompletionDivider).toBe(true);
   });
 
   it("marks only the active assistant turn as streaming for copy controls", () => {
@@ -301,8 +299,6 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
       ],
-      completionDividerBeforeEntryId: "assistant-two-entry",
-      completionDividerDuration: "5m",
       isWorking: false,
       activeTurnInProgress: true,
       activeTurnId: "turn-2" as never,
@@ -317,9 +313,7 @@ describe("deriveMessagesTimelineRows", () => {
     );
 
     expect(assistantRows[0]?.assistantCopyStreaming).toBe(false);
-    expect(assistantRows[0]?.completionDividerDuration).toBeNull();
     expect(assistantRows[1]?.assistantCopyStreaming).toBe(true);
-    expect(assistantRows[1]?.completionDividerDuration).toBe("5m");
   });
 
   it("projects assistant diff summaries and user revert counts onto the affected rows", () => {
@@ -361,8 +355,6 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
       ],
-      completionDividerBeforeEntryId: null,
-      completionDividerDuration: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map([
@@ -384,85 +376,188 @@ describe("deriveMessagesTimelineRows", () => {
     expect(assistantRow?.assistantTurnDiffSummary).toBe(assistantTurnDiffSummary);
   });
 
-  it("computes the completion divider duration from the current assistant row", () => {
+  it("folds settled-turn commentary and work behind a Worked-for row", () => {
+    const timelineEntries = [
+      {
+        id: "user-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:00Z",
+        message: {
+          id: "user-1" as never,
+          role: "user" as const,
+          text: "Build it",
+          turnId: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "assistant-thought-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:05Z",
+        message: {
+          id: "assistant-thought" as never,
+          role: "assistant" as const,
+          text: "Looking around first.",
+          turnId: "turn-1" as never,
+          createdAt: "2026-01-01T00:00:05Z",
+          completedAt: "2026-01-01T00:00:06Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "work-entry-1",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:08Z",
+        entry: {
+          id: "work-1",
+          createdAt: "2026-01-01T00:00:08Z",
+          turnId: "turn-1" as never,
+          label: "Ran command",
+          tone: "tool" as const,
+        },
+      },
+      {
+        id: "assistant-final-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:20Z",
+        message: {
+          id: "assistant-final" as never,
+          role: "assistant" as const,
+          text: "Done",
+          turnId: "turn-1" as never,
+          createdAt: "2026-01-01T00:00:20Z",
+          completedAt: "2026-01-01T00:00:22Z",
+          streaming: false,
+        },
+      },
+    ];
+
+    const collapsedRows = deriveMessagesTimelineRows({
+      timelineEntries,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const foldRow = collapsedRows.find(
+      (row): row is Extract<(typeof collapsedRows)[number], { kind: "turn-fold" }> =>
+        row.kind === "turn-fold",
+    );
+    expect(foldRow?.turnId).toBe("turn-1");
+    expect(foldRow?.expanded).toBe(false);
+    // First fold entry (00:00:05) → terminal message completedAt (00:00:22).
+    expect(foldRow?.label).toBe("Worked for 17s");
+    expect(collapsedRows.map((row) => row.id)).toEqual([
+      "user-entry",
+      "turn-fold:turn-1",
+      "assistant-final-entry",
+    ]);
+
+    const expandedRows = deriveMessagesTimelineRows({
+      timelineEntries,
+      expandedTurnIds: new Set(["turn-1" as never]),
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(expandedRows.map((row) => row.id)).toEqual([
+      "user-entry",
+      "turn-fold:turn-1",
+      "assistant-thought-entry",
+      "work-entry-1",
+      "assistant-final-entry",
+    ]);
+    expect(
+      expandedRows.find((row) => row.kind === "turn-fold" && row.expanded === true),
+    ).toBeDefined();
+  });
+
+  it("uses latest-turn timings and the stopped label for an interrupted latest turn", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
-          id: "user-entry",
-          kind: "message",
-          createdAt: "2026-01-01T00:00:00Z",
-          message: {
-            id: "user-1" as never,
-            role: "user",
-            text: "Build it",
-            turnId: null,
-            createdAt: "2026-01-01T00:00:00Z",
-            streaming: false,
+          id: "work-entry-1",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:05Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:05Z",
+            turnId: "turn-1" as never,
+            label: "Ran command",
+            tone: "tool" as const,
           },
         },
+      ],
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "interrupted",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:47Z",
+      },
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        kind: "turn-fold",
+        turnId: "turn-1",
+        label: "You stopped after 47s",
+        expanded: false,
+      }),
+    ]);
+  });
+
+  it("does not fold the active in-progress turn", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
         {
-          id: "assistant-entry",
+          id: "assistant-thought-entry",
           kind: "message",
           createdAt: "2026-01-01T00:00:05Z",
           message: {
-            id: "assistant-1" as never,
+            id: "assistant-thought" as never,
             role: "assistant",
-            text: "Done",
+            text: "Working on it.",
             turnId: "turn-1" as never,
             createdAt: "2026-01-01T00:00:05Z",
-            completedAt: "2026-01-01T00:00:22Z",
+            completedAt: "2026-01-01T00:00:06Z",
             streaming: false,
           },
         },
-      ],
-      completionDividerBeforeEntryId: "assistant-entry",
-      completionDividerDuration: null,
-      isWorking: false,
-      activeTurnStartedAt: null,
-      turnDiffSummaryByAssistantMessageId: new Map(),
-      revertTurnCountByUserMessageId: new Map(),
-    });
-
-    const assistantRow = rows.find(
-      (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
-        row.kind === "message" && row.message.role === "assistant",
-    );
-
-    expect(assistantRow?.completionDividerDuration).toBe("22s");
-  });
-
-  it("uses the turn-level completion duration for the completion divider", () => {
-    const rows = deriveMessagesTimelineRows({
-      timelineEntries: [
         {
-          id: "assistant-entry",
-          kind: "message",
-          createdAt: "2026-01-01T00:04:44Z",
-          message: {
-            id: "assistant-1" as never,
-            role: "assistant",
-            text: "Done",
+          id: "work-entry-1",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:08Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:08Z",
             turnId: "turn-1" as never,
-            createdAt: "2026-01-01T00:04:44Z",
-            completedAt: "2026-01-01T00:05:00Z",
-            streaming: false,
+            label: "Ran command",
+            tone: "tool" as const,
           },
         },
       ],
-      completionDividerBeforeEntryId: "assistant-entry",
-      completionDividerDuration: "5m",
-      isWorking: false,
-      activeTurnStartedAt: null,
+      isWorking: true,
+      activeTurnInProgress: true,
+      activeTurnId: "turn-1" as never,
+      activeTurnStartedAt: "2026-01-01T00:00:00Z",
       turnDiffSummaryByAssistantMessageId: new Map(),
       revertTurnCountByUserMessageId: new Map(),
     });
 
-    const assistantRow = rows.find(
-      (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
-        row.kind === "message" && row.message.role === "assistant",
-    );
-
-    expect(assistantRow?.completionDividerDuration).toBe("5m");
+    expect(rows.some((row) => row.kind === "turn-fold")).toBe(false);
+    expect(rows.map((row) => row.id)).toEqual([
+      "assistant-thought-entry",
+      "work-entry-1",
+      "working-indicator-row",
+    ]);
   });
 
   it("only shows assistant metadata on the terminal assistant message", () => {
@@ -497,8 +592,7 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
       ],
-      completionDividerBeforeEntryId: null,
-      completionDividerDuration: null,
+      expandedTurnIds: new Set(["turn-1" as never]),
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -548,8 +642,6 @@ describe("computeStableMessagesTimelineRows", () => {
           message: secondUserMessage,
         },
       ],
-      completionDividerBeforeEntryId: null,
-      completionDividerDuration: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -599,8 +691,6 @@ describe("computeStableMessagesTimelineRows", () => {
             entry: secondWorkEntry,
           },
         ],
-        completionDividerBeforeEntryId: null,
-        completionDividerDuration: null,
         isWorking: false,
         activeTurnStartedAt: null,
         turnDiffSummaryByAssistantMessageId: new Map(),
@@ -655,8 +745,6 @@ describe("computeStableMessagesTimelineRows", () => {
           message: secondUserMessage,
         },
       ],
-      completionDividerBeforeEntryId: null,
-      completionDividerDuration: null,
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
