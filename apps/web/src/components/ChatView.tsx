@@ -3859,7 +3859,6 @@ export default function ChatView(props: ChatViewProps) {
               key={activeThread.id}
               isWorking={isWorking}
               activeTurnInProgress={isWorking || !latestTurnSettled}
-              activeTurnId={activeLatestTurn?.turnId ?? null}
               activeTurnStartedAt={activeWorkStartedAt}
               listRef={legendListRef}
               timelineEntries={timelineEntries}

@@ -134,7 +134,6 @@ const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "d
 interface MessagesTimelineProps {
   isWorking: boolean;
   activeTurnInProgress: boolean;
-  activeTurnId?: TurnId | null;
   activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
@@ -162,7 +161,6 @@ interface MessagesTimelineProps {
 export const MessagesTimeline = memo(function MessagesTimeline({
   isWorking,
   activeTurnInProgress,
-  activeTurnId,
   activeTurnStartedAt,
   listRef,
   timelineEntries,
@@ -257,8 +255,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         latestTurn,
         expandedTurnIds,
         isWorking,
-        activeTurnInProgress,
-        activeTurnId: activeTurnId ?? null,
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
@@ -268,8 +264,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       latestTurn,
       expandedTurnIds,
       isWorking,
-      activeTurnInProgress,
-      activeTurnId,
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,

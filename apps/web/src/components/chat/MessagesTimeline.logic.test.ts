@@ -299,9 +299,13 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
       ],
+      latestTurn: {
+        turnId: "turn-2" as never,
+        state: "running",
+        startedAt: "2026-01-01T00:00:19Z",
+        completedAt: null,
+      },
       isWorking: false,
-      activeTurnInProgress: true,
-      activeTurnId: "turn-2" as never,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
       revertTurnCountByUserMessageId: new Map(),
@@ -514,6 +518,73 @@ describe("deriveMessagesTimelineRows", () => {
     ]);
   });
 
+  it("keeps the previous turn folded while a newly sent message awaits its turn", () => {
+    // Right after send, isWorking is true but latestTurn still points at the
+    // previous, settled turn — it must stay folded through that window.
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "work-entry-1",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:05Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:05Z",
+            turnId: "turn-1" as never,
+            label: "Ran command",
+            tone: "tool" as const,
+          },
+        },
+        {
+          id: "assistant-final-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:20Z",
+          message: {
+            id: "assistant-final" as never,
+            role: "assistant",
+            text: "Done",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:20Z",
+            completedAt: "2026-01-01T00:00:22Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "user-followup-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:01:00Z",
+          message: {
+            id: "user-followup" as never,
+            role: "user",
+            text: "yooo",
+            turnId: null,
+            createdAt: "2026-01-01T00:01:00Z",
+            streaming: false,
+          },
+        },
+      ],
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "completed",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:22Z",
+      },
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:01:00Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.id)).toEqual([
+      "turn-fold:turn-1",
+      "assistant-final-entry",
+      "user-followup-entry",
+      "working-indicator-row",
+    ]);
+    const finalRow = rows.find((row) => row.id === "assistant-final-entry");
+    expect(finalRow?.kind === "message" && finalRow.showAssistantMeta).toBe(true);
+  });
+
   it("does not fold the active in-progress turn", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
@@ -544,9 +615,13 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
       ],
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "running",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: null,
+      },
       isWorking: true,
-      activeTurnInProgress: true,
-      activeTurnId: "turn-1" as never,
       activeTurnStartedAt: "2026-01-01T00:00:00Z",
       turnDiffSummaryByAssistantMessageId: new Map(),
       revertTurnCountByUserMessageId: new Map(),
@@ -625,9 +700,13 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
       ],
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "running",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: null,
+      },
       isWorking: true,
-      activeTurnInProgress: true,
-      activeTurnId: "turn-1" as never,
       activeTurnStartedAt: "2026-01-01T00:00:00Z",
       turnDiffSummaryByAssistantMessageId: new Map(),
       revertTurnCountByUserMessageId: new Map(),

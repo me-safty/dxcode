@@ -138,6 +138,21 @@ interface TurnFold {
 }
 
 /**
+ * The latest turn counts as unsettled while it is still running (or has not
+ * recorded a completion). This is deliberately keyed on the turn's own
+ * lifecycle rather than transient working state: right after the user sends
+ * a message, the previous turn is still the "active" one until the server
+ * creates the new turn, and folding must not flicker through that window.
+ */
+function deriveUnsettledTurnId(latestTurn: TimelineLatestTurn | null): TurnId | null {
+  if (!latestTurn) {
+    return null;
+  }
+  const isSettled = latestTurn.completedAt !== null && latestTurn.state !== "running";
+  return isSettled ? null : latestTurn.turnId;
+}
+
+/**
  * Settled turns fold their commentary and tool activity behind a
  * "Worked for ..." row anchored at the turn's first foldable entry; the
  * terminal assistant message stays visible below the fold.
@@ -146,8 +161,7 @@ function deriveTurnFolds(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   terminalAssistantMessageIds: ReadonlySet<string>;
   latestTurn: TimelineLatestTurn | null;
-  activeTurnInProgress: boolean;
-  activeTurnId: TurnId | null;
+  unsettledTurnId: TurnId | null;
 }): ReadonlyMap<string, TurnFold> {
   interface TurnGroup {
     entries: Array<TimelineEntry>;
@@ -185,7 +199,7 @@ function deriveTurnFolds(input: {
 
   const foldsByAnchorEntryId = new Map<string, TurnFold>();
   for (const [turnId, group] of groupsByTurnId) {
-    if (input.activeTurnInProgress && turnId === input.activeTurnId) {
+    if (turnId === input.unsettledTurnId) {
       continue;
     }
     if (group.hasStreamingMessage) {
@@ -246,8 +260,6 @@ export function deriveMessagesTimelineRows(input: {
   latestTurn?: TimelineLatestTurn | null;
   expandedTurnIds?: ReadonlySet<TurnId>;
   isWorking: boolean;
-  activeTurnInProgress?: boolean;
-  activeTurnId?: TurnId | null;
   activeTurnStartedAt: string | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
@@ -257,12 +269,12 @@ export function deriveMessagesTimelineRows(input: {
     input.timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(input.timelineEntries);
+  const unsettledTurnId = deriveUnsettledTurnId(input.latestTurn ?? null);
   const foldsByAnchorEntryId = deriveTurnFolds({
     timelineEntries: input.timelineEntries,
     terminalAssistantMessageIds,
     latestTurn: input.latestTurn ?? null,
-    activeTurnInProgress: input.activeTurnInProgress === true,
-    activeTurnId: input.activeTurnId ?? null,
+    unsettledTurnId,
   });
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
@@ -333,9 +345,8 @@ export function deriveMessagesTimelineRows(input: {
 
     const assistantTurnStillInProgress =
       timelineEntry.message.role === "assistant" &&
-      input.activeTurnInProgress === true &&
-      input.activeTurnId != null &&
-      timelineEntry.message.turnId === input.activeTurnId;
+      unsettledTurnId !== null &&
+      timelineEntry.message.turnId === unsettledTurnId;
 
     const durationStart =
       durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt;
