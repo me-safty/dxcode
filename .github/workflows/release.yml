@@ -28,7 +28,7 @@ jobs:
   check_changes:
     name: Check for changes since last nightly
     if: github.event_name == 'schedule'
-    runs-on: t3code-arc
+    runs-on: ubuntu-latest
     outputs:
       has_changes: ${{ steps.check.outputs.has_changes }}
     steps:
@@ -64,7 +64,7 @@ jobs:
     if: |
       !failure() && !cancelled() &&
       (github.event_name != 'schedule' || needs.check_changes.outputs.has_changes == 'true')
-    runs-on: t3code-arc
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       release_channel: ${{ steps.release_meta.outputs.release_channel }}
@@ -168,7 +168,7 @@ jobs:
     name: Resolve T3 Connect public config
     needs: preflight
     if: ${{ false }} # Disabled for the fork: no production relay config.
-    runs-on: t3code-arc
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     environment:
       name: production
@@ -242,7 +242,7 @@ jobs:
             target: dmg
             arch: x64
           - label: Linux x64
-            runner: t3code-arc
+            runner: ubuntu-latest
             platform: linux
             target: AppImage
             arch: x64
@@ -480,7 +480,7 @@ jobs:
     name: Publish CLI to npm
     needs: [preflight, build]
     if: ${{ false }} # Disabled for the fork: keep the private CLI package out of npm publishing.
-    runs-on: t3code-arc
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -523,7 +523,7 @@ jobs:
     name: Publish GitHub Release
     needs: [preflight, build]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' }}
-    runs-on: t3code-arc
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - id: app_token
@@ -639,8 +639,8 @@ jobs:
   deploy_web:
     name: Deploy hosted web app
     needs: [preflight, release]
-    if: ${{ false }} # Disabled for the fork: avoid deploying the hosted web app with upstream Vercel secrets.
-    runs-on: t3code-arc
+    if: false # Disabled for the fork: avoid deploying the hosted web app with upstream Vercel secrets.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       T3CODE_CLERK_PUBLISHABLE_KEY: ""
@@ -733,9 +733,9 @@ jobs:
 
   finalize:
     name: Finalize release
-    if: ${{ false }} # Disabled for the fork: avoid committing release-only version bumps back to main.
+    if: false # Disabled for the fork: avoid committing release-only version bumps back to main.
     needs: [preflight, release]
-    runs-on: t3code-arc
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - id: app_token
@@ -808,9 +808,9 @@ jobs:
 
   announce_discord:
     name: Announce release on Discord
-    if: ${{ false }} # Disabled for the fork: avoid posting upstream release announcements.
+    if: false # Disabled for the fork: avoid posting upstream release announcements.
     needs: [preflight, release, deploy_web, finalize]
-    runs-on: t3code-arc
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
