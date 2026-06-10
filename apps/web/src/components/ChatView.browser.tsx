@@ -61,6 +61,10 @@ import {
   installServiceWorkerNotificationNavigation,
   resetNotificationNavigationStateForTests,
 } from "../push/notificationNavigation";
+import {
+  clearPendingNotificationClick,
+  writePendingNotificationClick,
+} from "../push/pendingNotificationClick";
 import { buildPlanImplementationPrompt } from "../proposedPlan";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { getServerConfig } from "../rpc/serverState";
@@ -1970,6 +1974,7 @@ async function mountChatView(options: {
   viewport: ViewportSpec;
   snapshot: OrchestrationReadModel;
   configureFixture?: (fixture: TestFixture) => void;
+  installNotificationNavigation?: boolean;
   resolveRpc?: (body: NormalizedWsRpcRequestBody) => unknown | undefined;
   getInitialStreamValues?: (
     request: NormalizedWsRpcRequestBody,
@@ -2007,6 +2012,10 @@ async function mountChatView(options: {
       initialEntries: [options.initialPath ?? `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`],
     }),
   );
+  const cleanupNotificationNavigation =
+    options.installNotificationNavigation === true
+      ? installServiceWorkerNotificationNavigation(router)
+      : null;
 
   const screen = await render(
     <AppAtomRegistryProvider>
@@ -2023,6 +2032,7 @@ async function mountChatView(options: {
 
   const cleanup = async () => {
     customWsRpcResolver = null;
+    cleanupNotificationNavigation?.();
     await screen.unmount();
     host.remove();
     await waitForLayout();
@@ -2073,6 +2083,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
     await __resetLocalApiForTests();
     await setViewport(DEFAULT_VIEWPORT);
+    await clearPendingNotificationClick();
     localStorage.clear();
     document.body.innerHTML = "";
     wsRequests.length = 0;
@@ -4699,6 +4710,47 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(mounted.router.state.location.pathname).not.toBe("/");
     } finally {
       cleanupNotificationNavigation();
+      await mounted.cleanup();
+    }
+  });
+
+  it("replays persisted notification targets on startup before bootstrap navigation", async () => {
+    const bootstrapThreadId = NOTIFICATION_RECOVERY_OTHER_THREAD_ID;
+    const snapshot = addThreadToSnapshot(
+      createSnapshotForTargetUser({
+        targetMessageId: "msg-user-notification-persisted-startup-test" as MessageId,
+        targetText: "notification persisted startup test",
+      }),
+      bootstrapThreadId,
+    );
+    await writePendingNotificationClick({
+      url: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`,
+      openedAt: Date.now(),
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+      initialPath: "/",
+      installNotificationNavigation: true,
+      configureFixture: (fixture) => {
+        fixture.welcome = {
+          ...fixture.welcome,
+          bootstrapThreadId,
+        };
+      },
+    });
+
+    try {
+      await waitForURL(
+        mounted.router,
+        (path) => path === serverThreadPath(THREAD_ID),
+        "Persisted notification clicks should navigate to the target thread on startup.",
+      );
+      await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
+      expect(mounted.router.state.location.pathname).toBe(serverThreadPath(THREAD_ID));
+      expect(mounted.router.state.location.pathname).not.toBe(serverThreadPath(bootstrapThreadId));
+    } finally {
+      await clearPendingNotificationClick();
       await mounted.cleanup();
     }
   });

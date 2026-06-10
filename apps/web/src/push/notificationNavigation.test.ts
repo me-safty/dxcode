@@ -2,6 +2,11 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 
 import type { AppRouter } from "../router";
 import {
+  readPendingNotificationClick,
+  writePendingNotificationClick,
+} from "./pendingNotificationClick";
+import {
+  consumePendingNotificationClick,
   getLastNotificationNavigationTarget,
   installServiceWorkerNotificationNavigation,
   isNotificationClickClientMessage,
@@ -12,23 +17,48 @@ import {
 
 const ORIGIN = "https://example.test";
 
-function stubServiceWorker() {
-  const target = new EventTarget();
+function createCacheStorageMock() {
+  const entries = new Map<string, Response>();
+  const cache = {
+    delete: vi.fn(async (request: Request) => entries.delete(request.url)),
+    match: vi.fn(async (request: Request) => entries.get(request.url)?.clone()),
+    put: vi.fn(async (request: Request, response: Response) => {
+      entries.set(request.url, response.clone());
+    }),
+  };
+  const cacheStorage = {
+    open: vi.fn(async () => cache),
+  };
+  return {
+    cache,
+    cacheStorage,
+  };
+}
+
+function stubServiceWorker(options: { readonly cacheStorage?: CacheStorage } = {}) {
+  const serviceWorkerTarget = new EventTarget();
+  const windowTarget = new EventTarget();
   vi.stubGlobal("navigator", {
     serviceWorker: {
-      addEventListener: target.addEventListener.bind(target),
-      removeEventListener: target.removeEventListener.bind(target),
+      addEventListener: serviceWorkerTarget.addEventListener.bind(serviceWorkerTarget),
+      removeEventListener: serviceWorkerTarget.removeEventListener.bind(serviceWorkerTarget),
     },
   });
   vi.stubGlobal("window", {
+    ...(options.cacheStorage ? { caches: options.cacheStorage } : {}),
+    addEventListener: windowTarget.addEventListener.bind(windowTarget),
     location: { origin: ORIGIN },
+    removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
   });
 
   return {
     dispatch(data: unknown) {
       const event = new Event("message") as MessageEvent;
       Object.defineProperty(event, "data", { value: data });
-      target.dispatchEvent(event);
+      serviceWorkerTarget.dispatchEvent(event);
+    },
+    dispatchWindowEvent(type: string) {
+      windowTarget.dispatchEvent(new Event(type));
     },
   };
 }
@@ -39,6 +69,11 @@ function makeRouter() {
   } as unknown as AppRouter & {
     readonly navigate: ReturnType<typeof vi.fn>;
   };
+}
+
+async function flushAsync(): Promise<void> {
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe("notificationNavigation", () => {
@@ -155,6 +190,104 @@ describe("notificationNavigation", () => {
       url: "/env-2/thread-2",
     });
     expect(router.navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays a persisted notification target on startup", async () => {
+    const service = await import("../environments/runtime/service");
+    const reconcileSpy = vi
+      .spyOn(service, "reconcileAfterNotificationClick")
+      .mockImplementation(() => undefined);
+    const { cacheStorage } = createCacheStorageMock();
+    stubServiceWorker({ cacheStorage: cacheStorage as unknown as CacheStorage });
+    const router = makeRouter();
+    const openedAt = Date.now();
+
+    await writePendingNotificationClick({
+      url: "/env-1/thread-1",
+      openedAt,
+    });
+
+    const cleanup = installServiceWorkerNotificationNavigation(router);
+    await flushAsync();
+
+    expect(router.navigate).toHaveBeenCalledWith({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId: "env-1",
+        threadId: "thread-1",
+      },
+      search: {},
+    });
+    expect(getLastNotificationNavigationTarget()).toEqual({
+      kind: "thread",
+      environmentId: "env-1",
+      threadId: "thread-1",
+    });
+    expect(reconcileSpy).toHaveBeenCalledWith(
+      {
+        kind: "thread",
+        environmentId: "env-1",
+        threadId: "thread-1",
+      },
+      {
+        openedAt,
+      },
+    );
+    await expect(readPendingNotificationClick()).resolves.toBeNull();
+
+    cleanup();
+  });
+
+  it("replays a persisted notification target on focus", async () => {
+    const service = await import("../environments/runtime/service");
+    vi.spyOn(service, "reconcileAfterNotificationClick").mockImplementation(() => undefined);
+    const { cacheStorage } = createCacheStorageMock();
+    const serviceWorker = stubServiceWorker({
+      cacheStorage: cacheStorage as unknown as CacheStorage,
+    });
+    const router = makeRouter();
+
+    const cleanup = installServiceWorkerNotificationNavigation(router);
+    await flushAsync();
+    expect(router.navigate).not.toHaveBeenCalled();
+
+    await writePendingNotificationClick({
+      url: "/env-2/thread-2",
+      openedAt: Date.now(),
+    });
+    serviceWorker.dispatchWindowEvent("focus");
+    await flushAsync();
+
+    expect(router.navigate).toHaveBeenCalledWith({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId: "env-2",
+        threadId: "thread-2",
+      },
+      search: {},
+    });
+
+    cleanup();
+  });
+
+  it("clears malformed or cross-origin persisted notification targets", async () => {
+    const service = await import("../environments/runtime/service");
+    const reconcileSpy = vi
+      .spyOn(service, "reconcileAfterNotificationClick")
+      .mockImplementation(() => undefined);
+    const { cacheStorage } = createCacheStorageMock();
+    stubServiceWorker({ cacheStorage: cacheStorage as unknown as CacheStorage });
+    const router = makeRouter();
+
+    await writePendingNotificationClick({
+      url: "https://elsewhere.test/env-1/thread-1",
+      openedAt: Date.now(),
+    });
+    await consumePendingNotificationClick(router, "test");
+
+    expect(router.navigate).not.toHaveBeenCalled();
+    expect(reconcileSpy).not.toHaveBeenCalled();
+    await expect(readPendingNotificationClick()).resolves.toBeNull();
   });
 
   it("does nothing when service workers are unavailable", () => {

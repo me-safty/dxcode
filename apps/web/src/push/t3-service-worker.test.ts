@@ -26,18 +26,79 @@ interface MockClientState {
 interface ServiceWorkerTestHarness {
   readonly context: vm.Context;
   readonly openWindowCalls: string[];
+  readonly operationLog: string[];
   readonly getClients: () => MockClientState[];
+  readonly getPendingClickWrites: () => Array<{
+    readonly cacheName: string;
+    readonly requestUrl: string;
+    readonly value: unknown;
+  }>;
   readonly addClient: (options: {
     readonly url: string;
+    readonly focusResult?: "self" | "throw";
     readonly focused?: boolean;
     readonly visibilityState?: "hidden" | "visible";
     readonly navigateResult?: "self" | "null" | "throw";
   }) => void;
+  readonly setOpenWindowResult: (
+    result: "undefined" | "client-at-url" | "client-at-home" | "throw",
+  ) => void;
 }
 
 function createServiceWorkerTestHarness(): ServiceWorkerTestHarness {
   const openWindowCalls: string[] = [];
+  const operationLog: string[] = [];
+  const pendingClickWrites: Array<{
+    cacheName: string;
+    requestUrl: string;
+    value: unknown;
+  }> = [];
+  let openWindowResult: "undefined" | "client-at-url" | "client-at-home" | "throw" = "undefined";
+  const makeClient = (options: {
+    readonly url: string;
+    readonly focusResult?: "self" | "throw";
+    readonly focused?: boolean;
+    readonly visibilityState?: "hidden" | "visible";
+    readonly navigateResult?: "self" | "null" | "throw";
+  }) => {
+    const client: Record<string, unknown> = {
+      url: options.url,
+      focused: options.focused === true,
+      visibilityState: options.visibilityState ?? "visible",
+      focusCalls: 0,
+      navigateCalls: [],
+      postMessageCalls: [],
+    };
+    client.focus = async () => {
+      operationLog.push("focus");
+      client.focusCalls = Number(client.focusCalls ?? 0) + 1;
+      if (options.focusResult === "throw") {
+        throw new Error("focus failed");
+      }
+      return client;
+    };
+    if (options.navigateResult !== undefined) {
+      client.navigate = async (url: string) => {
+        operationLog.push("navigate");
+        (client.navigateCalls as string[]).push(url);
+        if (options.navigateResult === "throw") {
+          throw new Error("navigate failed");
+        }
+        if (options.navigateResult === "null") {
+          return null;
+        }
+        client.url = url;
+        return client;
+      };
+    }
+    client.postMessage = (message: unknown) => {
+      (client.postMessageCalls as unknown[]).push(message);
+    };
+    return client;
+  };
   const context: Record<string, unknown> = {
+    Request,
+    Response,
     URL,
     console,
     __windowClients: [] as Array<Record<string, unknown>>,
@@ -49,8 +110,32 @@ function createServiceWorkerTestHarness(): ServiceWorkerTestHarness {
       clients: {
         matchAll: async () => context.__windowClients,
         openWindow: async (url: string) => {
+          operationLog.push("openWindow");
           openWindowCalls.push(url);
+          if (openWindowResult === "throw") {
+            throw new Error("openWindow failed");
+          }
+          if (openWindowResult === "undefined") {
+            return undefined;
+          }
+          const client = makeClient({
+            url: openWindowResult === "client-at-home" ? HOME_URL : url,
+          });
+          (context.__windowClients as Array<Record<string, unknown>>).push(client);
+          return client;
         },
+      },
+      caches: {
+        open: async (cacheName: string) => ({
+          put: async (request: Request, response: Response) => {
+            operationLog.push("persist");
+            pendingClickWrites.push({
+              cacheName,
+              requestUrl: request.url,
+              value: await response.json(),
+            });
+          },
+        }),
       },
     },
   };
@@ -74,6 +159,7 @@ this.__t3ServiceWorkerTestExports = {
   return {
     context,
     openWindowCalls,
+    operationLog,
     getClients: () =>
       (context.__windowClients as Array<Record<string, unknown>>).map((client) => ({
         url: String(client.url),
@@ -82,44 +168,12 @@ this.__t3ServiceWorkerTestExports = {
         postMessageCalls:
           (client.postMessageCalls as MockClientState["postMessageCalls"] | undefined) ?? [],
       })),
+    getPendingClickWrites: () => pendingClickWrites,
     addClient: (options) => {
-      const navigateBody =
-        options.navigateResult === undefined
-          ? ""
-          : `async navigate(url) {
-    this.navigateCalls.push(url);
-    const navigateResult = ${JSON.stringify(options.navigateResult)};
-    if (navigateResult === "throw") {
-      throw new Error("navigate failed");
-    }
-    if (navigateResult === "null") {
-      return null;
-    }
-    this.url = url;
-    return this;
-  },`;
-      vm.runInContext(
-        `
-{
-__windowClients.push({
-  url: ${JSON.stringify(options.url)},
-  focused: ${options.focused === true},
-  visibilityState: ${JSON.stringify(options.visibilityState ?? "visible")},
-  focusCalls: 0,
-  navigateCalls: [],
-  postMessageCalls: [],
-  async focus() {
-    this.focusCalls += 1;
-    return this;
-  },
-  ${navigateBody}
-  postMessage(message) {
-    this.postMessageCalls.push(message);
-  },
-});
-}`,
-        context,
-      );
+      (context.__windowClients as Array<Record<string, unknown>>).push(makeClient(options));
+    },
+    setOpenWindowResult: (result) => {
+      openWindowResult = result;
     },
   };
 }
@@ -161,6 +215,42 @@ describe("t3-service-worker notification click navigation", () => {
     await openNotificationUrl(harness, TARGET_URL);
 
     expect(harness.openWindowCalls).toEqual([TARGET_URL]);
+  });
+
+  it("posts the notification click to the client returned by openWindow", async () => {
+    harness.setOpenWindowResult("client-at-home");
+
+    await openNotificationUrl(harness, TARGET_URL);
+
+    const [client] = harness.getClients();
+    expect(harness.openWindowCalls).toEqual([TARGET_URL]);
+    expect(client?.url).toBe(HOME_URL);
+    expect(client?.postMessageCalls).toEqual([
+      {
+        type: "t3.notification-click",
+        url: TARGET_URL,
+        openedAt: expect.any(Number),
+      },
+    ]);
+  });
+
+  it("persists the notification click before window operations", async () => {
+    harness.addClient({ url: TARGET_URL, focused: true, navigateResult: "self" });
+
+    await openNotificationUrl(harness, TARGET_URL);
+
+    const [write] = harness.getPendingClickWrites();
+    expect(write).toMatchObject({
+      cacheName: "t3-notification-click-v1",
+      requestUrl: `${ORIGIN}/__t3-notification-click/pending`,
+      value: {
+        url: TARGET_URL,
+        openedAt: expect.any(Number),
+      },
+    });
+    expect(harness.operationLog.indexOf("persist")).toBeLessThan(
+      harness.operationLog.indexOf("focus"),
+    );
   });
 
   it("ignores cross-origin clients when deciding whether the app is open", async () => {
@@ -250,7 +340,7 @@ describe("t3-service-worker notification click navigation", () => {
     expect(harness.openWindowCalls).toEqual([]);
   });
 
-  it("falls back to focus and postMessage when navigation returns null", async () => {
+  it("falls back to focus, postMessage, and openWindow when navigation returns null", async () => {
     harness.addClient({
       url: HOME_URL,
       focused: true,
@@ -270,10 +360,10 @@ describe("t3-service-worker notification click navigation", () => {
         openedAt: expect.any(Number),
       },
     ]);
-    expect(harness.openWindowCalls).toEqual([]);
+    expect(harness.openWindowCalls).toEqual([TARGET_URL]);
   });
 
-  it("falls back to focus and postMessage when navigation throws", async () => {
+  it("falls back to focus, postMessage, and openWindow when navigation throws", async () => {
     harness.addClient({
       url: HOME_URL,
       focused: true,
@@ -285,6 +375,28 @@ describe("t3-service-worker notification click navigation", () => {
     const [client] = harness.getClients();
     expect(client?.url).toBe(HOME_URL);
     expect(client?.navigateCalls).toEqual([TARGET_URL]);
+    expect(client?.focusCalls).toBe(1);
+    expect(client?.postMessageCalls).toEqual([
+      {
+        type: "t3.notification-click",
+        url: TARGET_URL,
+        openedAt: expect.any(Number),
+      },
+    ]);
+    expect(harness.openWindowCalls).toEqual([TARGET_URL]);
+  });
+
+  it("posts the notification click when focus throws", async () => {
+    harness.addClient({
+      url: TARGET_URL,
+      focused: true,
+      focusResult: "throw",
+      navigateResult: "self",
+    });
+
+    await openNotificationUrl(harness, TARGET_URL);
+
+    const [client] = harness.getClients();
     expect(client?.focusCalls).toBe(1);
     expect(client?.postMessageCalls).toEqual([
       {

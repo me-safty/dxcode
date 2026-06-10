@@ -2,6 +2,10 @@ const DEFAULT_NOTIFICATION_TITLE = "Salchi";
 const DEFAULT_NOTIFICATION_URL = "/";
 const NOTIFICATION_CLICK_MESSAGE_TYPE = "t3.notification-click";
 const NOTIFICATION_TITLE_SOURCE_SUFFIX = /(?:^|\s+)from\s+Salchi\s*$/i;
+// Mirrored in src/push/pendingNotificationClick.ts. The service worker is a
+// public plain JS asset, so it cannot import the TypeScript helper directly.
+const PENDING_NOTIFICATION_CLICK_CACHE_NAME = "t3-notification-click-v1";
+const PENDING_NOTIFICATION_CLICK_REQUEST_PATH = "/__t3-notification-click/pending";
 
 self.addEventListener("push", (event) => {
   const payload = readPushPayload(event);
@@ -78,30 +82,44 @@ function clientMatchesNotificationUrl(clientUrl, notificationUrl) {
 }
 
 async function openNotificationUrl(url) {
+  const click = {
+    url,
+    openedAt: Date.now(),
+  };
+  await persistPendingNotificationClick(click);
+
+  return openNotificationClickTarget(click);
+}
+
+async function openNotificationClickTarget(click) {
   const clients = await self.clients.matchAll({
     type: "window",
     includeUncontrolled: true,
   });
   const sameOriginClients = clients.filter((client) => isSameOriginUrl(client.url));
   if (sameOriginClients.length === 0) {
-    return self.clients.openWindow(url);
+    return openWindowAndPostNotificationClick(click);
   }
 
-  const targetClient = selectNotificationClient(sameOriginClients, url);
-  return navigateFocusAndPostNotificationClick(targetClient, url);
+  const targetClient = selectNotificationClient(sameOriginClients, click.url);
+  return navigateFocusAndPostNotificationClick(targetClient, click);
 }
 
-async function navigateFocusAndPostNotificationClick(client, url) {
+async function navigateFocusAndPostNotificationClick(client, click) {
   if (!client) {
-    return self.clients.openWindow(url);
+    return openWindowAndPostNotificationClick(click);
   }
 
-  if (clientMatchesNotificationUrl(client.url, url)) {
-    return focusClientAndPostNotificationClick(client, url);
+  if (clientMatchesNotificationUrl(client.url, click.url)) {
+    return focusClientAndPostNotificationClick(client, click);
   }
 
-  const navigatedClient = await navigateNotificationClient(client, url);
-  return focusClientAndPostNotificationClick(navigatedClient || client, url);
+  const navigatedClient = await navigateNotificationClient(client, click.url);
+  const focusedClient = await focusClientAndPostNotificationClick(navigatedClient || client, click);
+  if (!navigatedClient) {
+    await openWindowAndPostNotificationClick(click);
+  }
+  return focusedClient;
 }
 
 async function navigateNotificationClient(client, url) {
@@ -116,31 +134,76 @@ async function navigateNotificationClient(client, url) {
   }
 }
 
-async function focusClientAndPostNotificationClick(client, url) {
+async function focusClientAndPostNotificationClick(client, click) {
   if ("focus" in client) {
-    const focusedClient = await client.focus();
-    postNotificationClickMessage(focusedClient || client, url);
+    let focusedClient = client;
+    try {
+      focusedClient = (await client.focus()) || client;
+    } catch {
+      focusedClient = client;
+    }
+    postNotificationClickMessage(focusedClient, click);
     return focusedClient;
   }
 
-  postNotificationClickMessage(client, url);
+  postNotificationClickMessage(client, click);
   return undefined;
 }
 
-function postNotificationClickMessage(client, url) {
+async function openWindowAndPostNotificationClick(click) {
+  const client = await openNotificationWindow(click.url);
+  postNotificationClickMessage(client, click);
+  return client;
+}
+
+async function openNotificationWindow(url) {
+  try {
+    return await self.clients.openWindow(url);
+  } catch {
+    return null;
+  }
+}
+
+function postNotificationClickMessage(client, click) {
   if (!client || !("postMessage" in client)) {
     return;
   }
 
   const message = {
     type: NOTIFICATION_CLICK_MESSAGE_TYPE,
-    url,
-    openedAt: Date.now(),
+    url: click.url,
+    openedAt: click.openedAt,
   };
 
   // Client.postMessage from a service worker does not accept a target origin.
   // oxlint-disable-next-line require-post-message-target-origin
   client.postMessage(message);
+}
+
+async function persistPendingNotificationClick(click) {
+  if (!("caches" in self)) {
+    return;
+  }
+
+  try {
+    const cache = await self.caches.open(PENDING_NOTIFICATION_CLICK_CACHE_NAME);
+    await cache.put(
+      makePendingNotificationClickRequest(),
+      new Response(JSON.stringify(click), {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    );
+  } catch {
+    // This persistence is best-effort. Direct navigation/postMessage still runs.
+  }
+}
+
+function makePendingNotificationClickRequest() {
+  return new Request(new URL(PENDING_NOTIFICATION_CLICK_REQUEST_PATH, self.location.origin), {
+    method: "GET",
+  });
 }
 
 function selectNotificationClient(sameOriginClients, url) {
