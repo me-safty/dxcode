@@ -1,7 +1,7 @@
 import "../index.css";
 
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { ThreadId, type TerminalAttachStreamEvent } from "@t3tools/contracts";
+import { ProjectId, ThreadId, type TerminalAttachStreamEvent } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
@@ -132,6 +132,7 @@ vi.mock("~/localApi", () => ({
 import { TerminalViewport } from "./ThreadTerminalDrawer";
 
 const THREAD_ID = ThreadId.make("thread-terminal-browser");
+const PROJECT_ID = ProjectId.make("project-terminal-browser");
 
 function createEnvironmentApi() {
   const snapshot = {
@@ -192,6 +193,7 @@ async function mountTerminalViewport(props: {
     <TerminalViewport
       threadRef={props.threadRef}
       threadId={THREAD_ID}
+      projectId={PROJECT_ID}
       terminalId="term-1"
       terminalLabel="Terminal"
       cwd="/repo/project"
@@ -216,6 +218,7 @@ async function mountTerminalViewport(props: {
         <TerminalViewport
           threadRef={nextProps.threadRef}
           threadId={THREAD_ID}
+          projectId={PROJECT_ID}
           terminalId="term-1"
           terminalLabel="Terminal"
           cwd="/repo/project"

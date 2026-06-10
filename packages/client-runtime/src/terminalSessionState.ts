@@ -88,6 +88,21 @@ export interface TerminalAttachClient {
   };
 }
 
+export type TerminalSubscribeMetadataInput = {
+  readonly environmentId: EnvironmentId;
+  readonly client: TerminalMetadataClient;
+  readonly options?: { readonly onResubscribe?: () => void };
+};
+
+export type TerminalAttachSessionInput = {
+  readonly environmentId: EnvironmentId;
+  readonly client: TerminalAttachClient;
+  readonly terminal: TerminalAttachInput;
+  readonly onSnapshot?: (snapshot: TerminalSessionSnapshot) => void;
+  readonly onEvent?: (event: TerminalAttachStreamEvent) => void;
+  readonly options?: { readonly onResubscribe?: () => void };
+};
+
 export const EMPTY_TERMINAL_BUFFER_STATE = Object.freeze<TerminalBufferState>({
   buffer: "",
   status: "closed",

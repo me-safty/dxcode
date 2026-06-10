@@ -4,6 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { LaunchEnvTestLayer } from "../../launchEnv/Layers/LaunchEnvTest.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { TerminalManager } from "../../terminal/Services/Manager.ts";
 import { ProjectSetupScriptRunner } from "../Services/ProjectSetupScriptRunner.ts";
@@ -20,25 +21,20 @@ const makeProject = (scripts: OrchestrationProject["scripts"]): OrchestrationPro
   deletedAt: null,
 });
 
+const TEST_BASE_DIR = "/tmp/t3-setup-script-runner";
+const launchEnvLayer = LaunchEnvTestLayer.stub({
+  t3Home: TEST_BASE_DIR,
+  projectId: ProjectId.make("project-1"),
+});
+
 const makeProjectionSnapshotQueryLayer = (project: OrchestrationProject) =>
-  Layer.succeed(ProjectionSnapshotQuery, {
-    getCommandReadModel: () => Effect.die("unused"),
-    getSnapshot: () => Effect.die("unused"),
-    getShellSnapshot: () => Effect.die("unused"),
-    getArchivedShellSnapshot: () => Effect.die("unused"),
-    getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 1 }),
-    getCounts: () => Effect.die("unused"),
+  Layer.mock(ProjectionSnapshotQuery)({
     getActiveProjectByWorkspaceRoot: (workspaceRoot) =>
       Effect.succeed(
         workspaceRoot === project.workspaceRoot ? Option.some(project) : Option.none(),
       ),
     getProjectShellById: (projectId) =>
       Effect.succeed(projectId === project.id ? Option.some(project) : Option.none()),
-    getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
-    getThreadCheckpointContext: () => Effect.die("unused"),
-    getFullThreadDiffContext: () => Effect.die("unused"),
-    getThreadShellById: () => Effect.die("unused"),
-    getThreadDetailById: () => Effect.die("unused"),
   });
 
 describe("ProjectSetupScriptRunner", () => {
@@ -50,6 +46,7 @@ describe("ProjectSetupScriptRunner", () => {
       Effect.service(ProjectSetupScriptRunner).pipe(
         Effect.provide(
           ProjectSetupScriptRunnerLive.pipe(
+            Layer.provideMerge(launchEnvLayer),
             Layer.provideMerge(makeProjectionSnapshotQueryLayer(project)),
             Layer.provideMerge(
               Layer.succeed(TerminalManager, {
@@ -112,6 +109,7 @@ describe("ProjectSetupScriptRunner", () => {
       Effect.service(ProjectSetupScriptRunner).pipe(
         Effect.provide(
           ProjectSetupScriptRunnerLive.pipe(
+            Layer.provideMerge(launchEnvLayer),
             Layer.provideMerge(makeProjectionSnapshotQueryLayer(project)),
             Layer.provideMerge(
               Layer.succeed(TerminalManager, {
@@ -149,12 +147,9 @@ describe("ProjectSetupScriptRunner", () => {
     expect(open).toHaveBeenCalledWith({
       threadId: "thread-1",
       terminalId: "setup-setup",
+      projectId: ProjectId.make("project-1"),
       cwd: "/repo/worktrees/a",
       worktreePath: "/repo/worktrees/a",
-      env: {
-        T3CODE_PROJECT_ROOT: "/repo/project",
-        T3CODE_WORKTREE_PATH: "/repo/worktrees/a",
-      },
     });
     expect(write).toHaveBeenCalledWith({
       threadId: "thread-1",

@@ -37,6 +37,7 @@ import { makeAdapterRegistryMock } from "../src/provider/testUtils/providerAdapt
 import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
 import { makeProviderRegistryLayer } from "../src/provider/testUtils/providerRegistryMock.ts";
 import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSessionDirectory.ts";
+import { LaunchEnvLive } from "../src/launchEnv/Layers/LaunchEnvLive.ts";
 import { ServerSettingsService } from "../src/serverSettings.ts";
 import { makeProviderServiceLive } from "../src/provider/Layers/ProviderService.ts";
 import { makeCodexAdapter } from "../src/provider/Layers/CodexAdapter.ts";
@@ -259,12 +260,16 @@ export const makeOrchestrationIntegrationHarness = (
 
     const persistenceLayer = makeSqlitePersistenceLive(dbPath);
     const orchestrationLayer = OrchestrationEngineLive.pipe(
+      Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
       Layer.provide(OrchestrationEventStoreLive),
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+      Layer.provide(RepositoryIdentityResolverLive),
+      Layer.provide(persistenceLayer),
     );
     const providerSessionDirectoryLayer = ProviderSessionDirectoryLive.pipe(
       Layer.provide(ProviderSessionRuntimeRepositoryLive),
+      Layer.provide(persistenceLayer),
     );
     const realCodexRegistry = Layer.effect(
       ProviderAdapterRegistry,
@@ -297,12 +302,15 @@ export const makeOrchestrationIntegrationHarness = (
     const providerRegistryLayer = makeProviderRegistryLayer();
 
     const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistry.layer));
-    const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive;
+    const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive.pipe(
+      Layer.provide(RepositoryIdentityResolverLive),
+      Layer.provide(persistenceLayer),
+    );
     const runtimeServicesLayer = Layer.mergeAll(
       projectionSnapshotQueryLayer,
-      orchestrationLayer.pipe(Layer.provide(projectionSnapshotQueryLayer)),
-      ProjectionCheckpointRepositoryLive,
-      ProjectionPendingApprovalRepositoryLive,
+      orchestrationLayer,
+      ProjectionCheckpointRepositoryLive.pipe(Layer.provide(persistenceLayer)),
+      ProjectionPendingApprovalRepositoryLive.pipe(Layer.provide(persistenceLayer)),
       checkpointStoreLayer,
       providerLayer,
       RuntimeReceiptBusTest,
@@ -374,14 +382,20 @@ export const makeOrchestrationIntegrationHarness = (
         }),
       ),
     );
+    const serverConfigLayer = ServerConfig.layerTest(workspaceDir, rootDir);
     const layer = Layer.empty.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(orchestrationReactorLayer),
       Layer.provideMerge(providerRegistryLayer),
-      Layer.provide(persistenceLayer),
-      Layer.provideMerge(RepositoryIdentityResolverLive),
       Layer.provideMerge(ServerSettingsService.layerTest()),
-      Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
+      Layer.provideMerge(serverConfigLayer),
+      Layer.provide(persistenceLayer),
+      Layer.provideMerge(
+        LaunchEnvLive.pipe(
+          Layer.provide(serverConfigLayer),
+          Layer.provide(projectionSnapshotQueryLayer),
+        ),
+      ),
       Layer.provideMerge(NodeServices.layer),
     );
 

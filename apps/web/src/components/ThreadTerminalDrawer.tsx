@@ -2,6 +2,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Plus, SquareSplitHorizontal, TerminalSquare, Trash2, XIcon } from "lucide-react";
 import {
   type ContextMenuItem,
+  type ProjectId,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type TerminalAttachStreamEvent,
@@ -270,6 +271,7 @@ export async function copyTerminalSelectionTextToClipboard(text: string): Promis
 interface TerminalViewportProps {
   threadRef: ScopedThreadRef;
   threadId: ThreadId;
+  projectId: ProjectId;
   terminalId: string;
   terminalLabel: string;
   cwd: string;
@@ -287,12 +289,12 @@ interface TerminalViewportProps {
 interface TerminalLaunchLocation {
   readonly cwd: string;
   readonly worktreePath?: string | null;
-  readonly runtimeEnv?: Record<string, string>;
 }
 
 export function TerminalViewport({
   threadRef,
   threadId,
+  projectId,
   terminalId,
   terminalLabel,
   cwd,
@@ -699,11 +701,12 @@ export function TerminalViewport({
         terminal: {
           threadId,
           terminalId,
+          projectId,
           cwd,
           ...(worktreePath !== undefined ? { worktreePath } : {}),
           cols: activeTerminal.cols,
           rows: activeTerminal.rows,
-          ...(runtimeEnv ? { env: runtimeEnv } : {}),
+          ...(runtimeEnv && Object.keys(runtimeEnv).length > 0 ? { env: runtimeEnv } : {}),
         },
         onEvent: (event) => {
           if (disposed) return;
@@ -762,7 +765,7 @@ export function TerminalViewport({
     // autoFocus is intentionally omitted;
     // it is only read at mount time and must not trigger terminal teardown/recreation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd, environmentId, runtimeEnvKey, terminalId, threadId, worktreePath]);
+  }, [cwd, environmentId, projectId, runtimeEnvKey, terminalId, threadId, worktreePath]);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -811,9 +814,9 @@ export function TerminalViewport({
 interface ThreadTerminalDrawerProps {
   threadRef: ScopedThreadRef;
   threadId: ThreadId;
+  projectId: ProjectId;
   cwd: string;
   worktreePath?: string | null;
-  runtimeEnv?: Record<string, string>;
   visible?: boolean;
   height: number;
   terminalIds: string[];
@@ -869,9 +872,9 @@ function TerminalActionButton({ label, className, onClick, children }: TerminalA
 export default function ThreadTerminalDrawer({
   threadRef,
   threadId,
+  projectId,
   cwd,
   worktreePath,
-  runtimeEnv,
   visible = true,
   height,
   terminalIds,
@@ -1027,11 +1030,10 @@ export default function ThreadTerminalDrawer({
         terminalLaunchLocationsById?.get(terminalId) ?? {
           cwd,
           ...(worktreePath !== undefined ? { worktreePath } : {}),
-          ...(runtimeEnv ? { runtimeEnv } : {}),
         }
       );
     },
-    [cwd, runtimeEnv, terminalLaunchLocationsById, worktreePath],
+    [cwd, terminalLaunchLocationsById, worktreePath],
   );
   const splitTerminalActionLabel = hasReachedSplitLimit
     ? `Split Terminal (max ${MAX_TERMINALS_PER_GROUP} per group)`
@@ -1260,14 +1262,12 @@ export default function ThreadTerminalDrawer({
                         <TerminalViewport
                           threadRef={threadRef}
                           threadId={threadId}
+                          projectId={projectId}
                           terminalId={terminalId}
                           terminalLabel={terminalLabelById.get(terminalId) ?? "Terminal"}
                           cwd={terminalLaunchLocation.cwd}
                           {...(terminalLaunchLocation.worktreePath !== undefined
                             ? { worktreePath: terminalLaunchLocation.worktreePath }
-                            : {})}
-                          {...(terminalLaunchLocation.runtimeEnv
-                            ? { runtimeEnv: terminalLaunchLocation.runtimeEnv }
                             : {})}
                           onSessionExited={() => onCloseTerminal(terminalId)}
                           onAddTerminalContext={onAddTerminalContext}
@@ -1288,14 +1288,12 @@ export default function ThreadTerminalDrawer({
                   key={resolvedActiveTerminalId}
                   threadRef={threadRef}
                   threadId={threadId}
+                  projectId={projectId}
                   terminalId={resolvedActiveTerminalId}
                   terminalLabel={terminalLabelById.get(resolvedActiveTerminalId) ?? "Terminal"}
                   cwd={activeTerminalLaunchLocation.cwd}
                   {...(activeTerminalLaunchLocation.worktreePath !== undefined
                     ? { worktreePath: activeTerminalLaunchLocation.worktreePath }
-                    : {})}
-                  {...(activeTerminalLaunchLocation.runtimeEnv
-                    ? { runtimeEnv: activeTerminalLaunchLocation.runtimeEnv }
                     : {})}
                   onSessionExited={() => onCloseTerminal(resolvedActiveTerminalId)}
                   onAddTerminalContext={onAddTerminalContext}
