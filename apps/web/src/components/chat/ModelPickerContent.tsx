@@ -10,7 +10,8 @@ import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { isModelPickerNewModel } from "./modelPickerModelHighlights";
 import { buildModelPickerSearchText, scoreModelPickerSearch } from "./modelPickerSearch";
-import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxList } from "../ui/combobox";
+import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxListVirtualized } from "../ui/combobox";
+import { ScrollArea } from "../ui/scroll-area";
 import { ModelEsque } from "./providerIconUtils";
 import {
   modelPickerJumpCommandForIndex,
@@ -81,12 +82,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   terminalOpen: boolean;
   onRequestClose?: () => void;
+  getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
   const {
     keybindings: providedKeybindings,
     modelOptionsByInstance,
     instanceEntries,
+    getModelDisabledReason,
     onInstanceModelChange,
   } = props;
   const [searchQuery, setSearchQuery] = useState("");
@@ -354,6 +357,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const handleModelSelect = useCallback(
     (modelSlug: string, instanceId: ProviderInstanceId) => {
+      if (getModelDisabledReason?.(instanceId, modelSlug)) {
+        return;
+      }
       const options = modelOptionsByInstance.get(instanceId);
       if (!options) {
         return;
@@ -370,7 +376,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         onInstanceModelChange(instanceId, resolvedModel);
       }
     },
-    [entryByInstanceId, modelOptionsByInstance, onInstanceModelChange],
+    [entryByInstanceId, getModelDisabledReason, modelOptionsByInstance, onInstanceModelChange],
   );
 
   const toggleFavorite = useCallback(
@@ -392,15 +398,20 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       string,
       NonNullable<ReturnType<typeof modelPickerJumpCommandForIndex>>
     >();
-    for (const [visibleModelIndex, model] of filteredModels.entries()) {
-      const jumpCommand = modelPickerJumpCommandForIndex(visibleModelIndex);
+    let selectableModelIndex = 0;
+    for (const model of filteredModels) {
+      if (getModelDisabledReason?.(model.instanceId, model.slug)) {
+        continue;
+      }
+      const jumpCommand = modelPickerJumpCommandForIndex(selectableModelIndex);
       if (!jumpCommand) {
         return mapping;
       }
       mapping.set(`${model.instanceId}:${model.slug}`, jumpCommand);
+      selectableModelIndex += 1;
     }
     return mapping;
-  }, [filteredModels]);
+  }, [filteredModels, getModelDisabledReason]);
   const modelJumpModelKeys = useMemo(
     () => [...modelJumpCommandByKey.keys()],
     [modelJumpCommandByKey],
@@ -566,80 +577,92 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         >
           <div
             className={cn(
-              "flex min-h-0 flex-1 flex-col overflow-hidden",
+              "flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/40",
               showSidebar && "border-l",
             )}
           >
             {/* Search bar */}
-            <div className="border-b px-3 py-2">
-              <ComboboxInput
-                ref={searchInputRef}
-                className="[&_input]:font-sans rounded-md"
-                inputClassName="border-0 shadow-none ring-0 focus-visible:ring-0"
-                placeholder="Search models..."
-                showTrigger={false}
-                startAddon={<SearchIcon className="size-4 shrink-0 text-muted-foreground/50" />}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    props.onRequestClose?.();
-                    return;
+            <div className="px-4 pt-2.5">
+              <div className="border-b border-border/70 pb-2.5 transition-colors focus-within:border-ring">
+                <ComboboxInput
+                  ref={searchInputRef}
+                  className="[&_input]:h-6.5 [&_input]:font-sans [&_input]:leading-6.5"
+                  inputClassName="rounded-none bg-transparent text-sm"
+                  placeholder="Search models..."
+                  showTrigger={false}
+                  startAddon={
+                    <SearchIcon className="-translate-x-0.5 size-4 shrink-0 text-muted-foreground/55" />
                   }
-                  if (e.key === "Enter" && highlightedModelKeyRef.current) {
-                    (
-                      e as typeof e & { preventBaseUIHandler?: () => void }
-                    ).preventBaseUIHandler?.();
-                    e.preventDefault();
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      props.onRequestClose?.();
+                      return;
+                    }
+                    if (e.key === "Enter" && highlightedModelKeyRef.current) {
+                      (
+                        e as typeof e & { preventBaseUIHandler?: () => void }
+                      ).preventBaseUIHandler?.();
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const { instanceId, slug } = splitInstanceModelKey(
+                        highlightedModelKeyRef.current,
+                      );
+                      handleModelSelect(slug, instanceId);
+                      return;
+                    }
                     e.stopPropagation();
-                    const { instanceId, slug } = splitInstanceModelKey(
-                      highlightedModelKeyRef.current,
-                    );
-                    handleModelSelect(slug, instanceId);
-                    return;
-                  }
-                  e.stopPropagation();
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()}
-                size="sm"
-              />
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  size="sm"
+                  unstyled
+                />
+              </div>
             </div>
 
             {/* Model list */}
-            <div
-              ref={listRegionRef}
-              className="relative min-h-0 flex-1 before:pointer-events-none before:absolute before:inset-0 before:bg-muted/40"
-            >
-              <ComboboxList className="model-picker-list size-full px-2 py-2">
-                {filteredModelKeys.map((modelKey, index) => {
-                  const model = filteredModelByKey.get(modelKey);
-                  if (!model) {
-                    return null;
-                  }
-                  return (
-                    <ModelListRow
-                      key={modelKey}
-                      index={index}
-                      model={model}
-                      instanceId={model.instanceId}
-                      driverKind={model.driverKind}
-                      providerDisplayName={model.instanceDisplayName}
-                      providerAccentColor={model.instanceAccentColor}
-                      isFavorite={favoritesSet.has(modelKey)}
-                      isSelected={modelKey === `${props.activeInstanceId}:${props.model}`}
-                      showProvider
-                      preferShortName={!isLocked}
-                      useTriggerLabel={false}
-                      showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
-                      jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
-                      onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
-                    />
-                  );
-                })}
-              </ComboboxList>
+            <div ref={listRegionRef} className="relative min-h-0 flex-1">
+              <ScrollArea
+                className="[&>[data-slot=scroll-area-viewport]]:overflow-x-hidden [&>[data-slot=scroll-area-viewport]]:overscroll-x-none"
+                scrollFade
+              >
+                <div className="w-full min-w-0 overflow-x-clip">
+                  <ComboboxListVirtualized className="model-picker-list w-full min-w-0 max-w-full px-2 py-1.5">
+                    {filteredModelKeys.map((modelKey, index) => {
+                      const model = filteredModelByKey.get(modelKey);
+                      if (!model) {
+                        return null;
+                      }
+                      const disabledReason =
+                        getModelDisabledReason?.(model.instanceId, model.slug) ?? null;
+                      return (
+                        <ModelListRow
+                          key={modelKey}
+                          index={index}
+                          model={model}
+                          instanceId={model.instanceId}
+                          driverKind={model.driverKind}
+                          providerDisplayName={model.instanceDisplayName}
+                          providerAccentColor={model.instanceAccentColor}
+                          isFavorite={favoritesSet.has(modelKey)}
+                          isSelected={modelKey === `${props.activeInstanceId}:${props.model}`}
+                          showProvider
+                          preferShortName={!isLocked}
+                          useTriggerLabel={false}
+                          showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
+                          jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
+                          disabledReason={disabledReason}
+                          onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
+                        />
+                      );
+                    })}
+                  </ComboboxListVirtualized>
+                </div>
+              </ScrollArea>
             </div>
             <ComboboxEmpty className="not-empty:py-6 empty:h-0 text-xs font-normal leading-snug">
               No models found

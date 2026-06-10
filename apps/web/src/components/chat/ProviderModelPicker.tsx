@@ -41,6 +41,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
   onOpenChange?: (open: boolean) => void;
+  getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
@@ -194,7 +195,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       </PopoverTrigger>
       <PopoverPopup
         align="start"
-        className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0] *:data-[slot=popover-viewport]:p-0"
+        className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0]"
+        viewportClassName="!overflow-hidden p-0"
       >
         <ModelPickerContent
           activeInstanceId={activeInstanceId}
@@ -206,6 +208,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           modelOptionsByInstance={props.modelOptionsByInstance}
           terminalOpen={props.terminalOpen ?? false}
           onRequestClose={() => setIsMenuOpen(false)}
+          {...(props.getModelDisabledReason
+            ? { getModelDisabledReason: props.getModelDisabledReason }
+            : {})}
           onInstanceModelChange={handleInstanceModelChange}
         />
       </PopoverPopup>

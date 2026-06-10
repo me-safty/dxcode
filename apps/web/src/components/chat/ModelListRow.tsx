@@ -34,6 +34,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
   useTriggerLabel?: boolean;
   showNewBadge?: boolean;
   jumpLabel?: string | null;
+  disabledReason?: string | null;
   onToggleFavorite: () => void;
 }) {
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
@@ -41,15 +42,18 @@ export const ModelListRow = memo(function ModelListRow(props: {
     ? `${props.providerDisplayName} · ${props.model.subProvider}`
     : props.providerDisplayName;
 
-  return (
+  const row = (
     <ComboboxItem
       hideIndicator
       index={props.index}
       value={`${props.instanceId}:${props.model.slug}`}
+      disabled={Boolean(props.disabledReason)}
       contentClassName="flex w-full items-center gap-3"
       className={cn(
-        "group w-full cursor-pointer rounded-md px-3 py-2.5 transition-[background-color,box-shadow,color]",
+        "group relative w-full !min-w-0 max-w-full cursor-pointer rounded-md px-2 py-2.5 transition-[background-color,box-shadow,color]",
         "data-highlighted:bg-muted/56 data-selected:bg-transparent data-selected:text-foreground data-selected:ring-0",
+        props.disabledReason &&
+          "data-disabled:pointer-events-auto data-disabled:cursor-not-allowed data-disabled:hover:bg-transparent",
       )}
     >
       <div className="min-w-0 flex-1 text-left">
@@ -101,6 +105,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
                 onKeyDown={(event) => {
                   event.stopPropagation();
                 }}
+                disabled={Boolean(props.disabledReason)}
                 type="button"
                 aria-label={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
               >
@@ -119,5 +124,18 @@ export const ModelListRow = memo(function ModelListRow(props: {
         </Tooltip>
       </div>
     </ComboboxItem>
+  );
+
+  if (!props.disabledReason) {
+    return row;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger render={row} />
+      <TooltipPopup side="left" align="center" className="max-w-64 text-balance leading-snug">
+        {props.disabledReason}
+      </TooltipPopup>
+    </Tooltip>
   );
 });
