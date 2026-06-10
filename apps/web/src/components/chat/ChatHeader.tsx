@@ -9,8 +9,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
-import { DiffIcon, FolderIcon, GitMergeIcon, TerminalSquareIcon } from "lucide-react";
-import { Badge } from "../ui/badge";
+import { DiffIcon, TerminalSquareIcon } from "lucide-react";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
@@ -105,24 +104,6 @@ export const ChatHeader = memo(function ChatHeader({
           />
           <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
         </Tooltip>
-        {activeProjectName && (
-          <Badge
-            variant="outline"
-            className="inline-flex h-auto min-h-0 min-w-0 max-w-full shrink items-center justify-center overflow-hidden px-2 py-1 text-center leading-none sm:h-auto sm:min-h-0 sm:min-w-0 sm:max-w-56"
-          >
-            <FolderIcon className="size-3 shrink-0 text-muted-foreground/70" aria-hidden />
-            <span className="min-w-0 max-w-full truncate leading-none">{activeProjectName}</span>
-          </Badge>
-        )}
-        {activeProjectName && !isGitRepo && (
-          <Badge
-            variant="outline"
-            className="inline-flex h-auto min-h-0 shrink-0 items-center justify-center gap-1 px-2 py-1 text-center text-[10px] leading-none text-amber-700 sm:h-auto sm:min-h-0 sm:min-w-0"
-          >
-            <GitMergeIcon className="size-3 shrink-0 opacity-90" aria-hidden />
-            Git not present
-          </Badge>
-        )}
       </div>
       <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 sm:shrink-0 sm:justify-end @3xl/header-actions:gap-3">
         {activeProjectScripts && (
