@@ -1573,6 +1573,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ]);
         assert.equal(threadPosts.length, 1);
         assert.equal(threadPosts[0]?.externalThreadId, "C_TEST:1710000000.000000");
+        assert.deepEqual(threadPosts[0]?.message, {
+          markdown:
+            "Merged noted. [PR #123: Finish Slack completion reaction](https://github.com/affil-ai/t3code/pull/123) is done.",
+        });
         assert.deepEqual(
           deliveryReceipts.map((receipt) => ({
             source: receipt.source,

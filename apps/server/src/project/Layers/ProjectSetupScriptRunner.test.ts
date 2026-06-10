@@ -7,7 +7,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { TerminalManager, type TerminalManagerShape } from "../../terminal/Services/Manager.ts";
-import { ProjectSetupScriptRunner } from "../Services/ProjectSetupScriptRunner.ts";
+import {
+  ProjectSetupScriptRunner,
+  type ProjectSetupScriptRunnerInput,
+  type ProjectSetupScriptRunnerShape,
+} from "../Services/ProjectSetupScriptRunner.ts";
 import { ProjectSetupScriptRunnerLive } from "./ProjectSetupScriptRunner.ts";
 
 const makeProject = (scripts: OrchestrationProject["scripts"]): OrchestrationProject => ({
@@ -76,6 +80,11 @@ const makeRunner = (input: {
     ),
   );
 
+const runForThread = (
+  runner: ProjectSetupScriptRunnerShape,
+  input: ProjectSetupScriptRunnerInput,
+) => Effect.runPromise(runner.runForThread(input));
+
 describe("ProjectSetupScriptRunner", () => {
   it("returns no-script when no setup script exists", async () => {
     const open = vi.fn<TerminalManagerShape["open"]>();
@@ -83,13 +92,11 @@ describe("ProjectSetupScriptRunner", () => {
     const project = makeProject([]);
     const runner = await makeRunner({ project, open, write });
 
-    const result = await Effect.runPromise(
-      runner.runForThread({
-        threadId: "thread-1",
-        projectId: "project-1",
-        worktreePath: "/repo/worktrees/a",
-      }),
-    );
+    const result = await runForThread(runner, {
+      threadId: "thread-1",
+      projectId: "project-1",
+      worktreePath: "/repo/worktrees/a",
+    });
 
     expect(result).toEqual({ status: "no-script" });
     expect(open).not.toHaveBeenCalled();
@@ -124,13 +131,11 @@ describe("ProjectSetupScriptRunner", () => {
     ]);
     const runner = await makeRunner({ project, open, write });
 
-    const result = await Effect.runPromise(
-      runner.runForThread({
-        threadId: "thread-1",
-        projectCwd: "/repo/project",
-        worktreePath: "/repo/worktrees/a",
-      }),
-    );
+    const result = await runForThread(runner, {
+      threadId: "thread-1",
+      projectCwd: "/repo/project",
+      worktreePath: "/repo/worktrees/a",
+    });
 
     expect(result).toEqual({
       status: "started",
@@ -184,13 +189,11 @@ describe("ProjectSetupScriptRunner", () => {
     ]);
     const runner = await makeRunner({ project, open, write });
 
-    await Effect.runPromise(
-      runner.runForThread({
-        threadId: "thread-1",
-        projectCwd: "/repo/project",
-        worktreePath: "/repo/worktrees/a",
-      }),
-    );
+    await runForThread(runner, {
+      threadId: "thread-1",
+      projectCwd: "/repo/project",
+      worktreePath: "/repo/worktrees/a",
+    });
 
     expect(write).toHaveBeenCalledWith({
       threadId: "thread-1",
@@ -227,13 +230,11 @@ describe("ProjectSetupScriptRunner", () => {
       }),
     });
 
-    const result = await Effect.runPromise(
-      runner.runForThread({
-        threadId: "thread-1",
-        projectCwd: "/repo/project",
-        worktreePath: "/repo/worktrees/a",
-      }),
-    );
+    const result = await runForThread(runner, {
+      threadId: "thread-1",
+      projectCwd: "/repo/project",
+      worktreePath: "/repo/worktrees/a",
+    });
 
     expect(result).toEqual({
       status: "started",

@@ -176,24 +176,20 @@ function pullRequestNumberFromUrl(url: string): string | null {
   return /\/pull\/(\d+)(?:$|[/?#])/i.exec(url)?.[1] ?? null;
 }
 
+function escapeMarkdownLinkLabel(label: string) {
+  return label
+    .replace(/([\\[\]])/g, "\\$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function postablePullRequestMerged(input: PullRequestMergedMessage): PostableMessage {
-  const body = `PR was merged: ${input.pullRequestUrl}`;
   const number = pullRequestNumberFromUrl(input.pullRequestUrl);
   const title = input.title?.trim();
+  const label = `${number !== null ? `PR #${number}` : "PR"}${title ? `: ${title}` : ""}`;
+  const markdown = `Merged noted. [${escapeMarkdownLinkLabel(label)}](${input.pullRequestUrl}) is done.`;
 
   return {
-    card: Card({
-      title: `PR was merged${number !== null ? ` #${number}` : ""}${title ? ` - ${title}` : ""}`,
-      children: [
-        Actions([
-          LinkButton({
-            label: "View PR",
-            url: input.pullRequestUrl,
-            style: "primary",
-          }),
-        ]),
-      ],
-    }),
-    fallbackText: body,
+    markdown: toSlackMarkdown(markdown),
   };
 }

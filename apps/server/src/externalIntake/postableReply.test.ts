@@ -88,20 +88,30 @@ describe("postableSupportEmailNotification", () => {
 });
 
 describe("postablePullRequestMerged", () => {
-  it("builds a Slack PR merged card with a View PR button", () => {
+  it("builds a Slack PR merged reply with the PR number and title linked", () => {
     const message = postablePullRequestMerged({
       kind: "slack_thread",
       pullRequestUrl: "https://github.com/acme/app/pull/42",
       title: "Add checkout filter",
     });
 
-    expect(message).toMatchObject({
-      fallbackText: "PR was merged: https://github.com/acme/app/pull/42",
-      card: {
-        title: "PR was merged #42 - Add checkout filter",
-      },
+    expect(message).toEqual({
+      markdown:
+        "Merged noted. [PR #42: Add checkout filter](https://github.com/acme/app/pull/42) is done.",
     });
-    expect(JSON.stringify(message)).toContain("View PR");
     expect(JSON.stringify(message)).not.toContain("New PR");
+  });
+
+  it("escapes markdown delimiters in the linked PR title", () => {
+    const message = postablePullRequestMerged({
+      kind: "slack_thread",
+      pullRequestUrl: "https://github.com/acme/app/pull/43",
+      title: "Handle [beta] rollout",
+    });
+
+    expect(message).toEqual({
+      markdown:
+        "Merged noted. [PR #43: Handle \\[beta\\] rollout](https://github.com/acme/app/pull/43) is done.",
+    });
   });
 });
