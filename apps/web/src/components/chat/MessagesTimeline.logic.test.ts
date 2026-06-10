@@ -606,6 +606,41 @@ describe("deriveMessagesTimelineRows", () => {
 
     expect(assistantRows.map((row) => row.showAssistantMeta)).toEqual([false, true]);
   });
+
+  it("withholds assistant metadata while the active turn is still in progress", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "assistant-thought-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:10Z",
+          message: {
+            id: "assistant-thought" as never,
+            role: "assistant",
+            text: "Working on it.",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:10Z",
+            completedAt: "2026-01-01T00:00:11Z",
+            streaming: false,
+          },
+        },
+      ],
+      isWorking: true,
+      activeTurnInProgress: true,
+      activeTurnId: "turn-1" as never,
+      activeTurnStartedAt: "2026-01-01T00:00:00Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const assistantRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
+        row.kind === "message" && row.message.role === "assistant",
+    );
+
+    expect(assistantRow?.showAssistantMeta).toBe(false);
+    expect(assistantRow?.showAssistantCopyButton).toBe(false);
+  });
 });
 
 describe("computeStableMessagesTimelineRows", () => {

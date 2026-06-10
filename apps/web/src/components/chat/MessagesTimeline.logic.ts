@@ -340,9 +340,13 @@ export function deriveMessagesTimelineRows(input: {
     const durationStart =
       durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt;
 
+    // While the turn is still running, the latest assistant message is only
+    // provisionally terminal — withhold the metadata row until the turn
+    // settles so commentary doesn't flash timestamps mid-work.
     const showAssistantMeta =
       timelineEntry.message.role === "assistant" &&
-      terminalAssistantMessageIds.has(timelineEntry.message.id);
+      terminalAssistantMessageIds.has(timelineEntry.message.id) &&
+      !assistantTurnStillInProgress;
 
     nextRows.push({
       kind: "message",

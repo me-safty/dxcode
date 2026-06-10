@@ -79,7 +79,7 @@ import {
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
-import { formatChatTimestamp, formatChatTimestampTooltip } from "../../timestampFormat";
+import { formatChatTimestampTooltip, formatShortTimestamp } from "../../timestampFormat";
 
 import {
   buildInlineTerminalContextText,
@@ -478,7 +478,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         <div className="flex shrink-0 items-center gap-2">
           <Tooltip>
             <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
-              {formatChatTimestamp(row.message.createdAt)}
+              {formatShortTimestamp(row.message.createdAt, ctx.timestampFormat)}
             </TooltipTrigger>
             <TooltipPopup>
               {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
@@ -568,7 +568,10 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
                 <TooltipTrigger
                   render={<p className="text-muted-foreground text-xs tabular-nums" />}
                 >
-                  {formatChatTimestamp(row.message.completedAt ?? row.message.createdAt)}
+                  {formatShortTimestamp(
+                    row.message.completedAt ?? row.message.createdAt,
+                    ctx.timestampFormat,
+                  )}
                 </TooltipTrigger>
                 <TooltipPopup>
                   {formatChatTimestampTooltip(
