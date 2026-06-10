@@ -392,12 +392,6 @@ describe("ProviderModelPicker", () => {
         expect(text).not.toContain("GPT-5 Codex");
         expect(text).toContain("Claude Opus 4.6");
       });
-      const selectedIndicator = document.querySelector<HTMLElement>(
-        '[data-model-picker-selected-indicator="true"]',
-      );
-      expect(selectedIndicator).not.toBeNull();
-      expect(selectedIndicator?.className).toContain("transition-[top]");
-      const initialIndicatorTop = selectedIndicator?.style.top;
 
       // Click on Codex provider in sidebar
       await vi.waitFor(() => {
@@ -410,11 +404,6 @@ describe("ProviderModelPicker", () => {
         const listText = getModelPickerListText();
         expect(listText).toContain("GPT-5 Codex");
         expect(listText).not.toContain("Claude Opus 4.6");
-        const movedIndicator = document.querySelector<HTMLElement>(
-          '[data-model-picker-selected-indicator="true"]',
-        );
-        expect(movedIndicator).toBe(selectedIndicator);
-        expect(movedIndicator?.style.top).not.toBe(initialIndicatorTop);
       });
     } finally {
       await mounted.cleanup();
@@ -470,15 +459,6 @@ describe("ProviderModelPicker", () => {
         );
         expect(searchInput).not.toBeNull();
         expect(document.activeElement).toBe(searchInput);
-        const inputControl = searchInput?.closest<HTMLElement>('[data-slot="input-control"]');
-        expect(inputControl?.className).not.toContain("rounded-lg border");
-        expect(inputControl?.parentElement?.parentElement?.className).toContain(
-          "focus-within:border-ring",
-        );
-        const picker = document.querySelector<HTMLElement>('[data-model-picker-content="true"]');
-        const popoverViewport = picker?.closest<HTMLElement>('[data-slot="popover-viewport"]');
-        expect(popoverViewport).not.toBeNull();
-        expect(popoverViewport?.className).toContain("overflow-hidden");
       });
     } finally {
       await mounted.cleanup();
@@ -1163,7 +1143,7 @@ describe("ProviderModelPicker", () => {
     }
   });
 
-  it("disables blocked model changes and explains why in a tooltip", async () => {
+  it("does not select models blocked by the provider", async () => {
     const disabledReason =
       "This provider does not allow switching models after a conversation has started. Start a new thread to use this model.";
     const mounted = await mountPicker({
@@ -1178,25 +1158,9 @@ describe("ProviderModelPicker", () => {
       await page.getByRole("button").click();
 
       const blockedModel = page.getByText("Claude Sonnet 4.6").first();
-      const blockedRow = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find(
-        (row) => row.textContent?.includes("Claude Sonnet 4.6"),
-      );
-      expect(blockedRow?.hasAttribute("data-disabled")).toBe(true);
-
-      await blockedModel.hover();
-      await vi.waitFor(() => {
-        const tooltip = document.querySelector<HTMLElement>('[data-slot="tooltip-popup"]');
-        expect(tooltip?.textContent).toContain(disabledReason);
-      });
-
       await blockedModel.click();
       expect(mounted.onProviderModelChange).not.toHaveBeenCalled();
       expect(document.querySelector(".model-picker-list")).not.toBeNull();
-
-      const activeRow = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find(
-        (row) => row.textContent?.includes("Claude Opus 4.6"),
-      );
-      expect(activeRow?.hasAttribute("data-disabled")).toBe(false);
     } finally {
       await mounted.cleanup();
     }

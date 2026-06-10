@@ -4,6 +4,7 @@ import {
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { resolveSelectableModel } from "@t3tools/shared/model";
+import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { SearchIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
@@ -11,7 +12,6 @@ import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { isModelPickerNewModel } from "./modelPickerModelHighlights";
 import { buildModelPickerSearchText, scoreModelPickerSearch } from "./modelPickerSearch";
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxListVirtualized } from "../ui/combobox";
-import { ScrollArea } from "../ui/scroll-area";
 import { ModelEsque } from "./providerIconUtils";
 import {
   modelPickerJumpCommandForIndex,
@@ -93,8 +93,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     onInstanceModelChange,
   } = props;
   const [searchQuery, setSearchQuery] = useState("");
+  const [showTopScrollFade, setShowTopScrollFade] = useState(false);
+  const [showBottomScrollFade, setShowBottomScrollFade] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const listRegionRef = useRef<HTMLDivElement>(null);
+  const modelListRef = useRef<LegendListRef | null>(null);
   const highlightedModelKeyRef = useRef<string | null>(null);
   const favorites = useSettings((s) => s.favorites ?? []);
   const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | "favorites">(
@@ -429,6 +431,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       new Map(filteredModels.map((model) => [`${model.instanceId}:${model.slug}`, model] as const)),
     [filteredModels],
   );
+  const updateModelListScrollFades = useCallback(() => {
+    const scrollElement = modelListRef.current?.getScrollableNode();
+    if (!(scrollElement instanceof HTMLElement)) {
+      return;
+    }
+    const maxScrollOffset = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+    setShowTopScrollFade(scrollElement.scrollTop > 1);
+    setShowBottomScrollFade(maxScrollOffset - scrollElement.scrollTop > 1);
+  }, []);
   const modelJumpShortcutContext = useMemo(
     () =>
       ({
@@ -489,47 +500,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, [handleModelSelect, keybindings, modelJumpModelKeys, modelJumpShortcutContext]);
 
   useLayoutEffect(() => {
-    const listRegion = listRegionRef.current;
-    if (!listRegion) {
-      return;
-    }
-
-    let cancelled = false;
-    let frame = 0;
+    setShowTopScrollFade(false);
+    setShowBottomScrollFade(filteredModelKeys.length > 5);
     let nestedFrame = 0;
-    let timeout = 0;
-
-    const measureScrollArea = () => {
-      if (cancelled) {
-        return;
-      }
-      const viewport = listRegion.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
-      if (!viewport || viewport.scrollHeight <= viewport.clientHeight) {
-        return;
-      }
-      const originalScrollTop = viewport.scrollTop;
-      const maxScrollTop = viewport.scrollHeight - viewport.clientHeight;
-      if (maxScrollTop <= 0) {
-        return;
-      }
-      viewport.scrollTop = Math.min(originalScrollTop + 1, maxScrollTop);
-      viewport.scrollTop = originalScrollTop;
-    };
-
-    queueMicrotask(measureScrollArea);
-    frame = window.requestAnimationFrame(() => {
-      measureScrollArea();
-      nestedFrame = window.requestAnimationFrame(measureScrollArea);
+    const frame = window.requestAnimationFrame(() => {
+      updateModelListScrollFades();
+      nestedFrame = window.requestAnimationFrame(updateModelListScrollFades);
     });
-    timeout = window.setTimeout(measureScrollArea, 0);
-
     return () => {
-      cancelled = true;
       window.cancelAnimationFrame(frame);
       window.cancelAnimationFrame(nestedFrame);
-      window.clearTimeout(timeout);
     };
-  }, [filteredModelKeys]);
+  }, [filteredModelKeys, updateModelListScrollFades]);
 
   return (
     <TooltipProvider delay={0}>
@@ -563,9 +545,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           filter={null}
           autoHighlight
           open
+          virtualized
           value={`${props.activeInstanceId}:${props.model}`}
-          onItemHighlighted={(modelKey) => {
+          onItemHighlighted={(modelKey, eventDetails) => {
             highlightedModelKeyRef.current = typeof modelKey === "string" ? modelKey : null;
+            if (eventDetails.reason === "keyboard" && eventDetails.index >= 0) {
+              modelListRef.current?.scrollIndexIntoView?.({
+                index: eventDetails.index,
+                animated: false,
+              });
+            }
           }}
           onValueChange={(modelKey) => {
             if (typeof modelKey !== "string") {
@@ -583,7 +572,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           >
             {/* Search bar */}
             <div className="px-4 pt-2.5">
-              <div className="border-b border-border/70 pb-2.5 transition-colors focus-within:border-ring">
+              <div className="-translate-y-px border-b border-border/70 pb-2.5 transition-colors focus-within:border-ring">
                 <ComboboxInput
                   ref={searchInputRef}
                   className="[&_input]:h-6.5 [&_input]:font-sans [&_input]:leading-6.5"
@@ -625,44 +614,52 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             </div>
 
             {/* Model list */}
-            <div ref={listRegionRef} className="relative min-h-0 flex-1">
-              <ScrollArea
-                className="[&>[data-slot=scroll-area-viewport]]:overflow-x-hidden [&>[data-slot=scroll-area-viewport]]:overscroll-x-none"
-                scrollFade
-              >
-                <div className="w-full min-w-0 overflow-x-clip">
-                  <ComboboxListVirtualized className="model-picker-list w-full min-w-0 max-w-full px-2 py-1.5">
-                    {filteredModelKeys.map((modelKey, index) => {
-                      const model = filteredModelByKey.get(modelKey);
-                      if (!model) {
-                        return null;
-                      }
-                      const disabledReason =
-                        getModelDisabledReason?.(model.instanceId, model.slug) ?? null;
-                      return (
-                        <ModelListRow
-                          key={modelKey}
-                          index={index}
-                          model={model}
-                          instanceId={model.instanceId}
-                          driverKind={model.driverKind}
-                          providerDisplayName={model.instanceDisplayName}
-                          providerAccentColor={model.instanceAccentColor}
-                          isFavorite={favoritesSet.has(modelKey)}
-                          isSelected={modelKey === `${props.activeInstanceId}:${props.model}`}
-                          showProvider
-                          preferShortName={!isLocked}
-                          useTriggerLabel={false}
-                          showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
-                          jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
-                          disabledReason={disabledReason}
-                          onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
-                        />
-                      );
-                    })}
-                  </ComboboxListVirtualized>
-                </div>
-              </ScrollArea>
+            <div className="relative min-h-0 flex-1 overflow-hidden">
+              <ComboboxListVirtualized className="model-picker-list size-full min-w-0 p-0">
+                <LegendList<string>
+                  ref={modelListRef}
+                  data={filteredModelKeys}
+                  keyExtractor={(modelKey) => modelKey}
+                  renderItem={({ item: modelKey, index }) => {
+                    const model = filteredModelByKey.get(modelKey);
+                    if (!model) {
+                      return null;
+                    }
+                    const disabledReason =
+                      getModelDisabledReason?.(model.instanceId, model.slug) ?? null;
+                    return (
+                      <ModelListRow
+                        key={modelKey}
+                        index={index}
+                        model={model}
+                        instanceId={model.instanceId}
+                        driverKind={model.driverKind}
+                        providerDisplayName={model.instanceDisplayName}
+                        providerAccentColor={model.instanceAccentColor}
+                        isFavorite={favoritesSet.has(modelKey)}
+                        isSelected={modelKey === `${props.activeInstanceId}:${props.model}`}
+                        showProvider
+                        preferShortName={!isLocked}
+                        useTriggerLabel={false}
+                        showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
+                        jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
+                        disabledReason={disabledReason}
+                        onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
+                      />
+                    );
+                  }}
+                  estimatedItemSize={60}
+                  drawDistance={480}
+                  recycleItems
+                  onLayout={updateModelListScrollFades}
+                  onScroll={updateModelListScrollFades}
+                  className={cn(
+                    "scrollbar-gutter-both h-full overflow-x-hidden overscroll-y-contain py-1.5 [--fade-size:1.5rem]",
+                    showTopScrollFade && "mask-t-from-[calc(100%-var(--fade-size))]",
+                    showBottomScrollFade && "mask-b-from-[calc(100%-var(--fade-size))]",
+                  )}
+                />
+              </ComboboxListVirtualized>
             </div>
             <ComboboxEmpty className="not-empty:py-6 empty:h-0 text-xs font-normal leading-snug">
               No models found
