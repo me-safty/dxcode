@@ -801,8 +801,21 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     const remoteUrl =
       (yield* readConfigValueNullable(cwd, `remote.${preferredRemoteName}.url`)) ??
       (yield* readConfigValueNullable(cwd, "remote.origin.url"));
+    if (!remoteUrl) return null;
 
-    return remoteUrl ? detectSourceControlProviderFromGitRemoteUrl(remoteUrl) : null;
+    const detected = detectSourceControlProviderFromGitRemoteUrl(remoteUrl);
+    if (detected && detected.kind !== "unknown") {
+      return detected;
+    }
+
+    // Arbitrary self-hosted host (e.g. Forgejo, self-hosted GitLab) that static hostname
+    // detection can't classify: ask the registry to refine via the provider CLIs
+    // (`fj auth list` / `glab auth status`) so status terminology/icons match what pull
+    // request operations target. Cached per cwd by the registry.
+    const handle = yield* sourceControlProviders
+      .resolveHandle({ cwd })
+      .pipe(Effect.orElseSucceed(() => null));
+    return handle?.context?.provider ?? detected;
   });
 
   const resolveRemoteRepositoryContext = Effect.fn("resolveRemoteRepositoryContext")(function* (
