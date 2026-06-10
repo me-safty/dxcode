@@ -183,7 +183,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onIsAtEndChange,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
+
+  // Toggling a fold inserts/removes rows between the fold row and the final
+  // message — everything above the trigger is unchanged, so the trigger stays
+  // put as long as the list doesn't re-anchor. maintainScrollAtEnd would do
+  // exactly that (pin the bottom content when row data changes while scrolled
+  // to the end), yanking the trigger out of view. Suppress it for the frames
+  // in which the toggle's data change and item measurements settle.
+  const [foldToggleSettling, setFoldToggleSettling] = useState(false);
   const onToggleTurnFold = useCallback((turnId: TurnId) => {
+    setFoldToggleSettling(true);
     setExpandedTurnIds((existing) => {
       const next = new Set(existing);
       if (next.has(turnId)) {
@@ -194,6 +203,23 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       return next;
     });
   }, []);
+  useEffect(() => {
+    if (!foldToggleSettling) {
+      return;
+    }
+    let secondFrameId: number | null = null;
+    const firstFrameId = window.requestAnimationFrame(() => {
+      secondFrameId = window.requestAnimationFrame(() => {
+        setFoldToggleSettling(false);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrameId);
+      if (secondFrameId !== null) {
+        window.cancelAnimationFrame(secondFrameId);
+      }
+    };
+  }, [foldToggleSettling]);
 
   // An in-session interrupt leaves its turn expanded so the user keeps their
   // place; the next turn (or a reload, since this is local state) folds it.
@@ -344,7 +370,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           renderItem={renderItem}
           estimatedItemSize={90}
           initialScrollAtEnd
-          maintainScrollAtEnd
+          maintainScrollAtEnd={!foldToggleSettling}
           maintainScrollAtEndThreshold={0.1}
           maintainVisibleContentPosition
           onScroll={handleScroll}
