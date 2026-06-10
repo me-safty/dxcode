@@ -993,27 +993,30 @@ describe("ProviderModelPicker", () => {
         expect(text).toContain("Claude Opus 4.6");
       });
 
-      const getFirstStarButton = () => {
-        const starButton = document.querySelector<HTMLButtonElement>(
+      const getFavoriteButton = () => {
+        const modelRow = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find(
+          (row) => row.textContent?.includes("Claude Opus 4.6"),
+        );
+        const starButton = modelRow?.querySelector<HTMLButtonElement>(
           'button[aria-label*="favorites"]',
         );
         expect(starButton).not.toBeNull();
         return starButton!;
       };
 
-      const firstStar = getFirstStarButton();
-      const initialAriaLabel = firstStar.getAttribute("aria-label");
+      const favoriteButton = getFavoriteButton();
+      const initialAriaLabel = favoriteButton.getAttribute("aria-label");
       expect(
         initialAriaLabel === "Add to favorites" || initialAriaLabel === "Remove from favorites",
       ).toBe(true);
 
-      await page.getByRole("button", { name: initialAriaLabel! }).first().click();
+      await userEvent.click(favoriteButton);
 
       const expectedAriaLabel =
         initialAriaLabel === "Add to favorites" ? "Remove from favorites" : "Add to favorites";
 
       await vi.waitFor(() => {
-        expect(getFirstStarButton().getAttribute("aria-label")).toBe(expectedAriaLabel);
+        expect(getFavoriteButton().getAttribute("aria-label")).toBe(expectedAriaLabel);
       });
     } finally {
       await mounted.cleanup();

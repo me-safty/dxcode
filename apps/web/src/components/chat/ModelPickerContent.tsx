@@ -619,6 +619,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 <LegendList<string>
                   ref={modelListRef}
                   data={filteredModelKeys}
+                  extraData={favoritesSet}
                   keyExtractor={(modelKey) => modelKey}
                   renderItem={({ item: modelKey, index }) => {
                     const model = filteredModelByKey.get(modelKey);
