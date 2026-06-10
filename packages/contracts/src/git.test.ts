@@ -19,6 +19,9 @@ const decodePreparePullRequestThreadInput = Schema.decodeUnknownSync(
 const decodeRunStackedActionInput = Schema.decodeUnknownSync(GitRunStackedActionInput);
 const decodeRunStackedActionResult = Schema.decodeUnknownSync(GitRunStackedActionResult);
 const decodeResolvePullRequestResult = Schema.decodeUnknownSync(GitResolvePullRequestResult);
+const decodeListManagedWorktreesResult = Schema.decodeUnknownSync(VcsListManagedWorktreesResult);
+const decodeWorktreeSizeResult = Schema.decodeUnknownSync(VcsWorktreeSizeResult);
+const decodeRemoveWorktreesInput = Schema.decodeUnknownSync(VcsRemoveWorktreesInput);
 
 describe("VcsCreateWorktreeInput", () => {
   it("accepts omitted newRefName for existing-refName worktrees", () => {
@@ -120,19 +123,19 @@ describe("GitRunStackedActionResult", () => {
 
 describe("managed worktree schemas", () => {
   it("decodes a managed worktrees result", () => {
-    const decoded = Schema.decodeUnknownSync(VcsListManagedWorktreesResult)({
+    const decoded = decodeListManagedWorktreesResult({
       worktrees: [{ path: "/wt/a", refName: "feature-a", isDirty: false }],
     });
     expect(decoded.worktrees[0]?.isDirty).toBe(false);
   });
 
   it("decodes a worktree size result", () => {
-    const decoded = Schema.decodeUnknownSync(VcsWorktreeSizeResult)({ sizeBytes: 4096 });
+    const decoded = decodeWorktreeSizeResult({ sizeBytes: 4096 });
     expect(decoded.sizeBytes).toBe(4096);
   });
 
   it("decodes a batch remove input with per-item force", () => {
-    const decoded = Schema.decodeUnknownSync(VcsRemoveWorktreesInput)({
+    const decoded = decodeRemoveWorktreesInput({
       cwd: "/repo",
       items: [{ path: "/wt/a", force: true }, { path: "/wt/b" }],
     });
