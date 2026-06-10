@@ -148,6 +148,32 @@ function makeLayer(input: {
   return { execute, git: gitMock, layerEffect };
 }
 
+it("parseForgejoRepositorySpec handles clone URLs and bare specs", () => {
+  const expected = { host: "git.example.org", owner: "owner", repo: "repo" };
+  assert.deepStrictEqual(
+    ForgejoApi.parseForgejoRepositorySpec("https://git.example.org/owner/repo", null),
+    expected,
+  );
+  assert.deepStrictEqual(
+    ForgejoApi.parseForgejoRepositorySpec("https://git.example.org/owner/repo.git", null),
+    expected,
+  );
+  assert.deepStrictEqual(
+    ForgejoApi.parseForgejoRepositorySpec("git@git.example.org:owner/repo.git", null),
+    expected,
+  );
+  assert.deepStrictEqual(
+    ForgejoApi.parseForgejoRepositorySpec("git.example.org/owner/repo", null),
+    expected,
+  );
+  assert.deepStrictEqual(ForgejoApi.parseForgejoRepositorySpec("owner/repo", "git.example.org"), {
+    host: "git.example.org",
+    owner: "owner",
+    repo: "repo",
+  });
+  assert.strictEqual(ForgejoApi.parseForgejoRepositorySpec("owner/repo", null), null);
+});
+
 it.effect("parses pull request responses from the Forgejo REST API", () =>
   Effect.gen(function* () {
     const { execute, layerEffect } = makeLayer({

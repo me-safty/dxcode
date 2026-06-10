@@ -153,7 +153,13 @@ export function parseForgejoRepositorySpec(
   value: string,
   fallbackHost: string | null,
 ): ForgejoRepositoryLocator | null {
-  const normalized = value.trim().replace(/\.git$/u, "").replace(/^\/+/u, "");
+  const trimmed = value.trim();
+  // A pasted clone URL (`https://host/owner/repo`, `ssh://…`, or `git@host:owner/repo`) carries
+  // its own host — parse it as a remote rather than splitting naively on `/`.
+  if (trimmed.startsWith("git@") || /^[a-z][a-z0-9+.-]*:\/\//iu.test(trimmed)) {
+    return parseForgejoRemoteUrl(trimmed);
+  }
+  const normalized = trimmed.replace(/\.git$/u, "").replace(/^\/+/u, "");
   const parts = normalized.split("/").filter((part) => part.length > 0);
   if (parts.length >= 3) {
     const repo = parts.at(-1);
