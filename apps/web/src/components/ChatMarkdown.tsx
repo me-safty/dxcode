@@ -3,6 +3,7 @@ import type { ServerProviderSkill } from "@t3tools/contracts";
 import React, {
   Children,
   Suspense,
+  type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
   isValidElement,
   use,
@@ -15,16 +16,34 @@ import React, {
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
+import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
+import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
+import {
+  getVscodeIconUrlForEntry,
+  hasSpecificVscodeIconForFileName,
+  syntheticFileNameForLanguageId,
+} from "../vscode-icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { Button } from "./ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
+import { ScrollArea } from "./ui/scroll-area";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { openInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
+import {
+  chatMarkdownClipboardPayload,
+  serializeTableElementToCsv,
+  serializeTableElementToMarkdown,
+} from "../markdown-clipboard";
 import {
   normalizeMarkdownLinkDestination,
   resolveMarkdownFileLinkMeta,
@@ -59,6 +78,9 @@ interface ChatMarkdownProps {
   cwd: string | undefined;
   isStreaming?: boolean;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  className?: string;
+  /** Treat single newlines as hard breaks — chat-style user input. */
+  lineBreaks?: boolean;
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
@@ -71,12 +93,82 @@ const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
+const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    "*": (defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
+    code: [...(defaultSchema.attributes?.code ?? []), "dataCodeMeta"],
+  },
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), "file"],
+  },
+} satisfies Parameters<typeof rehypeSanitize>[0];
 
 function extractFenceLanguage(className: string | undefined): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
   const raw = match?.[1] ?? "text";
   // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
   return raw === "gitignore" ? "ini" : raw;
+}
+
+const FENCE_TITLE_ATTR_REGEX = /(?:^|\s)(?:title|file(?:name)?)=(?:"([^"]+)"|'([^']+)'|(\S+))/i;
+const FENCE_FILENAME_TOKEN_REGEX = /^[\w@][\w@./-]*\.[A-Za-z0-9]+$/;
+
+/** Pulls a filename out of fence meta: ```ts title="x.ts" / ```ts src/main.ts */
+function extractFenceTitle(meta: string | undefined): string | null {
+  if (!meta) return null;
+  const attrMatch = FENCE_TITLE_ATTR_REGEX.exec(meta);
+  const attrTitle = attrMatch?.[1] ?? attrMatch?.[2] ?? attrMatch?.[3];
+  if (attrTitle) return attrTitle;
+  return meta.split(/\s+/).find((candidate) => FENCE_FILENAME_TOKEN_REGEX.test(candidate)) ?? null;
+}
+
+function extractPreCodeMeta(node: unknown): string | undefined {
+  const children = (
+    node as
+      | {
+          children?: Array<{
+            type?: string;
+            tagName?: string;
+            data?: { meta?: unknown };
+            properties?: { dataCodeMeta?: unknown };
+          }>;
+        }
+      | undefined
+  )?.children;
+  const codeNode = children?.find((child) => child?.type === "element" && child.tagName === "code");
+  const meta = codeNode?.properties?.dataCodeMeta ?? codeNode?.data?.meta;
+  return typeof meta === "string" && meta.trim().length > 0 ? meta.trim() : undefined;
+}
+
+type MarkdownAstNode = {
+  type?: string;
+  meta?: unknown;
+  data?: {
+    hProperties?: Record<string, unknown>;
+  };
+  children?: MarkdownAstNode[];
+};
+
+function remarkPreserveCodeMeta() {
+  return (tree: MarkdownAstNode) => {
+    const visit = (node: MarkdownAstNode) => {
+      if (node.type === "code" && typeof node.meta === "string" && node.meta.trim().length > 0) {
+        node.data = {
+          ...node.data,
+          hProperties: {
+            ...node.data?.hProperties,
+            dataCodeMeta: node.meta.trim(),
+          },
+        };
+      }
+      node.children?.forEach(visit);
+    };
+
+    visit(tree);
+  };
 }
 
 function nodeToPlainText(node: ReactNode): string {
@@ -233,17 +325,15 @@ interface MarkdownFileLinkProps {
   href: string;
   targetPath: string;
   displayPath: string;
-  filePath: string;
   label: string;
+  copyMarkdown: string;
   theme: "light" | "dark";
   className?: string | undefined;
 }
 
 const MARKDOWN_LINK_HREF_PATTERN = /\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
 const MARKDOWN_FILE_LINK_CLASS_NAME =
-  "chat-markdown-file-link relative top-[2px] max-w-full no-underline";
-const MARKDOWN_FILE_LINK_ICON_CLASS_NAME = "chat-markdown-file-link-icon size-3.5 shrink-0";
-const MARKDOWN_FILE_LINK_LABEL_CLASS_NAME = "chat-markdown-file-link-label truncate";
+  "chat-markdown-file-link cursor-pointer transition-colors hover:bg-accent/70";
 
 function pathParentSegments(path: string): string[] {
   const normalized = path.replaceAll("\\", "/");
@@ -320,12 +410,196 @@ function normalizeMarkdownLinkHrefKey(href: string): string {
   return rewriteMarkdownFileUriHref(normalizedHref) ?? normalizedHref;
 }
 
+const MARKDOWN_LINK_FAVICON_CLASS_NAME = "block size-full shrink-0 select-none";
+
+/** Hosts whose favicon request already failed this session — skip straight to the globe. */
+const failedFaviconHosts = new Set<string>();
+
+function resolveExternalLinkHost(href: string | undefined): string | null {
+  if (!href) return null;
+  try {
+    const url = new URL(href);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+const MarkdownLinkFavicon = memo(function MarkdownLinkFavicon({ host }: { host: string }) {
+  const [failedHost, setFailedHost] = useState<string | null>(null);
+  return (
+    <span className="chat-markdown-link-favicon" aria-hidden>
+      {failedHost === host || failedFaviconHosts.has(host) ? (
+        <GlobeIcon className={MARKDOWN_LINK_FAVICON_CLASS_NAME} />
+      ) : (
+        <img
+          src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`}
+          alt=""
+          loading="lazy"
+          draggable={false}
+          className={cn(MARKDOWN_LINK_FAVICON_CLASS_NAME, "rounded-sm")}
+          onError={() => {
+            failedFaviconHosts.add(host);
+            setFailedHost(host);
+          }}
+        />
+      )}
+    </span>
+  );
+});
+
+function leadingExternalLinkTextLength(text: string): number {
+  const protocol = /^(?:https?:\/\/)/i.exec(text)?.[0];
+  if (protocol) return protocol.length;
+  return Math.min(text.length, 1);
+}
+
+function breakableExternalLinkText(text: string): ReactNode[] {
+  return Array.from(text, (character, index) => (
+    <React.Fragment key={`${index}:${character}`}>
+      {character}
+      <wbr />
+    </React.Fragment>
+  ));
+}
+
+function plainHastText(node: unknown): string | null {
+  if (!node || typeof node !== "object" || !("children" in node) || !Array.isArray(node.children)) {
+    return null;
+  }
+  const parts = node.children.map((child) => {
+    if (
+      child &&
+      typeof child === "object" &&
+      "type" in child &&
+      child.type === "text" &&
+      "value" in child &&
+      typeof child.value === "string"
+    ) {
+      return child.value;
+    }
+    return null;
+  });
+  return parts.every((part) => part !== null) ? parts.join("") : null;
+}
+
+const SANITIZED_FRAGMENT_PREFIX = "user-content-";
+
+function decodeMarkdownFragmentId(href: string): string {
+  const encodedId = href.slice(1);
+  try {
+    return decodeURIComponent(encodedId);
+  } catch {
+    return encodedId;
+  }
+}
+
+function normalizeSanitizedFragmentId(id: string): string {
+  let normalizedId = id;
+  while (normalizedId.startsWith(SANITIZED_FRAGMENT_PREFIX)) {
+    normalizedId = normalizedId.slice(SANITIZED_FRAGMENT_PREFIX.length);
+  }
+  return normalizedId;
+}
+
+function findMarkdownFragmentTarget(anchor: HTMLAnchorElement, href: string): HTMLElement | null {
+  const decodedId = decodeMarkdownFragmentId(href);
+  const normalizedId = normalizeSanitizedFragmentId(decodedId);
+  const matchesFragment = (element: HTMLElement) =>
+    element.id === decodedId || normalizeSanitizedFragmentId(element.id) === normalizedId;
+  const markdownRoot = anchor.closest<HTMLElement>(".chat-markdown");
+  if (markdownRoot) {
+    const localTargets = Array.from(markdownRoot.querySelectorAll<HTMLElement>("[id]"));
+    const localTarget = localTargets.find(matchesFragment);
+    if (localTarget) return localTarget;
+  }
+
+  return (
+    document.getElementById(decodedId) ??
+    Array.from(document.querySelectorAll<HTMLElement>("[id]")).find(matchesFragment) ??
+    null
+  );
+}
+
+function handleMarkdownFragmentClick(event: ReactMouseEvent<HTMLAnchorElement>, href: string) {
+  if (
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  ) {
+    return;
+  }
+
+  const target = findMarkdownFragmentTarget(event.currentTarget, href);
+  if (!target) return;
+
+  event.preventDefault();
+  const nextUrl = new URL(window.location.href);
+  nextUrl.hash = href.slice(1);
+  window.history.pushState(window.history.state, "", nextUrl);
+  target.scrollIntoView({ block: "nearest" });
+}
+
+function MarkdownExternalLinkContent({
+  host,
+  plainText,
+  children,
+}: {
+  host: string;
+  plainText: string | null;
+  children: ReactNode;
+}) {
+  if (plainText) {
+    const leadingLength = leadingExternalLinkTextLength(plainText);
+    return (
+      <>
+        <span className="chat-markdown-link-leading">
+          <MarkdownLinkFavicon host={host} />
+          {plainText.slice(0, leadingLength)}
+        </span>
+        {breakableExternalLinkText(plainText.slice(leadingLength))}
+      </>
+    );
+  }
+
+  const childNodes = Children.toArray(children);
+  const firstChild = childNodes[0];
+
+  if (typeof firstChild === "string" && firstChild.length > 0) {
+    const leadingLength = leadingExternalLinkTextLength(firstChild);
+    return (
+      <>
+        <span className="chat-markdown-link-leading">
+          <MarkdownLinkFavicon host={host} />
+          {firstChild.slice(0, leadingLength)}
+        </span>
+        {breakableExternalLinkText(firstChild.slice(leadingLength))}
+        {childNodes.slice(1)}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <span className="chat-markdown-link-leading">
+        <MarkdownLinkFavicon host={host} />
+        {firstChild}
+      </span>
+      {childNodes.slice(1)}
+    </>
+  );
+}
+
 const MarkdownFileLink = memo(function MarkdownFileLink({
   href,
   targetPath,
   displayPath,
-  filePath,
   label,
+  copyMarkdown,
   theme,
   className,
 }: MarkdownFileLinkProps) {
@@ -420,7 +694,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         render={
           <a
             href={href}
-            className={cn(MARKDOWN_FILE_LINK_CLASS_NAME, className)}
+            className={cn(CHAT_FILE_TAG_CHIP_CLASS_NAME, MARKDOWN_FILE_LINK_CLASS_NAME, className)}
+            data-markdown-copy={copyMarkdown}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -428,13 +703,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             }}
             onContextMenu={handleContextMenu}
           >
-            <VscodeEntryIcon
-              pathValue={filePath}
-              kind="file"
-              theme={theme}
-              className={cn(MARKDOWN_FILE_LINK_ICON_CLASS_NAME, "text-current")}
-            />
-            <span className={MARKDOWN_FILE_LINK_LABEL_CLASS_NAME}>{label}</span>
+            <FileTagChipContent path={targetPath} label={label} theme={theme} selectable />
           </a>
         }
       />
@@ -458,8 +727,8 @@ function areMarkdownFileLinkPropsEqual(
     previous.href === next.href &&
     previous.targetPath === next.targetPath &&
     previous.displayPath === next.displayPath &&
-    previous.filePath === next.filePath &&
     previous.label === next.label &&
+    previous.copyMarkdown === next.copyMarkdown &&
     previous.theme === next.theme &&
     previous.className === next.className
   );
@@ -470,6 +739,8 @@ function ChatMarkdown({
   cwd,
   isStreaming = false,
   skills = EMPTY_MARKDOWN_SKILLS,
+  className,
+  lineBreaks = false,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
@@ -494,6 +765,17 @@ function ChatMarkdown({
   }, [markdownFileLinkMetaByHref]);
   const markdownUrlTransform = useCallback((href: string) => {
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
+  }, []);
+  // Re-emit highlighted content as markdown so copying out of the rendered
+  // view keeps links, emphasis, lists, and code fences intact.
+  const handleCopy = useCallback((event: ReactClipboardEvent<HTMLDivElement>) => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !event.clipboardData) return;
+    const payload = chatMarkdownClipboardPayload(selection);
+    if (!payload) return;
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", payload.text);
+    event.clipboardData.setData("text/html", payload.html);
   }, []);
   const markdownComponents = useMemo<Components>(
     () => ({
@@ -542,8 +824,8 @@ function ChatMarkdown({
             href={fileLinkMeta.targetPath}
             targetPath={fileLinkMeta.targetPath}
             displayPath={fileLinkMeta.displayPath}
-            filePath={fileLinkMeta.filePath}
             label={labelParts.join(" · ")}
+            copyMarkdown={`[${fileLinkMeta.basename}](${normalizedHref})`}
             theme={resolvedTheme}
             className={props.className}
           />
@@ -559,6 +841,8 @@ function ChatMarkdown({
           );
         }
 
+        const language = extractFenceLanguage(codeBlock.className);
+        const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
         return (
           <MarkdownCodeBlock>
             <CodeHighlightErrorBoundary
@@ -600,7 +884,12 @@ function ChatMarkdown({
   return (
     <div className="chat-markdown w-full min-w-0 text-xs leading-relaxed text-foreground">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={
+          lineBreaks
+            ? [remarkGfm, remarkBreaks, remarkPreserveCodeMeta]
+            : [remarkGfm, remarkPreserveCodeMeta]
+        }
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA]]}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >

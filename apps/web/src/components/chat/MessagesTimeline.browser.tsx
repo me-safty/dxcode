@@ -104,6 +104,21 @@ function buildUserTimelineEntry(text: string) {
   };
 }
 
+function buildAssistantTimelineEntry(text: string) {
+  return {
+    id: "entry-assistant-1",
+    kind: "message" as const,
+    createdAt: MESSAGE_CREATED_AT,
+    message: {
+      id: "message-assistant-1" as never,
+      role: "assistant" as const,
+      text,
+      createdAt: MESSAGE_CREATED_AT,
+      streaming: false,
+    },
+  };
+}
+
 describe("MessagesTimeline", () => {
   afterEach(() => {
     scrollToEndSpy.mockReset();
@@ -263,6 +278,63 @@ describe("MessagesTimeline", () => {
 
       const messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("renders user messages as markdown with chat-style line breaks", async () => {
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          buildUserTimelineEntry(
+            "## Plan\nuse **bold** and [a link](https://example.com)\nsecond line",
+          ),
+        ]}
+      />,
+    );
+
+    try {
+      await expect.element(page.getByRole("heading", { level: 2, name: "Plan" })).toBeVisible();
+      await expect
+        .element(page.getByRole("link", { name: "a link" }))
+        .toHaveAttribute("href", "https://example.com");
+
+      const messageBody = document.querySelector("[data-user-message-body='true']");
+      expect(messageBody?.querySelector("strong")?.textContent).toBe("bold");
+      // remark-breaks: the single newline between the inline runs is a <br>.
+      expect(messageBody?.querySelectorAll("p br").length).toBe(1);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("renders markdown file tags in user and assistant messages", async () => {
+    const fileLink = "[package.json](path/to/package.json)";
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        markdownCwd="/repo/project"
+        timelineEntries={[
+          buildUserTimelineEntry(`Review ${fileLink}`),
+          buildAssistantTimelineEntry(`I reviewed ${fileLink}`),
+        ]}
+      />,
+    );
+
+    try {
+      const userFileLink = document.querySelector(
+        '[data-message-role="user"] .chat-markdown-file-link',
+      );
+      const assistantFileLink = document.querySelector(
+        '[data-message-role="assistant"] .chat-markdown-file-link',
+      );
+
+      expect(userFileLink?.textContent).toContain("package.json");
+      expect(userFileLink?.getAttribute("href")).toBe("/repo/project/path/to/package.json");
+      expect(assistantFileLink?.textContent).toContain("package.json");
+      expect(assistantFileLink?.getAttribute("href")).toBe("/repo/project/path/to/package.json");
     } finally {
       await screen.unmount();
     }
