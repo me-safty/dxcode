@@ -4,6 +4,8 @@ export interface DiffRouteSearch {
   diff?: "1" | undefined;
   diffTurnId?: TurnId | undefined;
   diffFilePath?: string | undefined;
+  /** When "1", the in-chat editor side panel is open. */
+  editor?: "1" | undefined;
 }
 
 function isDiffOpenValue(value: unknown): boolean {
@@ -30,10 +32,12 @@ export function parseDiffRouteSearch(search: Record<string, unknown>): DiffRoute
   const diffTurnIdRaw = diff ? normalizeSearchString(search.diffTurnId) : undefined;
   const diffTurnId = diffTurnIdRaw ? TurnId.make(diffTurnIdRaw) : undefined;
   const diffFilePath = diff && diffTurnId ? normalizeSearchString(search.diffFilePath) : undefined;
+  const editor = isDiffOpenValue(search.editor) ? "1" : undefined;
 
   return {
     ...(diff ? { diff } : {}),
     ...(diffTurnId ? { diffTurnId } : {}),
     ...(diffFilePath ? { diffFilePath } : {}),
+    ...(editor ? { editor } : {}),
   };
 }

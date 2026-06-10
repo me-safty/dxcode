@@ -10,7 +10,14 @@ import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 
-import type { ProjectWriteFileInput, ProjectWriteFileResult } from "@t3tools/contracts";
+import type {
+  ProjectListTreeInput,
+  ProjectListTreeResult,
+  ProjectReadFileInput,
+  ProjectReadFileResult,
+  ProjectWriteFileInput,
+  ProjectWriteFileResult,
+} from "@t3tools/contracts";
 import { WorkspacePathOutsideRootError } from "./WorkspacePaths.ts";
 
 export class WorkspaceFileSystemError extends Schema.TaggedErrorClass<WorkspaceFileSystemError>()(
@@ -38,6 +45,32 @@ export interface WorkspaceFileSystemShape {
     input: ProjectWriteFileInput,
   ) => Effect.Effect<
     ProjectWriteFileResult,
+    WorkspaceFileSystemError | WorkspacePathOutsideRootError
+  >;
+
+  /**
+   * Read a file relative to the workspace root.
+   *
+   * Detects binary content and reports it via the result rather than returning
+   * undecoded bytes. Rejects paths that escape the workspace root.
+   */
+  readonly readFile: (
+    input: ProjectReadFileInput,
+  ) => Effect.Effect<
+    ProjectReadFileResult,
+    WorkspaceFileSystemError | WorkspacePathOutsideRootError
+  >;
+
+  /**
+   * List the immediate children of a directory relative to the workspace root.
+   *
+   * Used to lazily populate the IDE file tree one level at a time. Rejects
+   * paths that escape the workspace root.
+   */
+  readonly listTree: (
+    input: ProjectListTreeInput,
+  ) => Effect.Effect<
+    ProjectListTreeResult,
     WorkspaceFileSystemError | WorkspacePathOutsideRootError
   >;
 }

@@ -1,6 +1,8 @@
 import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+
 import ChatView from "../components/ChatView";
 import { threadHasStarted } from "../components/ChatView.logic";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
@@ -19,10 +21,66 @@ import {
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
-import { createThreadSelectorByRef } from "../storeSelectors";
+import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
+import { scopeProjectRef } from "@t3tools/client-runtime";
 import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
 import { RightPanelSheet } from "../components/RightPanelSheet";
+import { EditorPanel, type EditorMentionRef } from "../components/ide/EditorPanel";
+import { appendMentionToChatComposer } from "../components/ide/editorMention";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
+
+const EDITOR_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_editor_sidebar_width";
+const EDITOR_INLINE_DEFAULT_WIDTH = "clamp(28rem,42vw,46rem)";
+const EDITOR_INLINE_SIDEBAR_MIN_WIDTH = 26 * 16;
+const EDITOR_INLINE_SIDEBAR_MAX_WIDTH = 256 * 16;
+
+interface EditorTarget {
+  environmentId: EnvironmentId;
+  projectId: ProjectId;
+  cwd: string;
+  name: string;
+}
+
+const EditorPanelInlineSidebar = (props: {
+  editorTarget: EditorTarget;
+  onClose: () => void;
+  onMention: (ref: EditorMentionRef) => void;
+}) => {
+  const { editorTarget, onClose, onMention } = props;
+  return (
+    <SidebarProvider
+      defaultOpen={false}
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      className="w-auto min-h-0 flex-none bg-transparent"
+      style={{ "--sidebar-width": EDITOR_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
+    >
+      <Sidebar
+        side="right"
+        collapsible="offcanvas"
+        className="border-l border-border bg-card text-foreground"
+        resizable={{
+          maxWidth: EDITOR_INLINE_SIDEBAR_MAX_WIDTH,
+          minWidth: EDITOR_INLINE_SIDEBAR_MIN_WIDTH,
+          storageKey: EDITOR_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
+        }}
+      >
+        <EditorPanel
+          environmentId={editorTarget.environmentId}
+          projectId={editorTarget.projectId}
+          cwd={editorTarget.cwd}
+          projectName={editorTarget.name}
+          variant="sidebar"
+          onClose={onClose}
+          onMention={onMention}
+        />
+        <SidebarRail />
+      </Sidebar>
+    </SidebarProvider>
+  );
+};
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
 const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
@@ -168,6 +226,25 @@ function ChatThreadRouteView() {
   const serverThreadStarted = threadHasStarted(serverThread);
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
   const diffOpen = search.diff === "1";
+  const editorOpen = search.editor === "1";
+  const project = useStore(
+    useMemo(
+      () =>
+        createProjectSelectorByRef(
+          serverThread ? scopeProjectRef(serverThread.environmentId, serverThread.projectId) : null,
+        ),
+      [serverThread],
+    ),
+  );
+  const editorTarget: EditorTarget | null =
+    project && serverThread
+      ? {
+          environmentId: serverThread.environmentId,
+          projectId: serverThread.projectId,
+          cwd: project.cwd,
+          name: project.name,
+        }
+      : null;
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
   const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
@@ -209,10 +286,28 @@ function ChatThreadRouteView() {
       params: buildThreadRouteParams(threadRef),
       search: (previous) => {
         const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1" };
+        return { ...rest, diff: "1", editor: undefined };
       },
     });
   }, [markDiffOpened, navigate, threadRef]);
+  const closeEditor = useCallback(() => {
+    if (!threadRef) {
+      return;
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(threadRef),
+      search: (previous) => ({ ...previous, editor: undefined }),
+    });
+  }, [navigate, threadRef]);
+  const editorMention = useCallback(
+    (ref: EditorMentionRef) => {
+      if (threadRef) {
+        appendMentionToChatComposer(threadRef, ref);
+      }
+    },
+    [threadRef],
+  );
 
   useEffect(() => {
     if (!threadRef || !bootstrapComplete) {
@@ -237,6 +332,8 @@ function ChatThreadRouteView() {
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
 
+  const editorActive = editorOpen && editorTarget !== null;
+
   if (!shouldUseDiffSheet) {
     return (
       <>
@@ -245,16 +342,24 @@ function ChatThreadRouteView() {
             environmentId={threadRef.environmentId}
             threadId={threadRef.threadId}
             onDiffPanelOpen={markDiffOpened}
-            reserveTitleBarControlInset={!diffOpen}
+            reserveTitleBarControlInset={!diffOpen && !editorActive}
             routeKind="server"
           />
         </SidebarInset>
-        <DiffPanelInlineSidebar
-          diffOpen={diffOpen}
-          onCloseDiff={closeDiff}
-          onOpenDiff={openDiff}
-          renderDiffContent={shouldRenderDiffContent}
-        />
+        {editorActive ? (
+          <EditorPanelInlineSidebar
+            editorTarget={editorTarget}
+            onClose={closeEditor}
+            onMention={editorMention}
+          />
+        ) : (
+          <DiffPanelInlineSidebar
+            diffOpen={diffOpen}
+            onCloseDiff={closeDiff}
+            onOpenDiff={openDiff}
+            renderDiffContent={shouldRenderDiffContent}
+          />
+        )}
       </>
     );
   }
@@ -269,9 +374,23 @@ function ChatThreadRouteView() {
           routeKind="server"
         />
       </SidebarInset>
-      <RightPanelSheet open={diffOpen} onClose={closeDiff}>
-        {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
-      </RightPanelSheet>
+      {editorActive ? (
+        <RightPanelSheet open onClose={closeEditor}>
+          <EditorPanel
+            environmentId={editorTarget.environmentId}
+            projectId={editorTarget.projectId}
+            cwd={editorTarget.cwd}
+            projectName={editorTarget.name}
+            variant="sidebar"
+            onClose={closeEditor}
+            onMention={editorMention}
+          />
+        </RightPanelSheet>
+      ) : (
+        <RightPanelSheet open={diffOpen} onClose={closeDiff}>
+          {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
+        </RightPanelSheet>
+      )}
     </>
   );
 }
@@ -279,7 +398,7 @@ function ChatThreadRouteView() {
 export const Route = createFileRoute("/_chat/$environmentId/$threadId")({
   validateSearch: (search) => parseDiffRouteSearch(search),
   search: {
-    middlewares: [retainSearchParams<DiffRouteSearch>(["diff"])],
+    middlewares: [retainSearchParams<DiffRouteSearch>(["diff", "editor"])],
   },
   component: ChatThreadRouteView,
 });

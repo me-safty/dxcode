@@ -1,0 +1,87 @@
+/* Layout + theming for the in-app IDE editors. */
+
+/* App sans-serif stack (mirrors index.css body font). */
+.ide-codemirror-host,
+.ide-milkdown-host {
+  --ide-app-font: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+/* Markdown WYSIWYG find (Cmd+F) match highlight via the CSS Custom Highlight API. */
+::highlight(ide-md-find) {
+  background-color: #fde047;
+  color: #1a1a1a;
+}
+
+/* CodeMirror fills its container and scrolls internally. */
+.ide-codemirror-host .cm-editor {
+  height: 100%;
+}
+.ide-codemirror-host .cm-scroller {
+  overflow: auto;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ide-codemirror-host .cm-editor.cm-focused {
+  outline: none;
+}
+
+/* Transparent editor surface — blend with the panel/app instead of carrying
+   CodeMirror's own (one-dark / white) slab. */
+.ide-codemirror-host .cm-editor,
+.ide-codemirror-host .cm-scroller,
+.ide-codemirror-host .cm-gutters {
+  background-color: transparent !important;
+}
+
+/* Milkdown WYSIWYG (Crepe) host fills the available height and owns its scroll. */
+.ide-milkdown-host .milkdown {
+  height: 100%;
+  overflow: auto;
+  /* Use the app font throughout the rendered markdown (was Noto Serif/Sans). */
+  --crepe-font-default: var(--ide-app-font);
+  --crepe-font-title: var(--ide-app-font);
+  /* Transparent editor surface. */
+  --crepe-color-background: transparent;
+}
+.dark .ide-milkdown-host .milkdown {
+  --crepe-color-background: transparent;
+}
+.ide-milkdown-host .milkdown,
+.ide-milkdown-host .milkdown .ProseMirror {
+  background: transparent;
+  font-family: var(--ide-app-font);
+}
+.ide-milkdown-host .milkdown .ProseMirror {
+  /* Centered column with gutter room on the left for the block drag handle. */
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 1.5rem 2rem 6rem 3rem;
+}
+
+/*
+ * Crepe ships separate light/dark theme files that both scope their CSS
+ * variables to `.milkdown`. We import the light "frame" theme as the base and
+ * remap the variables to the dark palette when the app is in dark mode
+ * (the root <html> carries the `.dark` class — see hooks/useTheme.ts).
+ */
+.dark .milkdown {
+  --crepe-color-background: #1a1a1a;
+  --crepe-color-on-background: #e6e6e6;
+  --crepe-color-surface: #121212;
+  --crepe-color-surface-low: #1c1c1c;
+  --crepe-color-on-surface: #d1d1d1;
+  --crepe-color-on-surface-variant: #a9a9a9;
+  --crepe-color-outline: #757575;
+  --crepe-color-primary: #b5b5b5;
+  --crepe-color-secondary: #4d4d4d;
+  --crepe-color-on-secondary: #d6d6d6;
+  --crepe-color-inverse: #e5e5e5;
+  --crepe-color-on-inverse: #2a2a2a;
+  --crepe-color-inline-code: #ff6666;
+  --crepe-color-error: #ff6666;
+  --crepe-color-hover: #232323;
+  --crepe-color-selected: #2f2f2f;
+  --crepe-color-inline-area: #2b2b2b;
+}

@@ -969,6 +969,7 @@ export default function ChatView(props: ChatViewProps) {
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const diffOpen = rawSearch.diff === "1";
+  const editorOpen = rawSearch.editor === "1";
   const activeThreadId = activeThread?.id ?? null;
   const runningTerminalIds = useThreadRunningTerminalIds({
     environmentId: activeThread?.environmentId ?? null,
@@ -1918,10 +1919,31 @@ export default function ChatView(props: ChatViewProps) {
       replace: true,
       search: (previous) => {
         const rest = stripDiffSearchParams(previous);
-        return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
+        // Diff and editor share the right panel slot — opening one closes the other.
+        return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1", editor: undefined };
       },
     });
   }, [diffOpen, environmentId, isServerThread, navigate, onDiffPanelOpen, threadId]);
+
+  const onToggleEditor = useCallback(() => {
+    if (!isServerThread) {
+      return;
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId,
+        threadId,
+      },
+      replace: true,
+      search: (previous) => {
+        const rest = stripDiffSearchParams(previous);
+        return editorOpen
+          ? { ...rest, editor: undefined }
+          : { ...rest, editor: "1", diff: undefined };
+      },
+    });
+  }, [editorOpen, environmentId, isServerThread, navigate, threadId]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -3778,12 +3800,15 @@ export default function ChatView(props: ChatViewProps) {
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
+          editorOpen={editorOpen}
+          editorAvailable={activeProject !== undefined}
           onRunProjectScript={runProjectScript}
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
+          onToggleEditor={onToggleEditor}
         />
       </header>
 
