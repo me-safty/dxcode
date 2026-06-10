@@ -1,5 +1,6 @@
 # AGENTS.md
 
+# First Priorities
 ## Task Completion Requirements
 
 - `vp check` and `vp run typecheck` must pass before considering tasks completed.
@@ -8,17 +9,9 @@
 
 ## Project Snapshot
 
-more Code is a minimal web GUI for using coding agents like Codex and Claude.
+more Code is a minimal web GUI for using coding agents like Codex and Claude. It is intended to allow agents to work inside of a Linux VM (i.e a workstation for AI agents to do work in)
 
-This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
-
-## Core Priorities
-
-1. Performance first.
-2. Reliability first.
-3. Keep behavior predictable under load and during failures (session restarts, reconnects, partial streams).
-
-If a tradeoff is required, choose correctness and robustness over short-term convenience.
+# Secondary Priorities
 
 ## Maintainability
 
@@ -32,17 +25,9 @@ Long term maintainability is a core priority. If you add new functionality, firs
 - `packages/shared`: Shared runtime utilities consumed by both server and client applications. Uses explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.
 - `packages/client-runtime`: Shared runtime package for sharing client code across web and mobile.
 
-## Reference Repos
-
-- Open-source Codex repo: https://github.com/openai/codex
-- Codex-Monitor (Tauri, feature-complete, strong reference implementation): https://github.com/Dimillian/CodexMonitor
-
-Use these as implementation references when designing protocol handling, UX flows, and operational safeguards.
-
 ## Vendored Repositories
 
-This project vendors external repositories under `.repos/` as read-only reference material for coding
-agents.
+This project vendors external repositories under `.repos/` as read-only reference material for coding agents.
 
 - Prefer examples and patterns from the vendored source code over generated guesses or web search results.
 - Do not edit files under `.repos/` unless explicitly asked.

@@ -147,6 +147,30 @@ describe("buildTurnStartParams", () => {
       ],
     });
   });
+
+  it("runs semi-sandboxed turns autonomously inside the workspace sandbox", () => {
+    const params = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "semi-sandboxed",
+        prompt: "Implement it without escalation",
+      }),
+    );
+
+    assert.deepStrictEqual(params, {
+      threadId: "provider-thread-1",
+      approvalPolicy: "never",
+      sandboxPolicy: {
+        type: "workspaceWrite",
+      },
+      input: [
+        {
+          type: "text",
+          text: "Implement it without escalation",
+        },
+      ],
+    });
+  });
 });
 
 describe("isRecoverableThreadResumeError", () => {
@@ -197,6 +221,44 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
+  it("starts semi-sandboxed threads with workspace-write and no approvals", async () => {
+    const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
+    const started = makeThreadOpenResponse("semi-sandboxed-thread");
+    const client = {
+      request: <M extends "thread/start" | "thread/resume">(
+        method: M,
+        payload: CodexRpc.ClientRequestParamsByMethod[M],
+      ) => {
+        calls.push({ method, payload });
+        return Effect.succeed(started as CodexRpc.ClientRequestResponsesByMethod[M]);
+      },
+    };
+
+    await Effect.runPromise(
+      openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "semi-sandboxed",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: undefined,
+      }),
+    );
+
+    assert.deepStrictEqual(calls, [
+      {
+        method: "thread/start",
+        payload: {
+          cwd: "/tmp/project",
+          approvalPolicy: "never",
+          sandbox: "workspace-write",
+          model: "gpt-5.3-codex",
+        },
+      },
+    ]);
+  });
+
   it("falls back to thread/start when resume fails recoverably", async () => {
     const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
     const started = makeThreadOpenResponse("fresh-thread");

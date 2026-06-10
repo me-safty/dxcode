@@ -90,6 +90,7 @@ import {
   LockIcon,
   LockOpenIcon,
   PenLineIcon,
+  ShieldCheckIcon,
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -125,6 +126,11 @@ const runtimeModeConfig: Record<
     label: "Auto-accept edits",
     description: "Auto-approve edits, ask before other actions.",
     icon: PenLineIcon,
+  },
+  "semi-sandboxed": {
+    label: "Semi-Sandboxed",
+    description: "Avoid prompts while retaining provider sandboxing when supported.",
+    icon: ShieldCheckIcon,
   },
   "full-access": {
     label: "Full access",

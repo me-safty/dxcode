@@ -273,8 +273,12 @@ function runtimeModeToThreadConfig(input: RuntimeMode): {
         approvalPolicy: "on-request",
         sandbox: "workspace-write",
       };
+    case "semi-sandboxed":
+      return {
+        approvalPolicy: "never",
+        sandbox: "workspace-write",
+      };
     case "full-access":
-    default:
       return {
         approvalPolicy: "never",
         sandbox: "danger-full-access",
@@ -307,11 +311,11 @@ function runtimeModeToTurnSandboxPolicy(
         type: "readOnly",
       };
     case "auto-accept-edits":
+    case "semi-sandboxed":
       return {
         type: "workspaceWrite",
       };
     case "full-access":
-    default:
       return {
         type: "dangerFullAccess",
       };
