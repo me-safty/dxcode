@@ -9,6 +9,7 @@ import {
   terminalSessionStateAtom,
   type TerminalSessionTarget,
   type TerminalSessionState,
+  type TerminalAttachSessionInput,
 } from "@t3tools/client-runtime";
 import type {
   EnvironmentId,
@@ -38,12 +39,8 @@ export function subscribeTerminalMetadata(input: {
   return terminalSessionManager.subscribeMetadata(input);
 }
 
-export function attachTerminalSession(input: {
+export function attachTerminalSession(input: TerminalAttachSessionInput & {
   readonly environmentId: EnvironmentId;
-  readonly client: Parameters<typeof terminalSessionManager.attach>[0]["client"];
-  readonly terminal: Parameters<typeof terminalSessionManager.attach>[0]["terminal"];
-  readonly onSnapshot?: (snapshot: TerminalSessionSnapshot) => void;
-  readonly onEvent?: (event: TerminalAttachStreamEvent) => void;
 }) {
   return terminalSessionManager.attach({
     environmentId: input.environmentId,

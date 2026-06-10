@@ -12,6 +12,8 @@ import {
   type KnownTerminalSession,
   type TerminalSessionTarget,
   type TerminalSessionState,
+  type TerminalSubscribeMetadataInput,
+  type TerminalAttachSessionInput,
 } from "@t3tools/client-runtime";
 import type { EnvironmentId, TerminalSessionSnapshot, ThreadId } from "@t3tools/contracts";
 
@@ -21,19 +23,14 @@ export const terminalSessionManager = createTerminalSessionManager({
   getRegistry: () => appAtomRegistry,
 });
 
-export function subscribeTerminalMetadata(input: {
+export function subscribeTerminalMetadata(input: TerminalSubscribeMetadataInput & {
   readonly environmentId: EnvironmentId;
-  readonly client: Parameters<typeof terminalSessionManager.subscribeMetadata>[0]["client"];
 }) {
   return terminalSessionManager.subscribeMetadata(input);
 }
 
-export function attachTerminalSession(input: {
+export function attachTerminalSession(input: TerminalAttachSessionInput & {
   readonly environmentId: EnvironmentId;
-  readonly client: Parameters<typeof terminalSessionManager.attach>[0]["client"];
-  readonly terminal: Parameters<typeof terminalSessionManager.attach>[0]["terminal"];
-  readonly onSnapshot?: (snapshot: TerminalSessionSnapshot) => void;
-  readonly onEvent?: Parameters<typeof terminalSessionManager.attach>[0]["onEvent"];
 }) {
   return terminalSessionManager.attach({
     environmentId: input.environmentId,

@@ -11,7 +11,7 @@ export interface LaunchEnvContextInput {
   readonly projectRoot: string;
   readonly projectId: string;
   readonly threadId: string;
-  readonly worktreePath?: string | null;
+  readonly worktreePath?: string | null | undefined;
 }
 
 export function buildLaunchContextEnv(input: LaunchEnvContextInput): Record<string, string> {

@@ -348,7 +348,7 @@ describe("ProviderCommandReactor", () => {
     );
     const layer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(
-        LaunchEnvLayerLive.pipe(
+        LaunchEnvLive.pipe(
           Layer.provide(projectionSnapshotLayer),
           Layer.provide(serverConfigLayer),
         ),

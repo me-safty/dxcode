@@ -35,11 +35,25 @@ import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { environmentAuthenticatedAuthLayer } from "./auth/http.ts";
+import { TerminalManager, TerminalSessionLookupError } from "./terminal/Services/Manager.ts";
+
+const terminalManagerStub = {
+  open: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
+  attachStream: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
+  write: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
+  resize: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
+  clear: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
+  restart: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
+  close: () => Effect.fail(new TerminalSessionLookupError({ threadId: "", terminalId: "" })),
+  subscribe: () => Effect.succeed(() => {}),
+  subscribeMetadata: () => Effect.succeed(() => {}),
+};
 
 const CliRuntimeLayer = Layer.mergeAll(
   NodeServices.layer,
   NetService.layer,
   defaultLaunchEnvTestLayer,
+  Layer.succeed(TerminalManager, terminalManagerStub),
 );
 class ProjectCliHttpApi extends HttpApi.make("environment").add(EnvironmentOrchestrationHttpApi) {}
 

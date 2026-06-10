@@ -1,51 +1,62 @@
-import { TerminalCwdError, TerminalSessionLookupError, ThreadId } from "@t3tools/contracts";
+import { ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import { ServerConfig } from "../../config.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { LaunchEnv, type LaunchEnvShape, type LaunchEnvProjectionShape } from "../Services/LaunchEnv.ts";
-import { mergeResolvedLaunchEnv } from "../launchEnvUtils.ts";
+import { LaunchEnv, type LaunchEnvShape } from "../Services/LaunchEnv.ts";
+import { mergeResolvedLaunchEnv, type LaunchEnvContextInput } from "../launchEnvUtils.ts";
+import { LaunchEnvProjectLookupError, LaunchEnvThreadLookupError } from "../Services/LaunchEnvErrors.ts";
 
-export const makeResolveLaunchEnv = (t3Home: string): LaunchEnvShape["resolve"] =>
-  Effect.fn("LaunchEnv.resolve")(function* (input) {
+export const makeLaunchEnv = Effect.fn("makeLaunchEnv")(function* () {
+  const serverConfig = yield* ServerConfig;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+
+  const resolve: LaunchEnvShape["resolve"] = Effect.fn("LaunchEnv.resolve")(function* (input) {
     return mergeResolvedLaunchEnv({
-      t3Home,
+      t3Home: serverConfig.baseDir,
       ...(input.extraEnv !== undefined ? { extraEnv: input.extraEnv } : {}),
       context: {
         projectRoot: input.projectRoot,
         projectId: String(input.projectId),
-        threadId: input.threadId,
-        ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
+        threadId: String(input.threadId),
+        worktreePath: input.worktreePath ?? undefined,
       },
     });
   });
 
-export const makeResolveForThread = (
-  resolve: LaunchEnvShape["resolve"],
-  projection: LaunchEnvProjectionShape,
-): LaunchEnvShape["resolveForThread"] =>
-  Effect.fn("LaunchEnv.resolveForThread")(function* (input) {
-    const sessionLookupError = () =>
-      new TerminalSessionLookupError({
-        threadId: input.threadId,
-        terminalId: input.terminalId ?? "",
-      });
-
-    const threadOption = yield* projection
+  const resolveForThread: LaunchEnvShape["resolveForThread"] = Effect.fn(
+    "LaunchEnv.resolveForThread",
+  )(function* (input) {
+    const threadOption = yield* projectionSnapshotQuery
       .getThreadShellById(ThreadId.make(input.threadId))
-      .pipe(Effect.mapError(() => sessionLookupError()));
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new LaunchEnvThreadLookupError({
+              threadId: input.threadId,
+              terminalId: input.terminalId,
+              cause,
+            }),
+        ),
+      );
 
     const { projectId, worktreePath } = yield* Option.match(threadOption, {
       onSome: (thread) =>
         Effect.succeed({
           projectId: thread.projectId,
-          worktreePath: input.worktreePath !== undefined ? input.worktreePath : thread.worktreePath,
+          worktreePath:
+            input.worktreePath !== undefined ? input.worktreePath : thread.worktreePath,
         }),
       onNone: () => {
         if (input.projectId === undefined) {
-          return Effect.fail(sessionLookupError());
+          return Effect.fail(
+            new LaunchEnvThreadLookupError({
+              threadId: input.threadId,
+              terminalId: input.terminalId,
+            }),
+          );
         }
 
         return Effect.succeed({
@@ -55,27 +66,30 @@ export const makeResolveForThread = (
       },
     });
 
-    const projectOption = yield* projection.getProjectShellById(projectId).pipe(
-      Effect.mapError(
-        (cause) =>
-          new TerminalCwdError({
-            cwd: projectId,
-            reason: "statFailed",
-            cause,
-          }),
-      ),
-    );
-
-    const project = yield* Option.match(projectOption, {
-      onNone: () =>
-        Effect.fail(
-          new TerminalCwdError({
-            cwd: projectId,
-            reason: "notFound",
+    const project = yield* projectionSnapshotQuery
+      .getProjectShellById(projectId)
+      .pipe(
+        Effect.flatMap((projectOption) =>
+          Option.match(projectOption, {
+            onSome: Effect.succeed,
+            onNone: () =>
+              Effect.fail(
+                new LaunchEnvProjectLookupError({
+                  projectId: String(projectId),
+                  reason: "notFound",
+                }),
+              ),
           }),
         ),
-      onSome: Effect.succeed,
-    });
+        Effect.mapError(
+          (cause) =>
+            new LaunchEnvProjectLookupError({
+              projectId: String(projectId),
+              reason: "statFailed",
+              cause,
+            }),
+        ),
+      );
 
     const env: Record<string, string> = yield* resolve({
       ...(input.extraEnv !== undefined ? { extraEnv: input.extraEnv } : {}),
@@ -87,24 +101,15 @@ export const makeResolveForThread = (
 
     return {
       projectId,
-      ...(worktreePath !== undefined ? { worktreePath } : {}),
+      worktreePath,
       env,
-    } as const;
+    } satisfies typeof input extends { projectId?: infer P } ? { projectId: P | typeof projectId; worktreePath?: string | null | undefined; env: Record<string, string> } : never;
   });
-
-export const makeLaunchEnv = Effect.fn("makeLaunchEnv")(function* () {
-  const serverConfig = yield* ServerConfig;
-  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
-  const resolve = makeResolveLaunchEnv(serverConfig.baseDir);
 
   return {
     resolve,
-    resolveForThread: makeResolveForThread(resolve, {
-      getThreadShellById: (threadId) => projectionSnapshotQuery.getThreadShellById(threadId),
-      getProjectShellById: (projectId) => projectionSnapshotQuery.getProjectShellById(projectId),
-    }),
+    resolveForThread,
   } satisfies LaunchEnvShape;
 });
 
 export const LaunchEnvLive = Layer.effect(LaunchEnv, makeLaunchEnv());
-
