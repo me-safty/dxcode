@@ -2197,16 +2197,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
 
     const realWorktreesDir = yield* resolveRealPath(worktreesDir);
-    const isUnderWorktreesDir = (candidate: string): boolean => {
-      const normalized = path.resolve(candidate);
-      return normalized === realWorktreesDir || normalized.startsWith(realWorktreesDir + path.sep);
-    };
+    const isUnderWorktreesDir = (candidate: string): boolean =>
+      candidate === realWorktreesDir || candidate.startsWith(realWorktreesDir + path.sep);
 
     const rawCandidates: { path: string; refName: string }[] = [];
     let currentPath: string | null = null;
     let currentBranch: string | null = null;
     const flush = () => {
-      if (currentPath && isUnderWorktreesDir(currentPath)) {
+      if (currentPath) {
         rawCandidates.push({
           path: currentPath,
           refName: currentBranch ?? path.basename(currentPath),
@@ -2227,13 +2225,17 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
     flush();
 
-    const candidates = rawCandidates;
-
+    // Resolve each candidate's real path (also confirms it still exists on disk) and
+    // compare against the resolved worktrees dir so symlinked paths match symmetrically.
     const existing = yield* Effect.forEach(
-      candidates,
+      rawCandidates,
       (candidate) =>
-        fileSystem.stat(candidate.path).pipe(
-          Effect.as(Option.some(candidate)),
+        fileSystem.realPath(candidate.path).pipe(
+          Effect.map((realCandidatePath) =>
+            isUnderWorktreesDir(realCandidatePath)
+              ? Option.some({ path: candidate.path, refName: candidate.refName })
+              : Option.none<{ path: string; refName: string }>(),
+          ),
           Effect.orElseSucceed(() => Option.none<{ path: string; refName: string }>()),
         ),
       { concurrency: 8 },

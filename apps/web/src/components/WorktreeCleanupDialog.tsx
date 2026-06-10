@@ -1,5 +1,5 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ensureEnvironmentApi } from "../environmentApi";
 import { invalidateSourceControlState } from "../lib/sourceControlActions";
@@ -44,21 +44,29 @@ export function WorktreeCleanupDialog({
 }: WorktreeCleanupDialogProps) {
   const [rows, setRows] = useState<CleanupRowState[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+
+  // Hold the latest threadRefs in a ref so frequent thread-store updates don't
+  // re-run the load effect and discard the user's in-progress selection.
+  const threadRefsRef = useRef(threadRefs);
+  threadRefsRef.current = threadRefs;
 
   useEffect(() => {
     if (!open) {
       setRows([]);
+      setLoadError(null);
       return;
     }
     let cancelled = false;
     setLoading(true);
+    setLoadError(null);
     void (async () => {
       try {
         const api = ensureEnvironmentApi(environmentId);
         const { worktrees } = await api.vcs.listManagedWorktrees({ cwd });
         const selected = selectWorktreesForScope(
-          classifyManagedWorktrees(worktrees, threadRefs),
+          classifyManagedWorktrees(worktrees, threadRefsRef.current),
           scope,
         );
         if (cancelled) return;
@@ -88,6 +96,18 @@ export function WorktreeCleanupDialog({
               /* leave sizeBytes null => shown as unknown, excluded from total */
             });
         }
+      } catch (error) {
+        if (cancelled) return;
+        const message =
+          error instanceof Error ? error.message : "Failed to load worktrees.";
+        setLoadError(message);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not load worktrees",
+            description: message,
+          }),
+        );
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -95,7 +115,7 @@ export function WorktreeCleanupDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, environmentId, cwd, scope, threadRefs]);
+  }, [open, environmentId, cwd, scope]);
 
   const setRow = useCallback((path: string, patch: Partial<CleanupRowState>) => {
     setRows((current) => current.map((row) => (row.path === path ? { ...row, ...patch } : row)));
@@ -131,6 +151,16 @@ export function WorktreeCleanupDialog({
         }),
       );
       onOpenChange(false);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to remove worktrees.";
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Worktree cleanup failed",
+          description: message,
+        }),
+      );
     } finally {
       setRemoving(false);
     }
@@ -152,6 +182,10 @@ export function WorktreeCleanupDialog({
 
         {loading ? (
           <p className="px-1 py-4 text-sm text-muted-foreground">Scanning worktrees…</p>
+        ) : loadError ? (
+          <p className="px-1 py-4 text-sm text-destructive">
+            Could not load worktrees: {loadError}
+          </p>
         ) : rows.length === 0 ? (
           <p className="px-1 py-4 text-sm text-muted-foreground">Nothing to clean up.</p>
         ) : (

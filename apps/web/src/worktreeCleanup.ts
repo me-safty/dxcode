@@ -7,7 +7,10 @@ function normalizeWorktreePath(path: string | null): string | null {
   if (!trimmed) {
     return null;
   }
-  return trimmed;
+  // Canonicalize separator style and trailing slashes so paths from different
+  // sources (stored thread paths vs. git-reported worktree paths) compare equal.
+  const normalized = trimmed.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalized.length > 0 ? normalized : null;
 }
 
 export function getOrphanedWorktreePathForThread(

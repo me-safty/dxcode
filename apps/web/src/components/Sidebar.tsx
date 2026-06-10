@@ -1467,7 +1467,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
         const actionHandlers = new Map<string, () => Promise<void> | void>();
         const makeLeaf = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
+          action: "rename" | "grouping" | "copy-path" | "cleanup-worktrees" | "delete",
           member: SidebarProjectGroupMember,
           options?: {
             destructive?: boolean;
@@ -1486,6 +1486,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               case "copy-path":
                 copyPathToClipboard(member.cwd, { path: member.cwd });
                 return;
+              case "cleanup-worktrees":
+                setWorktreeCleanupTarget({ environmentId: member.environmentId, cwd: member.cwd });
+                return;
               case "delete":
                 return handleRemoveProject(member);
             }
@@ -1500,7 +1503,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         };
 
         const buildTargetedItem = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
+          action: "rename" | "grouping" | "copy-path" | "cleanup-worktrees" | "delete",
           label: string,
           options?: {
             destructive?: boolean;
@@ -1532,23 +1535,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           };
         };
 
-        const cleanupWorktreesId = `cleanup-worktrees:${project.memberProjects[0]?.physicalProjectKey ?? "project"}`;
-        actionHandlers.set(cleanupWorktreesId, () => {
-          const member = project.memberProjects[0];
-          if (member) {
-            setWorktreeCleanupTarget({ environmentId: member.environmentId, cwd: member.cwd });
-          }
-        });
-
         const clicked = await api.contextMenu.show(
           [
             buildTargetedItem("rename", "Rename"),
             buildTargetedItem("grouping", "Group into..."),
             buildTargetedItem("copy-path", "Copy Path"),
-            {
-              id: cleanupWorktreesId,
-              label: "Clean up worktrees…",
-            },
+            buildTargetedItem("cleanup-worktrees", "Clean up worktrees…"),
             buildTargetedItem("delete", "Remove", {
               destructive: true,
             }),

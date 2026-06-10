@@ -136,6 +136,12 @@ describe("classifyManagedWorktrees", () => {
     const [classified] = classifyManagedWorktrees([wt("/wt/a")], []);
     expect(classified?.classification).toBe("orphaned");
   });
+
+  it("matches a live thread despite trailing-slash and separator differences", () => {
+    const refs: WorktreeThreadRef[] = [{ worktreePath: "C:\\repo\\worktrees\\a\\", isArchived: false }];
+    const [classified] = classifyManagedWorktrees([wt("C:/repo/worktrees/a")], refs);
+    expect(classified?.classification).toBe("active");
+  });
 });
 
 describe("selectWorktreesForScope", () => {

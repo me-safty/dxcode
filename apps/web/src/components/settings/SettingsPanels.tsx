@@ -1581,9 +1581,18 @@ export function ArchivedThreadsPanel() {
                       size="sm"
                       className="h-7 cursor-pointer gap-1.5 px-2.5 text-destructive"
                       onClick={() =>
-                        void confirmAndDeleteThread(
-                          scopeThreadRef(thread.environmentId, thread.id),
-                        ).then(() => refreshArchivedThreads())
+                        void confirmAndDeleteThread(scopeThreadRef(thread.environmentId, thread.id))
+                          .then(() => refreshArchivedThreads())
+                          .catch((error) => {
+                            toastManager.add(
+                              stackedThreadToast({
+                                type: "error",
+                                title: "Failed to delete thread",
+                                description:
+                                  error instanceof Error ? error.message : "An error occurred.",
+                              }),
+                            );
+                          })
                       }
                     >
                       <Trash2 className="size-3.5" />
