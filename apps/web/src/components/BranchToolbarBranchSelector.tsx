@@ -1,7 +1,7 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronDownIcon, GitBranchIcon } from "lucide-react";
+import { ChevronDownIcon, GitBranchIcon, SearchIcon } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -645,23 +645,30 @@ export function BranchToolbarBranchSelector({
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </ComboboxTrigger>
       <ComboboxPopup align="end" side="top" className="flex w-80 flex-col">
-        <div className="shrink-0 border-b p-1">
-          <ComboboxInput
-            className="[&_input]:font-sans rounded-md"
-            inputClassName="ring-0"
-            placeholder="Search refs..."
-            showTrigger={false}
-            size="sm"
-            value={branchQuery}
-            onChange={(event) => setBranchQuery(event.target.value)}
-          />
+        <div className="shrink-0 px-3 pt-2.5">
+          <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
+            <SearchIcon
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1.5 left-0 size-4 shrink-0 text-muted-foreground/55"
+            />
+            <ComboboxInput
+              className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
+              inputClassName="rounded-none bg-transparent text-sm"
+              placeholder="Search refs..."
+              showTrigger={false}
+              size="sm"
+              unstyled
+              value={branchQuery}
+              onChange={(event) => setBranchQuery(event.target.value)}
+            />
+          </div>
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ComboboxEmpty>No refs found.</ComboboxEmpty>
           <div className="relative min-h-0 w-full max-h-56 flex-1 overflow-hidden">
             {shouldVirtualizeBranchList ? (
               <>
-                <ComboboxListVirtualized className="not-empty:ps-1 not-empty:pe-0 not-empty:py-1">
+                <ComboboxListVirtualized className="not-empty:ps-1 not-empty:pe-0 not-empty:pt-2 not-empty:pb-1">
                   <LegendList<string>
                     ref={branchListRef}
                     data={filteredBranchPickerItems}
@@ -696,7 +703,7 @@ export function BranchToolbarBranchSelector({
             ) : (
               <ComboboxList
                 ref={setBranchListRef}
-                className="h-full max-h-56 min-h-0 not-empty:ps-1 not-empty:pe-0 not-empty:py-1"
+                className="h-full max-h-56 min-h-0 not-empty:ps-1 not-empty:pe-0 not-empty:pt-2 not-empty:pb-1"
               >
                 {filteredBranchPickerItems.map((itemValue, index) =>
                   renderPickerItem(itemValue, index),
