@@ -2936,7 +2936,6 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     if (!activeThreadId) {
       setTerminalLaunchContext(null);
-      storeClearTerminalLaunchContext(routeThreadRef);
       return;
     }
     setTerminalLaunchContext((current) => {
@@ -2944,7 +2943,7 @@ export default function ChatView(props: ChatViewProps) {
       if (current.threadId === activeThreadId) return current;
       return null;
     });
-  }, [activeThreadId, routeThreadRef, storeClearTerminalLaunchContext]);
+  }, [activeThreadId]);
 
   useEffect(() => {
     if (!activeThreadId || !activeProjectCwd) {
@@ -2958,10 +2957,8 @@ export default function ChatView(props: ChatViewProps) {
         project: { cwd: activeProjectCwd },
         worktreePath: activeThreadWorktreePath,
       });
-      if (
-        settledCwd === current.cwd &&
-        (activeThreadWorktreePath ?? null) === current.worktreePath
-      ) {
+      const settledWorktreePath = activeThreadWorktreePath ?? null;
+      if (settledCwd === current.cwd && settledWorktreePath === current.worktreePath) {
         if (activeThreadRef) {
           storeClearTerminalLaunchContext(activeThreadRef);
         }
@@ -2985,9 +2982,10 @@ export default function ChatView(props: ChatViewProps) {
       project: { cwd: activeProjectCwd },
       worktreePath: activeThreadWorktreePath,
     });
+    const settledWorktreePath = activeThreadWorktreePath ?? null;
     if (
       settledCwd === storeServerTerminalLaunchContext.cwd &&
-      (activeThreadWorktreePath ?? null) === storeServerTerminalLaunchContext.worktreePath
+      settledWorktreePath === storeServerTerminalLaunchContext.worktreePath
     ) {
       if (activeThreadRef) {
         storeClearTerminalLaunchContext(activeThreadRef);

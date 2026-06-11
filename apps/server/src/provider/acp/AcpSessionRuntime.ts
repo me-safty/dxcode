@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -164,8 +166,10 @@ const makeAcpSessionRuntime = (
     const modeStateRef = yield* Ref.make<AcpSessionModeState | undefined>(undefined);
     const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallState>());
     const assistantSegmentRef = yield* Ref.make<AcpAssistantSegmentState>({ nextSegmentIndex: 0 });
+    const loadReplayRef = yield* Ref.make(false);
     const configOptionsRef = yield* Ref.make(sessionConfigOptionsFromSetup(undefined));
     const startStateRef = yield* Ref.make<AcpStartState>({ _tag: "NotStarted" });
+    const runtimeEpoch = randomUUID().slice(0, 8);
     const processScope = yield* Scope.make("sequential");
     let processScopeTransferred = false;
     yield* Effect.addFinalizer(() =>
@@ -255,6 +259,8 @@ const makeAcpSessionRuntime = (
         modeStateRef,
         toolCallsRef,
         assistantSegmentRef,
+        loadReplayRef,
+        runtimeEpoch,
         params: notification,
       }),
     );
@@ -418,11 +424,13 @@ const makeAcpSessionRuntime = (
           cwd: options.cwd,
           mcpServers: [],
         } satisfies EffectAcpSchema.LoadSessionRequest;
-        const resumed = yield* runLoggedRequest(
-          "session/load",
-          loadPayload,
-          acp.agent.loadSession(loadPayload),
-        ).pipe(Effect.exit);
+        const resumed = yield* Ref.set(loadReplayRef, true).pipe(
+          Effect.andThen(
+            runLoggedRequest("session/load", loadPayload, acp.agent.loadSession(loadPayload)),
+          ),
+          Effect.ensuring(Ref.set(loadReplayRef, false)),
+          Effect.exit,
+        );
         if (Exit.isSuccess(resumed)) {
           sessionId = options.resumeSessionId;
           sessionSetupResult = resumed.value;
@@ -600,12 +608,16 @@ const handleSessionUpdate = ({
   modeStateRef,
   toolCallsRef,
   assistantSegmentRef,
+  loadReplayRef,
+  runtimeEpoch,
   params,
 }: {
   readonly queue: Queue.Queue<AcpParsedSessionEvent>;
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
   readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallState>>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
+  readonly loadReplayRef: Ref.Ref<boolean>;
+  readonly runtimeEpoch: string;
   readonly params: EffectAcpSchema.SessionNotification;
 }): Effect.Effect<void> =>
   Effect.gen(function* () {
@@ -614,6 +626,9 @@ const handleSessionUpdate = ({
       yield* Ref.update(modeStateRef, (current) =>
         current === undefined ? current : updateModeState(current, parsed.modeId!),
       );
+    }
+    if (yield* Ref.get(loadReplayRef)) {
+      return;
     }
     for (const event of parsed.events) {
       if (event._tag === "ToolCallUpdated") {
@@ -653,6 +668,7 @@ const handleSessionUpdate = ({
           queue,
           assistantSegmentRef,
           sessionId: params.sessionId,
+          runtimeEpoch,
         });
         yield* Queue.offer(queue, {
           ...event,
@@ -690,17 +706,19 @@ function shouldEmitToolCallUpdate(
   return previous === undefined || previous.title !== next.title || previous.detail !== next.detail;
 }
 
-const assistantItemId = (sessionId: string, segmentIndex: number) =>
-  `assistant:${sessionId}:segment:${segmentIndex}`;
+const assistantItemId = (sessionId: string, runtimeEpoch: string, segmentIndex: number) =>
+  `assistant:${sessionId}:run:${runtimeEpoch}:segment:${segmentIndex}`;
 
 const ensureActiveAssistantSegment = ({
   queue,
   assistantSegmentRef,
   sessionId,
+  runtimeEpoch,
 }: {
   readonly queue: Queue.Queue<AcpParsedSessionEvent>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
   readonly sessionId: string;
+  readonly runtimeEpoch: string;
 }) =>
   Ref.modify<AcpAssistantSegmentState, EnsureActiveAssistantSegmentResult>(
     assistantSegmentRef,
@@ -708,7 +726,7 @@ const ensureActiveAssistantSegment = ({
       if (current.activeItemId) {
         return [{ itemId: current.activeItemId }, current] as const;
       }
-      const itemId = assistantItemId(sessionId, current.nextSegmentIndex);
+      const itemId = assistantItemId(sessionId, runtimeEpoch, current.nextSegmentIndex);
       return [
         {
           itemId,

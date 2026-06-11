@@ -199,6 +199,7 @@ vi.mock("~/environmentApi", () => ({
 
 vi.mock("~/environments/runtime", () => ({
   readEnvironmentConnection: readEnvironmentConnectionMock,
+  waitForEnvironmentReconnectIdle: vi.fn(async () => true),
 }));
 
 vi.mock("~/localApi", () => ({

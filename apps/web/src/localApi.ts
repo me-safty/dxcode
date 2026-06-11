@@ -76,43 +76,43 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
     },
     persistence: {
       getClientSettings: async () => {
-        if (window.desktopBridge) {
+        if (window.desktopBridge?.getClientSettings) {
           return window.desktopBridge.getClientSettings();
         }
         return readBrowserClientSettings();
       },
       setClientSettings: async (settings) => {
-        if (window.desktopBridge) {
+        if (window.desktopBridge?.setClientSettings) {
           return window.desktopBridge.setClientSettings(settings);
         }
         writeBrowserClientSettings(settings);
       },
       getSavedEnvironmentRegistry: async () => {
-        if (window.desktopBridge) {
+        if (window.desktopBridge?.getSavedEnvironmentRegistry) {
           return window.desktopBridge.getSavedEnvironmentRegistry();
         }
         return readBrowserSavedEnvironmentRegistry();
       },
       setSavedEnvironmentRegistry: async (records) => {
-        if (window.desktopBridge) {
+        if (window.desktopBridge?.setSavedEnvironmentRegistry) {
           return window.desktopBridge.setSavedEnvironmentRegistry(records);
         }
         writeBrowserSavedEnvironmentRegistry(records);
       },
       getSavedEnvironmentSecret: async (environmentId) => {
-        if (window.desktopBridge) {
+        if (window.desktopBridge?.getSavedEnvironmentSecret) {
           return window.desktopBridge.getSavedEnvironmentSecret(environmentId);
         }
         return readBrowserSavedEnvironmentSecret(environmentId);
       },
       setSavedEnvironmentSecret: async (environmentId, secret) => {
-        if (window.desktopBridge) {
+        if (window.desktopBridge?.setSavedEnvironmentSecret) {
           return window.desktopBridge.setSavedEnvironmentSecret(environmentId, secret);
         }
         return writeBrowserSavedEnvironmentSecret(environmentId, secret);
       },
       removeSavedEnvironmentSecret: async (environmentId) => {
-        if (window.desktopBridge) {
+        if (window.desktopBridge?.removeSavedEnvironmentSecret) {
           return window.desktopBridge.removeSavedEnvironmentSecret(environmentId);
         }
         removeBrowserSavedEnvironmentSecret(environmentId);
