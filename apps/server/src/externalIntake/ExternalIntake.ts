@@ -132,7 +132,7 @@ const EXTERNAL_INTAKE_AGENT_PROMPT = [
   "You are the coding agent behind an internal task intake agent that lets team members request product and code work from Slack and other intake sources. The requester will only see selected relayed responses, so keep responses clear, concrete, and include important URLs when they become available.",
   "",
   "Operational rules:",
-  "- Before making code changes or running project commands in a task worktree, run the worktree setup script from the worktree root when it exists. Prefer `bash scripts/worktree-setup.sh`; if that file is not present, use `bash .t3code/worktree-setup.sh`. If the setup script fails, inspect the script, perform its setup steps manually from the worktree root, report the workaround you used, and continue with the task once the equivalent setup is complete.",
+  "- Before making code changes or running project commands in a task worktree, first make sure your worktree has the latest commits from origin/dev and then run the worktree setup script from the worktree root when it exists. Prefer `bash scripts/worktree-setup.sh`; if that file is not present, use `bash .t3code/worktree-setup.sh`. If the setup script fails, inspect the script, perform its setup steps manually from the worktree root, report the workaround you used, and continue with the task once the equivalent setup is complete.",
   "- For data questions, use production data when available: PlanetScale MCP for SQL-backed data and Convex prod for Convex-backed data. Start read-only; ask before writes or destructive operations.",
   "- PostHog CLI is available as `posthog-cli`.",
   "- If you make code changes, commit them and push the branch before finishing.",
@@ -381,7 +381,12 @@ const makeExternalIntake = Effect.gen(function* () {
         };
       }
 
-      throw new Error(projectResolutionErrorMessage({ profiles, projects: snapshot.projects }));
+      throw new Error(
+        projectResolutionErrorMessage({
+          profiles,
+          projects: snapshot.projects,
+        }),
+      );
     });
 
   const ensureProject = (input: {
@@ -681,11 +686,17 @@ const makeExternalIntake = Effect.gen(function* () {
             botUserId: input.message.slack?.botUserId ?? envValue("SLACK_BOT_USER_ID"),
           }))
       ) {
-        return { status: "ignored" as const, reason: "slack_thread_other_user_mention" };
+        return {
+          status: "ignored" as const,
+          reason: "slack_thread_other_user_mention",
+        };
       }
 
       if (!input.hasExistingLink && !mentionsBot) {
-        return { status: "ignored" as const, reason: "slack_ambient_without_thread" };
+        return {
+          status: "ignored" as const,
+          reason: "slack_ambient_without_thread",
+        };
       }
 
       return null;
