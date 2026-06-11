@@ -383,6 +383,29 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.isString(missing?.error);
       }),
     );
+
+    it.effect("refuses to remove a path outside the managed worktrees dir", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        // A real directory that exists but is not under the server worktrees dir.
+        const outside = yield* makeTmpDir("outside-");
+
+        const { results } = yield* driver.removeWorktrees({
+          cwd,
+          items: [{ path: outside, force: true }],
+        });
+
+        assert.equal(results.length, 1);
+        assert.equal(results[0]?.ok, false);
+        assert.match(results[0]?.error ?? "", /managed worktrees directory/i);
+        // The refusal must not delete the directory.
+        const fileSystem = yield* FileSystem.FileSystem;
+        assert.equal(yield* fileSystem.exists(outside), true);
+      }),
+    );
   });
 
   describe("commit context", () => {

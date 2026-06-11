@@ -2286,24 +2286,41 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const removeWorktrees: GitVcsDriver.GitVcsDriverShape["removeWorktrees"] = Effect.fn(
     "removeWorktrees",
   )(function* (input) {
+    // Defense-in-depth: never run `git worktree remove` on a client-supplied path
+    // that is not under the managed worktrees dir, even though git itself only
+    // operates on registered worktrees.
+    const realWorktreesDir = yield* resolveRealPath(worktreesDir);
     const results = yield* Effect.forEach(
       input.items,
-      (item) => {
-        const args = ["worktree", "remove"];
-        if (item.force) {
-          args.push("--force");
-        }
-        args.push(item.path);
-        return executeGit("GitVcsDriver.removeWorktrees", input.cwd, args, {
-          timeoutMs: 15_000,
-          fallbackErrorMessage: "git worktree remove failed",
-        }).pipe(
-          Effect.as({ path: item.path, ok: true as const }),
-          Effect.catch((error) =>
-            Effect.succeed({ path: item.path, ok: false as const, error: error.message }),
-          ),
-        );
-      },
+      (item) =>
+        resolveRealPath(item.path).pipe(
+          Effect.flatMap((realCandidate) => {
+            const isManaged =
+              realCandidate === realWorktreesDir ||
+              realCandidate.startsWith(realWorktreesDir + path.sep);
+            if (!isManaged) {
+              return Effect.succeed({
+                path: item.path,
+                ok: false as const,
+                error: "refused: path is outside the managed worktrees directory",
+              });
+            }
+            const args = ["worktree", "remove"];
+            if (item.force) {
+              args.push("--force");
+            }
+            args.push(item.path);
+            return executeGit("GitVcsDriver.removeWorktrees", input.cwd, args, {
+              timeoutMs: 15_000,
+              fallbackErrorMessage: "git worktree remove failed",
+            }).pipe(
+              Effect.as({ path: item.path, ok: true as const }),
+              Effect.catch((error) =>
+                Effect.succeed({ path: item.path, ok: false as const, error: error.message }),
+              ),
+            );
+          }),
+        ),
       { concurrency: 1 },
     );
     return { results };
