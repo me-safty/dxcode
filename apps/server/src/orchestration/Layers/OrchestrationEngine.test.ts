@@ -363,6 +363,7 @@ describe("OrchestrationEngine", () => {
     const queuedThread = queuedReadModel.threads.find((thread) => thread.id === threadId);
     expect(queuedThread?.messages).toEqual([]);
     expect(queuedThread?.queuedTurns.map((queuedTurn) => queuedTurn.text)).toEqual(["cancel me"]);
+    expect(queuedThread?.queuedTurns[0]?.createdAt).toBe("2026-01-01T00:00:01.000Z");
 
     const queuedDetail = await system.readThreadDetail(threadId);
     expect(Option.isSome(queuedDetail)).toBe(true);
@@ -425,6 +426,7 @@ describe("OrchestrationEngine", () => {
     const dispatchedThread = dispatchedReadModel.threads.find((thread) => thread.id === threadId);
     expect(dispatchedThread?.queuedTurns).toEqual([]);
     expect(dispatchedThread?.messages.map((message) => message.text)).toEqual(["dispatch me"]);
+    expect(dispatchedThread?.messages[0]?.createdAt).toBe("2026-01-01T00:00:04.000Z");
 
     const dispatchEvents = (await system.readEvents()).filter(
       (event) => event.commandId === CommandId.make("cmd-turn-queue-dispatch-dispatch"),
@@ -434,6 +436,13 @@ describe("OrchestrationEngine", () => {
       "thread.message-sent",
       "thread.turn-start-requested",
     ]);
+    const dispatchedMessageEvent = dispatchEvents.find(
+      (event) => event.type === "thread.message-sent",
+    );
+    expect(dispatchedMessageEvent?.payload).toMatchObject({
+      createdAt: "2026-01-01T00:00:04.000Z",
+      updatedAt: "2026-01-01T00:00:04.000Z",
+    });
 
     await system.dispose();
   });
@@ -758,6 +767,7 @@ describe("OrchestrationEngine", () => {
         checkpointRef: asCheckpointRef("refs/t3/checkpoints/thread-turn-diff/turn/1"),
         status: "ready",
         files: [],
+        attribution: "unattributed",
         checkpointTurnCount: 1,
         createdAt,
       }),
@@ -773,6 +783,7 @@ describe("OrchestrationEngine", () => {
         checkpointRef: asCheckpointRef("refs/t3/checkpoints/thread-turn-diff/turn/1"),
         status: "ready",
         files: [],
+        attribution: "unattributed",
         assistantMessageId: null,
         completedAt: createdAt,
       },

@@ -302,12 +302,22 @@ export type OrchestrationCheckpointFile = typeof OrchestrationCheckpointFile.Typ
 export const OrchestrationCheckpointStatus = Schema.Literals(["ready", "missing", "error"]);
 export type OrchestrationCheckpointStatus = typeof OrchestrationCheckpointStatus.Type;
 
+export const OrchestrationCheckpointAttribution = Schema.Literals([
+  "edit-snapshots",
+  "touched-paths",
+  "unattributed",
+]);
+export type OrchestrationCheckpointAttribution = typeof OrchestrationCheckpointAttribution.Type;
+
 export const OrchestrationCheckpointSummary = Schema.Struct({
   turnId: TurnId,
   checkpointTurnCount: NonNegativeInt,
   checkpointRef: CheckpointRef,
   status: OrchestrationCheckpointStatus,
   files: Schema.Array(OrchestrationCheckpointFile),
+  attribution: OrchestrationCheckpointAttribution.pipe(
+    Schema.withDecodingDefault(Effect.succeed("unattributed")),
+  ),
   assistantMessageId: Schema.NullOr(MessageId),
   completedAt: IsoDateTime,
 });
@@ -895,6 +905,7 @@ const ThreadTurnDiffCompleteCommand = Schema.Struct({
   checkpointRef: CheckpointRef,
   status: OrchestrationCheckpointStatus,
   files: Schema.Array(OrchestrationCheckpointFile),
+  attribution: Schema.optional(OrchestrationCheckpointAttribution),
   assistantMessageId: Schema.optional(MessageId),
   checkpointTurnCount: NonNegativeInt,
   createdAt: IsoDateTime,
@@ -1151,6 +1162,9 @@ export const ThreadTurnDiffCompletedPayload = Schema.Struct({
   checkpointRef: CheckpointRef,
   status: OrchestrationCheckpointStatus,
   files: Schema.Array(OrchestrationCheckpointFile),
+  attribution: OrchestrationCheckpointAttribution.pipe(
+    Schema.withDecodingDefault(Effect.succeed("unattributed")),
+  ),
   assistantMessageId: Schema.NullOr(MessageId),
   completedAt: IsoDateTime,
 });
@@ -1370,6 +1384,9 @@ const ProjectionCheckpointRow = Schema.Struct({
   checkpointRef: CheckpointRef,
   status: OrchestrationCheckpointStatus,
   files: Schema.Array(OrchestrationCheckpointFile),
+  attribution: OrchestrationCheckpointAttribution.pipe(
+    Schema.withDecodingDefault(Effect.succeed("unattributed")),
+  ),
   assistantMessageId: Schema.NullOr(MessageId),
   completedAt: IsoDateTime,
 });

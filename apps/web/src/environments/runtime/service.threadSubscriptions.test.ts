@@ -50,6 +50,7 @@ const mockIsEnvironmentShellBootstrapTimeoutError = vi.hoisted(() =>
   vi.fn((error: unknown) => error instanceof MockEnvironmentShellBootstrapTimeoutError),
 );
 const mockFetchRemoteSessionState = vi.fn();
+const mockClientReconnects: Array<ReturnType<typeof vi.fn>> = [];
 const mockConnectionReconnects: Array<ReturnType<typeof vi.fn>> = [];
 let savedEnvironmentRegistryListener: (() => void) | null = null;
 
@@ -628,25 +629,30 @@ describe("retainThreadDetailSubscription", () => {
       serverSequence: input.clientSequence ?? 0,
       serverFingerprint: input.verifiedFingerprint ?? { version: 1, value: "test-fingerprint" },
     }));
-    mockCreateWsRpcClient.mockReturnValue({
-      server: {
-        getConfig: vi.fn(async () => ({
-          environment: {
-            environmentId: EnvironmentId.make("env-remote"),
-            label: "Remote env",
-            platform: { os: "darwin", arch: "arm64" },
-            serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
-          },
-        })),
-      },
-      isHeartbeatFresh: vi.fn(() => true),
-      orchestration: {
-        subscribeThread: mockSubscribeThread,
-        probeSync: mockProbeSync,
-        replayEvents: mockReplayEvents,
-        reconcileThreadDetail: mockReconcileThreadDetail,
-      },
+    mockCreateWsRpcClient.mockImplementation(() => {
+      const reconnect = vi.fn(async () => undefined);
+      mockClientReconnects.push(reconnect);
+      return {
+        reconnect,
+        server: {
+          getConfig: vi.fn(async () => ({
+            environment: {
+              environmentId: EnvironmentId.make("env-remote"),
+              label: "Remote env",
+              platform: { os: "darwin", arch: "arm64" },
+              serverVersion: "0.0.0-test",
+              capabilities: { repositoryIdentity: true },
+            },
+          })),
+        },
+        isHeartbeatFresh: vi.fn(() => true),
+        orchestration: {
+          subscribeThread: mockSubscribeThread,
+          probeSync: mockProbeSync,
+          replayEvents: mockReplayEvents,
+          reconcileThreadDetail: mockReconcileThreadDetail,
+        },
+      };
     });
     mockCreateEnvironmentConnection.mockImplementation((input) => {
       const reconnect = vi.fn(async () => undefined);
@@ -679,6 +685,7 @@ describe("retainThreadDetailSubscription", () => {
       role: "client",
     });
     mockConnectionReconnects.length = 0;
+    mockClientReconnects.length = 0;
     mockProbeSync.mockResolvedValue({
       clientSequence: 1,
       serverSequence: 1,
@@ -6334,6 +6341,244 @@ describe("retainThreadDetailSubscription", () => {
       expect(mockConnectionReconnects[0]).toHaveBeenCalledTimes(1);
     });
     expect(mockProbeSync).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("forces a raw transport reconnect when terminal output stalls while connected", async () => {
+    stubBrowserVisibility();
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+    const { recordWsConnectionAttempt, recordWsConnectionOpened } =
+      await import("../../rpc/wsConnectionState");
+    const { recordTerminalDiagnostic, recordTerminalWriteStart, recordTerminalWriteSuccess } =
+      await import("../../lib/terminalDiagnosticsState");
+    const { useTerminalStateStore } = await import("../../terminalStateStore");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-terminal-output-stall");
+    useTerminalStateStore
+      .getState()
+      .ensureTerminal({ environmentId, threadId }, "default", { open: true });
+    recordWsConnectionAttempt("ws://127.0.0.1:3000/ws");
+    recordWsConnectionOpened();
+
+    const attempt = recordTerminalWriteStart({
+      data: "a",
+      source: "xterm-on-data",
+      terminalId: "default",
+      threadRef: { environmentId, threadId },
+    });
+    recordTerminalWriteSuccess({
+      attempt,
+      terminalId: "default",
+      threadRef: { environmentId, threadId },
+    });
+
+    await vi.advanceTimersByTimeAsync(3_999);
+    expect(mockClientReconnects[0]).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.waitFor(() => {
+      expect(mockClientReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+    recordTerminalDiagnostic({ environmentId, threadId }, "default", "terminal-event-applied", {
+      eventAppliedAt: Date.now(),
+      eventType: "output",
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(mockClientReconnects[0]).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("recreates the environment connection when terminal output stall reconnect is ineffective", async () => {
+    stubBrowserVisibility();
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+    const { recordWsConnectionAttempt, recordWsConnectionOpened } =
+      await import("../../rpc/wsConnectionState");
+    const { recordTerminalWriteStart, recordTerminalWriteSuccess } =
+      await import("../../lib/terminalDiagnosticsState");
+    const { useTerminalStateStore } = await import("../../terminalStateStore");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-terminal-output-stall-ineffective");
+    useTerminalStateStore
+      .getState()
+      .ensureTerminal({ environmentId, threadId }, "default", { open: true });
+    recordWsConnectionAttempt("ws://127.0.0.1:3000/ws");
+    recordWsConnectionOpened();
+
+    const attempt = recordTerminalWriteStart({
+      data: "a",
+      source: "xterm-on-data",
+      terminalId: "default",
+      threadRef: { environmentId, threadId },
+    });
+    recordTerminalWriteSuccess({
+      attempt,
+      terminalId: "default",
+      threadRef: { environmentId, threadId },
+    });
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.waitFor(() => {
+      expect(mockClientReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => {
+      expect(mockCreateEnvironmentConnection).toHaveBeenCalledTimes(2);
+    });
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not recover terminal output stalls while the tab is hidden", async () => {
+    stubBrowserVisibility("hidden");
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+    const { recordWsConnectionAttempt, recordWsConnectionOpened } =
+      await import("../../rpc/wsConnectionState");
+    const { recordTerminalWriteStart, recordTerminalWriteSuccess } =
+      await import("../../lib/terminalDiagnosticsState");
+    const { useTerminalStateStore } = await import("../../terminalStateStore");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-terminal-output-stall-hidden");
+    useTerminalStateStore
+      .getState()
+      .ensureTerminal({ environmentId, threadId }, "default", { open: true });
+    recordWsConnectionAttempt("ws://127.0.0.1:3000/ws");
+    recordWsConnectionOpened();
+
+    const attempt = recordTerminalWriteStart({
+      data: "a",
+      source: "xterm-on-data",
+      terminalId: "default",
+      threadRef: { environmentId, threadId },
+    });
+    recordTerminalWriteSuccess({
+      attempt,
+      terminalId: "default",
+      threadRef: { environmentId, threadId },
+    });
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(mockClientReconnects[0]).not.toHaveBeenCalled();
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("suppresses repeated terminal output stall recovery during the cooldown", async () => {
+    stubBrowserVisibility();
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+    const { recordWsConnectionAttempt, recordWsConnectionOpened } =
+      await import("../../rpc/wsConnectionState");
+    const { recordTerminalDiagnostic, recordTerminalWriteStart, recordTerminalWriteSuccess } =
+      await import("../../lib/terminalDiagnosticsState");
+    const { useTerminalStateStore } = await import("../../terminalStateStore");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-terminal-output-stall-cooldown");
+    useTerminalStateStore
+      .getState()
+      .ensureTerminal({ environmentId, threadId }, "default", { open: true });
+    recordWsConnectionAttempt("ws://127.0.0.1:3000/ws");
+    recordWsConnectionOpened();
+
+    const attempt = recordTerminalWriteStart({
+      data: "a",
+      source: "xterm-on-data",
+      terminalId: "default",
+      threadRef: { environmentId, threadId },
+    });
+    recordTerminalWriteSuccess({
+      attempt,
+      terminalId: "default",
+      threadRef: { environmentId, threadId },
+    });
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.waitFor(() => {
+      expect(mockClientReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+    recordTerminalDiagnostic({ environmentId, threadId }, "default", "terminal-event-applied", {
+      eventAppliedAt: Date.now(),
+      eventType: "output",
+    });
+    await vi.advanceTimersByTimeAsync(100);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(mockClientReconnects[0]).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not duplicate terminal output stall recovery while reconnect is in flight", async () => {
+    stubBrowserVisibility();
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+    const { recordWsConnectionAttempt, recordWsConnectionOpened } =
+      await import("../../rpc/wsConnectionState");
+    const { recordTerminalWriteStart, recordTerminalWriteSuccess } =
+      await import("../../lib/terminalDiagnosticsState");
+    const { useTerminalStateStore } = await import("../../terminalStateStore");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    let resolveReconnect!: () => void;
+    const reconnectPromise = new Promise<void>((resolve) => {
+      resolveReconnect = resolve;
+    });
+    mockClientReconnects[0]?.mockImplementation(() => reconnectPromise);
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-terminal-output-stall-in-flight");
+    useTerminalStateStore
+      .getState()
+      .ensureTerminal({ environmentId, threadId }, "default", { open: true });
+    recordWsConnectionAttempt("ws://127.0.0.1:3000/ws");
+    recordWsConnectionOpened();
+
+    const attempt = recordTerminalWriteStart({
+      data: "a",
+      source: "xterm-on-data",
+      terminalId: "default",
+      threadRef: { environmentId, threadId },
+    });
+    recordTerminalWriteSuccess({
+      attempt,
+      terminalId: "default",
+      threadRef: { environmentId, threadId },
+    });
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.waitFor(() => {
+      expect(mockClientReconnects[0]).toHaveBeenCalledTimes(1);
+    });
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mockClientReconnects[0]).toHaveBeenCalledTimes(1);
+    expect(mockConnectionReconnects[0]).not.toHaveBeenCalled();
+
+    resolveReconnect();
+    await vi.advanceTimersByTimeAsync(0);
 
     stop();
     await resetEnvironmentServiceForTests();

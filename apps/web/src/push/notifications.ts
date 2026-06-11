@@ -39,7 +39,11 @@ export async function ensureT3ServiceWorkerRegistration(): Promise<ServiceWorker
   if (!support.supported) {
     throw new Error(pushSupportReasonLabel(support.reason));
   }
-  return navigator.serviceWorker.register(SERVICE_WORKER_URL);
+  // virtual:pwa-register cannot pass registration options and may re-register
+  // this URL without updateViaCache. The cache-busted import and server
+  // Cache-Control headers are the primary fix; this only helps transition
+  // already-stale installs.
+  return navigator.serviceWorker.register(SERVICE_WORKER_URL, { updateViaCache: "none" });
 }
 
 export async function getCurrentPushSubscription(): Promise<PushSubscription | null> {

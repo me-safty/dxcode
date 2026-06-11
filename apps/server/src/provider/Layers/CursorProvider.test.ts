@@ -13,6 +13,8 @@ import {
   buildCursorProviderSnapshot,
   buildCursorCapabilitiesFromConfigOptions,
   buildCursorDiscoveredModelsFromAvailableModelsResponse,
+  buildCursorDiscoveredModelsFromConfigOptions,
+  buildCursorDiscoveredModelsFromSessionModelState,
   checkCursorProviderStatus,
   discoverCursorModelsViaAcp,
   getCursorFallbackModels,
@@ -70,7 +72,7 @@ const makeMockAgentWrapper = Effect.fn("makeMockAgentWrapper")(function* (
   });
   const wrapperPath = path.join(dir, "fake-agent.sh");
   // @effect-diagnostics-next-line preferSchemaOverJson:off
-  const bunCommand = JSON.stringify("bun");
+  const mockAgentCommand = JSON.stringify(process.execPath);
   // @effect-diagnostics-next-line preferSchemaOverJson:off
   const mockAgentPathJson = JSON.stringify(mockAgentPath);
   const envExports = Object.entries(extraEnv ?? {})
@@ -78,7 +80,7 @@ const makeMockAgentWrapper = Effect.fn("makeMockAgentWrapper")(function* (
     .join("\n");
   const script = `#!/bin/sh
 ${envExports}
-exec ${bunCommand} ${mockAgentPathJson} "$@"
+exec ${mockAgentCommand} ${mockAgentPathJson} "$@"
 `;
   yield* fileSystem.writeFileString(wrapperPath, script);
   yield* fileSystem.chmod(wrapperPath, 0o755);
@@ -95,7 +97,7 @@ const makeMockAgentWithAboutWrapper = Effect.fn("makeMockAgentWithAboutWrapper")
   });
   const wrapperPath = path.join(dir, "fake-agent.sh");
   // @effect-diagnostics-next-line preferSchemaOverJson:off
-  const bunCommand = JSON.stringify("bun");
+  const mockAgentCommand = JSON.stringify(process.execPath);
   // @effect-diagnostics-next-line preferSchemaOverJson:off
   const mockAgentPathJson = JSON.stringify(mockAgentPath);
   const script = `#!/bin/sh
@@ -104,7 +106,7 @@ if [ "$1" = "about" ]; then
   printf 'User Email          cursor@example.com\\n'
   exit 0
 fi
-exec ${bunCommand} ${mockAgentPathJson} "$@"
+exec ${mockAgentCommand} ${mockAgentPathJson} "$@"
 `;
   yield* fileSystem.writeFileString(wrapperPath, script);
   yield* fileSystem.chmod(wrapperPath, 0o755);
@@ -172,7 +174,7 @@ const makeMockAgentWithPersistentChildWrapper = Effect.fn(
   const survivedPath = path.join(dir, "survived");
   const wrapperPath = path.join(dir, "fake-agent.sh");
   // @effect-diagnostics-next-line preferSchemaOverJson:off
-  const bunCommand = JSON.stringify("bun");
+  const mockAgentCommand = JSON.stringify(process.execPath);
   // @effect-diagnostics-next-line preferSchemaOverJson:off
   const mockAgentPathJson = JSON.stringify(mockAgentPath);
   // @effect-diagnostics-next-line preferSchemaOverJson:off
@@ -183,7 +185,7 @@ const makeMockAgentWithPersistentChildWrapper = Effect.fn(
   sleep 1
   printf 'survived\\n' > ${survivedPathJson}
 ) &
-exec ${bunCommand} ${mockAgentPathJson} "$@"
+exec ${mockAgentCommand} ${mockAgentPathJson} "$@"
 `;
   yield* fileSystem.writeFileString(wrapperPath, script);
   yield* fileSystem.chmod(wrapperPath, 0o755);
@@ -201,14 +203,14 @@ const makeInvocationLogWrapper = Effect.fn("makeInvocationLogWrapper")(function*
   const invocationLogPath = path.join(dir, "invoked");
   const wrapperPath = path.join(dir, "fake-agent.sh");
   // @effect-diagnostics-next-line preferSchemaOverJson:off
-  const bunCommand = JSON.stringify("bun");
+  const mockAgentCommand = JSON.stringify(process.execPath);
   // @effect-diagnostics-next-line preferSchemaOverJson:off
   const mockAgentPathJson = JSON.stringify(mockAgentPath);
   // @effect-diagnostics-next-line preferSchemaOverJson:off
   const invocationLogPathJson = JSON.stringify(invocationLogPath);
   const script = `#!/bin/sh
 printf 'invoked\\n' > ${invocationLogPathJson}
-exec ${bunCommand} ${mockAgentPathJson} "$@"
+exec ${mockAgentCommand} ${mockAgentPathJson} "$@"
 `;
   yield* fileSystem.writeFileString(wrapperPath, script);
   yield* fileSystem.chmod(wrapperPath, 0o755);
@@ -548,6 +550,96 @@ describe("buildCursorDiscoveredModelsFromAvailableModelsResponse", () => {
   });
 });
 
+describe("buildCursorDiscoveredModelsFromSessionModelState", () => {
+  it("falls back to ACP session model state when extension discovery is unavailable", () => {
+    expect(
+      buildCursorDiscoveredModelsFromSessionModelState(
+        {
+          currentModelId: "composer-2",
+          availableModels: [
+            { modelId: "default", name: "Auto" },
+            { modelId: "composer-2", name: "Composer 2" },
+          ],
+        },
+        [
+          {
+            type: "select",
+            currentValue: "true",
+            options: [
+              { name: "Off", value: "false" },
+              { name: "Fast", value: "true" },
+            ],
+            category: "model_config",
+            id: "fast",
+            name: "Fast",
+          },
+        ],
+      ),
+    ).toEqual([
+      {
+        slug: "default",
+        name: "Auto",
+        isCustom: false,
+        capabilities: emptyCapabilities,
+      },
+      {
+        slug: "composer-2",
+        name: "Composer 2",
+        isCustom: false,
+        capabilities: createModelCapabilities({
+          optionDescriptors: [booleanDescriptor("fastMode", "Fast", true)],
+        }),
+      },
+    ]);
+  });
+});
+
+describe("buildCursorDiscoveredModelsFromConfigOptions", () => {
+  it("falls back to the ACP model select config option", () => {
+    expect(
+      buildCursorDiscoveredModelsFromConfigOptions([
+        {
+          type: "select",
+          currentValue: "composer-2",
+          options: [
+            { name: "Auto", value: "default" },
+            { name: "Composer 2", value: "composer-2" },
+          ],
+          category: "model",
+          id: "model",
+          name: "Model",
+        },
+        {
+          type: "select",
+          currentValue: "true",
+          options: [
+            { name: "Off", value: "false" },
+            { name: "Fast", value: "true" },
+          ],
+          category: "model_config",
+          id: "fast",
+          name: "Fast",
+        },
+      ]),
+    ).toEqual([
+      {
+        slug: "default",
+        name: "Auto",
+        isCustom: false,
+        capabilities: emptyCapabilities,
+      },
+      {
+        slug: "composer-2",
+        name: "Composer 2",
+        isCustom: false,
+        capabilities: createModelCapabilities({
+          optionDescriptors: [booleanDescriptor("fastMode", "Fast", true)],
+        }),
+      },
+    ]);
+  });
+});
+
 describe("checkCursorProviderStatus", () => {
   it("does not spawn Cursor commands when the provider is disabled", async () => {
     const { invocationLogPath, wrapperPath } = await runNode(makeInvocationLogWrapper());
@@ -598,6 +690,37 @@ describe("checkCursorProviderStatus", () => {
     expect(requestLog).toContain("initialize");
     expect(requestLog).toContain("cursor/list_available_models");
   });
+
+  it("falls back to session model state when Cursor list_available_models fails", async () => {
+    const { requestLogPath, wrapperPath } = await runNode(makeProviderStatusEnvFixture());
+
+    const provider = await Effect.runPromise(
+      checkCursorProviderStatus(
+        {
+          enabled: true,
+          binaryPath: wrapperPath,
+          apiEndpoint: "",
+          customModels: [],
+        },
+        {
+          ...process.env,
+          T3_ACP_FAIL_LIST_AVAILABLE_MODELS: "1",
+          T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+        },
+      ).pipe(Effect.provide(NodeServices.layer)),
+    );
+
+    expect(provider.status).toBe("ready");
+    expect(provider.message).toBeUndefined();
+    expect(provider.models.map((model) => model.slug)).toEqual([
+      "default",
+      "composer-2",
+      "gpt-5.4",
+      "claude-opus-4-6",
+    ]);
+    const requestLog = await runNode(waitForFileContent(requestLogPath));
+    expect(requestLog).toContain("cursor/list_available_models");
+  });
 });
 
 describe("discoverCursorModelsViaAcp", () => {
@@ -635,6 +758,31 @@ describe("discoverCursorModelsViaAcp", () => {
           booleanDescriptor("fastMode", "Fast", false),
         ],
       }),
+    );
+  });
+
+  it("returns session model state when Cursor list_available_models fails", async () => {
+    const wrapperPath = await runNode(
+      makeMockAgentWrapper({ T3_ACP_FAIL_LIST_AVAILABLE_MODELS: "1" }),
+    );
+
+    const models = await Effect.runPromise(
+      discoverCursorModelsViaAcp({
+        enabled: true,
+        binaryPath: wrapperPath,
+        apiEndpoint: "",
+        customModels: [],
+      }).pipe(Effect.provide(NodeServices.layer)),
+    );
+
+    expect(models.map((model) => model.slug)).toEqual([
+      "default",
+      "composer-2",
+      "gpt-5.4",
+      "claude-opus-4-6",
+    ]);
+    expect(models.find((model) => model.slug === "default")?.capabilities).toEqual(
+      emptyCapabilities,
     );
   });
 

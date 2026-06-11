@@ -61,6 +61,10 @@ import {
   installServiceWorkerNotificationNavigation,
   resetNotificationNavigationStateForTests,
 } from "../push/notificationNavigation";
+import {
+  clearPendingNotificationClick,
+  writePendingNotificationClick,
+} from "../push/pendingNotificationClick";
 import { buildPlanImplementationPrompt } from "../proposedPlan";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { getServerConfig } from "../rpc/serverState";
@@ -75,6 +79,7 @@ import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
 vi.mock("../lib/gitStatusState", () => ({
+  applyGitStatusLocalUpdate: () => undefined,
   useGitStatus: () => ({ data: null, error: null, cause: null, isPending: false }),
   useGitStatuses: () => new Map(),
   refreshGitStatus: () => Promise.resolve(null),
@@ -1686,6 +1691,19 @@ async function waitForComposerMenuItem(itemId: string): Promise<HTMLElement> {
   );
 }
 
+async function expectComposerMenuItemVisible(itemId: string): Promise<HTMLElement> {
+  const item = await waitForComposerMenuItem(itemId);
+  await vi.waitFor(
+    () => {
+      const rect = item.getBoundingClientRect();
+      expect(rect.width).toBeGreaterThan(0);
+      expect(rect.height).toBeGreaterThan(0);
+    },
+    { timeout: 8_000, interval: 16 },
+  );
+  return item;
+}
+
 async function expectNoComposerMenuItem(itemId: string): Promise<void> {
   await waitForLayout();
   expect(document.querySelector<HTMLElement>(`[data-composer-item-id="${itemId}"]`)).toBeNull();
@@ -1969,6 +1987,7 @@ async function mountChatView(options: {
   viewport: ViewportSpec;
   snapshot: OrchestrationReadModel;
   configureFixture?: (fixture: TestFixture) => void;
+  installNotificationNavigation?: boolean;
   resolveRpc?: (body: NormalizedWsRpcRequestBody) => unknown | undefined;
   getInitialStreamValues?: (
     request: NormalizedWsRpcRequestBody,
@@ -2006,6 +2025,10 @@ async function mountChatView(options: {
       initialEntries: [options.initialPath ?? `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`],
     }),
   );
+  const cleanupNotificationNavigation =
+    options.installNotificationNavigation === true
+      ? installServiceWorkerNotificationNavigation(router)
+      : null;
 
   const screen = await render(
     <AppAtomRegistryProvider>
@@ -2022,6 +2045,7 @@ async function mountChatView(options: {
 
   const cleanup = async () => {
     customWsRpcResolver = null;
+    cleanupNotificationNavigation?.();
     await screen.unmount();
     host.remove();
     await waitForLayout();
@@ -2072,6 +2096,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
     await __resetLocalApiForTests();
     await setViewport(DEFAULT_VIEWPORT);
+    await clearPendingNotificationClick();
     localStorage.clear();
     document.body.innerHTML = "";
     wsRequests.length = 0;
@@ -4702,6 +4727,47 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("replays persisted notification targets on startup before bootstrap navigation", async () => {
+    const bootstrapThreadId = NOTIFICATION_RECOVERY_OTHER_THREAD_ID;
+    const snapshot = addThreadToSnapshot(
+      createSnapshotForTargetUser({
+        targetMessageId: "msg-user-notification-persisted-startup-test" as MessageId,
+        targetText: "notification persisted startup test",
+      }),
+      bootstrapThreadId,
+    );
+    await writePendingNotificationClick({
+      url: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`,
+      openedAt: Date.now(),
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+      initialPath: "/",
+      installNotificationNavigation: true,
+      configureFixture: (fixture) => {
+        fixture.welcome = {
+          ...fixture.welcome,
+          bootstrapThreadId,
+        };
+      },
+    });
+
+    try {
+      await waitForURL(
+        mounted.router,
+        (path) => path === serverThreadPath(THREAD_ID),
+        "Persisted notification clicks should navigate to the target thread on startup.",
+      );
+      await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
+      expect(mounted.router.state.location.pathname).toBe(serverThreadPath(THREAD_ID));
+      expect(mounted.router.state.location.pathname).not.toBe(serverThreadPath(bootstrapThreadId));
+    } finally {
+      await clearPendingNotificationClick();
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps a sent draft message visible while promotion waits for thread detail", async () => {
     const sentText = "Keep this visible after promotion";
     const mounted = await mountChatView({
@@ -4739,12 +4805,44 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await sendButton.click();
 
       await expect.element(page.getByText(sentText)).toBeInTheDocument();
+      await expect.element(page.getByTestId(`thread-row-${newThreadId}`)).toBeInTheDocument();
+      await vi.waitFor(
+        () => {
+          const row = document.querySelector<HTMLElement>(
+            `[data-testid="thread-row-${newThreadId}"]`,
+          );
+          expect(row).not.toBeNull();
+          expect(row?.textContent).toContain("New thread");
+          expect(row?.textContent).toContain("Working");
+          expect(row?.querySelector(`[data-testid="thread-archive-${newThreadId}"]`)).toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      document
+        .querySelector<HTMLElement>(`[data-testid="thread-row-${newThreadId}"]`)
+        ?.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: 24,
+            clientY: 24,
+          }),
+        );
+      await waitForLayout();
+      expect(
+        [...document.querySelectorAll("button")].some((button) =>
+          /^(Rename|Delete|Archive)/.test(button.textContent?.trim() ?? ""),
+        ),
+      ).toBe(false);
       await materializePromotedDraftThreadViaDomainEvent(newThreadId);
       await startPromotedServerThreadViaDomainEvent(newThreadId);
       await waitForLayout();
 
       expect(mounted.router.state.location.pathname).toBe(newThreadPath);
       await expect.element(page.getByText(sentText)).toBeInTheDocument();
+      expect(document.querySelectorAll(`[data-testid="thread-row-${newThreadId}"]`)).toHaveLength(
+        1,
+      );
     } finally {
       await mounted.cleanup();
     }
@@ -5744,9 +5842,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       const palette = page.getByTestId("command-palette");
       await expect.element(palette).toBeInTheDocument();
+      const input = await waitForCommandPaletteInput("Search commands, projects, and threads...");
       await expect
         .element(page.getByPlaceholder("Search commands, projects, and threads..."))
         .toBeInTheDocument();
+      expect(document.activeElement).not.toBe(input);
     } finally {
       await mounted.cleanup();
     }
@@ -7452,6 +7552,56 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("keeps the file mention menu open after mobile composer blur", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mobile-file-menu-blur-target" as MessageId,
+        targetText: "mobile file menu blur thread",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.projectsSearchEntries) {
+          return {
+            entries: [{ kind: "file", path: "src/App.tsx" }],
+            truncated: false,
+          };
+        }
+
+        return undefined;
+      },
+    });
+
+    try {
+      const expandComposerButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Expand composer"]'),
+        "Unable to find collapsed mobile composer expand control.",
+      );
+      expandComposerButton.click();
+      await waitForLayout();
+
+      const composerEditor = await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("@src");
+      await expectComposerMenuItemVisible("path:file:src/App.tsx");
+
+      composerEditor.blur();
+      await waitForLayout();
+
+      expect(document.activeElement).not.toBe(composerEditor);
+      await expectComposerMenuItemVisible("path:file:src/App.tsx");
+      await vi.waitFor(
+        () => {
+          const composerSurface = document.querySelector<HTMLElement>(
+            "[data-chat-composer-mobile-collapsed]",
+          );
+          expect(composerSurface?.dataset.chatComposerMobileCollapsed).toBe("false");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("does not open the slash-command menu during native composition input", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -7543,6 +7693,65 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await insertComposerNativeText("insertCompositionText", "$");
 
       await expectNoComposerMenuItem("skill:codex:agent-browser");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the skills menu open after mobile composer blur", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mobile-skill-menu-blur-target" as MessageId,
+        targetText: "mobile skill menu blur thread",
+      }),
+      configureFixture: (nextFixture) => {
+        const provider = nextFixture.serverConfig.providers[0];
+        if (!provider) {
+          throw new Error("Expected default provider in test fixture.");
+        }
+        (
+          provider as {
+            skills: ServerConfig["providers"][number]["skills"];
+          }
+        ).skills = [
+          {
+            name: "agent-browser",
+            displayName: "Agent Browser",
+            description: "Open pages, click around, and inspect web apps.",
+            path: "/Users/test/.agents/skills/agent-browser/SKILL.md",
+            enabled: true,
+          },
+        ];
+      },
+    });
+
+    try {
+      const expandComposerButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Expand composer"]'),
+        "Unable to find collapsed mobile composer expand control.",
+      );
+      expandComposerButton.click();
+      await waitForLayout();
+
+      const composerEditor = await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("$agent");
+      await expectComposerMenuItemVisible("skill:codex:agent-browser");
+
+      composerEditor.blur();
+      await waitForLayout();
+
+      expect(document.activeElement).not.toBe(composerEditor);
+      await expectComposerMenuItemVisible("skill:codex:agent-browser");
+      await vi.waitFor(
+        () => {
+          const composerSurface = document.querySelector<HTMLElement>(
+            "[data-chat-composer-mobile-collapsed]",
+          );
+          expect(composerSurface?.dataset.chatComposerMobileCollapsed).toBe("false");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }

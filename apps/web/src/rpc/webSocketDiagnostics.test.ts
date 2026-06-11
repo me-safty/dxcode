@@ -12,6 +12,7 @@ import {
 import { useTerminalStateStore } from "../terminalStateStore";
 import {
   recordWsConnectionAttempt,
+  recordWsConnectionErrored,
   recordWsConnectionOpened,
   recordWsHeartbeatPing,
   recordWsHeartbeatPong,
@@ -43,6 +44,7 @@ describe("webSocketDiagnostics", () => {
 
   it("builds a redacted markdown note with websocket and terminal state", () => {
     recordWsConnectionAttempt("ws://localhost:3020/?token=secret-token");
+    recordWsConnectionErrored("Unable to connect to the T3 server WebSocket.");
     recordWsConnectionOpened();
     recordWsHeartbeatPing();
     recordWsHeartbeatPong();
@@ -114,6 +116,7 @@ describe("webSocketDiagnostics", () => {
     expect(report).toContain("## Terminal client summary");
     expect(report).toContain("## Raw snapshot");
     expect(report).toContain('"uiState": "connected"');
+    expect(report).toContain('"lastError": null');
     expect(report).toContain('"heartbeatPingCount": 1');
     expect(report).toContain('"historyBytes": 38');
     expect(report).toContain('"inputKind": "paste-or-composition"');

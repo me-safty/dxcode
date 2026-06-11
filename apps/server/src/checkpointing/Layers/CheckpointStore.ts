@@ -45,6 +45,16 @@ const makeCheckpointStore = Effect.gen(function* () {
     return yield* checkpoints.captureCheckpoint(input);
   });
 
+  const captureOverlayCheckpoint: CheckpointStoreShape["captureOverlayCheckpoint"] = Effect.fn(
+    "captureOverlayCheckpoint",
+  )(function* (input) {
+    const checkpoints = yield* resolveCheckpoints(
+      "CheckpointStore.captureOverlayCheckpoint",
+      input.cwd,
+    );
+    return yield* checkpoints.captureOverlayCheckpoint(input);
+  });
+
   const hasCheckpointRef: CheckpointStoreShape["hasCheckpointRef"] = Effect.fn("hasCheckpointRef")(
     function* (input) {
       const checkpoints = yield* resolveCheckpoints("CheckpointStore.hasCheckpointRef", input.cwd);
@@ -66,6 +76,23 @@ const makeCheckpointStore = Effect.gen(function* () {
     },
   );
 
+  const hashFileBlob: CheckpointStoreShape["hashFileBlob"] = Effect.fn("hashFileBlob")(
+    function* (input) {
+      const checkpoints = yield* resolveCheckpoints("CheckpointStore.hashFileBlob", input.cwd);
+      return yield* checkpoints.hashFileBlob(input);
+    },
+  );
+
+  const readCheckpointFileBlob: CheckpointStoreShape["readCheckpointFileBlob"] = Effect.fn(
+    "readCheckpointFileBlob",
+  )(function* (input) {
+    const checkpoints = yield* resolveCheckpoints(
+      "CheckpointStore.readCheckpointFileBlob",
+      input.cwd,
+    );
+    return yield* checkpoints.readCheckpointFileBlob(input);
+  });
+
   const deleteCheckpointRefs: CheckpointStoreShape["deleteCheckpointRefs"] = Effect.fn(
     "deleteCheckpointRefs",
   )(function* (input) {
@@ -79,9 +106,12 @@ const makeCheckpointStore = Effect.gen(function* () {
   return {
     isGitRepository,
     captureCheckpoint,
+    captureOverlayCheckpoint,
     hasCheckpointRef,
     restoreCheckpoint,
     diffCheckpoints,
+    hashFileBlob,
+    readCheckpointFileBlob,
     deleteCheckpointRefs,
   } satisfies CheckpointStoreShape;
 });

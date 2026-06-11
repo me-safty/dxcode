@@ -46,6 +46,8 @@ import Migration0030 from "./Migrations/030_ProjectionThreadShellArchiveIndexes.
 import Migration0031 from "./Migrations/031_WebPushSubscriptions.ts";
 import Migration0032 from "./Migrations/032_ProjectionThreadQueuedTurns.ts";
 import Migration0033 from "./Migrations/033_StripImageViewActivityResults.ts";
+import Migration0034 from "./Migrations/034_CanonicalizeQueuedMessageDispatchTimes.ts";
+import Migration0035 from "./Migrations/035_CheckpointTurnFileSnapshots.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -91,6 +93,8 @@ export const migrationEntries = [
   [31, "WebPushSubscriptions", Migration0031],
   [32, "ProjectionThreadQueuedTurns", Migration0032],
   [33, "StripImageViewActivityResults", Migration0033],
+  [34, "CanonicalizeQueuedMessageDispatchTimes", Migration0034],
+  [35, "CheckpointTurnFileSnapshots", Migration0035],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

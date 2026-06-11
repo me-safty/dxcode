@@ -62,6 +62,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           checkpoint_turn_count,
           checkpoint_ref,
           checkpoint_status,
+          checkpoint_attribution,
           checkpoint_files_json
         )
         VALUES (
@@ -78,6 +79,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           ${row.checkpointTurnCount},
           ${row.checkpointRef},
           ${row.checkpointStatus},
+          ${row.checkpointAttribution},
           ${row.checkpointFiles}
         )
         ON CONFLICT (thread_id, turn_id)
@@ -93,6 +95,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           checkpoint_turn_count = excluded.checkpoint_turn_count,
           checkpoint_ref = excluded.checkpoint_ref,
           checkpoint_status = excluded.checkpoint_status,
+          checkpoint_attribution = excluded.checkpoint_attribution,
           checkpoint_files_json = excluded.checkpoint_files_json
       `,
   });
@@ -127,6 +130,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           checkpoint_turn_count,
           checkpoint_ref,
           checkpoint_status,
+          checkpoint_attribution,
           checkpoint_files_json
         )
         VALUES (
@@ -138,6 +142,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           NULL,
           'pending',
           ${row.requestedAt},
+          NULL,
           NULL,
           NULL,
           NULL,
@@ -202,6 +207,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "checkpointStatus",
+          checkpoint_attribution AS "checkpointAttribution",
           checkpoint_files_json AS "checkpointFiles"
         FROM projection_turns
         WHERE thread_id = ${threadId}
@@ -235,6 +241,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "checkpointStatus",
+          checkpoint_attribution AS "checkpointAttribution",
           checkpoint_files_json AS "checkpointFiles"
         FROM projection_turns
         WHERE thread_id = ${threadId}
@@ -252,6 +259,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           checkpoint_turn_count = NULL,
           checkpoint_ref = NULL,
           checkpoint_status = NULL,
+          checkpoint_attribution = NULL,
           checkpoint_files_json = '[]'
         WHERE thread_id = ${threadId}
           AND checkpoint_turn_count = ${checkpointTurnCount}

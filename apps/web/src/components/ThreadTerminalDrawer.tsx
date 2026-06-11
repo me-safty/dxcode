@@ -69,7 +69,8 @@ import {
   type ThreadTerminalGroup,
 } from "../types";
 import { readEnvironmentApi } from "~/environmentApi";
-import { readEnvironmentConnection } from "~/environments/runtime";
+import { readEnvironmentConnection, waitForEnvironmentReconnectIdle } from "~/environments/runtime";
+import { withTimeout } from "~/environments/runtime/withTimeout";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { readLocalApi } from "~/localApi";
 import { isTransportConnectionErrorMessage } from "~/rpc/transportError";
@@ -88,6 +89,8 @@ const TOUCH_LONG_PRESS_MOVE_TOLERANCE_PX = 10;
 const TERMINAL_OPEN_RETRY_DELAYS_MS = [250, 500, 1_000] as const;
 const TERMINAL_OPEN_RETRY_MAX_DELAY_MS = 2_000;
 const TERMINAL_RETRY_BOOTSTRAP_WAIT_MS = 5_000;
+const TERMINAL_MANUAL_RECONNECT_TIMEOUT_MS = 8_000;
+const TERMINAL_MANUAL_RECONNECT_IDLE_WAIT_MS = 2_500;
 
 type TerminalOpenReason = "manual-resync" | "mount" | "retry" | "user-restart";
 
@@ -1678,6 +1681,72 @@ export function TerminalViewport({
       run();
     }
 
+    async function reconnectTerminalTransport(reason: "manual-resync" | "user-restart") {
+      const connection = readEnvironmentConnection(environmentId);
+      if (!connection) {
+        recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-skipped", {
+          reason,
+        });
+        return;
+      }
+
+      const reconnectIdle = await waitForEnvironmentReconnectIdle(
+        environmentId,
+        TERMINAL_MANUAL_RECONNECT_IDLE_WAIT_MS,
+      );
+      recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-idle-wait", {
+        reason,
+        settled: reconnectIdle,
+      });
+      recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-started", {
+        reason,
+      });
+      try {
+        await withTimeout(
+          connection.client.reconnect(),
+          TERMINAL_MANUAL_RECONNECT_TIMEOUT_MS,
+          () =>
+            new Error(
+              `Terminal transport reconnect timed out after ${TERMINAL_MANUAL_RECONNECT_TIMEOUT_MS.toString()}ms.`,
+            ),
+        );
+        recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-success", {
+          reason,
+        });
+      } catch (error) {
+        recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-failed", {
+          message: errorMessage(error, "Terminal transport reconnect failed"),
+          reason,
+          transientTransport: isTransportConnectionError(error),
+        });
+        throw error;
+      }
+    }
+
+    async function withTransientTransportRetry<T>(
+      reason: "manual-resync" | "user-restart",
+      operation: () => Promise<T>,
+    ): Promise<T> {
+      try {
+        return await operation();
+      } catch (error) {
+        if (!isTransportConnectionError(error)) {
+          throw error;
+        }
+
+        const reconnectIdle = await waitForEnvironmentReconnectIdle(
+          environmentId,
+          TERMINAL_MANUAL_RECONNECT_IDLE_WAIT_MS,
+        );
+        recordTerminalDiagnostic(threadRef, terminalId, "terminal-transient-transport-retry", {
+          reason,
+          settled: reconnectIdle,
+          message: errorMessage(error, "Transient terminal transport error"),
+        });
+        return await operation();
+      }
+    }
+
     async function manualResyncTerminal() {
       if (disposed) {
         return;
@@ -1689,7 +1758,14 @@ export function TerminalViewport({
         size: readTerminalSize(),
       });
       try {
-        const snapshot = await performTerminalOpen("manual-resync", generation);
+        const snapshot = await withTransientTransportRetry("manual-resync", async () => {
+          await reconnectTerminalTransport("manual-resync");
+          await waitForEnvironmentReconnectIdle(
+            environmentId,
+            TERMINAL_MANUAL_RECONNECT_IDLE_WAIT_MS,
+          );
+          return await performTerminalOpen("manual-resync", generation);
+        });
         if (!snapshot) {
           return;
         }
@@ -1725,14 +1801,21 @@ export function TerminalViewport({
         rows: activeTerminal.rows,
       };
       try {
-        const snapshot = await terminalApi.restart({
-          threadId,
-          terminalId,
-          cwd,
-          ...(worktreePath !== undefined ? { worktreePath } : {}),
-          cols: size.cols,
-          rows: size.rows,
-          ...(runtimeEnv ? { env: runtimeEnv } : {}),
+        const snapshot = await withTransientTransportRetry("user-restart", async () => {
+          await reconnectTerminalTransport("user-restart");
+          await waitForEnvironmentReconnectIdle(
+            environmentId,
+            TERMINAL_MANUAL_RECONNECT_IDLE_WAIT_MS,
+          );
+          return await terminalApi.restart({
+            threadId,
+            terminalId,
+            cwd,
+            ...(worktreePath !== undefined ? { worktreePath } : {}),
+            cols: size.cols,
+            rows: size.rows,
+            ...(runtimeEnv ? { env: runtimeEnv } : {}),
+          });
         });
         if (disposed || generation !== openGenerationRef.current) {
           return;

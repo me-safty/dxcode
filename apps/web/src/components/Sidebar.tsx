@@ -40,6 +40,7 @@ import {
   type ContextMenuItem,
   type DesktopUpdateState,
   ProjectId,
+  type ScopedProjectRef,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
   type ThreadEnvMode,
@@ -73,6 +74,7 @@ import {
   selectThreadByRef,
   useStore,
 } from "../store";
+import { getThreadFromEnvironmentState } from "../threadDerivation";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import { useLocalDispatchStore } from "../localDispatchStore";
@@ -195,7 +197,8 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
-import type { SidebarThreadSummary } from "../types";
+import type { SidebarThreadSummary, Thread } from "../types";
+import { buildSidebarThreadPresentation } from "../sidebarThreadPresentation";
 import {
   buildPhysicalToLogicalProjectKeyMap,
   buildSidebarProjectSnapshots,
@@ -222,6 +225,41 @@ const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> =
   repository_path: "Group by repository path",
   separate: "Keep separate",
 };
+
+function useSidebarThreadPresentation(
+  serverThreads: readonly SidebarThreadSummary[],
+  projectRefs?: readonly ScopedProjectRef[],
+) {
+  const draftThreads = useComposerDraftStore(
+    useShallow((store) => Object.values(store.draftThreadsByThreadKey)),
+  );
+  const localDispatchByThreadKey = useLocalDispatchStore((store) => store.localDispatchByThreadKey);
+  const environmentStateById = useStore((state) => state.environmentStateById);
+  const serverThreadByKey = useMemo(() => {
+    const threadByKey = new Map<string, Thread>();
+    for (const environmentState of Object.values(environmentStateById)) {
+      for (const threadId of environmentState.threadIds) {
+        const thread = getThreadFromEnvironmentState(environmentState, threadId);
+        if (thread) {
+          threadByKey.set(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)), thread);
+        }
+      }
+    }
+    return threadByKey;
+  }, [environmentStateById]);
+
+  return useMemo(
+    () =>
+      buildSidebarThreadPresentation({
+        serverThreads,
+        draftThreads,
+        localDispatchByThreadKey,
+        serverThreadByKey,
+        ...(projectRefs !== undefined ? { projectRefs } : {}),
+      }),
+    [draftThreads, localDispatchByThreadKey, projectRefs, serverThreadByKey, serverThreads],
+  );
+}
 
 function clampSidebarThreadPreviewCount(value: number): SidebarThreadPreviewCount {
   return Math.min(
@@ -284,6 +322,7 @@ function buildThreadJumpLabelMap(input: {
 
 interface SidebarThreadRowProps {
   thread: SidebarThreadSummary;
+  isPending: boolean;
   projectCwd: string | null;
   orderedProjectThreadKeys: readonly string[];
   isActive: boolean;
@@ -345,6 +384,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     attemptArchiveThread,
     openPrLink,
     thread,
+    isPending,
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
@@ -380,7 +420,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const gitCwd = thread.worktreePath ?? threadProjectCwd ?? props.projectCwd;
   const gitStatus = useGitStatus({
     environmentId: thread.environmentId,
-    cwd: thread.branch != null ? gitCwd : null,
+    cwd: !isPending && thread.branch != null ? gitCwd : null,
   });
   const isHighlighted = isActive || isSelected;
   const isThreadRunning =
@@ -393,10 +433,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     },
     isActiveThread: isActive,
   });
-  const pr = resolveThreadPr(thread.branch, gitStatus.data);
+  const pr = isPending ? null : resolveThreadPr(thread.branch, gitStatus.data);
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
-  const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
+  const isConfirmingArchive =
+    confirmingArchiveThreadKey === threadKey && !isThreadRunning && !isPending;
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
     : !isThreadRunning
@@ -422,9 +463,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
   const handleRowClick = useCallback(
     (event: React.MouseEvent) => {
+      const isMac = isMacPlatform(navigator.platform);
+      const isModClick = isMac ? event.metaKey : event.ctrlKey;
+      if (isPending && (isModClick || event.shiftKey)) {
+        event.preventDefault();
+        navigateToThread(threadRef);
+        return;
+      }
       handleThreadClick(event, threadRef, orderedProjectThreadKeys);
     },
-    [handleThreadClick, orderedProjectThreadKeys, threadRef],
+    [handleThreadClick, isPending, navigateToThread, orderedProjectThreadKeys, threadRef],
   );
   const handleRowKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -436,6 +484,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
   const openRowContextMenu = useCallback(
     (position: { x: number; y: number }) => {
+      if (isPending) {
+        return;
+      }
       const hasSelection = useThreadSelectionStore.getState().hasSelection();
       if (hasSelection && isSelected) {
         void handleMultiSelectContextMenu(position);
@@ -447,7 +498,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       }
       void handleThreadContextMenu(threadRef, position);
     },
-    [clearSelection, handleMultiSelectContextMenu, handleThreadContextMenu, isSelected, threadRef],
+    [
+      clearSelection,
+      handleMultiSelectContextMenu,
+      handleThreadContextMenu,
+      isPending,
+      isSelected,
+      threadRef,
+    ],
   );
   const handleRowContextMenu = useCallback(
     (event: React.MouseEvent) => {
@@ -467,7 +525,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     onPointerMoveCapture: handleRowLongPressPointerMoveCapture,
     onPointerUpCapture: handleRowLongPressPointerUpCapture,
   } = useLongPressContextMenu<HTMLAnchorElement>({
-    enabled: renamingThreadKey !== threadKey,
+    enabled: renamingThreadKey !== threadKey && !isPending,
     onLongPress: openRowContextMenu,
   });
   const handlePrClick = useCallback(
@@ -664,7 +722,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               >
                 Confirm
               </button>
-            ) : !isThreadRunning ? (
+            ) : !isThreadRunning && !isPending ? (
               appSettingsConfirmThreadArchive ? (
                 <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
                   <button
@@ -754,6 +812,7 @@ interface SidebarProjectThreadListProps {
   hasOverflowingThreads: boolean;
   hiddenThreadStatus: ThreadStatusPill | null;
   orderedProjectThreadKeys: readonly string[];
+  pendingThreadKeys: ReadonlySet<string>;
   renderedThreads: readonly SidebarThreadSummary[];
   showEmptyThreadState: boolean;
   shouldShowThreadPanel: boolean;
@@ -805,6 +864,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     hasOverflowingThreads,
     hiddenThreadStatus,
     orderedProjectThreadKeys,
+    pendingThreadKeys,
     renderedThreads,
     showEmptyThreadState,
     shouldShowThreadPanel,
@@ -860,6 +920,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             <SidebarThreadRow
               key={threadKey}
               thread={thread}
+              isPending={pendingThreadKeys.has(threadKey)}
               projectCwd={projectCwd}
               orderedProjectThreadKeys={orderedProjectThreadKeys}
               isActive={activeRouteThreadKey === threadKey}
@@ -1051,7 +1112,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       );
     });
   }, []);
-  const sidebarThreads = useStore(
+  const serverSidebarThreads = useStore(
     useShallow(
       useMemo(
         () => (state: import("../store").AppState) =>
@@ -1059,6 +1120,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         [project.memberProjectRefs],
       ),
     ),
+  );
+  const { threads: sidebarThreads, pendingThreadKeys } = useSidebarThreadPresentation(
+    serverSidebarThreads,
+    project.memberProjectRefs,
   );
   const sidebarThreadByKey = useMemo(
     () =>
@@ -1075,6 +1140,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   // thread-list change).
   const sidebarThreadByKeyRef = useRef(sidebarThreadByKey);
   sidebarThreadByKeyRef.current = sidebarThreadByKey;
+  const pendingThreadKeysRef = useRef(pendingThreadKeys);
+  pendingThreadKeysRef.current = pendingThreadKeys;
   const projectThreads = sidebarThreads;
   const projectExpanded = useUiStateStore(
     (state) => state.projectExpandedById[project.projectKey] ?? true,
@@ -1092,10 +1159,34 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const activeLocalDispatchThreadKeys = useLocalDispatchStore(
     useShallow((state) => Object.keys(state.localDispatchByThreadKey)),
   );
-  const activeLocalDispatchThreadKeySet = useMemo(
-    () => new Set(activeLocalDispatchThreadKeys),
-    [activeLocalDispatchThreadKeys],
+  const draftThreadsByThreadKey = useComposerDraftStore((state) => state.draftThreadsByThreadKey);
+  const promotedDraftThreadKeyAliases = useMemo(
+    () =>
+      Object.values(draftThreadsByThreadKey).flatMap((draftThread) => {
+        if (!draftThread.promotedTo) {
+          return [];
+        }
+        const draftThreadKey = scopedThreadKey(
+          scopeThreadRef(draftThread.environmentId, draftThread.threadId),
+        );
+        return [
+          {
+            draftThreadKey,
+            promotedThreadKey: scopedThreadKey(draftThread.promotedTo),
+          },
+        ];
+      }),
+    [draftThreadsByThreadKey],
   );
+  const activeLocalDispatchThreadKeySet = useMemo(() => {
+    const threadKeys = new Set(activeLocalDispatchThreadKeys);
+    for (const alias of promotedDraftThreadKeyAliases) {
+      if (threadKeys.has(alias.draftThreadKey)) {
+        threadKeys.add(alias.promotedThreadKey);
+      }
+    }
+    return threadKeys;
+  }, [activeLocalDispatchThreadKeys, promotedDraftThreadKeyAliases]);
   const [renamingThreadKey, setRenamingThreadKey] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
   const [confirmingArchiveThreadKey, setConfirmingArchiveThreadKey] = useState<string | null>(null);
@@ -1164,9 +1255,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       visibleProjectThreads.map((thread) => resolveProjectThreadStatus(thread)),
     );
     return {
-      orderedProjectThreadKeys: visibleProjectThreads.map((thread) =>
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      ),
+      orderedProjectThreadKeys: visibleProjectThreads.flatMap((thread) => {
+        const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+        return pendingThreadKeys.has(threadKey) ? [] : [threadKey];
+      }),
       projectStatus,
       visibleProjectThreads,
     };
@@ -1174,6 +1266,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     activeLocalDispatchThreadKeySet,
     activeRouteThreadKey,
     projectThreads,
+    pendingThreadKeys,
     threadLastVisitedAts,
     threadSortOrder,
   ]);
@@ -1670,7 +1763,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     async (position: { x: number; y: number }) => {
       const api = readLocalApi();
       if (!api) return;
-      const threadKeys = [...useThreadSelectionStore.getState().selectedThreadKeys];
+      const threadKeys = [...useThreadSelectionStore.getState().selectedThreadKeys].filter(
+        (threadKey) => !pendingThreadKeysRef.current.has(threadKey),
+      );
       if (threadKeys.length === 0) return;
       const count = threadKeys.length;
 
@@ -1978,6 +2073,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const api = readLocalApi();
       if (!api) return;
       const threadKey = scopedThreadKey(threadRef);
+      if (pendingThreadKeysRef.current.has(threadKey)) {
+        return;
+      }
       const thread = sidebarThreadByKeyRef.current.get(threadKey) ?? null;
       if (!thread) return;
       const threadProject = memberProjectByScopedKey.get(
@@ -2154,6 +2252,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         hasOverflowingThreads={hasOverflowingThreads}
         hiddenThreadStatus={hiddenThreadStatus}
         orderedProjectThreadKeys={orderedProjectThreadKeys}
+        pendingThreadKeys={pendingThreadKeys}
         renderedThreads={renderedThreads}
         showEmptyThreadState={showEmptyThreadState}
         shouldShowThreadPanel={shouldShowThreadPanel}
@@ -2869,7 +2968,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
 export default function Sidebar() {
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
-  const sidebarThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const serverSidebarThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const { threads: sidebarThreads } = useSidebarThreadPresentation(serverSidebarThreads);
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);

@@ -17,7 +17,7 @@ import {
   getWsConnectionUiState,
   resetWsConnectionStateForTests,
 } from "../rpc/wsConnectionState";
-import { WsTransport } from "./wsTransport";
+import { WsTransport, type SubscriptionErrorInfo } from "./wsTransport";
 
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 
@@ -490,6 +490,115 @@ describe("WsTransport", () => {
     firstSocket.close(1006, "stale close after dispose");
 
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("retries non-transport subscription failures and resets backoff after a value", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const transport = createTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    getSocket().open();
+    await waitFor(() => {
+      expect(getWsConnectionStatus()).toMatchObject({ phase: "connected" });
+    });
+
+    vi.useFakeTimers();
+    const errors: SubscriptionErrorInfo[] = [];
+    const values: string[] = [];
+    let connectCount = 0;
+
+    const unsubscribe = transport.subscribe(
+      () => {
+        connectCount += 1;
+        if (connectCount === 1) {
+          return Stream.fail(new Error("server snapshot failed"));
+        }
+        if (connectCount === 2) {
+          return Stream.make("snapshot");
+        }
+        return Stream.fail(new Error("server snapshot failed again"));
+      },
+      (value) => {
+        values.push(value);
+      },
+      {
+        onSubscriptionError: (info) => {
+          errors.push(info);
+        },
+        tag: "shell",
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(errors).toHaveLength(1);
+    });
+    expect(errors[0]).toMatchObject({
+      attempt: 1,
+      error: "server snapshot failed",
+      staleSession: false,
+      tag: "shell",
+      transportError: false,
+      willRetryInMs: 1_000,
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await vi.waitFor(() => {
+      expect(values).toEqual(["snapshot"]);
+      expect(errors).toHaveLength(2);
+    });
+    expect(errors[1]).toMatchObject({
+      attempt: 1,
+      error: "server snapshot failed again",
+      transportError: false,
+      willRetryInMs: 1_000,
+    });
+
+    unsubscribe();
+    warnSpy.mockRestore();
+  });
+
+  it("stops a failed subscription retry loop after unsubscribe", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const transport = createTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    getSocket().open();
+    await waitFor(() => {
+      expect(getWsConnectionStatus()).toMatchObject({ phase: "connected" });
+    });
+
+    vi.useFakeTimers();
+    const errors: SubscriptionErrorInfo[] = [];
+    let connectCount = 0;
+
+    const unsubscribe = transport.subscribe(
+      () => {
+        connectCount += 1;
+        return Stream.fail(new Error("server snapshot failed"));
+      },
+      () => undefined,
+      {
+        onSubscriptionError: (info) => {
+          errors.push(info);
+        },
+        tag: "shell",
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(errors).toHaveLength(1);
+    });
+    unsubscribe();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(connectCount).toBe(1);
+    expect(errors).toHaveLength(1);
+    warnSpy.mockRestore();
   });
 
   it("marks unary requests as slow until the first server ack arrives", async () => {
@@ -1095,9 +1204,10 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
-  it("does not retry stream subscriptions after application-level failures", async () => {
+  it("retries stream subscriptions after application-level failures", async () => {
     const transport = createTransport("ws://localhost:3020");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const errors: SubscriptionErrorInfo[] = [];
     let attempts = 0;
 
     const unsubscribe = transport.subscribe(
@@ -1107,7 +1217,13 @@ describe("WsTransport", () => {
           return Stream.fail(new Error("Git command failed in GitCore.statusDetails"));
         }),
       vi.fn(),
-      { retryDelay: 10 },
+      {
+        onSubscriptionError: (info) => {
+          errors.push(info);
+        },
+        retryDelay: 10,
+        tag: "vcs-status",
+      },
     );
 
     await waitFor(() => {
@@ -1122,13 +1238,25 @@ describe("WsTransport", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(attempts).toBe(1);
-    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription failed", {
+    expect(errors[0]).toMatchObject({
+      attempt: 1,
       error: "Git command failed in GitCore.statusDetails",
+      tag: "vcs-status",
+      transportError: false,
+      willRetryInMs: 1_000,
+    });
+    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription failed; retrying", {
+      attempt: 1,
+      error: "Git command failed in GitCore.statusDetails",
+      retryDelayMs: 1_000,
     });
     expect(warnSpy).not.toHaveBeenCalledWith(
       "WebSocket RPC subscription disconnected",
       expect.anything(),
     );
+    await waitFor(() => {
+      expect(attempts).toBe(2);
+    }, 1_500);
 
     unsubscribe();
     await transport.dispose();

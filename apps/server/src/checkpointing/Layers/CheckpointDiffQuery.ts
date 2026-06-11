@@ -12,8 +12,12 @@ import * as Schema from "effect/Schema";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { CheckpointInvariantError, CheckpointUnavailableError } from "../Errors.ts";
-import { checkpointRefForThreadTurn } from "../Utils.ts";
-import { CheckpointStore } from "../Services/CheckpointStore.ts";
+import {
+  checkpointAttributedRefForThreadTurn,
+  checkpointRefForThreadTurn,
+  checkpointStartRefForThreadTurn,
+} from "../Utils.ts";
+import { CHECKPOINT_DIFF_PATHSPEC_LIMIT, CheckpointStore } from "../Services/CheckpointStore.ts";
 import {
   CheckpointDiffQuery,
   type CheckpointDiffQueryShape,
@@ -98,7 +102,7 @@ const make = Effect.gen(function* () {
         });
       }
 
-      const fromCheckpointRef =
+      let fromCheckpointRef =
         input.fromTurnCount === 0
           ? checkpointRefForThreadTurn(input.threadId, 0)
           : threadContext.value.checkpoints.find(
@@ -112,15 +116,50 @@ const make = Effect.gen(function* () {
         });
       }
 
-      const toCheckpointRef = threadContext.value.checkpoints.find(
+      const toCheckpoint = threadContext.value.checkpoints.find(
         (checkpoint) => checkpoint.checkpointTurnCount === input.toTurnCount,
-      )?.checkpointRef;
-      if (!toCheckpointRef) {
+      );
+      if (!toCheckpoint?.checkpointRef) {
         return yield* new CheckpointUnavailableError({
           threadId: input.threadId,
           turnCount: input.toTurnCount,
           detail: `Checkpoint ref is unavailable for turn ${input.toTurnCount}.`,
         });
+      }
+      let toCheckpointRef = toCheckpoint.checkpointRef;
+      let paths: ReadonlyArray<string> | undefined;
+
+      if (input.toTurnCount - input.fromTurnCount === 1) {
+        if (toCheckpoint.attribution === "edit-snapshots") {
+          const startRef = checkpointStartRefForThreadTurn(input.threadId, input.toTurnCount);
+          const attributedRef = checkpointAttributedRefForThreadTurn(
+            input.threadId,
+            input.toTurnCount,
+          );
+          const [startExists, attributedExists] = yield* Effect.all(
+            [
+              checkpointStore.hasCheckpointRef({
+                cwd: workspaceCwd,
+                checkpointRef: startRef,
+              }),
+              checkpointStore.hasCheckpointRef({
+                cwd: workspaceCwd,
+                checkpointRef: attributedRef,
+              }),
+            ],
+            { concurrency: 2 },
+          );
+          if (startExists && attributedExists) {
+            fromCheckpointRef = startRef;
+            toCheckpointRef = attributedRef;
+          }
+        } else if (
+          toCheckpoint.attribution === "touched-paths" &&
+          toCheckpoint.files.length > 0 &&
+          toCheckpoint.files.length <= CHECKPOINT_DIFF_PATHSPEC_LIMIT
+        ) {
+          paths = toCheckpoint.files.map((file) => file.path);
+        }
       }
 
       const diff = yield* checkpointStore
@@ -130,6 +169,7 @@ const make = Effect.gen(function* () {
           toCheckpointRef,
           fallbackFromToHead: false,
           ignoreWhitespace,
+          ...(paths !== undefined ? { paths } : {}),
         })
         .pipe(Effect.withSpan("checkpoint.turnDiff.diffCheckpoints"));
 

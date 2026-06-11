@@ -34,6 +34,7 @@ import { createAuthenticatedSessionHandlers } from "../../test/authHttpHandlers"
 import { BrowserWsRpcHarness } from "../../test/wsRpcHarness";
 
 vi.mock("../lib/gitStatusState", () => ({
+  applyGitStatusLocalUpdate: () => undefined,
   useGitStatus: () => ({ data: null, error: null, cause: null, isPending: false }),
   useGitStatuses: () => new Map(),
   refreshGitStatus: () => Promise.resolve(null),

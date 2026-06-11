@@ -1,31 +1,8 @@
-import { type ComponentProps, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from "../rightPanelLayout";
 import { Sheet, SheetPopup } from "./ui/sheet";
-
-const TOAST_PORTAL_SELECTOR = '[data-slot="toast-portal"], [data-slot="toast-portal-anchored"]';
-
-type SheetOpenChangeDetails = Parameters<
-  NonNullable<ComponentProps<typeof Sheet>["onOpenChange"]>
->[1];
-
-function targetIsInToastPortal(target: EventTarget | null | undefined): boolean {
-  return target instanceof Element && target.closest(TOAST_PORTAL_SELECTOR) !== null;
-}
-
-function isToastPortalDismissalRequest(eventDetails: SheetOpenChangeDetails): boolean {
-  if (eventDetails.reason !== "outside-press" && eventDetails.reason !== "focus-out") {
-    return false;
-  }
-
-  if (targetIsInToastPortal(eventDetails.event.target)) {
-    return true;
-  }
-
-  return (
-    "relatedTarget" in eventDetails.event && targetIsInToastPortal(eventDetails.event.relatedTarget)
-  );
-}
+import { isToastPortalDismissalRequest } from "./ui/sheetDismissal";
 
 export function RightPanelSheet(props: {
   children: ReactNode;

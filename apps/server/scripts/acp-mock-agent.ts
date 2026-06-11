@@ -19,10 +19,16 @@ const emitInterleavedAssistantToolCalls =
 const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS === "1";
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
+const failListAvailableModels = process.env.T3_ACP_FAIL_LIST_AVAILABLE_MODELS === "1";
+const includeSessionModels =
+  failListAvailableModels || process.env.T3_ACP_INCLUDE_SESSION_MODELS === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const ignoreCancel = process.env.T3_ACP_IGNORE_CANCEL === "1";
 const hangPromptAfterPermission = process.env.T3_ACP_HANG_PROMPT_AFTER_PERMISSION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
+const loadReplayHistory = process.env.T3_ACP_LOAD_REPLAY_HISTORY === "1";
+const failLoadSession = process.env.T3_ACP_FAIL_LOAD_SESSION === "1";
+const loadReplayModeId = process.env.T3_ACP_LOAD_REPLAY_MODE_ID;
 const sessionId = "mock-session-1";
 
 let currentModeId = "ask";
@@ -312,6 +318,16 @@ function listAvailableModelsResponse(): {
   };
 }
 
+function sessionModels(): AcpSchema.SessionModelState {
+  return {
+    availableModels: listAvailableModelsResponse().models.map((model) => ({
+      modelId: model.value,
+      name: model.name,
+    })),
+    currentModelId: currentModelId,
+  };
+}
+
 const program = Effect.gen(function* () {
   const agent = yield* EffectAcpAgent.AcpAgent;
 
@@ -332,25 +348,71 @@ const program = Effect.gen(function* () {
     Effect.succeed({
       sessionId,
       modes: modeState(),
+      ...(includeSessionModels ? { models: sessionModels() } : {}),
       configOptions: configOptions(),
     }),
   );
 
   yield* agent.handleLoadSession((request) =>
-    agent.client
-      .sessionUpdate({
-        sessionId: String(request.sessionId ?? sessionId),
+    Effect.gen(function* () {
+      if (failLoadSession) {
+        return yield* AcpError.AcpRequestError.internalError("Mock session/load failure");
+      }
+
+      const requestedSessionId = String(request.sessionId ?? sessionId);
+
+      yield* agent.client.sessionUpdate({
+        sessionId: requestedSessionId,
         update: {
           sessionUpdate: "user_message_chunk",
           content: { type: "text", text: "replay" },
         },
-      })
-      .pipe(
-        Effect.as({
-          modes: modeState(),
-          configOptions: configOptions(),
-        }),
-      ),
+      });
+
+      if (loadReplayHistory) {
+        const replayModeId = loadReplayModeId?.trim();
+        if (replayModeId) {
+          currentModeId = replayModeId;
+          yield* agent.client.sessionUpdate({
+            sessionId: requestedSessionId,
+            update: {
+              sessionUpdate: "current_mode_update",
+              currentModeId,
+            },
+          });
+        }
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "replayed assistant" },
+          },
+        });
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "load-replay-tool-call-1",
+            title: "Replay Tool",
+            kind: "execute",
+            status: "completed",
+            rawOutput: {
+              exitCode: 0,
+              stdout: "replayed",
+              stderr: "",
+            },
+          },
+        });
+      }
+
+      return {
+        modes: modeState(),
+        ...(includeSessionModels ? { models: sessionModels() } : {}),
+        configOptions: configOptions(),
+      };
+    }),
   );
 
   yield* agent.handleSetSessionConfigOption((request) =>
@@ -636,6 +698,9 @@ const program = Effect.gen(function* () {
 
   yield* agent.handleUnknownExtRequest((method, params) => {
     if (method === "cursor/list_available_models") {
+      if (failListAvailableModels) {
+        return Effect.fail(AcpError.AcpRequestError.internalError("Mock model discovery failure"));
+      }
       return Effect.succeed(listAvailableModelsResponse());
     }
 

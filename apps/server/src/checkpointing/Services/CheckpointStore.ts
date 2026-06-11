@@ -21,6 +21,16 @@ export interface CaptureCheckpointInput {
   readonly checkpointRef: CheckpointRef;
 }
 
+export interface CaptureOverlayCheckpointInput {
+  readonly cwd: string;
+  readonly baseCheckpointRef: CheckpointRef;
+  readonly checkpointRef: CheckpointRef;
+  readonly entries: ReadonlyArray<{
+    readonly path: string;
+    readonly blobSha: string | null;
+  }>;
+}
+
 export interface RestoreCheckpointInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
@@ -33,12 +43,26 @@ export interface DiffCheckpointsInput {
   readonly toCheckpointRef: CheckpointRef;
   readonly fallbackFromToHead?: boolean;
   readonly ignoreWhitespace: boolean;
+  readonly paths?: ReadonlyArray<string>;
 }
 
 export interface DeleteCheckpointRefsInput {
   readonly cwd: string;
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
 }
+
+export interface HashFileBlobInput {
+  readonly cwd: string;
+  readonly path: string;
+}
+
+export interface ReadCheckpointFileBlobInput {
+  readonly cwd: string;
+  readonly checkpointRef: CheckpointRef;
+  readonly path: string;
+}
+
+export const CHECKPOINT_DIFF_PATHSPEC_LIMIT = 500;
 
 /**
  * CheckpointStoreShape - Service API for checkpoint capture/restore and diff access.
@@ -56,6 +80,13 @@ export interface CheckpointStoreShape {
    */
   readonly captureCheckpoint: (
     input: CaptureCheckpointInput,
+  ) => Effect.Effect<void, CheckpointStoreError>;
+
+  /**
+   * Capture a synthetic checkpoint by overlaying specific blob entries on top of a base checkpoint.
+   */
+  readonly captureOverlayCheckpoint: (
+    input: CaptureOverlayCheckpointInput,
   ) => Effect.Effect<void, CheckpointStoreError>;
 
   /**
@@ -82,6 +113,24 @@ export interface CheckpointStoreShape {
   readonly diffCheckpoints: (
     input: DiffCheckpointsInput,
   ) => Effect.Effect<string, CheckpointStoreError>;
+
+  /**
+   * Writes the current file content to the VCS object store and returns its blob SHA.
+   *
+   * Returns `null` when the file is missing from the working tree.
+   */
+  readonly hashFileBlob: (
+    input: HashFileBlobInput,
+  ) => Effect.Effect<string | null, CheckpointStoreError>;
+
+  /**
+   * Resolves a file's blob SHA from a checkpoint tree.
+   *
+   * Returns `null` when the path does not exist in that checkpoint.
+   */
+  readonly readCheckpointFileBlob: (
+    input: ReadCheckpointFileBlobInput,
+  ) => Effect.Effect<string | null, CheckpointStoreError>;
 
   /**
    * Delete the provided checkpoint refs.

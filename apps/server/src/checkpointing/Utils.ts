@@ -9,6 +9,24 @@ export function checkpointRefForThreadTurn(threadId: ThreadId, turnCount: number
   );
 }
 
+export function checkpointStartRefForThreadTurn(
+  threadId: ThreadId,
+  turnCount: number,
+): CheckpointRef {
+  return CheckpointRef.make(
+    `${CHECKPOINT_REFS_PREFIX}/${Encoding.encodeBase64Url(threadId)}/turn-start/${turnCount}`,
+  );
+}
+
+export function checkpointAttributedRefForThreadTurn(
+  threadId: ThreadId,
+  turnCount: number,
+): CheckpointRef {
+  return CheckpointRef.make(
+    `${CHECKPOINT_REFS_PREFIX}/${Encoding.encodeBase64Url(threadId)}/turn-attributed/${turnCount}`,
+  );
+}
+
 export function resolveThreadWorkspaceCwd(input: {
   readonly thread: {
     readonly projectId: ProjectId;

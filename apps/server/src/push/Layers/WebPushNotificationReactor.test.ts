@@ -51,6 +51,7 @@ function makeTurnDiffCompletedEvent(
       checkpointRef: CheckpointRef.make(`checkpoint-${status}`),
       status,
       files: [],
+      attribution: "unattributed",
       assistantMessageId: MessageId.make("assistant-1"),
       completedAt: now,
     },

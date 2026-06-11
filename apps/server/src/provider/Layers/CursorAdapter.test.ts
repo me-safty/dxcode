@@ -39,7 +39,7 @@ class CursorAdapter extends Context.Service<CursorAdapter, CursorAdapterShape>()
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const mockAgentPath = path.join(__dirname, "../../../scripts/acp-mock-agent.ts");
-const bunExe = "bun";
+const mockAgentCommand = process.execPath;
 
 async function makeMockAgentWrapper(
   extraEnv?: Record<string, string>,
@@ -53,7 +53,7 @@ async function makeMockAgentWrapper(
   const script = `#!/bin/sh
 ${envExports}
 ${options?.initialDelaySeconds ? `sleep ${JSON.stringify(String(options.initialDelaySeconds))}` : ""}
-exec ${JSON.stringify(bunExe)} ${JSON.stringify(mockAgentPath)} "$@"
+exec ${JSON.stringify(mockAgentCommand)} ${JSON.stringify(mockAgentPath)} "$@"
 `;
   await writeFile(wrapperPath, script, "utf8");
   await chmod(wrapperPath, 0o755);
@@ -74,7 +74,7 @@ ${envExports}
   sleep 1
   printf 'survived\\n' > ${JSON.stringify(survivedPath)}
 ) &
-exec ${JSON.stringify(bunExe)} ${JSON.stringify(mockAgentPath)} "$@"
+exec ${JSON.stringify(mockAgentCommand)} ${JSON.stringify(mockAgentPath)} "$@"
 `;
   await writeFile(wrapperPath, script, "utf8");
   await chmod(wrapperPath, 0o755);
@@ -112,7 +112,7 @@ printf '%s\t' "$@" >> ${JSON.stringify(argvLogPath)}
 printf '\n' >> ${JSON.stringify(argvLogPath)}
 export T3_ACP_REQUEST_LOG_PATH=${JSON.stringify(requestLogPath)}
 ${envExports}
-exec ${JSON.stringify(bunExe)} ${JSON.stringify(mockAgentPath)} "$@"
+exec ${JSON.stringify(mockAgentCommand)} ${JSON.stringify(mockAgentPath)} "$@"
 `;
   await writeFile(wrapperPath, script, "utf8");
   await chmod(wrapperPath, 0o755);
@@ -248,7 +248,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       assert.isDefined(delta);
       if (delta?.type === "content.delta") {
         assert.equal(delta.payload.delta, "hello from mock");
-        assert.match(String(delta.itemId), /^assistant:mock-session-1:segment:0$/);
+        assert.match(String(delta.itemId), /^assistant:mock-session-1:run:[0-9a-f]+:segment:0$/);
       }
 
       const assistantCompleted = runtimeEvents.find(
@@ -654,7 +654,10 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
           if (contentDelta?.type === "content.delta") {
             assert.equal(String(contentDelta.turnId), String(turn.turnId));
             assert.equal(contentDelta.payload.delta, "hello from mock");
-            assert.equal(String(contentDelta.itemId), "assistant:mock-session-1:segment:0");
+            assert.match(
+              String(contentDelta.itemId),
+              /^assistant:mock-session-1:run:[0-9a-f]+:segment:0$/,
+            );
           }
         });
 

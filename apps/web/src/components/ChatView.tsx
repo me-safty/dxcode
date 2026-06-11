@@ -2514,6 +2514,7 @@ export default function ChatView(props: ChatViewProps) {
     action: "close",
     enabled: shouldUsePlanSidebarSheet && planSidebarOpen,
     onSwipe: closePlanSidebar,
+    requireScrollableStartPosition: true,
     side: "right",
     startArea: "screen",
     startSurface: "panel",
@@ -2830,6 +2831,32 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThread?.id, activeThread?.queuedTurns, optimisticQueuedTurns]);
 
   useEffect(() => {
+    if (!activeThread?.id || activeThread.messages.length === 0) {
+      return;
+    }
+    const messageIds = new Set(activeThread.messages.map((message) => message.id));
+    const removedQueuedTurns = optimisticQueuedTurns.filter((queuedTurn) =>
+      messageIds.has(queuedTurn.messageId),
+    );
+    if (removedQueuedTurns.length === 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setOptimisticQueuedTurns((existing) =>
+        existing.filter((queuedTurn) => !messageIds.has(queuedTurn.messageId)),
+      );
+    }, 0);
+    for (const queuedTurn of removedQueuedTurns) {
+      for (const attachment of queuedTurn.attachments) {
+        revokeBlobPreviewUrl(attachment.previewUrl);
+      }
+    }
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [activeThread?.id, activeThread?.messages, optimisticQueuedTurns]);
+
+  useEffect(() => {
     if (interruptingTurnId === null) {
       return;
     }
@@ -2909,7 +2936,6 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     if (!activeThreadId) {
       setTerminalLaunchContext(null);
-      storeClearTerminalLaunchContext(routeThreadRef);
       return;
     }
     setTerminalLaunchContext((current) => {
@@ -2917,7 +2943,7 @@ export default function ChatView(props: ChatViewProps) {
       if (current.threadId === activeThreadId) return current;
       return null;
     });
-  }, [activeThreadId, routeThreadRef, storeClearTerminalLaunchContext]);
+  }, [activeThreadId]);
 
   useEffect(() => {
     if (!activeThreadId || !activeProjectCwd) {
@@ -2931,10 +2957,8 @@ export default function ChatView(props: ChatViewProps) {
         project: { cwd: activeProjectCwd },
         worktreePath: activeThreadWorktreePath,
       });
-      if (
-        settledCwd === current.cwd &&
-        (activeThreadWorktreePath ?? null) === current.worktreePath
-      ) {
+      const settledWorktreePath = activeThreadWorktreePath ?? null;
+      if (settledCwd === current.cwd && settledWorktreePath === current.worktreePath) {
         if (activeThreadRef) {
           storeClearTerminalLaunchContext(activeThreadRef);
         }
@@ -2958,9 +2982,10 @@ export default function ChatView(props: ChatViewProps) {
       project: { cwd: activeProjectCwd },
       worktreePath: activeThreadWorktreePath,
     });
+    const settledWorktreePath = activeThreadWorktreePath ?? null;
     if (
       settledCwd === storeServerTerminalLaunchContext.cwd &&
-      (activeThreadWorktreePath ?? null) === storeServerTerminalLaunchContext.worktreePath
+      settledWorktreePath === storeServerTerminalLaunchContext.worktreePath
     ) {
       if (activeThreadRef) {
         storeClearTerminalLaunchContext(activeThreadRef);
@@ -3431,7 +3456,7 @@ export default function ChatView(props: ChatViewProps) {
     // Scroll to the current end *before* adding the optimistic message.
     // This marks the timeline as at-end so maintainScrollAtEnd automatically
     // pins to the new item when the data changes.
-    scrollToEnd(false);
+    markTimelineAtEnd();
 
     setOptimisticUserMessages((existing) => [
       ...existing,

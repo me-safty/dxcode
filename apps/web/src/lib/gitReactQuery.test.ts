@@ -1,6 +1,10 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const { recordSourceControlDiagnosticEventSpy } = vi.hoisted(() => ({
+  recordSourceControlDiagnosticEventSpy: vi.fn(),
+}));
+
 vi.mock("../environmentApi", () => ({
   ensureEnvironmentApi: vi.fn(),
 }));
@@ -10,8 +14,17 @@ vi.mock("../wsRpcClient", () => ({
   getWsRpcClientForEnvironment: vi.fn(),
 }));
 
-import type { InfiniteData } from "@tanstack/react-query";
-import { EnvironmentId, type EnvironmentApi, type VcsListRefsResult } from "@t3tools/contracts";
+vi.mock("./sourceControlDiagnostics", () => ({
+  recordSourceControlDiagnosticEvent: recordSourceControlDiagnosticEventSpy,
+}));
+
+import type { InfiniteData, MutationFunctionContext } from "@tanstack/react-query";
+import {
+  EnvironmentId,
+  type EnvironmentApi,
+  type VcsListRefsResult,
+  type VcsStatusLocalResult,
+} from "@t3tools/contracts";
 import * as environmentApi from "../environmentApi";
 
 import {
@@ -40,6 +53,20 @@ const BRANCH_QUERY_RESULT: VcsListRefsResult = {
 const BRANCH_SEARCH_RESULT: InfiniteData<VcsListRefsResult, number> = {
   pages: [BRANCH_QUERY_RESULT],
   pageParams: [0],
+};
+const LOCAL_STATUS_RESULT: VcsStatusLocalResult = {
+  isRepo: true,
+  hasPrimaryRemote: true,
+  isDefaultRef: false,
+  refName: "feature/test",
+  hasWorkingTreeChanges: false,
+  workingTree: {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    staged: { files: [], insertions: 0, deletions: 0 },
+    unstaged: { files: [], insertions: 0, deletions: 0 },
+  },
 };
 const ENVIRONMENT_A = EnvironmentId.make("environment-a");
 const ENVIRONMENT_B = EnvironmentId.make("environment-b");
@@ -227,6 +254,158 @@ describe("git mutation options", () => {
       cwd: "/repo/a",
       filePaths: ["src/app.ts"],
     });
+  });
+
+  it("records diagnostics for file mutation start, success, and invalidation scheduling", async () => {
+    const stageFiles = vi.fn().mockResolvedValue(null);
+    const unstageFiles = vi.fn().mockResolvedValue(null);
+    const revertUnstagedFiles = vi.fn().mockResolvedValue(null);
+    vi.mocked(environmentApi.ensureEnvironmentApi).mockReturnValue({
+      vcs: {
+        stageFiles,
+        unstageFiles,
+        revertUnstagedFiles,
+      },
+    } as unknown as EnvironmentApi);
+    const invalidateQueries = vi.fn(() => Promise.resolve());
+    const diagnosticQueryClient = { invalidateQueries } as unknown as QueryClient;
+    const mutationContext: MutationFunctionContext = {
+      client: diagnosticQueryClient,
+      meta: undefined,
+    };
+
+    const stageOptions = vcsStageFilesMutationOptions({
+      environmentId: ENVIRONMENT_A,
+      cwd: "/repo/a",
+      queryClient: diagnosticQueryClient,
+    });
+    const unstageOptions = vcsUnstageFilesMutationOptions({
+      environmentId: ENVIRONMENT_A,
+      cwd: "/repo/a",
+      queryClient: diagnosticQueryClient,
+    });
+    const revertOptions = vcsRevertUnstagedFilesMutationOptions({
+      environmentId: ENVIRONMENT_A,
+      cwd: "/repo/a",
+      queryClient: diagnosticQueryClient,
+    });
+
+    await stageOptions.mutationFn?.({ filePaths: ["src/app.ts"] }, mutationContext);
+    stageOptions.onSuccess?.(
+      LOCAL_STATUS_RESULT,
+      { filePaths: ["src/app.ts"] },
+      undefined as never,
+      mutationContext,
+    );
+    await unstageOptions.mutationFn?.({ filePaths: ["src/app.ts"] }, mutationContext);
+    unstageOptions.onSuccess?.(
+      LOCAL_STATUS_RESULT,
+      { filePaths: ["src/app.ts"] },
+      undefined as never,
+      mutationContext,
+    );
+    await revertOptions.mutationFn?.({ filePaths: ["src/app.ts"] }, mutationContext);
+    revertOptions.onSuccess?.(
+      LOCAL_STATUS_RESULT,
+      { filePaths: ["src/app.ts"] },
+      undefined as never,
+      mutationContext,
+    );
+
+    for (const action of ["stage", "unstage", "revert"]) {
+      expect(recordSourceControlDiagnosticEventSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "mutation-start",
+          action,
+          environmentId: ENVIRONMENT_A,
+          cwd: "/repo/a",
+          filePaths: ["src/app.ts"],
+        }),
+      );
+      expect(recordSourceControlDiagnosticEventSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "mutation-success",
+          action,
+          environmentId: ENVIRONMENT_A,
+          cwd: "/repo/a",
+        }),
+      );
+      expect(recordSourceControlDiagnosticEventSpy).toHaveBeenCalledWith({
+        kind: "git-query-invalidation-scheduled",
+        action,
+        queryKey: gitQueryKeys.all,
+      });
+    }
+  });
+
+  it("records diagnostics for file mutation errors", () => {
+    const mutationContext: MutationFunctionContext = {
+      client: queryClient,
+      meta: undefined,
+    };
+    const error = new Error("permission denied");
+
+    vcsRevertUnstagedFilesMutationOptions({
+      environmentId: ENVIRONMENT_A,
+      cwd: "/repo/a",
+      queryClient,
+    }).onError?.(error, { filePaths: ["src/app.ts"] }, undefined, mutationContext);
+
+    expect(recordSourceControlDiagnosticEventSpy).toHaveBeenCalledWith({
+      kind: "mutation-error",
+      action: "revert",
+      environmentId: ENVIRONMENT_A,
+      cwd: "/repo/a",
+      errorMessage: "permission denied",
+    });
+  });
+
+  it("does not keep file mutations pending while git query invalidation refetches", () => {
+    const invalidateQueries = vi.fn(() => new Promise(() => undefined));
+    const hangingInvalidationClient = {
+      invalidateQueries,
+    } as unknown as QueryClient;
+    const mutationContext: MutationFunctionContext = {
+      client: hangingInvalidationClient,
+      meta: undefined,
+    };
+
+    const stageResult = vcsStageFilesMutationOptions({
+      environmentId: ENVIRONMENT_A,
+      cwd: "/repo/a",
+      queryClient: hangingInvalidationClient,
+    }).onSuccess?.(
+      LOCAL_STATUS_RESULT,
+      { filePaths: ["src/app.ts"] },
+      undefined as never,
+      mutationContext,
+    );
+    const unstageResult = vcsUnstageFilesMutationOptions({
+      environmentId: ENVIRONMENT_A,
+      cwd: "/repo/a",
+      queryClient: hangingInvalidationClient,
+    }).onSuccess?.(
+      LOCAL_STATUS_RESULT,
+      { filePaths: ["src/app.ts"] },
+      undefined as never,
+      mutationContext,
+    );
+    const revertResult = vcsRevertUnstagedFilesMutationOptions({
+      environmentId: ENVIRONMENT_A,
+      cwd: "/repo/a",
+      queryClient: hangingInvalidationClient,
+    }).onSuccess?.(
+      LOCAL_STATUS_RESULT,
+      { filePaths: ["src/app.ts"] },
+      undefined as never,
+      mutationContext,
+    );
+
+    expect(stageResult).toBeUndefined();
+    expect(unstageResult).toBeUndefined();
+    expect(revertResult).toBeUndefined();
+    expect(invalidateQueries).toHaveBeenCalledTimes(3);
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: gitQueryKeys.all });
   });
 });
 

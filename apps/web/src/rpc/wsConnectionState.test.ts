@@ -82,6 +82,20 @@ describe("wsConnectionState", () => {
     });
   });
 
+  it("clears stale websocket errors when the socket opens", () => {
+    recordWsConnectionAttempt("ws://localhost:3020/ws");
+    recordWsConnectionErrored("Unable to connect to the T3 server WebSocket.");
+
+    vi.setSystemTime(new Date("2026-04-03T20:30:05.000Z"));
+    recordWsConnectionOpened();
+
+    expect(getWsConnectionStatus()).toMatchObject({
+      lastError: null,
+      lastErrorAt: null,
+      phase: "connected",
+    });
+  });
+
   it("adds a version mismatch hint to websocket close reasons when metadata includes one", () => {
     recordWsConnectionAttempt("ws://localhost:3020/ws");
     recordWsConnectionOpened();

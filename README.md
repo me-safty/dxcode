@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JoseRFelix/salchi/main/assets/salchi/salchi-icon-1024.png" alt="Salchi app icon" width="128" height="128" />
+  <img src="assets/salchi/salchi-logo.png" alt="Salchi logo" width="128" height="128" />
 </p>
 
 # Salchi
@@ -50,14 +50,33 @@ Salchi focused on the workflows and polish that matter here.
 npx salchi
 ```
 
-### Run over Tailscale on macOS
+### Tailscale quick start on macOS
 
-To expose a headless Salchi server to devices on your Tailnet and keep macOS awake while it is running:
+Use this when you want to run Salchi on your Mac and access it privately from
+your phone, tablet, or another computer. This uses Tailscale Serve, not Funnel,
+so the URL stays inside your tailnet.
+
+1. Create a Tailscale account at [tailscale.com/start](https://tailscale.com/start).
+   This creates your private tailnet.
+2. Install [Tailscale](https://tailscale.com/download) on the Mac that will run
+   Salchi and on each device that should open it, then sign in to the same
+   account on all devices.
+3. In the [Tailscale DNS settings](https://login.tailscale.com/admin/dns), keep
+   MagicDNS enabled and enable HTTPS certificates.
+4. Install and authenticate at least one provider CLI from the warning above on
+   the Mac.
+5. Open Terminal on the Mac, change into the project you want Salchi to manage,
+   and confirm Tailscale is connected:
 
 ```bash
+cd ~/projects/my-app
 tailscale status
+```
 
-caffeinate -ims npx salchi serve --tailscale-serve --port 4888 /path/to/project
+6. Start a headless Salchi server and keep macOS awake while it is running:
+
+```bash
+caffeinate -ims npx salchi serve --tailscale-serve --port 4888
 ```
 
 Salchi prints a pairing URL like:
@@ -66,7 +85,10 @@ Salchi prints a pairing URL like:
 https://your-mac.your-tailnet.ts.net/pair#token=...
 ```
 
-Open that URL from another device signed into the same Tailnet.
+Open that URL from another device signed into the same tailnet.
+
+7. **Optional:** To enable PWA push notifications, follow
+   [Tailscale Serve for PWA Push Notifications](./docs/tailscale-serve-pwa-push.md).
 
 Use a non-default Tailscale HTTPS port with:
 
@@ -74,15 +96,17 @@ Use a non-default Tailscale HTTPS port with:
 caffeinate -ims npx salchi serve \
   --tailscale-serve \
   --tailscale-serve-port 8443 \
-  --port 4888 \
-  /path/to/project
+  --port 4888
 ```
 
-Stop the Tailscale Serve route afterward with:
+Stop the default Tailscale Serve route afterward with:
 
 ```bash
 tailscale serve --https=443 off
 ```
+
+If you used `--tailscale-serve-port 8443`, stop that route with
+`tailscale serve --https=8443 off`.
 
 `caffeinate` keeps macOS awake while Salchi is running, but it will not reliably keep a Mac awake with the lid closed. Keep the lid open, or use clamshell mode with power connected and an external display, keyboard, and mouse.
 

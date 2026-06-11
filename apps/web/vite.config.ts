@@ -1,4 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - Vite config runs in Node and resolves local brand asset files.
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -107,6 +109,13 @@ function resolveDevProxyTarget(wsUrl: string | undefined): string | undefined {
 const devProxyTarget = resolveDevProxyTarget(configuredWsUrl);
 const webAssetBrand = resolveWebAssetBrandForConfiguredChannel(configuredHostedAppChannel);
 const serviceWorkerFilename = "t3-service-worker.js";
+const pushServiceWorkerFilename = "t3-push-service-worker.js";
+const pushServiceWorkerVersion = createHash("sha256")
+  .update(
+    readFileSync(fileURLToPath(new URL(`./public/${pushServiceWorkerFilename}`, import.meta.url))),
+  )
+  .digest("hex")
+  .slice(0, 8);
 
 function webBrandAssetsPlugin(): Plugin {
   return {
@@ -172,9 +181,9 @@ export default defineConfig({
       registerType: "prompt",
       workbox: {
         cleanupOutdatedCaches: true,
-        globIgnores: [`**/${serviceWorkerFilename}`],
+        globIgnores: [`**/${serviceWorkerFilename}`, `**/${pushServiceWorkerFilename}`],
         globPatterns: ["**/*.{js,css,html,ico,png,svg,webmanifest,woff2}"],
-        importScripts: ["t3-push-service-worker.js"],
+        importScripts: [`${pushServiceWorkerFilename}?v=${pushServiceWorkerVersion}`],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [

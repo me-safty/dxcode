@@ -48,9 +48,15 @@ const CLAUDE_PRESENTATION = {
   displayName: "Claude",
   showInteractionModeToggle: true,
 } as const;
+const MINIMUM_CLAUDE_FABLE_5_VERSION = "2.1.170";
 const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
 const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
 const VERSION_GATED_MODEL_REQUIREMENTS = [
+  {
+    slug: "claude-fable-5",
+    name: "Claude Fable 5",
+    minimumVersion: MINIMUM_CLAUDE_FABLE_5_VERSION,
+  },
   {
     slug: "claude-opus-4-8",
     name: "Claude Opus 4.8",
@@ -63,6 +69,28 @@ const VERSION_GATED_MODEL_REQUIREMENTS = [
   },
 ] as const;
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
+  {
+    slug: "claude-fable-5",
+    name: "Claude Fable 5",
+    isCustom: false,
+    capabilities: createModelCapabilities({
+      optionDescriptors: [
+        buildSelectOptionDescriptor({
+          id: "effort",
+          label: "Reasoning",
+          options: [
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High", isDefault: true },
+            { value: "xhigh", label: "Extra High" },
+            { value: "max", label: "Max" },
+            { value: "ultrathink", label: "Ultrathink" },
+          ],
+          promptInjectedValues: ["ultrathink"],
+        }),
+      ],
+    }),
+  },
   {
     slug: "claude-opus-4-8",
     name: "Claude Opus 4.8",

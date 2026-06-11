@@ -32,6 +32,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CheckpointStoreLive } from "../../checkpointing/Layers/CheckpointStore.ts";
 import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts";
+import { TurnFileSnapshots } from "../../persistence/Services/TurnFileSnapshots.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
@@ -44,6 +45,7 @@ import { RuntimeReceiptBusLive } from "./RuntimeReceiptBus.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { TurnFileSnapshotsLive } from "../../persistence/Layers/TurnFileSnapshots.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -54,7 +56,11 @@ import {
   ProviderService,
   type ProviderServiceShape,
 } from "../../provider/Services/ProviderService.ts";
-import { checkpointRefForThreadTurn } from "../../checkpointing/Utils.ts";
+import {
+  checkpointAttributedRefForThreadTurn,
+  checkpointRefForThreadTurn,
+  checkpointStartRefForThreadTurn,
+} from "../../checkpointing/Utils.ts";
 import { ServerConfig } from "../../config.ts";
 import { WorkspaceEntriesLive } from "../../workspace/Layers/WorkspaceEntries.ts";
 import { WorkspacePathsLive } from "../../workspace/Layers/WorkspacePaths.ts";
@@ -257,10 +263,7 @@ async function waitForGitRefExists(cwd: string, ref: string, timeoutMs = 15_000)
 }
 
 describe("CheckpointReactor", () => {
-  let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | CheckpointReactor | CheckpointStore | ProjectionSnapshotQuery,
-    unknown
-  > | null = null;
+  let runtime: { readonly dispose: () => Promise<void> } | null = null;
   let scope: Scope.Closeable | null = null;
   const tempDirs: string[] = [];
 
@@ -347,16 +350,20 @@ describe("CheckpointReactor", () => {
         ),
       ),
       Layer.provideMerge(WorkspacePathsLive),
+      Layer.provideMerge(TurnFileSnapshotsLive),
+      Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(VcsProcess.layer),
       Layer.provideMerge(ServerConfigLayer),
       Layer.provideMerge(NodeServices.layer),
     );
 
-    runtime = ManagedRuntime.make(layer);
-    const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
-    const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
-    const reactor = await runtime.runPromise(Effect.service(CheckpointReactor));
-    const checkpointStore = await runtime.runPromise(Effect.service(CheckpointStore));
+    const testRuntime = ManagedRuntime.make(layer);
+    runtime = testRuntime;
+    const engine = await testRuntime.runPromise(Effect.service(OrchestrationEngineService));
+    const snapshotQuery = await testRuntime.runPromise(Effect.service(ProjectionSnapshotQuery));
+    const reactor = await testRuntime.runPromise(Effect.service(CheckpointReactor));
+    const checkpointStore = await testRuntime.runPromise(Effect.service(CheckpointStore));
+    const turnFileSnapshots = await testRuntime.runPromise(Effect.service(TurnFileSnapshots));
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(reactor.drain);
@@ -396,21 +403,21 @@ describe("CheckpointReactor", () => {
     );
 
     if (options?.seedFilesystemCheckpoints ?? true) {
-      await runtime.runPromise(
+      await testRuntime.runPromise(
         checkpointStore.captureCheckpoint({
           cwd,
           checkpointRef: checkpointRefForThreadTurn(ThreadId.make("thread-1"), 0),
         }),
       );
       fs.writeFileSync(path.join(cwd, "README.md"), "v2\n", "utf8");
-      await runtime.runPromise(
+      await testRuntime.runPromise(
         checkpointStore.captureCheckpoint({
           cwd,
           checkpointRef: checkpointRefForThreadTurn(ThreadId.make("thread-1"), 1),
         }),
       );
       fs.writeFileSync(path.join(cwd, "README.md"), "v3\n", "utf8");
-      await runtime.runPromise(
+      await testRuntime.runPromise(
         checkpointStore.captureCheckpoint({
           cwd,
           checkpointRef: checkpointRefForThreadTurn(ThreadId.make("thread-1"), 2),
@@ -424,6 +431,9 @@ describe("CheckpointReactor", () => {
       provider,
       cwd,
       drain,
+      checkpointStore,
+      turnFileSnapshots,
+      runEffect: <A, E>(effect: Effect.Effect<A, E, never>) => testRuntime.runPromise(effect),
     };
   }
 
@@ -488,6 +498,9 @@ describe("CheckpointReactor", () => {
       gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 1)),
     ).toBe(true);
     expect(
+      gitRefExists(harness.cwd, checkpointStartRefForThreadTurn(ThreadId.make("thread-1"), 1)),
+    ).toBe(true);
+    expect(
       gitShowFileAtRef(
         harness.cwd,
         checkpointRefForThreadTurn(ThreadId.make("thread-1"), 0),
@@ -501,6 +514,499 @@ describe("CheckpointReactor", () => {
         "README.md",
       ),
     ).toBe("v2\n");
+  });
+
+  it("overwrites the turn-start ref on repeated start signals without replacing turn-0", async () => {
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    const threadId = ThreadId.make("thread-1");
+    const turnId = asTurnId("turn-overwrite-start");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-overwrite-start"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-overwrite-1"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId,
+      turnId,
+    });
+    await waitForGitRefExists(harness.cwd, checkpointStartRefForThreadTurn(threadId, 1));
+
+    fs.writeFileSync(path.join(harness.cwd, "README.md"), "later baseline\n", "utf8");
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-overwrite-2"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId,
+      turnId,
+    });
+    await harness.drain();
+
+    expect(
+      gitShowFileAtRef(harness.cwd, checkpointRefForThreadTurn(threadId, 0), "README.md"),
+    ).toBe("v1\n");
+    expect(
+      gitShowFileAtRef(harness.cwd, checkpointStartRefForThreadTurn(threadId, 1), "README.md"),
+    ).toBe("later baseline\n");
+  });
+
+  it("uses edit-time blobs so same-file workspace overlap does not enter the turn diff", async () => {
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    const threadId = ThreadId.make("thread-1");
+    const turnId = asTurnId("turn-same-file");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-same-file"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-same-file"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId,
+      turnId,
+    });
+    await waitForGitRefExists(harness.cwd, checkpointStartRefForThreadTurn(threadId, 1));
+
+    fs.writeFileSync(path.join(harness.cwd, "shared.txt"), "version-A\n", "utf8");
+    const blobSha = await harness.runEffect(
+      harness.checkpointStore.hashFileBlob({
+        cwd: harness.cwd,
+        path: "shared.txt",
+      }),
+    );
+    expect(blobSha).toMatch(/^[0-9a-f]{40}$/);
+    await harness.runEffect(
+      harness.turnFileSnapshots.upsertSnapshot({
+        threadId,
+        turnId,
+        path: "shared.txt",
+        blobSha: blobSha ?? null,
+        deleted: false,
+        updatedAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+
+    fs.writeFileSync(path.join(harness.cwd, "shared.txt"), "version-B\n", "utf8");
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-turn-completed-same-file"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:02.000Z",
+      threadId,
+      turnId,
+      payload: { state: "completed" },
+    });
+
+    const events = await waitForEvent(
+      harness.engine,
+      (event) => event.type === "thread.turn-diff-completed",
+    );
+    const completedEvent = events.find((event) => event.type === "thread.turn-diff-completed");
+    const completedPayload = (
+      completedEvent as
+        | {
+            readonly payload?: {
+              readonly attribution?: string;
+              readonly files?: ReadonlyArray<{ readonly path: string }>;
+            };
+          }
+        | undefined
+    )?.payload;
+    expect(completedPayload?.attribution).toBe("edit-snapshots");
+    expect(completedPayload?.files?.map((file) => file.path)).toEqual(["shared.txt"]);
+
+    const startRef = checkpointStartRefForThreadTurn(threadId, 1);
+    const attributedRef = checkpointAttributedRefForThreadTurn(threadId, 1);
+    const fullTurnRef = checkpointRefForThreadTurn(threadId, 1);
+    await waitForGitRefExists(harness.cwd, attributedRef);
+
+    expect(gitShowFileAtRef(harness.cwd, attributedRef, "shared.txt")).toBe("version-A\n");
+    expect(gitShowFileAtRef(harness.cwd, fullTurnRef, "shared.txt")).toBe("version-B\n");
+
+    const attributedDiff = runGit(harness.cwd, ["diff", startRef, attributedRef]);
+    expect(attributedDiff).toContain("+version-A");
+    expect(attributedDiff).not.toContain("version-B");
+  });
+
+  it("uses touched-path attribution for path-only rows", async () => {
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    const threadId = ThreadId.make("thread-1");
+    const turnId = asTurnId("turn-path-only");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-path-only"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-path-only"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId,
+      turnId,
+    });
+    await waitForGitRefExists(harness.cwd, checkpointStartRefForThreadTurn(threadId, 1));
+
+    fs.writeFileSync(path.join(harness.cwd, "a.txt"), "a2\n", "utf8");
+    fs.writeFileSync(path.join(harness.cwd, "b.txt"), "b2\n", "utf8");
+    await harness.runEffect(
+      harness.turnFileSnapshots.upsertSnapshot({
+        threadId,
+        turnId,
+        path: "a.txt",
+        blobSha: null,
+        deleted: false,
+        updatedAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-turn-completed-path-only"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:02.000Z",
+      threadId,
+      turnId,
+      payload: { state: "completed" },
+    });
+
+    const events = await waitForEvent(
+      harness.engine,
+      (event) => event.type === "thread.turn-diff-completed",
+    );
+    const completedEvent = events.find((event) => event.type === "thread.turn-diff-completed");
+    const completedPayload = (
+      completedEvent as
+        | {
+            readonly payload?: {
+              readonly attribution?: string;
+              readonly files?: ReadonlyArray<{ readonly path: string }>;
+            };
+          }
+        | undefined
+    )?.payload;
+    expect(completedPayload?.attribution).toBe("touched-paths");
+    expect(completedPayload?.files?.map((file) => file.path)).toEqual(["a.txt"]);
+    expect(gitRefExists(harness.cwd, checkpointAttributedRefForThreadTurn(threadId, 1))).toBe(
+      false,
+    );
+  });
+
+  it("records deleted edit-snapshot rows as deletions in the attributed diff", async () => {
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    const threadId = ThreadId.make("thread-1");
+    const turnId = asTurnId("turn-delete");
+
+    fs.writeFileSync(path.join(harness.cwd, "delete-me.txt"), "delete me\n", "utf8");
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-delete"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-delete"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId,
+      turnId,
+    });
+    await waitForGitRefExists(harness.cwd, checkpointStartRefForThreadTurn(threadId, 1));
+
+    fs.rmSync(path.join(harness.cwd, "delete-me.txt"));
+    await harness.runEffect(
+      harness.turnFileSnapshots.upsertSnapshot({
+        threadId,
+        turnId,
+        path: "delete-me.txt",
+        blobSha: null,
+        deleted: true,
+        updatedAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-turn-completed-delete"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:02.000Z",
+      threadId,
+      turnId,
+      payload: { state: "completed" },
+    });
+
+    const events = await waitForEvent(
+      harness.engine,
+      (event) => event.type === "thread.turn-diff-completed",
+    );
+    const completedEvent = events.find((event) => event.type === "thread.turn-diff-completed");
+    const completedPayload = (
+      completedEvent as
+        | {
+            readonly payload?: {
+              readonly attribution?: string;
+              readonly files?: ReadonlyArray<{ readonly path: string }>;
+            };
+          }
+        | undefined
+    )?.payload;
+    expect(completedPayload?.attribution).toBe("edit-snapshots");
+    expect(completedPayload?.files?.map((file) => file.path)).toEqual(["delete-me.txt"]);
+
+    const attributedDiff = runGit(harness.cwd, [
+      "diff",
+      checkpointStartRefForThreadTurn(threadId, 1),
+      checkpointAttributedRefForThreadTurn(threadId, 1),
+    ]);
+    expect(attributedDiff).toContain("diff --git a/delete-me.txt b/delete-me.txt");
+    expect(attributedDiff).toContain("deleted file mode");
+  });
+
+  it("degrades over the touched-path cap to unattributed full-tree diffs", async () => {
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    const threadId = ThreadId.make("thread-1");
+    const turnId = asTurnId("turn-over-cap");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-over-cap"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-over-cap"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId,
+      turnId,
+    });
+    await waitForGitRefExists(harness.cwd, checkpointStartRefForThreadTurn(threadId, 1));
+
+    fs.writeFileSync(path.join(harness.cwd, "scoped.txt"), "scoped\n", "utf8");
+    fs.writeFileSync(path.join(harness.cwd, "unscoped.txt"), "unscoped\n", "utf8");
+    for (let index = 0; index <= 500; index += 1) {
+      await harness.runEffect(
+        harness.turnFileSnapshots.upsertSnapshot({
+          threadId,
+          turnId,
+          path: `src/touched-${String(index).padStart(3, "0")}.ts`,
+          blobSha: null,
+          deleted: false,
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        }),
+      );
+    }
+
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-turn-completed-over-cap"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:02.000Z",
+      threadId,
+      turnId,
+      payload: { state: "completed" },
+    });
+
+    const events = await waitForEvent(
+      harness.engine,
+      (event) => event.type === "thread.turn-diff-completed",
+    );
+    const completedEvent = events.find((event) => event.type === "thread.turn-diff-completed");
+    const completedPayload = (
+      completedEvent as
+        | {
+            readonly payload?: {
+              readonly attribution?: string;
+              readonly files?: ReadonlyArray<{ readonly path: string }>;
+            };
+          }
+        | undefined
+    )?.payload;
+    const completedPaths = completedPayload?.files?.map((file) => file.path) ?? [];
+    expect(completedPayload?.attribution).toBe("unattributed");
+    expect(completedPaths).toEqual(expect.arrayContaining(["scoped.txt", "unscoped.txt"]));
+  });
+
+  it("excludes workspace changes made between a thread's turns via the next turn-start baseline", async () => {
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    const threadId = ThreadId.make("thread-1");
+    const firstTurnId = asTurnId("turn-baseline-1");
+    const secondTurnId = asTurnId("turn-baseline-2");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-baseline-between-turns"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-baseline-1"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt,
+      threadId,
+      turnId: firstTurnId,
+    });
+    await waitForGitRefExists(harness.cwd, checkpointStartRefForThreadTurn(threadId, 1));
+    fs.writeFileSync(path.join(harness.cwd, "a.txt"), "a1\n", "utf8");
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-turn-completed-baseline-1"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId,
+      turnId: firstTurnId,
+      payload: { state: "completed" },
+    });
+    await waitForEvent(
+      harness.engine,
+      (event) =>
+        event.type === "thread.turn-diff-completed" &&
+        (event as { readonly payload?: { readonly turnId?: TurnId } }).payload?.turnId ===
+          firstTurnId,
+    );
+
+    fs.writeFileSync(path.join(harness.cwd, "b.txt"), "between-turns\n", "utf8");
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-baseline-2"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:02.000Z",
+      threadId,
+      turnId: secondTurnId,
+    });
+    await waitForGitRefExists(harness.cwd, checkpointStartRefForThreadTurn(threadId, 2));
+    fs.writeFileSync(path.join(harness.cwd, "a.txt"), "a2\n", "utf8");
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-turn-completed-baseline-2"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:03.000Z",
+      threadId,
+      turnId: secondTurnId,
+      payload: { state: "completed" },
+    });
+
+    const events = await waitForEvent(
+      harness.engine,
+      (event) =>
+        event.type === "thread.turn-diff-completed" &&
+        (event as { readonly payload?: { readonly turnId?: TurnId } }).payload?.turnId ===
+          secondTurnId,
+    );
+    const completedEvent = events.find(
+      (event) =>
+        event.type === "thread.turn-diff-completed" &&
+        (event as { readonly payload?: { readonly turnId?: TurnId } }).payload?.turnId ===
+          secondTurnId,
+    );
+    const completedPayload = (
+      completedEvent as
+        | {
+            readonly payload?: {
+              readonly attribution?: string;
+              readonly files?: ReadonlyArray<{ readonly path: string }>;
+            };
+          }
+        | undefined
+    )?.payload;
+    expect(completedPayload?.attribution).toBe("unattributed");
+    expect(completedPayload?.files?.map((file) => file.path)).toEqual(["a.txt"]);
+    expect(
+      gitShowFileAtRef(harness.cwd, checkpointStartRefForThreadTurn(threadId, 2), "b.txt"),
+    ).toBe("between-turns\n");
   });
 
   it("refreshes local git status state on turn completion using the session cwd", async () => {
@@ -703,6 +1209,67 @@ describe("CheckpointReactor", () => {
     expect(
       thread.activities.some((activity) => activity.kind === "checkpoint.capture.failed"),
     ).toBe(true);
+  });
+
+  it("falls back to the previous full checkpoint when turn-start was missed", async () => {
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    const threadId = ThreadId.make("thread-1");
+    const turnId = asTurnId("turn-missed-start");
+
+    await harness.runEffect(
+      harness.checkpointStore.captureCheckpoint({
+        cwd: harness.cwd,
+        checkpointRef: checkpointRefForThreadTurn(threadId, 0),
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-missed-start"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+
+    fs.writeFileSync(path.join(harness.cwd, "README.md"), "missed start\n", "utf8");
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-turn-completed-missed-start"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId,
+      turnId,
+      payload: { state: "completed" },
+    });
+
+    const events = await waitForEvent(
+      harness.engine,
+      (event) => event.type === "thread.turn-diff-completed",
+    );
+    const completedEvent = events.find((event) => event.type === "thread.turn-diff-completed");
+    const completedPayload = (
+      completedEvent as
+        | {
+            readonly payload?: {
+              readonly attribution?: string;
+              readonly files?: ReadonlyArray<{ readonly path: string }>;
+            };
+          }
+        | undefined
+    )?.payload;
+    expect(gitRefExists(harness.cwd, checkpointStartRefForThreadTurn(threadId, 1))).toBe(false);
+    expect(completedPayload?.attribution).toBe("unattributed");
+    expect(completedPayload?.files?.map((file) => file.path)).toEqual(["README.md"]);
   });
 
   it("captures pre-turn baseline from project workspace root when thread worktree is unset", async () => {
@@ -945,6 +1512,18 @@ describe("CheckpointReactor", () => {
         createdAt,
       }),
     );
+    await harness.runEffect(
+      harness.checkpointStore.captureCheckpoint({
+        cwd: harness.cwd,
+        checkpointRef: checkpointStartRefForThreadTurn(ThreadId.make("thread-1"), 2),
+      }),
+    );
+    await harness.runEffect(
+      harness.checkpointStore.captureCheckpoint({
+        cwd: harness.cwd,
+        checkpointRef: checkpointAttributedRefForThreadTurn(ThreadId.make("thread-1"), 2),
+      }),
+    );
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -973,6 +1552,12 @@ describe("CheckpointReactor", () => {
     expect(fs.readFileSync(path.join(harness.cwd, "README.md"), "utf8")).toBe("v2\n");
     expect(
       gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 2)),
+    ).toBe(false);
+    expect(
+      gitRefExists(harness.cwd, checkpointStartRefForThreadTurn(ThreadId.make("thread-1"), 2)),
+    ).toBe(false);
+    expect(
+      gitRefExists(harness.cwd, checkpointAttributedRefForThreadTurn(ThreadId.make("thread-1"), 2)),
     ).toBe(false);
   });
 

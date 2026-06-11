@@ -84,6 +84,7 @@ vi.mock("../environments/runtime", () => ({
 }));
 
 vi.mock("../lib/gitStatusState", () => ({
+  applyGitStatusLocalUpdate: () => undefined,
   resetGitStatusStateForTests: () => undefined,
   useGitStatus: useGitStatusMock,
 }));
@@ -297,24 +298,41 @@ async function waitForPreviewShadowElement(selector: string): Promise<HTMLElemen
   return element;
 }
 
-function dispatchComposedClick(element: HTMLElement) {
+function dispatchComposedPointerTap(element: HTMLElement) {
   const rect = element.getBoundingClientRect();
-  dispatchComposedClickAt(element, {
+  dispatchComposedPointerTapAt(element, {
     clientX: rect.left + Math.min(2, Math.max(0, rect.width / 2)),
     clientY: rect.top + Math.max(1, rect.height / 2),
   });
 }
 
-function dispatchComposedClickAt(
+function dispatchComposedPointerTapAt(
   element: HTMLElement,
   point: { clientX: number; clientY: number },
 ) {
+  for (const type of ["pointerdown", "pointerup"]) {
+    element.dispatchEvent(
+      new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        clientX: point.clientX,
+        clientY: point.clientY,
+        composed: true,
+        pointerId: 1,
+        pointerType: "mouse",
+      }),
+    );
+  }
+}
+
+function dispatchComposedClick(element: HTMLElement) {
+  const rect = element.getBoundingClientRect();
   element.dispatchEvent(
     new MouseEvent("click", {
       bubbles: true,
       cancelable: true,
-      clientX: point.clientX,
-      clientY: point.clientY,
+      clientX: rect.left + Math.min(2, Math.max(0, rect.width / 2)),
+      clientY: rect.top + Math.max(1, rect.height / 2),
       composed: true,
     }),
   );
@@ -360,13 +378,13 @@ describe("WorkspaceFilePreviewPanel real diff renderer", () => {
     try {
       const marker = await waitForPreviewShadowElement('[data-column-number="2"]');
 
-      dispatchComposedClick(marker);
+      dispatchComposedPointerTap(marker);
       await vi.waitFor(() => {
         expect(document.querySelector("[data-testid='workspace-file-inline-diff']")).not.toBeNull();
       });
 
       const updatedMarker = await waitForPreviewShadowElement('[data-column-number="2"]');
-      dispatchComposedClick(updatedMarker);
+      dispatchComposedPointerTap(updatedMarker);
       await vi.waitFor(() => {
         expect(document.querySelector("[data-testid='workspace-file-inline-diff']")).toBeNull();
       });
@@ -389,7 +407,7 @@ describe("WorkspaceFilePreviewPanel real diff renderer", () => {
     }
   });
 
-  it("opens the inline diff when the painted marker click is retargeted to the gutter", async () => {
+  it("ignores a pointer tap retargeted to the gutter without the marker in the event path", async () => {
     const mounted = await renderPreview();
     try {
       const marker = await waitForPreviewShadowElement('[data-column-number="2"]');
@@ -399,27 +417,25 @@ describe("WorkspaceFilePreviewPanel real diff renderer", () => {
       }
       const markerRect = marker.getBoundingClientRect();
 
-      dispatchComposedClickAt(gutter, {
+      dispatchComposedPointerTapAt(gutter, {
         clientX: markerRect.left + 2,
         clientY: markerRect.top + 10,
       });
-      await vi.waitFor(() => {
-        expect(document.querySelector("[data-testid='workspace-file-inline-diff']")).not.toBeNull();
-      });
+      await waitForAnimationFrame();
+      expect(document.querySelector("[data-testid='workspace-file-inline-diff']")).toBeNull();
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("opens the inline diff from a real shadow-DOM code line click", async () => {
+  it("does not open the inline diff from a real shadow-DOM marked code line click", async () => {
     const mounted = await renderPreview();
     try {
       const line = await waitForPreviewShadowElement('[data-line="2"]');
 
       dispatchComposedClick(line);
-      await vi.waitFor(() => {
-        expect(document.querySelector("[data-testid='workspace-file-inline-diff']")).not.toBeNull();
-      });
+      await waitForAnimationFrame();
+      expect(document.querySelector("[data-testid='workspace-file-inline-diff']")).toBeNull();
     } finally {
       await mounted.cleanup();
     }
@@ -451,7 +467,7 @@ describe("WorkspaceFilePreviewPanel real diff renderer", () => {
     try {
       const firstMarker = await waitForPreviewShadowElement('[data-column-number="1"]');
 
-      dispatchComposedClick(firstMarker);
+      dispatchComposedPointerTap(firstMarker);
       await vi.waitFor(() => {
         expect(document.querySelector("[data-testid='workspace-file-inline-diff']")).not.toBeNull();
         expect(

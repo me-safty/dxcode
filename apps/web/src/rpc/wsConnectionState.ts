@@ -144,6 +144,8 @@ export function recordWsConnectionOpened(metadata?: WsConnectionMetadata): WsCon
     connectedAt: isoNow(),
     disconnectedAt: null,
     hasConnected: true,
+    lastError: null,
+    lastErrorAt: null,
     nextRetryAt: null,
     phase: "connected",
     reconnectAttemptCount: 0,

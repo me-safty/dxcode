@@ -282,6 +282,7 @@ function mapTurnDiffSummary(checkpoint: OrchestrationCheckpointSummary): TurnDif
     assistantMessageId: checkpoint.assistantMessageId ?? undefined,
     checkpointTurnCount: checkpoint.checkpointTurnCount,
     checkpointRef: checkpoint.checkpointRef,
+    attribution: checkpoint.attribution,
     files: checkpoint.files.map((file) => ({ ...file })),
   };
 }
@@ -671,6 +672,7 @@ function turnDiffSummariesEqual(left: TurnDiffSummary, right: TurnDiffSummary): 
     left.completedAt === right.completedAt &&
     left.status === right.status &&
     left.checkpointRef === right.checkpointRef &&
+    left.attribution === right.attribution &&
     left.checkpointTurnCount === right.checkpointTurnCount &&
     left.assistantMessageId === right.assistantMessageId &&
     turnDiffFilesEqual(left.files, right.files)
@@ -847,6 +849,19 @@ function shareThreadDetailCollections(previousThread: Thread, nextThread: Thread
 
 function compareMessagesByOrder(left: ChatMessage, right: ChatMessage): number {
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
+
+function mapDispatchedQueuedTurnMessage(queuedTurn: QueuedTurn, dispatchedAt: string): ChatMessage {
+  return {
+    id: queuedTurn.messageId,
+    role: queuedTurn.role,
+    text: queuedTurn.text,
+    turnId: null,
+    createdAt: dispatchedAt,
+    completedAt: dispatchedAt,
+    streaming: false,
+    ...(queuedTurn.attachments.length > 0 ? { attachments: [...queuedTurn.attachments] } : {}),
+  };
 }
 
 function compareQueuedTurnsByOrder(left: QueuedTurn, right: QueuedTurn): number {
@@ -2367,7 +2382,6 @@ function applyEnvironmentOrchestrationEvent(
       );
 
     case "thread.queued-turn-cancelled":
-    case "thread.queued-turn-dispatched":
       return updateThreadState(
         state,
         event.payload.threadId,
@@ -2381,6 +2395,42 @@ function applyEnvironmentOrchestrationEvent(
           return {
             ...thread,
             queuedTurns,
+            updatedAt: event.occurredAt,
+          };
+        },
+        options,
+      );
+
+    case "thread.queued-turn-dispatched":
+      return updateThreadState(
+        state,
+        event.payload.threadId,
+        (thread) => {
+          const queuedTurn = thread.queuedTurns.find(
+            (entry) => entry.messageId === event.payload.messageId,
+          );
+          const queuedTurns = thread.queuedTurns.filter(
+            (entry) => entry.messageId !== event.payload.messageId,
+          );
+          if (queuedTurns.length === thread.queuedTurns.length) {
+            return thread;
+          }
+
+          const messages =
+            queuedTurn !== undefined &&
+            !thread.messages.some((message) => message.id === queuedTurn.messageId)
+              ? [
+                  ...thread.messages,
+                  mapDispatchedQueuedTurnMessage(queuedTurn, event.payload.dispatchedAt),
+                ]
+                  .toSorted(compareMessagesByOrder)
+                  .slice(-MAX_THREAD_MESSAGES)
+              : thread.messages;
+
+          return {
+            ...thread,
+            queuedTurns,
+            messages,
             updatedAt: event.occurredAt,
           };
         },
@@ -2479,6 +2529,7 @@ function applyEnvironmentOrchestrationEvent(
             checkpointRef: event.payload.checkpointRef,
             status: event.payload.status,
             files: event.payload.files,
+            attribution: event.payload.attribution,
             assistantMessageId: event.payload.assistantMessageId,
             completedAt: event.payload.completedAt,
           });

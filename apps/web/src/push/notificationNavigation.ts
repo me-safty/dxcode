@@ -4,10 +4,18 @@ import { reconcileAfterNotificationClick } from "../environments/runtime/service
 import { recordResumeDiagnostic } from "../environments/runtime/resumeDiagnostics";
 import type { AppRouter } from "../router";
 import type { DraftId } from "../composerDraftStore";
+import {
+  clearPendingNotificationClick,
+  readPendingNotificationClick,
+} from "./pendingNotificationClick";
 
 export const NOTIFICATION_CLICK_MESSAGE_TYPE = "t3.notification-click";
 
 let lastNotificationNavigationTarget: NotificationNavigationTarget | null = null;
+let replayInFlight: Promise<void> | null = null;
+
+const PENDING_NOTIFICATION_CLICK_TTL_MS = 2 * 60 * 1000;
+const PENDING_NOTIFICATION_CLICK_RETRY_DELAYS_MS = [250, 500, 1000] as const;
 
 interface NotificationClickClientMessage {
   readonly type: typeof NOTIFICATION_CLICK_MESSAGE_TYPE;
@@ -132,6 +140,7 @@ export function getLastNotificationNavigationTarget(): NotificationNavigationTar
 
 export function resetNotificationNavigationStateForTests(): void {
   lastNotificationNavigationTarget = null;
+  replayInFlight = null;
 }
 
 export function installServiceWorkerNotificationNavigation(router: AppRouter): () => void {
@@ -140,6 +149,10 @@ export function installServiceWorkerNotificationNavigation(router: AppRouter): (
   }
 
   const serviceWorker = navigator.serviceWorker;
+  const cleanupCallbacks: Array<() => void> = [];
+  const replayPendingClick = (reason: string) => {
+    void replayPendingNotificationClick(router, reason);
+  };
   const handleMessage = (event: MessageEvent<unknown>) => {
     if (!isNotificationClickClientMessage(event.data)) {
       return;
@@ -152,35 +165,192 @@ export function installServiceWorkerNotificationNavigation(router: AppRouter): (
         openedAt: event.data.openedAt,
       },
     });
-    const target = parseNotificationNavigationTarget(event.data.url);
-    if (target === null) {
-      recordResumeDiagnostic("notification-navigation-target", {
-        reason: "parse-failed",
-        data: {
-          url: event.data.url,
-        },
-      });
-      return;
-    }
-
-    lastNotificationNavigationTarget = target;
-    recordResumeDiagnostic("notification-navigation-target", {
-      reason: "parsed",
-      ...(target.kind === "thread" ? { env: target.environmentId } : {}),
-      data: { target },
+    void handleNotificationClickNavigation(router, {
+      clearPending: true,
+      reason: "service-worker-message",
+      url: event.data.url,
+      ...(event.data.openedAt !== undefined ? { openedAt: event.data.openedAt } : {}),
     });
-    const openedAt =
-      event.data.openedAt !== undefined && Number.isFinite(event.data.openedAt)
-        ? event.data.openedAt
-        : undefined;
-    reconcileAfterNotificationClick(target, openedAt === undefined ? undefined : { openedAt });
-    void navigateToNotificationTarget(router, target);
   };
 
   serviceWorker.addEventListener("message", handleMessage);
-  return () => {
+  if ("startMessages" in serviceWorker) {
+    const startMessages = serviceWorker.startMessages;
+    if (typeof startMessages === "function") {
+      startMessages.call(serviceWorker);
+    }
+  }
+  cleanupCallbacks.push(() => {
     serviceWorker.removeEventListener("message", handleMessage);
+  });
+
+  if (typeof window !== "undefined" && "addEventListener" in window) {
+    const handleFocus = () => replayPendingClick("window-focus");
+    const handlePageShow = () => replayPendingClick("pageshow");
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handlePageShow);
+    cleanupCallbacks.push(() => {
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handlePageShow);
+    });
+  }
+
+  if (typeof document !== "undefined" && "addEventListener" in document) {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        replayPendingClick("visibilitychange-visible");
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    cleanupCallbacks.push(() => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    });
+  }
+
+  replayPendingClick("startup");
+
+  return () => {
+    for (const cleanup of cleanupCallbacks) {
+      cleanup();
+    }
   };
+}
+
+function replayPendingNotificationClick(router: AppRouter, reason: string): Promise<void> {
+  if (replayInFlight !== null) {
+    return replayInFlight;
+  }
+
+  const replay = consumePendingNotificationClick(router, reason, {
+    retryDelaysMs: hasPendingNotificationClickCache()
+      ? PENDING_NOTIFICATION_CLICK_RETRY_DELAYS_MS
+      : [],
+  });
+  const replayWithCleanup = replay.finally(() => {
+    if (replayInFlight === replayWithCleanup) {
+      replayInFlight = null;
+    }
+  });
+  replayInFlight = replayWithCleanup;
+  return replayWithCleanup;
+}
+
+export async function consumePendingNotificationClick(
+  router: AppRouter,
+  reason = "manual",
+  options: {
+    readonly retryDelaysMs?: ReadonlyArray<number>;
+  } = {},
+): Promise<void> {
+  const pending = await readPendingNotificationClickWithRetry(options.retryDelaysMs ?? []);
+  if (pending === null) {
+    return;
+  }
+
+  const pendingAgeMs = Date.now() - pending.openedAt;
+  if (pendingAgeMs > PENDING_NOTIFICATION_CLICK_TTL_MS) {
+    recordResumeDiagnostic("notification-navigation-pending", {
+      reason: "stale",
+      data: {
+        replayReason: reason,
+        url: pending.url,
+        openedAt: pending.openedAt,
+        ageMs: pendingAgeMs,
+        ttlMs: PENDING_NOTIFICATION_CLICK_TTL_MS,
+      },
+    });
+    await clearPendingNotificationClick();
+    return;
+  }
+
+  const handled = handleNotificationClickNavigation(router, {
+    clearPending: false,
+    openedAt: pending.openedAt,
+    reason,
+    url: pending.url,
+  });
+  if (!handled) {
+    recordResumeDiagnostic("notification-navigation-pending", {
+      reason: "ignored",
+      data: {
+        replayReason: reason,
+        url: pending.url,
+        openedAt: pending.openedAt,
+      },
+    });
+  }
+  await clearPendingNotificationClick();
+}
+
+async function readPendingNotificationClickWithRetry(
+  retryDelaysMs: ReadonlyArray<number>,
+): Promise<Awaited<ReturnType<typeof readPendingNotificationClick>>> {
+  const pending = await readPendingNotificationClick();
+  if (pending !== null) {
+    return pending;
+  }
+
+  for (const delayMs of retryDelaysMs) {
+    await sleep(delayMs);
+    const retryPending = await readPendingNotificationClick();
+    if (retryPending !== null) {
+      return retryPending;
+    }
+  }
+
+  return null;
+}
+
+function hasPendingNotificationClickCache(): boolean {
+  return typeof window !== "undefined" && "caches" in window;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function handleNotificationClickNavigation(
+  router: AppRouter,
+  input: {
+    readonly clearPending: boolean;
+    readonly openedAt?: number;
+    readonly reason: string;
+    readonly url: string;
+  },
+): boolean {
+  const target = parseNotificationNavigationTarget(input.url);
+  if (target === null) {
+    recordResumeDiagnostic("notification-navigation-target", {
+      reason: "parse-failed",
+      data: {
+        source: input.reason,
+        url: input.url,
+      },
+    });
+    if (input.clearPending) {
+      void clearPendingNotificationClick();
+    }
+    return false;
+  }
+
+  lastNotificationNavigationTarget = target;
+  recordResumeDiagnostic("notification-navigation-target", {
+    reason: "parsed",
+    ...(target.kind === "thread" ? { env: target.environmentId } : {}),
+    data: {
+      source: input.reason,
+      target,
+    },
+  });
+  const openedAt = Number.isFinite(input.openedAt) ? input.openedAt : undefined;
+  reconcileAfterNotificationClick(target, openedAt === undefined ? undefined : { openedAt });
+  void navigateToNotificationTarget(router, target);
+  if (input.clearPending) {
+    void clearPendingNotificationClick();
+  }
+  return true;
 }
 
 function normalizePathname(pathname: string): string {

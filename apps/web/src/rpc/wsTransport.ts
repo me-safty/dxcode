@@ -20,9 +20,19 @@ import {
 } from "./protocol";
 import { isTransportConnectionErrorMessage } from "./transportError";
 
+export interface SubscriptionErrorInfo {
+  readonly attempt: number;
+  readonly error: string;
+  readonly staleSession: boolean;
+  readonly tag?: string;
+  readonly transportError: boolean;
+  readonly willRetryInMs: number;
+}
+
 interface SubscribeOptions {
   readonly retryDelay?: Duration.Input;
   readonly onResubscribe?: () => void;
+  readonly onSubscriptionError?: (info: SubscriptionErrorInfo) => void;
   readonly tag?: string;
 }
 
@@ -31,6 +41,8 @@ interface RequestOptions {
 }
 
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
+const NON_TRANSPORT_SUBSCRIPTION_RETRY_BASE_DELAY_MS = 1_000;
+const NON_TRANSPORT_SUBSCRIPTION_RETRY_MAX_DELAY_MS = 30_000;
 const NOOP: () => void = () => undefined;
 
 interface TransportSession {
@@ -50,6 +62,13 @@ function formatErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+function getNonTransportSubscriptionRetryDelayMs(attempt: number): number {
+  return Math.min(
+    NON_TRANSPORT_SUBSCRIPTION_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1),
+    NON_TRANSPORT_SUBSCRIPTION_RETRY_MAX_DELAY_MS,
+  );
 }
 
 export class WsTransport {
@@ -125,6 +144,15 @@ export class WsTransport {
       Duration.fromInputUnsafe(options?.retryDelay ?? DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS),
     );
     let cancelCurrentStream: () => void = NOOP;
+    let consecutiveFailureCount = 0;
+
+    const notifySubscriptionError = (info: SubscriptionErrorInfo) => {
+      try {
+        options?.onSubscriptionError?.(info);
+      } catch {
+        // Diagnostics hooks must never affect subscription recovery.
+      }
+    };
 
     void (async () => {
       for (;;) {
@@ -158,6 +186,7 @@ export class WsTransport {
               attemptReceivedValue = true;
               this.hasReportedTransportDisconnect = false;
               hasReceivedValue = true;
+              consecutiveFailureCount = 0;
             },
           );
           cancelCurrentStream = runningStream.cancel;
@@ -172,25 +201,49 @@ export class WsTransport {
             return;
           }
 
+          const formattedError = formatErrorMessage(error);
+          const transportError = isTransportConnectionErrorMessage(formattedError);
           if (session !== this.session) {
+            notifySubscriptionError({
+              attempt: consecutiveFailureCount + 1,
+              error: formattedError,
+              staleSession: true,
+              ...(options?.tag === undefined ? {} : { tag: options.tag }),
+              transportError,
+              willRetryInMs: 0,
+            });
             continue;
           }
 
-          const formattedError = formatErrorMessage(error);
-          if (!isTransportConnectionErrorMessage(formattedError)) {
-            console.warn("WebSocket RPC subscription failed", {
+          consecutiveFailureCount += 1;
+          const willRetryInMs = transportError
+            ? retryDelayMs
+            : getNonTransportSubscriptionRetryDelayMs(consecutiveFailureCount);
+          notifySubscriptionError({
+            attempt: consecutiveFailureCount,
+            error: formattedError,
+            staleSession: false,
+            ...(options?.tag === undefined ? {} : { tag: options.tag }),
+            transportError,
+            willRetryInMs,
+          });
+
+          if (transportError) {
+            if (!this.hasReportedTransportDisconnect) {
+              console.warn("WebSocket RPC subscription disconnected", {
+                error: formattedError,
+              });
+            }
+            this.hasReportedTransportDisconnect = true;
+          } else {
+            console.warn("WebSocket RPC subscription failed; retrying", {
+              attempt: consecutiveFailureCount,
               error: formattedError,
+              retryDelayMs: willRetryInMs,
             });
-            return;
           }
 
-          if (!this.hasReportedTransportDisconnect) {
-            console.warn("WebSocket RPC subscription disconnected", {
-              error: formattedError,
-            });
-          }
-          this.hasReportedTransportDisconnect = true;
-          await sleep(retryDelayMs);
+          await sleep(willRetryInMs);
         }
       }
     })();

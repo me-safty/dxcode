@@ -67,8 +67,14 @@ export interface VirtualizedListProps<T> {
   readonly data: readonly T[];
   readonly keyExtractor: (item: T, index: number) => Key;
   readonly getItemType?: (item: T, index: number) => string | undefined;
+  readonly getFixedItemSize?: (
+    item: T,
+    index: number,
+    itemType: string | undefined,
+  ) => number | undefined;
   readonly renderItem: (args: { item: T; index: number }) => ReactNode;
   readonly estimatedItemSize?: number;
+  readonly extraData?: unknown;
   readonly initialScrollAtEnd?: boolean;
   readonly maintainScrollAtEnd?: boolean | { animated?: boolean };
   readonly maintainScrollAtEndThreshold?: number;
@@ -150,8 +156,10 @@ function VirtualizedListInner<T>(
     data,
     keyExtractor,
     getItemType,
+    getFixedItemSize,
     renderItem,
     estimatedItemSize,
+    extraData,
     initialScrollAtEnd = false,
     maintainScrollAtEnd = false,
     maintainScrollAtEndThreshold,
@@ -188,6 +196,12 @@ function VirtualizedListInner<T>(
   const handleGetItemType = useCallback(
     (item: T, index: number) => getItemType?.(item, index),
     [getItemType],
+  );
+
+  const handleGetFixedItemSize = useCallback(
+    (item: T, index: number, itemType: string | undefined) =>
+      getFixedItemSize?.(item, index, itemType),
+    [getFixedItemSize],
   );
 
   const handleRenderItem = useCallback(
@@ -257,10 +271,13 @@ function VirtualizedListInner<T>(
       data={data}
       keyExtractor={handleKeyExtractor}
       {...(getItemType ? { getItemType: handleGetItemType } : {})}
+      {...(getFixedItemSize ? { getFixedItemSize: handleGetFixedItemSize } : {})}
       renderItem={handleRenderItem}
+      {...(extraData !== undefined ? { extraData } : {})}
       initialScrollAtEnd={initialScrollAtEnd}
       maintainScrollAtEnd={maintainScrollAtEnd}
       maintainVisibleContentPosition={maintainVisibleContentPosition}
+      recycleItems={false}
       onScroll={handleScroll}
       ListHeaderComponent={ListHeaderComponent ? <>{ListHeaderComponent}</> : null}
       ListFooterComponent={ListFooterComponent ? <>{ListFooterComponent}</> : null}

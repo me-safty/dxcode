@@ -202,5 +202,114 @@ it.layer(TestLayer)("CheckpointStoreLive", (it) => {
         expect(whitespaceIgnoredDiff).not.toContain("+          <h1>Title</h1>");
       }),
     );
+
+    it.effect("can filter checkpoint diffs to attributed paths", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore;
+        const threadId = ThreadId.make("thread-checkpoint-store-pathspec");
+        const fromCheckpointRef = checkpointRefForThreadTurn(threadId, 0);
+        const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+
+        yield* writeTextFile(path.join(tmp, "a.txt"), "a1\n");
+        yield* writeTextFile(path.join(tmp, "b.txt"), "b1\n");
+        yield* checkpointStore.captureCheckpoint({
+          cwd: tmp,
+          checkpointRef: fromCheckpointRef,
+        });
+        yield* writeTextFile(path.join(tmp, "a.txt"), "a2\n");
+        yield* writeTextFile(path.join(tmp, "b.txt"), "b2\n");
+        yield* checkpointStore.captureCheckpoint({
+          cwd: tmp,
+          checkpointRef: toCheckpointRef,
+        });
+
+        const diff = yield* checkpointStore.diffCheckpoints({
+          cwd: tmp,
+          fromCheckpointRef,
+          toCheckpointRef,
+          ignoreWhitespace: false,
+          paths: ["a.txt"],
+        });
+
+        expect(diff).toContain("diff --git a/a.txt b/a.txt");
+        expect(diff).toContain("+a2");
+        expect(diff).not.toContain("diff --git a/b.txt b/b.txt");
+        expect(diff).not.toContain("+b2");
+      }),
+    );
+  });
+
+  describe("hashFileBlob", () => {
+    it.effect("hashes existing files and returns null for missing files", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore;
+
+        yield* writeTextFile(path.join(tmp, "snapshot.txt"), "snapshot\n");
+        const blobSha = yield* checkpointStore.hashFileBlob({
+          cwd: tmp,
+          path: "snapshot.txt",
+        });
+        const missingBlobSha = yield* checkpointStore.hashFileBlob({
+          cwd: tmp,
+          path: "missing.txt",
+        });
+
+        expect(blobSha).toMatch(/^[0-9a-f]{40}$/);
+        expect(missingBlobSha).toBeNull();
+      }),
+    );
+  });
+
+  describe("captureOverlayCheckpoint", () => {
+    it.effect("captures a synthetic checkpoint with modified and deleted entries", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore;
+        const threadId = ThreadId.make("thread-checkpoint-store-overlay");
+        const baseCheckpointRef = checkpointRefForThreadTurn(threadId, 0);
+        const overlayCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+
+        yield* writeTextFile(path.join(tmp, "changed.txt"), "base\n");
+        yield* writeTextFile(path.join(tmp, "deleted.txt"), "delete me\n");
+        yield* checkpointStore.captureCheckpoint({
+          cwd: tmp,
+          checkpointRef: baseCheckpointRef,
+        });
+
+        yield* writeTextFile(path.join(tmp, "changed.txt"), "overlay\n");
+        const changedBlobSha = yield* checkpointStore.hashFileBlob({
+          cwd: tmp,
+          path: "changed.txt",
+        });
+        expect(changedBlobSha).not.toBeNull();
+
+        yield* checkpointStore.captureOverlayCheckpoint({
+          cwd: tmp,
+          baseCheckpointRef,
+          checkpointRef: overlayCheckpointRef,
+          entries: [
+            { path: "changed.txt", blobSha: changedBlobSha },
+            { path: "deleted.txt", blobSha: null },
+          ],
+        });
+
+        const diff = yield* checkpointStore.diffCheckpoints({
+          cwd: tmp,
+          fromCheckpointRef: baseCheckpointRef,
+          toCheckpointRef: overlayCheckpointRef,
+          ignoreWhitespace: false,
+        });
+
+        expect(diff).toContain("diff --git a/changed.txt b/changed.txt");
+        expect(diff).toContain("+overlay");
+        expect(diff).toContain("diff --git a/deleted.txt b/deleted.txt");
+        expect(diff).toContain("deleted file mode");
+      }),
+    );
   });
 });

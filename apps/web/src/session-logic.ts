@@ -50,6 +50,11 @@ export const PROVIDER_OPTIONS: Array<{
 
 export interface WorkLogEntry {
   id: string;
+  /** Identity that stays fixed across a tool call's lifecycle (started ->
+   * updated -> completed), unlike `id`, which tracks the latest event so it
+   * changes on every update. Used for React keys and the one-shot appearance
+   * animation so a single tool call doesn't re-mount and re-animate per tick. */
+  stableId?: string;
   createdAt: string;
   label: string;
   detail?: string;
@@ -60,12 +65,12 @@ export interface WorkLogEntry {
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
+  toolCallId?: string;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseKey?: string;
-  toolCallId?: string;
 }
 
 export interface PendingApproval {
@@ -576,6 +581,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const toolCallId = isTaskActivity ? null : extractToolCallId(payload);
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
+    stableId: activity.id,
     createdAt: activity.createdAt,
     label: activity.kind === "runtime.warning" ? "Provider warning" : taskLabel || activity.summary,
     tone:
@@ -623,15 +629,68 @@ function collapseDerivedWorkLogEntries(
   entries: ReadonlyArray<DerivedWorkLogEntry>,
 ): DerivedWorkLogEntry[] {
   const collapsed: DerivedWorkLogEntry[] = [];
+  const openToolEntryIndexByCollapseKey = new Map<string, number>();
+
   for (const entry of entries) {
+    const toolCollapseKey = getToolCallCollapseKey(entry);
+    const openToolEntryIndex =
+      toolCollapseKey !== undefined
+        ? openToolEntryIndexByCollapseKey.get(toolCollapseKey)
+        : undefined;
+    if (openToolEntryIndex !== undefined) {
+      const openToolEntry = collapsed[openToolEntryIndex];
+      if (openToolEntry && shouldCollapseToolLifecycleEntries(openToolEntry, entry)) {
+        collapsed[openToolEntryIndex] = mergeDerivedWorkLogEntries(openToolEntry, entry, {
+          preserveCreatedAt: openToolEntryIndex !== collapsed.length - 1,
+        });
+        refreshOpenToolEntryIndex(
+          openToolEntryIndexByCollapseKey,
+          toolCollapseKey,
+          collapsed[openToolEntryIndex],
+          openToolEntryIndex,
+        );
+        continue;
+      }
+    }
+
     const previous = collapsed.at(-1);
     if (previous && shouldCollapseToolLifecycleEntries(previous, entry)) {
       collapsed[collapsed.length - 1] = mergeDerivedWorkLogEntries(previous, entry);
+      refreshOpenToolEntryIndex(
+        openToolEntryIndexByCollapseKey,
+        getToolCallCollapseKey(previous),
+        collapsed[collapsed.length - 1],
+        collapsed.length - 1,
+      );
       continue;
     }
+
     collapsed.push(entry);
+    if (entry.activityKind === "tool.updated" && toolCollapseKey !== undefined) {
+      openToolEntryIndexByCollapseKey.set(toolCollapseKey, collapsed.length - 1);
+    }
   }
   return collapsed;
+}
+
+function getToolCallCollapseKey(entry: DerivedWorkLogEntry): string | undefined {
+  return entry.collapseKey?.startsWith("tool:") ? entry.collapseKey : undefined;
+}
+
+function refreshOpenToolEntryIndex(
+  openToolEntryIndexByCollapseKey: Map<string, number>,
+  toolCollapseKey: string | undefined,
+  entry: DerivedWorkLogEntry | undefined,
+  index: number,
+) {
+  if (toolCollapseKey === undefined) {
+    return;
+  }
+  if (entry?.activityKind === "tool.updated") {
+    openToolEntryIndexByCollapseKey.set(toolCollapseKey, index);
+  } else {
+    openToolEntryIndexByCollapseKey.delete(toolCollapseKey);
+  }
 }
 
 function shouldCollapseToolLifecycleEntries(
@@ -662,6 +721,7 @@ function shouldCollapseToolLifecycleEntries(
 function mergeDerivedWorkLogEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
+  options?: { preserveCreatedAt?: boolean },
 ): DerivedWorkLogEntry {
   const changedFiles = mergeChangedFiles(previous.changedFiles, next.changedFiles);
   const detail = next.detail ?? previous.detail;
@@ -675,6 +735,10 @@ function mergeDerivedWorkLogEntries(
   return {
     ...previous,
     ...next,
+    // Keep the first event's identity so the collapsed entry stays stable as
+    // later lifecycle events merge in (`id` intentionally follows `next`).
+    stableId: previous.stableId ?? next.stableId ?? previous.id,
+    createdAt: options?.preserveCreatedAt ? previous.createdAt : next.createdAt,
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),

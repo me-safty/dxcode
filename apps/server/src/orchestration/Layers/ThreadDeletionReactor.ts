@@ -6,6 +6,8 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { TurnFileSnapshotsLive } from "../../persistence/Layers/TurnFileSnapshots.ts";
+import { TurnFileSnapshots } from "../../persistence/Services/TurnFileSnapshots.ts";
 import { TerminalManager } from "../../terminal/Services/Manager.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
@@ -40,6 +42,7 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
   const terminalManager = yield* TerminalManager;
+  const turnFileSnapshots = yield* TurnFileSnapshots;
 
   const stopProviderSession = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
     logCleanupCauseUnlessInterrupted({
@@ -55,12 +58,20 @@ const make = Effect.gen(function* () {
       threadId,
     });
 
+  const deleteTurnFileSnapshots = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
+    logCleanupCauseUnlessInterrupted({
+      effect: turnFileSnapshots.deleteByThread({ threadId }),
+      message: "thread deletion cleanup skipped turn file snapshots",
+      threadId,
+    });
+
   const processThreadDeleted = Effect.fn("processThreadDeleted")(function* (
     event: ThreadDeletedEvent,
   ) {
     const { threadId } = event.payload;
     yield* stopProviderSession(threadId);
     yield* closeThreadTerminals(threadId);
+    yield* deleteTurnFileSnapshots(threadId);
   });
 
   const processThreadDeletedSafely = (event: ThreadDeletedEvent) =>
@@ -96,4 +107,6 @@ const make = Effect.gen(function* () {
   } satisfies ThreadDeletionReactorShape;
 });
 
-export const ThreadDeletionReactorLive = Layer.effect(ThreadDeletionReactor, make);
+export const ThreadDeletionReactorLive = Layer.effect(ThreadDeletionReactor, make).pipe(
+  Layer.provide(TurnFileSnapshotsLive),
+);

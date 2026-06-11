@@ -11,6 +11,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  OrchestrationCheckpointAttribution,
   OrchestrationCheckpointFile,
   OrchestrationCheckpointStatus,
   ThreadId,
@@ -19,7 +20,7 @@ import {
 import * as Option from "effect/Option";
 import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
-import type * as Effect from "effect/Effect";
+import * as Effect from "effect/Effect";
 
 import type { ProjectionRepositoryError } from "../Errors.ts";
 
@@ -30,6 +31,9 @@ export const ProjectionCheckpoint = Schema.Struct({
   checkpointRef: CheckpointRef,
   status: OrchestrationCheckpointStatus,
   files: Schema.Array(OrchestrationCheckpointFile),
+  attribution: OrchestrationCheckpointAttribution.pipe(
+    Schema.withDecodingDefault(Effect.succeed("unattributed")),
+  ),
   assistantMessageId: Schema.NullOr(MessageId),
   completedAt: IsoDateTime,
 });

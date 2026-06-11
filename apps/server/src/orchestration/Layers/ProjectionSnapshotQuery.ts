@@ -6,6 +6,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  OrchestrationCheckpointAttribution,
   OrchestrationCheckpointFile,
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
@@ -32,9 +33,12 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
@@ -112,6 +116,9 @@ const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
 const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
   Struct.assign({
     files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
+    attribution: OrchestrationCheckpointAttribution.pipe(
+      Schema.withDecodingDefault(Effect.succeed("unattributed")),
+    ),
   }),
 );
 type ProjectionThreadMessageDbRow = Schema.Schema.Type<typeof ProjectionThreadMessageDbRowSchema>;
@@ -376,6 +383,7 @@ function mapCheckpointRow(
     checkpointRef: row.checkpointRef,
     status: row.status,
     files: row.files,
+    attribution: row.attribution,
     assistantMessageId: row.assistantMessageId,
     completedAt: row.completedAt,
   };
@@ -499,6 +507,34 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
+  interface ShellSnapshotOwnerInterrupted {
+    readonly _tag: "ShellSnapshotOwnerInterrupted";
+  }
+  const shellSnapshotOwnerInterrupted: ShellSnapshotOwnerInterrupted = {
+    _tag: "ShellSnapshotOwnerInterrupted",
+  };
+  const isShellSnapshotOwnerInterrupted = (
+    error: ProjectionRepositoryError | ShellSnapshotOwnerInterrupted,
+  ): error is ShellSnapshotOwnerInterrupted => error._tag === "ShellSnapshotOwnerInterrupted";
+  type ShellSnapshotInFlight = Deferred.Deferred<
+    Schema.Schema.Type<typeof OrchestrationShellSnapshot>,
+    ProjectionRepositoryError | ShellSnapshotOwnerInterrupted
+  >;
+  type ShellSnapshotInFlightSelection =
+    | {
+        readonly deferred: ShellSnapshotInFlight;
+        readonly owner: false;
+      }
+    | {
+        readonly deferred: ShellSnapshotInFlight;
+        readonly owner: true;
+      };
+  type ShellSnapshotInFlightRefUpdate = readonly [
+    ShellSnapshotInFlightSelection,
+    ShellSnapshotInFlight,
+  ];
+  const shellSnapshotInFlightRef = yield* Ref.make<ShellSnapshotInFlight | null>(null);
+  const shellSnapshotInFlightWaiterRetryLimit = 3;
   const repositoryIdentityResolutionConcurrency = 4;
   const resolveRepositoryIdentitiesForProjects = Effect.fn(
     "ProjectionSnapshotQuery.resolveRepositoryIdentitiesForProjects",
@@ -808,6 +844,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "status",
+          COALESCE(checkpoint_attribution, 'unattributed') AS "attribution",
           checkpoint_files_json AS "files",
           assistant_message_id AS "assistantMessageId",
           completed_at AS "completedAt"
@@ -1331,6 +1368,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "status",
+          COALESCE(checkpoint_attribution, 'unattributed') AS "attribution",
           checkpoint_files_json AS "files",
           assistant_message_id AS "assistantMessageId",
           completed_at AS "completedAt"
@@ -1352,6 +1390,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "status",
+          COALESCE(checkpoint_attribution, 'unattributed') AS "attribution",
           checkpoint_files_json AS "files",
           assistant_message_id AS "assistantMessageId",
           completed_at AS "completedAt"
@@ -1374,6 +1413,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "status",
+          COALESCE(checkpoint_attribution, 'unattributed') AS "attribution",
           checkpoint_files_json AS "files",
           assistant_message_id AS "assistantMessageId",
           completed_at AS "completedAt"
@@ -1602,6 +1642,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   checkpointRef: row.checkpointRef,
                   status: row.status,
                   files: row.files,
+                  attribution: row.attribution,
                   assistantMessageId: row.assistantMessageId,
                   completedAt: row.completedAt,
                 });
@@ -1949,7 +1990,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         }),
       );
 
-  const getShellSnapshot: ProjectionSnapshotQueryShape["getShellSnapshot"] = () =>
+  const loadShellSnapshot: ProjectionSnapshotQueryShape["getShellSnapshot"] = () =>
     sql
       .withTransaction(
         Effect.all([
@@ -2080,6 +2121,73 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           return toPersistenceSqlError("ProjectionSnapshotQuery.getShellSnapshot:query")(error);
         }),
       );
+
+  const makeShellSnapshotOwnerInterruptedError = () =>
+    toPersistenceSqlError("ProjectionSnapshotQuery.getShellSnapshot:coalescedOwnerInterrupted")(
+      new Error("Coalesced shell snapshot owner was interrupted repeatedly."),
+    );
+
+  const getShellSnapshotAttempt = (
+    remainingWaiterRetries: number,
+  ): ReturnType<ProjectionSnapshotQueryShape["getShellSnapshot"]> =>
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const deferred = yield* Deferred.make<
+          Schema.Schema.Type<typeof OrchestrationShellSnapshot>,
+          ProjectionRepositoryError | ShellSnapshotOwnerInterrupted
+        >();
+        const inFlight: ShellSnapshotInFlightSelection = yield* Ref.modify(
+          shellSnapshotInFlightRef,
+          (current): ShellSnapshotInFlightRefUpdate => {
+            if (current !== null) {
+              const selected: ShellSnapshotInFlightSelection = {
+                deferred: current,
+                owner: false,
+              };
+              return [selected, current] as const;
+            }
+            const selected: ShellSnapshotInFlightSelection = {
+              deferred,
+              owner: true,
+            };
+            return [selected, deferred] as const;
+          },
+        );
+
+        if (!inFlight.owner) {
+          return yield* restore(Deferred.await(inFlight.deferred)).pipe(
+            Effect.catchIf(isShellSnapshotOwnerInterrupted, () =>
+              remainingWaiterRetries > 0
+                ? getShellSnapshotAttempt(remainingWaiterRetries - 1)
+                : Effect.fail(makeShellSnapshotOwnerInterruptedError()),
+            ),
+          );
+        }
+
+        return yield* restore(loadShellSnapshot()).pipe(
+          Effect.onExit((exit) =>
+            Effect.uninterruptible(
+              Effect.gen(function* () {
+                if (Exit.hasInterrupts(exit) && !Exit.hasDies(exit)) {
+                  yield* Ref.update(shellSnapshotInFlightRef, (current) =>
+                    current === inFlight.deferred ? null : current,
+                  );
+                  yield* Deferred.fail(inFlight.deferred, shellSnapshotOwnerInterrupted);
+                } else {
+                  yield* Deferred.done(inFlight.deferred, exit);
+                  yield* Ref.update(shellSnapshotInFlightRef, (current) =>
+                    current === inFlight.deferred ? null : current,
+                  );
+                }
+              }),
+            ),
+          ),
+        );
+      }),
+    );
+
+  const getShellSnapshot: ProjectionSnapshotQueryShape["getShellSnapshot"] = () =>
+    getShellSnapshotAttempt(shellSnapshotInFlightWaiterRetryLimit);
 
   const getArchivedShellSnapshot: ProjectionSnapshotQueryShape["getArchivedShellSnapshot"] = () =>
     sql
@@ -2345,6 +2453,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             checkpointRef: row.checkpointRef,
             status: row.status,
             files: row.files,
+            attribution: row.attribution,
             assistantMessageId: row.assistantMessageId,
             completedAt: row.completedAt,
           }),

@@ -1,4 +1,3 @@
-import * as Equal from "effect/Equal";
 import { type TimelineEntry, type WorkLogEntry } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId, type TurnId } from "@t3tools/contracts";
@@ -134,6 +133,7 @@ export function deriveMessagesTimelineRows(input: {
     }
 
     if (timelineEntry.kind === "work") {
+      const precedingTimelineEntryId = input.timelineEntries[index - 1]?.id ?? null;
       const groupedEntries = [timelineEntry.entry];
       let cursor = index + 1;
       while (cursor < input.timelineEntries.length) {
@@ -142,10 +142,9 @@ export function deriveMessagesTimelineRows(input: {
         groupedEntries.push(nextEntry.entry);
         cursor += 1;
       }
-      const anchorEntry = groupedEntries[groupedEntries.length - 1];
       nextRows.push({
         kind: "work",
-        id: `work-group:${anchorEntry?.id ?? timelineEntry.id}`,
+        id: `work-group:after:${precedingTimelineEntryId ?? "start"}`,
         createdAt: timelineEntry.createdAt,
         groupedEntries,
       });
@@ -240,7 +239,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return a.proposedPlan === (b as typeof a).proposedPlan;
 
     case "work":
-      return Equal.equals(a.groupedEntries, (b as typeof a).groupedEntries);
+      return areWorkEntriesUnchanged(a.groupedEntries, (b as typeof a).groupedEntries);
 
     case "message": {
       const bm = b as typeof a;
@@ -256,4 +255,47 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       );
     }
   }
+}
+
+function areWorkEntriesUnchanged(
+  aEntries: ReadonlyArray<WorkLogEntry>,
+  bEntries: ReadonlyArray<WorkLogEntry>,
+): boolean {
+  if (aEntries.length !== bEntries.length) {
+    return false;
+  }
+  return aEntries.every((entry, index) => {
+    const bEntry = bEntries[index];
+    return bEntry !== undefined && isWorkEntryUnchanged(entry, bEntry);
+  });
+}
+
+function isWorkEntryUnchanged(a: WorkLogEntry, b: WorkLogEntry): boolean {
+  return (
+    a.stableId === b.stableId &&
+    a.id === b.id &&
+    a.label === b.label &&
+    a.detail === b.detail &&
+    a.command === b.command &&
+    a.rawCommand === b.rawCommand &&
+    a.tone === b.tone &&
+    a.toolTitle === b.toolTitle &&
+    a.itemType === b.itemType &&
+    a.requestKind === b.requestKind &&
+    a.toolCallId === b.toolCallId &&
+    a.createdAt === b.createdAt &&
+    areStringArraysUnchanged(a.changedFiles, b.changedFiles)
+  );
+}
+
+function areStringArraysUnchanged(
+  a: ReadonlyArray<string> | undefined,
+  b: ReadonlyArray<string> | undefined,
+): boolean {
+  const aValues = a ?? [];
+  const bValues = b ?? [];
+  if (aValues.length !== bValues.length) {
+    return false;
+  }
+  return aValues.every((value, index) => value === bValues[index]);
 }

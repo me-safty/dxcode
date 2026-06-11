@@ -1,9 +1,10 @@
-import { EnvironmentId, type VcsStatusResult } from "@t3tools/contracts";
+import { EnvironmentId, type VcsStatusLocalResult, type VcsStatusResult } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { WsRpcClient } from "../rpc/wsRpcClient";
 import { resetAppAtomRegistryForTests } from "../rpc/atomRegistry";
 import {
+  applyGitStatusLocalUpdate,
   getGitStatusSnapshot,
   resetGitStatusStateForTests,
   refreshGitStatus,
@@ -68,6 +69,20 @@ const BASE_STATUS: VcsStatusResult = {
   behindCount: 0,
   pr: null,
 };
+
+function localStatusPart(status: VcsStatusResult): VcsStatusLocalResult {
+  return {
+    isRepo: status.isRepo,
+    hasPrimaryRemote: status.hasPrimaryRemote,
+    isDefaultRef: status.isDefaultRef,
+    refName: status.refName,
+    hasWorkingTreeChanges: status.hasWorkingTreeChanges,
+    workingTree: status.workingTree,
+    ...(status.sourceControlProvider
+      ? { sourceControlProvider: status.sourceControlProvider }
+      : {}),
+  };
+}
 
 const gitClient = {
   refreshStatus: vi.fn(async (input: { cwd: string }) => ({
@@ -286,6 +301,64 @@ describe("gitStatusState", () => {
     await firstPromise;
 
     expect(getGitStatusSnapshot(TARGET).data).toEqual(newest);
+
+    release();
+  });
+
+  it("does not let a refresh started before a local mutation result clobber the mutation status", async () => {
+    const release = watchGitStatus(TARGET, gitClient);
+    emitGitStatus({
+      ...BASE_STATUS,
+      hasWorkingTreeChanges: true,
+      workingTree: {
+        ...emptyWorkingTree,
+        files: [{ path: "src/stale.ts", status: "modified", insertions: 1, deletions: 0 }],
+        unstaged: {
+          files: [{ path: "src/stale.ts", status: "modified", insertions: 1, deletions: 0 }],
+          insertions: 1,
+          deletions: 0,
+        },
+      },
+    });
+
+    const deferredRefresh = createDeferredPromise<VcsStatusResult>();
+    const slowClient = {
+      onStatus: gitClient.onStatus,
+      refreshStatus: vi
+        .fn<(input: { cwd: string }) => Promise<VcsStatusResult>>()
+        .mockReturnValueOnce(deferredRefresh.promise),
+    };
+
+    const refreshPromise = refreshGitStatus(TARGET, { client: slowClient, force: true });
+    const mutationStatus = localStatusPart({
+      ...BASE_STATUS,
+      hasWorkingTreeChanges: false,
+      workingTree: emptyWorkingTree,
+    });
+    applyGitStatusLocalUpdate(TARGET, mutationStatus);
+
+    deferredRefresh.resolve({
+      ...BASE_STATUS,
+      hasWorkingTreeChanges: true,
+      workingTree: {
+        ...emptyWorkingTree,
+        files: [{ path: "src/stale.ts", status: "modified", insertions: 1, deletions: 0 }],
+        unstaged: {
+          files: [{ path: "src/stale.ts", status: "modified", insertions: 1, deletions: 0 }],
+          insertions: 1,
+          deletions: 0,
+        },
+      },
+    });
+    await refreshPromise;
+
+    expect(getGitStatusSnapshot(TARGET).data?.workingTree.files).toEqual([]);
+    expect(getGitStatusSnapshot(TARGET).data).toMatchObject({
+      hasUpstream: true,
+      aheadCount: 0,
+      behindCount: 0,
+      pr: null,
+    });
 
     release();
   });
