@@ -656,13 +656,20 @@ export const ProviderRegistryLive = Layer.effect(
         // Snapshot current state without starting a probe. Managed providers
         // launch their startup refresh independently, so this closes the
         // subscription race without putting external work on the registry
-        // or HTTP server construction path.
+        // or HTTP server construction path. Keep this bounded because a
+        // third-party driver can still accidentally make getSnapshot slow.
         yield* Effect.forEach(
           newlyAdded,
           ([, instance]) =>
             Effect.gen(function* () {
               const source = buildSnapshotSource(instance);
-              const provider = yield* source.getSnapshot;
+              const maybeProvider = yield* source.getSnapshot.pipe(
+                Effect.timeoutOption(BOOT_SNAPSHOT_FALLBACK_BUDGET),
+              );
+              if (Option.isNone(maybeProvider)) {
+                return;
+              }
+              const provider = maybeProvider.value;
               yield* correlateSnapshotWithSource(source, provider).pipe(
                 Effect.flatMap(syncProvider),
               );
