@@ -84,7 +84,7 @@ const getGitOriginUrl: Effect.Effect<string | null> = execCapture(
 );
 
 const getBranchName: Effect.Effect<string | null> = execCapture(
-  "git rev-parse --abbrev-ref HEAD",
+  "git symbolic-ref --quiet --short HEAD",
 );
 
 const getRuntime = (): { name: string; version: string } => {

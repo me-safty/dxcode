@@ -1168,7 +1168,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const branchResult = yield* executeGit(
       "GitVcsDriver.statusDetailsRemote.branch",
       cwd,
-      ["rev-parse", "--abbrev-ref", "HEAD"],
+      ["symbolic-ref", "--quiet", "--short", "HEAD"],
       { allowNonZeroExit: true },
     ).pipe(Effect.catchIf(isMissingGitCwdError, () => Effect.succeed(null)));
 
@@ -1176,17 +1176,25 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
     }
     if (branchResult.exitCode !== 0) {
-      const stderr = branchResult.stderr.trim();
-      return yield* createGitCommandError(
-        "GitVcsDriver.statusDetailsRemote.branch",
+      const headResult = yield* executeGit(
+        "GitVcsDriver.statusDetailsRemote.head",
         cwd,
-        ["rev-parse", "--abbrev-ref", "HEAD"],
-        stderr || "git branch lookup failed",
+        ["rev-parse", "--verify", "--quiet", "HEAD"],
+        { allowNonZeroExit: true },
       );
+      if (headResult.exitCode !== 0) {
+        const stderr = branchResult.stderr.trim() || headResult.stderr.trim();
+        return yield* createGitCommandError(
+          "GitVcsDriver.statusDetailsRemote.branch",
+          cwd,
+          ["symbolic-ref", "--quiet", "--short", "HEAD"],
+          stderr || "git branch lookup failed",
+        );
+      }
     }
 
     const branchValue = branchResult.stdout.trim();
-    const branch = branchValue.length > 0 && branchValue !== "HEAD" ? branchValue : null;
+    const branch = branchResult.exitCode === 0 && branchValue.length > 0 ? branchValue : null;
     const upstream = yield* resolveCurrentUpstream(cwd);
     const upstreamRef = upstream?.upstreamRef ?? null;
     let aheadCount = 0;
