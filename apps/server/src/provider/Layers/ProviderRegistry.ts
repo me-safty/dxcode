@@ -30,17 +30,17 @@ import {
   type ServerProviderUpdateState,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
-import * as Stream from "effect/Stream";
-import * as Duration from "effect/Duration";
-import * as Option from "effect/Option";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../../config.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
@@ -63,11 +63,20 @@ const loadProviders = (
     providerSources,
     (providerSource) =>
       providerSource.getSnapshot.pipe(
-        Effect.flatMap((snapshot) => correlateSnapshotWithSource(providerSource, snapshot)),
+        Effect.timeoutOption(BOOT_SNAPSHOT_FALLBACK_BUDGET),
+        Effect.flatMap((maybeSnapshot) =>
+          Option.isNone(maybeSnapshot)
+            ? Effect.sync((): ServerProvider | undefined => undefined)
+            : correlateSnapshotWithSource(providerSource, maybeSnapshot.value),
+        ),
       ),
     {
       concurrency: "unbounded",
     },
+  ).pipe(
+    Effect.map((providers) =>
+      providers.filter((provider): provider is ServerProvider => provider !== undefined),
+    ),
   );
 
 const BOOT_SNAPSHOT_FALLBACK_BUDGET = Duration.millis(100);
@@ -232,10 +241,7 @@ export const ProviderRegistryLive = Layer.effect(
     const bootInstanceByInstanceId = new Map(
       bootInstances.map((instance) => [instance.instanceId, instance] as const),
     );
-    const fallbackProviders = yield* loadProviders(bootSources).pipe(
-      Effect.timeoutOption(BOOT_SNAPSHOT_FALLBACK_BUDGET),
-      Effect.map(Option.getOrElse((): ReadonlyArray<ServerProvider> => [])),
-    );
+    const fallbackProviders = yield* loadProviders(bootSources);
     const fallbackByInstance = new Map(
       fallbackProviders.map(
         (provider) => [provider.instanceId, provider] as const,
