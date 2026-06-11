@@ -48,7 +48,7 @@ describe("uploadSlackFiles", () => {
           ]);
           expect(form.get("channel_id")).toBe("C123");
           expect(form.get("thread_ts")).toBe("1781138017.962159");
-          expect(form.get("initial_comment")).toBe("Attached files.");
+          expect(form.get("initial_comment")).toBe("Agent response with CSV attached.");
           return new Response(JSON.stringify({ ok: true }));
         }
         throw new Error(`Unexpected fetch ${url}`);
@@ -67,7 +67,7 @@ describe("uploadSlackFiles", () => {
             data: new TextEncoder().encode("a,b\n1,2"),
           },
         ],
-        initialComment: "Attached files.",
+        initialComment: "Agent response with CSV attached.",
       }),
     ).resolves.toEqual(["F123"]);
 

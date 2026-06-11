@@ -12,7 +12,7 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ExternalIntegrationRepository } from "../persistence/Services/ExternalIntegrations.ts";
 import { ExternalChat } from "./ExternalChat.ts";
 import { extractGitHubPullRequests } from "./github.ts";
-import { postableReplyBody, postableUserInputRequest } from "./postableReply.ts";
+import { postableReplyBody, postableUserInputRequest, toSlackMarkdown } from "./postableReply.ts";
 import { derivePendingExternalUserInputs } from "./userInputSlack.ts";
 
 type AssistantMessageEvent = Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
@@ -83,6 +83,10 @@ export function shouldFinalizeAssistantRelayFromMessage(input: {
     input.streaming === false &&
     (input.turnId === null || (input.attachments !== undefined && input.attachments.length > 0))
   );
+}
+
+export function assistantFileInitialComment(text: string) {
+  return text.trim().length > 0 ? toSlackMarkdown(text) : undefined;
 }
 
 export const makeExternalIntakeReactor = Effect.gen(function* () {
@@ -179,6 +183,122 @@ export const makeExternalIntakeReactor = Effect.gen(function* () {
           source: "slack",
           deliveryKey: textDeliveryKey,
         });
+        if (attachmentFiles.length > 0) {
+          let completedAttachmentExternalMessageId: string | null = null;
+          const pendingAttachmentFiles: Array<{
+            readonly deliveryKey: string;
+            readonly existingCreatedAt: string | null;
+            readonly attachment: ChatAttachment;
+            readonly name: string;
+            readonly mimeType: string;
+            readonly data: Uint8Array;
+          }> = [];
+          for (const file of attachmentFiles) {
+            const deliveryKey = assistantAttachmentDeliveryKey({
+              ...input,
+              attachmentId: file.attachment.id,
+              externalThreadId: link.externalThreadId,
+            });
+            const existing = yield* repository.getDeliveryReceipt({
+              source: "slack",
+              deliveryKey,
+            });
+            if (Option.isSome(existing) && existing.value.status === "completed") {
+              completedAttachmentExternalMessageId ??= existing.value.externalMessageId;
+              continue;
+            }
+            pendingAttachmentFiles.push({
+              deliveryKey,
+              existingCreatedAt: Option.getOrNull(
+                Option.map(existing, (receipt) => receipt.createdAt),
+              ),
+              ...file,
+            });
+          }
+
+          let uploadedExternalMessageId: string | null = completedAttachmentExternalMessageId;
+          if (pendingAttachmentFiles.length > 0) {
+            const initialComment = assistantFileInitialComment(input.text);
+            const uploaded = yield* externalChat
+              .uploadFilesToThread({
+                source: "slack",
+                externalThreadId: link.externalThreadId,
+                files: pendingAttachmentFiles.map(({ name, mimeType, data }) => ({
+                  name,
+                  mimeType,
+                  data,
+                })),
+                ...(initialComment !== undefined ? { initialComment } : {}),
+              })
+              .pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning("external intake failed to upload assistant files to Slack", {
+                    threadId: String(input.threadId),
+                    messageId: input.messageId,
+                    externalThreadId: link.externalThreadId,
+                    phase: input.phase,
+                    error: error instanceof Error ? error.message : String(error),
+                  }).pipe(Effect.as(null)),
+                ),
+              );
+            if (uploaded === null) {
+              continue;
+            }
+            uploadedExternalMessageId = uploaded.externalFileIds[0] ?? null;
+            yield* Effect.forEach(
+              pendingAttachmentFiles,
+              (file, index) =>
+                repository.upsertDeliveryReceipt({
+                  source: "slack",
+                  deliveryKey: file.deliveryKey,
+                  status: "completed",
+                  externalMessageId: uploaded.externalFileIds[index] ?? null,
+                  metadata: {
+                    t3ThreadId: String(input.threadId),
+                    t3MessageId: input.messageId,
+                    t3TurnId: input.turnId,
+                    phase: input.phase,
+                    attachment: {
+                      id: file.attachment.id,
+                      name: file.attachment.name,
+                      mimeType: file.attachment.mimeType,
+                      sizeBytes: file.attachment.sizeBytes,
+                    },
+                  },
+                  createdAt: file.existingCreatedAt ?? now,
+                  updatedAt: nowIso(),
+                }),
+              { concurrency: 1 },
+            );
+          }
+
+          if (
+            input.text.trim().length > 0 &&
+            (Option.isNone(existingTextDelivery) ||
+              existingTextDelivery.value.status !== "completed")
+          ) {
+            yield* repository.upsertDeliveryReceipt({
+              source: "slack",
+              deliveryKey: textDeliveryKey,
+              status: "completed",
+              externalMessageId: uploadedExternalMessageId,
+              metadata: {
+                t3ThreadId: String(input.threadId),
+                t3MessageId: input.messageId,
+                t3TurnId: input.turnId,
+                phase: input.phase,
+                deliveredWithAttachments: true,
+              },
+              createdAt: Option.getOrElse(
+                Option.map(existingTextDelivery, (receipt) => receipt.createdAt),
+                () => now,
+              ),
+              updatedAt: nowIso(),
+            });
+          }
+          continue;
+        }
+
         if (input.text.trim().length > 0) {
           if (
             Option.isNone(existingTextDelivery) ||
@@ -224,91 +344,6 @@ export const makeExternalIntakeReactor = Effect.gen(function* () {
               });
             }
           }
-        }
-
-        if (attachmentFiles.length > 0) {
-          const pendingAttachmentFiles: Array<{
-            readonly deliveryKey: string;
-            readonly existingCreatedAt: string | null;
-            readonly attachment: ChatAttachment;
-            readonly name: string;
-            readonly mimeType: string;
-            readonly data: Uint8Array;
-          }> = [];
-          for (const file of attachmentFiles) {
-            const deliveryKey = assistantAttachmentDeliveryKey({
-              ...input,
-              attachmentId: file.attachment.id,
-              externalThreadId: link.externalThreadId,
-            });
-            const existing = yield* repository.getDeliveryReceipt({
-              source: "slack",
-              deliveryKey,
-            });
-            if (Option.isSome(existing) && existing.value.status === "completed") {
-              continue;
-            }
-            pendingAttachmentFiles.push({
-              deliveryKey,
-              existingCreatedAt: Option.getOrNull(
-                Option.map(existing, (receipt) => receipt.createdAt),
-              ),
-              ...file,
-            });
-          }
-          if (pendingAttachmentFiles.length === 0) {
-            continue;
-          }
-          const uploaded = yield* externalChat
-            .uploadFilesToThread({
-              source: "slack",
-              externalThreadId: link.externalThreadId,
-              files: pendingAttachmentFiles.map(({ name, mimeType, data }) => ({
-                name,
-                mimeType,
-                data,
-              })),
-              ...(input.text.trim().length === 0 ? { initialComment: "Attached files." } : {}),
-            })
-            .pipe(
-              Effect.catch((error) =>
-                Effect.logWarning("external intake failed to upload assistant files to Slack", {
-                  threadId: String(input.threadId),
-                  messageId: input.messageId,
-                  externalThreadId: link.externalThreadId,
-                  phase: input.phase,
-                  error: error instanceof Error ? error.message : String(error),
-                }).pipe(Effect.as(null)),
-              ),
-            );
-          if (uploaded === null) {
-            continue;
-          }
-          yield* Effect.forEach(
-            pendingAttachmentFiles,
-            (file, index) =>
-              repository.upsertDeliveryReceipt({
-                source: "slack",
-                deliveryKey: file.deliveryKey,
-                status: "completed",
-                externalMessageId: uploaded.externalFileIds[index] ?? null,
-                metadata: {
-                  t3ThreadId: String(input.threadId),
-                  t3MessageId: input.messageId,
-                  t3TurnId: input.turnId,
-                  phase: input.phase,
-                  attachment: {
-                    id: file.attachment.id,
-                    name: file.attachment.name,
-                    mimeType: file.attachment.mimeType,
-                    sizeBytes: file.attachment.sizeBytes,
-                  },
-                },
-                createdAt: file.existingCreatedAt ?? now,
-                updatedAt: nowIso(),
-              }),
-            { concurrency: 1 },
-          );
         }
       }
     });
@@ -491,28 +526,39 @@ export const makeExternalIntakeReactor = Effect.gen(function* () {
       if (event.payload.session.status === "running") {
         return;
       }
-      const threadId = String(event.payload.threadId);
-      const matchingEntries = [...assistantRelayStateByTurn.entries()].filter(
-        ([, state]) => String(state.threadId) === threadId,
+      yield* Effect.sleep("250 millis").pipe(
+        Effect.andThen(
+          Effect.gen(function* () {
+            const threadId = String(event.payload.threadId);
+            const matchingEntries = [...assistantRelayStateByTurn.entries()].filter(
+              ([, state]) => String(state.threadId) === threadId,
+            );
+            for (const [key, state] of matchingEntries) {
+              yield* relayFinalAssistantMessage(state);
+              assistantRelayStateByTurn.delete(key);
+            }
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning(
+                "external intake reactor failed to finalize Slack assistant relay",
+                {
+                  eventId: String(event.eventId),
+                  threadId: String(event.payload.threadId),
+                  error: error instanceof Error ? error.message : String(error),
+                },
+              ),
+            ),
+          ),
+        ),
+        Effect.forkScoped,
+        Effect.asVoid,
       );
-      for (const [key, state] of matchingEntries) {
-        yield* relayFinalAssistantMessage(state);
-        assistantRelayStateByTurn.delete(key);
-      }
     });
 
   yield* Effect.forkScoped(
     Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
       if (event.type === "thread.session-set") {
-        return finalizeAssistantTurnsForThread(event).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("external intake reactor failed to finalize Slack assistant relay", {
-              eventId: String(event.eventId),
-              threadId: String(event.payload.threadId),
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          ),
-        );
+        return finalizeAssistantTurnsForThread(event);
       }
 
       if (event.type === "thread.activity-appended") {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  assistantFileInitialComment,
   assistantAttachmentDeliveryKey,
   assistantTextDeliveryKey,
   shouldFinalizeAssistantRelayFromMessage,
@@ -47,5 +48,13 @@ describe("ExternalIntakeReactor", () => {
         turnId: "turn-csv",
       }),
     ).toBe(false);
+  });
+
+  it("uses the assistant text as the file upload comment and omits placeholder comments", () => {
+    expect(assistantFileInitialComment("")).toBeUndefined();
+    expect(assistantFileInitialComment("   \n")).toBeUndefined();
+    expect(assistantFileInitialComment("Done. The CSV is attached.")).toBe(
+      "Done. The CSV is attached.",
+    );
   });
 });
