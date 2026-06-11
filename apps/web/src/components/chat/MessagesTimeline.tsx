@@ -1342,7 +1342,11 @@ function ToolEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
   const hasFileChangeDetails = hasFileChangeWorkEntryDetails(workEntry);
   const genericDetails = buildToolCallExpandedBody(workEntry);
   const supplementalDetails =
-    hasCommandDetails || hasFileChangeDetails ? buildSupplementalToolDetailBody(workEntry) : null;
+    hasCommandDetails || hasFileChangeDetails
+      ? buildSupplementalToolDetailBody(workEntry, {
+          dedupeRenderedCommandOutput: hasCommandDetails,
+        })
+      : null;
   if (!hasCommandDetails && !hasFileChangeDetails && !genericDetails) {
     return null;
   }
@@ -1358,27 +1362,30 @@ function ToolEntryDetails({ workEntry }: { workEntry: TimelineWorkEntry }) {
   );
 }
 
-function buildSupplementalToolDetailBody(workEntry: TimelineWorkEntry): string | null {
+function buildSupplementalToolDetailBody(
+  workEntry: TimelineWorkEntry,
+  options: { dedupeRenderedCommandOutput: boolean },
+): string | null {
   const detail = workEntry.detail?.trim();
   if (!detail) {
     return null;
   }
   const command = workEntry.command?.trim();
   const rawCommand = workEntry.rawCommand?.trim();
-  const hasStreamOutput =
-    hasRenderableCommandOutput(workEntry.stdout) || hasRenderableCommandOutput(workEntry.stderr);
-  const renderedOutputs = [
-    workEntry.stdout,
-    workEntry.stderr,
-    !hasStreamOutput ? workEntry.output : undefined,
-  ];
-  const renderedOutputMatchesDetail = renderedOutputs.some(
-    (value) => getRenderableCommandOutputLines(value).join("\n") === detail,
-  );
+  const renderedOutputMatchesDetail =
+    options.dedupeRenderedCommandOutput && commandOutputMatchesDetail(workEntry, detail);
   if (detail === command || detail === rawCommand || renderedOutputMatchesDetail) {
     return null;
   }
   return detail;
+}
+
+function commandOutputMatchesDetail(workEntry: TimelineWorkEntry, detail: string): boolean {
+  const hasStreamOutput =
+    hasRenderableCommandOutput(workEntry.stdout) || hasRenderableCommandOutput(workEntry.stderr);
+  return [workEntry.stdout, workEntry.stderr, !hasStreamOutput ? workEntry.output : undefined].some(
+    (value) => getRenderableCommandOutputLines(value).join("\n") === detail,
+  );
 }
 
 function hasCommandWorkEntryDetails(workEntry: TimelineWorkEntry): boolean {
