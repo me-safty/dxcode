@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isLoopbackHostname, resolveDevRedirectUrl } from "./http.ts";
+import { cacheControlForStaticPath, isLoopbackHostname, resolveDevRedirectUrl } from "./http.ts";
 
 describe("http dev routing", () => {
   it("treats localhost and loopback addresses as local", () => {
@@ -23,5 +23,24 @@ describe("http dev routing", () => {
     expect(resolveDevRedirectUrl(devUrl, requestUrl)).toBe(
       "http://127.0.0.1:5173/pair?token=test-token",
     );
+  });
+});
+
+describe("static cache control", () => {
+  it("marks hashed asset build outputs as immutable", () => {
+    expect(cacheControlForStaticPath("assets/index-abc123.js")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+  });
+
+  it("requires revalidation for unhashed static outputs", () => {
+    expect(cacheControlForStaticPath("index.html")).toBe("no-cache");
+    expect(cacheControlForStaticPath("t3-service-worker.js")).toBe("no-cache");
+    expect(cacheControlForStaticPath("t3-push-service-worker.js")).toBe("no-cache");
+    expect(cacheControlForStaticPath("manifest.webmanifest")).toBe("no-cache");
+  });
+
+  it("does not treat assetsy as the assets directory", () => {
+    expect(cacheControlForStaticPath("assetsy/file.js")).toBe("no-cache");
   });
 });

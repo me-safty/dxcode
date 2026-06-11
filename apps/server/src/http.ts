@@ -429,6 +429,13 @@ export const workspaceGitImageRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+// Hashed build outputs under assets/ are immutable; everything else
+// (index.html, service workers, manifest, root icons) must be revalidated.
+export const cacheControlForStaticPath = (relativePath: string): string =>
+  relativePath.startsWith("assets/") || relativePath.startsWith("assets\\")
+    ? "public, max-age=31536000, immutable"
+    : "no-cache";
+
 export const staticAndDevRouteLayer = HttpRouter.add(
   "GET",
   "*",
@@ -502,6 +509,9 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.uint8Array(indexData, {
         status: 200,
         contentType: "text/html; charset=utf-8",
+        headers: {
+          "Cache-Control": "no-cache",
+        },
       });
     }
 
@@ -516,6 +526,9 @@ export const staticAndDevRouteLayer = HttpRouter.add(
     return HttpServerResponse.uint8Array(data, {
       status: 200,
       contentType,
+      headers: {
+        "Cache-Control": cacheControlForStaticPath(staticRelativePath),
+      },
     });
   }),
 );
