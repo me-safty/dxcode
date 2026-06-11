@@ -75,7 +75,6 @@ function copyPackagePayload(root: string): void {
 
   const files: ReadonlyArray<readonly [string, string, number]> = [
     ["morecode", "usr/bin/morecode", 0o755],
-    ["morecode", "usr/bin/t3", 0o755],
     ["morecode.service", "usr/lib/systemd/system/morecode.service", 0o644],
     ["morecode.sysusers", "usr/lib/sysusers.d/morecode.conf", 0o644],
     ["morecode.tmpfiles", "usr/lib/tmpfiles.d/morecode.conf", 0o644],
@@ -180,7 +179,6 @@ function buildRpm(
       "%config(noreplace) /etc/morecode/morecode.env",
       "/opt/morecode",
       "/usr/bin/morecode",
-      "/usr/bin/t3",
       "/usr/share/doc/morecode-headless/LICENSE",
       "/usr/lib/systemd/system/morecode.service",
       "/usr/lib/sysusers.d/morecode.conf",

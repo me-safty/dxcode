@@ -23,7 +23,7 @@ The package creates a dedicated `morecode` system user and starts `morecode.serv
 - default coding workspace: `/var/lib/morecode/workspace`
 - application runtime: `/opt/morecode`
 
-Both `morecode` and `t3` invoke the installed CLI.
+The package installs the CLI as `morecode`.
 
 The server binds to `127.0.0.1:3773` by default. This works with SSH port forwarding and avoids
 accidentally exposing the backend broadly:
@@ -61,8 +61,8 @@ Install provider CLIs in a system-wide location included in the service `PATH`, 
 Run installed more Code administration commands as the service account too:
 
 ```bash
-sudo -u morecode -H t3 auth --help
-sudo -u morecode -H t3 project --help
+sudo -u morecode -H morecode auth --help
+sudo -u morecode -H morecode project --help
 ```
 
 ## Build packages
