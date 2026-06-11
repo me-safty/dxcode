@@ -271,7 +271,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("thread-1"),
         modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
-          { id: "fastMode", value: true },
+          { id: "serviceTier", value: "priority" },
         ]),
         runtimeMode: "full-access",
       });
@@ -282,7 +282,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
         mcpServers: [],
         model: "gpt-5.3-codex",
         providerInstanceId: ProviderInstanceId.make("codex"),
-        serviceTier: "fast",
+        serviceTier: "priority",
         threadId: asThreadId("thread-1"),
         runtimeMode: "full-access",
       });
@@ -345,7 +345,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
           input: "hello",
           modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
             { id: "reasoningEffort", value: "high" },
-            { id: "fastMode", value: true },
+            { id: "serviceTier", value: "priority" },
           ]),
           attachments: [],
         }),
@@ -355,7 +355,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         input: "hello",
         model: "gpt-5.3-codex",
         effort: "high",
-        serviceTier: "fast",
+        serviceTier: "priority",
       });
     }),
   );
@@ -399,7 +399,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
             "gpt-5.3-codex",
             [
               { id: "reasoningEffort", value: "high" },
-              { id: "fastMode", value: true },
+              { id: "serviceTier", value: "flex" },
             ],
           ),
           attachments: [],
@@ -410,7 +410,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         input: "hello",
         model: "gpt-5.3-codex",
         effort: "high",
-        serviceTier: "fast",
+        serviceTier: "flex",
       });
     }).pipe(Effect.provide(customLayer));
   });
