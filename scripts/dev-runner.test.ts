@@ -109,6 +109,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.MORECODE_T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD, "0");
         assert.equal(env.MORECODE_T3CODE_LOG_WS_EVENTS, "1");
         assert.equal(env.MORECODE_T3CODE_HOST, "0.0.0.0");
+        assert.equal(env.HOST, "0.0.0.0");
         assert.equal(env.VITE_DEV_SERVER_URL, "http://localhost:7331/");
       }),
     );

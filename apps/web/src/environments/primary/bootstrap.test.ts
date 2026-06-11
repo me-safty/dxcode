@@ -175,4 +175,17 @@ describe("environmentBootstrap", () => {
       "http://127.0.0.1:5733/.well-known/t3/environment",
     );
   });
+
+  it("uses the vite proxy when the local dev server is opened over LAN", async () => {
+    vi.stubEnv("VITE_DEV_SERVER_URL", "http://10.0.0.21:5733");
+    vi.stubEnv("VITE_HTTP_URL", "http://localhost:13773");
+    vi.stubEnv("VITE_WS_URL", "ws://localhost:13773");
+    installTestBrowser("http://10.0.0.21:5733/");
+    await installDescriptorApi();
+
+    await expect(resolveInitialPrimaryEnvironmentDescriptor()).resolves.toEqual(BASE_ENVIRONMENT);
+    expect(resolvePrimaryEnvironmentHttpUrl("/.well-known/t3/environment")).toBe(
+      "http://10.0.0.21:5733/.well-known/t3/environment",
+    );
+  });
 });

@@ -53,7 +53,6 @@ function resolveHttpRequestBaseUrl(httpBaseUrl: string): string {
   if (
     !isCurrentOriginDevServer ||
     currentUrl.origin === targetUrl.origin ||
-    !isLoopbackHostname(currentUrl.hostname) ||
     !isLoopbackHostname(targetUrl.hostname)
   ) {
     return httpBaseUrl;

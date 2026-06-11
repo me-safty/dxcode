@@ -18,6 +18,9 @@
     "fmt:check": "vp fmt --check",
     "build:contracts": "vp run --filter @t3tools/contracts build",
     "release:smoke": "node scripts/release-smoke.ts",
+    "dist:linux": "node scripts/package-linux.ts",
+    "dist:linux:deb": "node scripts/package-linux.ts --format deb",
+    "dist:linux:rpm": "node scripts/package-linux.ts --format rpm",
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist packages/*/dist .vite-plus apps/*/.vite-plus packages/*/.vite-plus",
     "sync:vscode-icons": "node scripts/sync-vscode-icons.mjs",
     "sync:repos": "node scripts/sync-reference-repos.ts"

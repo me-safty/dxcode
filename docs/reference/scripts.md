@@ -13,10 +13,9 @@
 - `bun run dist:desktop:artifact -- --platform <mac|linux|win> --target <target[,target...]> --arch <arch>` — Builds one or more desktop artifacts for a specific platform and architecture.
 - `bun run dist:desktop:dmg` — Builds a shareable macOS `.dmg` into `./release`.
 - `bun run dist:desktop:dmg:x64` — Builds an Intel macOS `.dmg`.
-- `bun run dist:desktop:linux` — Builds Linux AppImage, Debian, and RPM packages into `./release`.
-- `bun run dist:desktop:linux:appimage` — Builds only the Linux AppImage into `./release`.
-- `bun run dist:desktop:linux:deb` — Builds only the Linux Debian package into `./release`.
-- `bun run dist:desktop:linux:rpm` — Builds only the Linux RPM package into `./release`.
+- `vp run dist:linux` — Builds headless Linux Debian and RPM packages into `./release`.
+- `vp run dist:linux:deb` — Builds only the headless Linux Debian package.
+- `vp run dist:linux:rpm` — Builds only the headless Linux RPM package.
 - `bun run dist:desktop:win` — Builds a Windows NSIS installer into `./release`.
 
 ## Desktop `.dmg` packaging notes

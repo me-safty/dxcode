@@ -173,6 +173,7 @@ export function createDevRunnerEnv({
 
     if (host !== undefined) {
       output.MORECODE_T3CODE_HOST = host;
+      output.HOST = host;
     }
 
     if (noBrowser !== undefined) {

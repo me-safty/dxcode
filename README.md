@@ -35,6 +35,7 @@ There's no public docs site yet, checkout the miscellaneous markdown files in [d
 - [Architecture overview](./docs/architecture/overview.md)
 - [Provider guides](./docs/providers/codex.md)
 - [Operations](./docs/operations/ci.md)
+- [Headless Linux packages](./docs/operations/headless-linux.md)
 - [Reference](./docs/reference/encyclopedia.md)
 
 ## If you REALLY want to contribute still.... read this first
