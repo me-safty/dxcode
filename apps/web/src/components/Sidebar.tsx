@@ -921,6 +921,7 @@ interface SidebarProjectItemProps {
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void;
   expandThreadListForProject: (projectKey: string) => void;
   collapseThreadListForProject: (projectKey: string) => void;
+  collapseAllProjects: () => void;
   dragInProgressRef: React.RefObject<boolean>;
   suppressProjectClickAfterDragRef: React.RefObject<boolean>;
   suppressProjectClickForContextMenuRef: React.RefObject<boolean>;
@@ -941,6 +942,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     attachThreadListAutoAnimateRef,
     expandThreadListForProject,
     collapseThreadListForProject,
+    collapseAllProjects,
     dragInProgressRef,
     suppressProjectClickAfterDragRef,
     suppressProjectClickForContextMenuRef,
@@ -1246,10 +1248,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (useThreadSelectionStore.getState().hasSelection()) {
         clearSelection();
       }
+      if (event.altKey) {
+        collapseAllProjects();
+        return;
+      }
       toggleProject(project.projectKey);
     },
     [
       clearSelection,
+      collapseAllProjects,
       dragInProgressRef,
       project.projectKey,
       suppressProjectClickAfterDragRef,
@@ -2807,6 +2814,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                         attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
                         expandThreadListForProject={expandThreadListForProject}
                         collapseThreadListForProject={collapseThreadListForProject}
+                        collapseAllProjects={collapseAllProjects}
                         dragInProgressRef={dragInProgressRef}
                         suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
                         suppressProjectClickForContextMenuRef={
@@ -2839,6 +2847,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
                 expandThreadListForProject={expandThreadListForProject}
                 collapseThreadListForProject={collapseThreadListForProject}
+                collapseAllProjects={collapseAllProjects}
                 dragInProgressRef={dragInProgressRef}
                 suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
                 suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
