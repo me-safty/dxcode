@@ -51,6 +51,11 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
+import {
+  AGENT_ARTIFACTS_ENV_VAR,
+  appendAgentArtifactInstructions,
+  agentArtifactsDirForThread,
+} from "../../agentArtifacts.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import {
@@ -1380,12 +1385,20 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           yield* Effect.suspend(() => stopSessionInternal(existing));
         }
 
+        const artifactsDir = agentArtifactsDirForThread({
+          stateDir: serverConfig.stateDir,
+          threadId: input.threadId,
+        });
+        yield* fileSystem.makeDirectory(artifactsDir, { recursive: true }).pipe(Effect.ignore);
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
           cwd: input.cwd ?? process.cwd(),
           binaryPath: codexConfig.binaryPath,
-          ...(options?.environment ? { environment: options.environment } : {}),
+          environment: {
+            ...options?.environment,
+            [AGENT_ARTIFACTS_ENV_VAR]: artifactsDir,
+          },
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
           ...(isCodexResumeCursorSchema(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
@@ -1503,7 +1516,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
   const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const codexAttachments = yield* Effect.forEach(
-      input.attachments ?? [],
+      (input.attachments ?? []).filter((attachment) => attachment.type === "image"),
       (attachment) => resolveAttachment(input, attachment),
       { concurrency: 1 },
     );
@@ -1519,7 +1532,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         : undefined;
     return yield* session.runtime
       .sendTurn({
-        ...(input.input !== undefined ? { input: input.input } : {}),
+        ...(input.input !== undefined
+          ? { input: appendAgentArtifactInstructions(input.input) ?? input.input }
+          : {}),
         ...(input.modelSelection?.instanceId === boundInstanceId
           ? { model: input.modelSelection.model }
           : {}),

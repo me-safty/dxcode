@@ -19,6 +19,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
@@ -26,6 +27,11 @@ import * as Stream from "effect/Stream";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
+import {
+  AGENT_ARTIFACTS_ENV_VAR,
+  appendAgentArtifactInstructions,
+  agentArtifactsDirForThread,
+} from "../../agentArtifacts.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -535,6 +541,7 @@ export function makeOpenCodeAdapter(
   return Effect.gen(function* () {
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("opencode");
     const serverConfig = yield* ServerConfig;
+    const fileSystem = yield* FileSystem.FileSystem;
     const openCodeRuntime = yield* OpenCodeRuntime;
     const crypto = yield* Crypto.Crypto;
     const nativeEventLogger =
@@ -1180,10 +1187,20 @@ export function makeOpenCodeAdapter(
               // The runtime binds the server's lifetime to the Scope.Scope
               // we provide below — closing `sessionScope` kills the child
               // process automatically. No manual `server.close()` needed.
+              const artifactsDir = agentArtifactsDirForThread({
+                stateDir: serverConfig.stateDir,
+                threadId: input.threadId,
+              });
+              yield* fileSystem
+                .makeDirectory(artifactsDir, { recursive: true })
+                .pipe(Effect.ignore);
               const server = yield* openCodeRuntime.connectToOpenCodeServer({
                 binaryPath,
                 serverUrl,
-                ...(options?.environment ? { environment: options.environment } : {}),
+                environment: {
+                  ...options?.environment,
+                  [AGENT_ARTIFACTS_ENV_VAR]: artifactsDir,
+                },
               });
               const client = openCodeRuntime.createOpenCodeSdkClient({
                 baseUrl: server.url,
@@ -1310,7 +1327,7 @@ export function makeOpenCodeAdapter(
         });
       }
 
-      const text = input.input?.trim();
+      const text = appendAgentArtifactInstructions(input.input)?.trim();
       const fileParts = toOpenCodeFileParts({
         attachments: input.attachments,
         resolveAttachmentPath: (attachment) =>

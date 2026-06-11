@@ -190,6 +190,20 @@ function emailHeaderValue(email: ResendReceivedEmail, name: string) {
   return header?.[1];
 }
 
+function supportEmailIdentityHeaderLines(email: ResendReceivedEmail) {
+  const lines = [
+    ["Header-From", emailHeaderValue(email, "from")],
+    ["Header-Reply-To", emailHeaderValue(email, "reply-to")],
+    ["Header-X-Original-From", emailHeaderValue(email, "x-original-from")],
+    ["Header-X-Original-Sender", emailHeaderValue(email, "x-original-sender")],
+  ].flatMap(([label, value]) => {
+    const trimmed = value?.trim();
+    return trimmed && trimmed.length > 0 ? [`${label}: ${trimmed}`] : [];
+  });
+
+  return lines.length > 0 ? ["", "Email identity headers:", ...lines] : [];
+}
+
 export function normalizeEmailAddress(value: string) {
   const match = /<?([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})>?/i.exec(value);
   return match?.[1]?.toLowerCase();
@@ -417,10 +431,14 @@ export function formatSupportEmailForAgent(
 ) {
   return [
     `From: ${email.from ?? "(unknown sender)"}`,
+    ...(email.reply_to !== undefined && email.reply_to.length > 0
+      ? [`Reply-To: ${email.reply_to.join(", ")}`]
+      : []),
     `To: ${(email.to ?? [context.groupAddress ?? "(unknown recipient)"]).join(", ")}`,
     ...(email.cc !== undefined && email.cc.length > 0 ? [`Cc: ${email.cc.join(", ")}`] : []),
     ...(email.created_at !== undefined ? [`Date: ${email.created_at}`] : []),
     `Subject: ${email.subject ?? "(no subject)"}`,
+    ...supportEmailIdentityHeaderLines(email),
     "",
     emailBody(email),
     ...attachmentLines(attachments),

@@ -37,6 +37,8 @@ import {
   IconChecklist as ChecklistIcon,
   IconChevronDown as ChevronDownIcon,
   IconChevronRight as ChevronRightIcon,
+  IconDownload as DownloadIcon,
+  IconFile as FileIcon,
   IconMessageQuestion as MessageQuestionIcon,
   IconPencil as SquarePenIcon,
   IconRobot as RobotIcon,
@@ -382,7 +384,6 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const userImages = row.message.attachments ?? [];
   const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
   const terminalContexts = displayedUserMessage.contexts;
   const canRevertAgentWork = typeof row.revertTurnCount === "number";
@@ -391,39 +392,11 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
     <div className="group/user flex justify-end">
       <div className="max-w-[80%]">
         <div className="relative rounded-2xl rounded-br-md bg-secondary px-4 py-3">
-          {userImages.length > 0 && (
-            <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-              {userImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-                <div
-                  key={image.id}
-                  className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-                >
-                  {image.previewUrl ? (
-                    <button
-                      type="button"
-                      className="h-full w-full cursor-zoom-in"
-                      aria-label={`Preview ${image.name}`}
-                      onClick={() => {
-                        const preview = buildExpandedImagePreview(userImages, image.id);
-                        if (!preview) return;
-                        ctx.onImageExpand(preview);
-                      }}
-                    >
-                      <img
-                        src={image.previewUrl}
-                        alt={image.name}
-                        className="block h-auto max-h-[220px] w-full object-cover"
-                      />
-                    </button>
-                  ) : (
-                    <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                      {image.name}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          <MessageAttachments
+            attachments={row.message.attachments ?? []}
+            className="mb-2"
+            onImageExpand={ctx.onImageExpand}
+          />
           <CollapsibleUserMessageBody
             text={displayedUserMessage.visibleText}
             terminalContexts={terminalContexts}
@@ -441,6 +414,93 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
         </div>
       </div>
+    </div>
+  );
+}
+
+function formatAttachmentSize(sizeBytes: number): string {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+    return "";
+  }
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`;
+  }
+  if (sizeBytes < 1024 * 1024) {
+    return `${(sizeBytes / 1024).toFixed(sizeBytes < 10 * 1024 ? 1 : 0)} KB`;
+  }
+  return `${(sizeBytes / (1024 * 1024)).toFixed(sizeBytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function MessageAttachments({
+  attachments,
+  className,
+  onImageExpand,
+}: {
+  attachments: ReadonlyArray<NonNullable<TimelineMessage["attachments"]>[number]>;
+  className?: string;
+  onImageExpand: (preview: NonNullable<ReturnType<typeof buildExpandedImagePreview>>) => void;
+}) {
+  if (attachments.length === 0) {
+    return null;
+  }
+
+  const images = attachments.filter((attachment) => attachment.type === "image");
+  const files = attachments.filter((attachment) => attachment.type === "file");
+
+  return (
+    <div className={cn("space-y-2", className)}>
+      {images.length > 0 ? (
+        <div className="grid max-w-[420px] grid-cols-2 gap-2">
+          {images.map((image) => (
+            <div
+              key={image.id}
+              className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+            >
+              {image.previewUrl ? (
+                <button
+                  type="button"
+                  className="h-full w-full cursor-zoom-in"
+                  aria-label={`Preview ${image.name}`}
+                  onClick={() => {
+                    const preview = buildExpandedImagePreview(images, image.id);
+                    if (!preview) return;
+                    onImageExpand(preview);
+                  }}
+                >
+                  <img
+                    src={image.previewUrl}
+                    alt={image.name}
+                    className="block h-auto max-h-[220px] w-full object-cover"
+                  />
+                </button>
+              ) : (
+                <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                  {image.name}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {files.length > 0 ? (
+        <div className="flex max-w-[520px] flex-col gap-1.5">
+          {files.map((file) => (
+            <a
+              key={file.id}
+              href={file.downloadUrl}
+              download={file.name}
+              className="flex min-w-0 items-center gap-2 rounded-md border border-border/80 bg-background/70 px-2.5 py-2 text-sm text-foreground transition-colors hover:bg-accent"
+            >
+              <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">{file.name}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {formatAttachmentSize(file.sizeBytes)}
+              </span>
+              <DownloadIcon className="size-4 shrink-0 text-muted-foreground" />
+            </a>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -467,15 +527,24 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const hasAttachments = (row.message.attachments?.length ?? 0) > 0;
+  const messageText =
+    row.message.text || (row.message.streaming || hasAttachments ? "" : "(empty response)");
 
   return (
     <div className="group/assistant-message min-w-0 px-1 py-0.5">
-      <ChatMarkdown
-        text={messageText}
-        cwd={ctx.markdownCwd}
-        isStreaming={Boolean(row.message.streaming)}
-        skills={ctx.skills}
+      {messageText.length > 0 ? (
+        <ChatMarkdown
+          text={messageText}
+          cwd={ctx.markdownCwd}
+          isStreaming={Boolean(row.message.streaming)}
+          skills={ctx.skills}
+        />
+      ) : null}
+      <MessageAttachments
+        attachments={row.message.attachments ?? []}
+        className="mt-2"
+        onImageExpand={ctx.onImageExpand}
       />
       <AssistantChangedFilesSection
         turnSummary={row.assistantTurnDiffSummary}

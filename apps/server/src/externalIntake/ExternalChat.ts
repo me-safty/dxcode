@@ -50,6 +50,16 @@ export interface ExternalChatShape {
     readonly externalThreadId: string;
     readonly message: PostableMessage;
   }) => Effect.Effect<{ readonly externalMessageId: string }, ExternalChatError>;
+  readonly uploadFilesToThread: (input: {
+    readonly source: "slack";
+    readonly externalThreadId: string;
+    readonly files: ReadonlyArray<{
+      readonly name: string;
+      readonly mimeType: string;
+      readonly data: Uint8Array;
+    }>;
+    readonly initialComment?: string;
+  }) => Effect.Effect<{ readonly externalFileIds: ReadonlyArray<string> }, ExternalChatError>;
   readonly postToChannel: (input: {
     readonly source: "slack";
     readonly channelId: string;
@@ -226,6 +236,77 @@ async function fetchAttachmentData(attachment: Attachment): Promise<Buffer> {
   }
 
   return fetchSlackFileUrl(url, botToken);
+}
+
+async function slackApi<T>(
+  token: string,
+  method: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const response = await fetch(`https://slack.com/api/${method}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(`Slack ${method} failed: ${response.status} ${response.statusText}`);
+  }
+  const payload = (await response.json()) as { readonly ok?: boolean; readonly error?: string };
+  if (payload.ok !== true) {
+    throw new Error(`Slack ${method} rejected request: ${payload.error ?? "unknown_error"}`);
+  }
+  return payload as T;
+}
+
+async function uploadSlackFiles(input: {
+  readonly token: string;
+  readonly channelId: string;
+  readonly threadTs: string;
+  readonly files: ReadonlyArray<{
+    readonly name: string;
+    readonly mimeType: string;
+    readonly data: Uint8Array;
+  }>;
+  readonly initialComment?: string;
+}): Promise<ReadonlyArray<string>> {
+  const files: Array<{ id: string; title: string }> = [];
+  for (const file of input.files) {
+    const prepared = await slackApi<{
+      readonly file_id: string;
+      readonly upload_url: string;
+    }>(input.token, "files.getUploadURLExternal", {
+      filename: file.name,
+      length: file.data.byteLength,
+    });
+    const uploadResponse = await fetch(prepared.upload_url, {
+      method: "POST",
+      headers: {
+        "Content-Type": file.mimeType,
+      },
+      body: Buffer.from(file.data),
+    });
+    if (!uploadResponse.ok) {
+      throw new Error(
+        `Slack file upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`,
+      );
+    }
+    files.push({ id: prepared.file_id, title: file.name });
+  }
+
+  if (files.length === 0) {
+    return [];
+  }
+
+  await slackApi(input.token, "files.completeUploadExternal", {
+    files,
+    channel_id: input.channelId,
+    thread_ts: input.threadTs,
+    ...(input.initialComment ? { initial_comment: input.initialComment } : {}),
+  });
+  return files.map((file) => file.id);
 }
 
 async function nativeImageAttachment(
@@ -582,6 +663,26 @@ const makeExternalChat = Effect.gen(function* () {
       catch: toExternalChatError,
     });
 
+  const uploadFilesToThread: ExternalChatShape["uploadFilesToThread"] = (input) =>
+    Effect.tryPromise({
+      try: async () => {
+        const token = process.env.SLACK_BOT_TOKEN?.trim();
+        if (!token) {
+          throw new Error("SLACK_BOT_TOKEN is required to upload files to Slack.");
+        }
+        const { channelId, threadTs } = parseSlackExternalThreadId(input.externalThreadId);
+        const externalFileIds = await uploadSlackFiles({
+          token,
+          channelId,
+          threadTs,
+          files: input.files,
+          ...(input.initialComment ? { initialComment: input.initialComment } : {}),
+        });
+        return { externalFileIds };
+      },
+      catch: toExternalChatError,
+    });
+
   const postToChannel: ExternalChatShape["postToChannel"] = (input) =>
     Effect.tryPromise({
       try: async () => {
@@ -635,6 +736,7 @@ const makeExternalChat = Effect.gen(function* () {
   return {
     handleSlackWebhook,
     postToThread,
+    uploadFilesToThread,
     postToChannel,
     updateThreadMessage,
     addReaction,

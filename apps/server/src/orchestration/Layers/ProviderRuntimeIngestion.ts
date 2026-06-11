@@ -4,6 +4,7 @@ import {
   CommandId,
   MessageId,
   type OrchestrationEvent,
+  type ChatAttachment,
   type OrchestrationMessage,
   type OrchestrationProposedPlanId,
   CheckpointRef,
@@ -38,6 +39,7 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { materializeAgentArtifactManifest } from "../../agentArtifacts.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 
@@ -114,6 +116,19 @@ function findMessageById(
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
     if (message?.id === messageId) {
+      return message;
+    }
+  }
+  return undefined;
+}
+
+function findLatestAssistantMessageForTurn(
+  messages: ReadonlyArray<OrchestrationMessage>,
+  turnId: TurnId,
+): OrchestrationMessage | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "assistant" && message.turnId === turnId) {
       return message;
     }
   }
@@ -944,6 +959,7 @@ const make = Effect.gen(function* () {
     finalDeltaCommandTag: string;
     fallbackText?: string;
     hasProjectedMessage?: boolean;
+    attachments?: ReadonlyArray<ChatAttachment>;
   }) =>
     Effect.gen(function* () {
       const bufferedText = yield* takeBufferedAssistantText(input.messageId);
@@ -967,12 +983,14 @@ const make = Effect.gen(function* () {
         });
       }
 
-      if (input.hasProjectedMessage || hasRenderableText) {
+      const attachments = input.attachments ?? [];
+      if (input.hasProjectedMessage || hasRenderableText || attachments.length > 0) {
         yield* orchestrationEngine.dispatch({
           type: "thread.message.assistant.complete",
           commandId: yield* providerCommandId(input.event, input.commandTag),
           threadId: input.threadId,
           messageId: input.messageId,
+          ...(attachments.length > 0 ? { attachments } : {}),
           ...(input.turnId ? { turnId: input.turnId } : {}),
           createdAt: input.createdAt,
         });
@@ -1546,9 +1564,19 @@ const make = Effect.gen(function* () {
         const proposedPlans = detailedThread?.proposedPlans ?? [];
         const turnId = toTurnId(event.turnId);
         if (turnId) {
+          const artifactAttachments = yield* materializeAgentArtifactManifest({
+            threadId: thread.id,
+          });
           const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
+          const assistantMessageIdList = [...assistantMessageIds];
+          const artifactTargetMessageId =
+            assistantMessageIdList[assistantMessageIdList.length - 1] ??
+            findLatestAssistantMessageForTurn(messages, turnId)?.id ??
+            (artifactAttachments.length > 0
+              ? MessageId.make(`assistant:${event.turnId ?? event.eventId}:artifacts`)
+              : undefined);
           yield* Effect.forEach(
-            assistantMessageIds,
+            assistantMessageIdList,
             (assistantMessageId) =>
               finalizeAssistantMessage({
                 event,
@@ -1559,9 +1587,31 @@ const make = Effect.gen(function* () {
                 commandTag: "assistant-complete-finalize",
                 finalDeltaCommandTag: "assistant-delta-finalize-fallback",
                 hasProjectedMessage: findMessageById(messages, assistantMessageId) !== undefined,
+                ...(artifactAttachments.length > 0 &&
+                artifactTargetMessageId !== undefined &&
+                assistantMessageId === artifactTargetMessageId
+                  ? { attachments: artifactAttachments }
+                  : {}),
               }),
             { concurrency: 1 },
           ).pipe(Effect.asVoid);
+          if (
+            assistantMessageIdList.length === 0 &&
+            artifactAttachments.length > 0 &&
+            artifactTargetMessageId !== undefined
+          ) {
+            yield* finalizeAssistantMessage({
+              event,
+              threadId: thread.id,
+              messageId: artifactTargetMessageId,
+              turnId,
+              createdAt: now,
+              commandTag: "assistant-complete-finalize-artifacts",
+              finalDeltaCommandTag: "assistant-delta-finalize-artifacts",
+              hasProjectedMessage: findMessageById(messages, artifactTargetMessageId) !== undefined,
+              attachments: artifactAttachments,
+            });
+          }
           yield* clearAssistantMessageIdsForTurn(thread.id, turnId);
           yield* clearAssistantSegmentStateForTurn(thread.id, turnId);
 

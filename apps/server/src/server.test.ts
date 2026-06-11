@@ -722,6 +722,7 @@ const buildAppUnderTest = (options?: {
           handleSlackWebhook: () =>
             Effect.succeed(new Response(JSON.stringify({ accepted: true }), { status: 200 })),
           postToThread: () => Effect.succeed({ externalMessageId: "external-message-test" }),
+          uploadFilesToThread: () => Effect.succeed({ externalFileIds: [] }),
           postToChannel: () =>
             Effect.succeed({
               externalThreadId: "C_TEST:1710000000.000000",

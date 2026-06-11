@@ -168,15 +168,23 @@ function mapSession(session: OrchestrationSession): ThreadSession {
 
 function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage): ChatMessage {
   const attachments = message.attachments?.map((attachment) => ({
-    type: "image" as const,
+    type: attachment.type,
     id: attachment.id,
     name: attachment.name,
     mimeType: attachment.mimeType,
     sizeBytes: attachment.sizeBytes,
-    previewUrl: resolveEnvironmentHttpUrl({
+    downloadUrl: resolveEnvironmentHttpUrl({
       environmentId,
-      pathname: attachmentPreviewRoutePath(attachment.id),
+      pathname: attachmentRoutePath(attachment.id),
     }),
+    ...(attachment.type === "image"
+      ? {
+          previewUrl: resolveEnvironmentHttpUrl({
+            environmentId,
+            pathname: attachmentRoutePath(attachment.id),
+          }),
+        }
+      : {}),
   }));
 
   return {
@@ -1034,7 +1042,7 @@ function toLegacyProvider(providerName: string | null): ProviderDriverKind {
   return ProviderDriverKind.make("codex");
 }
 
-function attachmentPreviewRoutePath(attachmentId: string): string {
+function attachmentRoutePath(attachmentId: string): string {
   return `/attachments/${encodeURIComponent(attachmentId)}`;
 }
 

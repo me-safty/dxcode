@@ -66,6 +66,11 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
+import {
+  AGENT_ARTIFACTS_ENV_VAR,
+  appendAgentArtifactInstructions,
+  agentArtifactsDirForThread,
+} from "../../agentArtifacts.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { CLAUDE_OPENCODE_ANTHROPIC_SYSTEM_PROMPT } from "../ClaudeSystemPrompt.ts";
 import { ServerConfig } from "../../config.ts";
@@ -661,7 +666,11 @@ function buildPromptText(
   const caps = getClaudeModelCapabilities(claudeModel);
 
   const promptEffort = resolvePromptInjectedEffort(caps, rawEffort);
-  return applyClaudePromptEffortPrefix(input.input?.trim() ?? "", promptEffort);
+  return (
+    appendAgentArtifactInstructions(
+      applyClaudePromptEffortPrefix(input.input?.trim() ?? "", promptEffort),
+    ) ?? ""
+  );
 }
 
 function buildUserMessage(input: {
@@ -3056,6 +3065,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "full-access": "bypassPermissions",
       };
       const permissionMode = runtimeModeToPermission[input.runtimeMode];
+      const artifactsDir = agentArtifactsDirForThread({
+        stateDir: serverConfig.stateDir,
+        threadId,
+      });
+      yield* fileSystem.makeDirectory(artifactsDir, { recursive: true }).pipe(Effect.ignore);
+      const sessionEnvironment = {
+        ...claudeEnvironment,
+        [AGENT_ARTIFACTS_ENV_VAR]: artifactsDir,
+      };
       const settings = {
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
         ...(fastMode ? { fastMode: true } : {}),
@@ -3092,7 +3110,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
-        env: claudeEnvironment,
+        env: sessionEnvironment,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
       };

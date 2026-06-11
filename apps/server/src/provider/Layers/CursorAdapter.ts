@@ -40,6 +40,11 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
+import {
+  AGENT_ARTIFACTS_ENV_VAR,
+  appendAgentArtifactInstructions,
+  agentArtifactsDirForThread,
+} from "../../agentArtifacts.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import {
@@ -526,9 +531,17 @@ export function makeCursorAdapter(
             ? yield* options.resolveSettings
             : cursorSettings;
 
+          const artifactsDir = agentArtifactsDirForThread({
+            stateDir: serverConfig.stateDir,
+            threadId: input.threadId,
+          });
+          yield* fileSystem.makeDirectory(artifactsDir, { recursive: true }).pipe(Effect.ignore);
           const acp = yield* makeCursorAcpRuntime({
             cursorSettings: effectiveCursorSettings,
-            ...(options?.environment ? { environment: options.environment } : {}),
+            environment: {
+              ...options?.environment,
+              [AGENT_ARTIFACTS_ENV_VAR]: artifactsDir,
+            },
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
@@ -919,11 +932,15 @@ export function makeCursorAdapter(
         });
 
         const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
-        if (input.input?.trim()) {
-          promptParts.push({ type: "text", text: input.input.trim() });
+        const text = appendAgentArtifactInstructions(input.input)?.trim();
+        if (text) {
+          promptParts.push({ type: "text", text });
         }
         if (input.attachments && input.attachments.length > 0) {
           for (const attachment of input.attachments) {
+            if (attachment.type !== "image") {
+              continue;
+            }
             const attachmentPath = resolveAttachmentPath({
               attachmentsDir: serverConfig.attachmentsDir,
               attachment,

@@ -31,6 +31,11 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
+import {
+  AGENT_ARTIFACTS_ENV_VAR,
+  appendAgentArtifactInstructions,
+  agentArtifactsDirForThread,
+} from "../../agentArtifacts.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import {
@@ -370,9 +375,17 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             threadId: input.threadId,
           });
 
+          const artifactsDir = agentArtifactsDirForThread({
+            stateDir: serverConfig.stateDir,
+            threadId: input.threadId,
+          });
+          yield* fileSystem.makeDirectory(artifactsDir, { recursive: true }).pipe(Effect.ignore);
           const acp = yield* makeGrokAcpRuntime({
             grokSettings,
-            ...(options?.environment ? { environment: options.environment } : {}),
+            environment: {
+              ...options?.environment,
+              [AGENT_ARTIFACTS_ENV_VAR]: artifactsDir,
+            },
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
@@ -680,8 +693,11 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
             });
 
-            const text = input.input?.trim();
-            const imagePromptParts = yield* Effect.forEach(input.attachments ?? [], (attachment) =>
+            const text = appendAgentArtifactInstructions(input.input)?.trim();
+            const imageAttachments = (input.attachments ?? []).filter(
+              (attachment) => attachment.type === "image",
+            );
+            const imagePromptParts = yield* Effect.forEach(imageAttachments, (attachment) =>
               Effect.gen(function* () {
                 const attachmentPath = resolveAttachmentPath({
                   attachmentsDir: serverConfig.attachmentsDir,

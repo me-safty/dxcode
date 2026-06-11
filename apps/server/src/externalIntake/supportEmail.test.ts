@@ -93,6 +93,32 @@ describe("support email formatting", () => {
     );
   });
 
+  it("includes parsed reply-to and raw sender headers in the agent prompt", () => {
+    const email = {
+      id: "email-2",
+      from: "help@nextcard.com",
+      reply_to: ["supastars3@aol.com"],
+      to: ["nextcard-help@example.resend.app"],
+      subject: "Support Request",
+      text: "My credits are missing.",
+      headers: {
+        from: '"Doreen Sargente via Support/Help" <help@nextcard.com>',
+        "reply-to": '"Doreen Sargente" <supastars3@aol.com>',
+        "x-original-from": "Doreen Sargente <supastars3@aol.com>",
+        "x-original-sender": "supastars3@aol.com",
+      },
+    } satisfies ResendReceivedEmail;
+
+    const prompt = formatSupportEmailForAgent(email, [], context);
+    expect(prompt).toContain("From: help@nextcard.com");
+    expect(prompt).toContain("Reply-To: supastars3@aol.com");
+    expect(prompt).toContain("Email identity headers:");
+    expect(prompt).toContain('Header-From: "Doreen Sargente via Support/Help" <help@nextcard.com>');
+    expect(prompt).toContain('Header-Reply-To: "Doreen Sargente" <supastars3@aol.com>');
+    expect(prompt).toContain("Header-X-Original-From: Doreen Sargente <supastars3@aol.com>");
+    expect(prompt).toContain("Header-X-Original-Sender: supastars3@aol.com");
+  });
+
   it("truncates quoted chains from Slack previews", () => {
     const email = {
       id: "email-3",
