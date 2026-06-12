@@ -310,6 +310,10 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           updatedAt: "2026-02-24T00:00:03.000Z",
           archivedAt: null,
           deletedAt: null,
+          parentRelation: {
+            kind: "root",
+            rootThreadId: ThreadId.make("thread-1"),
+          },
           messages: [
             {
               id: asMessageId("message-1"),
@@ -419,6 +423,10 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           createdAt: "2026-02-24T00:00:02.000Z",
           updatedAt: "2026-02-24T00:00:03.000Z",
           archivedAt: null,
+          parentRelation: {
+            kind: "root",
+            rootThreadId: ThreadId.make("thread-1"),
+          },
           session: {
             threadId: ThreadId.make("thread-1"),
             status: "running",
