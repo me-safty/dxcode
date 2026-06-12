@@ -97,7 +97,13 @@ import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
+import {
+  RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY,
+  PLAN_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
+  PLAN_INLINE_DEFAULT_WIDTH,
+  PLAN_INLINE_SIDEBAR_MIN_WIDTH,
+} from "../rightPanelLayout";
+import { useResizeHandle } from "../hooks/useResizeHandle";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
@@ -382,7 +388,6 @@ function formatOutgoingPrompt(params: {
 }
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
-
 type ChatViewProps =
   | {
       environmentId: EnvironmentId;
@@ -2439,6 +2444,19 @@ export default function ChatView(props: ChatViewProps) {
     planSidebarDismissedForTurnRef.current =
       activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
   }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+  const {
+    handleRef: planResizeHandleRef,
+    setWrapperRef: setPlanSidebarWrapperRef,
+    onPointerDown: handlePlanResizePointerDown,
+    onPointerMove: handlePlanResizePointerMove,
+    onPointerUp: handlePlanResizeEndInteraction,
+    onClick: handlePlanResizeClick,
+  } = useResizeHandle({
+    cssVarName: "--plan-sidebar-width",
+    storageKey: PLAN_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
+    minWidth: PLAN_INLINE_SIDEBAR_MIN_WIDTH,
+    isDisabled: shouldUsePlanSidebarSheet,
+  });
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -4020,19 +4038,43 @@ export default function ChatView(props: ChatViewProps) {
         </div>
         {/* end chat column */}
 
-        {/* Plan sidebar */}
+        {/* Plan sidebar (inline, resizable) */}
         {planSidebarOpen && !shouldUsePlanSidebarSheet ? (
-          <PlanSidebar
-            activePlan={activePlan}
-            activeProposedPlan={sidebarProposedPlan}
-            label={planSidebarLabel}
-            environmentId={environmentId}
-            markdownCwd={gitCwd ?? undefined}
-            workspaceRoot={activeWorkspaceRoot}
-            timestampFormat={timestampFormat}
-            mode="sidebar"
-            onClose={closePlanSidebar}
-          />
+          <div
+            ref={setPlanSidebarWrapperRef}
+            className="relative flex h-full min-h-0 flex-none flex-col border-l border-border/70"
+            style={
+              {
+                width: `var(--plan-sidebar-width, ${PLAN_INLINE_DEFAULT_WIDTH})`,
+                transition: "width 0ms",
+              } as React.CSSProperties
+            }
+          >
+            {/* Left-edge drag handle — mirrors SidebarRail behaviour */}
+            <button
+              ref={planResizeHandleRef}
+              type="button"
+              aria-label="Resize plan sidebar"
+              title="Drag to resize"
+              className="absolute inset-y-0 left-0 z-20 hidden w-4 -translate-x-1/2 cursor-e-resize after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-border sm:flex"
+              tabIndex={-1}
+              onPointerDown={handlePlanResizePointerDown}
+              onPointerMove={handlePlanResizePointerMove}
+              onPointerUp={handlePlanResizeEndInteraction}
+              onPointerCancel={handlePlanResizeEndInteraction}
+              onClick={handlePlanResizeClick}
+            />
+            <PlanSidebar
+              activePlan={activePlan}
+              activeProposedPlan={sidebarProposedPlan}
+              label={planSidebarLabel}
+              environmentId={environmentId}
+              markdownCwd={gitCwd ?? undefined}
+              workspaceRoot={activeWorkspaceRoot}
+              timestampFormat={timestampFormat}
+              onClose={closePlanSidebar}
+            />
+          </div>
         ) : null}
       </div>
       {/* end horizontal flex container */}
@@ -4064,7 +4106,6 @@ export default function ChatView(props: ChatViewProps) {
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeWorkspaceRoot}
             timestampFormat={timestampFormat}
-            mode="sheet"
             onClose={closePlanSidebar}
           />
         </RightPanelSheet>
