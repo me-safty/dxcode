@@ -86,7 +86,10 @@ import { redactServerSettingsForClient, ServerSettingsService } from "./serverSe
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
-import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
+import {
+  WorkspacePathOutsideRootError,
+  WorkspacePaths,
+} from "./workspace/Services/WorkspacePaths.ts";
 import { VcsStatusBroadcaster } from "./vcs/VcsStatusBroadcaster.ts";
 import { VcsProvisioningService } from "./vcs/VcsProvisioningService.ts";
 import { GitWorkflowService } from "./git/GitWorkflowService.ts";
@@ -117,6 +120,16 @@ import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 const isWorkspacePathOutsideRootError = Schema.is(WorkspacePathOutsideRootError);
 const decodeCodexSettings = Schema.decodeUnknownEffect(CodexSettings);
+
+function describeUnknownCause(cause: unknown): string {
+  if (cause instanceof Error) {
+    return cause.message;
+  }
+  if (typeof cause === "string") {
+    return cause;
+  }
+  return "Unknown error";
+}
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -262,6 +275,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
+      const workspacePaths = yield* WorkspacePaths;
       const lifecycleEvents = yield* ServerLifecycleEvents;
       const serverSettings = yield* ServerSettingsService;
       const startup = yield* ServerRuntimeStartup;
@@ -333,6 +347,15 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
         if (!effectiveConfig.enabled) {
           return { skills: snapshot.skills };
         }
+        const normalizedCwd = yield* workspacePaths.normalizeWorkspaceRoot(input.cwd).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServerProviderSkillsListError({
+                message: `Invalid Codex skills cwd '${input.cwd}': ${cause.message}`,
+                cause,
+              }),
+          ),
+        );
         const homeLayout = yield* resolveCodexHomeLayout(effectiveConfig).pipe(
           Effect.provideService(Path.Path, path),
         );
@@ -342,7 +365,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           Effect.mapError(
             (cause) =>
               new ServerProviderSkillsListError({
-                message: `Failed to prepare Codex home for '${input.instanceId}': ${cause.message}`,
+                message: `Failed to prepare Codex home for '${input.instanceId}': ${describeUnknownCause(cause)}`,
                 cause,
               }),
           ),
@@ -350,7 +373,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
         const skills = yield* listCodexProviderSkills({
           binaryPath: effectiveConfig.binaryPath,
           ...(homeLayout.effectiveHomePath ? { homePath: homeLayout.effectiveHomePath } : {}),
-          cwd: input.cwd,
+          cwd: normalizedCwd,
           environment: mergeProviderInstanceEnvironment(instanceConfig.environment ?? []),
         }).pipe(
           Effect.scoped,
@@ -358,7 +381,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
           Effect.mapError(
             (cause) =>
               new ServerProviderSkillsListError({
-                message: `Failed to list Codex skills for '${input.cwd}'.`,
+                message: `Failed to list Codex skills (provider: '${input.instanceId}', cwd: '${normalizedCwd}').`,
                 cause,
               }),
           ),

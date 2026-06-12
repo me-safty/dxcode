@@ -1,5 +1,5 @@
 import type { EnvironmentId, ProviderInstanceId, ServerProviderSkill } from "@t3tools/contracts";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   readEnvironmentConnection,
@@ -22,33 +22,79 @@ export interface ProviderWorkspaceSkillsState {
 }
 
 const cache = new Map<string, ReadonlyArray<ServerProviderSkill>>();
+const CACHE_MAX_ENTRIES = 100;
+
+const listeners = new Set<() => void>();
+let unsubscribeEnvironmentConnections: (() => void) | null = null;
+let unsubscribeProviderInvalidations: (() => void) | null = null;
+
+function notifyListeners(): void {
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+function clearCacheAndNotify(): void {
+  invalidateProviderWorkspaceSkills();
+  notifyListeners();
+}
+
+function setCachedSkills(key: string, skills: ReadonlyArray<ServerProviderSkill>): void {
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
+  cache.set(key, skills);
+  while (cache.size > CACHE_MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
+}
+
+function subscribeWorkspaceSkillChanges(listener: () => void): () => void {
+  listeners.add(listener);
+  if (listeners.size === 1) {
+    unsubscribeEnvironmentConnections = subscribeEnvironmentConnections(clearCacheAndNotify);
+    unsubscribeProviderInvalidations = subscribeProviderInvalidations(clearCacheAndNotify);
+  }
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      unsubscribeEnvironmentConnections?.();
+      unsubscribeEnvironmentConnections = null;
+      unsubscribeProviderInvalidations?.();
+      unsubscribeProviderInvalidations = null;
+      invalidateProviderWorkspaceSkills();
+    }
+  };
+}
 
 function targetKey(target: Omit<ProviderWorkspaceSkillsTarget, "fallbackSkills">): string | null {
   if (
     !target.enabled ||
     target.environmentId === null ||
     target.instanceId === null ||
-    target.cwd === null
+    target.cwd === null ||
+    target.cwd.trim().length === 0
   ) {
     return null;
   }
-  return `${target.environmentId}:${target.instanceId}:${target.cwd}`;
+  return `${target.environmentId}:${target.instanceId}:${target.cwd.trim()}`;
 }
 
 export function invalidateProviderWorkspaceSkills(): void {
   cache.clear();
 }
 
-subscribeProviderInvalidations(invalidateProviderWorkspaceSkills);
-
 export function useProviderWorkspaceSkills(
   target: ProviderWorkspaceSkillsTarget,
 ): ProviderWorkspaceSkillsState {
+  const fallbackSkillsRef = useRef(target.fallbackSkills);
   const stableTarget = useMemo(
     () => ({
       environmentId: target.environmentId,
       instanceId: target.instanceId,
-      cwd: target.cwd,
+      cwd: target.cwd?.trim() || null,
       enabled: target.enabled,
     }),
     [target.cwd, target.enabled, target.environmentId, target.instanceId],
@@ -61,8 +107,15 @@ export function useProviderWorkspaceSkills(
     error: null,
   }));
 
+  useEffect(() => {
+    fallbackSkillsRef.current = target.fallbackSkills;
+    if (key === null) {
+      setState({ skills: target.fallbackSkills, isPending: false, error: null });
+    }
+  }, [key, target.fallbackSkills]);
+
   useEffect(
-    () => subscribeEnvironmentConnections(() => setConnectionVersion((version) => version + 1)),
+    () => subscribeWorkspaceSkillChanges(() => setConnectionVersion((version) => version + 1)),
     [],
   );
 
@@ -73,7 +126,7 @@ export function useProviderWorkspaceSkills(
       stableTarget.instanceId === null ||
       stableTarget.cwd === null
     ) {
-      setState({ skills: target.fallbackSkills, isPending: false, error: null });
+      setState({ skills: fallbackSkillsRef.current, isPending: false, error: null });
       return;
     }
 
@@ -86,7 +139,7 @@ export function useProviderWorkspaceSkills(
     const connection = readEnvironmentConnection(stableTarget.environmentId);
     if (!connection) {
       setState({
-        skills: target.fallbackSkills,
+        skills: fallbackSkillsRef.current,
         isPending: false,
         error: "Remote connection is not ready.",
       });
@@ -95,7 +148,7 @@ export function useProviderWorkspaceSkills(
 
     let cancelled = false;
     setState((current) => ({
-      skills: current.skills.length > 0 ? current.skills : target.fallbackSkills,
+      skills: current.skills.length > 0 ? current.skills : fallbackSkillsRef.current,
       isPending: true,
       error: null,
     }));
@@ -106,13 +159,13 @@ export function useProviderWorkspaceSkills(
       })
       .then((result) => {
         if (cancelled) return;
-        cache.set(key, result.skills);
+        setCachedSkills(key, result.skills);
         setState({ skills: result.skills, isPending: false, error: null });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
         setState({
-          skills: target.fallbackSkills,
+          skills: fallbackSkillsRef.current,
           isPending: false,
           error: error instanceof Error ? error.message : "Failed to list provider skills.",
         });
@@ -128,7 +181,6 @@ export function useProviderWorkspaceSkills(
     stableTarget.enabled,
     stableTarget.environmentId,
     stableTarget.instanceId,
-    target.fallbackSkills,
   ]);
 
   return state;

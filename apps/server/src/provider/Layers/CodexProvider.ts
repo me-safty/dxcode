@@ -271,16 +271,18 @@ export const listCodexProviderSkills = Effect.fn("listCodexProviderSkills")(func
   readonly binaryPath: string;
   readonly homePath?: string;
   readonly cwd: string;
-  readonly environment?: NodeJS.ProcessEnv;
+  readonly environment: NodeJS.ProcessEnv;
 }) {
   const resolvedHomePath = input.homePath ? expandHomePath(input.homePath) : undefined;
+  // The app-server command layer is scoped; callers must run this effect with
+  // `Effect.scoped` so the spawned process finalizer is released.
   const clientContext = yield* Layer.build(
     CodexClient.layerCommand({
       command: input.binaryPath,
       args: ["app-server"],
       cwd: input.cwd,
       env: {
-        ...(input.environment ?? process.env),
+        ...input.environment,
         ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
       },
     }),
