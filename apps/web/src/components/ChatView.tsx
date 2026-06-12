@@ -80,6 +80,7 @@ import {
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
+import { closeThreadNotifications } from "../push/notifications";
 import {
   type AppState,
   selectProjectsAcrossEnvironments,
@@ -1200,12 +1201,16 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     if (!serverThread?.id) return;
-    const threadKey = scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id));
+    const threadId = serverThread.id;
+    const threadKey = scopedThreadKey(scopeThreadRef(serverThread.environmentId, threadId));
     const markVisibleThreadVisited = () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") {
         return;
       }
       markThreadVisited(threadKey);
+      // Use the raw thread id: notification tags are issued server-side as
+      // `thread:{rawThreadId}:…`, not the scoped key used for visited state.
+      void closeThreadNotifications(threadId);
     };
 
     markVisibleThreadVisited();
@@ -1217,6 +1222,7 @@ export default function ChatView(props: ChatViewProps) {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         markThreadVisited(threadKey);
+        void closeThreadNotifications(threadId);
       }
     };
 

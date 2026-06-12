@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   forceRefreshApp,
   shouldShowDownloadableDiagnostics,
+  shouldShowForceRefreshAction,
   shouldShowOpenInPicker,
 } from "./ChatHeader";
 
@@ -121,6 +122,16 @@ describe("shouldShowDownloadableDiagnostics", () => {
     installWindowStub({});
 
     expect(shouldShowDownloadableDiagnostics()).toBe(false);
+  });
+});
+
+describe("shouldShowForceRefreshAction", () => {
+  it("shows force refresh when downloadable diagnostics are shown", () => {
+    expect(shouldShowForceRefreshAction({ showDownloadableDiagnostics: true })).toBe(true);
+  });
+
+  it("hides force refresh when downloadable diagnostics are hidden", () => {
+    expect(shouldShowForceRefreshAction({ showDownloadableDiagnostics: false })).toBe(false);
   });
 });
 

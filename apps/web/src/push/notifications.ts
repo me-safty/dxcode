@@ -46,6 +46,36 @@ export async function ensureT3ServiceWorkerRegistration(): Promise<ServiceWorker
   return navigator.serviceWorker.register(SERVICE_WORKER_URL, { updateViaCache: "none" });
 }
 
+/**
+ * Closes any displayed OS notifications for a thread when it is viewed in-app,
+ * so stale notifications cannot re-inflate the app icon badge on the next push.
+ *
+ * Best-effort: never registers the service worker (uses getRegistration) and
+ * swallows errors. Notification tags are server-issued as `thread:{threadId}:…`
+ * using the raw thread id, so callers must pass the raw id (not the scoped key)
+ * and we match by prefix because getNotifications({tag}) is exact-match only.
+ */
+export async function closeThreadNotifications(threadId: string): Promise<void> {
+  if (!getBrowserPushSupport().supported || threadId.length === 0) {
+    return;
+  }
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration || typeof registration.getNotifications !== "function") {
+      return;
+    }
+    const prefix = `thread:${threadId}:`;
+    const notifications = await registration.getNotifications();
+    for (const notification of notifications) {
+      if (notification.tag.startsWith(prefix)) {
+        notification.close();
+      }
+    }
+  } catch {
+    // Closing notifications is best-effort and must never disrupt navigation.
+  }
+}
+
 export async function getCurrentPushSubscription(): Promise<PushSubscription | null> {
   const registration = await ensureT3ServiceWorkerRegistration();
   return registration.pushManager.getSubscription();

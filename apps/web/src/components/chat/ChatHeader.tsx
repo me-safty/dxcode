@@ -105,6 +105,12 @@ export function shouldShowDownloadableDiagnostics(input?: {
   );
 }
 
+export function shouldShowForceRefreshAction(input: {
+  readonly showDownloadableDiagnostics: boolean;
+}): boolean {
+  return input.showDownloadableDiagnostics;
+}
+
 function handleExportTimelineDiagnostics(): void {
   void exportTimelineResizeDiagnostics()
     .then((result) => {
@@ -208,6 +214,9 @@ export const ChatHeader = memo(function ChatHeader({
   const showDownloadableDiagnostics = shouldShowDownloadableDiagnostics({
     serverWebFeatureFlags,
   });
+  const showForceRefreshAction = shouldShowForceRefreshAction({
+    showDownloadableDiagnostics,
+  });
   const renderProjectScriptsControl = (inMenu = false) =>
     activeProjectScripts ? (
       <ProjectScriptsControl
@@ -224,6 +233,7 @@ export const ChatHeader = memo(function ChatHeader({
   const hasProjectScriptsControl = activeProjectScripts !== undefined;
   const hasSourceControl = Boolean(activeProjectName && gitCwd);
   const showCompactOverflowActions = isCompactHeader && hasProjectScriptsControl;
+  const showOverflowDiagnosticsActions = showDownloadableDiagnostics;
 
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
@@ -391,19 +401,27 @@ export const ChatHeader = memo(function ChatHeader({
                   <FolderTreeIcon aria-hidden="true" className="size-4" />
                   File explorer
                 </MenuItem>
-                <MenuSeparator />
+                {showCompactOverflowActions || showOverflowDiagnosticsActions ? (
+                  <MenuSeparator />
+                ) : null}
               </>
             ) : null}
             {showCompactOverflowActions && hasProjectScriptsControl
               ? renderProjectScriptsControl(true)
               : null}
-            {showCompactOverflowActions && hasProjectScriptsControl ? <MenuSeparator /> : null}
-            <MenuItem onClick={forceRefreshApp}>
-              <RefreshCwIcon aria-hidden="true" className="size-4" />
-              Force refresh
-            </MenuItem>
-            {showDownloadableDiagnostics ? (
+            {showCompactOverflowActions &&
+            hasProjectScriptsControl &&
+            showOverflowDiagnosticsActions ? (
+              <MenuSeparator />
+            ) : null}
+            {showOverflowDiagnosticsActions ? (
               <>
+                {showForceRefreshAction ? (
+                  <MenuItem onClick={forceRefreshApp}>
+                    <RefreshCwIcon aria-hidden="true" className="size-4" />
+                    Force refresh
+                  </MenuItem>
+                ) : null}
                 <MenuSeparator />
                 <MenuItem onClick={handleExportTimelineDiagnostics}>
                   <DownloadIcon aria-hidden="true" className="size-4" />

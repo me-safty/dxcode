@@ -45,6 +45,7 @@ interface ServiceWorkerTestHarness {
   readonly getDisplayedNotificationCount: () => number;
   readonly dispatchPush: (payload: unknown) => Promise<void>;
   readonly dispatchNotificationClick: (index?: number) => Promise<void>;
+  readonly dispatchNotificationClose: (index?: number) => Promise<void>;
   readonly removeAppBadgeSupport: () => void;
   readonly addClient: (options: {
     readonly url: string;
@@ -318,6 +319,27 @@ this.__t3ServiceWorkerTestExports = {
       }
       await Promise.all(waitUntilPromises);
     },
+    dispatchNotificationClose: async (index = 0) => {
+      const notification = displayedNotifications.filter(
+        (candidate) => candidate.__closed !== true,
+      )[index];
+      if (!notification) {
+        throw new Error(`No displayed notification at index ${index}`);
+      }
+      // The browser removes the notification before dispatching notificationclose.
+      notification.close();
+      const waitUntilPromises: Array<Promise<unknown>> = [];
+      const event = {
+        notification,
+        waitUntil: (promise: Promise<unknown>) => {
+          waitUntilPromises.push(Promise.resolve(promise));
+        },
+      };
+      for (const listener of eventListeners.notificationclose ?? []) {
+        listener(event);
+      }
+      await Promise.all(waitUntilPromises);
+    },
     addClient: (options) => {
       (context.__windowClients as Array<Record<string, unknown>>).push(makeClient(options));
     },
@@ -360,19 +382,68 @@ describe("t3-service-worker app badge", () => {
     vi.restoreAllMocks();
   });
 
-  it("sets the numeric badge from displayed notifications after pushes", async () => {
+  it("counts distinct threads with completed turns after pushes", async () => {
     await harness.dispatchPush({
-      tag: "thread-1",
+      tag: "thread:thread-1:turn:turn-1",
       url: TARGET_URL,
     });
     await harness.dispatchPush({
-      tag: "thread-2",
+      tag: "thread:thread-2:turn:turn-1",
       url: `${ORIGIN}/env-1/thread-2`,
     });
 
     expect(harness.getDisplayedNotificationCount()).toBe(2);
     expect(harness.getBadgeSetCalls()).toEqual([1, 2]);
     expect(harness.getBadgeClearCallCount()).toBe(0);
+  });
+
+  it("does not badge approval or user-input request notifications", async () => {
+    await harness.dispatchPush({
+      tag: "thread:thread-1:approval:activity-1",
+      url: TARGET_URL,
+    });
+    await harness.dispatchPush({
+      tag: "thread:thread-1:input:activity-2",
+      url: TARGET_URL,
+    });
+
+    expect(harness.getDisplayedNotificationCount()).toBe(2);
+    expect(harness.getBadgeSetCalls()).toEqual([]);
+  });
+
+  it("does not badge notifications with the default tag", async () => {
+    await harness.dispatchPush({ url: TARGET_URL });
+
+    expect(harness.getDisplayedNotificationCount()).toBe(1);
+    expect(harness.getBadgeSetCalls()).toEqual([]);
+  });
+
+  it("counts a single thread once when multiple turns complete", async () => {
+    await harness.dispatchPush({
+      tag: "thread:thread-1:turn:turn-1",
+      url: TARGET_URL,
+    });
+    await harness.dispatchPush({
+      tag: "thread:thread-1:turn:turn-2",
+      url: TARGET_URL,
+    });
+
+    expect(harness.getBadgeSetCalls()).toEqual([1, 1]);
+    expect(harness.getBadgeClearCallCount()).toBe(0);
+  });
+
+  it("closes prior notifications for a thread when a new turn completes", async () => {
+    await harness.dispatchPush({
+      tag: "thread:thread-1:approval:activity-1",
+      url: TARGET_URL,
+    });
+    await harness.dispatchPush({
+      tag: "thread:thread-1:turn:turn-1",
+      url: TARGET_URL,
+    });
+
+    expect(harness.getDisplayedNotificationCount()).toBe(1);
+    expect(harness.getBadgeSetCalls()).toEqual([1]);
   });
 
   it("skips push badge writes while a visible same-origin page owns the badge", async () => {
@@ -383,7 +454,7 @@ describe("t3-service-worker app badge", () => {
     });
 
     await harness.dispatchPush({
-      tag: "thread-1",
+      tag: "thread:thread-1:turn:turn-1",
       url: TARGET_URL,
     });
 
@@ -394,11 +465,11 @@ describe("t3-service-worker app badge", () => {
 
   it("decrements and clears the badge when notifications are clicked", async () => {
     await harness.dispatchPush({
-      tag: "thread-1",
+      tag: "thread:thread-1:turn:turn-1",
       url: TARGET_URL,
     });
     await harness.dispatchPush({
-      tag: "thread-2",
+      tag: "thread:thread-2:turn:turn-1",
       url: `${ORIGIN}/env-1/thread-2`,
     });
 
@@ -415,11 +486,45 @@ describe("t3-service-worker app badge", () => {
     expect(harness.getBadgeClearCallCount()).toBe(1);
   });
 
+  it("resyncs the badge when a notification is dismissed", async () => {
+    await harness.dispatchPush({
+      tag: "thread:thread-1:turn:turn-1",
+      url: TARGET_URL,
+    });
+    await harness.dispatchPush({
+      tag: "thread:thread-2:turn:turn-1",
+      url: `${ORIGIN}/env-1/thread-2`,
+    });
+
+    await harness.dispatchNotificationClose(0);
+
+    expect(harness.getDisplayedNotificationCount()).toBe(1);
+    expect(harness.getBadgeSetCalls()).toEqual([1, 2, 1]);
+    expect(harness.getBadgeClearCallCount()).toBe(0);
+  });
+
+  it("skips dismissal resync while a visible same-origin page owns the badge", async () => {
+    await harness.dispatchPush({
+      tag: "thread:thread-1:turn:turn-1",
+      url: TARGET_URL,
+    });
+    harness.addClient({
+      url: HOME_URL,
+      focused: true,
+      visibilityState: "visible",
+    });
+
+    await harness.dispatchNotificationClose(0);
+
+    expect(harness.getBadgeSetCalls()).toEqual([1]);
+    expect(harness.getBadgeClearCallCount()).toBe(0);
+  });
+
   it("does nothing when app badge support is unavailable", async () => {
     harness.removeAppBadgeSupport();
 
     await harness.dispatchPush({
-      tag: "thread-1",
+      tag: "thread:thread-1:turn:turn-1",
       url: TARGET_URL,
     });
 
