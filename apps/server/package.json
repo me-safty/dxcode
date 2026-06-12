@@ -16,6 +16,8 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/bin.ts",
+    "dev:debug": "node --watch --inspect=127.0.0.1:9229 --inspect-brk src/bin.ts",
+    "dev:debug:resume": "node --watch --inspect=127.0.0.1:9229 src/bin.ts",
     "build:bundle": "vp pack",
     "start": "node dist/bin.mjs",
     "typecheck": "tsgo --noEmit",

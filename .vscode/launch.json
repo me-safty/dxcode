@@ -1,0 +1,212 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "attach",
+      "name": "Attach: apps/server (src/bin.ts)",
+      "port": 9229,
+      "address": "127.0.0.1",
+      "restart": true,
+      "localRoot": "${workspaceFolder}/apps/server",
+      "remoteRoot": "${workspaceFolder}/apps/server",
+      "outFiles": [
+        "${workspaceFolder}/apps/server/dist/**/*.js",
+        "${workspaceFolder}/apps/server/src/**/*.ts"
+      ],
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch: apps/server (break on start)",
+      "program": "${workspaceFolder}/apps/server/src/bin.ts",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--watch", "--inspect=127.0.0.1:9229", "--inspect-brk"],
+      "cwd": "${workspaceFolder}/apps/server",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "outFiles": [
+        "${workspaceFolder}/apps/server/dist/**/*.js",
+        "${workspaceFolder}/apps/server/src/**/*.ts"
+      ],
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch: apps/server (no break)",
+      "program": "${workspaceFolder}/apps/server/src/bin.ts",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--watch", "--inspect=127.0.0.1:9229"],
+      "cwd": "${workspaceFolder}/apps/server",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "outFiles": [
+        "${workspaceFolder}/apps/server/dist/**/*.js",
+        "${workspaceFolder}/apps/server/src/**/*.ts"
+      ],
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      "type": "node",
+      "request": "attach",
+      "name": "Attach: apps/web (vp dev)",
+      "port": 9230,
+      "address": "127.0.0.1",
+      "restart": true,
+      "localRoot": "${workspaceFolder}/apps/web",
+      "remoteRoot": "${workspaceFolder}/apps/web",
+      "outFiles": [
+        "${workspaceFolder}/apps/web/src/**/*.{ts,tsx}",
+        "${workspaceFolder}/apps/web/dist/**/*.js"
+      ],
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch: apps/web (vp dev, no break)",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@t3tools/web", "dev:debug"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "outFiles": [
+        "${workspaceFolder}/apps/web/src/**/*.{ts,tsx}",
+        "${workspaceFolder}/apps/web/dist/**/*.js"
+      ],
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch: apps/web (vp dev, break on start)",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@t3tools/web", "dev:debug:brk"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "outFiles": [
+        "${workspaceFolder}/apps/web/src/**/*.{ts,tsx}",
+        "${workspaceFolder}/apps/web/dist/**/*.js"
+      ],
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      "type": "node",
+      "request": "attach",
+      "name": "Attach: apps/mobile (expo start)",
+      "port": 9231,
+      "address": "127.0.0.1",
+      "restart": true,
+      "localRoot": "${workspaceFolder}/apps/mobile",
+      "remoteRoot": "${workspaceFolder}/apps/mobile",
+      "outFiles": [
+        "${workspaceFolder}/apps/mobile/**/*.{ts,tsx}",
+        "${workspaceFolder}/apps/mobile/.expo/**"
+      ],
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch: apps/mobile (expo start, no break)",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@t3tools/mobile", "dev:debug"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "outFiles": [
+        "${workspaceFolder}/apps/mobile/**/*.{ts,tsx}",
+        "${workspaceFolder}/apps/mobile/.expo/**"
+      ],
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch: apps/mobile (expo start, break on start)",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@t3tools/mobile", "dev:debug:brk"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "outFiles": [
+        "${workspaceFolder}/apps/mobile/**/*.{ts,tsx}",
+        "${workspaceFolder}/apps/mobile/.expo/**"
+      ],
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      "type": "node",
+      "request": "attach",
+      "name": "Attach: dev-runner (monorepo)",
+      "port": 9232,
+      "address": "127.0.0.1",
+      "restart": true,
+      "localRoot": "${workspaceFolder}",
+      "remoteRoot": "${workspaceFolder}",
+      "outFiles": [
+        "${workspaceFolder}/scripts/**/*.ts",
+        "${workspaceFolder}/apps/server/src/**/*.ts",
+        "${workspaceFolder}/apps/web/src/**/*.{ts,tsx}"
+      ],
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch: dev-runner (no break)",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev:debug"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "outFiles": [
+        "${workspaceFolder}/scripts/**/*.ts",
+        "${workspaceFolder}/apps/server/src/**/*.ts",
+        "${workspaceFolder}/apps/web/src/**/*.{ts,tsx}"
+      ],
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch: dev-runner (break on start)",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev:debug:brk"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "outFiles": [
+        "${workspaceFolder}/scripts/**/*.ts",
+        "${workspaceFolder}/apps/server/src/**/*.ts",
+        "${workspaceFolder}/apps/web/src/**/*.{ts,tsx}"
+      ],
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Server (debug)",
+      "configurations": ["Launch: apps/server (break on start)"],
+      "stopAll": true
+    },
+    {
+      "name": "Web (debug)",
+      "configurations": ["Launch: apps/web (vp dev, break on start)"],
+      "stopAll": true
+    },
+    {
+      "name": "Mobile (debug)",
+      "configurations": ["Launch: apps/mobile (expo start, break on start)"],
+      "stopAll": true
+    },
+    {
+      "name": "Dev runner (debug)",
+      "configurations": ["Launch: dev-runner (break on start)"],
+      "stopAll": true
+    }
+  ]
+}

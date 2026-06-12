@@ -7,6 +7,8 @@
     "dev": "node scripts/dev-runner.ts dev",
     "dev:server": "node scripts/dev-runner.ts dev:server",
     "dev:web": "node scripts/dev-runner.ts dev:web",
+    "dev:debug": "NODE_OPTIONS=--inspect=127.0.0.1:9232 node scripts/dev-runner.ts dev",
+    "dev:debug:brk": "NODE_OPTIONS='--inspect=127.0.0.1:9232 --inspect-brk' node scripts/dev-runner.ts dev",
     "start": "vp run --filter t3 start",
     "build": "vp run --filter './apps/*' --filter './packages/*' --filter './oxlint-plugin-t3code' --filter './scripts' build",
     "typecheck": "vp run -r --concurrency-limit 2 typecheck",

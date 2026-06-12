@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vp dev",
+    "dev:debug": "NODE_OPTIONS=--inspect=127.0.0.1:9230 vp dev",
+    "dev:debug:brk": "NODE_OPTIONS='--inspect=127.0.0.1:9230 --inspect-brk' vp dev",
     "build": "vp build",
     "preview": "vp preview",
     "typecheck": "tsgo --noEmit",
