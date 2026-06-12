@@ -9,15 +9,21 @@ const NOTIFICATION_TITLE_SOURCE_SUFFIX = /(?:^|\s+)from\s+Salchi\s*$/i;
 // public plain JS asset, so it cannot import the TypeScript helper directly.
 const PENDING_NOTIFICATION_CLICK_CACHE_NAME = "t3-notification-click-v1";
 const PENDING_NOTIFICATION_CLICK_REQUEST_PATH = "/__t3-notification-click/pending";
+// Matches turn-completion notification tags (thread:{threadId}:turn:{turnId}).
+// The app icon badge counts only completed turns, so approval/input request
+// notifications and the default "salchi" tag must be excluded.
+const TURN_NOTIFICATION_TAG_PATTERN = /^thread:(.+):turn:[^:]+$/;
+const THREAD_NOTIFICATION_TAG_PREFIX = /^thread:(.+?):/;
 
 self.addEventListener("push", (event) => {
   const payload = readPushPayload(event);
   const title = notificationTitle(payload.title);
+  const tag = payload.tag || "salchi";
   const notification = {
     body: payload.body || undefined,
     icon: "/salchi-pwa-192.png",
     badge: "/salchi-pwa-192.png",
-    tag: payload.tag || "t3code",
+    tag,
     data: {
       url: payload.url || DEFAULT_NOTIFICATION_URL,
     },
@@ -25,6 +31,12 @@ self.addEventListener("push", (event) => {
 
   event.waitUntil(
     (async () => {
+      // A completed turn supersedes the thread's earlier prompts (older turns,
+      // approval/input requests). Non-turn pushes (approval/input) must not
+      // close a prior completed-turn notification, which still owns the badge.
+      if (TURN_NOTIFICATION_TAG_PATTERN.test(tag)) {
+        await closeSupersededThreadNotifications(tag);
+      }
       await self.registration.showNotification(title, notification);
       await syncDisplayedNotificationBadge({ skipVisibleClient: true });
     })(),
@@ -41,6 +53,10 @@ self.addEventListener("notificationclick", (event) => {
       await openNotificationUrl(url);
     })(),
   );
+});
+
+self.addEventListener("notificationclose", (event) => {
+  event.waitUntil(syncDisplayedNotificationBadge({ skipVisibleClient: true }));
 });
 
 function readPushPayload(event) {
@@ -146,6 +162,18 @@ async function hasVisibleSameOriginWindowClient() {
   return clients.some((client) => isVisibleSameOriginClient(client));
 }
 
+function countUnseenTurnCompletionThreads(notifications) {
+  const threadIds = new Set();
+  for (const notification of notifications) {
+    const tag = typeof notification.tag === "string" ? notification.tag : "";
+    const match = TURN_NOTIFICATION_TAG_PATTERN.exec(tag);
+    if (match) {
+      threadIds.add(match[1]);
+    }
+  }
+  return threadIds.size;
+}
+
 async function syncDisplayedNotificationBadge(options = {}) {
   if (!canSetAppBadge() || typeof self.registration?.getNotifications !== "function") {
     return false;
@@ -156,7 +184,29 @@ async function syncDisplayedNotificationBadge(options = {}) {
   }
 
   const notifications = await self.registration.getNotifications();
-  return writeServiceWorkerAppBadge(notifications.length);
+  return writeServiceWorkerAppBadge(countUnseenTurnCompletionThreads(notifications));
+}
+
+async function closeSupersededThreadNotifications(tag) {
+  if (typeof tag !== "string" || typeof self.registration?.getNotifications !== "function") {
+    return;
+  }
+  const match = THREAD_NOTIFICATION_TAG_PREFIX.exec(tag);
+  if (match === null) {
+    return;
+  }
+  const prefix = `thread:${match[1]}:`;
+  const notifications = await self.registration.getNotifications();
+  for (const notification of notifications) {
+    if (
+      typeof notification.tag === "string" &&
+      notification.tag !== tag &&
+      notification.tag.startsWith(prefix) &&
+      typeof notification.close === "function"
+    ) {
+      notification.close();
+    }
+  }
 }
 
 async function writeServiceWorkerAppBadge(count) {
