@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "expo start --clear",
     "dev:client": "APP_VARIANT=development expo start --dev-client --clear",
+    "dev:debug": "NODE_OPTIONS=--inspect=127.0.0.1:9231 expo start --clear",
+    "dev:debug:brk": "NODE_OPTIONS='--inspect=127.0.0.1:9231 --inspect-brk' expo start --clear",
     "start": "expo start",
     "start:dev": "APP_VARIANT=development expo start",
     "start:preview": "APP_VARIANT=preview expo start",
