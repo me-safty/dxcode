@@ -6,6 +6,12 @@
   - If changing native mobile code, `vp run lint:mobile` must also pass.
 - Use `vp test` for the built-in Vite+ test command and `vp run test` when you specifically need the `test` package script.
 
+## Operational Safety
+
+- Do not restart, reload, stop, kill, or otherwise disrupt running services unless the user explicitly asks for that action in the current task.
+- Pulling code, building artifacts, running checks, inspecting status, or deploying files does not imply permission to restart a service. If a restart appears necessary, stop and ask first.
+- Treat shared or deployed service processes as potentially hosting active user work. Prefer non-disruptive inspection and verification.
+
 ## Project Snapshot
 
 T3 Code is a minimal web GUI for using coding agents like Codex and Claude.
