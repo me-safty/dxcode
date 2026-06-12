@@ -167,17 +167,29 @@ function mapSession(session: OrchestrationSession): ThreadSession {
 }
 
 function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage): ChatMessage {
-  const attachments = message.attachments?.map((attachment) => ({
-    type: "image" as const,
-    id: attachment.id,
-    name: attachment.name,
-    mimeType: attachment.mimeType,
-    sizeBytes: attachment.sizeBytes,
-    previewUrl: resolveEnvironmentHttpUrl({
-      environmentId,
-      pathname: attachmentPreviewRoutePath(attachment.id),
-    }),
-  }));
+  const attachments = message.attachments?.map((attachment) => {
+    if (attachment.type === "image") {
+      return {
+        type: "image" as const,
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        previewUrl: resolveEnvironmentHttpUrl({
+          environmentId,
+          pathname: attachmentPreviewRoutePath(attachment.id),
+        }),
+      };
+    }
+    return {
+      type: "file" as const,
+      id: attachment.id,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      workspacePath: attachment.workspacePath,
+    };
+  });
 
   return {
     id: message.id,

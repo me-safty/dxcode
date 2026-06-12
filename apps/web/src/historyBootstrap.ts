@@ -20,16 +20,29 @@ function messageRoleLabel(message: ChatMessage): "USER" | "ASSISTANT" {
 
 function attachmentSummary(message: ChatMessage): string | null {
   const imageAttachments = message.attachments?.filter((attachment) => attachment.type === "image");
-  const count = imageAttachments?.length ?? 0;
-  if (count === 0) {
+  const fileAttachments = message.attachments?.filter((attachment) => attachment.type === "file");
+  const imageCount = imageAttachments?.length ?? 0;
+  const fileCount = fileAttachments?.length ?? 0;
+  if (imageCount === 0 && fileCount === 0) {
     return null;
   }
 
-  const names = imageAttachments?.slice(0, 3).map((image) => image.name) ?? [];
-  const namesSummary = names.join(", ");
-  const extraCount = count - names.length;
-  const extraSummary = extraCount > 0 ? ` (+${extraCount} more)` : "";
-  return `[Attached image${count === 1 ? "" : "s"}: ${namesSummary}${extraSummary}]`;
+  const parts: string[] = [];
+  if (imageCount > 0) {
+    const imageNames = imageAttachments?.slice(0, 3).map((image) => image.name) ?? [];
+    const imageNamesSummary = imageNames.join(", ");
+    const extraImageCount = imageCount - imageNames.length;
+    const extraImageSummary = extraImageCount > 0 ? ` (+${extraImageCount} more)` : "";
+    parts.push(`image${imageCount === 1 ? "" : "s"}: ${imageNamesSummary}${extraImageSummary}`);
+  }
+  if (fileCount > 0) {
+    const fileNames = fileAttachments?.slice(0, 3).map((file) => file.name) ?? [];
+    const fileNamesSummary = fileNames.join(", ");
+    const extraFileCount = fileCount - fileNames.length;
+    const extraFileSummary = extraFileCount > 0 ? ` (+${extraFileCount} more)` : "";
+    parts.push(`file${fileCount === 1 ? "" : "s"}: ${fileNamesSummary}${extraFileSummary}`);
+  }
+  return `[Attached ${parts.join("; ")}]`;
 }
 
 function buildMessageBlock(message: ChatMessage): string {

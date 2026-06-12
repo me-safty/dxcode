@@ -80,6 +80,7 @@ interface ProjectorDefinition {
 interface AttachmentSideEffects {
   readonly deletedThreadIds: Set<string>;
   readonly prunedThreadRelativePaths: Map<string, Set<string>>;
+  readonly prunedThreadFilePaths: Map<string, Set<string>>;
 }
 
 const materializeAttachmentsForProjection = Effect.fn("materializeAttachmentsForProjection")(
@@ -325,12 +326,31 @@ function collectThreadAttachmentRelativePaths(
   return relativePaths;
 }
 
+function collectThreadFileAttachmentPaths(
+  messages: ReadonlyArray<ProjectionThreadMessage>,
+  pathService: Path.Path,
+): Set<string> {
+  const fileNames = new Set<string>();
+  for (const message of messages) {
+    for (const attachment of message.attachments ?? []) {
+      if (attachment.type !== "file") {
+        continue;
+      }
+      const fileName = pathService.basename(attachment.workspacePath);
+      fileNames.add(fileName);
+    }
+  }
+  return fileNames;
+}
+
 const runAttachmentSideEffects = Effect.fn("runAttachmentSideEffects")(function* (
   sideEffects: AttachmentSideEffects,
 ) {
   const serverConfig = yield* Effect.service(ServerConfig);
   const fileSystem = yield* Effect.service(FileSystem.FileSystem);
   const path = yield* Effect.service(Path.Path);
+  const projectionThreadRepository = yield* ProjectionThreadRepository;
+  const projectionProjectRepository = yield* ProjectionProjectRepository;
 
   const attachmentsRootDir = serverConfig.attachmentsDir;
   const readAttachmentRootEntries = fileSystem
@@ -429,7 +449,71 @@ const runAttachmentSideEffects = Effect.fn("runAttachmentSideEffects")(function*
     );
   });
 
+  const deleteThreadWorkspaceFiles = Effect.fn("deleteThreadWorkspaceFiles")(function* (
+    threadId: string,
+  ) {
+    const threadRow = yield* projectionThreadRepository.getById({
+      threadId: ThreadId.make(threadId),
+    });
+    if (Option.isNone(threadRow)) {
+      return;
+    }
+    const projectRow = yield* projectionProjectRepository.getById({
+      projectId: threadRow.value.projectId,
+    });
+    if (Option.isNone(projectRow)) {
+      return;
+    }
+    const workspaceRoot = projectRow.value.workspaceRoot;
+    const uploadDir = path.join(workspaceRoot, ".morecode", "uploads", threadId);
+    yield* fileSystem
+      .remove(uploadDir, { force: true, recursive: true })
+      .pipe(Effect.catch(() => Effect.void));
+  });
+
+  const pruneThreadWorkspaceFiles = Effect.fn("pruneThreadWorkspaceFiles")(function* (
+    threadId: string,
+    keptFileNames: Set<string>,
+  ) {
+    const threadRow = yield* projectionThreadRepository.getById({
+      threadId: ThreadId.make(threadId),
+    });
+    if (Option.isNone(threadRow)) {
+      return;
+    }
+    const projectRow = yield* projectionProjectRepository.getById({
+      projectId: threadRow.value.projectId,
+    });
+    if (Option.isNone(projectRow)) {
+      return;
+    }
+    const workspaceRoot = projectRow.value.workspaceRoot;
+    const uploadDir = path.join(workspaceRoot, ".morecode", "uploads", threadId);
+    const entries = yield* fileSystem
+      .readDirectory(uploadDir, { recursive: false })
+      .pipe(Effect.orElseSucceed(() => [] as Array<string>));
+    yield* Effect.forEach(
+      entries,
+      (entry) =>
+        Effect.gen(function* () {
+          const filePath = path.join(uploadDir, entry);
+          const fileInfo = yield* fileSystem.stat(filePath).pipe(Effect.orElseSucceed(() => null));
+          if (!fileInfo || fileInfo.type !== "File") {
+            return;
+          }
+          if (!keptFileNames.has(entry)) {
+            yield* fileSystem.remove(filePath, { force: true });
+          }
+        }),
+      { concurrency: 1 },
+    );
+  });
+
   yield* Effect.forEach(sideEffects.deletedThreadIds, deleteThreadAttachments, {
+    concurrency: 1,
+  });
+
+  yield* Effect.forEach(sideEffects.deletedThreadIds, deleteThreadWorkspaceFiles, {
     concurrency: 1,
   });
 
@@ -437,6 +521,12 @@ const runAttachmentSideEffects = Effect.fn("runAttachmentSideEffects")(function*
     sideEffects.prunedThreadRelativePaths.entries(),
     ([threadId, keptThreadRelativePaths]) =>
       pruneThreadAttachments(threadId, keptThreadRelativePaths),
+    { concurrency: 1 },
+  );
+
+  yield* Effect.forEach(
+    sideEffects.prunedThreadFilePaths.entries(),
+    ([threadId, keptFileNames]) => pruneThreadWorkspaceFiles(threadId, keptFileNames),
     { concurrency: 1 },
   );
 });
@@ -451,12 +541,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
     const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
     const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
+    const path = yield* Path.Path;
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
-
     const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
     const serverConfig = yield* ServerConfig;
 
     const applyProjectsProjection: ProjectorDefinition["apply"] = Effect.fn(
@@ -861,6 +950,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           attachmentSideEffects.prunedThreadRelativePaths.set(
             event.payload.threadId,
             collectThreadAttachmentRelativePaths(event.payload.threadId, keptRows),
+          );
+          attachmentSideEffects.prunedThreadFilePaths.set(
+            event.payload.threadId,
+            collectThreadFileAttachmentPaths(keptRows, path),
           );
           return;
         }
@@ -1419,6 +1512,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       const attachmentSideEffects: AttachmentSideEffects = {
         deletedThreadIds: new Set<string>(),
         prunedThreadRelativePaths: new Map<string, Set<string>>(),
+        prunedThreadFilePaths: new Map<string, Set<string>>(),
       };
 
       yield* sql.withTransaction(
@@ -1468,6 +1562,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
         Effect.provideService(ServerConfig, serverConfig),
+        Effect.provideService(ProjectionThreadRepository, projectionThreadRepository),
+        Effect.provideService(ProjectionProjectRepository, projectionProjectRepository),
         Effect.asVoid,
         Effect.catchTag("SqlError", (sqlError) =>
           Effect.fail(toPersistenceSqlError("ProjectionPipeline.projectEvent:query")(sqlError)),
@@ -1482,6 +1578,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
       Effect.provideService(ServerConfig, serverConfig),
+      Effect.provideService(ProjectionThreadRepository, projectionThreadRepository),
+      Effect.provideService(ProjectionProjectRepository, projectionProjectRepository),
       Effect.asVoid,
       Effect.tap(() =>
         Effect.logDebug("orchestration projection pipeline bootstrapped").pipe(

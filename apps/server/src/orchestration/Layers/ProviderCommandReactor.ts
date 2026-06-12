@@ -62,6 +62,19 @@ function toNonEmptyProviderInput(value: string | undefined): string | undefined 
   return normalized && normalized.length > 0 ? normalized : undefined;
 }
 
+function appendFileReferencesToMessage(
+  message: string,
+  attachments: ReadonlyArray<ChatAttachment> | undefined,
+): string {
+  const fileAttachments = attachments?.filter((a) => a.type === "file") ?? [];
+  if (fileAttachments.length === 0) {
+    return message;
+  }
+  const fileLines = fileAttachments.map((file) => `- ${file.name}: ${file.workspacePath}`);
+  const referenceBlock = ["", "Attached files:", ...fileLines].join("\n");
+  return message + referenceBlock;
+}
+
 function withSectionContext(message: string, thread: OrchestrationThread): string {
   const context = thread.sectionContextSnapshot;
   if (!context || context.markdown.trim().length === 0) {
@@ -566,8 +579,15 @@ const make = Effect.gen(function* () {
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
-    const normalizedInput = toNonEmptyProviderInput(withSectionContext(input.messageText, thread));
+    const messageWithFileReferences = appendFileReferencesToMessage(
+      input.messageText,
+      input.attachments,
+    );
+    const normalizedInput = toNonEmptyProviderInput(
+      withSectionContext(messageWithFileReferences, thread),
+    );
     const normalizedAttachments = input.attachments ?? [];
+    const providerAttachments = normalizedAttachments.filter((a) => a.type === "image");
     const activeSession = yield* providerService
       .listSessions()
       .pipe(
@@ -599,7 +619,7 @@ const make = Effect.gen(function* () {
     return {
       threadId: input.threadId,
       ...(normalizedInput ? { input: normalizedInput } : {}),
-      ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
+      ...(providerAttachments.length > 0 ? { attachments: providerAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     };
@@ -630,7 +650,7 @@ const make = Effect.gen(function* () {
 
       const generated = yield* textGeneration.generateBranchName({
         cwd,
-        message: input.messageText,
+        message: appendFileReferencesToMessage(input.messageText, input.attachments),
         ...(attachments.length > 0 ? { attachments } : {}),
         modelSelection,
       });
@@ -675,7 +695,7 @@ const make = Effect.gen(function* () {
 
         const generated = yield* textGeneration.generateThreadTitle({
           cwd: input.cwd,
-          message: input.messageText,
+          message: appendFileReferencesToMessage(input.messageText, input.attachments),
           ...(attachments.length > 0 ? { attachments } : {}),
           modelSelection,
         });

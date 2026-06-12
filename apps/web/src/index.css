@@ -7,8 +7,8 @@
 @theme inline {
   --animate-skeleton: skeleton 2s -1s infinite linear;
   --font-sans:
-    "DM Sans Variable", "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
-    sans-serif;
+    var(--app-font-family, "DM Sans Variable"), "DM Sans Variable", "DM Sans", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono:
     "SF Mono", "SFMono-Regular", "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace;
   --color-warning-foreground: var(--warning-foreground);
@@ -159,6 +159,7 @@
 
 body {
   font-family:
+    var(--app-font-family, "DM Sans Variable"),
     "DM Sans Variable",
     "DM Sans",
     -apple-system,

@@ -63,6 +63,11 @@ export function attachmentRelativePath(attachment: ChatAttachment): string {
       });
       return `${attachment.id}${extension}`;
     }
+    case "file": {
+      // File attachments are stored in the workspace, not the attachment store.
+      // Their path is derived from workspacePath on the attachment record.
+      throw new Error("File attachments are not stored in the attachment store.");
+    }
   }
 }
 
