@@ -3,11 +3,20 @@ import {
   CodexSettings,
   CursorSettings,
   GrokSettings,
+  KimiCodeSettings,
   OpenCodeSettings,
   ProviderDriverKind,
 } from "@t3tools/contracts";
 import type * as Schema from "effect/Schema";
-import { ClaudeAI, CursorIcon, GrokIcon, type Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import {
+  ClaudeAI,
+  CursorIcon,
+  GrokIcon,
+  KimiCodeIcon,
+  type Icon,
+  OpenAI,
+  OpenCodeIcon,
+} from "../Icons";
 
 type ProviderSettingsSchema = {
   readonly fields: Readonly<Record<string, Schema.Top>>;
@@ -60,6 +69,13 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     icon: GrokIcon,
     badgeLabel: "Early Access",
     settingsSchema: GrokSettings,
+  },
+  {
+    value: ProviderDriverKind.make("kimiCode"),
+    label: "Kimi Code",
+    icon: KimiCodeIcon,
+    badgeLabel: "Early Access",
+    settingsSchema: KimiCodeSettings,
   },
   {
     value: ProviderDriverKind.make("opencode"),

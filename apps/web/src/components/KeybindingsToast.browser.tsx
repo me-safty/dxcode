@@ -159,6 +159,7 @@ function createBaseServerConfig(): ServerConfig {
         },
         cursor: { enabled: true, binaryPath: "", apiEndpoint: "", customModels: [] },
         grok: { enabled: true, binaryPath: "", customModels: [] },
+        kimiCode: { enabled: true, binaryPath: "", customModels: [] },
         opencode: {
           enabled: true,
           binaryPath: "",
