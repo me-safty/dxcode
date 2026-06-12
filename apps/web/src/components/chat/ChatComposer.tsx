@@ -756,6 +756,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => selectedProviderEntry?.snapshot ?? null,
     [selectedProviderEntry],
   );
+  const selectedProviderFallbackSkills = useMemo(
+    () => selectedProviderStatus?.skills ?? [],
+    [selectedProviderStatus],
+  );
   const selectedProviderModels = useMemo<ReadonlyArray<ServerProvider["models"][number]>>(
     () => selectedProviderEntry?.models ?? [],
     [selectedProviderEntry],
@@ -902,7 +906,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     instanceId: selectedProviderStatus?.instanceId ?? null,
     cwd: gitCwd,
     enabled: isSkillTrigger,
-    fallbackSkills: selectedProviderStatus?.skills ?? [],
+    fallbackSkills: selectedProviderFallbackSkills,
   });
 
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
