@@ -10,6 +10,7 @@ const THREAD_ID = "thread-diff-browser";
 const {
   fileDiffRenderCalls,
   navigateSpy,
+  openWorkspaceFilePreviewSpy,
   parsedFilesRef,
   virtualizerRenderCalls,
   workingTreeDiffRef,
@@ -19,6 +20,7 @@ const {
     options: { collapsed?: boolean } | undefined;
   }>,
   navigateSpy: vi.fn(),
+  openWorkspaceFilePreviewSpy: vi.fn(),
   parsedFilesRef: {
     current: [] as Array<{
       cacheKey?: string;
@@ -198,6 +200,7 @@ vi.mock("../rightPanelGesture", () => ({
 
 vi.mock("../workspaceFilePreview", () => ({
   openPathInPreferredEditorOrFilePreview: vi.fn(async () => undefined),
+  openWorkspaceFilePreview: openWorkspaceFilePreviewSpy,
 }));
 
 vi.mock("../workspaceImagePreview", () => ({
@@ -222,6 +225,7 @@ describe("DiffPanel", () => {
   afterEach(() => {
     fileDiffRenderCalls.length = 0;
     virtualizerRenderCalls.length = 0;
+    openWorkspaceFilePreviewSpy.mockClear();
     parsedFilesRef.current = [];
     workingTreeDiffRef.current = "diff --git a/src/App.tsx b/src/App.tsx";
     vi.clearAllMocks();
@@ -266,6 +270,39 @@ describe("DiffPanel", () => {
       await vi.waitFor(() => {
         expect(fileDiffRenderCalls.at(-1)?.options?.collapsed).toBe(true);
       });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("opens a diff file in the workspace preview from the file header", async () => {
+    parsedFilesRef.current = [fileDiff("src/App.tsx")];
+    const screen = await render(<DiffPanel mode="sidebar" />);
+
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector('button[aria-label="Preview src/App.tsx"]')).not.toBeNull();
+      });
+
+      document
+        .querySelector<HTMLButtonElement>('button[aria-label="Preview src/App.tsx"]')
+        ?.click();
+
+      expect(openWorkspaceFilePreviewSpy).toHaveBeenCalledWith(
+        {
+          environmentId: ENVIRONMENT_ID,
+          cwd: "/repo/project",
+          relativePath: "src/App.tsx",
+          displayPath: "src/App.tsx",
+        },
+        {
+          returnTarget: {
+            kind: "diff",
+            diffSource: "unstaged",
+            diffFilePath: "src/App.tsx",
+          },
+        },
+      );
     } finally {
       await screen.unmount();
     }

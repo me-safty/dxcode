@@ -13,7 +13,9 @@ const CROSS_ORIGIN_URL = "https://elsewhere.example/env-1/thread-1";
 const DEFAULT_NOTIFICATION_TITLE = "Salchi";
 
 interface MockClientState {
+  readonly id: string;
   readonly url: string;
+  readonly controlled: boolean;
   readonly focusCalls: number;
   readonly navigateCalls: string[];
   readonly postMessageCalls: Array<{
@@ -28,6 +30,11 @@ interface ServiceWorkerTestHarness {
   readonly openWindowCalls: string[];
   readonly operationLog: string[];
   readonly getClients: () => MockClientState[];
+  readonly getBroadcastMessages: () => Array<{
+    readonly name: string;
+    readonly message: unknown;
+  }>;
+  readonly getBroadcastCloseCalls: () => string[];
   readonly getPendingClickWrites: () => Array<{
     readonly cacheName: string;
     readonly requestUrl: string;
@@ -35,6 +42,7 @@ interface ServiceWorkerTestHarness {
   }>;
   readonly addClient: (options: {
     readonly url: string;
+    readonly controlled?: boolean;
     readonly focusResult?: "self" | "throw";
     readonly focused?: boolean;
     readonly visibilityState?: "hidden" | "visible";
@@ -43,26 +51,36 @@ interface ServiceWorkerTestHarness {
   readonly setOpenWindowResult: (
     result: "undefined" | "client-at-url" | "client-at-home" | "throw",
   ) => void;
+  readonly removeBroadcastChannel: () => void;
 }
 
 function createServiceWorkerTestHarness(): ServiceWorkerTestHarness {
   const openWindowCalls: string[] = [];
   const operationLog: string[] = [];
+  const broadcastMessages: Array<{
+    name: string;
+    message: unknown;
+  }> = [];
+  const broadcastCloseCalls: string[] = [];
   const pendingClickWrites: Array<{
     cacheName: string;
     requestUrl: string;
     value: unknown;
   }> = [];
   let openWindowResult: "undefined" | "client-at-url" | "client-at-home" | "throw" = "undefined";
+  let nextClientId = 1;
   const makeClient = (options: {
     readonly url: string;
+    readonly controlled?: boolean;
     readonly focusResult?: "self" | "throw";
     readonly focused?: boolean;
     readonly visibilityState?: "hidden" | "visible";
     readonly navigateResult?: "self" | "null" | "throw";
   }) => {
     const client: Record<string, unknown> = {
+      id: `client-${nextClientId++}`,
       url: options.url,
+      __controlled: options.controlled ?? true,
       focused: options.focused === true,
       visibilityState: options.visibilityState ?? "visible",
       focusCalls: 0,
@@ -96,6 +114,27 @@ function createServiceWorkerTestHarness(): ServiceWorkerTestHarness {
     };
     return client;
   };
+  class MockBroadcastChannel {
+    readonly name: string;
+
+    constructor(name: string) {
+      this.name = name;
+    }
+
+    postMessage(message: unknown) {
+      operationLog.push("broadcast");
+      broadcastMessages.push({
+        name: this.name,
+        message,
+      });
+    }
+
+    close() {
+      operationLog.push("broadcast-close");
+      broadcastCloseCalls.push(this.name);
+    }
+  }
+
   const context: Record<string, unknown> = {
     Request,
     Response,
@@ -108,7 +147,13 @@ function createServiceWorkerTestHarness(): ServiceWorkerTestHarness {
       removeEventListener: vi.fn(),
       skipWaiting: vi.fn(),
       clients: {
-        matchAll: async () => context.__windowClients,
+        matchAll: async (options?: { readonly includeUncontrolled?: boolean }) => {
+          const clients = context.__windowClients as Array<Record<string, unknown>>;
+          if (options?.includeUncontrolled === true) {
+            return clients;
+          }
+          return clients.filter((client) => client.__controlled === true);
+        },
         openWindow: async (url: string) => {
           operationLog.push("openWindow");
           openWindowCalls.push(url);
@@ -137,6 +182,7 @@ function createServiceWorkerTestHarness(): ServiceWorkerTestHarness {
           },
         }),
       },
+      BroadcastChannel: MockBroadcastChannel,
     },
   };
 
@@ -162,18 +208,25 @@ this.__t3ServiceWorkerTestExports = {
     operationLog,
     getClients: () =>
       (context.__windowClients as Array<Record<string, unknown>>).map((client) => ({
+        id: String(client.id),
         url: String(client.url),
+        controlled: client.__controlled === true,
         focusCalls: Number(client.focusCalls ?? 0),
         navigateCalls: (client.navigateCalls as string[] | undefined) ?? [],
         postMessageCalls:
           (client.postMessageCalls as MockClientState["postMessageCalls"] | undefined) ?? [],
       })),
+    getBroadcastMessages: () => broadcastMessages,
+    getBroadcastCloseCalls: () => broadcastCloseCalls,
     getPendingClickWrites: () => pendingClickWrites,
     addClient: (options) => {
       (context.__windowClients as Array<Record<string, unknown>>).push(makeClient(options));
     },
     setOpenWindowResult: (result) => {
       openWindowResult = result;
+    },
+    removeBroadcastChannel: () => {
+      delete (context.self as Record<string, unknown>).BroadcastChannel;
     },
   };
 }
@@ -214,6 +267,55 @@ describe("t3-service-worker notification click navigation", () => {
   it("opens a new window with the full URL when no same-origin client exists", async () => {
     await openNotificationUrl(harness, TARGET_URL);
 
+    expect(harness.openWindowCalls).toEqual([TARGET_URL]);
+  });
+
+  it("broadcasts the notification click and closes the channel before window operations", async () => {
+    await openNotificationUrl(harness, TARGET_URL);
+
+    expect(harness.getBroadcastMessages()).toEqual([
+      {
+        name: "t3-notification-click",
+        message: {
+          type: "t3.notification-click",
+          url: TARGET_URL,
+          openedAt: expect.any(Number),
+        },
+      },
+    ]);
+    expect(harness.getBroadcastCloseCalls()).toEqual(["t3-notification-click"]);
+    expect(harness.operationLog.indexOf("persist")).toBeLessThan(
+      harness.operationLog.indexOf("broadcast"),
+    );
+    expect(harness.operationLog.indexOf("broadcast")).toBeLessThan(
+      harness.operationLog.indexOf("openWindow"),
+    );
+  });
+
+  it("broadcasts the notification click when an existing client handles the click", async () => {
+    harness.addClient({ url: TARGET_URL, focused: true });
+
+    await openNotificationUrl(harness, TARGET_URL);
+
+    expect(harness.getBroadcastMessages()).toEqual([
+      {
+        name: "t3-notification-click",
+        message: {
+          type: "t3.notification-click",
+          url: TARGET_URL,
+          openedAt: expect.any(Number),
+        },
+      },
+    ]);
+    expect(harness.getBroadcastCloseCalls()).toEqual(["t3-notification-click"]);
+  });
+
+  it("continues notification click handling when BroadcastChannel is unavailable", async () => {
+    harness.removeBroadcastChannel();
+
+    await openNotificationUrl(harness, TARGET_URL);
+
+    expect(harness.getBroadcastMessages()).toEqual([]);
     expect(harness.openWindowCalls).toEqual([TARGET_URL]);
   });
 
@@ -294,9 +396,33 @@ describe("t3-service-worker notification click navigation", () => {
     expect(harness.openWindowCalls).toEqual([]);
   });
 
+  it("focuses and posts to a controlled client without navigating", async () => {
+    harness.addClient({
+      url: HOME_URL,
+      focused: true,
+      navigateResult: "self",
+    });
+
+    await openNotificationUrl(harness, TARGET_URL);
+
+    const [client] = harness.getClients();
+    expect(client?.url).toBe(HOME_URL);
+    expect(client?.navigateCalls).toEqual([]);
+    expect(client?.focusCalls).toBe(1);
+    expect(client?.postMessageCalls).toEqual([
+      {
+        type: "t3.notification-click",
+        url: TARGET_URL,
+        openedAt: expect.any(Number),
+      },
+    ]);
+    expect(harness.openWindowCalls).toEqual([]);
+  });
+
   it("navigates a focused same-origin client before posting the click message", async () => {
     harness.addClient({
       url: HOME_URL,
+      controlled: false,
       focused: true,
       navigateResult: "self",
     });
@@ -320,6 +446,7 @@ describe("t3-service-worker notification click navigation", () => {
   it("navigates a hidden same-origin client without opening a new window", async () => {
     harness.addClient({
       url: HOME_URL,
+      controlled: false,
       visibilityState: "hidden",
       navigateResult: "self",
     });
@@ -343,6 +470,7 @@ describe("t3-service-worker notification click navigation", () => {
   it("focuses and posts without opening a new window when navigate is unavailable", async () => {
     harness.addClient({
       url: HOME_URL,
+      controlled: false,
       focused: true,
     });
 
@@ -365,6 +493,7 @@ describe("t3-service-worker notification click navigation", () => {
   it("focuses and posts without opening a new window when navigation returns null", async () => {
     harness.addClient({
       url: HOME_URL,
+      controlled: false,
       focused: true,
       navigateResult: "null",
     });
@@ -388,6 +517,7 @@ describe("t3-service-worker notification click navigation", () => {
   it("focuses and posts without opening a new window when navigation throws", async () => {
     harness.addClient({
       url: HOME_URL,
+      controlled: false,
       focused: true,
       navigateResult: "throw",
     });

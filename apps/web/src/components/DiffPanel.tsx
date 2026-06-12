@@ -8,6 +8,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   Columns2Icon,
+  EyeIcon,
   PanelRightCloseIcon,
   PilcrowIcon,
   Rows3Icon,
@@ -53,8 +54,13 @@ import { formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { Button } from "./ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
-import { openPathInPreferredEditorOrFilePreview } from "../workspaceFilePreview";
+import {
+  openPathInPreferredEditorOrFilePreview,
+  openWorkspaceFilePreview,
+  type WorkspaceFilePreviewDiffReturnTarget,
+} from "../workspaceFilePreview";
 import {
   isWorkspaceImagePreviewPath,
   resolveWorkspaceGitImagePreviewUrl,
@@ -559,6 +565,14 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     target?.scrollIntoView({ block: "nearest" });
   }, [selectedFilePath, renderableFiles]);
 
+  const buildDiffFileReturnTarget = useCallback(
+    (filePath: string): WorkspaceFilePreviewDiffReturnTarget => ({
+      kind: "diff",
+      ...(selectedDiffSource ? { diffSource: selectedDiffSource, diffFilePath: filePath } : {}),
+      ...(selectedTurn?.turnId ? { diffTurnId: selectedTurn.turnId, diffFilePath: filePath } : {}),
+    }),
+    [selectedDiffSource, selectedTurn?.turnId],
+  );
   const openDiffFileInEditor = useCallback(
     (filePath: string) => {
       const targetPath = activeCwd ? resolvePathLinkTarget(filePath, activeCwd) : filePath;
@@ -568,18 +582,30 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           ? { environmentId: activeDiffContext.environmentId }
           : {}),
         ...(activeCwd ? { cwd: activeCwd, displayPath: filePath } : {}),
-        returnTarget: {
-          kind: "diff",
-          ...(selectedDiffSource ? { diffSource: selectedDiffSource } : {}),
-          ...(selectedDiffSource ? { diffFilePath: filePath } : {}),
-          ...(selectedTurn?.turnId ? { diffTurnId: selectedTurn.turnId } : {}),
-          ...(selectedTurn?.turnId ? { diffFilePath: filePath } : {}),
-        },
+        returnTarget: buildDiffFileReturnTarget(filePath),
       }).catch((error) => {
         console.warn("Failed to open diff file in editor.", error);
       });
     },
-    [activeCwd, activeDiffContext?.environmentId, selectedDiffSource, selectedTurn?.turnId],
+    [activeCwd, activeDiffContext?.environmentId, buildDiffFileReturnTarget],
+  );
+  const openDiffFilePreview = useCallback(
+    (filePath: string) => {
+      if (!activeCwd || !activeDiffContext?.environmentId) {
+        return;
+      }
+
+      openWorkspaceFilePreview(
+        {
+          environmentId: activeDiffContext.environmentId,
+          cwd: activeCwd,
+          relativePath: filePath,
+          displayPath: filePath,
+        },
+        { returnTarget: buildDiffFileReturnTarget(filePath) },
+      );
+    },
+    [activeCwd, activeDiffContext?.environmentId, buildDiffFileReturnTarget],
   );
   const toggleDiffFileCollapsed = useCallback((fileKey: string) => {
     setCollapsedDiffFileKeys((current) => {
@@ -1074,26 +1100,52 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                         <FileDiff
                           fileDiff={fileDiff}
                           renderHeaderPrefix={() => (
-                            <button
-                              type="button"
-                              className={cn(
-                                "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
-                                getDiffCollapseIconClassName(fileDiff),
-                              )}
-                              aria-label={collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
-                              aria-expanded={!collapsed}
-                              title={collapsed ? "Expand diff" : "Collapse diff"}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                toggleDiffFileCollapsed(fileKey);
-                              }}
-                            >
-                              {collapsed ? (
-                                <ChevronRightIcon className="size-4" />
-                              ) : (
-                                <ChevronDownIcon className="size-4" />
-                              )}
-                            </button>
+                            <span className="inline-flex shrink-0 items-center gap-1">
+                              <button
+                                type="button"
+                                className={cn(
+                                  "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
+                                  getDiffCollapseIconClassName(fileDiff),
+                                )}
+                                aria-label={
+                                  collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`
+                                }
+                                aria-expanded={!collapsed}
+                                title={collapsed ? "Expand diff" : "Collapse diff"}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  toggleDiffFileCollapsed(fileKey);
+                                }}
+                              >
+                                {collapsed ? (
+                                  <ChevronRightIcon className="size-4" />
+                                ) : (
+                                  <ChevronDownIcon className="size-4" />
+                                )}
+                              </button>
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <Button
+                                      type="button"
+                                      size="icon-xs"
+                                      variant="ghost"
+                                      aria-label={`Preview ${filePath}`}
+                                      className="size-5 text-muted-foreground/75 hover:text-foreground"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openDiffFilePreview(filePath);
+                                      }}
+                                    />
+                                  }
+                                >
+                                  <EyeIcon className="size-3.5" />
+                                </TooltipTrigger>
+                                <TooltipPopup className="pointer-events-none" side="bottom">
+                                  Preview file
+                                </TooltipPopup>
+                              </Tooltip>
+                            </span>
                           )}
                           options={{
                             collapsed: collapsed || shouldRenderImagePreview,
