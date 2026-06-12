@@ -10,6 +10,8 @@ export interface AppBadgeNavigator {
 let badgeSyncInstalled = false;
 let syncScheduled = false;
 let lastRequestedBadgeCount: number | null = null;
+let appStoreUnsubscribe: (() => void) | null = null;
+let uiStateStoreUnsubscribe: (() => void) | null = null;
 
 function readBadgeNavigator(): AppBadgeNavigator | null {
   return typeof navigator === "undefined" ? null : (navigator as AppBadgeNavigator);
@@ -84,13 +86,50 @@ function scheduleAppBadgeSync(): void {
   queueMicrotask(syncAppBadge);
 }
 
+export function resyncAppBadge(): void {
+  lastRequestedBadgeCount = null;
+  scheduleAppBadgeSync();
+}
+
+function handleWindowFocus(): void {
+  resyncAppBadge();
+}
+
+function handleDocumentVisibilityChange(): void {
+  if (typeof document !== "undefined" && document.visibilityState === "visible") {
+    resyncAppBadge();
+  }
+}
+
 export function installPwaAppBadgeSync(): void {
   if (badgeSyncInstalled || !canUseAppBadge()) {
     return;
   }
 
   badgeSyncInstalled = true;
-  useStore.subscribe(scheduleAppBadgeSync);
-  useUiStateStore.subscribe(scheduleAppBadgeSync);
+  appStoreUnsubscribe = useStore.subscribe(scheduleAppBadgeSync);
+  uiStateStoreUnsubscribe = useUiStateStore.subscribe(scheduleAppBadgeSync);
+  if (typeof window !== "undefined") {
+    window.addEventListener("focus", handleWindowFocus);
+  }
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", handleDocumentVisibilityChange);
+  }
   scheduleAppBadgeSync();
+}
+
+export function __resetPwaAppBadgeSyncForTests(): void {
+  appStoreUnsubscribe?.();
+  uiStateStoreUnsubscribe?.();
+  appStoreUnsubscribe = null;
+  uiStateStoreUnsubscribe = null;
+  if (typeof window !== "undefined") {
+    window.removeEventListener("focus", handleWindowFocus);
+  }
+  if (typeof document !== "undefined") {
+    document.removeEventListener("visibilitychange", handleDocumentVisibilityChange);
+  }
+  badgeSyncInstalled = false;
+  syncScheduled = false;
+  lastRequestedBadgeCount = null;
 }

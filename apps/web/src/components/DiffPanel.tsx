@@ -4,11 +4,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import type { TurnId } from "@t3tools/contracts";
 import {
+  ArrowLeftIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   Columns2Icon,
-  EyeIcon,
+  FileSearchIcon,
   PanelRightCloseIcon,
   PilcrowIcon,
   Rows3Icon,
@@ -50,6 +51,7 @@ import {
   type ThreadRouteTarget,
 } from "../threadRoutes";
 import { useSettings } from "../hooks/useSettings";
+import { useSourceControlPanelState } from "../sourceControlPanelState";
 import { formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { Button } from "./ui/button";
@@ -296,6 +298,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   });
   const diffSearch = useSearch({ strict: false, select: (search) => parseDiffRouteSearch(search) });
   const diffOpen = diffSearch.diff === "1";
+  const sourceControlOpen = useSourceControlPanelState().open;
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const routeDraftId = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
   const serverThread = useStore(
@@ -767,6 +770,18 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   })();
   const headerRow = (
     <>
+      {sourceControlOpen ? (
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label="Back to source control"
+          title="Back to source control"
+          className="shrink-0 [-webkit-app-region:no-drag]"
+          onClick={closeDiffPanel}
+        >
+          <ArrowLeftIcon className="size-3.5" />
+        </Button>
+      ) : null}
       <div className="hidden min-w-0 flex-1 [-webkit-app-region:no-drag] max-[760px]:block">
         <Select
           value={diffSelectionValue}
@@ -782,7 +797,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
             selectTurn(value as TurnId);
           }}
         >
-          <SelectTrigger className="w-full" aria-label="Diff selection">
+          <SelectTrigger className="w-full min-w-0" aria-label="Diff selection">
             <SelectValue>{selectedDiffDropdownLabel}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -1100,52 +1115,50 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                         <FileDiff
                           fileDiff={fileDiff}
                           renderHeaderPrefix={() => (
-                            <span className="inline-flex shrink-0 items-center gap-1">
-                              <button
-                                type="button"
-                                className={cn(
-                                  "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
-                                  getDiffCollapseIconClassName(fileDiff),
-                                )}
-                                aria-label={
-                                  collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`
+                            <button
+                              type="button"
+                              className={cn(
+                                "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
+                                getDiffCollapseIconClassName(fileDiff),
+                              )}
+                              aria-label={collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
+                              aria-expanded={!collapsed}
+                              title={collapsed ? "Expand diff" : "Collapse diff"}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleDiffFileCollapsed(fileKey);
+                              }}
+                            >
+                              {collapsed ? (
+                                <ChevronRightIcon className="size-4" />
+                              ) : (
+                                <ChevronDownIcon className="size-4" />
+                              )}
+                            </button>
+                          )}
+                          renderHeaderMetadata={() => (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <Button
+                                    type="button"
+                                    size="icon-xs"
+                                    variant="ghost"
+                                    aria-label={`Preview ${filePath}`}
+                                    className="size-5 text-muted-foreground/75 hover:text-foreground"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      openDiffFilePreview(filePath);
+                                    }}
+                                  />
                                 }
-                                aria-expanded={!collapsed}
-                                title={collapsed ? "Expand diff" : "Collapse diff"}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  toggleDiffFileCollapsed(fileKey);
-                                }}
                               >
-                                {collapsed ? (
-                                  <ChevronRightIcon className="size-4" />
-                                ) : (
-                                  <ChevronDownIcon className="size-4" />
-                                )}
-                              </button>
-                              <Tooltip>
-                                <TooltipTrigger
-                                  render={
-                                    <Button
-                                      type="button"
-                                      size="icon-xs"
-                                      variant="ghost"
-                                      aria-label={`Preview ${filePath}`}
-                                      className="size-5 text-muted-foreground/75 hover:text-foreground"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        openDiffFilePreview(filePath);
-                                      }}
-                                    />
-                                  }
-                                >
-                                  <EyeIcon className="size-3.5" />
-                                </TooltipTrigger>
-                                <TooltipPopup className="pointer-events-none" side="bottom">
-                                  Preview file
-                                </TooltipPopup>
-                              </Tooltip>
-                            </span>
+                                <FileSearchIcon className="size-3.5" />
+                              </TooltipTrigger>
+                              <TooltipPopup className="pointer-events-none" side="bottom">
+                                Preview file
+                              </TooltipPopup>
+                            </Tooltip>
                           )}
                           options={{
                             collapsed: collapsed || shouldRenderImagePreview,

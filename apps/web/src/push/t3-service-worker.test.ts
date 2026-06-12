@@ -40,6 +40,12 @@ interface ServiceWorkerTestHarness {
     readonly requestUrl: string;
     readonly value: unknown;
   }>;
+  readonly getBadgeSetCalls: () => number[];
+  readonly getBadgeClearCallCount: () => number;
+  readonly getDisplayedNotificationCount: () => number;
+  readonly dispatchPush: (payload: unknown) => Promise<void>;
+  readonly dispatchNotificationClick: (index?: number) => Promise<void>;
+  readonly removeAppBadgeSupport: () => void;
   readonly addClient: (options: {
     readonly url: string;
     readonly controlled?: boolean;
@@ -67,6 +73,15 @@ function createServiceWorkerTestHarness(): ServiceWorkerTestHarness {
     requestUrl: string;
     value: unknown;
   }> = [];
+  const badgeSetCalls: number[] = [];
+  let badgeClearCallCount = 0;
+  const eventListeners: Record<string, Array<(event: unknown) => void>> = {};
+  const displayedNotifications: Array<
+    Record<string, unknown> & {
+      __closed: boolean;
+      close: () => void;
+    }
+  > = [];
   let openWindowResult: "undefined" | "client-at-url" | "client-at-home" | "throw" = "undefined";
   let nextClientId = 1;
   const makeClient = (options: {
@@ -134,6 +149,21 @@ function createServiceWorkerTestHarness(): ServiceWorkerTestHarness {
       broadcastCloseCalls.push(this.name);
     }
   }
+  const makeNotification = (title: string, options: Record<string, unknown>) => {
+    const notification: Record<string, unknown> & {
+      __closed: boolean;
+      close: () => void;
+    } = {
+      ...options,
+      title,
+      __closed: false,
+      close: () => {
+        operationLog.push("notification-close");
+        notification.__closed = true;
+      },
+    };
+    return notification;
+  };
 
   const context: Record<string, unknown> = {
     Request,
@@ -143,9 +173,40 @@ function createServiceWorkerTestHarness(): ServiceWorkerTestHarness {
     __windowClients: [] as Array<Record<string, unknown>>,
     self: {
       location: { origin: ORIGIN, href: `${ORIGIN}/` },
-      addEventListener: vi.fn(),
+      addEventListener: vi.fn((type: string, listener: (event: unknown) => void) => {
+        (eventListeners[type] ??= []).push(listener);
+      }),
       removeEventListener: vi.fn(),
       skipWaiting: vi.fn(),
+      navigator: {
+        setAppBadge: async (count?: number) => {
+          operationLog.push("setAppBadge");
+          badgeSetCalls.push(Number(count));
+        },
+        clearAppBadge: async () => {
+          operationLog.push("clearAppBadge");
+          badgeClearCallCount += 1;
+        },
+      },
+      registration: {
+        showNotification: async (title: string, options: Record<string, unknown>) => {
+          operationLog.push("showNotification");
+          const notification = makeNotification(title, options);
+          const tag = typeof notification.tag === "string" ? notification.tag : null;
+          const existingIndex = tag
+            ? displayedNotifications.findIndex(
+                (candidate) => candidate.__closed !== true && candidate.tag === tag,
+              )
+            : -1;
+          if (existingIndex >= 0) {
+            displayedNotifications.splice(existingIndex, 1, notification);
+            return;
+          }
+          displayedNotifications.push(notification);
+        },
+        getNotifications: async () =>
+          displayedNotifications.filter((notification) => notification.__closed !== true),
+      },
       clients: {
         matchAll: async (options?: { readonly includeUncontrolled?: boolean }) => {
           const clients = context.__windowClients as Array<Record<string, unknown>>;
@@ -219,6 +280,44 @@ this.__t3ServiceWorkerTestExports = {
     getBroadcastMessages: () => broadcastMessages,
     getBroadcastCloseCalls: () => broadcastCloseCalls,
     getPendingClickWrites: () => pendingClickWrites,
+    getBadgeSetCalls: () => badgeSetCalls,
+    getBadgeClearCallCount: () => badgeClearCallCount,
+    getDisplayedNotificationCount: () =>
+      displayedNotifications.filter((notification) => notification.__closed !== true).length,
+    dispatchPush: async (payload) => {
+      const waitUntilPromises: Array<Promise<unknown>> = [];
+      const event = {
+        data: {
+          json: () => payload,
+        },
+        waitUntil: (promise: Promise<unknown>) => {
+          waitUntilPromises.push(Promise.resolve(promise));
+        },
+      };
+      for (const listener of eventListeners.push ?? []) {
+        listener(event);
+      }
+      await Promise.all(waitUntilPromises);
+    },
+    dispatchNotificationClick: async (index = 0) => {
+      const notification = displayedNotifications.filter(
+        (candidate) => candidate.__closed !== true,
+      )[index];
+      if (!notification) {
+        throw new Error(`No displayed notification at index ${index}`);
+      }
+      const waitUntilPromises: Array<Promise<unknown>> = [];
+      const event = {
+        notification,
+        waitUntil: (promise: Promise<unknown>) => {
+          waitUntilPromises.push(Promise.resolve(promise));
+        },
+      };
+      for (const listener of eventListeners.notificationclick ?? []) {
+        listener(event);
+      }
+      await Promise.all(waitUntilPromises);
+    },
     addClient: (options) => {
       (context.__windowClients as Array<Record<string, unknown>>).push(makeClient(options));
     },
@@ -227,6 +326,9 @@ this.__t3ServiceWorkerTestExports = {
     },
     removeBroadcastChannel: () => {
       delete (context.self as Record<string, unknown>).BroadcastChannel;
+    },
+    removeAppBadgeSupport: () => {
+      (context.self as Record<string, unknown>).navigator = {};
     },
   };
 }
@@ -246,6 +348,86 @@ function notificationTitle(harness: ServiceWorkerTestHarness, rawTitle: unknown)
     ),
   );
 }
+
+describe("t3-service-worker app badge", () => {
+  let harness: ServiceWorkerTestHarness;
+
+  beforeEach(() => {
+    harness = createServiceWorkerTestHarness();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sets the numeric badge from displayed notifications after pushes", async () => {
+    await harness.dispatchPush({
+      tag: "thread-1",
+      url: TARGET_URL,
+    });
+    await harness.dispatchPush({
+      tag: "thread-2",
+      url: `${ORIGIN}/env-1/thread-2`,
+    });
+
+    expect(harness.getDisplayedNotificationCount()).toBe(2);
+    expect(harness.getBadgeSetCalls()).toEqual([1, 2]);
+    expect(harness.getBadgeClearCallCount()).toBe(0);
+  });
+
+  it("skips push badge writes while a visible same-origin page owns the badge", async () => {
+    harness.addClient({
+      url: HOME_URL,
+      focused: true,
+      visibilityState: "visible",
+    });
+
+    await harness.dispatchPush({
+      tag: "thread-1",
+      url: TARGET_URL,
+    });
+
+    expect(harness.getDisplayedNotificationCount()).toBe(1);
+    expect(harness.getBadgeSetCalls()).toEqual([]);
+    expect(harness.getBadgeClearCallCount()).toBe(0);
+  });
+
+  it("decrements and clears the badge when notifications are clicked", async () => {
+    await harness.dispatchPush({
+      tag: "thread-1",
+      url: TARGET_URL,
+    });
+    await harness.dispatchPush({
+      tag: "thread-2",
+      url: `${ORIGIN}/env-1/thread-2`,
+    });
+
+    await harness.dispatchNotificationClick(0);
+
+    expect(harness.getDisplayedNotificationCount()).toBe(1);
+    expect(harness.getBadgeSetCalls()).toEqual([1, 2, 1]);
+    expect(harness.getBadgeClearCallCount()).toBe(0);
+
+    await harness.dispatchNotificationClick(0);
+
+    expect(harness.getDisplayedNotificationCount()).toBe(0);
+    expect(harness.getBadgeSetCalls()).toEqual([1, 2, 1]);
+    expect(harness.getBadgeClearCallCount()).toBe(1);
+  });
+
+  it("does nothing when app badge support is unavailable", async () => {
+    harness.removeAppBadgeSupport();
+
+    await harness.dispatchPush({
+      tag: "thread-1",
+      url: TARGET_URL,
+    });
+
+    expect(harness.getDisplayedNotificationCount()).toBe(1);
+    expect(harness.getBadgeSetCalls()).toEqual([]);
+    expect(harness.getBadgeClearCallCount()).toBe(0);
+  });
+});
 
 describe("t3-service-worker notification click navigation", () => {
   let harness: ServiceWorkerTestHarness;

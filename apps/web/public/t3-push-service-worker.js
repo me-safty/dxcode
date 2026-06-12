@@ -23,14 +23,24 @@ self.addEventListener("push", (event) => {
     },
   };
 
-  event.waitUntil(self.registration.showNotification(title, notification));
+  event.waitUntil(
+    (async () => {
+      await self.registration.showNotification(title, notification);
+      await syncDisplayedNotificationBadge({ skipVisibleClient: true });
+    })(),
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = resolveNotificationUrl(event.notification.data?.url);
 
-  event.waitUntil(openNotificationUrl(url));
+  event.waitUntil(
+    (async () => {
+      await syncDisplayedNotificationBadge();
+      await openNotificationUrl(url);
+    })(),
+  );
 });
 
 function readPushPayload(event) {
@@ -116,6 +126,57 @@ async function openNotificationClickTarget(click) {
   }
 
   return navigateFocusAndPostNotificationClick(targetClient, click);
+}
+
+function canSetAppBadge() {
+  return typeof self.navigator?.setAppBadge === "function";
+}
+
+function isVisibleSameOriginClient(client) {
+  return (
+    isSameOriginUrl(client.url) && (client.focused === true || client.visibilityState === "visible")
+  );
+}
+
+async function hasVisibleSameOriginWindowClient() {
+  const clients = await self.clients.matchAll({
+    type: "window",
+    includeUncontrolled: true,
+  });
+  return clients.some((client) => isVisibleSameOriginClient(client));
+}
+
+async function syncDisplayedNotificationBadge(options = {}) {
+  if (!canSetAppBadge() || typeof self.registration?.getNotifications !== "function") {
+    return false;
+  }
+
+  if (options.skipVisibleClient === true && (await hasVisibleSameOriginWindowClient())) {
+    return false;
+  }
+
+  const notifications = await self.registration.getNotifications();
+  return writeServiceWorkerAppBadge(notifications.length);
+}
+
+async function writeServiceWorkerAppBadge(count) {
+  const badgeCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  try {
+    if (badgeCount > 0) {
+      await self.navigator.setAppBadge(badgeCount);
+      return true;
+    }
+
+    if (typeof self.navigator.clearAppBadge === "function") {
+      await self.navigator.clearAppBadge();
+      return true;
+    }
+
+    await self.navigator.setAppBadge(0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function navigateFocusAndPostNotificationClick(client, click) {
