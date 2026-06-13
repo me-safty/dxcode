@@ -969,9 +969,26 @@ function syncThreadUiFromStore() {
   );
 }
 
+function syncThreadGroupsFromStore() {
+  const state = useStore.getState();
+  const clientSettings = getClientSettings();
+  const liveThreadKeys = new Set(
+    selectThreadsAcrossEnvironments(state).map((thread) =>
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+    ),
+  );
+  const liveProjectKeys = new Set(
+    selectProjectsAcrossEnvironments(state).map((project) =>
+      deriveLogicalProjectKeyFromSettings(project, clientSettings),
+    ),
+  );
+  useUiStateStore.getState().syncThreadGroups({ liveThreadKeys, liveProjectKeys });
+}
+
 function reconcileSnapshotDerivedState() {
   syncProjectUiFromStore();
   syncThreadUiFromStore();
+  syncThreadGroupsFromStore();
 
   const threads = selectThreadsAcrossEnvironments(useStore.getState());
   const activeThreadKeys = collectActiveTerminalUiThreadKeys({
