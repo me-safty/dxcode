@@ -238,6 +238,7 @@ interface CollabReceiverInfo {
   readonly parentItemId: ProviderItemId | undefined;
   readonly providerThreadId: string;
   readonly childThreadId: ThreadId;
+  readonly rawPrompt: string | undefined;
   readonly detail: string | undefined;
 }
 
@@ -657,6 +658,12 @@ function collabToolCallDetail(
   return undefined;
 }
 
+function collabToolCallPrompt(
+  item: CodexRpc.ServerNotificationParamsByMethod["item/started"]["item"],
+): string | undefined {
+  return trimNotificationText("prompt" in item ? item.prompt : undefined);
+}
+
 function rememberCollabReceiverTurns(
   collabReceiverTurns: Map<string, CollabReceiverInfo>,
   notification: CodexServerNotification,
@@ -671,6 +678,7 @@ function rememberCollabReceiverTurns(
     return;
   }
 
+  const rawPrompt = collabToolCallPrompt(notification.params.item);
   const detail = collabToolCallDetail(notification.params.item);
   const parentItemId = ProviderItemId.make(notification.params.item.id);
   for (const receiverThreadId of notification.params.item.receiverThreadIds) {
@@ -685,6 +693,7 @@ function rememberCollabReceiverTurns(
           parentThreadId,
           providerThreadId: receiverThreadId,
         }),
+      rawPrompt: existing?.rawPrompt ?? rawPrompt,
       detail: existing?.detail ?? detail,
     });
   }
@@ -722,6 +731,7 @@ function subagentChildrenFromNotification(
   readonly providerThreadId: string;
   readonly childThreadId: string;
   readonly parentItemId?: string | undefined;
+  readonly rawPrompt?: string | undefined;
   readonly titleSeed?: string | undefined;
 }> {
   if (notification.method !== "item/started" && notification.method !== "item/completed") {
@@ -740,6 +750,7 @@ function subagentChildrenFromNotification(
         providerThreadId,
         childThreadId: String(info.childThreadId),
         ...(info.parentItemId ? { parentItemId: String(info.parentItemId) } : {}),
+        ...(info.rawPrompt ? { rawPrompt: info.rawPrompt } : {}),
         ...(info.detail ? { titleSeed: info.detail } : {}),
       },
     ];

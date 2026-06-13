@@ -50,6 +50,7 @@ interface RuntimeSubagentChild {
   readonly childThreadId: ThreadId;
   readonly providerThreadId: string;
   readonly parentItemId: ProviderItemId;
+  readonly rawPrompt: string | null;
   readonly titleSeed: string | null;
 }
 
@@ -135,11 +136,16 @@ function readRuntimeSubagentChildren(
       typeof record?.titleSeed === "string" && record.titleSeed.trim().length > 0
         ? record.titleSeed.trim()
         : null;
+    const rawPrompt =
+      typeof record?.rawPrompt === "string" && record.rawPrompt.trim().length > 0
+        ? record.rawPrompt.trim()
+        : null;
     return [
       {
         childThreadId,
         providerThreadId,
         parentItemId,
+        rawPrompt,
         titleSeed,
       },
     ];
@@ -1457,7 +1463,7 @@ const make = Effect.gen(function* () {
                   parentRelation,
                   createdAt: now,
                 });
-                if (parentRelation.titleSeed?.trim()) {
+                if (child.rawPrompt?.trim()) {
                   yield* orchestrationEngine.dispatch({
                     type: "thread.message.user.append",
                     commandId: CommandId.make(
@@ -1467,8 +1473,7 @@ const make = Effect.gen(function* () {
                     messageId: MessageId.make(
                       `subagent-prompt:${child.childThreadId}:${child.parentItemId}`,
                     ),
-                    text: parentRelation.titleSeed.trim(),
-                    ...(parentRelation.parentTurnId ? { turnId: parentRelation.parentTurnId } : {}),
+                    text: child.rawPrompt.trim(),
                     createdAt: now,
                   });
                 }

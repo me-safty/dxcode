@@ -2629,6 +2629,7 @@ describe("ProviderRuntimeIngestion", () => {
               providerThreadId: "provider-child-prompt-test",
               childThreadId,
               parentItemId: "parent-item-prompt-test",
+              rawPrompt,
               titleSeed: rawPrompt,
             },
           ],
@@ -2653,7 +2654,59 @@ describe("ProviderRuntimeIngestion", () => {
           id: "subagent-prompt:subagent-prompt-test:parent-item-prompt-test",
           role: "user",
           text: rawPrompt,
+          turnId: null,
           streaming: false,
+        }),
+      ]),
+    );
+  });
+
+  it("does not fabricate a child prompt from title metadata", async () => {
+    const harness = await createHarness({
+      textGeneration: {
+        generateThreadTitle: () => Effect.succeed({ title: "Summarized child task" }),
+      },
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+    const childThreadId = asThreadId("subagent-title-only-prompt-test");
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-subagent-title-only-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-9"),
+      itemId: asItemId("parent-item-title-only-test"),
+      payload: {
+        itemType: "collab_agent_tool_call",
+        status: "completed",
+        title: "Subagent",
+        detail: "Summarized child task",
+        data: {
+          subagentChildren: [
+            {
+              providerThreadId: "provider-child-title-only-test",
+              childThreadId,
+              parentItemId: "parent-item-title-only-test",
+              titleSeed: "Summarized child task",
+            },
+          ],
+        },
+      },
+    });
+
+    const childThread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.title === "Summarized child task",
+      2000,
+      childThreadId,
+    );
+
+    expect(childThread.messages).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "subagent-prompt:subagent-title-only-prompt-test:parent-item-title-only-test",
         }),
       ]),
     );
