@@ -336,7 +336,7 @@ describe("AntigravityAdapter resumed-output turn reopen", () => {
         makeAntigravityAdapter(settings, {
           instanceId: ProviderInstanceId.make("antigravity"),
           environment: {},
-        }).pipe(Effect.provideService(ServerConfig, config)),
+        }).pipe(Effect.provideService(ServerConfig, config), Effect.provide(NodeServices.layer)),
       );
 
       const events: ProviderRuntimeEvent[] = [];
@@ -427,7 +427,7 @@ describe("AntigravityAdapter resumed-output turn reopen", () => {
         makeAntigravityAdapter(settings, {
           instanceId: ProviderInstanceId.make("antigravity"),
           environment: {},
-        }).pipe(Effect.provideService(ServerConfig, config)),
+        }).pipe(Effect.provideService(ServerConfig, config), Effect.provide(NodeServices.layer)),
       );
 
       const events: ProviderRuntimeEvent[] = [];
@@ -599,7 +599,7 @@ describe("AntigravityAdapter full-access auto-approval", () => {
           environment: { ANTIGRAVITY_LS_ADDRESS: daemon.address },
           // Avoid spawning the real agentapi binary; the resume path ignores stdout.
           runAgentApi: () => Promise.resolve(""),
-        }).pipe(Effect.provideService(ServerConfig, config)),
+        }).pipe(Effect.provideService(ServerConfig, config), Effect.provide(NodeServices.layer)),
       );
 
       const events: ProviderRuntimeEvent[] = [];

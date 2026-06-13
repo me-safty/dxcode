@@ -294,7 +294,7 @@ export const WsCloudInstallRelayClientRpc = Rpc.make(WS_METHODS.cloudInstallRela
 export const WsSpeechToTextTranscribeRpc = Rpc.make(WS_METHODS.speechToTextTranscribe, {
   payload: SpeechToTextTranscribeInput,
   success: SpeechToTextTranscribeResult,
-  error: SpeechToTextError,
+  error: Schema.Union([SpeechToTextError, EnvironmentAuthorizationError]),
 });
 
 export const WsSourceControlLookupRepositoryRpc = Rpc.make(

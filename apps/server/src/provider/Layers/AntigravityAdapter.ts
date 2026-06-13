@@ -17,10 +17,10 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
-import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -613,8 +613,20 @@ function sendCascadeGateDecision(input: {
 export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(function* (
   settings: AntigravitySettings,
   options: AntigravityAdapterLiveOptions = {},
-): Effect.fn.Return<AntigravityAdapterShape, never, ServerConfig> {
+): Effect.fn.Return<AntigravityAdapterShape, never, ServerConfig | Crypto.Crypto> {
   const serverConfig = yield* Effect.service(ServerConfig);
+  const crypto = yield* Crypto.Crypto;
+  const randomUUIDv4 = crypto.randomUUIDv4.pipe(
+    Effect.mapError(
+      (cause) =>
+        new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "crypto/randomUUIDv4",
+          detail: "Failed to generate Antigravity runtime identifier.",
+          cause,
+        }),
+    ),
+  );
   const sessionsRef = yield* Ref.make(new Map<ThreadId, SessionContext>());
   const eventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const binaryPath = resolveAntigravityAgentApiPath(settings);
@@ -1070,6 +1082,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       }
 
       const cwd = context.session.cwd ?? serverConfig.cwd;
+      const modelLabel = resolveAntigravityModelLabel(input.modelSelection);
       const env = makeAntigravityEnvironment(settings, baseEnv, cwd);
       yield* Effect.tryPromise({
         try: () =>
@@ -1100,9 +1113,8 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
         `<T3_WORKSPACE_CONTEXT>\nCurrent working directory: ${cwd}\nWhen the user refers to "this folder", "here", or the current folder, use this directory.\n</T3_WORKSPACE_CONTEXT>`,
         `${prompt}${attachmentText}`,
       ].join("\n\n");
-      const turnId = TurnId.make(`antigravity-turn-${yield* Random.nextUUIDv4}`);
+      const turnId = TurnId.make(`antigravity-turn-${yield* randomUUIDv4}`);
       const updatedAt = yield* currentTimestamp;
-      const modelLabel = resolveAntigravityModelLabel(input.modelSelection);
 
       context.activeTurnId = turnId;
       context.session = {

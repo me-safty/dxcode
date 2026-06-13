@@ -21,7 +21,7 @@ export class SpeechToTextError extends Schema.TaggedErrorClass<SpeechToTextError
   {
     detail: Schema.String,
     status: Schema.optionalKey(Schema.Int),
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
