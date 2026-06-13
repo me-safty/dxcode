@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./themePalettes.css";
 
 @custom-variant dark (&:is(.dark, .dark *));
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
@@ -36,6 +37,14 @@
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -99,62 +108,44 @@
 :root {
   color-scheme: light;
   --radius: 0.625rem;
-  --background: var(--color-white);
-  --app-chrome-background: var(--background);
-  --foreground: var(--color-neutral-800);
-  --card: var(--color-white);
-  --card-foreground: var(--color-neutral-800);
-  --popover: var(--color-white);
-  --popover-foreground: var(--color-neutral-800);
-  --primary: oklch(0.488 0.217 264);
-  --primary-foreground: var(--color-white);
-  --secondary: --alpha(var(--color-black) / 4%);
-  --secondary-foreground: var(--color-neutral-800);
-  --muted: --alpha(var(--color-black) / 4%);
-  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-black));
-  --accent: --alpha(var(--color-black) / 4%);
-  --accent-foreground: var(--color-neutral-800);
-  --destructive: var(--color-red-500);
-  --border: --alpha(var(--color-black) / 8%);
-  --input: --alpha(var(--color-black) / 10%);
-  --ring: oklch(0.488 0.217 264);
-  --destructive-foreground: var(--color-red-700);
-  --info: var(--color-blue-500);
-  --info-foreground: var(--color-blue-700);
-  --success: var(--color-emerald-500);
-  --success-foreground: var(--color-emerald-700);
-  --warning: var(--color-amber-500);
-  --warning-foreground: var(--color-amber-700);
+  --background: color-mix(in srgb, var(--palette-surface) 97%, var(--palette-primary));
+  --app-chrome-background: color-mix(in srgb, var(--palette-surface) 94%, var(--palette-primary));
+  --foreground: var(--palette-on-surface);
+  --card: color-mix(in srgb, var(--palette-surface) 72%, var(--palette-surface-variant));
+  --card-foreground: var(--palette-on-surface);
+  --popover: color-mix(in srgb, var(--palette-surface) 58%, var(--palette-surface-variant));
+  --popover-foreground: var(--palette-on-surface);
+  --primary: var(--palette-primary);
+  --primary-foreground: var(--palette-on-primary);
+  --secondary: color-mix(in srgb, var(--palette-secondary) 14%, var(--palette-surface));
+  --secondary-foreground: var(--palette-secondary);
+  --muted: color-mix(in srgb, var(--palette-surface-variant) 74%, var(--palette-surface));
+  --muted-foreground: var(--palette-on-surface-variant);
+  --accent: color-mix(in srgb, var(--palette-primary) 15%, var(--palette-surface-variant));
+  --accent-foreground: var(--palette-on-surface);
+  --destructive: var(--palette-error);
+  --destructive-foreground: var(--palette-error);
+  --border: color-mix(in srgb, var(--palette-outline) 52%, var(--palette-surface));
+  --input: color-mix(in srgb, var(--palette-outline) 34%, var(--palette-surface));
+  --ring: var(--palette-primary);
+  --info: var(--palette-tertiary);
+  --info-foreground: var(--palette-tertiary);
+  --success: var(--palette-secondary);
+  --success-foreground: var(--palette-secondary);
+  --warning: var(--palette-primary);
+  --warning-foreground: var(--palette-primary);
+  --sidebar: color-mix(in srgb, var(--palette-surface) 58%, var(--palette-surface-variant));
+  --sidebar-foreground: var(--palette-on-surface);
+  --sidebar-primary: var(--palette-primary);
+  --sidebar-primary-foreground: var(--palette-on-primary);
+  --sidebar-accent: color-mix(in srgb, var(--palette-primary) 16%, var(--palette-surface-variant));
+  --sidebar-accent-foreground: var(--palette-on-surface);
+  --sidebar-border: color-mix(in srgb, var(--palette-outline) 46%, var(--palette-surface));
+  --sidebar-ring: var(--palette-primary);
+}
 
-  @variant dark {
-    color-scheme: dark;
-    --background: color-mix(in srgb, var(--color-neutral-950) 95%, var(--color-white));
-    --app-chrome-background: var(--background);
-    --foreground: var(--color-neutral-100);
-    --card: color-mix(in srgb, var(--background) 98%, var(--color-white));
-    --card-foreground: var(--color-neutral-100);
-    --popover: color-mix(in srgb, var(--background) 98%, var(--color-white));
-    --popover-foreground: var(--color-neutral-100);
-    --primary: oklch(0.588 0.217 264);
-    --primary-foreground: var(--color-white);
-    --secondary: --alpha(var(--color-white) / 4%);
-    --secondary-foreground: var(--color-neutral-100);
-    --muted: --alpha(var(--color-white) / 4%);
-    --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
-    --accent: --alpha(var(--color-white) / 4%);
-    --accent-foreground: var(--color-neutral-100);
-    --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
-    --border: --alpha(var(--color-white) / 6%);
-    --input: --alpha(var(--color-white) / 8%);
-    --ring: oklch(0.588 0.217 264);
-    --destructive-foreground: var(--color-red-400);
-    --info: var(--color-blue-500);
-    --info-foreground: var(--color-blue-400);
-    --success: var(--color-emerald-500);
-    --success-foreground: var(--color-emerald-400);
-    --warning: var(--color-amber-500);
-    --warning-foreground: var(--color-amber-400);
-  }
+:root.dark {
+  color-scheme: dark;
 }
 
 body {
@@ -202,6 +193,38 @@ body::after {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-repeat: repeat;
   background-size: 256px 256px;
+}
+
+[data-slot="sidebar-inner"] {
+  background-image:
+    radial-gradient(
+      circle at 14% 0%,
+      color-mix(in srgb, var(--palette-primary) 14%, transparent),
+      transparent 17rem
+    ),
+    radial-gradient(
+      circle at 100% 100%,
+      color-mix(in srgb, var(--palette-secondary) 8%, transparent),
+      transparent 21rem
+    );
+}
+
+[data-slot="sidebar-inset"] {
+  background-image:
+    radial-gradient(
+      circle at 92% -8%,
+      color-mix(in srgb, var(--palette-tertiary) 8%, transparent),
+      transparent 30rem
+    ),
+    radial-gradient(
+      circle at 15% 110%,
+      color-mix(in srgb, var(--palette-primary) 5%, transparent),
+      transparent 34rem
+    );
+}
+
+[data-slot="sidebar-menu-button"][data-active="true"] {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--palette-primary) 76%, transparent);
 }
 
 pre,
@@ -410,7 +433,7 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown blockquote {
-  border-left: 2px solid var(--border);
+  border-left: 2px solid color-mix(in srgb, var(--palette-primary) 72%, var(--border));
   padding-left: 0.8rem;
   color: var(--muted-foreground);
 }
