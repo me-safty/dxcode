@@ -109,34 +109,16 @@ export function WebSocketConnectionCoordinator() {
   const lastForcedReconnectAtRef = useRef(0);
   const toastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
 
-  const runReconnect = useEffectEvent((showFailureToast: boolean) => {
+  const runReconnect = useEffectEvent(() => {
     lastForcedReconnectAtRef.current = Date.now();
     void getPrimaryEnvironmentConnection()
       .reconnect()
       .catch((error) => {
-        if (!showFailureToast) {
-          console.warn("Automatic WebSocket reconnect failed", { error });
-          return;
-        }
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Reconnect failed",
-            description:
-              error instanceof Error ? error.message : "Unable to restart the WebSocket.",
-            data: {
-              dismissAfterVisibleMs: 8_000,
-              hideCopyButton: true,
-            },
-          }),
-        );
+        console.warn("Automatic WebSocket reconnect failed", { error });
       });
   });
   const syncBrowserOnlineStatus = useEffectEvent(() => {
     setBrowserOnlineStatus(navigator.onLine !== false);
-  });
-  const triggerManualReconnect = useEffectEvent(() => {
-    runReconnect(true);
   });
   const triggerAutoReconnect = useEffectEvent((trigger: WsAutoReconnectTrigger) => {
     const currentStatus =
@@ -149,7 +131,7 @@ export function WebSocketConnectionCoordinator() {
       return;
     }
 
-    runReconnect(false);
+    runReconnect();
   });
 
   useEffect(() => {
@@ -189,7 +171,7 @@ export function WebSocketConnectionCoordinator() {
         return;
       }
 
-      runReconnect(false);
+      runReconnect();
     }, timeoutMs);
 
     return () => {
@@ -204,18 +186,13 @@ export function WebSocketConnectionCoordinator() {
   ]);
 
   // Transient reconnecting / offline / recovered state is surfaced ambiently
-  // by the sidebar connection status. Only the terminal "retries exhausted"
-  // case still warrants an interrupting toast, because it is actionable and
-  // the user needs the Retry button to be unmissable.
+  // by the sidebar connection status. The exhausted case still warrants an
+  // interrupting toast because automatic reconnect has stopped.
   useEffect(() => {
     const shouldShowExhaustedToast = status.hasConnected && status.reconnectPhase === "exhausted";
 
     if (shouldShowExhaustedToast) {
       const toastPayload = stackedThreadToast({
-        actionProps: {
-          children: "Retry",
-          onClick: triggerManualReconnect,
-        },
         data: {
           hideCopyButton: true,
         },

@@ -18,6 +18,8 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type TouchEvent as ReactTouchEvent,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { FileDiff } from "@pierre/diffs/react";
 import {
@@ -104,6 +106,7 @@ import {
   scheduleTimelineScrollAnchorRestore,
   type ScheduledTimelineScrollAnchorRestore,
 } from "./timelineScrollAnchor";
+import { createTouchScrollIntentTracker, isWheelScrollAwayIntent } from "./timelineScrollIntent";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -346,6 +349,37 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [],
   );
 
+  const touchScrollIntentRef = useRef(createTouchScrollIntentTracker());
+  const handleWheelCapture = useCallback(
+    (event: ReactWheelEvent<HTMLDivElement>) => {
+      // Only scrolling up detaches from the bottom; wheeling down (or while
+      // already pinned at the bottom) must not stop stick-to-bottom.
+      if (isWheelScrollAwayIntent(event.deltaY)) {
+        handleUserScrollIntent();
+      }
+    },
+    [handleUserScrollIntent],
+  );
+  const handleTouchStartCapture = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    if (touch) {
+      touchScrollIntentRef.current.touchStart(touch.clientY);
+    }
+  }, []);
+  const handleTouchMoveCapture = useCallback(
+    (event: ReactTouchEvent<HTMLDivElement>) => {
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+      // Finger dragging down the screen scrolls the content up = scroll-away.
+      if (touchScrollIntentRef.current.touchMove(touch.clientY)) {
+        handleUserScrollIntent();
+      }
+    },
+    [handleUserScrollIntent],
+  );
+
   const handleBeforePlanExpandedChange = useCallback(() => {
     const anchor = captureTimelineScrollAnchor(listRef.current);
     onUserScrollIntent?.();
@@ -504,8 +538,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         <div
           className="h-full min-h-0"
           onPointerDownCapture={handlePointerDown}
-          onTouchMoveCapture={handleUserScrollIntent}
-          onWheelCapture={handleUserScrollIntent}
+          onTouchStartCapture={handleTouchStartCapture}
+          onTouchMoveCapture={handleTouchMoveCapture}
+          onWheelCapture={handleWheelCapture}
         >
           <VirtualizedList<MessagesTimelineRow>
             ref={listRef}
@@ -520,7 +555,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             maintainScrollAtEndThreshold={0.1}
             maintainVisibleContentPosition={MAINTAIN_VISIBLE_CONTENT_POSITION_DATA_ANCHORED}
             onIsAtEndChange={onIsAtEndChange}
-            onItemSizeChanged={handleItemSizeChanged}
             className="h-full overflow-x-hidden overscroll-y-contain"
             style={{ height: "100%" }}
             data-testid="messages-timeline-list"

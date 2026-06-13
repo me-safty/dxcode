@@ -61,6 +61,10 @@ import {
   type WorkspaceFileDiffMarkerKind,
   type WorkspaceFileInlineDiffHunk,
 } from "../workspace-file-diff-markers";
+import {
+  WORKSPACE_FILE_INLINE_DIFF_ATTRIBUTE,
+  WORKSPACE_FILE_INLINE_DIFF_SELECTOR,
+} from "../workspaceFilePreviewDom";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { Button } from "./ui/button";
@@ -68,7 +72,6 @@ import { Toggle } from "./ui/toggle";
 
 const FILE_PREVIEW_LINE_HEIGHT = 20;
 const FILE_PREVIEW_VIRTUALIZER_CLASS_NAME = "workspace-file-preview-virtualizer";
-const FILE_PREVIEW_INLINE_DIFF_SELECTOR = '[data-workspace-file-inline-diff="true"]';
 // A tap counts as a click as long as the finger barely moves; anything larger is a scroll.
 const FILE_PREVIEW_GUTTER_TAP_SLOP_PX = 10;
 
@@ -221,8 +224,8 @@ function resolveGutterLineNumberFromEvent(event: PointerEvent): number | null {
   for (const target of path) {
     if (
       target instanceof Element &&
-      (target.matches(FILE_PREVIEW_INLINE_DIFF_SELECTOR) ||
-        target.closest(FILE_PREVIEW_INLINE_DIFF_SELECTOR) !== null)
+      (target.matches(WORKSPACE_FILE_INLINE_DIFF_SELECTOR) ||
+        target.closest(WORKSPACE_FILE_INLINE_DIFF_SELECTOR) !== null)
     ) {
       // Taps inside an expanded inline diff carry their own gutter; ignore them.
       return null;
@@ -422,7 +425,7 @@ function WorkspaceInlineDiffAnnotation(props: {
     <div
       className="border-y border-border/70 bg-muted/30"
       data-testid="workspace-file-inline-diff"
-      data-workspace-file-inline-diff="true"
+      {...{ [WORKSPACE_FILE_INLINE_DIFF_ATTRIBUTE]: "true" }}
     >
       <div className="flex h-7 items-center justify-between gap-2 border-b border-border/50 bg-muted/60 pl-3 pr-1">
         <p className="truncate text-[15px] font-medium text-muted-foreground md:text-[11px]">

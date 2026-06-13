@@ -23,6 +23,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectExpandedById: {},
     projectOrder: [],
     threadLastVisitedAtById: {},
+    seededThreadVisitedKeys: new Set<string>(),
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
     ...overrides,
@@ -37,6 +38,7 @@ describe("uiStateStore pure functions", () => {
     const next = markThreadVisited(initialState, threadId, "2026-02-25T12:30:00.700Z");
 
     expect(next.threadLastVisitedAtById[threadId]).toBe("2026-02-25T12:30:00.700Z");
+    expect(next.seededThreadVisitedKeys.has(threadId)).toBe(false);
   });
 
   it("markThreadVisited does not move visit state backwards under clock skew", () => {
@@ -52,6 +54,21 @@ describe("uiStateStore pure functions", () => {
     expect(next).toBe(initialState);
   });
 
+  it("markThreadVisited un-seeds a thread even when the visit timestamp does not move forward", () => {
+    const threadId = ThreadId.make("thread-1");
+    const initialState = makeUiState({
+      threadLastVisitedAtById: {
+        [threadId]: "2026-02-25T12:30:00.700Z",
+      },
+      seededThreadVisitedKeys: new Set([threadId]),
+    });
+
+    const next = markThreadVisited(initialState, threadId, "2026-02-25T12:30:00.000Z");
+
+    expect(next.threadLastVisitedAtById[threadId]).toBe("2026-02-25T12:30:00.700Z");
+    expect(next.seededThreadVisitedKeys.has(threadId)).toBe(false);
+  });
+
   it("markThreadUnread moves lastVisitedAt before completion for a completed thread", () => {
     const threadId = ThreadId.make("thread-1");
     const latestTurnCompletedAt = "2026-02-25T12:30:00.000Z";
@@ -64,6 +81,7 @@ describe("uiStateStore pure functions", () => {
     const next = markThreadUnread(initialState, threadId, latestTurnCompletedAt);
 
     expect(next.threadLastVisitedAtById[threadId]).toBe("2026-02-25T12:29:59.999Z");
+    expect(next.seededThreadVisitedKeys.has(threadId)).toBe(false);
   });
 
   it("markThreadUnread does not change a thread without a completed turn", () => {
@@ -359,6 +377,7 @@ describe("uiStateStore pure functions", () => {
     expect(next.threadLastVisitedAtById).toEqual({
       [thread1]: "2026-02-25T12:35:00.000Z",
     });
+    expect(next.seededThreadVisitedKeys).toEqual(new Set());
     expect(next.threadChangedFilesExpandedById).toEqual({
       [thread1]: {
         "turn-1": false,
@@ -380,6 +399,113 @@ describe("uiStateStore pure functions", () => {
     expect(next.threadLastVisitedAtById).toEqual({
       [thread1]: "2026-02-25T12:35:00.000Z",
     });
+    expect(next.seededThreadVisitedKeys).toEqual(new Set([thread1]));
+  });
+
+  it("syncThreads raises newer visit seeds while an entry is still seeded", () => {
+    const thread1 = ThreadId.make("thread-1");
+    const initialState = makeUiState();
+
+    const seeded = syncThreads(initialState, [
+      {
+        key: thread1,
+        seedVisitedAt: "2026-02-25T12:35:00.000Z",
+      },
+    ]);
+    const next = syncThreads(seeded, [
+      {
+        key: thread1,
+        seedVisitedAt: "2026-02-25T12:36:00.000Z",
+      },
+    ]);
+
+    expect(next.threadLastVisitedAtById[thread1]).toBe("2026-02-25T12:36:00.000Z");
+    expect(next.seededThreadVisitedKeys).toEqual(new Set([thread1]));
+  });
+
+  it("syncThreads does not lower older visit seeds", () => {
+    const thread1 = ThreadId.make("thread-1");
+    const initialState = makeUiState();
+
+    const seeded = syncThreads(initialState, [
+      {
+        key: thread1,
+        seedVisitedAt: "2026-02-25T12:35:00.000Z",
+      },
+    ]);
+    const next = syncThreads(seeded, [
+      {
+        key: thread1,
+        seedVisitedAt: "2026-02-25T12:34:00.000Z",
+      },
+    ]);
+
+    expect(next).toBe(seeded);
+    expect(next.threadLastVisitedAtById[thread1]).toBe("2026-02-25T12:35:00.000Z");
+    expect(next.seededThreadVisitedKeys).toEqual(new Set([thread1]));
+  });
+
+  it("syncThreads does not overwrite a real visit after markThreadVisited un-seeds it", () => {
+    const thread1 = ThreadId.make("thread-1");
+    const seeded = syncThreads(makeUiState(), [
+      {
+        key: thread1,
+        seedVisitedAt: "2026-02-25T12:35:00.000Z",
+      },
+    ]);
+    const visited = markThreadVisited(seeded, thread1, "2026-02-25T12:35:30.000Z");
+
+    const next = syncThreads(visited, [
+      {
+        key: thread1,
+        seedVisitedAt: "2026-02-25T12:36:00.000Z",
+      },
+    ]);
+
+    expect(next).toBe(visited);
+    expect(next.threadLastVisitedAtById[thread1]).toBe("2026-02-25T12:35:30.000Z");
+    expect(next.seededThreadVisitedKeys).toEqual(new Set());
+  });
+
+  it("markThreadUnread un-seeds a thread so newer seeds do not overwrite the unread marker", () => {
+    const thread1 = ThreadId.make("thread-1");
+    const seeded = syncThreads(makeUiState(), [
+      {
+        key: thread1,
+        seedVisitedAt: "2026-02-25T12:35:00.000Z",
+      },
+    ]);
+    const unread = markThreadUnread(seeded, thread1, "2026-02-25T12:35:30.000Z");
+
+    const next = syncThreads(unread, [
+      {
+        key: thread1,
+        seedVisitedAt: "2026-02-25T12:36:00.000Z",
+      },
+    ]);
+
+    expect(next).toBe(unread);
+    expect(next.threadLastVisitedAtById[thread1]).toBe("2026-02-25T12:35:29.999Z");
+    expect(next.seededThreadVisitedKeys).toEqual(new Set());
+  });
+
+  it("syncThreads prunes seeded markers for dropped threads", () => {
+    const thread1 = ThreadId.make("thread-1");
+    const thread2 = ThreadId.make("thread-2");
+    const initialState = makeUiState({
+      threadLastVisitedAtById: {
+        [thread1]: "2026-02-25T12:35:00.000Z",
+        [thread2]: "2026-02-25T12:36:00.000Z",
+      },
+      seededThreadVisitedKeys: new Set([thread1, thread2]),
+    });
+
+    const next = syncThreads(initialState, [{ key: thread1 }]);
+
+    expect(next.threadLastVisitedAtById).toEqual({
+      [thread1]: "2026-02-25T12:35:00.000Z",
+    });
+    expect(next.seededThreadVisitedKeys).toEqual(new Set([thread1]));
   });
 
   it("setProjectExpanded updates expansion without touching order", () => {
@@ -413,7 +539,19 @@ describe("uiStateStore pure functions", () => {
     const next = clearThreadUi(initialState, thread1);
 
     expect(next.threadLastVisitedAtById).toEqual({});
+    expect(next.seededThreadVisitedKeys).toEqual(new Set());
     expect(next.threadChangedFilesExpandedById).toEqual({});
+  });
+
+  it("clearThreadUi removes seeded markers for deleted threads", () => {
+    const thread1 = ThreadId.make("thread-1");
+    const initialState = makeUiState({
+      seededThreadVisitedKeys: new Set([thread1]),
+    });
+
+    const next = clearThreadUi(initialState, thread1);
+
+    expect(next.seededThreadVisitedKeys).toEqual(new Set());
   });
 
   it("setThreadChangedFilesExpanded stores collapsed turns per thread", () => {

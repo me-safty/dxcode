@@ -41,7 +41,6 @@ describe("deriveConnectionIndicator", () => {
     );
     expect(view.tone).toBe("online");
     expect(view.label).toBe("Connected");
-    expect(view.showRetry).toBe(false);
   });
 
   it("uses the connection label in the detail when present", () => {
@@ -72,7 +71,6 @@ describe("deriveConnectionIndicator", () => {
     expect(view.tone).toBe("syncing");
     expect(view.label).toBe("Reconnecting");
     expect(view.detail).toBe("Reconnecting to T3 Server in 6s… Attempt 2/8");
-    expect(view.showRetry).toBe(true);
   });
 
   it("is red without a retry affordance while the browser is offline", () => {
@@ -86,10 +84,9 @@ describe("deriveConnectionIndicator", () => {
     );
     expect(view.tone).toBe("offline");
     expect(view.label).toBe("Offline");
-    expect(view.showRetry).toBe(false);
   });
 
-  it("is red and retryable once reconnect retries are exhausted", () => {
+  it("is red once reconnect retries are exhausted", () => {
     const view = deriveConnectionIndicator(
       makeStatus({
         hasConnected: true,
@@ -102,7 +99,6 @@ describe("deriveConnectionIndicator", () => {
     expect(view.tone).toBe("offline");
     expect(view.label).toBe("Disconnected");
     expect(view.detail).toBe("Couldn't reconnect to T3 Server. Retries exhausted.");
-    expect(view.showRetry).toBe(true);
   });
 
   it("surfaces the underlying error message on a failed initial connection", () => {
@@ -113,6 +109,5 @@ describe("deriveConnectionIndicator", () => {
     expect(view.tone).toBe("offline");
     expect(view.label).toBe("Connection error");
     expect(view.detail).toBe("Can't reach T3 Server: handshake rejected");
-    expect(view.showRetry).toBe(true);
   });
 });

@@ -29,6 +29,10 @@ export const MOBILE_EDGE_SWIPE_FLICK_VELOCITY_PX_PER_MS = 0.5;
 export const MOBILE_EDGE_SWIPE_SCROLL_EDGE_EPSILON_PX = 1;
 
 export type MobileEdgeSwipeDecision = "cancel" | MobileEdgeSwipeAction | "pending";
+export type MobileEdgeSwipeHorizontalScrollOwnerScope =
+  | "all"
+  | "none"
+  | { readonly ancestorSelector: string };
 export type MobileEdgeSwipeBlocker =
   | { readonly kind: "none" }
   | { readonly element: Element; readonly kind: "hard-block" }
@@ -228,11 +232,28 @@ function isHorizontallyScrollable(el: Element): el is HTMLElement {
   return overflowX === "auto" || overflowX === "scroll" || overflowX === "overlay";
 }
 
+function isHorizontalScrollOwnerInScope(
+  elementPath: readonly Element[],
+  scope: MobileEdgeSwipeHorizontalScrollOwnerScope,
+): boolean {
+  if (scope === "all") {
+    return true;
+  }
+
+  if (scope === "none") {
+    return false;
+  }
+
+  return elementPath.some((el) => el.matches(scope.ancestorSelector));
+}
+
 export function resolveMobileEdgeSwipeBlocker(
   target: EventTarget | null,
   composedPath?: readonly EventTarget[],
+  horizontalScrollOwnerScope: MobileEdgeSwipeHorizontalScrollOwnerScope = "all",
 ): MobileEdgeSwipeBlocker {
-  for (const el of getElementPath(target, composedPath)) {
+  const elementPath = getElementPath(target, composedPath);
+  for (const el of elementPath) {
     // Inputs, terminals, and editable regions always swallow a horizontal drag.
     if (el.matches("input, textarea, select, [contenteditable='true'], .xterm")) {
       return { element: el, kind: "hard-block" };
@@ -241,7 +262,10 @@ export function resolveMobileEdgeSwipeBlocker(
     // explicitly marked snippets) owns the gesture so a fast scroll is never
     // mistaken for a panel swipe. Content that fits has nothing to scroll, so
     // the edge swipe passes through and opens/closes the panel as usual.
-    if (isHorizontallyScrollable(el)) {
+    if (
+      isHorizontallyScrollable(el) &&
+      isHorizontalScrollOwnerInScope(elementPath, horizontalScrollOwnerScope)
+    ) {
       return { element: el, kind: "horizontal-scroll-owner" };
     }
   }
@@ -380,6 +404,7 @@ export function useMobileEdgeSwipe({
   blockedByOpenPanelSide,
   edgeWidth = MOBILE_EDGE_SWIPE_EDGE_WIDTH_PX,
   enabled,
+  horizontalScrollOwnerScope = "all",
   onSwipe,
   requireScrollableStartPosition = false,
   side,
@@ -390,6 +415,7 @@ export function useMobileEdgeSwipe({
   readonly blockedByOpenPanelSide?: MobileEdgeSwipeSide;
   readonly edgeWidth?: number;
   readonly enabled: boolean;
+  readonly horizontalScrollOwnerScope?: MobileEdgeSwipeHorizontalScrollOwnerScope;
   readonly onSwipe: () => void;
   readonly requireScrollableStartPosition?: boolean;
   readonly side: MobileEdgeSwipeSide;
@@ -398,6 +424,12 @@ export function useMobileEdgeSwipe({
 }) {
   const onSwipeRef = useRef(onSwipe);
   onSwipeRef.current = onSwipe;
+  const horizontalScrollOwnerStringScope =
+    typeof horizontalScrollOwnerScope === "string" ? horizontalScrollOwnerScope : null;
+  const horizontalScrollOwnerAncestorSelector =
+    typeof horizontalScrollOwnerScope === "string"
+      ? null
+      : horizontalScrollOwnerScope.ancestorSelector;
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") {
@@ -552,7 +584,13 @@ export function useMobileEdgeSwipe({
       }
 
       const composedPath = event.composedPath();
-      const blocker = resolveMobileEdgeSwipeBlocker(event.target, composedPath);
+      const blocker = resolveMobileEdgeSwipeBlocker(
+        event.target,
+        composedPath,
+        horizontalScrollOwnerAncestorSelector === null
+          ? (horizontalScrollOwnerStringScope ?? "all")
+          : { ancestorSelector: horizontalScrollOwnerAncestorSelector },
+      );
       if (
         blocker.kind === "hard-block" ||
         (blocker.kind === "horizontal-scroll-owner" &&
@@ -600,7 +638,13 @@ export function useMobileEdgeSwipe({
 
     const handlePointerDown = (event: PointerEvent) => {
       const composedPath = event.composedPath();
-      const blocker = resolveMobileEdgeSwipeBlocker(event.target, composedPath);
+      const blocker = resolveMobileEdgeSwipeBlocker(
+        event.target,
+        composedPath,
+        horizontalScrollOwnerAncestorSelector === null
+          ? (horizontalScrollOwnerStringScope ?? "all")
+          : { ancestorSelector: horizontalScrollOwnerAncestorSelector },
+      );
       if (
         performance.now() < ignorePointerUntil ||
         event.pointerType !== "touch" ||
@@ -659,6 +703,8 @@ export function useMobileEdgeSwipe({
     blockedByOpenPanelSide,
     edgeWidth,
     enabled,
+    horizontalScrollOwnerAncestorSelector,
+    horizontalScrollOwnerStringScope,
     requireScrollableStartPosition,
     side,
     startArea,

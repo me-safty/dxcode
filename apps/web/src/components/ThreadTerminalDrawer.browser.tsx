@@ -199,7 +199,6 @@ vi.mock("~/environmentApi", () => ({
 
 vi.mock("~/environments/runtime", () => ({
   readEnvironmentConnection: readEnvironmentConnectionMock,
-  waitForEnvironmentReconnectIdle: vi.fn(async () => true),
 }));
 
 vi.mock("~/localApi", () => ({
@@ -266,12 +265,8 @@ async function mountTerminalViewport(props: {
   threadRef: ReturnType<typeof scopeThreadRef>;
   drawerBackgroundColor?: string;
   drawerTextColor?: string;
-  resyncRequestId?: number;
-  restartRequestId?: number;
 }) {
   let currentProps = {
-    resyncRequestId: props.resyncRequestId ?? 0,
-    restartRequestId: props.restartRequestId ?? 0,
     threadRef: props.threadRef,
   };
   const drawer = document.createElement("div");
@@ -301,8 +296,6 @@ async function mountTerminalViewport(props: {
       focusRequestId={0}
       autoFocus={false}
       resizeEpoch={0}
-      resyncRequestId={currentProps.resyncRequestId}
-      restartRequestId={currentProps.restartRequestId}
       drawerHeight={320}
       keybindings={[]}
     />,
@@ -313,8 +306,6 @@ async function mountTerminalViewport(props: {
     rerender: async (
       nextProps: Partial<{
         threadRef: ReturnType<typeof scopeThreadRef>;
-        resyncRequestId: number;
-        restartRequestId: number;
       }>,
     ) => {
       currentProps = { ...currentProps, ...nextProps };
@@ -330,8 +321,6 @@ async function mountTerminalViewport(props: {
           focusRequestId={0}
           autoFocus={false}
           resizeEpoch={0}
-          resyncRequestId={currentProps.resyncRequestId}
-          restartRequestId={currentProps.restartRequestId}
           drawerHeight={320}
           keybindings={[]}
         />,
@@ -664,70 +653,9 @@ describe("TerminalViewport", () => {
     }
   });
 
-  it("manual resync request reopens and rehydrates the terminal", async () => {
-    const environment = createEnvironmentApi();
-    const reconnect = vi.fn(async () => undefined);
-    environmentApiById.set("environment-a", environment);
-    environmentConnectionById.set("environment-a", { client: { reconnect } });
-
-    const mounted = await mountTerminalViewport({
-      threadRef: scopeThreadRef("environment-a" as never, THREAD_ID),
-    });
-
-    try {
-      await vi.waitFor(() => {
-        expect(environment.terminal.open).toHaveBeenCalledTimes(1);
-      });
-
-      await mounted.rerender({ resyncRequestId: 1 });
-
-      await vi.waitFor(() => {
-        expect(reconnect).toHaveBeenCalledTimes(1);
-        expect(environment.terminal.open).toHaveBeenCalledTimes(2);
-      });
-      expect(reconnect.mock.invocationCallOrder[0]).toBeLessThan(
-        environment.terminal.open.mock.invocationCallOrder[1] ?? 0,
-      );
-      expect(environment.terminal.restart).not.toHaveBeenCalled();
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("manual restart request restarts without any automatic restart", async () => {
-    const environment = createEnvironmentApi();
-    const reconnect = vi.fn(async () => undefined);
-    environmentApiById.set("environment-a", environment);
-    environmentConnectionById.set("environment-a", { client: { reconnect } });
-
-    const mounted = await mountTerminalViewport({
-      threadRef: scopeThreadRef("environment-a" as never, THREAD_ID),
-    });
-
-    try {
-      await vi.waitFor(() => {
-        expect(environment.terminal.open).toHaveBeenCalledTimes(1);
-      });
-
-      expect(environment.terminal.restart).not.toHaveBeenCalled();
-      await mounted.rerender({ restartRequestId: 1 });
-      await vi.waitFor(() => {
-        expect(reconnect).toHaveBeenCalledTimes(1);
-        expect(environment.terminal.restart).toHaveBeenCalledTimes(1);
-      });
-      expect(reconnect.mock.invocationCallOrder[0]).toBeLessThan(
-        environment.terminal.restart.mock.invocationCallOrder[0] ?? 0,
-      );
-      expect(environment.terminal.open).toHaveBeenCalledTimes(1);
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("drawer toolbar resyncs and restarts only after confirmation", async () => {
+  it("drawer toolbar omits resync and restart controls", async () => {
     const environment = createEnvironmentApi();
     environmentApiById.set("environment-a", environment);
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 
     const mounted = await mountThreadTerminalDrawer({
       threadRef: scopeThreadRef("environment-a" as never, THREAD_ID),
@@ -738,25 +666,10 @@ describe("TerminalViewport", () => {
         expect(environment.terminal.open).toHaveBeenCalledTimes(1);
       });
 
-      document.querySelector<HTMLButtonElement>("[aria-label='Resync Terminal']")?.click();
-      await vi.waitFor(() => {
-        expect(environment.terminal.open).toHaveBeenCalledTimes(2);
-      });
-
-      document.querySelector<HTMLButtonElement>("[aria-label='Restart Terminal']")?.click();
-      await vi.waitFor(() => {
-        expect(confirmSpy).toHaveBeenCalledTimes(1);
-      });
+      expect(document.querySelector("[aria-label='Resync Terminal']")).toBeNull();
+      expect(document.querySelector("[aria-label='Restart Terminal']")).toBeNull();
       expect(environment.terminal.restart).not.toHaveBeenCalled();
-
-      confirmSpy.mockReturnValueOnce(true);
-      document.querySelector<HTMLButtonElement>("[aria-label='Restart Terminal']")?.click();
-
-      await vi.waitFor(() => {
-        expect(environment.terminal.restart).toHaveBeenCalledTimes(1);
-      });
     } finally {
-      confirmSpy.mockRestore();
       await mounted.cleanup();
     }
   });

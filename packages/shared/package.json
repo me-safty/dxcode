@@ -110,10 +110,6 @@
     "./orchestrationThreadDetailFingerprint": {
       "types": "./src/orchestrationThreadDetailFingerprint.ts",
       "import": "./src/orchestrationThreadDetailFingerprint.ts"
-    },
-    "./webFeatureFlags": {
-      "types": "./src/webFeatureFlags.ts",
-      "import": "./src/webFeatureFlags.ts"
     }
   },
   "scripts": {

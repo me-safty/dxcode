@@ -1,13 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
-import {
-  Plus,
-  RefreshCw,
-  RotateCcw,
-  SquareSplitHorizontal,
-  TerminalSquare,
-  Trash2,
-  XIcon,
-} from "lucide-react";
+import { Plus, SquareSplitHorizontal, TerminalSquare, Trash2, XIcon } from "lucide-react";
 import {
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
@@ -69,8 +61,7 @@ import {
   type ThreadTerminalGroup,
 } from "../types";
 import { readEnvironmentApi } from "~/environmentApi";
-import { readEnvironmentConnection, waitForEnvironmentReconnectIdle } from "~/environments/runtime";
-import { withTimeout } from "~/environments/runtime/withTimeout";
+import { readEnvironmentConnection } from "~/environments/runtime";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { readLocalApi } from "~/localApi";
 import { isTransportConnectionErrorMessage } from "~/rpc/transportError";
@@ -89,10 +80,8 @@ const TOUCH_LONG_PRESS_MOVE_TOLERANCE_PX = 10;
 const TERMINAL_OPEN_RETRY_DELAYS_MS = [250, 500, 1_000] as const;
 const TERMINAL_OPEN_RETRY_MAX_DELAY_MS = 2_000;
 const TERMINAL_RETRY_BOOTSTRAP_WAIT_MS = 5_000;
-const TERMINAL_MANUAL_RECONNECT_TIMEOUT_MS = 8_000;
-const TERMINAL_MANUAL_RECONNECT_IDLE_WAIT_MS = 2_500;
 
-type TerminalOpenReason = "manual-resync" | "mount" | "retry" | "user-restart";
+type TerminalOpenReason = "mount" | "retry";
 
 interface TerminalSize {
   readonly cols: number;
@@ -566,8 +555,6 @@ interface TerminalViewportProps {
   focusRequestId: number;
   autoFocus: boolean;
   resizeEpoch: number;
-  resyncRequestId: number;
-  restartRequestId: number;
   drawerHeight: number;
   keybindings: ResolvedKeybindingsConfig;
   pendingModifierRef?: MutableRefObject<TerminalModifier | null>;
@@ -587,8 +574,6 @@ export function TerminalViewport({
   focusRequestId,
   autoFocus,
   resizeEpoch,
-  resyncRequestId,
-  restartRequestId,
   drawerHeight,
   keybindings,
   pendingModifierRef,
@@ -611,13 +596,9 @@ export function TerminalViewport({
   const latestTerminalSizeRef = useRef<TerminalSize | null>(null);
   const deferredResizeRef = useRef<(TerminalSize & { reason: string }) | null>(null);
   const requestTerminalResizeRef = useRef<((reason: string) => void) | null>(null);
-  const resyncTerminalRef = useRef<(() => void) | null>(null);
-  const restartTerminalRef = useRef<(() => void) | null>(null);
   const openGenerationRef = useRef(0);
   const openRetryAttemptRef = useRef(0);
   const openRetryTimerRef = useRef<number | null>(null);
-  const handledResyncRequestIdRef = useRef(0);
-  const handledRestartRequestIdRef = useRef(0);
   const touchScrollStateRef = useRef<{
     accumulatedPixels: number;
     active: boolean;
@@ -1681,172 +1662,6 @@ export function TerminalViewport({
       run();
     }
 
-    async function reconnectTerminalTransport(reason: "manual-resync" | "user-restart") {
-      const connection = readEnvironmentConnection(environmentId);
-      if (!connection) {
-        recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-skipped", {
-          reason,
-        });
-        return;
-      }
-
-      const reconnectIdle = await waitForEnvironmentReconnectIdle(
-        environmentId,
-        TERMINAL_MANUAL_RECONNECT_IDLE_WAIT_MS,
-      );
-      recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-idle-wait", {
-        reason,
-        settled: reconnectIdle,
-      });
-      recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-started", {
-        reason,
-      });
-      try {
-        await withTimeout(
-          connection.client.reconnect(),
-          TERMINAL_MANUAL_RECONNECT_TIMEOUT_MS,
-          () =>
-            new Error(
-              `Terminal transport reconnect timed out after ${TERMINAL_MANUAL_RECONNECT_TIMEOUT_MS.toString()}ms.`,
-            ),
-        );
-        recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-success", {
-          reason,
-        });
-      } catch (error) {
-        recordTerminalDiagnostic(threadRef, terminalId, "terminal-transport-reconnect-failed", {
-          message: errorMessage(error, "Terminal transport reconnect failed"),
-          reason,
-          transientTransport: isTransportConnectionError(error),
-        });
-        throw error;
-      }
-    }
-
-    async function withTransientTransportRetry<T>(
-      reason: "manual-resync" | "user-restart",
-      operation: () => Promise<T>,
-    ): Promise<T> {
-      try {
-        return await operation();
-      } catch (error) {
-        if (!isTransportConnectionError(error)) {
-          throw error;
-        }
-
-        const reconnectIdle = await waitForEnvironmentReconnectIdle(
-          environmentId,
-          TERMINAL_MANUAL_RECONNECT_IDLE_WAIT_MS,
-        );
-        recordTerminalDiagnostic(threadRef, terminalId, "terminal-transient-transport-retry", {
-          reason,
-          settled: reconnectIdle,
-          message: errorMessage(error, "Transient terminal transport error"),
-        });
-        return await operation();
-      }
-    }
-
-    async function manualResyncTerminal() {
-      if (disposed) {
-        return;
-      }
-      const generation = ++openGenerationRef.current;
-      clearOpenRetryTimer();
-      recordTerminalDiagnostic(threadRef, terminalId, "terminal-resync-started", {
-        generation,
-        size: readTerminalSize(),
-      });
-      try {
-        const snapshot = await withTransientTransportRetry("manual-resync", async () => {
-          await reconnectTerminalTransport("manual-resync");
-          await waitForEnvironmentReconnectIdle(
-            environmentId,
-            TERMINAL_MANUAL_RECONNECT_IDLE_WAIT_MS,
-          );
-          return await performTerminalOpen("manual-resync", generation);
-        });
-        if (!snapshot) {
-          return;
-        }
-        recordTerminalDiagnostic(threadRef, terminalId, "terminal-resync-success", {
-          snapshot: summarizeTerminalSnapshot(snapshot),
-        });
-      } catch (error) {
-        if (disposed || generation !== openGenerationRef.current) {
-          return;
-        }
-        const message = errorMessage(error, "Terminal resync failed");
-        recordTerminalDiagnostic(threadRef, terminalId, "terminal-resync-failed", {
-          message,
-          transientTransport: isTransportConnectionError(error),
-        });
-        writeSystemMessage(terminal, message);
-      } finally {
-        flushDeferredResize();
-      }
-    }
-
-    async function restartTerminal() {
-      const activeTerminal = terminalRef.current;
-      const activeFitAddon = fitAddonRef.current;
-      if (!activeTerminal || !activeFitAddon) {
-        return;
-      }
-      const generation = ++openGenerationRef.current;
-      clearOpenRetryTimer();
-      activeFitAddon.fit();
-      const size = readTerminalSize() ?? {
-        cols: activeTerminal.cols,
-        rows: activeTerminal.rows,
-      };
-      try {
-        const snapshot = await withTransientTransportRetry("user-restart", async () => {
-          await reconnectTerminalTransport("user-restart");
-          await waitForEnvironmentReconnectIdle(
-            environmentId,
-            TERMINAL_MANUAL_RECONNECT_IDLE_WAIT_MS,
-          );
-          return await terminalApi.restart({
-            threadId,
-            terminalId,
-            cwd,
-            ...(worktreePath !== undefined ? { worktreePath } : {}),
-            cols: size.cols,
-            rows: size.rows,
-            ...(runtimeEnv ? { env: runtimeEnv } : {}),
-          });
-        });
-        if (disposed || generation !== openGenerationRef.current) {
-          return;
-        }
-        hasHandledExitRef.current = false;
-        hydrateFromSnapshot(snapshot, "user-restart");
-        recordTerminalDiagnostic(threadRef, terminalId, "terminal-restart-success", {
-          snapshot: summarizeTerminalSnapshot(snapshot),
-        });
-        flushDeferredResize();
-      } catch (error) {
-        if (disposed || generation !== openGenerationRef.current) {
-          return;
-        }
-        const message = errorMessage(error, "Terminal restart failed");
-        recordTerminalDiagnostic(threadRef, terminalId, "terminal-restart-failed", {
-          message,
-          transientTransport: isTransportConnectionError(error),
-        });
-        writeSystemMessage(activeTerminal, message);
-      }
-    }
-
-    resyncTerminalRef.current = () => {
-      void manualResyncTerminal();
-    };
-
-    restartTerminalRef.current = () => {
-      void restartTerminal();
-    };
-
     const fitTimer = window.setTimeout(() => {
       requestTerminalResizeRef.current?.("mount-fit");
     }, 30);
@@ -1864,8 +1679,6 @@ export function TerminalViewport({
       clearOpenRetryTimer();
       window.clearTimeout(fitTimer);
       requestTerminalResizeRef.current = null;
-      resyncTerminalRef.current = null;
-      restartTerminalRef.current = null;
       inputDisposable.dispose();
       selectionDisposable.dispose();
       terminalLinksDisposable.dispose();
@@ -1886,22 +1699,6 @@ export function TerminalViewport({
     // autoFocus is intentionally omitted;
     // it is only read at mount time and must not trigger terminal teardown/recreation.
   }, [cwd, environmentId, runtimeEnv, terminalId, threadId]);
-
-  useEffect(() => {
-    if (resyncRequestId <= 0 || handledResyncRequestIdRef.current === resyncRequestId) {
-      return;
-    }
-    handledResyncRequestIdRef.current = resyncRequestId;
-    resyncTerminalRef.current?.();
-  }, [resyncRequestId]);
-
-  useEffect(() => {
-    if (restartRequestId <= 0 || handledRestartRequestIdRef.current === restartRequestId) {
-      return;
-    }
-    handledRestartRequestIdRef.current = restartRequestId;
-    restartTerminalRef.current?.();
-  }, [restartRequestId]);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -2078,8 +1875,6 @@ export default function ThreadTerminalDrawer({
     EMPTY_TERMINAL_KEYBOARD_VIEWPORT,
   );
   const [resizeEpoch, setResizeEpoch] = useState(0);
-  const [resyncRequestId, setResyncRequestId] = useState(0);
-  const [restartRequestId, setRestartRequestId] = useState(0);
   const drawerRef = useRef<HTMLElement>(null);
   const drawerHeightRef = useRef(drawerHeight);
   const keyboardViewportRef = useRef(keyboardViewport);
@@ -2205,8 +2000,6 @@ export default function ThreadTerminalDrawer({
   const closeTerminalActionLabel = closeShortcutLabel
     ? `Close Terminal (${closeShortcutLabel})`
     : "Close Terminal";
-  const resyncTerminalActionLabel = "Resync Terminal";
-  const restartTerminalActionLabel = "Restart Terminal";
   const renderedDrawerHeight = resolveRenderedDrawerHeight(drawerHeight, keyboardViewport);
   const onSplitTerminalAction = useCallback(() => {
     if (hasReachedSplitLimit) return;
@@ -2215,24 +2008,6 @@ export default function ThreadTerminalDrawer({
   const onNewTerminalAction = useCallback(() => {
     onNewTerminal();
   }, [onNewTerminal]);
-  const onResyncTerminalAction = useCallback(() => {
-    setResyncRequestId((value) => value + 1);
-  }, []);
-  const onRestartTerminalAction = useCallback(() => {
-    recordTerminalDiagnostic(threadRef, resolvedActiveTerminalId, "terminal-restart-clicked", {
-      reason: "toolbar",
-    });
-    const confirmed =
-      typeof window !== "undefined" &&
-      window.confirm("Restart this terminal? Running work in this terminal will be stopped.");
-    if (!confirmed) {
-      return;
-    }
-    recordTerminalDiagnostic(threadRef, resolvedActiveTerminalId, "terminal-restart-confirmed", {
-      reason: "toolbar",
-    });
-    setRestartRequestId((value) => value + 1);
-  }, [resolvedActiveTerminalId, threadRef]);
 
   const sendActiveTerminalInput = useCallback(
     (data: string) => {
@@ -2547,20 +2322,6 @@ export default function ThreadTerminalDrawer({
             </TerminalActionButton>
             <TerminalActionButton
               className="inline-flex size-8 items-center justify-center rounded-md text-foreground/90 transition-colors hover:bg-accent active:bg-accent"
-              onClick={onResyncTerminalAction}
-              label={resyncTerminalActionLabel}
-            >
-              <RefreshCw className="size-4" />
-            </TerminalActionButton>
-            <TerminalActionButton
-              className="inline-flex size-8 items-center justify-center rounded-md text-foreground/90 transition-colors hover:bg-accent active:bg-accent"
-              onClick={onRestartTerminalAction}
-              label={restartTerminalActionLabel}
-            >
-              <RotateCcw className="size-4" />
-            </TerminalActionButton>
-            <TerminalActionButton
-              className="inline-flex size-8 items-center justify-center rounded-md text-foreground/90 transition-colors hover:bg-accent active:bg-accent"
               onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
               label={closeTerminalActionLabel}
             >
@@ -2588,22 +2349,6 @@ export default function ThreadTerminalDrawer({
                 label={newTerminalActionLabel}
               >
                 <Plus className="size-3.25" />
-              </TerminalActionButton>
-              <div className="h-4 w-px bg-border/80" />
-              <TerminalActionButton
-                className="p-1 text-foreground/90 transition-colors hover:bg-accent"
-                onClick={onResyncTerminalAction}
-                label={resyncTerminalActionLabel}
-              >
-                <RefreshCw className="size-3.25" />
-              </TerminalActionButton>
-              <div className="h-4 w-px bg-border/80" />
-              <TerminalActionButton
-                className="p-1 text-foreground/90 transition-colors hover:bg-accent"
-                onClick={onRestartTerminalAction}
-                label={restartTerminalActionLabel}
-              >
-                <RotateCcw className="size-3.25" />
               </TerminalActionButton>
               <div className="h-4 w-px bg-border/80" />
               <TerminalActionButton
@@ -2653,12 +2398,6 @@ export default function ThreadTerminalDrawer({
                         focusRequestId={focusRequestId}
                         autoFocus={terminalId === resolvedActiveTerminalId}
                         resizeEpoch={resizeEpoch}
-                        resyncRequestId={
-                          terminalId === resolvedActiveTerminalId ? resyncRequestId : 0
-                        }
-                        restartRequestId={
-                          terminalId === resolvedActiveTerminalId ? restartRequestId : 0
-                        }
                         drawerHeight={renderedDrawerHeight}
                         keybindings={keybindings}
                         pendingModifierRef={pendingTerminalModifierRef}
@@ -2684,8 +2423,6 @@ export default function ThreadTerminalDrawer({
                   focusRequestId={focusRequestId}
                   autoFocus
                   resizeEpoch={resizeEpoch}
-                  resyncRequestId={resyncRequestId}
-                  restartRequestId={restartRequestId}
                   drawerHeight={renderedDrawerHeight}
                   keybindings={keybindings}
                   pendingModifierRef={pendingTerminalModifierRef}
@@ -2728,24 +2465,6 @@ export default function ThreadTerminalDrawer({
                     label={newTerminalActionLabel}
                   >
                     <Plus className={isMobile ? "size-4" : "size-3.25"} />
-                  </TerminalActionButton>
-                  <TerminalActionButton
-                    className={`inline-flex h-full items-center border-l border-border/70 ${
-                      isMobile ? "px-2" : "px-1"
-                    } text-foreground/90 transition-colors hover:bg-accent/70 active:bg-accent/70`}
-                    onClick={onResyncTerminalAction}
-                    label={resyncTerminalActionLabel}
-                  >
-                    <RefreshCw className={isMobile ? "size-4" : "size-3.25"} />
-                  </TerminalActionButton>
-                  <TerminalActionButton
-                    className={`inline-flex h-full items-center border-l border-border/70 ${
-                      isMobile ? "px-2" : "px-1"
-                    } text-foreground/90 transition-colors hover:bg-accent/70 active:bg-accent/70`}
-                    onClick={onRestartTerminalAction}
-                    label={restartTerminalActionLabel}
-                  >
-                    <RotateCcw className={isMobile ? "size-4" : "size-3.25"} />
                   </TerminalActionButton>
                   <TerminalActionButton
                     className={`inline-flex h-full items-center border-l border-border/70 ${
