@@ -57,6 +57,18 @@ const INTERRUPTED_AGENTAPI_RESULT = "__t3_antigravity_agentapi_interrupted__";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 let nextEventSequence = 0;
 
+const CONTEXT_CHECKPOINT_COMPACTION_PROMPT = [
+  "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.",
+  "",
+  "Include:",
+  "- Current progress and key decisions made",
+  "- Important context, constraints, or user preferences",
+  "- What remains to be done (clear next steps)",
+  "- Any critical data, examples, or references needed to continue",
+  "",
+  "Be concise, structured, and focused on helping the next LLM seamlessly continue the work.",
+].join("\n");
+
 const AgentApiNewConversationResponse = Schema.Struct({
   response: Schema.Struct({
     newConversation: Schema.Struct({
@@ -110,7 +122,15 @@ interface SessionContext {
   pollOffset: number;
   pollCarry: string;
   readonly seenLines: Set<string>;
+  readonly toolCallStepIndexes: Set<number>;
+  pendingCompaction: PendingCompaction | undefined;
   stopped: boolean;
+}
+
+interface PendingCompaction {
+  readonly turnId: TurnId;
+  summary: string;
+  completed: boolean;
 }
 
 interface PendingAntigravityGate {
@@ -208,6 +228,16 @@ function toolDetail(tool: AntigravityToolCall): string | undefined {
   return command ?? target ?? tool.name;
 }
 
+function toolTitle(tool: AntigravityToolCall): string {
+  const name = trimText(tool.name);
+  if (!name) return "Tool call";
+  const normalized = name.toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "list_dir" || normalized === "list_directory") return "Listed directory";
+  if (normalized === "read_file") return "Read file";
+  if (normalized === "write_to_file" || normalized === "write_file") return "Write file";
+  return name;
+}
+
 function itemTypeForTranscript(record: AntigravityTranscriptRecord) {
   const type = normalizeTranscriptType(record.type);
   if (type.includes("RUN_COMMAND")) return "command_execution" as const;
@@ -229,6 +259,54 @@ function isTerminalResponseRecord(input: {
     (input.method.includes("FINAL") || input.method.includes("RESPONSE")) &&
     !(input.record.tool_calls && input.record.tool_calls.length > 0)
   );
+}
+
+function sanitizeAntigravityAssistantText(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const lines = value.split(/\r?\n/u);
+  const kept: string[] = [];
+  let droppingPermissionBlock = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      droppingPermissionBlock = false;
+      kept.push(line);
+      continue;
+    }
+    if (/^Created At:\s*\S+\s+Completed At:\s*\S+/iu.test(trimmed)) continue;
+    if (/^You have read and write access to the following workspace\(s\):$/iu.test(trimmed)) {
+      droppingPermissionBlock = true;
+      continue;
+    }
+    if (/^Additionally, your current permission grants\b/iu.test(trimmed)) {
+      droppingPermissionBlock = false;
+      continue;
+    }
+    if (droppingPermissionBlock) {
+      if (trimmed.startsWith("/") || /^[A-Z]:[\\/]/u.test(trimmed)) continue;
+      droppingPermissionBlock = false;
+    }
+    if (/^(read_file|write_file|command|mcp)\([^)]+\):\s*(?:allowed|denied|ask)$/iu.test(trimmed))
+      continue;
+    if (/^Browser initialized successfully\b/iu.test(trimmed)) continue;
+    if (/^Workflow Status:/iu.test(trimmed)) continue;
+    if (/^Workflow validation is now active\b/iu.test(trimmed)) continue;
+    if (/^Content Priority Mode:/iu.test(trimmed)) continue;
+    kept.push(line);
+  }
+  const sanitized = kept.join("\n").trim();
+  return sanitized.length > 0 ? sanitized : undefined;
+}
+
+function isDuplicateConcreteToolRecord(
+  record: AntigravityTranscriptRecord,
+  priorToolCallStepIndexes: ReadonlySet<number>,
+): boolean {
+  if (typeof record.step_index !== "number" || !priorToolCallStepIndexes.has(record.step_index)) {
+    return false;
+  }
+  const type = normalizeTranscriptType(record.type);
+  return type.includes("LIST_DIRECTORY") || type.includes("LIST_DIR");
 }
 
 function agentApiTimeoutMessage(): string {
@@ -323,7 +401,7 @@ export function mapAntigravityTranscriptRecordToRuntimeEvents(input: {
         payload: {
           itemType: "dynamic_tool_call",
           status: "completed",
-          title: tool.name ?? "Tool call",
+          title: toolTitle(tool),
           ...(toolDetail(tool) ? { detail: toolDetail(tool) } : {}),
           data: tool,
         },
@@ -399,7 +477,8 @@ export function mapAntigravityTranscriptRecordToRuntimeEvents(input: {
     return events;
   }
 
-  if (content) {
+  const assistantText = sanitizeAntigravityAssistantText(content);
+  if (assistantText) {
     events.push({
       ...runtimeEventBase({ threadId, instanceId, turnId, createdAt, method, payload: record }),
       type: "content.delta",
@@ -409,7 +488,7 @@ export function mapAntigravityTranscriptRecordToRuntimeEvents(input: {
           : itemType === "plan"
             ? "plan_text"
             : "assistant_text",
-        delta: content,
+        delta: assistantText,
       },
     });
   }
@@ -684,6 +763,71 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
     void pollGates(context);
   };
 
+  const emitThreadCompacted = (context: SessionContext, createdAt: string, detail?: unknown) => {
+    emit({
+      ...runtimeEventBase({
+        threadId: context.session.threadId,
+        ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+        createdAt,
+        method: "thread/compacted",
+        rawSource: "antigravity.agentapi",
+        payload: detail ?? {},
+      }),
+      type: "thread.state.changed",
+      payload: {
+        state: "compacted",
+        ...(detail !== undefined ? { detail } : {}),
+      },
+    });
+  };
+
+  const startCompactedConversation = async (
+    context: SessionContext,
+    summary: string,
+  ): Promise<void> => {
+    const pendingCompaction = context.pendingCompaction;
+    if (!pendingCompaction || pendingCompaction.completed || context.stopped) return;
+    context.pendingCompaction = {
+      ...pendingCompaction,
+      completed: true,
+    };
+    const cwd = context.session.cwd ?? serverConfig.cwd;
+    const env = makeAntigravityEnvironment(settings, baseEnv, cwd);
+    const seedPrompt = [
+      "<T3_CONTEXT_CHECKPOINT>",
+      "Continue this conversation from the compacted handoff summary below. Do not repeat the summary unless the user asks.",
+      "",
+      summary.trim(),
+      "</T3_CONTEXT_CHECKPOINT>",
+    ].join("\n");
+    const stdout = await (options.runAgentApi
+      ? options.runAgentApi(binaryPath, ["new-conversation", seedPrompt], { cwd, env })
+      : runAgentApiDefault(binaryPath, ["new-conversation", seedPrompt], { cwd, env }));
+    const decoded = decodeNewConversationResponse(JSON.parse(stdout) as unknown);
+    const conversationId = decoded.response.newConversation.conversationId;
+    const updatedAt = new Date().toISOString();
+    context.conversationId = conversationId;
+    context.session = {
+      ...context.session,
+      status: "ready",
+      activeTurnId: undefined,
+      resumeCursor: { conversationId },
+      updatedAt,
+    };
+    context.pollOffset = 0;
+    context.pollCarry = "";
+    context.seenLines.clear();
+    context.toolCallStepIndexes.clear();
+    context.pendingCompaction = undefined;
+    if (context.poller) {
+      clearInterval(context.poller);
+      context.poller = undefined;
+    }
+    startTranscriptPoller(context);
+    startGatePoller(context);
+    emitThreadCompacted(context, updatedAt, { conversationId });
+  };
+
   const getContext = (threadId: ThreadId, _method: string) =>
     Ref.get(sessionsRef).pipe(
       Effect.flatMap((sessions) => {
@@ -739,6 +883,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
           context.pollOffset = 0;
           context.pollCarry = "";
           context.seenLines.clear();
+          context.toolCallStepIndexes.clear();
         }
         if (stat.size === context.pollOffset) return;
         const handle = await fs.open(transcriptPath, "r");
@@ -756,6 +901,10 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
             context.seenLines.add(key);
             const record = parseAntigravityTranscriptLine(line);
             if (!record) continue;
+            if (isDuplicateConcreteToolRecord(record, context.toolCallStepIndexes)) continue;
+            if (typeof record.step_index === "number" && record.tool_calls?.length) {
+              context.toolCallStepIndexes.add(record.step_index);
+            }
             const mapRecord = () =>
               mapAntigravityTranscriptRecordToRuntimeEvents({
                 record,
@@ -774,8 +923,21 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
               mapped = mapRecord();
             }
             for (const event of mapped) {
+              const pendingCompaction = context.pendingCompaction;
+              if (
+                pendingCompaction &&
+                event.turnId === pendingCompaction.turnId &&
+                event.type === "content.delta" &&
+                event.payload.streamKind === "assistant_text"
+              ) {
+                pendingCompaction.summary += event.payload.delta;
+              }
               emit(event);
               if (event.type === "turn.completed") {
+                const shouldFinalizeCompaction =
+                  pendingCompaction !== undefined &&
+                  event.turnId === pendingCompaction.turnId &&
+                  pendingCompaction.summary.trim().length > 0;
                 context.activeTurnId = undefined;
                 context.session = {
                   ...context.session,
@@ -783,6 +945,28 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
                   activeTurnId: undefined,
                   updatedAt: context.session.updatedAt,
                 };
+                if (shouldFinalizeCompaction) {
+                  startCompactedConversation(context, pendingCompaction.summary).catch((cause) => {
+                    const detail = cause instanceof Error ? cause.message : String(cause);
+                    context.pendingCompaction = undefined;
+                    emit({
+                      ...runtimeEventBase({
+                        threadId: context.session.threadId,
+                        ...(options.instanceId ? { instanceId: options.instanceId } : {}),
+                        createdAt: new Date().toISOString(),
+                        method: "compact.new-conversation",
+                        rawSource: "antigravity.agentapi",
+                        payload: { detail },
+                      }),
+                      type: "runtime.error",
+                      payload: {
+                        message: `Failed to start compacted Antigravity conversation: ${detail}`,
+                        class: "provider_error",
+                        detail,
+                      },
+                    });
+                  });
+                }
               }
             }
           }
@@ -851,6 +1035,8 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       pollOffset: 0,
       pollCarry: "",
       seenLines: new Set(),
+      toolCallStepIndexes: new Set(),
+      pendingCompaction: undefined,
       stopped: false,
     };
     yield* Ref.update(sessionsRef, (sessions) => new Map(sessions).set(input.threadId, context));
@@ -1108,6 +1294,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
     }
     const updatedAt = yield* currentTimestamp;
     context.activeTurnId = undefined;
+    context.pendingCompaction = undefined;
     context.pendingGates.clear();
     context.autoApprovedGates.clear();
     context.agentApiCancel = undefined;
@@ -1123,6 +1310,29 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       type: "turn.completed",
       payload: { state: "cancelled" },
     });
+  });
+
+  const compactThread: AntigravityAdapterShape["compactThread"] = Effect.fn(
+    "AntigravityAdapter.compactThread",
+  )(function* (threadId) {
+    const context = yield* getContext(threadId, "compactThread");
+    if (context.activeTurnId) {
+      return yield* new ProviderAdapterValidationError({
+        provider: PROVIDER,
+        operation: "compactThread",
+        issue: "Cannot compact Antigravity while a turn is already running.",
+      });
+    }
+    const result = yield* sendTurn({
+      threadId,
+      input: CONTEXT_CHECKPOINT_COMPACTION_PROMPT,
+      attachments: [],
+    });
+    context.pendingCompaction = {
+      turnId: result.turnId,
+      summary: "",
+      completed: false,
+    };
   });
 
   const respondToRequest: AntigravityAdapterShape["respondToRequest"] = (
@@ -1223,6 +1433,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
     startSession,
     sendTurn,
     interruptTurn,
+    compactThread,
     respondToRequest,
     respondToUserInput,
     stopSession,

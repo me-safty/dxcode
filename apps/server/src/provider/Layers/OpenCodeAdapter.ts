@@ -1396,6 +1396,15 @@ export function makeOpenCodeAdapter(
       },
     );
 
+    const compactThread: OpenCodeAdapterShape["compactThread"] = (threadId) =>
+      Effect.fail(
+        new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "compactThread",
+          detail: `Provider '${PROVIDER}' does not support explicit context compaction yet for thread '${threadId}'.`,
+        }),
+      );
+
     const stopAll: OpenCodeAdapterShape["stopAll"] = () =>
       Effect.gen(function* () {
         const contexts = [...sessions.values()];
@@ -1426,6 +1435,7 @@ export function makeOpenCodeAdapter(
       hasSession,
       readThread,
       rollbackThread,
+      compactThread,
       stopAll,
       get streamEvents() {
         return Stream.fromQueue(runtimeEvents);

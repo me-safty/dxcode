@@ -3285,6 +3285,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     yield* Deferred.succeed(pending.answers, answers);
   });
 
+  const compactThread: ClaudeAdapterShape["compactThread"] = (threadId) =>
+    Effect.fail(
+      new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "compactThread",
+        detail: `Provider '${PROVIDER}' does not support explicit context compaction yet for thread '${threadId}'.`,
+      }),
+    );
+
   const stopSession: ClaudeAdapterShape["stopSession"] = Effect.fn("stopSession")(
     function* (threadId) {
       const context = yield* requireSession(threadId);
@@ -3334,6 +3343,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     interruptTurn,
     readThread,
     rollbackThread,
+    compactThread,
     respondToRequest,
     respondToUserInput,
     stopSession,

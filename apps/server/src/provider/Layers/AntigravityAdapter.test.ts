@@ -137,7 +137,34 @@ describe("AntigravityAdapter transcript helpers", () => {
     expect(events[0]?.payload).toMatchObject({
       itemType: "dynamic_tool_call",
       status: "completed",
-      title: "write_to_file",
+      title: "Write file",
+    });
+  });
+
+  it("normalizes Antigravity list tool call titles", () => {
+    const events = mapAntigravityTranscriptRecordToRuntimeEvents({
+      threadId: ThreadId.make("thread-1"),
+      turnId: TurnId.make("turn-1"),
+      record: {
+        step_index: 7,
+        source: "MODEL",
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        tool_calls: [
+          {
+            name: "List_dir",
+            args: { path: "/tmp/project" },
+          },
+        ],
+      },
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.payload).toMatchObject({
+      itemType: "dynamic_tool_call",
+      status: "completed",
+      title: "Listed directory",
+      detail: "/tmp/project",
     });
   });
 
@@ -209,6 +236,33 @@ describe("AntigravityAdapter transcript helpers", () => {
     });
   });
 
+  it("strips Antigravity protocol and tool-log noise from final response text", () => {
+    const events = mapAntigravityTranscriptRecordToRuntimeEvents({
+      threadId: ThreadId.make("thread-1"),
+      turnId: TurnId.make("turn-1"),
+      record: {
+        step_index: 12,
+        source: "MODEL",
+        type: "FINAL_RESPONSE",
+        status: "DONE",
+        content: [
+          "Created At: 2026-06-01T10:21:47Z Completed At: 2026-06-01T10:21:47Z",
+          "You have read and write access to the following workspace(s):",
+          "/home/coder",
+          "command(cat): allowed",
+          "Browser initialized successfully with anti-detection features",
+          "Done.",
+        ].join("\n"),
+      },
+    });
+
+    expect(events.map((event) => event.type)).toEqual(["content.delta", "turn.completed"]);
+    expect(events[0]?.payload).toMatchObject({
+      streamKind: "assistant_text",
+      delta: "Done.",
+    });
+  });
+
   it("maps system error transcript records to runtime failures", () => {
     const events = mapAntigravityTranscriptRecordToRuntimeEvents({
       threadId: ThreadId.make("thread-1"),
@@ -255,6 +309,97 @@ describe("AntigravityAdapter transcript helpers", () => {
 });
 
 describe("AntigravityAdapter resumed-output turn reopen", () => {
+  it("does not duplicate list-dir planner and concrete transcript records", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "antig-list-dedupe-"));
+    try {
+      const brainPath = join(baseDir, "brain");
+      const conversationId = "conv-list-dedupe";
+      const transcriptPath = join(
+        brainPath,
+        conversationId,
+        ".system_generated",
+        "logs",
+        "transcript.jsonl",
+      );
+      await mkdir(dirname(transcriptPath), { recursive: true });
+      await writeFile(transcriptPath, "");
+
+      const settings = decodeAntigravitySettings({
+        brainPath,
+        settingsPath: join(baseDir, "settings.json"),
+      });
+
+      const config = await Effect.runPromise(
+        makeTestServerConfig(baseDir).pipe(Effect.provide(NodeServices.layer)),
+      );
+      const adapter = await Effect.runPromise(
+        makeAntigravityAdapter(settings, {
+          instanceId: ProviderInstanceId.make("antigravity"),
+          environment: {},
+        }).pipe(Effect.provideService(ServerConfig, config)),
+      );
+
+      const events: ProviderRuntimeEvent[] = [];
+      const collector = Effect.runFork(
+        Stream.runForEach(adapter.streamEvents, (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        ),
+      );
+      const threadId = ThreadId.make("thread-list-dedupe");
+      try {
+        await Effect.runPromise(
+          adapter.startSession({
+            threadId,
+            runtimeMode: "full-access",
+            cwd: baseDir,
+            resumeCursor: { conversationId },
+          }),
+        );
+
+        await appendFile(
+          transcriptPath,
+          [
+            JSON.stringify({
+              step_index: 3,
+              source: "MODEL",
+              type: "PLANNER_RESPONSE",
+              status: "DONE",
+              tool_calls: [{ name: "List_dir", args: { path: baseDir } }],
+            }),
+            JSON.stringify({
+              step_index: 3,
+              source: "MODEL",
+              type: "LIST_DIRECTORY",
+              status: "DONE",
+              content: '{"name":"package.json"}',
+            }),
+            "",
+          ].join("\n"),
+        );
+
+        await waitFor(
+          () => events.filter((event) => event.type === "item.completed").length === 1,
+          events,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 700));
+
+        const toolEvents = events.filter((event) => event.type === "item.completed");
+        expect(toolEvents).toHaveLength(1);
+        expect(toolEvents[0]?.payload).toMatchObject({
+          itemType: "dynamic_tool_call",
+          title: "Listed directory",
+        });
+      } finally {
+        await Effect.runPromise(adapter.stopSession(threadId)).catch(() => undefined);
+        await Effect.runPromise(Fiber.interrupt(collector)).catch(() => undefined);
+      }
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
   it("reopens a turn when transcript output resumes after a completed turn", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "antig-reopen-"));
     try {
