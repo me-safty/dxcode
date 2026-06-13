@@ -64,6 +64,11 @@ export function sortThreads<T extends Pick<Thread, "id"> & ThreadSortInput>(
   threads: readonly T[],
   sortOrder: SidebarThreadSortOrder,
 ): T[] {
+  // Manual sort preserves the incoming order; the caller layers the
+  // user-defined order on top via `orderItemsByPreferredIds`.
+  if (sortOrder === "manual") {
+    return [...threads];
+  }
   return threads.toSorted((left, right) => {
     const rightTimestamp = getThreadSortTimestamp(right, sortOrder);
     const leftTimestamp = getThreadSortTimestamp(left, sortOrder);
