@@ -1463,28 +1463,28 @@ const make = Effect.gen(function* () {
                   parentRelation,
                   createdAt: now,
                 });
-                if (child.rawPrompt) {
-                  const childThreadIdText = String(child.childThreadId);
-                  const parentItemIdText = String(child.parentItemId);
-                  yield* orchestrationEngine.dispatch({
-                    type: "thread.message.user.append",
-                    commandId: CommandId.make(
-                      `provider:subagent-thread-prompt:${childThreadIdText}:${parentItemIdText}`,
-                    ),
-                    threadId: child.childThreadId,
-                    messageId: MessageId.make(
-                      `subagent-prompt:${childThreadIdText}:${parentItemIdText}`,
-                    ),
-                    text: child.rawPrompt,
-                    createdAt: now,
-                  });
-                }
                 yield* maybeGenerateSubagentThreadTitle({
                   childThreadId: child.childThreadId,
                   titleSeed: parentRelation.titleSeed,
                   cwd: thread.worktreePath ?? process.cwd(),
                   createdAt: now,
                 }).pipe(Effect.forkScoped);
+              }
+              if (child.rawPrompt) {
+                const childThreadIdText = String(child.childThreadId);
+                const parentItemIdText = String(child.parentItemId);
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.message.user.append",
+                  commandId: CommandId.make(
+                    `provider:subagent-thread-prompt:${childThreadIdText}:${parentItemIdText}`,
+                  ),
+                  threadId: child.childThreadId,
+                  messageId: MessageId.make(
+                    `subagent-prompt:${childThreadIdText}:${parentItemIdText}`,
+                  ),
+                  text: child.rawPrompt,
+                  createdAt: now,
+                });
               }
               yield* Ref.update(syntheticChildShellById, (current) => {
                 const cached = current.get(child.childThreadId);

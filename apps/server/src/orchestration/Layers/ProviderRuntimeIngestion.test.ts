@@ -2611,6 +2611,39 @@ describe("ProviderRuntimeIngestion", () => {
     const childThreadId = asThreadId("subagent-prompt-test");
 
     harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-subagent-prompt-started"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-9"),
+      itemId: asItemId("parent-item-prompt-test"),
+      payload: {
+        itemType: "collab_agent_tool_call",
+        status: "in_progress",
+        title: "Subagent",
+        detail: rawPrompt,
+        data: {
+          subagentChildren: [
+            {
+              providerThreadId: "provider-child-prompt-test",
+              childThreadId,
+              parentItemId: "parent-item-prompt-test",
+              titleSeed: rawPrompt,
+            },
+          ],
+        },
+      },
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (entry) => entry.parentRelation?.kind === "subagent",
+      2000,
+      childThreadId,
+    );
+
+    harness.emit({
       type: "item.completed",
       eventId: asEventId("evt-subagent-prompt-completed"),
       provider: ProviderDriverKind.make("codex"),
