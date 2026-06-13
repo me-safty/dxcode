@@ -1008,7 +1008,18 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     if (!stat || stat.type !== "File") continue;
 
     const to = path.join(options.outputDir, entry);
-    yield* fs.copyFile(from, to);
+    const tempTo = `${to}.${process.pid}.tmp`;
+    yield* fs.copyFile(from, tempTo);
+    yield* fs.rename(tempTo, to).pipe(
+      Effect.catch(() =>
+        Effect.gen(function* () {
+          yield* fs.remove(tempTo).pipe(Effect.orElseSucceed(() => undefined));
+          return yield* new BuildScriptError({
+            message: `Failed to replace ${to}. Close any running copy of this artifact and retry.`,
+          });
+        }),
+      ),
+    );
     copiedArtifacts.push(to);
   }
 
