@@ -155,6 +155,17 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
       getProcessResourceHistory: vi.fn(),
       signalProcess: vi.fn(),
     },
+    speechToText: {
+      transcribe: vi.fn(),
+    },
+    antigravity: {
+      listAccounts: vi.fn(),
+      detectAccount: vi.fn(),
+      saveAccount: vi.fn(),
+      switchAccount: vi.fn(),
+      removeAccount: vi.fn(),
+      dismissDetectedAccount: vi.fn(),
+    },
   };
   return {
     ...actual,

@@ -87,6 +87,15 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import { transcribeSpeechWithGroq } from "./speechToText/GroqSpeechToText.ts";
+import {
+  detectAntigravityAccount,
+  dismissDetectedAntigravityAccount,
+  listAntigravityAccounts,
+  removeAntigravityAccount,
+  resolveAntigravitySettingsFromServer,
+  saveAntigravityAccount,
+  switchAntigravityAccount,
+} from "./provider/AntigravityAccountStore.ts";
 import * as SourceControlDiscoveryLayer from "./sourceControl/SourceControlDiscovery.ts";
 import { SourceControlRepositoryService } from "./sourceControl/SourceControlRepositoryService.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
@@ -152,6 +161,12 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.serverGetProcessResourceHistory, AuthOrchestrationReadScope],
   [WS_METHODS.serverSignalProcess, AuthOrchestrationOperateScope],
   [WS_METHODS.speechToTextTranscribe, AuthOrchestrationOperateScope],
+  [WS_METHODS.antigravityListAccounts, AuthOrchestrationReadScope],
+  [WS_METHODS.antigravityDetectAccount, AuthOrchestrationReadScope],
+  [WS_METHODS.antigravitySaveAccount, AuthOrchestrationOperateScope],
+  [WS_METHODS.antigravitySwitchAccount, AuthOrchestrationOperateScope],
+  [WS_METHODS.antigravityRemoveAccount, AuthOrchestrationOperateScope],
+  [WS_METHODS.antigravityDismissDetectedAccount, AuthOrchestrationOperateScope],
   [WS_METHODS.cloudGetRelayClientStatus, AuthRelayWriteScope],
   [WS_METHODS.cloudInstallRelayClient, AuthRelayWriteScope],
   [WS_METHODS.sourceControlLookupRepository, AuthOrchestrationReadScope],
@@ -1091,6 +1106,64 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
               Effect.flatMap((settings) => transcribeSpeechWithGroq({ request: input, settings })),
             ),
             { "rpc.aggregate": "speech-to-text" },
+          ),
+        [WS_METHODS.antigravityListAccounts]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.antigravityListAccounts,
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) =>
+                listAntigravityAccounts(resolveAntigravitySettingsFromServer(settings)),
+              ),
+            ),
+            { "rpc.aggregate": "antigravity" },
+          ),
+        [WS_METHODS.antigravityDetectAccount]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.antigravityDetectAccount,
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) =>
+                detectAntigravityAccount(resolveAntigravitySettingsFromServer(settings)),
+              ),
+            ),
+            { "rpc.aggregate": "antigravity" },
+          ),
+        [WS_METHODS.antigravitySaveAccount]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.antigravitySaveAccount,
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) =>
+                saveAntigravityAccount({
+                  settings: resolveAntigravitySettingsFromServer(settings),
+                  ...(input.label ? { label: input.label } : {}),
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "antigravity" },
+          ),
+        [WS_METHODS.antigravitySwitchAccount]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.antigravitySwitchAccount,
+            serverSettings.getSettings.pipe(
+              Effect.flatMap((settings) =>
+                switchAntigravityAccount({
+                  settings: resolveAntigravitySettingsFromServer(settings),
+                  accountId: input.accountId,
+                }),
+              ),
+            ),
+            { "rpc.aggregate": "antigravity" },
+          ),
+        [WS_METHODS.antigravityRemoveAccount]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.antigravityRemoveAccount,
+            removeAntigravityAccount({ accountId: input.accountId }),
+            { "rpc.aggregate": "antigravity" },
+          ),
+        [WS_METHODS.antigravityDismissDetectedAccount]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.antigravityDismissDetectedAccount,
+            dismissDetectedAntigravityAccount({ fingerprint: input.fingerprint }),
+            { "rpc.aggregate": "antigravity" },
           ),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) =>
           observeRpcEffect(WS_METHODS.cloudGetRelayClientStatus, relayClient.resolve, {

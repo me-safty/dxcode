@@ -81,6 +81,15 @@ import type {
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
 import type { SpeechToTextTranscribeInput, SpeechToTextTranscribeResult } from "./speech.ts";
+import type {
+  AntigravityAccountDismissInput,
+  AntigravityAccountRemoveInput,
+  AntigravityAccountSaveInput,
+  AntigravityAccountSwitchInput,
+  AntigravityAccountsListResult,
+  AntigravityAccountDetection,
+  AntigravityAccountsRegistry,
+} from "./antigravityAccounts.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -526,6 +535,16 @@ export interface LocalApi {
   };
   speechToText: {
     transcribe: (input: SpeechToTextTranscribeInput) => Promise<SpeechToTextTranscribeResult>;
+  };
+  antigravity: {
+    listAccounts: () => Promise<AntigravityAccountsListResult>;
+    detectAccount: () => Promise<AntigravityAccountDetection>;
+    saveAccount: (input: AntigravityAccountSaveInput) => Promise<AntigravityAccountsRegistry>;
+    switchAccount: (input: AntigravityAccountSwitchInput) => Promise<AntigravityAccountsRegistry>;
+    removeAccount: (input: AntigravityAccountRemoveInput) => Promise<AntigravityAccountsRegistry>;
+    dismissDetectedAccount: (
+      input: AntigravityAccountDismissInput,
+    ) => Promise<AntigravityAccountsRegistry>;
   };
 }
 

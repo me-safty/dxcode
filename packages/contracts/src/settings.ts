@@ -416,13 +416,31 @@ export const AntigravitySettings = makeProviderSettingsSchema(
         },
       }),
     ),
+    geminiHomePath: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Gemini home path",
+        description: "Root directory for Antigravity credentials and state (default: ~/.gemini).",
+        providerSettingsForm: {
+          placeholder: "~/.gemini",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
     customModels: Schema.Array(Schema.String).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
   },
   {
-    order: ["binaryPath", "brainPath", "settingsPath", "languageServerAddress", "csrfToken"],
+    order: [
+      "binaryPath",
+      "geminiHomePath",
+      "brainPath",
+      "settingsPath",
+      "languageServerAddress",
+      "csrfToken",
+    ],
   },
 );
 export type AntigravitySettings = typeof AntigravitySettings.Type;
@@ -567,6 +585,7 @@ const OpenCodeSettingsPatch = Schema.Struct({
 const AntigravitySettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
+  geminiHomePath: Schema.optionalKey(TrimmedString),
   brainPath: Schema.optionalKey(TrimmedString),
   settingsPath: Schema.optionalKey(TrimmedString),
   languageServerAddress: Schema.optionalKey(TrimmedString),

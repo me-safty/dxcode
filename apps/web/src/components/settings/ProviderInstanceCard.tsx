@@ -41,6 +41,7 @@ import type { DriverOption } from "./providerDriverMeta";
 import { ProviderSettingsForm } from "./ProviderSettingsForm";
 import { ProviderModelsSection } from "./ProviderModelsSection";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+import { AntigravityAccountSection } from "./AntigravityAccountSection";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import {
@@ -767,6 +768,10 @@ export function ProviderInstanceCard({
                 onChange={updateEnvironment}
               />
             </div>
+
+            {driverKind === "antigravity" ? (
+              <AntigravityAccountSection enabled={isExpanded && enabled} />
+            ) : null}
 
             {driverOption ? (
               <ProviderSettingsForm

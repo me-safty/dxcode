@@ -169,6 +169,7 @@ function createBaseServerConfig(): ServerConfig {
         antigravity: {
           enabled: true,
           binaryPath: "",
+          geminiHomePath: "",
           brainPath: "",
           settingsPath: "",
           languageServerAddress: "",

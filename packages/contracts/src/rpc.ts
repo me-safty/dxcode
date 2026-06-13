@@ -120,6 +120,16 @@ import {
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
+import {
+  AntigravityAccountDismissInput,
+  AntigravityAccountError,
+  AntigravityAccountRemoveInput,
+  AntigravityAccountSaveInput,
+  AntigravityAccountsListResult,
+  AntigravityAccountSwitchInput,
+  AntigravityAccountDetection,
+  AntigravityAccountsRegistry,
+} from "./antigravityAccounts.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -176,6 +186,14 @@ export const WS_METHODS = {
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
   speechToTextTranscribe: "speechToText.transcribe",
+
+  // Antigravity account management
+  antigravityListAccounts: "antigravity.listAccounts",
+  antigravityDetectAccount: "antigravity.detectAccount",
+  antigravitySaveAccount: "antigravity.saveAccount",
+  antigravitySwitchAccount: "antigravity.switchAccount",
+  antigravityRemoveAccount: "antigravity.removeAccount",
+  antigravityDismissDetectedAccount: "antigravity.dismissDetectedAccount",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -557,6 +575,45 @@ export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess,
   stream: true,
 });
 
+export const WsAntigravityListAccountsRpc = Rpc.make(WS_METHODS.antigravityListAccounts, {
+  payload: Schema.Struct({}),
+  success: AntigravityAccountsListResult,
+  error: Schema.Union([AntigravityAccountError, EnvironmentAuthorizationError]),
+});
+
+export const WsAntigravityDetectAccountRpc = Rpc.make(WS_METHODS.antigravityDetectAccount, {
+  payload: Schema.Struct({}),
+  success: AntigravityAccountDetection,
+  error: Schema.Union([AntigravityAccountError, EnvironmentAuthorizationError]),
+});
+
+export const WsAntigravitySaveAccountRpc = Rpc.make(WS_METHODS.antigravitySaveAccount, {
+  payload: AntigravityAccountSaveInput,
+  success: AntigravityAccountsRegistry,
+  error: Schema.Union([AntigravityAccountError, EnvironmentAuthorizationError]),
+});
+
+export const WsAntigravitySwitchAccountRpc = Rpc.make(WS_METHODS.antigravitySwitchAccount, {
+  payload: AntigravityAccountSwitchInput,
+  success: AntigravityAccountsRegistry,
+  error: Schema.Union([AntigravityAccountError, EnvironmentAuthorizationError]),
+});
+
+export const WsAntigravityRemoveAccountRpc = Rpc.make(WS_METHODS.antigravityRemoveAccount, {
+  payload: AntigravityAccountRemoveInput,
+  success: AntigravityAccountsRegistry,
+  error: Schema.Union([AntigravityAccountError, EnvironmentAuthorizationError]),
+});
+
+export const WsAntigravityDismissDetectedAccountRpc = Rpc.make(
+  WS_METHODS.antigravityDismissDetectedAccount,
+  {
+    payload: AntigravityAccountDismissInput,
+    success: AntigravityAccountsRegistry,
+    error: Schema.Union([AntigravityAccountError, EnvironmentAuthorizationError]),
+  },
+);
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -612,4 +669,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
+  WsAntigravityListAccountsRpc,
+  WsAntigravityDetectAccountRpc,
+  WsAntigravitySaveAccountRpc,
+  WsAntigravitySwitchAccountRpc,
+  WsAntigravityRemoveAccountRpc,
+  WsAntigravityDismissDetectedAccountRpc,
 );
