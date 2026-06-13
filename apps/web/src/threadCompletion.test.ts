@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { EnvironmentId, ThreadId, type OrchestrationLatestTurn } from "@t3tools/contracts";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
 
-import { countUnseenCompletedThreads, hasUnseenCompletion } from "./threadCompletion";
+import {
+  countUnseenCompletedThreads,
+  hasUnseenCompletion,
+  viewedThreadVisitedAt,
+} from "./threadCompletion";
 
 function makeLatestTurn(completedAt: string | null): Pick<OrchestrationLatestTurn, "completedAt"> {
   return { completedAt };
@@ -31,6 +35,34 @@ describe("hasUnseenCompletion", () => {
     expect(hasUnseenCompletion({ latestTurn: null })).toBe(false);
     expect(hasUnseenCompletion({ latestTurn: makeLatestTurn(null) })).toBe(false);
     expect(hasUnseenCompletion({ latestTurn: makeLatestTurn("not-a-date") })).toBe(false);
+  });
+});
+
+describe("viewedThreadVisitedAt", () => {
+  it("returns now when now is after the latest completion", () => {
+    expect(
+      viewedThreadVisitedAt("2026-06-12T12:00:00.000Z", new Date("2026-06-12T12:00:01.000Z")),
+    ).toBe("2026-06-12T12:00:01.000Z");
+  });
+
+  it("returns completedAt when the latest completion is after now", () => {
+    expect(
+      viewedThreadVisitedAt("2026-06-12T12:00:01.000Z", new Date("2026-06-12T12:00:00.000Z")),
+    ).toBe("2026-06-12T12:00:01.000Z");
+  });
+
+  it("returns now when now equals the latest completion", () => {
+    expect(
+      viewedThreadVisitedAt("2026-06-12T12:00:00.000Z", new Date("2026-06-12T12:00:00.000Z")),
+    ).toBe("2026-06-12T12:00:00.000Z");
+  });
+
+  it("returns now when completedAt is missing or malformed", () => {
+    const now = new Date("2026-06-12T12:00:00.000Z");
+
+    expect(viewedThreadVisitedAt(null, now)).toBe("2026-06-12T12:00:00.000Z");
+    expect(viewedThreadVisitedAt(undefined, now)).toBe("2026-06-12T12:00:00.000Z");
+    expect(viewedThreadVisitedAt("not-a-date", now)).toBe("2026-06-12T12:00:00.000Z");
   });
 });
 

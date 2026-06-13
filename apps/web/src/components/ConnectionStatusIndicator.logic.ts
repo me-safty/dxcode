@@ -13,8 +13,6 @@ export interface ConnectionIndicatorView {
   readonly label: string;
   /** Longer human explanation, shown in the tooltip / `title`. */
   readonly detail: string;
-  /** Whether a manual "reconnect now" affordance should be offered. */
-  readonly showRetry: boolean;
 }
 
 const DEFAULT_CONNECTION_NAME = "T3 Server";
@@ -49,7 +47,6 @@ export function deriveConnectionIndicator(
       tone: "offline",
       label: "Disconnected",
       detail: `Couldn't reconnect to ${name}. Retries exhausted.`,
-      showRetry: true,
     };
   }
 
@@ -59,14 +56,12 @@ export function deriveConnectionIndicator(
         tone: "online",
         label: "Connected",
         detail: `Connected to ${name}.`,
-        showRetry: false,
       };
     case "connecting":
       return {
         tone: "syncing",
         label: "Connecting",
         detail: `Connecting to ${name}…`,
-        showRetry: false,
       };
     case "reconnecting":
       return {
@@ -79,14 +74,12 @@ export function deriveConnectionIndicator(
                 status.nextRetryAt,
                 nowMs,
               )}… ${formatAttempt(status)}`,
-        showRetry: true,
       };
     case "offline":
       return {
         tone: "offline",
         label: "Offline",
         detail: "You're offline. Waiting for the network to come back.",
-        showRetry: false,
       };
     case "error":
       return {
@@ -95,7 +88,6 @@ export function deriveConnectionIndicator(
         detail: status.lastError?.trim()
           ? `Can't reach ${name}: ${status.lastError.trim()}`
           : `Can't reach ${name}.`,
-        showRetry: true,
       };
   }
 }

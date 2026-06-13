@@ -30,6 +30,7 @@ export interface UiProjectState {
 
 export interface UiThreadState {
   threadLastVisitedAtById: Record<string, string>;
+  seededThreadVisitedKeys: ReadonlySet<string>;
   threadChangedFilesExpandedById: Record<string, Record<string, boolean>>;
 }
 
@@ -56,6 +57,7 @@ const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
   threadLastVisitedAtById: {},
+  seededThreadVisitedKeys: new Set<string>(),
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
 };
@@ -222,6 +224,39 @@ function recordsEqual<T>(left: Record<string, T>, right: Record<string, T>): boo
     }
   }
   return true;
+}
+
+function setsEqual<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isTimestampAfter(left: string, right: string): boolean {
+  const leftMs = Date.parse(left);
+  if (Number.isNaN(leftMs)) {
+    return false;
+  }
+  const rightMs = Date.parse(right);
+  return Number.isNaN(rightMs) || leftMs > rightMs;
+}
+
+function withoutSeededThreadVisitedKey(
+  state: UiState,
+  threadId: string,
+): ReadonlySet<string> | null {
+  if (!state.seededThreadVisitedKeys.has(threadId)) {
+    return null;
+  }
+  const nextSeededThreadVisitedKeys = new Set(state.seededThreadVisitedKeys);
+  nextSeededThreadVisitedKeys.delete(threadId);
+  return nextSeededThreadVisitedKeys;
 }
 
 function projectOrdersEqual(left: readonly string[], right: readonly string[]): boolean {
@@ -413,13 +448,24 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
       retainedThreadIds.has(threadId),
     ),
   );
+  const nextSeededThreadVisitedKeys = new Set(
+    [...state.seededThreadVisitedKeys].filter((threadId) => retainedThreadIds.has(threadId)),
+  );
   for (const thread of threads) {
-    if (
-      nextThreadLastVisitedAtById[thread.key] === undefined &&
-      thread.seedVisitedAt !== undefined &&
-      thread.seedVisitedAt.length > 0
+    const seedVisitedAt = thread.seedVisitedAt;
+    if (seedVisitedAt === undefined || seedVisitedAt.length === 0) {
+      continue;
+    }
+
+    const previousVisitedAt = nextThreadLastVisitedAtById[thread.key];
+    if (previousVisitedAt === undefined) {
+      nextThreadLastVisitedAtById[thread.key] = seedVisitedAt;
+      nextSeededThreadVisitedKeys.add(thread.key);
+    } else if (
+      nextSeededThreadVisitedKeys.has(thread.key) &&
+      isTimestampAfter(seedVisitedAt, previousVisitedAt)
     ) {
-      nextThreadLastVisitedAtById[thread.key] = thread.seedVisitedAt;
+      nextThreadLastVisitedAtById[thread.key] = seedVisitedAt;
     }
   }
   const nextThreadChangedFilesExpandedById = Object.fromEntries(
@@ -429,6 +475,7 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
   );
   if (
     recordsEqual(state.threadLastVisitedAtById, nextThreadLastVisitedAtById) &&
+    setsEqual(state.seededThreadVisitedKeys, nextSeededThreadVisitedKeys) &&
     nestedBooleanRecordsEqual(
       state.threadChangedFilesExpandedById,
       nextThreadChangedFilesExpandedById,
@@ -439,6 +486,7 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
   return {
     ...state,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
+    seededThreadVisitedKeys: nextSeededThreadVisitedKeys,
     threadChangedFilesExpandedById: nextThreadChangedFilesExpandedById,
   };
 }
@@ -453,14 +501,23 @@ export function markThreadVisited(state: UiState, threadId: string, visitedAt?: 
     Number.isFinite(visitedAtMs) &&
     previousVisitedAtMs >= visitedAtMs
   ) {
+    const nextSeededThreadVisitedKeys = withoutSeededThreadVisitedKey(state, threadId);
+    if (nextSeededThreadVisitedKeys) {
+      return {
+        ...state,
+        seededThreadVisitedKeys: nextSeededThreadVisitedKeys,
+      };
+    }
     return state;
   }
+  const nextSeededThreadVisitedKeys = withoutSeededThreadVisitedKey(state, threadId);
   return {
     ...state,
     threadLastVisitedAtById: {
       ...state.threadLastVisitedAtById,
       [threadId]: at,
     },
+    seededThreadVisitedKeys: nextSeededThreadVisitedKeys ?? state.seededThreadVisitedKeys,
   };
 }
 
@@ -469,15 +526,34 @@ export function markThreadUnread(
   threadId: string,
   latestTurnCompletedAt: string | null | undefined,
 ): UiState {
+  const nextSeededThreadVisitedKeys = withoutSeededThreadVisitedKey(state, threadId);
   if (!latestTurnCompletedAt) {
+    if (nextSeededThreadVisitedKeys) {
+      return {
+        ...state,
+        seededThreadVisitedKeys: nextSeededThreadVisitedKeys,
+      };
+    }
     return state;
   }
   const latestTurnCompletedAtMs = Date.parse(latestTurnCompletedAt);
   if (Number.isNaN(latestTurnCompletedAtMs)) {
+    if (nextSeededThreadVisitedKeys) {
+      return {
+        ...state,
+        seededThreadVisitedKeys: nextSeededThreadVisitedKeys,
+      };
+    }
     return state;
   }
   const unreadVisitedAt = new Date(latestTurnCompletedAtMs - 1).toISOString();
   if (state.threadLastVisitedAtById[threadId] === unreadVisitedAt) {
+    if (nextSeededThreadVisitedKeys) {
+      return {
+        ...state,
+        seededThreadVisitedKeys: nextSeededThreadVisitedKeys,
+      };
+    }
     return state;
   }
   return {
@@ -486,22 +562,27 @@ export function markThreadUnread(
       ...state.threadLastVisitedAtById,
       [threadId]: unreadVisitedAt,
     },
+    seededThreadVisitedKeys: nextSeededThreadVisitedKeys ?? state.seededThreadVisitedKeys,
   };
 }
 
 export function clearThreadUi(state: UiState, threadId: string): UiState {
   const hasVisitedState = threadId in state.threadLastVisitedAtById;
+  const hasSeededState = state.seededThreadVisitedKeys.has(threadId);
   const hasChangedFilesState = threadId in state.threadChangedFilesExpandedById;
-  if (!hasVisitedState && !hasChangedFilesState) {
+  if (!hasVisitedState && !hasSeededState && !hasChangedFilesState) {
     return state;
   }
   const nextThreadLastVisitedAtById = { ...state.threadLastVisitedAtById };
+  const nextSeededThreadVisitedKeys = new Set(state.seededThreadVisitedKeys);
   const nextThreadChangedFilesExpandedById = { ...state.threadChangedFilesExpandedById };
   delete nextThreadLastVisitedAtById[threadId];
+  nextSeededThreadVisitedKeys.delete(threadId);
   delete nextThreadChangedFilesExpandedById[threadId];
   return {
     ...state,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
+    seededThreadVisitedKeys: nextSeededThreadVisitedKeys,
     threadChangedFilesExpandedById: nextThreadChangedFilesExpandedById,
   };
 }
