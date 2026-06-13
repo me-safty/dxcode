@@ -64,6 +64,18 @@ Checkout their getting started guide for more information: https://viteplus.dev/
 vp i
 ```
 
+### Run this fork
+
+From the root of the repository, run:
+
+```bash
+vp run dev
+```
+
+Alternatively, use `npm run dev`.
+
 Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
 
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+## Acknowledgements
+
+Thanks to [Noctalia](https://github.com/noctalia-dev/noctalia) for inspiring more Code's colorful theme palettes.
