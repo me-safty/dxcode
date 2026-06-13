@@ -1463,17 +1463,19 @@ const make = Effect.gen(function* () {
                   parentRelation,
                   createdAt: now,
                 });
-                if (child.rawPrompt?.trim()) {
+                if (child.rawPrompt) {
+                  const childThreadIdText = String(child.childThreadId);
+                  const parentItemIdText = String(child.parentItemId);
                   yield* orchestrationEngine.dispatch({
                     type: "thread.message.user.append",
                     commandId: CommandId.make(
-                      `provider:subagent-thread-prompt:${child.childThreadId}:${child.parentItemId}`,
+                      `provider:subagent-thread-prompt:${childThreadIdText}:${parentItemIdText}`,
                     ),
                     threadId: child.childThreadId,
                     messageId: MessageId.make(
-                      `subagent-prompt:${child.childThreadId}:${child.parentItemId}`,
+                      `subagent-prompt:${childThreadIdText}:${parentItemIdText}`,
                     ),
-                    text: child.rawPrompt.trim(),
+                    text: child.rawPrompt,
                     createdAt: now,
                   });
                 }

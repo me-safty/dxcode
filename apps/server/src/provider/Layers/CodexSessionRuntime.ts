@@ -242,6 +242,10 @@ interface CollabReceiverInfo {
   readonly detail: string | undefined;
 }
 
+type CollabToolCallNotificationItem =
+  | CodexRpc.ServerNotificationParamsByMethod["item/started"]["item"]
+  | CodexRpc.ServerNotificationParamsByMethod["item/completed"]["item"];
+
 type CodexServerNotification = {
   readonly [M in CodexRpc.ServerNotificationMethod]: {
     readonly method: M;
@@ -640,9 +644,7 @@ function deterministicSubagentThreadId(input: {
   return ThreadId.make(`subagent_${hash}`);
 }
 
-function collabToolCallDetail(
-  item: CodexRpc.ServerNotificationParamsByMethod["item/started"]["item"],
-): string | undefined {
+function collabToolCallDetail(item: CollabToolCallNotificationItem): string | undefined {
   const candidates = [
     "prompt" in item ? item.prompt : undefined,
     "title" in item ? item.title : undefined,
@@ -658,10 +660,9 @@ function collabToolCallDetail(
   return undefined;
 }
 
-function collabToolCallPrompt(
-  item: CodexRpc.ServerNotificationParamsByMethod["item/started"]["item"],
-): string | undefined {
-  return trimNotificationText("prompt" in item ? item.prompt : undefined);
+function collabToolCallPrompt(item: CollabToolCallNotificationItem): string | undefined {
+  const prompt = "prompt" in item ? item.prompt : undefined;
+  return typeof prompt === "string" ? trimNotificationText(prompt) : undefined;
 }
 
 function rememberCollabReceiverTurns(
@@ -693,7 +694,7 @@ function rememberCollabReceiverTurns(
           parentThreadId,
           providerThreadId: receiverThreadId,
         }),
-      rawPrompt: existing?.rawPrompt ?? rawPrompt,
+      rawPrompt: rawPrompt ?? existing?.rawPrompt,
       detail: existing?.detail ?? detail,
     });
   }

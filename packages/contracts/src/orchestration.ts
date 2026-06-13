@@ -744,7 +744,7 @@ const ThreadMessageUserAppendCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   messageId: MessageId,
-  text: Schema.String,
+  text: TrimmedNonEmptyString,
   turnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
 });

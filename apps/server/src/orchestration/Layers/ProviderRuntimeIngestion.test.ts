@@ -2661,6 +2661,57 @@ describe("ProviderRuntimeIngestion", () => {
     );
   });
 
+  it("does not project a whitespace-only subagent prompt", async () => {
+    const harness = await createHarness({
+      textGeneration: {
+        generateThreadTitle: () => Effect.succeed({ title: "Whitespace child task" }),
+      },
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+    const childThreadId = asThreadId("subagent-whitespace-prompt-test");
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-subagent-whitespace-prompt-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-9"),
+      itemId: asItemId("parent-item-whitespace-prompt-test"),
+      payload: {
+        itemType: "collab_agent_tool_call",
+        status: "completed",
+        title: "Subagent",
+        detail: "Whitespace child task",
+        data: {
+          subagentChildren: [
+            {
+              providerThreadId: "provider-child-whitespace-prompt-test",
+              childThreadId,
+              parentItemId: "parent-item-whitespace-prompt-test",
+              rawPrompt: "\n  ",
+              titleSeed: "Whitespace child task",
+            },
+          ],
+        },
+      },
+    });
+
+    const childThread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.title === "Whitespace child task",
+      2000,
+      childThreadId,
+    );
+    expect(childThread.messages).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "subagent-prompt:subagent-whitespace-prompt-test:parent-item-whitespace-prompt-test",
+        }),
+      ]),
+    );
+  });
+
   it("does not fabricate a child prompt from title metadata", async () => {
     const harness = await createHarness({
       textGeneration: {
@@ -2702,7 +2753,6 @@ describe("ProviderRuntimeIngestion", () => {
       2000,
       childThreadId,
     );
-
     expect(childThread.messages).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
