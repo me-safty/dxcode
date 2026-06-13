@@ -484,6 +484,7 @@ export interface LocalApi {
   shell: {
     openInEditor: (cwd: string, editor: EditorId) => Promise<void>;
     openExternal: (url: string) => Promise<void>;
+    revealPath: (path: string) => Promise<void>;
   };
   contextMenu: {
     show: <T extends string>(

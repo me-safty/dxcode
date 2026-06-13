@@ -1107,6 +1107,7 @@ describe("GeneralSettingsPanel observability", () => {
       },
       shell: {
         openInEditor,
+        revealPath: vi.fn().mockResolvedValue(undefined),
       },
       server: {
         getProcessDiagnostics: vi.fn().mockResolvedValue({

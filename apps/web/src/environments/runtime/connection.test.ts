@@ -85,6 +85,7 @@ function createTestClient(config?: { readonly emitInitialSnapshot?: boolean }) {
     },
     shell: {
       openInEditor: vi.fn(async () => undefined),
+      revealPath: vi.fn(async () => undefined),
     },
     git: {
       runStackedAction: vi.fn(async () => ({}) as any),

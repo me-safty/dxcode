@@ -11,6 +11,7 @@ import {
   ExternalLauncherError,
   type EditorId,
   type LaunchEditorInput,
+  type RevealPathInput,
 } from "@t3tools/contracts";
 import { isCommandAvailable, type CommandAvailabilityOptions } from "@t3tools/shared/shell";
 import * as Context from "effect/Context";
@@ -25,7 +26,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 // ==============================
 
 export { ExternalLauncherError };
-export type { LaunchEditorInput };
+export type { LaunchEditorInput, RevealPathInput };
 export { isCommandAvailable } from "@t3tools/shared/shell";
 
 interface EditorLaunch {
@@ -184,6 +185,13 @@ function fileManagerCommandForPlatform(platform: NodeJS.Platform): string {
   }
 }
 
+function posixDirname(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  const separatorIndex = trimmed.lastIndexOf("/");
+  if (separatorIndex <= 0) return ".";
+  return trimmed.slice(0, separatorIndex);
+}
+
 export function resolveBrowserLaunch(
   target: string,
   platform: NodeJS.Platform = process.platform,
@@ -210,6 +218,35 @@ export function resolveBrowserLaunch(
     args: [target],
     options: DETACHED_IGNORE_STDIO_OPTIONS,
   };
+}
+
+export function resolveRevealPathLaunch(
+  targetPath: string,
+  platform: NodeJS.Platform = process.platform,
+): ProcessLaunch {
+  switch (platform) {
+    case "darwin":
+      return {
+        command: "open",
+        args: ["-R", targetPath],
+        options: DETACHED_IGNORE_STDIO_OPTIONS,
+      };
+    case "win32":
+      return {
+        command: "explorer",
+        args: [`/select,${targetPath}`],
+        options: {
+          ...DETACHED_IGNORE_STDIO_OPTIONS,
+          shell: true,
+        },
+      };
+    default:
+      return {
+        command: "xdg-open",
+        args: [posixDirname(targetPath)],
+        options: DETACHED_IGNORE_STDIO_OPTIONS,
+      };
+  }
 }
 
 export function resolveAvailableEditors(
@@ -251,6 +288,11 @@ export interface ExternalLauncherShape {
    * Launches the editor as a detached process so server startup is not blocked.
    */
   readonly launchEditor: (input: LaunchEditorInput) => Effect.Effect<void, ExternalLauncherError>;
+
+  /**
+   * Reveal a local file or directory in the platform file manager.
+   */
+  readonly revealPath: (input: RevealPathInput) => Effect.Effect<void, ExternalLauncherError>;
 }
 
 /**
@@ -344,6 +386,12 @@ export const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProce
   );
 });
 
+export const revealPath = Effect.fn("externalLauncher.revealPath")(function* (
+  input: RevealPathInput,
+): Effect.fn.Return<void, ExternalLauncherError, ChildProcessSpawner.ChildProcessSpawner> {
+  yield* launchAndUnref(resolveRevealPathLaunch(input.path), "Failed to reveal path");
+});
+
 const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
@@ -357,6 +405,10 @@ const make = Effect.gen(function* () {
         launchEditorProcess(launch).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         ),
+      ),
+    revealPath: (input) =>
+      revealPath(input).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       ),
   } satisfies ExternalLauncherShape;
 });

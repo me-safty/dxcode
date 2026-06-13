@@ -4,13 +4,17 @@ import { page } from "vite-plus/test/browser";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
-const { openInPreferredEditorMock, readLocalApiMock } = vi.hoisted(() => ({
-  openInPreferredEditorMock: vi.fn(async () => "vscode"),
-  readLocalApiMock: vi.fn(() => ({
-    server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
-    shell: { openInEditor: vi.fn(async () => undefined) },
-  })),
-}));
+const { contextMenuShowMock, openInPreferredEditorMock, readLocalApiMock, revealPathMock } =
+  vi.hoisted(() => ({
+    contextMenuShowMock: vi.fn(),
+    revealPathMock: vi.fn(async () => undefined),
+    openInPreferredEditorMock: vi.fn(async () => "vscode"),
+    readLocalApiMock: vi.fn(() => ({
+      server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
+      shell: { openInEditor: vi.fn(async () => undefined), revealPath: revealPathMock },
+      contextMenu: { show: contextMenuShowMock },
+    })),
+  }));
 
 vi.mock("../editorPreferences", () => ({
   openInPreferredEditor: openInPreferredEditorMock,
@@ -29,6 +33,8 @@ import { serializeTableElementToCsv, serializeTableElementToMarkdown } from "../
 describe("ChatMarkdown", () => {
   afterEach(() => {
     openInPreferredEditorMock.mockClear();
+    contextMenuShowMock.mockReset();
+    revealPathMock.mockClear();
     readLocalApiMock.mockClear();
     localStorage.clear();
     document.body.innerHTML = "";
@@ -198,6 +204,57 @@ describe("ChatMarkdown", () => {
       expect(getComputedStyle(element!).textDecorationLine).toBe("none");
       expect(getComputedStyle(element!).borderStyle).toBe("solid");
       expect(getComputedStyle(element!).userSelect).not.toBe("none");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("routes file link context menu actions to Finder reveal and path copy", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const screen = await render(
+      <ChatMarkdown text="[package.json](path/to/package.json)" cwd="/repo/project" />,
+    );
+
+    try {
+      const link = page.getByRole("link", { name: "package.json" });
+      contextMenuShowMock.mockResolvedValueOnce("reveal");
+      link.element().dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 12,
+          clientY: 34,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(contextMenuShowMock).toHaveBeenCalledWith(
+          expect.arrayContaining([
+            expect.objectContaining({ id: "reveal", label: "Open in Finder" }),
+            expect.objectContaining({ id: "copy-path", label: "Copy path" }),
+          ]),
+          { x: 12, y: 34 },
+        );
+        expect(revealPathMock).toHaveBeenCalledWith("/repo/project/path/to/package.json");
+      });
+
+      contextMenuShowMock.mockResolvedValueOnce("copy-path");
+      link.element().dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 56,
+          clientY: 78,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith("/repo/project/path/to/package.json");
+      });
     } finally {
       await screen.unmount();
     }

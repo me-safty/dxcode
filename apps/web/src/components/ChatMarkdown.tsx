@@ -665,6 +665,7 @@ function UncachedShikiCodeBlock({
 interface MarkdownFileLinkProps {
   href: string;
   targetPath: string;
+  filePath: string;
   iconPath: string;
   displayPath: string;
   label: string;
@@ -939,6 +940,7 @@ function MarkdownExternalLinkContent({
 const MarkdownFileLink = memo(function MarkdownFileLink({
   href,
   targetPath,
+  filePath,
   iconPath,
   displayPath,
   label,
@@ -966,6 +968,27 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       );
     });
   }, [targetPath]);
+
+  const handleReveal = useCallback(() => {
+    const api = readLocalApi();
+    if (!api) {
+      toastManager.add({
+        type: "error",
+        title: "Open in Finder is unavailable",
+      });
+      return;
+    }
+
+    void api.shell.revealPath(filePath).catch((error) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Unable to open in Finder",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    });
+  }, [filePath]);
 
   const handleCopy = useCallback((value: string, title: string) => {
     if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
@@ -1010,6 +1033,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       const clicked = await api.contextMenu.show(
         [
           { id: "open", label: "Open in editor" },
+          { id: "reveal", label: "Open in Finder" },
+          { id: "copy-path", label: "Copy path" },
           { id: "copy-relative", label: "Copy relative path" },
           { id: "copy-full", label: "Copy full path" },
         ] as const,
@@ -1020,6 +1045,14 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         handleOpen();
         return;
       }
+      if (clicked === "reveal") {
+        handleReveal();
+        return;
+      }
+      if (clicked === "copy-path") {
+        handleCopy(filePath, "Path");
+        return;
+      }
       if (clicked === "copy-relative") {
         handleCopy(displayPath, "Relative path");
         return;
@@ -1028,7 +1061,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         handleCopy(targetPath, "Full path");
       }
     },
-    [displayPath, handleCopy, handleOpen, targetPath],
+    [displayPath, filePath, handleCopy, handleOpen, handleReveal, targetPath],
   );
 
   return (
@@ -1069,6 +1102,7 @@ function areMarkdownFileLinkPropsEqual(
   return (
     previous.href === next.href &&
     previous.targetPath === next.targetPath &&
+    previous.filePath === next.filePath &&
     previous.iconPath === next.iconPath &&
     previous.displayPath === next.displayPath &&
     previous.label === next.label &&
@@ -1189,6 +1223,7 @@ function ChatMarkdown({
           <MarkdownFileLink
             href={fileLinkMeta.targetPath}
             targetPath={fileLinkMeta.targetPath}
+            filePath={fileLinkMeta.filePath}
             iconPath={fileLinkMeta.filePath}
             displayPath={fileLinkMeta.displayPath}
             label={labelParts.join(" · ")}

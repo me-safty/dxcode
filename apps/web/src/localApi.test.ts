@@ -70,6 +70,7 @@ const rpcClientMock = {
   },
   shell: {
     openInEditor: vi.fn(),
+    revealPath: vi.fn(async () => undefined),
   },
   vcs: {
     pull: vi.fn(),
@@ -365,6 +366,17 @@ describe("wsApi", () => {
     expect(rpcClientMock.server.getConfig).toHaveBeenCalledWith();
     expect(rpcClientMock.server.subscribeConfig).not.toHaveBeenCalled();
     expect(rpcClientMock.server.subscribeLifecycle).not.toHaveBeenCalled();
+  });
+
+  it("forwards path reveal requests directly to the RPC client", async () => {
+    const { createLocalApi } = await import("./localApi");
+
+    const api = createLocalApi(rpcClientMock as never);
+
+    await expect(api.shell.revealPath("/tmp/project/src/file.ts")).resolves.toBeUndefined();
+    expect(rpcClientMock.shell.revealPath).toHaveBeenCalledWith({
+      path: "/tmp/project/src/file.ts",
+    });
   });
 
   it("forwards terminal attach, metadata, and shell stream events", async () => {

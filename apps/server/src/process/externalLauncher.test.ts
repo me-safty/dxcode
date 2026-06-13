@@ -18,6 +18,7 @@ import {
   resolveAvailableEditors,
   resolveBrowserLaunch,
   resolveEditorLaunch,
+  resolveRevealPathLaunch,
 } from "./externalLauncher.ts";
 
 function encodeUtf16LeBase64(input: string): string {
@@ -511,6 +512,30 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
       });
     }),
   );
+});
+
+it("resolves reveal path launches for platform file managers", () => {
+  assert.deepEqual(resolveRevealPathLaunch("/tmp/project/src/file.ts", "darwin"), {
+    command: "open",
+    args: ["-R", "/tmp/project/src/file.ts"],
+    options: {
+      detached: true,
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    },
+  });
+
+  assert.deepEqual(resolveRevealPathLaunch("/tmp/project/src/file.ts", "linux"), {
+    command: "xdg-open",
+    args: ["/tmp/project/src"],
+    options: {
+      detached: true,
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    },
+  });
 });
 
 it("resolveBrowserLaunch maps default browser launchers by platform", () => {
