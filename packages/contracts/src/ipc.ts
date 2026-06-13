@@ -247,6 +247,7 @@ export const DesktopSshEnvironmentTargetSchema = Schema.Struct({
   hostname: Schema.String,
   username: Schema.NullOr(Schema.String),
   port: Schema.NullOr(Schema.Number),
+  identityFile: Schema.NullOr(Schema.String),
 });
 export type DesktopSshEnvironmentTarget = typeof DesktopSshEnvironmentTargetSchema.Type;
 
@@ -262,6 +263,7 @@ export const DesktopDiscoveredSshHostSchema = Schema.Struct({
   hostname: Schema.String,
   username: Schema.NullOr(Schema.String),
   port: Schema.NullOr(Schema.Number),
+  identityFile: Schema.NullOr(Schema.String),
   source: DesktopSshHostSourceSchema,
 });
 

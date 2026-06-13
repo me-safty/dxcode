@@ -276,6 +276,7 @@ describe("addSavedEnvironment", () => {
         hostname: "devbox.example.com",
         username: "julius",
         port: 22,
+        identityFile: null,
       },
       httpBaseUrl: "http://127.0.0.1:3774/",
       wsBaseUrl: "ws://127.0.0.1:3774/",
@@ -479,6 +480,7 @@ describe("addSavedEnvironment", () => {
           hostname: "devbox.example.com",
           username: "julius",
           port: 22,
+          identityFile: null,
         },
       },
     ];
@@ -495,6 +497,7 @@ describe("addSavedEnvironment", () => {
           hostname: "devbox.example.com",
           username: "julius",
           port: 22,
+          identityFile: null,
         },
       }),
     ).resolves.toMatchObject({
@@ -541,6 +544,7 @@ describe("addSavedEnvironment", () => {
         hostname: "devbox",
         username: null,
         port: null,
+        identityFile: null,
       }),
     ).resolves.toMatchObject({
       environmentId: EnvironmentId.make("environment-1"),
@@ -631,6 +635,7 @@ describe("addSavedEnvironment", () => {
       hostname: "devbox",
       username: null,
       port: null,
+      identityFile: null,
     });
 
     expect(createdConnections).toHaveLength(2);
@@ -675,6 +680,7 @@ describe("addSavedEnvironment", () => {
         hostname: "devbox.example.com",
         username: "julius",
         port: 22,
+        identityFile: null,
       },
     });
 
@@ -691,6 +697,7 @@ describe("addSavedEnvironment", () => {
           hostname: "devbox.example.com",
           username: "julius",
           port: 22,
+          identityFile: null,
         },
       },
     ];
@@ -723,6 +730,7 @@ describe("addSavedEnvironment", () => {
         hostname: "devbox",
         username: null,
         port: null,
+        identityFile: null,
       }),
     ).resolves.toMatchObject({
       environmentId: EnvironmentId.make("environment-1"),
@@ -734,6 +742,7 @@ describe("addSavedEnvironment", () => {
         hostname: "devbox",
         username: null,
         port: null,
+        identityFile: null,
       },
       { issuePairingToken: true },
     );
@@ -769,6 +778,7 @@ describe("addSavedEnvironment", () => {
           hostname: "devbox.example.com",
           username: "julius",
           port: 22,
+          identityFile: null,
         },
       },
     ];
@@ -782,6 +792,7 @@ describe("addSavedEnvironment", () => {
       hostname: "devbox.example.com",
       username: "julius",
       port: 22,
+      identityFile: null,
     });
     expect(mockRemove).toHaveBeenCalledWith(EnvironmentId.make("environment-1"));
     expect(mockRemoveSavedEnvironmentBearerToken).toHaveBeenCalledWith(
@@ -808,6 +819,7 @@ describe("addSavedEnvironment", () => {
           hostname: "devbox.example.com",
           username: "julius",
           port: 22,
+          identityFile: null,
         },
       },
     ];
@@ -822,6 +834,7 @@ describe("addSavedEnvironment", () => {
       hostname: "devbox.example.com",
       username: "julius",
       port: 22,
+      identityFile: null,
     });
     expect(mockRemove).not.toHaveBeenCalled();
     expect(mockRemoveSavedEnvironmentBearerToken).toHaveBeenCalledWith(
@@ -937,6 +950,7 @@ describe("addSavedEnvironment", () => {
           hostname: "devbox.example.com",
           username: "julius",
           port: 22,
+          identityFile: null,
         },
       },
     ];
@@ -954,6 +968,7 @@ describe("addSavedEnvironment", () => {
         hostname: "devbox.example.com",
         username: "julius",
         port: 22,
+        identityFile: null,
       },
       { issuePairingToken: true },
     );
@@ -982,6 +997,7 @@ describe("addSavedEnvironment", () => {
         hostname: "devbox.example.com",
         username: "julius",
         port: 22,
+        identityFile: null,
       },
     };
     mockSavedRecords = [originalRecord];
@@ -992,6 +1008,7 @@ describe("addSavedEnvironment", () => {
         hostname: "devbox.example.com",
         username: "julius",
         port: 22,
+        identityFile: null,
       },
       httpBaseUrl: "http://127.0.0.1:3774/",
       wsBaseUrl: "ws://127.0.0.1:3774/",
@@ -1031,6 +1048,7 @@ describe("addSavedEnvironment", () => {
           hostname: "devbox.example.com",
           username: "julius",
           port: 22,
+          identityFile: null,
         },
       },
     ];

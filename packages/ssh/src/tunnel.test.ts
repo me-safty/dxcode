@@ -148,6 +148,7 @@ describe("ssh tunnel scripts", () => {
       hostname: "devbox.example.com",
       username: "julius",
       port: 2222,
+      identityFile: null,
     } as const;
 
     assert.include(
@@ -219,6 +220,7 @@ describe("ssh tunnel scripts", () => {
       hostname: "devbox.example.com",
       username: "julius",
       port: 2222,
+      identityFile: null,
     } as const;
     const spawner = ChildProcessSpawner.make(() =>
       Effect.succeed(makeSuccessfulProcess('loaded nvm default\n{"remotePort":3774}\n')),
@@ -287,6 +289,7 @@ describe("ssh tunnel scripts", () => {
       hostname: "devbox.example.com",
       username: "julius",
       port: 2222,
+      identityFile: null,
     } as const;
     const spawner = ChildProcessSpawner.make(() =>
       Effect.succeed(
@@ -314,6 +317,7 @@ describe("ssh tunnel scripts", () => {
       hostname: "devbox.example.com",
       username: "julius",
       port: 2222,
+      identityFile: null,
     } as const;
     const spawner = ChildProcessSpawner.make(() =>
       Effect.succeed(
@@ -372,6 +376,7 @@ describe("ssh tunnel scripts", () => {
       hostname: "devbox.example.com",
       username: "julius",
       port: 2222,
+      identityFile: null,
     } as const;
 
     return Effect.gen(function* () {

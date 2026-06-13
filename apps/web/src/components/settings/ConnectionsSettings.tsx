@@ -325,6 +325,7 @@ function parseManualDesktopSshTarget(input: {
   readonly host: string;
   readonly username: string;
   readonly port: string;
+  readonly identityFile: string;
 }): DesktopSshEnvironmentTarget {
   const rawHost = input.host.trim();
   if (rawHost.length === 0) {
@@ -371,11 +372,14 @@ function parseManualDesktopSshTarget(input: {
     throw new Error("SSH port must be between 1 and 65535.");
   }
 
+  const identityFile = input.identityFile.trim() || null;
+
   return {
     alias: hostname,
     hostname,
     username,
     port,
+    identityFile,
   };
 }
 
@@ -2019,6 +2023,7 @@ export function ConnectionsSettings() {
   const [savedBackendSshHost, setSavedBackendSshHost] = useState("");
   const [savedBackendSshUsername, setSavedBackendSshUsername] = useState("");
   const [savedBackendSshPort, setSavedBackendSshPort] = useState("");
+  const [savedBackendSshIdentityFile, setSavedBackendSshIdentityFile] = useState("");
   const [savedBackendError, setSavedBackendError] = useState<string | null>(null);
   const [isAddingSavedBackend, setIsAddingSavedBackend] = useState(false);
   const unsavedDiscoveredSshHosts = useMemo(
@@ -2268,6 +2273,7 @@ export function ConnectionsSettings() {
           host: savedBackendSshHost,
           username: savedBackendSshUsername,
           port: savedBackendSshPort,
+          identityFile: savedBackendSshIdentityFile,
         });
         const record = await connectDesktopSshEnvironment(target, { label: "" });
         setSavedBackendHost("");
@@ -2275,6 +2281,7 @@ export function ConnectionsSettings() {
         setSavedBackendSshHost("");
         setSavedBackendSshUsername("");
         setSavedBackendSshPort("");
+        setSavedBackendSshIdentityFile("");
 
         setAddBackendDialogOpen(false);
         toastManager.add({
@@ -2331,6 +2338,7 @@ export function ConnectionsSettings() {
     savedBackendMode,
     savedBackendPairingCode,
     savedBackendSshHost,
+    savedBackendSshIdentityFile,
     savedBackendSshPort,
     savedBackendSshUsername,
   ]);
@@ -2765,6 +2773,21 @@ export function ConnectionsSettings() {
             />
           </label>
         </div>
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium text-foreground">
+            SSH private key path
+          </span>
+          <Input
+            value={savedBackendSshIdentityFile}
+            onChange={(event) => setSavedBackendSshIdentityFile(event.target.value)}
+            placeholder="/home/coder/Downloads/ssh-key-2026-05-31.key"
+            disabled={isAddingSavedBackend}
+            spellCheck={false}
+          />
+          <span className="mt-1.5 block text-[11px] text-muted-foreground">
+            Required for key-only hosts such as Oracle Cloud VPS instances.
+          </span>
+        </label>
         {savedBackendError || discoveredSshHostsError ? (
           <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {savedBackendError ?? discoveredSshHostsError}

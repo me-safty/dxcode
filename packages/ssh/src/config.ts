@@ -228,6 +228,7 @@ export const discoverSshHosts = Effect.fnUntraced(
         hostname: alias,
         username: null,
         port: null,
+        identityFile: null,
         source: "ssh-config",
       });
     }
@@ -241,6 +242,7 @@ export const discoverSshHosts = Effect.fnUntraced(
         hostname,
         username: null,
         port: null,
+        identityFile: null,
         source: "known-hosts",
       });
     }

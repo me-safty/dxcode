@@ -51,16 +51,28 @@ export function parseSshResolveOutput(alias: string, stdout: string): DesktopSsh
   const rawPort = values.get("port")?.trim() ?? "";
   const parsedPort = Number.parseInt(rawPort, 10);
 
+  const identityFile = values.get("identityfile")?.trim() || null;
+
   return {
     alias,
     hostname,
     username,
     port: Number.isInteger(parsedPort) ? parsedPort : null,
+    identityFile,
   };
 }
 
+export function normalizeSshIdentityFilePath(identityFile: string | null | undefined): string | null {
+  const trimmed = identityFile?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function targetUsesSshIdentityFile(target: DesktopSshEnvironmentTarget): boolean {
+  return normalizeSshIdentityFilePath(target.identityFile) !== null;
+}
+
 export function targetConnectionKey(target: DesktopSshEnvironmentTarget): string {
-  return `${target.alias}\u0000${target.hostname}\u0000${target.username ?? ""}\u0000${target.port ?? ""}`;
+  return `${target.alias}\u0000${target.hostname}\u0000${target.username ?? ""}\u0000${target.port ?? ""}\u0000${normalizeSshIdentityFilePath(target.identityFile) ?? ""}`;
 }
 
 export function remoteStateKey(target: DesktopSshEnvironmentTarget): string {
@@ -90,11 +102,13 @@ export function baseSshArgs(
   target: DesktopSshEnvironmentTarget,
   input?: { readonly batchMode?: "yes" | "no" },
 ): string[] {
+  const identityFile = normalizeSshIdentityFilePath(target.identityFile);
   return [
     "-o",
     `BatchMode=${input?.batchMode ?? "no"}`,
     "-o",
     "ConnectTimeout=10",
+    ...(identityFile ? ["-i", identityFile] : []),
     ...(target.port !== null ? ["-p", String(target.port)] : []),
   ];
 }
@@ -150,6 +164,7 @@ function sshTargetLogFields(target: DesktopSshEnvironmentTarget) {
     hostname: target.hostname,
     username: target.username,
     port: target.port,
+    hasIdentityFile: targetUsesSshIdentityFile(target),
   };
 }
 
@@ -329,6 +344,7 @@ export const resolveSshTarget = Effect.fn("ssh/command.resolveSshTarget")(functi
       hostname: trimmedAlias,
       username: null,
       port: null,
+      identityFile: null,
     },
     { preHostArgs: ["-G"] },
   ).pipe(
@@ -343,6 +359,7 @@ export const resolveSshTarget = Effect.fn("ssh/command.resolveSshTarget")(functi
           hostname: trimmedAlias,
           username: null,
           port: null,
+          identityFile: null,
         }),
       ),
     ),

@@ -1035,6 +1035,7 @@ describe("GeneralSettingsPanel observability", () => {
         hostname: "devbox.example.com",
         username: "julius",
         port: 22,
+        identityFile: null,
         source: "ssh-config" as const,
       },
     ]);

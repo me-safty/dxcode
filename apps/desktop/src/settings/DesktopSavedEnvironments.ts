@@ -43,6 +43,7 @@ const DesktopSshTargetSchema = Schema.Struct({
   hostname: Schema.String,
   username: Schema.NullOr(Schema.String),
   port: Schema.NullOr(Schema.Number),
+  identityFile: Schema.NullOr(Schema.String),
 });
 
 const PersistedSavedEnvironmentStorageRecordSchema = Schema.Struct({

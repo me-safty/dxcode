@@ -77,6 +77,25 @@ describe("ssh command", () => {
           hostname: "devbox.example.com",
           username: "julius",
           port: 2222,
+          identityFile: null,
+        },
+      );
+      assert.deepEqual(
+        parseSshResolveOutput(
+          "oracle-vps",
+          [
+            "hostname 155.248.250.102",
+            "user ubuntu",
+            "identityfile /home/coder/Downloads/ssh-key-2026-05-31.key",
+            "",
+          ].join("\n"),
+        ),
+        {
+          alias: "oracle-vps",
+          hostname: "155.248.250.102",
+          username: "ubuntu",
+          port: null,
+          identityFile: "/home/coder/Downloads/ssh-key-2026-05-31.key",
         },
       );
     }),
@@ -91,10 +110,31 @@ describe("ssh command", () => {
             hostname: "devbox.example.com",
             username: "julius",
             port: 2222,
+            identityFile: null,
           },
           { batchMode: "no" },
         ),
         ["-o", "BatchMode=no", "-o", "ConnectTimeout=10", "-p", "2222"],
+      );
+      assert.deepEqual(
+        baseSshArgs(
+          {
+            alias: "oracle-vps",
+            hostname: "155.248.250.102",
+            username: "ubuntu",
+            port: null,
+            identityFile: "/home/coder/Downloads/ssh-key-2026-05-31.key",
+          },
+          { batchMode: "yes" },
+        ),
+        [
+          "-o",
+          "BatchMode=yes",
+          "-o",
+          "ConnectTimeout=10",
+          "-i",
+          "/home/coder/Downloads/ssh-key-2026-05-31.key",
+        ],
       );
     }),
   );
@@ -160,6 +200,7 @@ describe("ssh command", () => {
             hostname: "devbox.example.com",
             username: "julius",
             port: 2222,
+            identityFile: null,
           },
           { remoteCommandArgs: ["sh", "-s"] },
         ),
@@ -190,6 +231,7 @@ describe("ssh command", () => {
             hostname: "devbox.example.com",
             username: "julius",
             port: 2222,
+            identityFile: null,
           },
           { remoteCommandArgs: ["sh", "-s"] },
         ),
@@ -218,6 +260,7 @@ describe("ssh command", () => {
               hostname: "devbox.example.com",
               username: "julius",
               port: 2222,
+              identityFile: null,
             },
             { timeoutMs: 1 },
           ),

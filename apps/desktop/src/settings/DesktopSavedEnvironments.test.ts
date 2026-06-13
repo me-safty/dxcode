@@ -27,6 +27,7 @@ const savedRegistryRecord: PersistedSavedEnvironmentRecord = {
     hostname: "devbox.example.com",
     username: "julius",
     port: 22,
+    identityFile: null,
   },
 };
 
@@ -183,6 +184,7 @@ describe("DesktopSavedEnvironments", () => {
                   "hostname": "devbox.example.com",
                   "username": "julius",
                   "port": 22,
+                  "identityFile": null,
                 },
               },
             ],
