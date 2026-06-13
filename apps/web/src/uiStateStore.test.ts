@@ -14,6 +14,7 @@ import {
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
   setThreadChangedFilesExpanded,
+  setWorktreeLabel,
   type UiState,
 } from "./uiStateStore";
 
@@ -24,6 +25,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
+    worktreeLabelByPath: {},
     ...overrides,
   };
 }
@@ -140,6 +142,30 @@ describe("uiStateStore pure functions", () => {
       defaultAdvertisedEndpointKey: null,
     });
   });
+
+  it("stores, trims, and clears labels keyed by worktree path", () => {
+    const initialState = makeUiState();
+    const path = "/repo/.t3/worktrees/feature-a";
+
+    const labeled = setWorktreeLabel(initialState, path, "  Feature A  ");
+    expect(labeled.worktreeLabelByPath).toEqual({ [path]: "Feature A" });
+    expect(setWorktreeLabel(labeled, path, "Feature A")).toBe(labeled);
+
+    const cleared = setWorktreeLabel(labeled, path, "   ");
+    expect(cleared.worktreeLabelByPath).toEqual({});
+    expect(setWorktreeLabel(initialState, path, "")).toBe(initialState);
+  });
+
+  it("keeps sibling worktree labels independent", () => {
+    const pathA = "/repo/.t3/worktrees/feature-a";
+    const pathB = "/repo/.t3/worktrees/feature-b";
+    const state = setWorktreeLabel(makeUiState(), pathA, "Alpha");
+
+    expect(setWorktreeLabel(state, pathB, "Beta").worktreeLabelByPath).toEqual({
+      [pathA]: "Alpha",
+      [pathB]: "Beta",
+    });
+  });
 });
 
 describe("parsePersistedState", () => {
@@ -161,6 +187,10 @@ describe("parsePersistedState", () => {
           "turn-2": true,
         },
       },
+      worktreeLabelByPath: {
+        "/repo/.t3/worktrees/feature-a": "  Feature A  ",
+        "/repo/.t3/worktrees/blank": "   ",
+      },
     });
 
     expect(parsed).toEqual({
@@ -176,6 +206,9 @@ describe("parsePersistedState", () => {
         "environment:thread-1": {
           "turn-1": false,
         },
+      },
+      worktreeLabelByPath: {
+        "/repo/.t3/worktrees/feature-a": "Feature A",
       },
     });
   });
@@ -262,6 +295,9 @@ describe("uiStateStore persistence", () => {
         },
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
+      worktreeLabelByPath: {
+        "/repo/.t3/worktrees/feature-a": "Feature A",
+      },
     });
 
     persistState(state);
@@ -282,6 +318,9 @@ describe("uiStateStore persistence", () => {
         "environment:thread-1": {
           "turn-1": false,
         },
+      },
+      worktreeLabelByPath: {
+        "/repo/.t3/worktrees/feature-a": "Feature A",
       },
     });
     expect(parsePersistedState(persisted)).toEqual({

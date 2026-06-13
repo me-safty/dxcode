@@ -25,6 +25,7 @@ export interface PersistedUiState {
   projectOrderCwds?: string[];
   defaultAdvertisedEndpointKey?: string | null;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
+  worktreeLabelByPath?: Record<string, string>;
 }
 
 export interface UiProjectState {
@@ -41,7 +42,15 @@ export interface UiEndpointState {
   defaultAdvertisedEndpointKey: string | null;
 }
 
-export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {}
+export interface UiWorktreeState {
+  worktreeLabelByPath: Record<string, string>;
+}
+
+export interface UiState
+  extends UiProjectState,
+    UiThreadState,
+    UiEndpointState,
+    UiWorktreeState {}
 
 const initialState: UiState = {
   projectExpandedById: {},
@@ -49,6 +58,7 @@ const initialState: UiState = {
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
+  worktreeLabelByPath: {},
 };
 
 const LEGACY_PROJECT_CWD_PREFERENCE_PREFIX = "legacy-project-cwd:";
@@ -132,6 +142,7 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
       parsed.defaultAdvertisedEndpointKey.length > 0
         ? parsed.defaultAdvertisedEndpointKey
         : null,
+    worktreeLabelByPath: sanitizePersistedWorktreeLabels(parsed.worktreeLabelByPath),
   };
 }
 
@@ -155,6 +166,25 @@ function readPersistedState(): UiState {
   } catch {
     return initialState;
   }
+}
+
+function sanitizePersistedWorktreeLabels(
+  value: PersistedUiState["worktreeLabelByPath"],
+): Record<string, string> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  const labels: Record<string, string> = {};
+  for (const [path, label] of Object.entries(value)) {
+    if (!path || typeof label !== "string") {
+      continue;
+    }
+    const trimmedLabel = label.trim();
+    if (trimmedLabel.length > 0) {
+      labels[path] = trimmedLabel;
+    }
+  }
+  return labels;
 }
 
 function sanitizePersistedThreadChangedFilesExpanded(
@@ -211,6 +241,7 @@ export function persistState(state: UiState): void {
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         threadChangedFilesExpandedById,
+        worktreeLabelByPath: state.worktreeLabelByPath,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -334,6 +365,34 @@ export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | nu
   };
 }
 
+export function setWorktreeLabel(state: UiState, worktreePath: string, label: string): UiState {
+  if (!worktreePath.trim()) {
+    return state;
+  }
+  const trimmedLabel = label.trim();
+  const currentLabel = state.worktreeLabelByPath[worktreePath];
+
+  if (trimmedLabel.length === 0) {
+    if (currentLabel === undefined) {
+      return state;
+    }
+    const worktreeLabelByPath = { ...state.worktreeLabelByPath };
+    delete worktreeLabelByPath[worktreePath];
+    return { ...state, worktreeLabelByPath };
+  }
+
+  if (currentLabel === trimmedLabel) {
+    return state;
+  }
+  return {
+    ...state,
+    worktreeLabelByPath: {
+      ...state.worktreeLabelByPath,
+      [worktreePath]: trimmedLabel,
+    },
+  };
+}
+
 export function resolveProjectExpanded(
   projectExpandedById: Readonly<Record<string, boolean>>,
   preferenceKeys: readonly string[],
@@ -416,6 +475,7 @@ interface UiStateStore extends UiState {
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
+  setWorktreeLabel: (worktreePath: string, label: string) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
   reorderProjects: (
     currentProjectOrder: readonly string[],
@@ -434,6 +494,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setThreadChangedFilesExpanded(state, threadId, turnId, expanded)),
   setDefaultAdvertisedEndpointKey: (key) =>
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
+  setWorktreeLabel: (worktreePath, label) =>
+    set((state) => setWorktreeLabel(state, worktreePath, label)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
   reorderProjects: (currentProjectOrder, draggedProjectIds, targetProjectIds) =>
@@ -441,6 +503,12 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
       reorderProjects(state, currentProjectOrder, draggedProjectIds, targetProjectIds),
     ),
 }));
+
+export function useWorktreeLabel(worktreePath: string | null | undefined): string | null {
+  return useUiStateStore((state) =>
+    worktreePath ? (state.worktreeLabelByPath[worktreePath] ?? null) : null,
+  );
+}
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));
 

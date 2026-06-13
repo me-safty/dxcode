@@ -13,6 +13,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
+import { WorktreeRenameDialog } from "../components/WorktreeRenameDialog";
 import { RelayClientInstallDialog } from "../components/cloud/RelayClientInstallDialog";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
@@ -108,6 +109,7 @@ function RootRouteView() {
       <AppSidebarLayout>
         <Outlet />
       </AppSidebarLayout>
+      <WorktreeRenameDialog />
     </CommandPalette>
   );
 

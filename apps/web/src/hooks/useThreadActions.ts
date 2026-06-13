@@ -22,7 +22,8 @@ import { readLocalApi } from "../localApi";
 import { readEnvironmentThreadRefs, readProject, readThreadShell } from "../state/entities";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
-import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
+import { getOrphanedWorktreePathForThread, worktreeDisplayName } from "../worktreeCleanup";
+import { useUiStateStore } from "../uiStateStore";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -179,7 +180,10 @@ export function useThreadActions() {
         threadRef.threadId,
       );
       const displayWorktreePath = orphanedWorktreePath
-        ? formatWorktreePathForDisplay(orphanedWorktreePath)
+        ? worktreeDisplayName(
+            orphanedWorktreePath,
+            useUiStateStore.getState().worktreeLabelByPath,
+          )
         : null;
       const canDeleteWorktree = orphanedWorktreePath !== null && threadProject !== null;
       const localApi = readLocalApi();
