@@ -36,7 +36,7 @@ export function useAntigravityAccounts(enabled: boolean): AntigravityAccountsSta
       setRegistry(result.registry);
       setDetection(result.detection);
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Failed to load Gemini accounts.";
+      const message = cause instanceof Error ? cause.message : "Failed to load Antigravity accounts.";
       setError(message);
     } finally {
       setIsLoading(false);

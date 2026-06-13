@@ -419,7 +419,7 @@ export const AntigravitySettings = makeProviderSettingsSchema(
     geminiHomePath: TrimmedString.pipe(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
-        title: "Gemini home path",
+        title: "Antigravity credentials path",
         description: "Root directory for Antigravity credentials and state (default: ~/.gemini).",
         providerSettingsForm: {
           placeholder: "~/.gemini",

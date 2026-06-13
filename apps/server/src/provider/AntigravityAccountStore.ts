@@ -26,7 +26,7 @@ import {
 const REGISTRY_FILE_NAME = "registry.json";
 const SNAPSHOT_DIR_NAME = "snapshot";
 
-/** Auth-critical paths under the Gemini home directory, relative to its root. */
+/** Auth-critical paths under the Antigravity credentials directory (~/.gemini), relative to its root. */
 export const ANTIGRAVITY_AUTH_RELATIVE_PATHS = [
   "antigravity-browser-profile",
   "antigravity/implicit",
@@ -448,7 +448,7 @@ function defaultAccountLabel(input: {
     return input.email.trim();
   }
   const suffix = input.fingerprint.slice(0, 8);
-  return input.existingCount === 0 ? "Gemini account" : `Gemini account (${suffix})`;
+  return input.existingCount === 0 ? "Antigravity account" : `Antigravity account (${suffix})`;
 }
 
 export const listAntigravityAccounts = Effect.fn("listAntigravityAccounts")(function* (

@@ -66,16 +66,16 @@ export function AntigravityAccountSection(props: { readonly enabled: boolean }) 
       setSaveDialogOpen(false);
       toastManager.add({
         type: "success",
-        title: "Gemini account saved",
+        title: "Antigravity account saved",
         description: "You can switch between saved accounts from provider settings.",
       });
       await ensureLocalApi().server.refreshProviders();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to save Gemini account.";
+      const message = error instanceof Error ? error.message : "Failed to save Antigravity account.";
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Could not save Gemini account",
+          title: "Could not save Antigravity account",
           description: message,
         }),
       );
@@ -90,7 +90,7 @@ export function AntigravityAccountSection(props: { readonly enabled: boolean }) 
       setSaveDialogOpen(false);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to dismiss Gemini account prompt.";
+        error instanceof Error ? error.message : "Failed to dismiss Antigravity account prompt.";
       toastManager.add(
         stackedThreadToast({
           type: "error",
@@ -111,16 +111,16 @@ export function AntigravityAccountSection(props: { readonly enabled: boolean }) 
         await accounts.switchAccount(accountId);
         toastManager.add({
           type: "success",
-          title: "Gemini account switched",
+          title: "Antigravity account switched",
           description: "Restart Antigravity if the active session does not update immediately.",
         });
         await ensureLocalApi().server.refreshProviders();
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to switch Gemini account.";
+        const message = error instanceof Error ? error.message : "Failed to switch Antigravity account.";
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not switch Gemini account",
+            title: "Could not switch Antigravity account",
             description: message,
           }),
         );
@@ -138,14 +138,14 @@ export function AntigravityAccountSection(props: { readonly enabled: boolean }) 
         await accounts.removeAccount(accountId);
         toastManager.add({
           type: "success",
-          title: "Saved Gemini account removed",
+          title: "Saved Antigravity account removed",
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to remove Gemini account.";
+        const message = error instanceof Error ? error.message : "Failed to remove Antigravity account.";
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not remove Gemini account",
+            title: "Could not remove Antigravity account",
             description: message,
           }),
         );
@@ -168,7 +168,7 @@ export function AntigravityAccountSection(props: { readonly enabled: boolean }) 
       <div className="border-t border-border/60 px-4 py-3 sm:px-5">
         <div className="space-y-3">
           <div className="space-y-1">
-            <p className="text-xs font-medium text-foreground">Gemini accounts</p>
+            <p className="text-xs font-medium text-foreground">Antigravity accounts</p>
             <p className="text-xs text-muted-foreground">
               Save Antigravity credentials from <code className="text-foreground">~/.gemini</code>{" "}
               and switch between them here. T3 stores auth snapshots in its own data directory.
@@ -189,7 +189,7 @@ export function AntigravityAccountSection(props: { readonly enabled: boolean }) 
               <span>Detected session:</span>
               <RedactedSensitiveText
                 value={currentEmail}
-                ariaLabel="Toggle detected Gemini email visibility"
+                ariaLabel="Toggle detected Antigravity email visibility"
                 revealTooltip="Click to reveal email"
                 hideTooltip="Click to hide email"
                 className="text-foreground"
@@ -235,7 +235,7 @@ export function AntigravityAccountSection(props: { readonly enabled: boolean }) 
               ) : null}
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground">No saved Gemini accounts yet.</p>
+            <p className="text-xs text-muted-foreground">No saved Antigravity accounts yet.</p>
           )}
 
           <div>
@@ -259,7 +259,7 @@ export function AntigravityAccountSection(props: { readonly enabled: boolean }) 
       <AlertDialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Save this Gemini account?</AlertDialogTitle>
+            <AlertDialogTitle>Save this Antigravity account?</AlertDialogTitle>
             <AlertDialogDescription>
               T3 detected Antigravity credentials that are not in your saved account list. Save them
               so you can switch back to this account later.
@@ -273,7 +273,7 @@ export function AntigravityAccountSection(props: { readonly enabled: boolean }) 
                 className="mt-1.5"
                 value={saveLabel}
                 onCommit={setSaveLabel}
-                placeholder={accounts.detection?.email?.trim() || "Gemini account"}
+                placeholder={accounts.detection?.email?.trim() || "Antigravity account"}
                 spellCheck={false}
               />
             </label>
