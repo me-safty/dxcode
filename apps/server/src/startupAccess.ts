@@ -1,7 +1,6 @@
 import { networkInterfaces } from "node:os";
 
 import { QrCode } from "@t3tools/shared/qrCode";
-import { appendWebFeatureFlagsToUrl, type WebFeatureFlag } from "@t3tools/shared/webFeatureFlags";
 import { resolveTailscaleHttpsBaseUrl } from "@t3tools/tailscale";
 import * as Effect from "effect/Effect";
 import { HttpServer } from "effect/unstable/http";
@@ -91,16 +90,12 @@ export const resolveListeningPort = (address: unknown, fallbackPort: number): nu
   return fallbackPort;
 };
 
-export const buildPairingUrl = (
-  connectionString: string,
-  token: string,
-  options?: { readonly webFeatureFlags?: readonly WebFeatureFlag[] },
-): string => {
+export const buildPairingUrl = (connectionString: string, token: string): string => {
   const url = new URL(connectionString);
   url.pathname = "/pair";
   url.searchParams.delete("token");
   url.hash = new URLSearchParams([["token", token]]).toString();
-  return appendWebFeatureFlagsToUrl(url.toString(), options?.webFeatureFlags ?? []);
+  return url.toString();
 };
 
 export const renderTerminalQrCode = (value: string, margin = 2): string => {
@@ -155,13 +150,10 @@ export const issueHeadlessServeAccessInfo = Effect.fn("issueHeadlessServeAccessI
       )
     : fallbackConnectionString;
   const issued = yield* serverAuth.issuePairingCredential({ role: "owner" });
-  const pairingUrlOptions = serverConfig.webFeatureFlags
-    ? { webFeatureFlags: serverConfig.webFeatureFlags }
-    : undefined;
 
   return {
     connectionString,
     token: issued.credential,
-    pairingUrl: buildPairingUrl(connectionString, issued.credential, pairingUrlOptions),
+    pairingUrl: buildPairingUrl(connectionString, issued.credential),
   } satisfies HeadlessServeAccessInfo;
 });

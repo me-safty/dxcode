@@ -13,7 +13,6 @@ import * as LogLevel from "effect/LogLevel";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
-import type { WebFeatureFlag } from "@t3tools/shared/webFeatureFlags";
 
 export const DEFAULT_PORT = 3773;
 
@@ -74,7 +73,6 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logWebSocketEvents: boolean;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
-  readonly webFeatureFlags?: readonly WebFeatureFlag[];
 }
 
 export const deriveServerPaths = Effect.fn(function* (

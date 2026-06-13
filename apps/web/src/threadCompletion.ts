@@ -12,6 +12,28 @@ export interface ScopedThreadCompletionInput extends ThreadCompletionStatusInput
   archivedAt?: string | null | undefined;
 }
 
+/** Visit timestamp for a thread the user is actually looking at: never earlier
+ * than the latest turn's completedAt, so server/client clock skew cannot leave
+ * a viewed thread counting as unseen.
+ */
+export function viewedThreadVisitedAt(
+  completedAt: string | null | undefined,
+  now = new Date(),
+): string {
+  const nowIso = now.toISOString();
+  if (!completedAt) {
+    return nowIso;
+  }
+
+  const completedAtMs = Date.parse(completedAt);
+  if (Number.isNaN(completedAtMs)) {
+    return nowIso;
+  }
+
+  const nowMs = Date.parse(nowIso);
+  return completedAtMs > nowMs ? completedAt : nowIso;
+}
+
 export function hasUnseenCompletion(thread: ThreadCompletionStatusInput): boolean {
   if (!thread.latestTurn?.completedAt) return false;
   const completedAt = Date.parse(thread.latestTurn.completedAt);

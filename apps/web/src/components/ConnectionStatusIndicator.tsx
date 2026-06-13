@@ -1,6 +1,5 @@
 import { memo, useEffect, useState } from "react";
 
-import { getPrimaryEnvironmentConnection } from "../environments/runtime";
 import { cn } from "../lib/utils";
 import { useWsConnectionStatus } from "../rpc/wsConnectionState";
 import {
@@ -9,22 +8,6 @@ import {
   deriveConnectionIndicator,
 } from "./ConnectionStatusIndicator.logic";
 import { Spinner } from "./ui/spinner";
-import { stackedThreadToast, toastManager } from "./ui/toast";
-
-function requestManualReconnect() {
-  void getPrimaryEnvironmentConnection()
-    .reconnect()
-    .catch((error) => {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Reconnect failed",
-          description: error instanceof Error ? error.message : "Unable to restart the WebSocket.",
-          data: { dismissAfterVisibleMs: 8_000, hideCopyButton: true },
-        }),
-      );
-    });
-}
 
 /**
  * Re-renders once per second while a timed reconnect is pending so the
@@ -82,19 +65,9 @@ export const SidebarConnectionStatus = memo(function SidebarConnectionStatus() {
         <ConnectionGlyph tone={view.tone} />
       </span>
       <span className="min-w-0 flex-1 truncate text-xs">Connection</span>
-      {view.showRetry ? (
-        <button
-          type="button"
-          onClick={requestManualReconnect}
-          className="shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/10"
-        >
-          Retry
-        </button>
-      ) : (
-        <span className="shrink-0 truncate text-[10px] tabular-nums text-muted-foreground/70">
-          {view.label}
-        </span>
-      )}
+      <span className="shrink-0 truncate text-[10px] tabular-nums text-muted-foreground/70">
+        {view.label}
+      </span>
     </div>
   );
 });

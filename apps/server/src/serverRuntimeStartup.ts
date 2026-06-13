@@ -22,7 +22,6 @@ import * as Context from "effect/Context";
 import * as Console from "effect/Console";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
-import { appendWebFeatureFlagsToUrl } from "@t3tools/shared/webFeatureFlags";
 
 import { ServerConfig } from "./config.ts";
 import { Keybindings } from "./keybindings.ts";
@@ -261,10 +260,7 @@ const resolveStartupBrowserTarget = Effect.gen(function* () {
         ),
       )
     : null;
-  const baseTarget = appendWebFeatureFlagsToUrl(
-    serverConfig.devUrl?.toString() ?? tailscaleUrl ?? bindUrl,
-    serverConfig.webFeatureFlags ?? [],
-  );
+  const baseTarget = serverConfig.devUrl?.toString() ?? tailscaleUrl ?? bindUrl;
   return yield* Effect.succeed(serverConfig.mode === "desktop" ? baseTarget : undefined).pipe(
     Effect.flatMap((target) =>
       target ? Effect.succeed(target) : serverAuth.issueStartupPairingUrl(baseTarget),

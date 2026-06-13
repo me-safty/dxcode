@@ -40,11 +40,6 @@ export type ServerConfigIssue = typeof ServerConfigIssue.Type;
 
 const ServerConfigIssues = Schema.Array(ServerConfigIssue);
 
-export const ServerWebFeatureFlag = Schema.Literal("downloadable-diagnostics");
-export type ServerWebFeatureFlag = typeof ServerWebFeatureFlag.Type;
-
-const ServerWebFeatureFlags = Schema.Array(ServerWebFeatureFlag);
-
 export const ServerProviderState = Schema.Literals(["ready", "warning", "error", "disabled"]);
 export type ServerProviderState = typeof ServerProviderState.Type;
 
@@ -408,7 +403,6 @@ export const ServerConfig = Schema.Struct({
   issues: ServerConfigIssues,
   providers: ServerProviders,
   availableEditors: Schema.Array(EditorId),
-  webFeatureFlags: Schema.optional(ServerWebFeatureFlags),
   observability: ServerObservability,
   settings: ServerSettings,
 });

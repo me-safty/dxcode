@@ -15,6 +15,8 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type TouchEvent as ReactTouchEvent,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
@@ -70,17 +72,13 @@ import {
 } from "./userMessageTerminalContexts";
 import { SkillInlineText } from "./SkillInlineText";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
-import {
-  VirtualizedList,
-  type VirtualizedListHandle,
-  type VirtualizedListItemSizeChange,
-} from "../virtualization/VirtualizedList";
-import { recordTimelineResize } from "./timelineResizeDiagnostics";
+import { VirtualizedList, type VirtualizedListHandle } from "../virtualization/VirtualizedList";
 import {
   captureTimelineScrollAnchor,
   scheduleTimelineScrollAnchorRestore,
   type ScheduledTimelineScrollAnchorRestore,
 } from "./timelineScrollAnchor";
+import { createTouchScrollIntentTracker, isWheelScrollAwayIntent } from "./timelineScrollIntent";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -246,29 +244,35 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     cancelScheduledLocalResizeRestore();
     onUserScrollIntent?.();
   }, [cancelScheduledLocalResizeRestore, onUserScrollIntent]);
-  const handleItemSizeChanged = useCallback(
-    (info: VirtualizedListItemSizeChange<MessagesTimelineRow>) => {
-      const delta = info.size - info.previous;
-      if (Math.abs(delta) < 1) {
-        return;
-      }
-      const role = info.itemData.kind === "message" ? `:${info.itemData.message.role}` : "";
-      const occurrence = recordTimelineResize({
-        kind: `${info.itemData.kind}${role}`,
-        key: info.itemKey,
-        index: info.index,
-        previous: info.previous,
-        size: info.size,
-      });
-      if (import.meta.env.DEV) {
-        console.log(
-          `[timeline-resize] #${occurrence} ${info.itemData.kind}${role} ` +
-            `${Math.round(info.previous)}→${Math.round(info.size)} ` +
-            `Δ${delta >= 0 ? "+" : ""}${Math.round(delta)} idx=${info.index} key=${info.itemKey}`,
-        );
+  const touchScrollIntentRef = useRef(createTouchScrollIntentTracker());
+  const handleWheelCapture = useCallback(
+    (event: ReactWheelEvent<HTMLDivElement>) => {
+      // Only scrolling up detaches from the bottom; wheeling down (or while
+      // already pinned at the bottom) must not stop stick-to-bottom.
+      if (isWheelScrollAwayIntent(event.deltaY)) {
+        handleUserScrollIntent();
       }
     },
-    [],
+    [handleUserScrollIntent],
+  );
+  const handleTouchStartCapture = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    if (touch) {
+      touchScrollIntentRef.current.touchStart(touch.clientY);
+    }
+  }, []);
+  const handleTouchMoveCapture = useCallback(
+    (event: ReactTouchEvent<HTMLDivElement>) => {
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+      // Finger dragging down the screen scrolls the content up = scroll-away.
+      if (touchScrollIntentRef.current.touchMove(touch.clientY)) {
+        handleUserScrollIntent();
+      }
+    },
+    [handleUserScrollIntent],
   );
   const handleBeforePlanExpandedChange = useCallback(() => {
     const anchor = captureTimelineScrollAnchor(listRef.current);
@@ -422,8 +426,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         <div
           className="h-full min-h-0"
           onPointerDownCapture={handlePointerDown}
-          onTouchMoveCapture={handleUserScrollIntent}
-          onWheelCapture={handleUserScrollIntent}
+          onTouchStartCapture={handleTouchStartCapture}
+          onTouchMoveCapture={handleTouchMoveCapture}
+          onWheelCapture={handleWheelCapture}
         >
           <VirtualizedList<MessagesTimelineRow>
             ref={listRef}
@@ -438,7 +443,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             maintainScrollAtEndThreshold={0.1}
             maintainVisibleContentPosition={MAINTAIN_VISIBLE_CONTENT_POSITION_DATA_ANCHORED}
             onIsAtEndChange={onIsAtEndChange}
-            onItemSizeChanged={handleItemSizeChanged}
             className="h-full overflow-x-hidden overscroll-y-contain"
             style={{ height: "100%" }}
             data-testid="messages-timeline-list"

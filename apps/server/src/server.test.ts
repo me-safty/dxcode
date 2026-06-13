@@ -27,7 +27,6 @@ import {
   EditorId,
 } from "@t3tools/contracts";
 import { computeOrchestrationThreadDetailFingerprint } from "@t3tools/shared/orchestrationThreadDetailFingerprint";
-import { DOWNLOADABLE_DIAGNOSTICS_WEB_FEATURE } from "@t3tools/shared/webFeatureFlags";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
 import * as Clock from "effect/Clock";
@@ -2136,7 +2135,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         config: {
           otlpTracesUrl: "http://localhost:4318/v1/traces",
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",
-          webFeatureFlags: [DOWNLOADABLE_DIAGNOSTICS_WEB_FEATURE],
         },
         layers: {
           keybindings: {
@@ -2173,7 +2171,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(first.config.observability.otlpMetricsUrl, "http://localhost:4318/v1/metrics");
         assert.equal(first.config.observability.otlpMetricsEnabled, true);
         assert.deepEqual(first.config.settings, DEFAULT_SERVER_SETTINGS);
-        assert.deepEqual(first.config.webFeatureFlags, [DOWNLOADABLE_DIAGNOSTICS_WEB_FEATURE]);
       }
       assert.deepEqual(second, {
         version: 1,

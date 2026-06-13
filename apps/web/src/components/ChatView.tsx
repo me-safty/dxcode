@@ -81,6 +81,7 @@ import {
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
 import { closeThreadNotifications } from "../push/notifications";
+import { viewedThreadVisitedAt } from "../threadCompletion";
 import {
   type AppState,
   selectProjectsAcrossEnvironments,
@@ -117,6 +118,7 @@ import {
   setActiveWorkspaceFileExplorerContext,
   useWorkspaceFilePanelState,
 } from "../workspaceFilePreview";
+import { WORKSPACE_FILE_INLINE_DIFF_SELECTOR } from "../workspaceFilePreviewDom";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveLiveThreadBranchUpdate } from "./GitActionsControl.logic";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -170,6 +172,7 @@ import {
   STICK_TO_BOTTOM_RESUME_LOCK_MS,
   type ScheduledStickToBottom,
 } from "./chat/stickToBottom";
+import { scheduleAtEndResync, type ScheduledAtEndResync } from "./chat/stickToBottomResync";
 import {
   captureTimelinePrependScrollSnapshot,
   restoreTimelinePrependScrollSnapshot,
@@ -812,6 +815,7 @@ export default function ChatView(props: ChatViewProps) {
   const isAtEndRef = useRef(true);
   const shouldStickToBottomRef = useRef(true);
   const scheduledStickToBottomRef = useRef<ScheduledStickToBottom | null>(null);
+  const scheduledAtEndResyncRef = useRef<ScheduledAtEndResync | null>(null);
   const scheduledOlderDetailPrependRestoreRef = useRef<ScheduledTimelineScrollAnchorRestore | null>(
     null,
   );
@@ -1207,7 +1211,7 @@ export default function ChatView(props: ChatViewProps) {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") {
         return;
       }
-      markThreadVisited(threadKey);
+      markThreadVisited(threadKey, viewedThreadVisitedAt(serverThread.latestTurn?.completedAt));
       // Use the raw thread id: notification tags are issued server-side as
       // `thread:{rawThreadId}:…`, not the scoped key used for visited state.
       void closeThreadNotifications(threadId);
@@ -1221,7 +1225,7 @@ export default function ChatView(props: ChatViewProps) {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        markThreadVisited(threadKey);
+        markThreadVisited(threadKey, viewedThreadVisitedAt(serverThread.latestTurn?.completedAt));
         void closeThreadNotifications(threadId);
       }
     };
@@ -1242,9 +1246,14 @@ export default function ChatView(props: ChatViewProps) {
     if (!serverThread?.id) return;
     const threadKey = scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id));
     return () => {
-      markThreadVisited(threadKey);
+      markThreadVisited(threadKey, viewedThreadVisitedAt(serverThread.latestTurn?.completedAt));
     };
-  }, [serverThread?.id, serverThread?.environmentId, markThreadVisited]);
+  }, [
+    serverThread?.id,
+    serverThread?.environmentId,
+    serverThread?.latestTurn?.completedAt,
+    markThreadVisited,
+  ]);
 
   const selectedProviderByThreadId = composerActiveProvider ?? null;
   const threadProvider =
@@ -2553,8 +2562,8 @@ export default function ChatView(props: ChatViewProps) {
   useMobileEdgeSwipe({
     action: "close",
     enabled: shouldUsePlanSidebarSheet && planSidebarOpen,
+    horizontalScrollOwnerScope: { ancestorSelector: WORKSPACE_FILE_INLINE_DIFF_SELECTOR },
     onSwipe: closePlanSidebar,
-    requireScrollableStartPosition: true,
     side: "right",
     startArea: "screen",
     startSurface: "panel",
@@ -2636,13 +2645,36 @@ export default function ChatView(props: ChatViewProps) {
     scheduledStickToBottomRef.current = null;
   }, []);
 
+  const cancelScheduledAtEndResync = useCallback(() => {
+    scheduledAtEndResyncRef.current?.cancel();
+    scheduledAtEndResyncRef.current = null;
+  }, []);
+
   const markTimelineAtEnd = useCallback(() => {
     isAtEndRef.current = true;
     shouldStickToBottomRef.current = true;
     userScrollDetachUntilRef.current = 0;
+    cancelScheduledAtEndResync();
     showScrollDebouncer.current.cancel();
     setScrollToBottomVisible(false);
-  }, [setScrollToBottomVisible]);
+  }, [cancelScheduledAtEndResync, setScrollToBottomVisible]);
+
+  // After the user-scroll grace window expires, the virtualizer won't emit a
+  // fresh isAtEnd report (it only fires on *change*). Re-check the list's real
+  // at-end state once the window elapses and re-attach if it's pinned to the
+  // bottom — this repairs desyncs from "wheeled down while already at bottom"
+  // and "scrolled up then back to bottom within the grace window".
+  const scheduleAtEndResyncCheck = useCallback(
+    (delayMs: number) => {
+      cancelScheduledAtEndResync();
+      scheduledAtEndResyncRef.current = scheduleAtEndResync({
+        delayMs,
+        isAtEnd: () => timelineListRef.current?.getState?.().isAtEnd ?? false,
+        onAtEnd: () => markTimelineAtEnd(),
+      });
+    },
+    [cancelScheduledAtEndResync, markTimelineAtEnd],
+  );
 
   const detachTimelineFromBottom = useCallback(() => {
     const shouldShowPill = isAtEndRef.current || shouldStickToBottomRef.current;
@@ -2693,6 +2725,10 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
       if (isAtEnd && performance.now() < userScrollDetachUntilRef.current) {
+        // The list reports it's pinned to the bottom, but we're still inside
+        // the user-scroll grace window. Don't drop the signal — re-check once
+        // the window elapses so we can re-attach.
+        scheduleAtEndResyncCheck(userScrollDetachUntilRef.current - performance.now());
         return;
       }
       if (isAtEnd) {
@@ -2703,7 +2739,7 @@ export default function ChatView(props: ChatViewProps) {
         isAtEndRef.current = false;
       }
     },
-    [forceStickToBottom, markTimelineAtEnd],
+    [forceStickToBottom, markTimelineAtEnd, scheduleAtEndResyncCheck],
   );
 
   const onTimelineUserScrollIntent = useCallback(() => {
@@ -2711,7 +2747,14 @@ export default function ChatView(props: ChatViewProps) {
     stickToBottomLockUntilRef.current = 0;
     userScrollDetachUntilRef.current = performance.now() + USER_SCROLL_DETACH_GRACE_MS;
     detachTimelineFromBottom();
-  }, [cancelScheduledOlderDetailPrependRestore, detachTimelineFromBottom]);
+    // If the gesture didn't actually leave the bottom (e.g. an overscroll bounce
+    // or a down-wheel that slipped through), re-attach after the grace window.
+    scheduleAtEndResyncCheck(USER_SCROLL_DETACH_GRACE_MS);
+  }, [
+    cancelScheduledOlderDetailPrependRestore,
+    detachTimelineFromBottom,
+    scheduleAtEndResyncCheck,
+  ]);
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current) {
@@ -2721,6 +2764,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [scrollToEnd, timelineEntries]);
 
   useEffect(() => cancelScheduledStickToBottom, [cancelScheduledStickToBottom]);
+  useEffect(() => cancelScheduledAtEndResync, [cancelScheduledAtEndResync]);
   useEffect(
     () => cancelScheduledOlderDetailPrependRestore,
     [cancelScheduledOlderDetailPrependRestore],
@@ -4239,8 +4283,6 @@ export default function ChatView(props: ChatViewProps) {
       >
         <ChatHeader
           activeThreadEnvironmentId={activeThread.environmentId}
-          activeThreadId={activeThread.id}
-          {...(routeKind === "draft" && draftId ? { draftId } : {})}
           activeThreadTitle={activeThread.title}
           activeProjectName={activeProject?.name}
           isGitRepo={isGitRepo}

@@ -3,17 +3,13 @@ import {
   type EditorId,
   type ProjectScript,
   type ResolvedKeybindingsConfig,
-  type ThreadId,
 } from "@t3tools/contracts";
 import { memo } from "react";
-import { type DraftId } from "~/composerDraftStore";
 import {
   DiffIcon,
-  DownloadIcon,
   EllipsisIcon,
   FolderTreeIcon,
   GitBranchIcon,
-  RefreshCwIcon,
   TerminalSquareIcon,
 } from "lucide-react";
 import { Badge } from "../ui/badge";
@@ -30,20 +26,9 @@ import {
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Button } from "../ui/button";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
-import { stackedThreadToast, toastManager } from "../ui/toast";
-import { exportTimelineResizeDiagnostics } from "./timelineResizeDiagnostics";
-import {
-  exportWebSocketDiagnosticsNote,
-  type WebSocketDiagnosticsContext,
-} from "../../rpc/webSocketDiagnostics";
-import { DOWNLOADABLE_DIAGNOSTICS_WEB_FEATURE } from "@t3tools/shared/webFeatureFlags";
-import { isWebFeatureEnabled } from "../../webFeatureFlags";
-import { useServerWebFeatureFlags } from "../../rpc/serverState";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
-  activeThreadId: ThreadId;
-  draftId?: DraftId;
   activeThreadTitle: string;
   activeProjectName: string | undefined;
   isGitRepo: boolean;
@@ -84,87 +69,8 @@ export function shouldShowOpenInPicker(input: {
   );
 }
 
-export function forceRefreshApp(): void {
-  const forceReload = window.desktopBridge?.forceReload;
-  if (typeof forceReload === "function") {
-    void forceReload().catch(() => {
-      window.location.reload();
-    });
-    return;
-  }
-
-  window.location.reload();
-}
-
-export function shouldShowDownloadableDiagnostics(input?: {
-  readonly serverWebFeatureFlags?: ReadonlyArray<string>;
-}): boolean {
-  return (
-    (input?.serverWebFeatureFlags ?? []).includes(DOWNLOADABLE_DIAGNOSTICS_WEB_FEATURE) ||
-    isWebFeatureEnabled(DOWNLOADABLE_DIAGNOSTICS_WEB_FEATURE)
-  );
-}
-
-export function shouldShowForceRefreshAction(input: {
-  readonly showDownloadableDiagnostics: boolean;
-}): boolean {
-  return input.showDownloadableDiagnostics;
-}
-
-function handleExportTimelineDiagnostics(): void {
-  void exportTimelineResizeDiagnostics()
-    .then((result) => {
-      if (result === "empty") {
-        toastManager.add({
-          type: "warning",
-          title: "No scroll diagnostics captured yet",
-          description: "Scroll through the conversation, then export again.",
-        });
-        return;
-      }
-      toastManager.add({
-        type: "success",
-        title:
-          result === "downloaded"
-            ? "Scroll diagnostics downloaded"
-            : result === "copied"
-              ? "Scroll diagnostics copied to clipboard"
-              : "Scroll diagnostics shared",
-      });
-    })
-    .catch((error: unknown) => {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not export scroll diagnostics",
-          description: error instanceof Error ? error.message : "An unexpected error occurred.",
-        }),
-      );
-    });
-}
-
-function handleExportWebSocketDiagnostics(context: WebSocketDiagnosticsContext): void {
-  try {
-    const result = exportWebSocketDiagnosticsNote(context);
-    toastManager.add({
-      type: "success",
-      title: "WebSocket diagnostics downloaded",
-      description: result.filename,
-    });
-  } catch (error: unknown) {
-    toastManager.add(
-      stackedThreadToast({
-        type: "error",
-        title: "Could not export WebSocket diagnostics",
-        description: error instanceof Error ? error.message : "An unexpected error occurred.",
-      }),
-    );
-  }
-}
-
 export const ChatHeader = memo(function ChatHeader({
   activeThreadEnvironmentId,
-  activeThreadId,
   activeThreadTitle,
   activeProjectName,
   isGitRepo,
@@ -194,7 +100,6 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isCompactHeader = useMediaQuery("(max-width: 760px)");
-  const serverWebFeatureFlags = useServerWebFeatureFlags();
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
     activeThreadEnvironmentId,
@@ -211,12 +116,6 @@ export const ChatHeader = memo(function ChatHeader({
   const threadEnvironmentLabel = isRemoteThread
     ? (remoteEnvRuntimeLabel ?? remoteEnvSavedLabel ?? "Remote")
     : null;
-  const showDownloadableDiagnostics = shouldShowDownloadableDiagnostics({
-    serverWebFeatureFlags,
-  });
-  const showForceRefreshAction = shouldShowForceRefreshAction({
-    showDownloadableDiagnostics,
-  });
   const renderProjectScriptsControl = (inMenu = false) =>
     activeProjectScripts ? (
       <ProjectScriptsControl
@@ -233,7 +132,6 @@ export const ChatHeader = memo(function ChatHeader({
   const hasProjectScriptsControl = activeProjectScripts !== undefined;
   const hasSourceControl = Boolean(activeProjectName && gitCwd);
   const showCompactOverflowActions = isCompactHeader && hasProjectScriptsControl;
-  const showOverflowDiagnosticsActions = showDownloadableDiagnostics;
 
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
@@ -384,74 +282,29 @@ export const ChatHeader = memo(function ChatHeader({
             </TooltipPopup>
           </Tooltip>
         )}
-        <Menu>
-          <MenuTrigger
-            render={<Button size="icon-xs" variant="outline" aria-label="More thread actions" />}
-          >
-            <EllipsisIcon className="size-4.5 sm:size-4" />
-          </MenuTrigger>
-          <MenuPopup align="end" side="bottom" className="min-w-48">
-            {isCompactHeader ? (
-              <>
-                <MenuItem onClick={() => onToggleDiff()} disabled={!isGitRepo && !diffOpen}>
-                  <DiffIcon aria-hidden="true" className="size-4" />
-                  Diff
-                </MenuItem>
-                <MenuItem onClick={() => onToggleFileExplorer()} disabled={!fileExplorerAvailable}>
-                  <FolderTreeIcon aria-hidden="true" className="size-4" />
-                  File explorer
-                </MenuItem>
-                {showCompactOverflowActions || showOverflowDiagnosticsActions ? (
-                  <MenuSeparator />
-                ) : null}
-              </>
-            ) : null}
-            {showCompactOverflowActions && hasProjectScriptsControl
-              ? renderProjectScriptsControl(true)
-              : null}
-            {showCompactOverflowActions &&
-            hasProjectScriptsControl &&
-            showOverflowDiagnosticsActions ? (
-              <MenuSeparator />
-            ) : null}
-            {showOverflowDiagnosticsActions ? (
-              <>
-                {showForceRefreshAction ? (
-                  <MenuItem onClick={forceRefreshApp}>
-                    <RefreshCwIcon aria-hidden="true" className="size-4" />
-                    Force refresh
-                  </MenuItem>
-                ) : null}
-                <MenuSeparator />
-                <MenuItem onClick={handleExportTimelineDiagnostics}>
-                  <DownloadIcon aria-hidden="true" className="size-4" />
-                  Export scroll diagnostics
-                </MenuItem>
-                <MenuItem
-                  onClick={() =>
-                    handleExportWebSocketDiagnostics({
-                      activeProjectName,
-                      activeThreadEnvironmentId,
-                      activeThreadId,
-                      activeThreadTitle,
-                      diffOpen,
-                      fileExplorerAvailable,
-                      fileExplorerOpen,
-                      gitCwd,
-                      openInCwd,
-                      sourceControlOpen,
-                      terminalAvailable,
-                      terminalOpen,
-                    })
-                  }
-                >
-                  <DownloadIcon aria-hidden="true" className="size-4" />
-                  Export WebSocket diagnostics
-                </MenuItem>
-              </>
-            ) : null}
-          </MenuPopup>
-        </Menu>
+        {isCompactHeader ? (
+          <Menu>
+            <MenuTrigger
+              render={<Button size="icon-xs" variant="outline" aria-label="More thread actions" />}
+            >
+              <EllipsisIcon className="size-4.5 sm:size-4" />
+            </MenuTrigger>
+            <MenuPopup align="end" side="bottom" className="min-w-48">
+              <MenuItem onClick={() => onToggleDiff()} disabled={!isGitRepo && !diffOpen}>
+                <DiffIcon aria-hidden="true" className="size-4" />
+                Diff
+              </MenuItem>
+              <MenuItem onClick={() => onToggleFileExplorer()} disabled={!fileExplorerAvailable}>
+                <FolderTreeIcon aria-hidden="true" className="size-4" />
+                File explorer
+              </MenuItem>
+              {showCompactOverflowActions ? <MenuSeparator /> : null}
+              {showCompactOverflowActions && hasProjectScriptsControl
+                ? renderProjectScriptsControl(true)
+                : null}
+            </MenuPopup>
+          </Menu>
+        ) : null}
       </div>
     </div>
   );
