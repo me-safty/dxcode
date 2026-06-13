@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: "en-US"
+early_access: false
+focus: "high"
+tone_instructions: "Be concise, direct, and prioritize correctness, reliability, performance, and maintainability risks."
+
+chat:
+  art: false
+  auto_reply: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "CONTRIBUTING.md"
+      - "README.md"
+      - ".github/pull_request_template.md"
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  review_status: true
+  review_details: false
+  commit_status: true
+  collapse_walkthrough: true
+  changed_files_summary: true
+  sequence_diagrams: true
+  poem: false
+  in_progress_fortune: false
+  enable_prompt_for_ai_agents: true
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 5
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+
+  tools:
+    github-checks:
+      enabled: true
+      timeout_ms: 900000
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+    yamllint:
+      enabled: true
+
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/dist/**"
+    - "!**/dist-electron/**"
+    - "!**/.vite-plus/**"
+    - "!**/.turbo/**"
+    - "!**/.diagnostics/**"
+    - "!**/coverage/**"
+    - "!**/playwright-report/**"
+    - "!**/test-results/**"
+    - "!apps/web/public/mockServiceWorker.js"
+
+  path_instructions:
+    - path: "**/*.{ts,tsx}"
+      instructions: |
+        Review for predictable behavior under load and failure. Prefer existing local abstractions over new patterns, avoid broad `any` usage, keep async boundaries explicit, and require focused tests for user-facing behavior or shared contracts.
+
+        Never suggest `bun test`; this repo uses `bun run test` for Vitest.
+
+    - path: "apps/server/src/**/*.{ts,tsx}"
+      instructions: |
+        Server changes should preserve provider session recovery, partial stream handling, restart/reconnect behavior, and WebSocket push ordering. Prefer reconciliation through existing RPCs and diagnostics before introducing new lifecycle mechanisms.
+
+        Treat Effect lifecycle changes as infrastructure work. For ManagedRuntime, Scope, Stream, Fiber, runCallback, RPC protocol layers, or WebSocket transport changes, identify resource ownership and cancellation path, avoid detached fibers, and expect focused regression plus cancellation tests.
+
+    - path: "apps/web/src/**/*.{ts,tsx}"
+      instructions: |
+        UI changes should preserve responsive layout, keyboard/mouse ergonomics, readable dense operational screens, and stable reconnect/offline behavior. Watch for overlapping text, layout shift from dynamic content, and missing logic tests for state transitions.
+
+    - path: "packages/contracts/src/**/*.{ts,tsx}"
+      instructions: |
+        This package must remain schema-only. Do not add runtime business logic here. Review schema changes for backward compatibility and explicit provider/WebSocket contract impacts.
+
+    - path: "packages/shared/src/**/*.{ts,tsx}"
+      instructions: |
+        Shared utilities should stay small, runtime-safe, and consumed through explicit subpath exports. Do not introduce barrel exports.
+
+    - path: "**/*.{test,spec}.{ts,tsx}"
+      instructions: |
+        Tests should exercise the exact failure mode, avoid brittle timing assumptions, and use Vitest through `bun run test` when run locally. For lifecycle work, include cancellation or interruption coverage where relevant.
+
+    - path: ".github/workflows/**/*.{yml,yaml}"
+      instructions: |
+        CI should keep format, lint, typecheck, and test coverage aligned with repository policy. Do not add `bun test`; use `bun run test` or the existing Vite+ commands that delegate to Vitest.
