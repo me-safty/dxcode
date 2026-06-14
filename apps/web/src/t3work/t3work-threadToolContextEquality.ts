@@ -86,6 +86,7 @@ export function projectThreadsEqual(left: ProjectThread, right: ProjectThread): 
     left.kickoffInteractionMode === right.kickoffInteractionMode &&
     kickoffWorkflowEqual(left.kickoffWorkflow, right.kickoffWorkflow) &&
     left.status === right.status &&
+    left.sleepingUntil === right.sleepingUntil &&
     projectThreadArraysEqual(left.selectedToolIds, right.selectedToolIds)
   );
 }

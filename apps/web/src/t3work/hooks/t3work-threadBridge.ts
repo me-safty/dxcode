@@ -42,6 +42,9 @@ export function mapLiveThreadToProjectThread(
           : thread.session?.status === "closed" || thread.archivedAt
             ? "completed"
             : "idle",
+    // A clock-parked routine (Epic 27): carry the server-computed wake instant so the sidebar
+    // pill reads "Sleeping until <time>". Absent when no run on this thread is sleeping.
+    ...(thread.sleepingUntil !== undefined ? { sleepingUntil: thread.sleepingUntil } : {}),
   };
 }
 

@@ -140,6 +140,16 @@ const ProjectionFullThreadDiffContextRowSchema = Schema.Struct({
   latestCheckpointTurnCount: Schema.NullOr(NonNegativeInt),
   toCheckpointRef: Schema.NullOr(CheckpointRef),
 });
+// Epic 27: a thread's soonest pending wake instant, joined from the `workflow_runs` run record
+// (status `sleeping`, the `wake_at` deadline the scheduler arms). Surfaced on the thread DTO as
+// `sleepingUntil` to light the sidebar's dormant-routine pill.
+const SleepingWakeAtRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  wakeAt: IsoDateTime,
+});
+const SleepingWakeAtByThreadRowSchema = Schema.Struct({
+  wakeAt: IsoDateTime,
+});
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
@@ -934,6 +944,42 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  // Epic 27: the soonest pending wake instant per launch thread. A thread can launch several
+  // routines; the sidebar shows the nearest deadline (MIN). Batched — one query feeds the whole
+  // shell snapshot, never per-thread. Rides the partial idx_workflow_runs_wake_at index.
+  const listSleepingWakeAtRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: SleepingWakeAtRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          launch_thread_id AS "threadId",
+          MIN(wake_at) AS "wakeAt"
+        FROM workflow_runs
+        WHERE status = 'sleeping'
+          AND wake_at IS NOT NULL
+          AND launch_thread_id IS NOT NULL
+        GROUP BY launch_thread_id
+      `,
+  });
+
+  // The single-thread sibling of listSleepingWakeAtRows. ORDER BY ... LIMIT 1 (not a MIN
+  // aggregate) so a thread with no sleeping run yields no row — None, not a null `wake_at`.
+  const getSleepingWakeAtByThread = SqlSchema.findOneOption({
+    Request: ThreadIdLookupInput,
+    Result: SleepingWakeAtByThreadRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT wake_at AS "wakeAt"
+        FROM workflow_runs
+        WHERE status = 'sleeping'
+          AND wake_at IS NOT NULL
+          AND launch_thread_id = ${threadId}
+        ORDER BY wake_at ASC
+        LIMIT 1
+      `,
+  });
+
   const getSnapshot: ProjectionSnapshotQueryShape["getSnapshot"] = () =>
     sql
       .withTransaction(
@@ -1457,11 +1503,27 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listSleepingWakeAtRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listSleepingWakeAt:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listSleepingWakeAt:decodeRows",
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
-        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, stateRows]) =>
+        Effect.flatMap((rows) =>
           Effect.gen(function* () {
+            const [
+              projectRows,
+              threadRows,
+              sessionRows,
+              latestTurnRows,
+              stateRows,
+              sleepingWakeAtRows,
+            ] = rows;
             let updatedAt: string | null = null;
             for (const row of projectRows) {
               updatedAt = maxIso(updatedAt, row.updatedAt);
@@ -1492,6 +1554,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             const sessionByThread = new Map(
               sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
             );
+            const sleepingUntilByThread = new Map(
+              sleepingWakeAtRows.map((row) => [row.threadId, row.wakeAt] as const),
+            );
 
             const snapshot = {
               snapshotSequence: computeSnapshotSequence(stateRows),
@@ -1502,29 +1567,32 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     )
                   : Result.failVoid,
               ),
-              threads: Arr.filterMap(threadRows, (row) =>
-                row.deletedAt === null
-                  ? Result.succeed({
-                      id: row.threadId,
-                      projectId: row.projectId,
-                      title: row.title,
-                      modelSelection: row.modelSelection,
-                      runtimeMode: row.runtimeMode,
-                      interactionMode: row.interactionMode,
-                      branch: row.branch,
-                      worktreePath: row.worktreePath,
-                      latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-                      createdAt: row.createdAt,
-                      updatedAt: row.updatedAt,
-                      archivedAt: row.archivedAt,
-                      session: sessionByThread.get(row.threadId) ?? null,
-                      latestUserMessageAt: row.latestUserMessageAt,
-                      hasPendingApprovals: row.pendingApprovalCount > 0,
-                      hasPendingUserInput: row.pendingUserInputCount > 0,
-                      hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
-                    } satisfies OrchestrationThreadShell)
-                  : Result.failVoid,
-              ),
+              threads: Arr.filterMap(threadRows, (row) => {
+                if (row.deletedAt !== null) {
+                  return Result.failVoid;
+                }
+                const sleepingUntil = sleepingUntilByThread.get(row.threadId);
+                return Result.succeed({
+                  id: row.threadId,
+                  projectId: row.projectId,
+                  title: row.title,
+                  modelSelection: row.modelSelection,
+                  runtimeMode: row.runtimeMode,
+                  interactionMode: row.interactionMode,
+                  branch: row.branch,
+                  worktreePath: row.worktreePath,
+                  latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
+                  archivedAt: row.archivedAt,
+                  session: sessionByThread.get(row.threadId) ?? null,
+                  latestUserMessageAt: row.latestUserMessageAt,
+                  hasPendingApprovals: row.pendingApprovalCount > 0,
+                  hasPendingUserInput: row.pendingUserInputCount > 0,
+                  hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                  ...(sleepingUntil !== undefined ? { sleepingUntil } : {}),
+                } satisfies OrchestrationThreadShell);
+              }),
               updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
             };
 
@@ -1847,7 +1915,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
   const getThreadShellById: ProjectionSnapshotQueryShape["getThreadShellById"] = (threadId) =>
     Effect.gen(function* () {
-      const [threadRow, latestTurnRow, sessionRow] = yield* Effect.all([
+      const [threadRow, latestTurnRow, sessionRow, sleepingRow] = yield* Effect.all([
         getActiveThreadRowById({ threadId }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
@@ -1869,6 +1937,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             toPersistenceSqlOrDecodeError(
               "ProjectionSnapshotQuery.getThreadShellById:getSession:query",
               "ProjectionSnapshotQuery.getThreadShellById:getSession:decodeRow",
+            ),
+          ),
+        ),
+        getSleepingWakeAtByThread({ threadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getThreadShellById:getSleepingWakeAt:query",
+              "ProjectionSnapshotQuery.getThreadShellById:getSleepingWakeAt:decodeRow",
             ),
           ),
         ),
@@ -1896,6 +1972,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
         hasPendingUserInput: threadRow.value.pendingUserInputCount > 0,
         hasActionableProposedPlan: threadRow.value.hasActionableProposedPlan > 0,
+        ...(Option.isSome(sleepingRow) ? { sleepingUntil: sleepingRow.value.wakeAt } : {}),
       } satisfies OrchestrationThreadShell);
     });
 
@@ -1909,6 +1986,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         checkpointRows,
         latestTurnRow,
         sessionRow,
+        sleepingRow,
       ] = yield* Effect.all([
         getActiveThreadRowById({ threadId }).pipe(
           Effect.mapError(
@@ -1963,6 +2041,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             toPersistenceSqlOrDecodeError(
               "ProjectionSnapshotQuery.getThreadDetailById:getSession:query",
               "ProjectionSnapshotQuery.getThreadDetailById:getSession:decodeRow",
+            ),
+          ),
+        ),
+        getSleepingWakeAtByThread({ threadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getThreadDetailById:getSleepingWakeAt:query",
+              "ProjectionSnapshotQuery.getThreadDetailById:getSleepingWakeAt:decodeRow",
             ),
           ),
         ),
@@ -2028,6 +2114,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           completedAt: row.completedAt,
         })),
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
+        ...(Option.isSome(sleepingRow) ? { sleepingUntil: sleepingRow.value.wakeAt } : {}),
       };
 
       return Option.some(

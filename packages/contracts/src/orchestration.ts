@@ -355,6 +355,10 @@ export const OrchestrationThread = Schema.Struct({
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  /** ISO instant a scheduled-workflow run launched from this thread is sleeping until (Epic 27):
+   * the soonest `wake_at` of its `sleeping` workflow_runs. Omitted when no run is clock-parked.
+   * Read-only — sourced from the run record, never written through the thread. */
+  sleepingUntil: Schema.optional(IsoDateTime),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -398,6 +402,10 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
+  /** ISO instant a scheduled-workflow run launched from this thread is sleeping until (Epic 27):
+   * the soonest `wake_at` of its `sleeping` workflow_runs. Omitted when no run is clock-parked.
+   * Drives the sidebar's "Sleeping until <time>" pill. Read-only — sourced from the run record. */
+  sleepingUntil: Schema.optional(IsoDateTime),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 

@@ -16,6 +16,7 @@ import {
   makeProjectThread,
   makeStoredProject,
 } from "./t3work-threadBridge.testSupport";
+import { resolveThreadStatusPill } from "~/t3work/components/t3work-projectSidebarShared";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -484,5 +485,51 @@ describe("remapProjectThreadToStoredProject", () => {
         displayMode: "thread",
       }),
     ]);
+  });
+
+  it("carries a sleeping run's wake instant through to the sidebar pill", () => {
+    const projectThread = mapLiveThreadToProjectThread({
+      id: "thread-routine",
+      projectId: ProjectId.make("live-saved"),
+      title: "Weekly triage",
+      messages: [],
+      activities: [],
+      latestTurn: null,
+      archivedAt: null,
+      error: null,
+      session: null,
+      createdAt: "2026-06-14T09:00:00.000Z",
+      updatedAt: "2026-06-14T10:00:00.000Z",
+      sleepingUntil: "2026-06-15T09:00:00.000Z",
+      environmentId: "env-local" as EnvironmentId,
+      defaultModelSelection: null,
+    } as never);
+
+    expect(projectThread.sleepingUntil).toBe("2026-06-15T09:00:00.000Z");
+
+    const pill = resolveThreadStatusPill(projectThread);
+    expect(pill?.label).toBe("Sleeping");
+    expect(pill?.detail).toMatch(/^until /);
+  });
+
+  it("omits sleepingUntil and renders no sleeping pill when no run is clock-parked", () => {
+    const projectThread = mapLiveThreadToProjectThread({
+      id: "thread-plain",
+      projectId: ProjectId.make("live-saved"),
+      title: "Active work",
+      messages: [],
+      activities: [],
+      latestTurn: null,
+      archivedAt: null,
+      error: null,
+      session: null,
+      createdAt: "2026-06-14T09:00:00.000Z",
+      updatedAt: "2026-06-14T10:00:00.000Z",
+      environmentId: "env-local" as EnvironmentId,
+      defaultModelSelection: null,
+    } as never);
+
+    expect(projectThread.sleepingUntil).toBeUndefined();
+    expect(resolveThreadStatusPill(projectThread)?.label).not.toBe("Sleeping");
   });
 });

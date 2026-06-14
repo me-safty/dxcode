@@ -47,7 +47,7 @@ export type ProjectThread = {
   status: "idle" | "running" | "completed" | "error";
   /** ISO instant a scheduled-workflow run on this thread is sleeping until (Epic 27), or
    * absent when no run is clock-parked. Drives the "Sleeping until <time>" status pill.
-   * (Sourcing this from `workflow_runs.wake_at` through the thread payload is the next slice.) */
+   * Sourced from `workflow_runs.wake_at`, joined onto the thread shell DTO by launch_thread_id. */
   sleepingUntil?: string;
 };
 

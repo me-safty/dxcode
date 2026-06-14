@@ -117,6 +117,9 @@ export interface Thread {
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  /** ISO instant a scheduled-workflow run on this thread is sleeping until (Epic 27), or absent
+   * when no run is clock-parked. Server-computed; promoted from the thread shell. */
+  sleepingUntil?: string;
 }
 
 export interface ThreadShell {
@@ -134,6 +137,9 @@ export interface ThreadShell {
   updatedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
+  /** ISO instant a scheduled-workflow run on this thread is sleeping until (Epic 27), or absent
+   * when no run is clock-parked. Drives the sidebar's "Sleeping until <time>" pill. */
+  sleepingUntil?: string;
 }
 
 export interface ThreadTurnState {
@@ -158,6 +164,9 @@ export interface SidebarThreadSummary {
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
+  /** ISO instant a scheduled-workflow run on this thread is sleeping until (Epic 27), or absent
+   * when no run is clock-parked. Drives the sidebar's "Sleeping until <time>" pill. */
+  sleepingUntil?: string;
 }
 
 export interface ThreadSession {
