@@ -105,6 +105,7 @@ export const layer = Layer.effect(
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const platform = yield* HostProcessPlatform;
+    const architecture = yield* HostProcessArchitecture;
 
     const nodePty = yield* Effect.promise(() => import("node-pty"));
 
@@ -112,6 +113,8 @@ export const layer = Layer.effect(
       ensureNodePtySpawnHelperExecutable().pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.provideService(Path.Path, path),
+        Effect.provideService(HostProcessPlatform, platform),
+        Effect.provideService(HostProcessArchitecture, architecture),
         Effect.orElseSucceed(() => undefined),
       ),
     );

@@ -5,7 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Config from "effect/Config";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -420,9 +420,10 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     });
 
     const hostPlatform = yield* HostProcessPlatform;
+    const hostEnvironment = yield* HostProcessEnvironment;
     const env = yield* createDevRunnerEnv({
       mode: input.mode,
-      baseEnv: {},
+      baseEnv: hostEnvironment,
       serverOffset,
       webOffset,
       t3Home: input.t3Home,
@@ -452,7 +453,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       stdout: "inherit",
       stderr: "inherit",
       env,
-      extendEnv: true,
+      extendEnv: false,
       // Windows needs shell mode to resolve .cmd shims (e.g. vp.cmd).
       shell: hostPlatform === "win32",
       // Keep Vite+ in the same process group so terminal signals (Ctrl+C)

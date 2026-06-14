@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeOS from "node:os";
 import { execFileSync } from "node:child_process";
+import { accessSync, constants as fileSystemConstants } from "node:fs";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -21,6 +22,15 @@ type ExecFileSyncLike = (
   args: ReadonlyArray<string>,
   options: { encoding: "utf8"; timeout: number },
 ) => string;
+
+function canExecuteFile(filePath: string): boolean {
+  try {
+    accessSync(filePath, fileSystemConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export interface CommandAvailabilityOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -442,15 +452,7 @@ const isExecutableFile = Effect.fn("shell.isExecutableFile")(function* (
     return windowsPathExtensions.includes(extension.toUpperCase());
   }
 
-  if (stat.mode === undefined) {
-    return true;
-  }
-  // Note: this checks for any execute bit rather than the effective-uid-aware
-  // `access(X_OK)` the previous sync implementation used. `FileSystem.access`
-  // exposes no executable probe, and the difference only matters for files
-  // that are executable solely by a different user — close enough for PATH
-  // candidate filtering.
-  return (stat.mode & 0o111) !== 0;
+  return canExecuteFile(filePath);
 });
 
 const resolveCommandPathForPlatform = Effect.fn("shell.resolveCommandPathForPlatform")(function* (
