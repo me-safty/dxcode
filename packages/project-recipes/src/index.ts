@@ -8,3 +8,4 @@ export * from "./sidecarComposition.ts";
 export * from "./sidecarSection.ts";
 export * from "./surface.ts";
 export * from "./toolGroups.ts";
+export * from "./workflowDecision.ts";

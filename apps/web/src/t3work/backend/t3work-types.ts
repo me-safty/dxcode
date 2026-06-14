@@ -14,14 +14,7 @@ import type {
   SubmitProjectRecipeCardActionResponse,
 } from "@t3tools/project-recipes";
 import type { AtlassianBackendApi } from "./t3work-atlassianBackendTypes";
-import type {
-  GitHubAssetDownloadRequest,
-  GitHubDownloadedAsset,
-} from "~/t3work/backend/t3work-githubAssetTypes";
-import type {
-  GitHubPullRequestContextRequest,
-  GitHubPullRequestContextResponse,
-} from "~/t3work/backend/t3work-githubTypes";
+import type { GitHubBackendApi } from "./t3work-githubBackendTypes";
 import type { T3workTurnToolContext } from "~/t3work/t3work-threadToolContext";
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
@@ -60,6 +53,11 @@ export interface BackendApi {
     readonly text: string;
     /** The composer's optimistic message id, so the server message reconciles with it. */
     readonly messageId: string;
+    /** Structured reply value (a decision-card choice); the server validates it against the
+     * pending ask's affordance and the engine schema-validates it on resume. */
+    readonly value?: unknown;
+    /** The decision card's ask — rejected by the server if it is no longer the pending one. */
+    readonly correlationId?: string;
   }) => Promise<void>;
   readonly listThreadPlacements: (input: {
     readonly threadIds?: ReadonlyArray<string>;
@@ -117,58 +115,12 @@ export interface ProjectWorkspaceBackendApi {
   }) => Promise<ProjectWorkspaceWriteContextFilesResult>;
 }
 
-export type GitHubRepositoryCandidate = {
-  readonly id: string;
-  readonly nameWithOwner: string;
-  readonly url: string;
-  readonly host: string;
-  readonly updatedAt?: string;
-  readonly description?: string;
-  readonly isPrivate?: boolean;
-};
-
-export type GitHubInboxItem = {
-  readonly id: string;
-  readonly repository: string;
-  readonly repositoryUrl?: string;
-  readonly reason: string;
-  readonly authorLogin?: string;
-  readonly authorAvatarUrl?: string;
-  readonly reviewRequested?: boolean;
-  readonly subjectType?: string;
-  readonly subjectTitle?: string;
-  readonly subjectUrl?: string;
-  readonly subjectBranch?: string;
-  readonly subjectState?: "open" | "closed" | "merged" | "draft";
-  readonly commentCount?: number;
-  readonly reviewCommentCount?: number;
-  readonly additions?: number;
-  readonly deletions?: number;
-  readonly changedFiles?: number;
-  readonly updatedAt?: string;
-};
-
-export type GitHubInboxDiscoverResponse = {
-  readonly host: string;
-  readonly account?: string;
-  readonly repositories: ReadonlyArray<GitHubRepositoryCandidate>;
-  readonly inboxItems: ReadonlyArray<GitHubInboxItem>;
-  readonly suggestedRepositoryUrls: ReadonlyArray<string>;
-  readonly inboxWarning?: string;
-};
-
-export interface GitHubBackendApi {
-  readonly discoverInbox: (input: {
-    readonly host: string;
-    readonly projectKey?: string;
-    readonly projectTitle?: string;
-    readonly linkedRepositoryUrls?: ReadonlyArray<string>;
-  }) => Promise<GitHubInboxDiscoverResponse>;
-  readonly getPullRequestContext: (
-    input: GitHubPullRequestContextRequest,
-  ) => Promise<GitHubPullRequestContextResponse>;
-  readonly downloadAsset: (input: GitHubAssetDownloadRequest) => Promise<GitHubDownloadedAsset>;
-}
+export type {
+  GitHubBackendApi,
+  GitHubInboxDiscoverResponse,
+  GitHubInboxItem,
+  GitHubRepositoryCandidate,
+} from "./t3work-githubBackendTypes";
 
 export type {
   AtlassianAssignableUser,

@@ -5,16 +5,18 @@ import type {
 } from "@t3tools/integrations-core";
 import type { ResourcePage, ResourceSnapshot } from "@t3tools/project-context";
 
+import { createAtlassianIssueOpsApi } from "./t3work-atlassianBackendApiIssueOps";
 import type {
-  AtlassianAssignableUser,
   AtlassianBackendApi,
   AtlassianBacklogResponse,
+  AtlassianBacklogSearchInput,
+  AtlassianBacklogSearchResult,
   AtlassianBasicConnectInput,
   AtlassianBoardColumnsResponse,
-  AtlassianDownloadedAsset,
   AtlassianOAuthConnectInput,
   AtlassianOAuthExchangeInput,
   AtlassianOAuthExchangeResult,
+  TempoCapacityResponse,
 } from "./t3work-atlassianBackendTypes";
 import { postJson } from "./t3work-t3BackendHttp";
 
@@ -23,6 +25,22 @@ export function createAtlassianBackendApi(httpBaseUrl: string): AtlassianBackend
     postJson<TRequest, TResponse>(httpBaseUrl, path, body);
 
   return {
+    async getTempoCapacity(input: {
+      readonly accountIds: ReadonlyArray<string>;
+      readonly from: string;
+      readonly to: string;
+      readonly projectKey?: string;
+      readonly atlassianAccountId?: string;
+    }): Promise<TempoCapacityResponse> {
+      return post<typeof input, TempoCapacityResponse>("/api/t3work/tempo/capacity", input);
+    },
+
+    async setTempoToken(token: string | null): Promise<{ configured: boolean }> {
+      return post<{ token: string | null }, { configured: boolean }>("/api/t3work/tempo/token", {
+        token,
+      });
+    },
+
     async listAccounts(): Promise<ReadonlyArray<IntegrationAccount>> {
       const response = await post<object, { accounts: ReadonlyArray<IntegrationAccount> }>(
         "/api/t3work/atlassian/accounts",
@@ -110,6 +128,13 @@ export function createAtlassianBackendApi(httpBaseUrl: string): AtlassianBackend
       return post<typeof input, AtlassianBacklogResponse>("/api/t3work/atlassian/backlog", input);
     },
 
+    async searchBacklog(input: AtlassianBacklogSearchInput) {
+      return post<typeof input, AtlassianBacklogSearchResult>(
+        "/api/t3work/atlassian/backlog/search",
+        input,
+      );
+    },
+
     async getBoardColumns(input: {
       readonly account: IntegrationAccountRef;
       readonly externalProjectId: string;
@@ -132,79 +157,7 @@ export function createAtlassianBackendApi(httpBaseUrl: string): AtlassianBackend
       return response.snapshot;
     },
 
-    async searchAssignableUsers(input: {
-      readonly accountId: string;
-      readonly issueIdOrKey: string;
-      readonly query?: string;
-    }): Promise<ReadonlyArray<AtlassianAssignableUser>> {
-      const response = await post<typeof input, { users: ReadonlyArray<AtlassianAssignableUser> }>(
-        "/api/t3work/atlassian/backlog/assignable-users",
-        input,
-      );
-      return response.users;
-    },
-
-    async updateIssueAssignee(input: {
-      readonly accountId: string;
-      readonly issueIdOrKey: string;
-      readonly assigneeAccountId?: string | null;
-      readonly assigneeDisplayName?: string | null;
-    }): Promise<void> {
-      await post<typeof input, { ok: true }>(
-        "/api/t3work/atlassian/backlog/update-assignee",
-        input,
-      );
-    },
-
-    async updateIssueEstimate(input: {
-      readonly accountId: string;
-      readonly issueIdOrKey: string;
-      readonly estimateValue: number | null;
-      readonly estimateMode?: "points" | "hours";
-    }): Promise<{ label: string }> {
-      const response = await post<typeof input, { ok: true; label: string }>(
-        "/api/t3work/atlassian/backlog/update-estimate",
-        input,
-      );
-      return { label: response.label };
-    },
-
-    async updateIssueStatus(input: {
-      readonly accountId: string;
-      readonly issueIdOrKey: string;
-      readonly targetStatus: string;
-    }): Promise<{ status: string }> {
-      const response = await post<typeof input, { ok: true; status: string }>(
-        "/api/t3work/atlassian/issue/update-status",
-        input,
-      );
-      return { status: response.status };
-    },
-
-    async createSubtask(input: {
-      readonly accountId: string;
-      readonly projectId: string;
-      readonly parentIssueIdOrKey: string;
-      readonly summary: string;
-      readonly description?: string;
-      readonly estimateHours?: number;
-    }): Promise<{ id: string; key: string }> {
-      const response = await post<typeof input, { created: { id: string; key: string } }>(
-        "/api/t3work/atlassian/backlog/create-subtask",
-        input,
-      );
-      return response.created;
-    },
-
-    async downloadAsset(input: {
-      readonly accountId: string;
-      readonly url: string;
-    }): Promise<AtlassianDownloadedAsset> {
-      const response = await post<typeof input, { asset: AtlassianDownloadedAsset }>(
-        "/api/t3work/atlassian/asset",
-        input,
-      );
-      return response.asset;
-    },
+    ...createAtlassianIssueOpsApi(post),
   };
 }
+

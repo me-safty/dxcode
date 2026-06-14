@@ -98,6 +98,31 @@ export function useThreadChatComposerState(input: {
     });
   }, [input.backend, input.threadId, input.turnToolContext]);
 
+  // A decision-card click: ChatView renders the optimistic reply bubble (reusing the message id
+  // the resolve route reconciles with) and hands the structured value here to post.
+  const resolveWorkflowDecision = useCallback(
+    async (decision: {
+      threadId: string;
+      messageId: string;
+      text: string;
+      value: unknown;
+      correlationId: string;
+    }) => {
+      if (!input.backend) {
+        return;
+      }
+
+      await input.backend.resolveWorkflowInput({
+        threadId: decision.threadId,
+        text: decision.text,
+        messageId: decision.messageId,
+        value: decision.value,
+        correlationId: decision.correlationId,
+      });
+    },
+    [input.backend],
+  );
+
   const dispatchTurnStartOverride = useCallback(
     async (turnStart: {
       threadId: string;
@@ -161,6 +186,7 @@ export function useThreadChatComposerState(input: {
     prepareComposerContextAttachments,
     prepareTurnStart,
     removeContextAttachment,
+    resolveWorkflowDecision,
     submitRecipeCardAction,
   };
 }

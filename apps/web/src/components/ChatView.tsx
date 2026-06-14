@@ -393,6 +393,17 @@ type ChatViewProps =
             submit?: Record<string, unknown>;
           }) => Promise<void>)
         | undefined;
+      /** Optional host hook answering a workflow decision card — posts the structured value
+       * (plus display text + the card's correlationId) to the resolve-input route. */
+      dispatchWorkflowDecision?:
+        | ((input: {
+            threadId: ThreadId;
+            messageId: MessageId;
+            text: string;
+            value: unknown;
+            correlationId: string;
+          }) => Promise<void>)
+        | undefined;
     }
   | {
       environmentId: EnvironmentId;
@@ -442,6 +453,17 @@ type ChatViewProps =
             cardId: string;
             actionId: string;
             submit?: Record<string, unknown>;
+          }) => Promise<void>)
+        | undefined;
+      /** Optional host hook answering a workflow decision card — posts the structured value
+       * (plus display text + the card's correlationId) to the resolve-input route. */
+      dispatchWorkflowDecision?:
+        | ((input: {
+            threadId: ThreadId;
+            messageId: MessageId;
+            text: string;
+            value: unknown;
+            correlationId: string;
           }) => Promise<void>)
         | undefined;
     };
@@ -878,6 +900,7 @@ export default function ChatView(props: ChatViewProps) {
     dispatchTurnStartOverride,
     onComposerContextAttachmentsConsumed,
     onSubmitRecipeCardAction,
+    dispatchWorkflowDecision,
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
   const routeThreadRef = useMemo(
@@ -3943,6 +3966,56 @@ export default function ChatView(props: ChatViewProps) {
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
 
+  // A decision-card click answers a workflow's pending askUser: render the choice as the
+  // user's reply optimistically (the resolve route reuses the message id so the server message
+  // reconciles with it), then post the structured value through the host hook. No turn starts.
+  const activeThreadRefForDecision = useRef(activeThread);
+  activeThreadRefForDecision.current = activeThread;
+  const resolveWorkflowDecisionFromCard = useCallback(
+    async (input: { choice: string; value: unknown; correlationId: string }) => {
+      const thread = activeThreadRefForDecision.current;
+      if (!dispatchWorkflowDecision || !thread) {
+        return;
+      }
+      const threadIdForSend = thread.id;
+      const messageIdForSend = newMessageId();
+      const messageCreatedAt = new Date().toISOString();
+      setThreadError(threadIdForSend, null);
+      isAtEndRef.current = true;
+      showScrollDebouncer.current.cancel();
+      setShowScrollToBottom(false);
+      await legendListRef.current?.scrollToEnd?.({ animated: false });
+      setOptimisticUserMessages((existing) => [
+        ...existing,
+        {
+          id: messageIdForSend,
+          role: "user",
+          text: input.choice,
+          createdAt: messageCreatedAt,
+          streaming: false,
+        },
+      ]);
+      try {
+        await dispatchWorkflowDecision({
+          threadId: threadIdForSend,
+          messageId: messageIdForSend,
+          text: input.choice,
+          value: input.value,
+          correlationId: input.correlationId,
+        });
+      } catch (err) {
+        setOptimisticUserMessages((existing) =>
+          existing.filter((message) => message.id !== messageIdForSend),
+        );
+        setThreadError(
+          threadIdForSend,
+          err instanceof Error ? err.message : "Failed to submit the decision.",
+        );
+      }
+    },
+    [dispatchWorkflowDecision, setThreadError],
+  );
+
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
@@ -4046,6 +4119,9 @@ export default function ChatView(props: ChatViewProps) {
               onIsAtEndChange={onIsAtEndChange}
               activityCards={activityCardEntries}
               onSubmitRecipeCardAction={onSubmitRecipeCardAction}
+              onResolveWorkflowDecision={
+                dispatchWorkflowDecision ? resolveWorkflowDecisionFromCard : undefined
+              }
             />
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}

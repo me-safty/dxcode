@@ -21,6 +21,8 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import type { AskAffordance } from "@t3work/sdk";
+
 /** Which ask kind a thread is parked on — selects the event that resolves it. */
 export type WorkflowPendingKind = "thread.turn" | "user.input";
 
@@ -28,6 +30,11 @@ export interface WorkflowPendingAsk {
   readonly runId: string;
   readonly correlationId: string;
   readonly kind: WorkflowPendingKind;
+  /** The `user.input` ask's affordance descriptor, so the resolve route can reject a
+   * structured value that does not fit the offered choices BEFORE posting the reply. Hot-index
+   * only (not persisted): after a restart-rehydration it is absent and the route check degrades
+   * gracefully — the SDK still schema-validates the reply on resume. */
+  readonly affordance?: AskAffordance;
 }
 
 export interface WorkflowRegisteredRun {

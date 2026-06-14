@@ -87,6 +87,12 @@ import {
   T3workWorkflowCardBody,
 } from "~/t3work/chat/t3work-messageExtViews";
 import {
+  findActiveWorkflowInputMessageId,
+  getT3workWorkflowDecisionAttachment,
+  T3workWorkflowDecisionCard,
+  type WorkflowDecisionChooseHandler,
+} from "~/t3work/chat/t3work-messageDecisionCard";
+import {
   buildReviewCommentRenderablePatch,
   parseReviewCommentMessageSegments,
   type ReviewCommentContext,
@@ -117,6 +123,9 @@ interface TimelineRowSharedState {
         submit?: Record<string, unknown>;
       }) => Promise<void>)
     | undefined;
+  onResolveWorkflowDecision?: WorkflowDecisionChooseHandler | undefined;
+  /** The message currently awaiting workflow input — only its decision card accepts clicks. */
+  activeWorkflowInputMessageId: string | null;
 }
 
 interface TimelineRowActivityState {
@@ -166,6 +175,7 @@ interface MessagesTimelineProps {
         submit?: Record<string, unknown>;
       }) => Promise<void>)
     | undefined;
+  onResolveWorkflowDecision?: WorkflowDecisionChooseHandler | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +207,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onIsAtEndChange,
   activityCards = EMPTY_ACTIVITY_CARDS,
   onSubmitRecipeCardAction,
+  onResolveWorkflowDecision,
 }: MessagesTimelineProps) {
   const baseRows = useMemo(
     () =>
@@ -254,6 +265,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [listRef, onIsAtEndChange, rows.length]);
 
+  // Only the latest unanswered askUser message accepts decision-card clicks. Computed from the
+  // same entries the rows render (optimistic user replies included), so a click disables the
+  // card immediately.
+  const activeWorkflowInputMessageId = useMemo(
+    () => findActiveWorkflowInputMessageId(timelineEntries),
+    [timelineEntries],
+  );
+
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       timestampFormat,
@@ -267,6 +286,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onSubmitRecipeCardAction,
+      onResolveWorkflowDecision,
+      activeWorkflowInputMessageId,
     }),
     [
       timestampFormat,
@@ -280,6 +301,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onSubmitRecipeCardAction,
+      onResolveWorkflowDecision,
+      activeWorkflowInputMessageId,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -609,8 +632,11 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
 function SystemTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const workflowCard = getT3workWorkflowCardAttachment(row.message);
+  const decision = getT3workWorkflowDecisionAttachment(row.message);
   const attachments = getT3workRenderableAttachments(row.message);
-  const hasText = row.message.text.trim().length > 0;
+  // The decision card renders the question itself; the message text (the same question) would
+  // double up above it.
+  const hasText = decision === null && row.message.text.trim().length > 0;
 
   if (row.message.t3workExt?.visibleToUser === false) {
     return null;
@@ -638,8 +664,15 @@ function SystemTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message
             />
           </div>
         ) : null}
+        {decision ? (
+          <T3workWorkflowDecisionCard
+            decision={decision}
+            active={ctx.activeWorkflowInputMessageId === row.message.id}
+            onChoose={ctx.onResolveWorkflowDecision}
+          />
+        ) : null}
         {attachments.length > 0 ? <T3workMessageAttachmentList attachments={attachments} /> : null}
-        {!hasText && !workflowCard && attachments.length === 0 ? (
+        {!hasText && !workflowCard && !decision && attachments.length === 0 ? (
           <ChatMarkdown
             text="(empty system message)"
             cwd={ctx.markdownCwd}

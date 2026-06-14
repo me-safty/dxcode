@@ -90,11 +90,30 @@ export const T3workWorkflowEngineReactorLive = Layer.effectDiscard(
         return;
       }
 
+      // A structured decision reply is pinned to its ask: the route's staleness check is a
+      // read-only peek that two in-flight replies can both pass, so the take here is the
+      // authoritative point — a reply authored for a DIFFERENT (already-resolved) ask must not
+      // answer the newer pending one. Re-register and ignore it.
+      const workflowReply = role === "user" ? event.payload.t3workExt?.workflowReply : undefined;
+      if (
+        workflowReply?.correlationId !== undefined &&
+        workflowReply.correlationId !== pending.correlationId
+      ) {
+        registry.setPending(threadId, pending);
+        return;
+      }
+
       // An assistant turn resolves with its assembled delta text (the marker's own text is "");
-      // a user reply resolves with the message text directly.
+      // a user reply resolves with the structured decision value when the resolve route attached
+      // one (`t3workExt.workflowReply`, e.g. a decision-card choice), else the message text.
       const assembled = assistantTextByMessageId.get(messageId);
       assistantTextByMessageId.delete(messageId);
-      const reply = role === "assistant" ? (assembled ?? text) : text;
+      const reply =
+        role === "assistant"
+          ? (assembled ?? text)
+          : workflowReply !== undefined
+            ? workflowReply.value
+            : text;
       yield* Effect.promise(() => run.resume(pending.correlationId, reply));
     });
 

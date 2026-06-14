@@ -11,12 +11,16 @@
  *   5. capability gate   — askUser without "user" → PermissionDeniedError, broker untouched.
  *   6. determinism       — the same body replays to the same correlationId.
  *   7. schema retry      — an ask whose replies never satisfy the schema → SchemaExhaustedError.
+ *   8. decision card     — askUser with a choice schema + attachments carries the affordance
+ *                          descriptor and the refs in the `user.input` payload.
  */
 
 import { afterAll, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   agentPrimitiveWorkflow,
+  askChoiceJsonWorkflow,
+  askChoiceWorkflow,
   askResponseWorkflow,
   childSpawnWorkflow,
   cleanupRunsRoot,
@@ -110,6 +114,11 @@ describe("durable workflow engine — Thread model", () => {
     expect(before.bySeq.size).toBe(1);
     expect(before.byCorrelation.size).toBe(0);
 
+    // A non-choice ask journals the EXACT pre-decision-card payload — no affordance key — so
+    // runs parked on an older askUser re-derive the same argsHash and still resume.
+    expect(broker.sent[0]?.payload).not.toHaveProperty("affordance");
+    expect(broker.sent[0]?.payload).not.toHaveProperty("attachments");
+
     const wrote = await appendResolvedEntry({
       runsRoot,
       runId: run.runId,
@@ -121,6 +130,64 @@ describe("durable workflow engine — Thread model", () => {
     const resumed = await resumeWorkflow(run.runId, askResponseWorkflow, { question: "ship it?" }, base);
     expect(completed(resumed)).toEqual({ answer: "approved" });
     expect(broker.sent).toHaveLength(1); // the sent entry replayed, broker untouched
+  });
+
+  it("carries the affordance descriptor + attachments in the user.input payload and resumes with the chosen literal", async () => {
+    const broker = createMockBroker(alwaysDefer);
+    const base = launchBase(broker);
+    const args = { question: "Release decision?" };
+    const run = await startWorkflow(askChoiceWorkflow, args, base);
+    if (!isSuspended(run)) throw new Error("expected SuspendedResult");
+
+    expect(broker.sent.map((e) => e.kind)).toEqual(["user.input"]);
+    const payload = broker.sent[0]?.payload as Record<string, unknown>;
+    expect(payload["affordance"]).toEqual({
+      kind: "choice",
+      options: ["ship-now", "hold", "rollback"],
+    });
+    expect(payload["attachments"]).toEqual([
+      {
+        provider: "jira",
+        kind: "issue",
+        id: "BUG-7",
+        displayId: "BUG-7",
+        title: "Checkout rounding error",
+        url: "https://example.atlassian.net/browse/BUG-7",
+        status: "Open",
+      },
+    ]);
+
+    // The host posts back the chosen literal (raw, as resolve-input appends it).
+    await appendResolvedEntry({
+      runsRoot,
+      runId: run.runId,
+      correlationId: run.correlationId,
+      reply: "hold",
+    });
+    const resumed = await resumeWorkflow(run.runId, askChoiceWorkflow, args, base);
+    expect(completed(resumed)).toEqual({ decision: "hold" });
+    expect(broker.sent).toHaveLength(1); // replay does not re-fire the card
+  });
+
+  it("resolves a choice whose option literals are JSON-parseable strings without corrupting them", async () => {
+    const broker = createMockBroker(alwaysDefer);
+    const base = launchBase(broker);
+    const args = { question: "Proceed?" };
+    const run = await startWorkflow(askChoiceJsonWorkflow, args, base);
+    if (!isSuspended(run)) throw new Error("expected SuspendedResult");
+
+    // "true" is a valid offered option AND valid JSON — it must reach the literal decode as
+    // the string "true", not be JSON-coerced into boolean true (which would exhaust the retry
+    // loop on a legitimate button click).
+    await appendResolvedEntry({
+      runsRoot,
+      runId: run.runId,
+      correlationId: run.correlationId,
+      reply: "true",
+    });
+    const resumed = await resumeWorkflow(run.runId, askChoiceJsonWorkflow, args, base);
+    expect(completed(resumed)).toEqual({ confirmed: "true" });
+    expect(broker.sent).toHaveLength(1); // resolved on the first attempt — no corrective re-ask
   });
 
   it("records only sent entries for fire-and-forget spawn/notify (never suspends)", async () => {

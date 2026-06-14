@@ -1,5 +1,6 @@
 import "./t3work-sdk.globals.ts";
 
+export { schemaToAffordance } from "./t3work-sdk.affordance.ts";
 export { appendResolvedEntry, createHostBroker, createMockBroker } from "./t3work-sdk.broker.ts";
 export { builtinTools } from "./t3work-sdk.builtins.ts";
 export { hashArgs } from "./t3work-sdk.canonicalJson.ts";
@@ -73,8 +74,11 @@ export type {
   WorkflowRunOptions,
   WorkflowRunResult,
 } from "./t3work-sdk.engine.ts";
+export type { AskAffordance } from "./t3work-sdk.affordance.ts";
 export type {
   AskOpts,
+  AskUserAttachment,
+  AskUserOpts,
   SpawnThreadOpts,
   Thread,
   ThreadRef,

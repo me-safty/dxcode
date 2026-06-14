@@ -110,11 +110,27 @@ export type T3workMessageAuthor = typeof T3workMessageAuthor.Type;
 export const T3workMessageStatus = Schema.Literals(["active", "waiting-for-input", "completed"]);
 export type T3workMessageStatus = typeof T3workMessageStatus.Type;
 
+/**
+ * Present on a user message that answers a workflow's pending `askUser` with a structured
+ * value (e.g. a decision-card choice). The message `text` stays the human-readable rendering
+ * of the reply; the workflow-engine reactor resolves the parked ask with `value` instead of
+ * the text when this is present.
+ */
+export const T3workMessageWorkflowReply = Schema.Struct({
+  value: Schema.Unknown,
+  /** The ask this reply answers (the decision card's pending correlationId). The reactor
+   * ignores a structured reply whose correlationId no longer matches the pending ask, so a
+   * stale card click cannot answer a NEWER question that was validated against an older one. */
+  correlationId: Schema.optional(Schema.String),
+});
+export type T3workMessageWorkflowReply = typeof T3workMessageWorkflowReply.Type;
+
 export const T3workMessageExt = Schema.Struct({
   author: Schema.optional(T3workMessageAuthor),
   visibleToUser: Schema.optional(Schema.Boolean),
   visibleToAgent: Schema.optional(Schema.Boolean),
   status: Schema.optional(T3workMessageStatus),
   attachments: Schema.optional(Schema.Array(T3workMessageAttachment)),
+  workflowReply: Schema.optional(T3workMessageWorkflowReply),
 });
 export type T3workMessageExt = typeof T3workMessageExt.Type;

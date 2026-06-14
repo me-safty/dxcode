@@ -15,66 +15,29 @@
  * it precedes (turn-on-a-missing-thread would otherwise race).
  */
 
-import {
-  CommandId,
-  MessageId,
-  type ModelSelection,
-  type OrchestrationCommand,
-  type ProjectId,
-  type ProviderInteractionMode,
-  type RuntimeMode,
-  type T3workMessageExt,
-  ThreadId,
-} from "@t3tools/contracts";
+import { CommandId, MessageId, T3workMessageExternalResourceRef, ThreadId } from "@t3tools/contracts";
+import { PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_DECISION } from "@t3tools/project-recipes";
+import * as Schema from "effect/Schema";
 
 import type { MessageBroker, MessageEnvelope } from "@t3work/sdk";
 
-import type { T3workWorkflowEngineRegistryShape } from "./t3work-workflowEngineRegistry.ts";
+import {
+  messageUpsert,
+  type ThreadCreatePayload,
+  type ThreadMessagePayload,
+  type ThreadTurnPayload,
+  type UserInputPayload,
+  type WorkflowEngineBrokerDeps,
+} from "./t3work-workflowEngineBrokerTypes.ts";
 
-/** The ask a run is parked on, as the broker knows it when it fires (thread + correlation). */
-export interface WorkflowEnginePendingAsk {
-  readonly threadId: string;
-  readonly correlationId: string;
-  readonly kind: "thread.turn" | "user.input";
-}
+export type {
+  WorkflowEngineBrokerDeps,
+  WorkflowEnginePendingAsk,
+} from "./t3work-workflowEngineBrokerTypes.ts";
 
-export interface WorkflowEngineBrokerDeps {
-  readonly runId: string;
-  readonly projectId: ProjectId;
-  readonly modelSelection: ModelSelection;
-  readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
-  readonly registry: T3workWorkflowEngineRegistryShape;
-  /** Run an orchestration command (the launch builds this from the captured runtime). */
-  readonly dispatch: (command: OrchestrationCommand) => Promise<void>;
-  readonly newId: () => string;
-  readonly nowIso: () => string;
-  /**
-   * Durably persist the pending ask (status=suspended + pending columns) before the side
-   * effect dispatches, so a restart finds the parked run in the DB. The in-memory
-   * `registry.setPending` is still set for the live reactor's hot lookups; this mirrors it to
-   * the source of truth. No-op (undefined) on the fs/in-memory path.
-   */
-  readonly recordPending?: (pending: WorkflowEnginePendingAsk) => Promise<void>;
-}
-
-interface ThreadCreatePayload {
-  readonly threadId: string;
-  readonly name?: string;
-}
-interface ThreadTurnPayload {
-  readonly threadId: string;
-  readonly prompt: string;
-}
-interface ThreadMessagePayload {
-  readonly threadId: string;
-  readonly recipient: "agent" | "user";
-  readonly text: string;
-}
-interface UserInputPayload {
-  readonly threadId: string;
-  readonly question: string;
-}
+/** Attachment refs from the workflow are opaque payload (SDK black-box rule); only refs that
+ * satisfy the message contract render as resource cards — anything else is dropped, never fatal. */
+const isMessageResourceRef = Schema.is(T3workMessageExternalResourceRef);
 
 export function createWorkflowEngineBroker(deps: WorkflowEngineBrokerDeps): MessageBroker {
   // Serialize dispatches so a floated `thread.create` lands before the `thread.turn` it precedes.
@@ -136,17 +99,44 @@ export function createWorkflowEngineBroker(deps: WorkflowEngineBrokerDeps): Mess
     }
     if (kind === "user.input") {
       const p = payload as UserInputPayload;
-      deps.registry.setPending(p.threadId, { runId: deps.runId, correlationId, kind: "user.input" });
+      const affordance = p.affordance ?? { kind: "text" as const };
+      deps.registry.setPending(p.threadId, {
+        runId: deps.runId,
+        correlationId,
+        kind: "user.input",
+        affordance,
+      });
       await deps.recordPending?.({ threadId: p.threadId, correlationId, kind: "user.input" });
       // Tag the escalation message as awaiting the user's answer (with the owning run) so the UI
       // can render it as a guided prompt and route the reply back to this run rather than a
-      // free-form chat turn.
+      // free-form chat turn. An ask that is renderable as a decision card (a choice affordance,
+      // or attached resources) additionally carries the `workflow.decision` view + the resource
+      // refs; a plain text ask keeps today's bare message + composer.
+      const resources = (p.attachments ?? []).filter(isMessageResourceRef);
+      const renderAsCard = affordance.kind !== "text" || resources.length > 0;
       await enqueue(() =>
         deps.dispatch(
           messageUpsert(deps, p.threadId, "system", p.question, {
             author: { kind: "system", workflowRunId: deps.runId },
             status: "waiting-for-input",
             visibleToUser: true,
+            ...(renderAsCard
+              ? {
+                  attachments: [
+                    {
+                      kind: "view" as const,
+                      miniappId: PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_DECISION,
+                      props: {
+                        question: p.question,
+                        affordance,
+                        correlationId,
+                        workflowRunId: deps.runId,
+                      },
+                    },
+                    ...resources.map((resource) => ({ kind: "resource" as const, resource })),
+                  ],
+                }
+              : {}),
           }),
         ),
       );
@@ -161,27 +151,4 @@ export function createWorkflowEngineBroker(deps: WorkflowEngineBrokerDeps): Mess
   };
 
   return { send };
-}
-
-function messageUpsert(
-  deps: WorkflowEngineBrokerDeps,
-  threadId: string,
-  role: "user" | "system",
-  text: string,
-  t3workExt?: T3workMessageExt,
-): OrchestrationCommand {
-  return {
-    type: "thread.message.upsert",
-    commandId: CommandId.make(`t3work-wf:msg:${deps.newId()}`),
-    threadId: ThreadId.make(threadId),
-    message: {
-      messageId: MessageId.make(deps.newId()),
-      role,
-      text,
-      turnId: null,
-      streaming: false,
-      ...(t3workExt === undefined ? {} : { t3workExt }),
-    },
-    createdAt: deps.nowIso(),
-  };
 }

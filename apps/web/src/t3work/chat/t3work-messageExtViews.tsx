@@ -3,6 +3,7 @@ import { CheckCircle2Icon, LoaderCircleIcon } from "lucide-react";
 import {
   isProjectRecipeWorkflowCardActivityPayload,
   PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_CARD,
+  PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_DECISION,
   type ProjectRecipeWorkflowCardActivityPayload,
 } from "@t3tools/project-recipes";
 
@@ -44,7 +45,8 @@ export function getT3workRenderableAttachments(
   return (message.t3workExt?.attachments ?? []).filter(
     (attachment) =>
       attachment.kind !== "view" ||
-      attachment.miniappId !== PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_CARD,
+      (attachment.miniappId !== PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_CARD &&
+        attachment.miniappId !== PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_DECISION),
   );
 }
 

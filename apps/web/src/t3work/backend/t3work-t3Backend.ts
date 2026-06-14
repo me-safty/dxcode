@@ -107,6 +107,8 @@ export function createT3Backend(wsBaseUrl: string): BackendApi {
     threadId: string;
     text: string;
     messageId: string;
+    value?: unknown;
+    correlationId?: string;
   }) {
     await postJson<typeof input, { ok: true }>(
       httpBaseUrl,

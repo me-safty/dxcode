@@ -3,14 +3,12 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   EventId,
-  MessageId,
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import { PROJECT_RECIPE_ACTIVITY_KIND_LAUNCH } from "@t3tools/project-recipes";
 import type { LaunchProjectRecipeWorkflowRequest } from "@t3tools/project-recipes";
 import { createModelSelection } from "@t3tools/shared/model";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import { HttpRouter } from "effect/unstable/http";
 
@@ -34,12 +32,11 @@ import {
   isRuntimeMode,
   loadThreadProjectContext,
 } from "./t3work-thread-recipe-workflow-routes-shared.ts";
+import { nowIso } from "./t3work-thread-recipe-workflow-routes-resolve.ts";
 import { launchWorkflowRecipe } from "./t3work-workflowEngineLaunch.ts";
 import { T3workWorkflowEngineRegistry } from "./t3work-workflowEngineRegistry.ts";
 
-function nowIso(): string {
-  return DateTime.formatIso(DateTime.nowUnsafe());
-}
+export { t3workThreadWorkflowResolveInputRouteLayer } from "./t3work-thread-recipe-workflow-routes-resolve.ts";
 
 /**
  * Launch a recipe's `.workflow.ts` through the durable engine (Epic 25). Replaces the legacy
@@ -158,54 +155,6 @@ export const t3workThreadRecipeWorkflowLaunchRouteLayer = HttpRouter.add(
     return okJson({ ok: true, mode: "engine", runId: result.runId, status: result.status });
   }).pipe(
     Effect.mapError((cause) => toT3workError(cause, "Failed to launch recipe workflow.")),
-    Effect.catch(errorResponse),
-  ),
-);
-
-/**
- * Answer a workflow's pending `askUser`. Rather than resolving the parked run directly (which
- * would make the user's reply invisible and risk a second resolution racing the reactor), this
- * appends the reply as a normal user message on the thread. The workflow-engine reactor then
- * resolves the parked `user.input` from that `thread.message-sent` event — a single resolution
- * path, the reply renders like any other message, and no agent turn is started.
- */
-export const t3workThreadWorkflowResolveInputRouteLayer = HttpRouter.add(
-  "POST",
-  "/api/t3work/thread/workflow/resolve-input",
-  Effect.gen(function* () {
-    const orchestration = yield* OrchestrationEngineService;
-    const input = yield* readJsonBody<{ threadId?: string; text?: string; messageId?: string }>();
-    const threadIdInput = input.threadId?.trim() ?? "";
-    const text = typeof input.text === "string" ? input.text : "";
-    // Reuse the client's optimistic message id so the upserted message reconciles with the
-    // optimistic bubble the composer already rendered (otherwise the reply shows twice).
-    const messageIdInput = input.messageId?.trim();
-    if (threadIdInput.length === 0) {
-      return yield* new T3workAtlassianError({ message: "threadId is required." });
-    }
-    if (text.length === 0) {
-      return yield* new T3workAtlassianError({ message: "text is required." });
-    }
-
-    yield* orchestration.dispatch({
-      type: "thread.message.upsert",
-      commandId: CommandId.make(`t3work-wf-resolve:${t3workRandomUUID()}`),
-      threadId: ThreadId.make(threadIdInput),
-      message: {
-        messageId: MessageId.make(
-          messageIdInput && messageIdInput.length > 0 ? messageIdInput : t3workRandomUUID(),
-        ),
-        role: "user",
-        text,
-        turnId: null,
-        streaming: false,
-      },
-      createdAt: nowIso(),
-    });
-
-    return okJson({ ok: true });
-  }).pipe(
-    Effect.mapError((cause) => toT3workError(cause, "Failed to resolve workflow input.")),
     Effect.catch(errorResponse),
   ),
 );

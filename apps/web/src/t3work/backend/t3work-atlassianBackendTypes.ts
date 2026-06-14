@@ -9,6 +9,8 @@ import type {
 } from "@t3tools/integrations-core";
 import type { ResourcePage, ResourceSnapshot } from "@t3tools/project-context";
 
+import type { TempoCapacityResponse } from "./t3work-atlassianTempoTypes";
+
 export type AtlassianBasicConnectInput = {
   readonly siteUrl: string;
   readonly email: string;
@@ -95,6 +97,22 @@ export type AtlassianBacklogResponse = {
   readonly cache?: AtlassianBacklogCacheMetadata;
 };
 
+export type AtlassianBacklogSearchInput = {
+  readonly account: IntegrationAccountRef;
+  readonly externalProjectId: string;
+  readonly query: string;
+  readonly mode: "offline" | "live";
+  readonly boardId?: string;
+  readonly sprintId?: string;
+  readonly filterId?: string;
+  readonly limit?: number;
+};
+
+export type AtlassianBacklogSearchResult = {
+  readonly mode: "offline" | "live";
+  readonly items: ResourcePage["items"];
+};
+
 export type AtlassianBoardColumnsResponse = {
   readonly selectedBoardId?: string;
   readonly boardColumns: ReadonlyArray<AtlassianBacklogBoardColumn>;
@@ -109,7 +127,20 @@ export type AtlassianAssignableUser = {
 
 export type AtlassianIssueStatusLane = "todo" | "inProgress" | "review" | "done";
 
+export type {
+  TempoCapacityResponse,
+  TempoUserCapacity,
+} from "./t3work-atlassianTempoTypes";
+
 export interface AtlassianBackendApi {
+  readonly getTempoCapacity: (input: {
+    readonly accountIds: ReadonlyArray<string>;
+    readonly from: string;
+    readonly to: string;
+    readonly projectKey?: string;
+    readonly atlassianAccountId?: string;
+  }) => Promise<TempoCapacityResponse>;
+  readonly setTempoToken: (token: string | null) => Promise<{ configured: boolean }>;
   readonly listAccounts: () => Promise<ReadonlyArray<IntegrationAccount>>;
   readonly connectBasic: (
     input: AtlassianBasicConnectInput,
@@ -138,6 +169,9 @@ export interface AtlassianBackendApi {
     readonly forceRefresh?: boolean;
     readonly clearProjectCache?: boolean;
   }) => Promise<AtlassianBacklogResponse>;
+  readonly searchBacklog?: (
+    input: AtlassianBacklogSearchInput,
+  ) => Promise<AtlassianBacklogSearchResult>;
   readonly getBoardColumns: (input: {
     readonly account: IntegrationAccountRef;
     readonly externalProjectId: string;
@@ -176,7 +210,7 @@ export interface AtlassianBackendApi {
     readonly summary: string;
     readonly description?: string;
     readonly estimateHours?: number;
-  }) => Promise<{ id: string; key: string }>;
+  }) => Promise<{ id: string; key: string; item?: ResourcePage["items"][number] }>;
   readonly downloadAsset: (input: {
     readonly accountId: string;
     readonly url: string;

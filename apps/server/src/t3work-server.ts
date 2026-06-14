@@ -1,13 +1,15 @@
+import { EnvironmentHttpApi } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
+import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import { ServerConfig } from "./config.ts";
 import {
   attachmentsRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
-  serverEnvironmentRouteLayer,
+  serverEnvironmentHttpApiLayer,
   staticAndDevRouteLayer,
   browserApiCorsLayer,
 } from "./http.ts";
@@ -64,20 +66,15 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts";
-import {
-  authBearerBootstrapRouteLayer,
-  authBootstrapRouteLayer,
-  authClientsRevokeOthersRouteLayer,
-  authClientsRevokeRouteLayer,
-  authClientsRouteLayer,
-  authPairingLinksRevokeRouteLayer,
-  authPairingLinksRouteLayer,
-  authPairingCredentialRouteLayer,
-  authSessionRouteLayer,
-  authWebSocketTokenRouteLayer,
-} from "./auth/http.ts";
-import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
-import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
+import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
+import { layer as ServerSecretStoreLive } from "./auth/ServerSecretStore.ts";
+import { layer as ServerAuthLive } from "./auth/EnvironmentAuth.ts";
+import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
+import * as ReviewService from "./review/ReviewService.ts";
+import { connectHttpApiLayer } from "./cloud/http.ts";
+import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
+import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
+import * as RelayClient from "@t3tools/shared/relayClient";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -87,10 +84,7 @@ import {
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
-import {
-  orchestrationDispatchRouteLayer,
-  orchestrationSnapshotRouteLayer,
-} from "./orchestration/http.ts";
+import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import {
   t3workAtlassianAccountsRouteLayer,
   t3workAtlassianAssetRouteLayer,
@@ -103,6 +97,7 @@ import {
   t3workAtlassianResourcesRouteLayer,
 } from "./t3work-atlassian-routes.ts";
 import { t3workAtlassianOAuthExchangeRouteLayer } from "./t3work-atlassian-oauth-routes.ts";
+import { t3workTempoRouteLayer } from "./t3work-tempo-routes.ts";
 import { t3workProjectWorkspaceBootstrapRouteLayer } from "./t3work-project-repository-routes.ts";
 import { t3workProjectWorkspaceWriteContextFilesRouteLayer } from "./t3work-project-workspace-write-routes.ts";
 import {
@@ -167,7 +162,15 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(ProviderCommandReactorLive),
   Layer.provideMerge(CheckpointReactorLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
+  Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStoreLive))),
   Layer.provideMerge(RuntimeReceiptBusLive),
+);
+
+const RelayClientLive = Layer.unwrap(
+  Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    return RelayClient.layerCloudflared({ baseDir: config.baseDir });
+  }),
 );
 
 const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
@@ -221,11 +224,17 @@ const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.l
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
 );
 
+const ReviewLayerLive = ReviewService.layer.pipe(
+  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(VcsDriverRegistryLayerLive),
+);
+
 const VcsLayerLive = Layer.empty.pipe(
   Layer.provideMerge(VcsProjectConfig.layer),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
   Layer.provideMerge(VcsProvisioningService.layer.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
   Layer.provideMerge(GitWorkflowLayerLive),
+  Layer.provideMerge(ReviewLayerLive),
   Layer.provideMerge(SourceControlRepositoryServiceLayerLive),
   Layer.provideMerge(VcsStatusBroadcaster.layer.pipe(Layer.provide(GitWorkflowLayerLive))),
 );
@@ -256,6 +265,14 @@ const WorkspaceLayerLive = Layer.mergeAll(
 const AuthLayerLive = ServerAuthLive.pipe(
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provide(ServerSecretStoreLive),
+);
+
+const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
+  RelayClientLive,
+  CloudManagedEndpointRuntime.layer.pipe(
+    Layer.provide(ServerSecretStoreLive),
+    Layer.provide(RelayClientLive),
+  ),
 );
 
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
@@ -308,6 +325,16 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(RepositoryIdentityResolverLive),
   Layer.provideMerge(ServerEnvironmentLive),
   Layer.provideMerge(AuthLayerLive),
+  // Cloud relay/token services share one provideMerge slot (the `pipe` arity is capped):
+  // the secret store backs both the CLI token manager and the managed endpoint runtime,
+  // which the ws RPC layer and the connect HttpApi group resolve at request time.
+  Layer.provideMerge(
+    Layer.mergeAll(
+      ServerSecretStoreLive,
+      CloudCliTokenManager.layer.pipe(Layer.provide(ServerSecretStoreLive)),
+      CloudManagedEndpointRuntimeLive,
+    ),
+  ),
 );
 
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
@@ -326,19 +353,14 @@ const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
 );
 
 export const makeT3workRoutesLayer = Layer.mergeAll(
-  authBearerBootstrapRouteLayer,
-  authBootstrapRouteLayer,
-  authClientsRevokeOthersRouteLayer,
-  authClientsRevokeRouteLayer,
-  authClientsRouteLayer,
-  authPairingLinksRevokeRouteLayer,
-  authPairingLinksRouteLayer,
-  authPairingCredentialRouteLayer,
-  authSessionRouteLayer,
-  authWebSocketTokenRouteLayer,
+  HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
+    Layer.provide(authHttpApiLayer),
+    Layer.provide(connectHttpApiLayer),
+    Layer.provide(orchestrationHttpApiLayer),
+    Layer.provide(serverEnvironmentHttpApiLayer),
+    Layer.provide(environmentAuthenticatedAuthLayer),
+  ),
   attachmentsRouteLayer,
-  orchestrationDispatchRouteLayer,
-  orchestrationSnapshotRouteLayer,
   t3workAtlassianAccountsRouteLayer,
   t3workAtlassianAssetRouteLayer,
   t3workAtlassianAssetContentRouteLayer,
@@ -352,11 +374,11 @@ export const makeT3workRoutesLayer = Layer.mergeAll(
   t3workGitHubAssetRouteLayer,
   t3workGitHubInboxRouteLayer,
   t3workGitHubPullRequestContextRouteLayer,
+  t3workTempoRouteLayer,
   t3workProjectWorkspaceBootstrapRouteLayer,
   t3workProjectWorkspaceWriteContextFilesRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
-  serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));

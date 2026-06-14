@@ -65,6 +65,13 @@ export function createMockAtlassianBackendApi(input: {
   toMockPollResult: <T>(value: T) => T3workPollResult<T>;
 }): T3workPollingBackend["atlassian"] {
   return {
+    getTempoCapacity: async (request) => ({
+      configured: false,
+      from: request.from,
+      to: request.to,
+      capacities: [],
+    }),
+    setTempoToken: async () => ({ configured: false }),
     listAccounts: async () => input.mockIntegrationProvider.listAccounts(),
     connectBasic: async () => input.mockIntegrationProvider.listAccounts(),
     connectOAuth: async () => input.mockIntegrationProvider.listAccounts(),

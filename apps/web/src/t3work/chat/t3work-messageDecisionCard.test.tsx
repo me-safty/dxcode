@@ -1,0 +1,313 @@
+// @vitest-environment jsdom
+/**
+ * The `askUser` decision card (Epic 25 §askUser decision cards):
+ *   • the `t3work.workflow.decision` view renders in the timeline as the bordered
+ *     "needs your input" card — question, choice buttons, sibling resource attachment;
+ *   • only the live (latest unanswered) card accepts clicks — a user reply after it disables;
+ *   • a click hands the structured value to the handler (bare option, or `{ field: option }`);
+ *   • a text affordance renders no buttons — the freeform composer stays the reply path.
+ */
+
+import { EnvironmentId, MessageId } from "@t3tools/contracts";
+import { PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_DECISION } from "@t3tools/project-recipes";
+import { act, createRef, type ReactNode, type Ref } from "react";
+import { createRoot } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import type { LegendListRef } from "@legendapp/list/react";
+
+import {
+  findActiveWorkflowInputMessageId,
+  T3workWorkflowDecisionCard,
+} from "~/t3work/chat/t3work-messageDecisionCard";
+import type { ChatMessage } from "~/types";
+
+vi.mock("@legendapp/list/react", async () => {
+  const LegendList = (props: {
+    data: Array<{ id: string }>;
+    keyExtractor: (item: { id: string }) => string;
+    renderItem: (args: { item: { id: string } }) => ReactNode;
+    ListHeaderComponent?: ReactNode;
+    ListFooterComponent?: ReactNode;
+    ref?: Ref<LegendListRef>;
+  }) => (
+    <div>
+      {props.ListHeaderComponent}
+      {props.data.map((item) => (
+        <div key={props.keyExtractor(item)}>{props.renderItem({ item })}</div>
+      ))}
+      {props.ListFooterComponent}
+    </div>
+  );
+
+  return { LegendList };
+});
+
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
+// jsdom has no matchMedia; the theme hook reads it at module load when MessagesTimeline's
+// import graph is evaluated.
+window.matchMedia ??= ((query: string) => ({
+  matches: false,
+  media: query,
+  onchange: null,
+  addEventListener: () => {},
+  removeEventListener: () => {},
+  addListener: () => {},
+  removeListener: () => {},
+  dispatchEvent: () => false,
+})) as unknown as typeof window.matchMedia;
+
+const QUESTION = "Release decision for BUG-7?";
+
+function decisionMessage(id: string): ChatMessage {
+  return {
+    id: MessageId.make(id),
+    role: "system",
+    text: QUESTION,
+    streaming: false,
+    createdAt: "2026-06-09T00:00:00.000Z",
+    completedAt: "2026-06-09T00:00:00.000Z",
+    t3workExt: {
+      visibleToUser: true,
+      status: "waiting-for-input",
+      attachments: [
+        {
+          kind: "view",
+          miniappId: PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_DECISION,
+          props: {
+            question: QUESTION,
+            affordance: { kind: "choice", options: ["ship-now", "hold", "rollback"] },
+            correlationId: "run-1:1",
+            workflowRunId: "run-1",
+          },
+        },
+        {
+          kind: "resource",
+          resource: {
+            provider: "jira",
+            kind: "issue",
+            id: "BUG-7",
+            displayId: "BUG-7",
+            title: "Checkout rounding error",
+            url: "https://example.atlassian.net/browse/BUG-7",
+            status: "Open",
+          },
+        },
+      ],
+    },
+  };
+}
+
+function userReply(id: string, text: string): ChatMessage {
+  return {
+    id: MessageId.make(id),
+    role: "user",
+    text,
+    streaming: false,
+    createdAt: "2026-06-09T00:00:01.000Z",
+  };
+}
+
+async function renderTimeline(messages: ReadonlyArray<ChatMessage>) {
+  const { MessagesTimeline } = await import("~/components/chat/MessagesTimeline");
+  return renderToStaticMarkup(
+    <MessagesTimeline
+      isWorking={false}
+      activeTurnInProgress={false}
+      activeTurnId={null}
+      activeTurnStartedAt={null}
+      listRef={createRef<LegendListRef | null>()}
+      timelineEntries={messages.map((message, index) => ({
+        id: `timeline-${index}`,
+        kind: "message" as const,
+        createdAt: message.createdAt,
+        message,
+      }))}
+      completionDividerBeforeEntryId={null}
+      completionSummary={null}
+      turnDiffSummaryByAssistantMessageId={new Map()}
+      routeThreadKey="environment-local:thread-1"
+      onOpenTurnDiff={() => {}}
+      revertTurnCountByUserMessageId={new Map()}
+      onRevertUserMessage={() => {}}
+      isRevertingCheckpoint={false}
+      onImageExpand={() => {}}
+      activeThreadEnvironmentId={EnvironmentId.make("environment-local")}
+      markdownCwd={undefined}
+      resolvedTheme="light"
+      timestampFormat="locale"
+      workspaceRoot={undefined}
+      onIsAtEndChange={() => {}}
+      onResolveWorkflowDecision={async () => {}}
+    />,
+  );
+}
+
+const mountedRoots: Array<{ root: ReturnType<typeof createRoot>; container: HTMLElement }> = [];
+
+async function renderNode(node: ReactNode) {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  mountedRoots.push({ root, container });
+  await act(async () => {
+    root.render(node);
+  });
+  return container;
+}
+
+async function clickButton(container: HTMLElement, label: string) {
+  const button = [...container.querySelectorAll("button")].find(
+    (candidate) => candidate.textContent === label,
+  );
+  expect(button).toBeDefined();
+  await act(async () => {
+    button!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  });
+}
+
+afterEach(async () => {
+  while (mountedRoots.length > 0) {
+    const mounted = mountedRoots.pop();
+    if (!mounted) {
+      continue;
+    }
+    await act(async () => {
+      mounted.root.unmount();
+    });
+    mounted.container.remove();
+  }
+  document.body.innerHTML = "";
+});
+
+describe("workflow decision card in the timeline", () => {
+  it("renders the question, the choice buttons, and the attachment resource card", async () => {
+    const markup = await renderTimeline([decisionMessage("message-decision-1")]);
+
+    expect(markup).toContain("Needs your input");
+    expect(markup).toContain(QUESTION);
+    // The card owns the question; the message text must not duplicate it above the card.
+    expect(markup.split(QUESTION)).toHaveLength(2);
+    expect(markup).toContain("ship-now");
+    expect(markup).toContain("hold");
+    expect(markup).toContain("rollback");
+    expect(markup).toContain("Checkout rounding error");
+    expect(markup).toContain("https://example.atlassian.net/browse/BUG-7");
+    expect(markup).toContain("…or reply in the composer below.");
+    expect(markup).not.toContain('disabled=""');
+  }, 10000);
+
+  it("disables the choices once a user reply lands after the card", async () => {
+    const markup = await renderTimeline([
+      decisionMessage("message-decision-1"),
+      userReply("message-reply-1", "hold"),
+    ]);
+
+    expect(markup).toContain('disabled=""');
+    expect(markup).not.toContain("…or reply in the composer below.");
+  }, 10000);
+});
+
+describe("findActiveWorkflowInputMessageId", () => {
+  const entry = (message: ChatMessage) => ({ kind: "message" as const, message });
+
+  it("returns the latest unanswered waiting-for-input message", () => {
+    expect(
+      findActiveWorkflowInputMessageId([entry(decisionMessage("message-decision-1"))]),
+    ).toBe("message-decision-1");
+  });
+
+  it("returns null once a user reply lands after it", () => {
+    expect(
+      findActiveWorkflowInputMessageId([
+        entry(decisionMessage("message-decision-1")),
+        entry(userReply("message-reply-1", "hold")),
+      ]),
+    ).toBeNull();
+  });
+});
+
+describe("T3workWorkflowDecisionCard clicks", () => {
+  it("posts the chosen literal as the structured value", async () => {
+    const onChoose = vi.fn(async () => {});
+    const container = await renderNode(
+      <T3workWorkflowDecisionCard
+        decision={{
+          question: QUESTION,
+          affordance: { kind: "choice", options: ["ship-now", "hold", "rollback"] },
+          correlationId: "run-1:1",
+        }}
+        active
+        onChoose={onChoose}
+      />,
+    );
+
+    await clickButton(container, "hold");
+    expect(onChoose).toHaveBeenCalledExactlyOnceWith({
+      choice: "hold",
+      value: "hold",
+      correlationId: "run-1:1",
+    });
+  });
+
+  it("wraps a fielded choice as { field: option }", async () => {
+    const onChoose = vi.fn(async () => {});
+    const container = await renderNode(
+      <T3workWorkflowDecisionCard
+        decision={{
+          question: "How severe?",
+          affordance: { kind: "choice", field: "severity", options: ["low", "high"] },
+          correlationId: "run-2:1",
+        }}
+        active
+        onChoose={onChoose}
+      />,
+    );
+
+    await clickButton(container, "high");
+    expect(onChoose).toHaveBeenCalledExactlyOnceWith({
+      choice: "high",
+      value: { severity: "high" },
+      correlationId: "run-2:1",
+    });
+  });
+
+  it("ignores clicks on an inactive (stale) card", async () => {
+    const onChoose = vi.fn(async () => {});
+    const container = await renderNode(
+      <T3workWorkflowDecisionCard
+        decision={{
+          question: QUESTION,
+          affordance: { kind: "choice", options: ["ship-now", "hold"] },
+          correlationId: "run-1:1",
+        }}
+        active={false}
+        onChoose={onChoose}
+      />,
+    );
+
+    await clickButton(container, "hold");
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it("renders no buttons for a text affordance — the composer is the reply path", async () => {
+    const container = await renderNode(
+      <T3workWorkflowDecisionCard
+        decision={{
+          question: "Describe the repro steps.",
+          affordance: { kind: "text" },
+          correlationId: "run-3:1",
+        }}
+        active
+        onChoose={async () => {}}
+      />,
+    );
+
+    expect(container.querySelectorAll("button")).toHaveLength(0);
+    expect(container.textContent).toContain("Describe the repro steps.");
+    expect(container.textContent).toContain("Reply in the composer below.");
+  });
+});

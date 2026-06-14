@@ -5,64 +5,39 @@
  * through {@link HandleDispatch}, so there is no separate suspension machinery.
  *
  * The 2×2 surface is recipient (Agent / User) × mode (ask = drive + await a typed reply /
- * notify = fire-and-forget):
- *   • `askAgent`   → `thread.turn`    (ask)  — start an agent turn, await its final message.
- *   • `notifyAgent`→ `thread.message` (one-way, recipient "agent") — post a message, no turn.
- *   • `askUser`    → `user.input`     (ask)  — request user input, await the reply.
- *   • `notifyUser` → `thread.message` (one-way, recipient "user") — a user-visible message.
- *   • `spawnThread`→ `thread.create`  (one-way) — make an isolated thread; its id is the
- *     `thread.create` correlationId, so it re-derives identically on replay.
- *   • `agent(p, o)`= `spawnThread(o).askAgent(p, o)` — one-shot; the thread is not retained.
+ * notify = fire-and-forget): `askAgent`→`thread.turn`, `notifyAgent`→`thread.message`,
+ * `askUser`→`user.input`, `notifyUser`→`thread.message`. `spawnThread`→`thread.create` makes
+ * an isolated thread whose id is the `thread.create` correlationId (so it re-derives on
+ * replay), and `agent(p, o)` = `spawnThread(o).askAgent(p, o)` (one-shot, thread not retained).
  *
- * Ask verbs with a `schema` enforce it via an internal corrective-retry loop: the reply is
- * decoded against the schema, and on mismatch the verb re-asks (a fresh turn, a fresh `seq`)
- * up to {@link MAX_SCHEMA_ATTEMPTS} before throwing {@link SchemaExhaustedError}. Each attempt
- * is journaled, so the loop replays deterministically.
+ * Ask verbs with a `schema` enforce it via an internal corrective-retry loop: on a decode
+ * mismatch the verb re-asks (fresh turn, fresh `seq`) up to {@link MAX_SCHEMA_ATTEMPTS} before
+ * throwing {@link SchemaExhaustedError}. Each attempt is journaled, so the loop replays.
  */
 
-import type * as Schema from "effect/Schema";
-
+import { schemaToAffordance } from "./t3work-sdk.affordance.ts";
 import type { MessageBroker } from "./t3work-sdk.broker.ts";
 import { PermissionDeniedError, SchemaExhaustedError } from "./t3work-sdk.errors.ts";
 import type { HandleDispatch, ReplyResolver } from "./t3work-sdk.handles.ts";
 import { decodeWithSchema } from "./t3work-sdk.internal.ts";
+import type {
+  AskOpts,
+  AskUserOpts,
+  SpawnThreadOpts,
+  Thread,
+  WorkflowThreadPrimitives,
+} from "./t3work-sdk.threadTypes.ts";
 import type { ModelSelection } from "./t3work-sdk.types.ts";
 
-/** A reference to a thread the workflow can drive. `id` is the thread's stable id. */
-export interface ThreadRef {
-  readonly kind: "thread-ref";
-  readonly id: string;
-}
-
-/** Options for an ask verb (`agent` / `askAgent` / `askUser`). */
-export interface AskOpts<R = string> {
-  readonly schema?: Schema.Schema<R>;
-  readonly model?: ModelSelection;
-}
-
-/** Options for `spawnThread`. */
-export interface SpawnThreadOpts {
-  readonly name?: string;
-  readonly model?: ModelSelection;
-}
-
-/** The one Thread type, shared by the ambient launching thread and any spawned one. */
-export interface Thread {
-  askAgent<R = string>(prompt: string, opts?: AskOpts<R>): Promise<R>;
-  notifyAgent(msg: string): void;
-  askUser<R = string>(question: string, opts?: AskOpts<R>): Promise<R>;
-  notifyUser(msg: string): void;
-  readonly id: ThreadRef;
-}
-
-/** The globals this module binds into the workflow body. */
-export interface WorkflowThreadPrimitives {
-  /** The thread the workflow runs in (the chat the user launched from); `undefined` if
-   * headless (cron/automation, no chat surface). */
-  readonly thread: Thread | undefined;
-  readonly spawnThread: (opts?: SpawnThreadOpts) => Thread;
-  readonly agent: <R = string>(prompt: string, opts?: AskOpts<R>) => Promise<R>;
-}
+export type {
+  AskOpts,
+  AskUserAttachment,
+  AskUserOpts,
+  SpawnThreadOpts,
+  Thread,
+  ThreadRef,
+  WorkflowThreadPrimitives,
+} from "./t3work-sdk.threadTypes.ts";
 
 /** One attempt + two corrective retries. */
 const MAX_SCHEMA_ATTEMPTS = 3;
@@ -103,16 +78,51 @@ export function createThreadPrimitives(deps: {
     kind: "thread.turn" | "user.input",
     threadId: string,
     basePrompt: string,
-    opts: AskOpts<R> | undefined,
+    opts: AskUserOpts<R> | undefined,
   ): Promise<R> => {
     const schema = opts?.schema;
     const model = opts?.model ?? deps.defaultModel;
     const promptField = kind === "thread.turn" ? "prompt" : "question";
-    let prompt = schema === undefined ? basePrompt : `${basePrompt}\n\n${SCHEMA_INSTRUCTION}`;
+    // A `user.input` carries everything the host needs to render the decision card: the
+    // affordance descriptor derived from the schema (the live schema object stays inside the
+    // runtime) and the attachment refs. Derivation is a pure AST walk, so the payload — and its
+    // argsHash — re-derives identically on replay. `{ kind: "text" }` is the host's implicit
+    // default and is OMITTED, keeping the journaled payload byte-identical to pre-card journals
+    // for every non-choice ask — a run parked on an older askUser still resumes. (A run parked
+    // on a string-literal-schema askUser recorded before decision cards existed is the one
+    // shape that drifts; none can predate the feature.)
+    const affordance = kind === "user.input" ? schemaToAffordance(schema) : undefined;
+    const choice = affordance?.kind === "choice" ? affordance : undefined;
+    const attachments = kind === "user.input" ? opts?.attachments : undefined;
+    const renderFields = {
+      ...(affordance === undefined || affordance.kind === "text" ? {} : { affordance }),
+      ...(attachments === undefined || attachments.length === 0 ? {} : { attachments }),
+    };
+    // A choice renders as buttons — the JSON-reply instruction would mislead the user (and leak
+    // into the card), so a choice ask keeps the bare question; its corrective re-ask names the
+    // offered options instead.
+    const correctiveInstruction =
+      choice === undefined ? SCHEMA_INSTRUCTION : `Reply with exactly one of: ${choice.options.join(", ")}.`;
+    // A reply that IS one of the offered options needs no JSON coercion — the literal string
+    // (field-wrapped for a fielded choice) is the value. Running coerceReply on it would corrupt
+    // JSON-parseable options ("true" → boolean, "42" → number) and fail the literal decode.
+    const coerceChoiceReply = (value: unknown): unknown => {
+      if (choice !== undefined && typeof value === "string" && choice.options.includes(value)) {
+        return choice.field === undefined ? value : { [choice.field]: value };
+      }
+      return coerceReply(value);
+    };
+    let prompt =
+      schema === undefined || choice !== undefined ? basePrompt : `${basePrompt}\n\n${SCHEMA_INSTRUCTION}`;
     let attempt = 0;
     for (;;) {
       attempt += 1;
-      const payload = { threadId, [promptField]: prompt, ...(model === undefined ? {} : { model }) };
+      const payload = {
+        threadId,
+        [promptField]: prompt,
+        ...renderFields,
+        ...(model === undefined ? {} : { model }),
+      };
       const correlationId = await dispatch.send({
         kind,
         refId: kind,
@@ -122,7 +132,7 @@ export function createThreadPrimitives(deps: {
       const reply = await dispatch.awaitResolution<unknown>(correlationId, undefined);
       if (schema === undefined) return String(reply) as R;
       try {
-        return await decodeWithSchema(schema, coerceReply(reply), "Invalid thread reply");
+        return await decodeWithSchema(schema, coerceChoiceReply(reply), "Invalid thread reply");
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         if (attempt >= MAX_SCHEMA_ATTEMPTS) {
@@ -130,7 +140,7 @@ export function createThreadPrimitives(deps: {
             `${kind} on thread '${threadId}' did not satisfy the response schema after ${attempt} attempts: ${detail}`,
           );
         }
-        prompt = `${basePrompt}\n\nYour previous reply did not match the required schema (${detail}). ${SCHEMA_INSTRUCTION}`;
+        prompt = `${basePrompt}\n\nYour previous reply did not match the required schema (${detail}). ${correctiveInstruction}`;
       }
     }
   };
@@ -162,7 +172,7 @@ export function createThreadPrimitives(deps: {
       askVerb<R>("thread.turn", threadId, p, withThreadModel(o, threadModel)),
     notifyAgent: (msg: string) => notify(threadId, "agent", msg),
     askUser: has("user")
-      ? <R>(q: string, o?: AskOpts<R>) => askVerb<R>("user.input", threadId, q, o)
+      ? <R>(q: string, o?: AskUserOpts<R>) => askVerb<R>("user.input", threadId, q, o)
       : (denied("user", "askUser") as Thread["askUser"]),
     notifyUser: has("user")
       ? (msg: string) => notify(threadId, "user", msg)

@@ -12,6 +12,8 @@ import { join } from "node:path";
 import * as Schema from "effect/Schema";
 
 import type * as AgentPrimitiveWorkflow from "./__fixtures__/t3work-sdk.agentPrimitive.workflow.ts";
+import type * as AskChoiceJsonWorkflow from "./__fixtures__/t3work-sdk.askChoiceJson.workflow.ts";
+import type * as AskChoiceWorkflow from "./__fixtures__/t3work-sdk.askChoice.workflow.ts";
 import type * as AskResponseWorkflow from "./__fixtures__/t3work-sdk.askResponse.workflow.ts";
 import type * as BudgetWorkflow from "./__fixtures__/t3work-sdk.budgetPrimitive.workflow.ts";
 import type * as ChildSpawnWorkflow from "./__fixtures__/t3work-sdk.childSpawn.workflow.ts";
@@ -225,6 +227,12 @@ export const waitWorkflow = defineWorkflow<typeof WaitWorkflow>(
 );
 export const askResponseWorkflow = defineWorkflow<typeof AskResponseWorkflow>(
   "./__fixtures__/t3work-sdk.askResponse.workflow.ts",
+);
+export const askChoiceWorkflow = defineWorkflow<typeof AskChoiceWorkflow>(
+  "./__fixtures__/t3work-sdk.askChoice.workflow.ts",
+);
+export const askChoiceJsonWorkflow = defineWorkflow<typeof AskChoiceJsonWorkflow>(
+  "./__fixtures__/t3work-sdk.askChoiceJson.workflow.ts",
 );
 export const fireForgetWorkflow = defineWorkflow<typeof FireForgetWorkflow>(
   "./__fixtures__/t3work-sdk.handleFireForget.workflow.ts",
