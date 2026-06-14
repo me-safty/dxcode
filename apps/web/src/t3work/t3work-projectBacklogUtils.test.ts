@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildProjectBacklogAssigneeFilterOptions,
   filterProjectBacklogTickets,
+  getProjectBacklogIssueTypeFilterCategory,
   isProjectTicketHourTracked,
   isProjectTicketSubtask,
   resolveProjectBacklogAssigneeFilter,
@@ -56,8 +57,8 @@ describe("project backlog utils", () => {
     ).toBe(true);
   });
 
-  it("treats bugs and subtasks as hour-tracked work", () => {
-    expect(isProjectTicketHourTracked(createTicket({ id: "bug", issueType: "Bug" }))).toBe(true);
+  it("treats only subtasks and untyped time-tracked work as hour-tracked work", () => {
+    expect(isProjectTicketHourTracked(createTicket({ id: "bug", issueType: "Bug" }))).toBe(false);
     expect(isProjectTicketHourTracked(createTicket({ id: "subtask", issueType: "Sub-task" }))).toBe(
       true,
     );
@@ -138,6 +139,185 @@ describe("project backlog utils", () => {
         (option) => option.label,
       ),
     ).toEqual(["All assignees", "Philip Jonientz", "Alex", "Zoe"]);
+  });
+
+  it("deduplicates assignee filter options when some tickets miss account ids", () => {
+    const tickets = [
+      createTicket({
+        id: "pj-account",
+        assignee: "Philip Jonientz",
+        assigneeAccountId: "account-pj",
+      }),
+      createTicket({ id: "pj-name", assignee: "Philip Jonientz" }),
+    ];
+
+    expect(buildProjectBacklogAssigneeFilterOptions(tickets).map((option) => option.label)).toEqual(
+      ["All assignees", "Philip Jonientz"],
+    );
+  });
+
+  it("matches name-only tickets when filtering by an account-backed assignee", () => {
+    const tickets = [
+      createTicket({
+        id: "pj-account",
+        assignee: "Philip Jonientz",
+        assigneeAccountId: "account-pj",
+      }),
+      createTicket({ id: "pj-name", assignee: "Philip Jonientz" }),
+      createTicket({ id: "other", assignee: "Alex", assigneeAccountId: "account-alex" }),
+    ];
+
+    expect(
+      filterProjectBacklogTickets({
+        tickets,
+        query: "",
+        focusFilter: "all",
+        assigneeFilter: "account:account-pj",
+      }).map((ticket) => ticket.id),
+    ).toEqual(["pj-account", "pj-name"]);
+  });
+
+  it("includes stories that have assigned subtasks for the selected assignee", () => {
+    const story = createTicket({
+      id: "story",
+      issueType: "Story",
+      assignee: "Blair",
+      assigneeAccountId: "account-blair",
+    });
+    const mySubtask = createTicket({
+      id: "my-subtask",
+      issueType: "Sub-task",
+      parentId: story.id,
+      assignee: "Alex",
+      assigneeAccountId: "account-alex",
+    });
+    const siblingSubtask = createTicket({
+      id: "sibling-subtask",
+      issueType: "Sub-task",
+      parentId: story.id,
+    });
+    const otherStory = createTicket({
+      id: "other-story",
+      issueType: "Story",
+      assignee: "Blair",
+      assigneeAccountId: "account-blair",
+    });
+
+    const filteredIds = filterProjectBacklogTickets({
+      tickets: [story, mySubtask, siblingSubtask, otherStory],
+      query: "",
+      focusFilter: "all",
+      assigneeFilter: "account:account-alex",
+    }).map((ticket) => ticket.id);
+
+    expect(filteredIds).toEqual(expect.arrayContaining(["story", "my-subtask", "sibling-subtask"]));
+    expect(filteredIds).toHaveLength(3);
+  });
+
+  it("keeps unassigned subtasks visible under a matched story by default", () => {
+    const story = createTicket({
+      id: "story",
+      issueType: "Story",
+      assignee: "Alex",
+      assigneeAccountId: "account-alex",
+      ref: { displayId: "PROJ-11", title: "Improve cart summary" },
+    });
+    const assignedSubtask = createTicket({
+      id: "assigned-subtask",
+      issueType: "Sub-task",
+      parentId: story.id,
+      assignee: "Blair",
+      assigneeAccountId: "account-blair",
+      ref: { displayId: "PROJ-12", title: "Hook up CTA" },
+    });
+    const unassignedSubtask = createTicket({
+      id: "unassigned-subtask",
+      issueType: "Sub-task",
+      parentId: story.id,
+      ref: { displayId: "PROJ-13", title: "Add analytics" },
+    });
+    const otherStory = createTicket({
+      id: "other-story",
+      issueType: "Story",
+      assignee: "Blair",
+      assigneeAccountId: "account-blair",
+      ref: { displayId: "PROJ-21", title: "Other work" },
+    });
+
+    const filteredIds = filterProjectBacklogTickets({
+      tickets: [story, assignedSubtask, unassignedSubtask, otherStory],
+      query: "",
+      focusFilter: "all",
+      assigneeFilter: "account:account-alex",
+    }).map((ticket) => ticket.id);
+
+    expect(filteredIds).toEqual(
+      expect.arrayContaining(["story", "assigned-subtask", "unassigned-subtask"]),
+    );
+    expect(filteredIds).toHaveLength(3);
+  });
+
+  it("can require subtasks to match the assignee filter directly", () => {
+    const story = createTicket({
+      id: "story",
+      issueType: "Story",
+      assignee: "Alex",
+      assigneeAccountId: "account-alex",
+    });
+    const assignedSubtask = createTicket({
+      id: "assigned-subtask",
+      issueType: "Sub-task",
+      parentId: story.id,
+      assignee: "Alex",
+      assigneeAccountId: "account-alex",
+    });
+    const otherAssigneeSubtask = createTicket({
+      id: "other-assignee-subtask",
+      issueType: "Sub-task",
+      parentId: story.id,
+      assignee: "Blair",
+      assigneeAccountId: "account-blair",
+    });
+    const unassignedSubtask = createTicket({
+      id: "unassigned-subtask",
+      issueType: "Sub-task",
+      parentId: story.id,
+    });
+
+    const filteredIds = filterProjectBacklogTickets({
+      tickets: [story, assignedSubtask, otherAssigneeSubtask, unassignedSubtask],
+      query: "",
+      focusFilter: "all",
+      assigneeFilter: "account:account-alex",
+      assigneeFilterScope: { epic: false, story: true, subtask: true },
+    }).map((ticket) => ticket.id);
+
+    expect(filteredIds).toEqual(expect.arrayContaining(["story", "assigned-subtask"]));
+    expect(filteredIds).toHaveLength(2);
+  });
+
+  it("filters visible issue type categories before hierarchy context is restored", () => {
+    const epic = createTicket({ id: "epic", issueType: "Epic" });
+    const story = createTicket({ id: "story", issueType: "Story", parentId: epic.id });
+    const subtask = createTicket({
+      id: "subtask",
+      issueType: "Sub-task",
+      parentId: story.id,
+    });
+
+    expect([epic, story, subtask].map(getProjectBacklogIssueTypeFilterCategory)).toEqual([
+      "epic",
+      "standard",
+      "subtask",
+    ]);
+    expect(
+      filterProjectBacklogTickets({
+        tickets: [epic, story, subtask],
+        query: "",
+        focusFilter: "all",
+        visibleIssueTypes: ["standard", "subtask"],
+      }).map((ticket) => ticket.id),
+    ).toEqual(["story", "subtask"]);
   });
 
   it("treats unavailable assignee filters as all assignees", () => {

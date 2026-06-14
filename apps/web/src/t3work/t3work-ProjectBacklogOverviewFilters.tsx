@@ -1,4 +1,6 @@
-import { Loader2 } from "lucide-react";
+import { Loader2, Orbit, Table2 } from "lucide-react";
+
+import { planningSpaceEnabled } from "~/t3work/planning-space/t3work-planningSpaceFlag";
 
 import type {
   AtlassianBacklogBoard,
@@ -17,7 +19,9 @@ import type {
 } from "~/t3work/t3work-projectBacklogTable";
 import type {
   ProjectBacklogAssigneeFilterOption,
+  ProjectBacklogAssigneeFilterScope,
   ProjectBacklogFocusFilter,
+  ProjectBacklogIssueTypeFilterKey,
 } from "~/t3work/t3work-projectBacklogUtils";
 
 export interface ProjectBacklogOverviewFiltersProps {
@@ -26,6 +30,10 @@ export interface ProjectBacklogOverviewFiltersProps {
   onQueryChange: (value: string) => void;
   assigneeFilter: string;
   onAssigneeFilterChange: (value: string) => void;
+  assigneeFilterScope: ProjectBacklogAssigneeFilterScope;
+  onAssigneeFilterScopeChange: (value: ProjectBacklogAssigneeFilterScope) => void;
+  visibleIssueTypes: ReadonlyArray<ProjectBacklogIssueTypeFilterKey>;
+  onVisibleIssueTypesChange: (value: ReadonlyArray<ProjectBacklogIssueTypeFilterKey>) => void;
   assigneeOptions: ReadonlyArray<ProjectBacklogAssigneeFilterOption>;
   savedFilters: ReadonlyArray<AtlassianBacklogSavedFilter>;
   selectedFilterId: string | undefined;
@@ -59,6 +67,10 @@ export function ProjectBacklogOverviewFilters({
   onQueryChange,
   assigneeFilter,
   onAssigneeFilterChange,
+  assigneeFilterScope,
+  onAssigneeFilterScopeChange,
+  visibleIssueTypes,
+  onVisibleIssueTypesChange,
   assigneeOptions = [],
   savedFilters = [],
   selectedFilterId,
@@ -97,6 +109,8 @@ export function ProjectBacklogOverviewFilters({
       <ProjectBacklogOverviewAssigneeFilter
         value={assigneeFilter}
         onValueChange={onAssigneeFilterChange}
+        scope={assigneeFilterScope}
+        onScopeChange={onAssigneeFilterScopeChange}
         options={assigneeOptions}
       />
 
@@ -111,11 +125,47 @@ export function ProjectBacklogOverviewFilters({
             <span>Updating backlog…</span>
           </div>
         ) : null}
+        {planningSpaceEnabled ? (
+          <div
+            className="inline-flex items-center rounded-md border border-border/70 bg-background/90"
+            role="group"
+            aria-label="Quick view switch"
+          >
+            <button
+              type="button"
+              aria-label="Table view"
+              aria-pressed={viewMode === "table"}
+              onClick={() => onViewModeChange("table")}
+              className={`inline-flex size-8 items-center justify-center rounded-l-md transition-colors ${
+                viewMode === "table"
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Table2 className="size-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Planning space view"
+              aria-pressed={viewMode === "planning-space"}
+              onClick={() => onViewModeChange("planning-space")}
+              className={`inline-flex size-8 items-center justify-center rounded-r-md transition-colors ${
+                viewMode === "planning-space"
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Orbit className="size-4" />
+            </button>
+          </div>
+        ) : null}
         <ProjectBacklogOptionsMenu
           viewMode={viewMode}
           onViewModeChange={onViewModeChange}
           focusFilter={focusFilter}
           onFocusFilterChange={onFocusFilterChange}
+          visibleIssueTypes={visibleIssueTypes}
+          onVisibleIssueTypesChange={onVisibleIssueTypesChange}
           tableGroupBy={tableGroupBy}
           onTableGroupByChange={onTableGroupByChange}
           tableSortBy={tableSortBy}

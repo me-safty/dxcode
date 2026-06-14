@@ -17,6 +17,7 @@ describe("project dashboard backlog state", () => {
       query: "persisted query",
       focusFilter: "needs-plan",
       assigneeFilter: "account-1",
+      visibleIssueTypes: ["standard", "subtask"],
       viewMode: "table",
       tableGroupBy: "assignee",
       tableSortBy: "title",
@@ -40,6 +41,8 @@ describe("project dashboard backlog state", () => {
       query: "",
       focusFilter: "all",
       assigneeFilter: "account-1",
+      assigneeFilterScope: { epic: false, story: true, subtask: false },
+      visibleIssueTypes: ["standard", "subtask"],
       viewMode: "planning",
       tableGroupBy: "assignee",
       tableSortBy: "title",
@@ -72,6 +75,18 @@ describe("project dashboard backlog state", () => {
       sprint: ALL_SPRINTS_ROUTE_SEARCH_VALUE,
       jiraFilter: "filter-7",
     });
+  });
+
+  it("accepts planning-space as a routable backlog view mode", () => {
+    const search = parseProjectDashboardBacklogRouteSearch({ view: "planning-space" });
+
+    expect(search.view).toBe("planning-space");
+    expect(
+      resolveProjectDashboardBacklogState({
+        persisted: { viewMode: "table" },
+        search,
+      }).viewMode,
+    ).toBe("planning-space");
   });
 
   it("strips backlog query params while preserving unrelated search params", () => {

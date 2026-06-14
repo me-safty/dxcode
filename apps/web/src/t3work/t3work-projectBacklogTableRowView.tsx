@@ -66,14 +66,11 @@ export const ProjectBacklogTableRowView = memo(function ProjectBacklogTableRowVi
     rowDirty,
     rowError,
     rowSaving,
-    selectedAssigneeLabel,
-    setAssigneeDraft,
     setEstimateDraft,
     resetEstimateDraft,
     commitRow,
   } = useProjectBacklogTableRowDraft({
     ticket,
-    onUpdateAssignee,
     onUpdateEstimate,
   });
   const handleCommitRow = () => {
@@ -103,9 +100,7 @@ export const ProjectBacklogTableRowView = memo(function ProjectBacklogTableRowVi
           key={`${ticket.id}:${columnId}`}
           columnId={columnId}
           ticket={ticket}
-          selectedAssigneeLabel={selectedAssigneeLabel}
           estimateDraft={estimateDraft}
-          onSelectAssignee={setAssigneeDraft}
           onEstimateDraftChange={setEstimateDraft}
           onEstimateReset={resetEstimateDraft}
           onCommitRow={handleCommitRow}

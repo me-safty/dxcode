@@ -14,17 +14,9 @@ export type {
 } from "./t3work-projectBacklogTableMeta";
 
 import type { ProjectBacklogTicketContext } from "./t3work-projectBacklogPresentation";
-import type {
-  ProjectBacklogTableGroupBy,
-  ProjectBacklogTableSortBy,
-  ProjectBacklogTableSortDirection,
-} from "./t3work-projectBacklogTableMeta";
-import {
-  compareProjectBacklogTableGroupLabels,
-  getProjectBacklogTableGroupDescriptor,
-} from "./t3work-projectBacklogTableGrouping";
-import { sortProjectBacklogTableTickets } from "./t3work-projectBacklogTableSorting";
 import type { ProjectTicket } from "./t3work-types";
+
+export { buildProjectBacklogTableGroups } from "./t3work-projectBacklogTableGroupBuild";
 
 export interface ProjectBacklogTableRow {
   ticket: ProjectTicket;
@@ -77,92 +69,6 @@ export function areProjectBacklogTableGroupsEqual(
   );
 }
 
-interface ProjectBacklogTableGroupBucket {
-  id: string;
-  label: string;
-  description?: string;
-  order: number;
-  matchedCount: number;
-  rowsByTicketId: Map<string, ProjectBacklogTableRow>;
-}
-
-export function buildProjectBacklogTableGroups({
-  tickets,
-  contextByTicketId,
-  groupBy,
-  sortBy,
-  sortDirection,
-}: {
-  tickets: readonly ProjectTicket[];
-  contextByTicketId: ReadonlyMap<string, ProjectBacklogTicketContext>;
-  groupBy: ProjectBacklogTableGroupBy;
-  sortBy: ProjectBacklogTableSortBy;
-  sortDirection: ProjectBacklogTableSortDirection;
-}): readonly ProjectBacklogTableGroup[] {
-  const sortedTickets = sortProjectBacklogTableTickets({ tickets, sortBy, sortDirection });
-  const groups = new Map<string, ProjectBacklogTableGroupBucket>();
-
-  for (const ticket of sortedTickets) {
-    const context = contextByTicketId.get(ticket.id);
-    const group = getProjectBacklogTableGroupDescriptor(ticket, groupBy, context);
-
-    let current = groups.get(group.id);
-    if (!current) {
-      current = {
-        id: group.id,
-        label: group.label,
-        ...(group.description ? { description: group.description } : {}),
-        order: group.order,
-        matchedCount: 0,
-        rowsByTicketId: new Map<string, ProjectBacklogTableRow>(),
-      };
-      groups.set(group.id, current);
-    }
-
-    current.matchedCount += 1;
-    const chain = [...(context?.ancestors ?? []), ticket];
-    chain.forEach((chainTicket, depth) => {
-      const existing = current.rowsByTicketId.get(chainTicket.id);
-      if (existing) {
-        if (chainTicket.id === ticket.id) {
-          existing.isContextOnly = false;
-        }
-        if (depth < existing.depth) {
-          existing.depth = depth;
-        }
-        return;
-      }
-
-      current.rowsByTicketId.set(chainTicket.id, {
-        ticket: chainTicket,
-        depth,
-        isContextOnly: chainTicket.id !== ticket.id,
-      });
-    });
-  }
-
-  return [...groups.values()]
-    .toSorted((left, right) => {
-      const orderDelta = left.order - right.order;
-      if (orderDelta !== 0) return orderDelta;
-      return compareProjectBacklogTableGroupLabels(left.label, right.label);
-    })
-    .map((group) => {
-      const nextGroup: ProjectBacklogTableGroup = {
-        id: group.id,
-        label: group.label,
-        matchedCount: group.matchedCount,
-        contextCount: group.rowsByTicketId.size - group.matchedCount,
-        rows: [...group.rowsByTicketId.values()],
-      };
-
-      if (group.description) {
-        nextGroup.description = group.description;
-      }
-
-      return nextGroup;
-    });
-}
 
 export function getProjectBacklogTableExpandableTicketIds(
   rows: readonly ProjectBacklogTableRow[],

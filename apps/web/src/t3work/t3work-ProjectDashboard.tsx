@@ -55,20 +55,22 @@ export function ProjectDashboard({
         </div>
       </header>
 
-      <section className={`h-full min-h-0 flex-1 ${t3SurfaceBackdrops.dashboardContent}`}>
-        <ScrollArea className="h-full">
-          <div className="mx-auto flex h-full min-h-0 w-full max-w-6xl flex-col p-4 sm:p-6">
-            {dashboardMode === "backlog" ? (
-              <ProjectDashboardBacklogView project={project} onOpenTicket={onOpenTicket} />
-            ) : (
+      <section
+        className={`flex min-h-0 flex-1 flex-col overflow-hidden ${t3SurfaceBackdrops.dashboardContent}`}
+      >
+        {dashboardMode === "backlog" ? (
+          <ProjectDashboardBacklogView project={project} onOpenTicket={onOpenTicket} />
+        ) : (
+          <ScrollArea className="h-full min-h-0 flex-1">
+            <div className="mx-auto flex h-full min-h-0 w-full max-w-6xl flex-col p-4 sm:p-6">
               <ProjectDashboardMyWorkView
                 project={project}
                 fallbackTickets={fallbackTickets}
                 onOpenTicket={onOpenTicket}
               />
-            )}
-          </div>
-        </ScrollArea>
+            </div>
+          </ScrollArea>
+        )}
       </section>
     </div>
   );

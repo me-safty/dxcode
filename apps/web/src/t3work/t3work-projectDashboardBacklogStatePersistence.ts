@@ -1,4 +1,13 @@
-import { PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL } from "./t3work-projectBacklogUtils";
+import {
+  parseProjectBacklogAssigneeFilterScope,
+  parseProjectBacklogAssigneeFilterScopeRouteValue,
+  parseProjectBacklogVisibleIssueTypes,
+  parseProjectBacklogVisibleIssueTypesRouteValue,
+  PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL,
+  serializeProjectBacklogAssigneeFilterScopeRouteValue,
+  serializeProjectBacklogVisibleIssueTypesRouteValue,
+  areProjectBacklogAssigneeFilterScopesEqual,
+} from "./t3work-projectBacklogUtils";
 
 import {
   ALL_JIRA_FILTERS_ROUTE_SEARCH_VALUE,
@@ -47,6 +56,15 @@ export function readPersistedProjectDashboardBacklogState(
 
     if (typeof parsed.assigneeFilter === "string") persisted.assigneeFilter = parsed.assigneeFilter;
 
+    if (parsed.assigneeFilterScope !== undefined) {
+      persisted.assigneeFilterScope = parseProjectBacklogAssigneeFilterScope(
+        parsed.assigneeFilterScope,
+      );
+    }
+
+    const visibleIssueTypes = parseProjectBacklogVisibleIssueTypes(parsed.visibleIssueTypes);
+    if (visibleIssueTypes !== undefined) persisted.visibleIssueTypes = visibleIssueTypes;
+
     const viewMode = parseRouteEnum(parsed.viewMode, projectBacklogViewModeValues);
     if (viewMode !== undefined) persisted.viewMode = viewMode;
 
@@ -88,10 +106,7 @@ export function writePersistedProjectDashboardBacklogState(
     return;
   }
 
-  window.localStorage.setItem(
-    getProjectDashboardBacklogStorageKey(projectId),
-    JSON.stringify(state),
-  );
+  window.localStorage.setItem(getProjectDashboardBacklogStorageKey(projectId), JSON.stringify(state));
 }
 
 export function resolveProjectDashboardBacklogState(input: {
@@ -117,6 +132,14 @@ export function resolveProjectDashboardBacklogState(input: {
   if (search.focus !== undefined) next.focusFilter = search.focus;
   if ("assignee" in search)
     next.assigneeFilter = search.assignee ?? PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL;
+  const routeAssigneeScope = parseProjectBacklogAssigneeFilterScopeRouteValue(search.assigneeScope);
+  if (routeAssigneeScope !== undefined) {
+    next.assigneeFilterScope = routeAssigneeScope;
+  }
+  const routeVisibleIssueTypes = parseProjectBacklogVisibleIssueTypesRouteValue(search.issueTypes);
+  if (routeVisibleIssueTypes !== undefined) {
+    next.visibleIssueTypes = routeVisibleIssueTypes;
+  }
   if (search.view !== undefined) next.viewMode = search.view;
   if (search.group !== undefined) next.tableGroupBy = search.group;
   if (search.sort !== undefined) next.tableSortBy = search.sort;
@@ -142,10 +165,17 @@ export function resolveProjectDashboardBacklogState(input: {
 export function buildProjectDashboardBacklogRouteSearch(
   state: ProjectDashboardBacklogState,
 ): ProjectDashboardBacklogRouteSearch {
+  const assigneeScope = serializeProjectBacklogAssigneeFilterScopeRouteValue(
+    state.assigneeFilterScope,
+  );
+  const issueTypes = serializeProjectBacklogVisibleIssueTypesRouteValue(state.visibleIssueTypes);
+
   return {
     q: state.query,
     focus: state.focusFilter,
     assignee: state.assigneeFilter,
+    ...(assigneeScope !== undefined ? { assigneeScope } : {}),
+    ...(issueTypes !== undefined ? { issueTypes } : {}),
     view: state.viewMode,
     group: state.tableGroupBy,
     sort: state.tableSortBy,
@@ -174,14 +204,18 @@ export function areProjectDashboardBacklogStatesEqual(
     left.query === right.query &&
     left.focusFilter === right.focusFilter &&
     left.assigneeFilter === right.assigneeFilter &&
+    areProjectBacklogAssigneeFilterScopesEqual(
+      left.assigneeFilterScope,
+      right.assigneeFilterScope,
+    ) &&
+    left.visibleIssueTypes.length === right.visibleIssueTypes.length &&
+    left.visibleIssueTypes.every((value, index) => value === right.visibleIssueTypes[index]) &&
     left.viewMode === right.viewMode &&
     left.tableGroupBy === right.tableGroupBy &&
     left.tableSortBy === right.tableSortBy &&
     left.tableSortDirection === right.tableSortDirection &&
     left.visibleTableColumns.length === right.visibleTableColumns.length &&
-    left.visibleTableColumns.every(
-      (column, index) => column === right.visibleTableColumns[index],
-    ) &&
+    left.visibleTableColumns.every((column, index) => column === right.visibleTableColumns[index]) &&
     left.boardId === right.boardId &&
     left.sprintId === right.sprintId &&
     left.filterId === right.filterId

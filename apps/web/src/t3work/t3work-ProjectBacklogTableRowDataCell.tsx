@@ -17,9 +17,7 @@ export function ProjectBacklogTableRowDataCell({
   ticket,
   parentTicket,
   estimateFieldLabel,
-  selectedAssigneeLabel,
   estimateDraft,
-  onSelectAssignee,
   onEstimateDraftChange,
   onEstimateReset,
   onCommitRow,
@@ -31,9 +29,7 @@ export function ProjectBacklogTableRowDataCell({
   ticket: ProjectTicket;
   parentTicket?: ProjectTicket;
   estimateFieldLabel?: string;
-  selectedAssigneeLabel: string;
   estimateDraft: string;
-  onSelectAssignee: (assignee: AtlassianAssignableUser | null) => void;
   onEstimateDraftChange: (value: string) => void;
   onEstimateReset: () => void;
   onCommitRow: () => void;
@@ -61,8 +57,6 @@ export function ProjectBacklogTableRowDataCell({
         <ProjectBacklogRowAssigneeCell
           compact
           ticket={ticket}
-          selectedAssigneeLabel={selectedAssigneeLabel}
-          onSelectAssignee={onSelectAssignee}
           onSearchAssignableUsers={onSearchAssignableUsers}
           onUpdateAssignee={onUpdateAssignee}
         />

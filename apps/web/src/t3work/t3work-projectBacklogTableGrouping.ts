@@ -75,6 +75,14 @@ export function getProjectBacklogTableGroupDescriptor(
   groupBy: ProjectBacklogTableGroupBy,
   context?: ProjectBacklogTicketContext,
 ): ProjectBacklogTableGroupDescriptor {
+  if (groupBy === "none") {
+    return {
+      id: "all",
+      label: "All issues",
+      order: 0,
+    };
+  }
+
   if (groupBy === "planning-state") {
     const state = getProjectBacklogPlanningState(ticket);
     const meta = getProjectBacklogPlanningMeta(state);

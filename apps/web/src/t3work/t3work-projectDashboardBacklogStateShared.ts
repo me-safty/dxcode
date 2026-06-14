@@ -14,14 +14,20 @@ import {
   projectBacklogTableColumnValues,
 } from "./t3work-projectBacklogTable";
 import {
+  defaultProjectBacklogAssigneeFilterScope,
+  defaultProjectBacklogVisibleIssueTypes,
   PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL,
+  type ProjectBacklogAssigneeFilterScope,
   type ProjectBacklogFocusFilter,
+  type ProjectBacklogIssueTypeFilterKey,
 } from "./t3work-projectBacklogUtils";
 
 export interface ProjectDashboardBacklogRouteSearch {
   q?: string;
   focus?: ProjectBacklogFocusFilter;
   assignee?: string;
+  assigneeScope?: string;
+  issueTypes?: string;
   view?: ProjectBacklogViewMode;
   group?: ProjectBacklogTableGroupBy;
   sort?: ProjectBacklogTableSortBy;
@@ -35,6 +41,8 @@ export interface ProjectDashboardBacklogState extends BacklogSelectionInput {
   query: string;
   focusFilter: ProjectBacklogFocusFilter;
   assigneeFilter: string;
+  assigneeFilterScope: ProjectBacklogAssigneeFilterScope;
+  visibleIssueTypes: ReadonlyArray<ProjectBacklogIssueTypeFilterKey>;
   viewMode: ProjectBacklogViewMode;
   tableGroupBy: ProjectBacklogTableGroupBy;
   tableSortBy: ProjectBacklogTableSortBy;
@@ -59,8 +67,10 @@ export const projectBacklogViewModeValues = new Set<ProjectBacklogViewMode>([
   "planning",
   "ownership",
   "table",
+  "planning-space",
 ]);
 export const projectBacklogTableGroupByValues = new Set<ProjectBacklogTableGroupBy>([
+  "none",
   "planning-state",
   "sprint",
   "assignee",
@@ -100,16 +110,8 @@ export function parseVisibleProjectBacklogTableColumns(
 }
 
 export const routeSearchKeys = [
-  "q",
-  "focus",
-  "assignee",
-  "view",
-  "group",
-  "sort",
-  "dir",
-  "board",
-  "sprint",
-  "jiraFilter",
+  "q", "focus", "assignee", "assigneeScope", "issueTypes", "view",
+  "group", "sort", "dir", "board", "sprint", "jiraFilter",
 ] as const;
 
 function normalizeRouteString(value: unknown): string | undefined {
@@ -140,6 +142,8 @@ export function createDefaultProjectDashboardBacklogState(): ProjectDashboardBac
     query: "",
     focusFilter: "all",
     assigneeFilter: PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL,
+    assigneeFilterScope: { ...defaultProjectBacklogAssigneeFilterScope },
+    visibleIssueTypes: [...defaultProjectBacklogVisibleIssueTypes],
     viewMode: projectBacklogViewModes[0]?.value ?? "table",
     tableGroupBy: "planning-state",
     tableSortBy: "rank",
@@ -168,6 +172,14 @@ export function parseProjectDashboardBacklogRouteSearch(
 
   if (typeof search.assignee === "string") {
     parsed.assignee = search.assignee;
+  }
+
+  if (typeof search.assigneeScope === "string") {
+    parsed.assigneeScope = search.assigneeScope;
+  }
+
+  if (typeof search.issueTypes === "string") {
+    parsed.issueTypes = search.issueTypes;
   }
 
   const view = parseRouteEnum(search.view, projectBacklogViewModeValues);

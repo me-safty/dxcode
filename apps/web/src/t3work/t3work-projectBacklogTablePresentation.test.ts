@@ -81,6 +81,7 @@ describe("project backlog table presentation", () => {
     const tickets = [parent, child, needsOwner, unsprinted];
     const presentation = buildVisibleBacklogHierarchy(tickets, tickets);
     const groupModes = [
+      "none",
       "planning-state",
       "sprint",
       "assignee",
@@ -142,6 +143,73 @@ describe("project backlog table presentation", () => {
         collapsedTicketIds: new Set([parent.id]),
       }).map((row) => row.ticket.id),
     ).toEqual([parent.id]);
+  });
+
+  it("keeps descendants under their direct visible parent inside grouped rows", () => {
+    const epic = createTicket({
+      id: "epic",
+      issueType: "Epic",
+      ref: { displayId: "PROJ-1", title: "Checkout" },
+    });
+    const story = createTicket({
+      id: "story",
+      issueType: "Story",
+      parentId: epic.id,
+      ref: { displayId: "PROJ-2", title: "Cart" },
+    });
+    const subtask = createTicket({
+      id: "subtask",
+      issueType: "Sub-task",
+      parentId: story.id,
+      ref: { displayId: "PROJ-3", title: "Button" },
+    });
+    const tickets = [epic, story, subtask];
+    const presentation = buildVisibleBacklogHierarchy(tickets, tickets);
+
+    const groups = buildProjectBacklogTableGroups({
+      tickets,
+      contextByTicketId: presentation.contextByTicketId,
+      groupBy: "issue-type",
+      sortBy: "key",
+      sortDirection: "desc",
+    });
+    const subtaskGroup = groups.find((group) => group.label === "Sub-task");
+
+    expect(subtaskGroup?.rows.map((row) => [row.ticket.id, row.depth, row.isContextOnly])).toEqual([
+      ["epic", 0, true],
+      ["story", 1, true],
+      ["subtask", 2, false],
+    ]);
+  });
+
+  it("builds no-group rows as one normal hierarchy without duplicates", () => {
+    const epic = createTicket({ id: "epic", issueType: "Epic" });
+    const story = createTicket({ id: "story", issueType: "Story", parentId: epic.id });
+    const subtask = createTicket({
+      id: "subtask",
+      issueType: "Sub-task",
+      parentId: story.id,
+    });
+    const tickets = [epic, story, subtask];
+    const presentation = buildVisibleBacklogHierarchy(tickets, tickets);
+
+    const groups = buildProjectBacklogTableGroups({
+      tickets,
+      contextByTicketId: presentation.contextByTicketId,
+      groupBy: "none",
+      sortBy: "key",
+      sortDirection: "desc",
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.rows.map((row) => [row.ticket.id, row.depth])).toEqual([
+      ["epic", 0],
+      ["story", 1],
+      ["subtask", 2],
+    ]);
+    expect(new Set(groups[0]?.rows.map((row) => row.ticket.id))).toEqual(
+      new Set(["epic", "story", "subtask"]),
+    );
   });
 
   it("prefers epic ancestors when grouping by parent", () => {

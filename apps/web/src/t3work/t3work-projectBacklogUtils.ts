@@ -1,123 +1,64 @@
+import {
+  defaultProjectBacklogAssigneeFilterScope,
+  defaultProjectBacklogVisibleIssueTypes,
+  getProjectBacklogAssigneeFilterValue,
+  normalizeProjectBacklogAssigneeName,
+  PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL,
+  resolveProjectBacklogAssigneeFilter,
+  type ProjectBacklogAssigneeFilterScope,
+  type ProjectBacklogIssueTypeFilterKey,
+} from "~/t3work/t3work-projectBacklogFilterOptions";
+import {
+  buildProjectBacklogChildrenByParentId,
+  matchesAssigneeFilter,
+  type ProjectBacklogAssigneeFilterContext,
+} from "~/t3work/t3work-projectBacklogAssigneeFilterMatch";
+import { parseProjectBacklogVisibleIssueTypes } from "~/t3work/t3work-projectBacklogFilterSerialization";
+import {
+  getProjectBacklogIssueTypeFilterCategory,
+  hasProjectBacklogAssignee,
+  hasProjectBacklogEstimate,
+} from "~/t3work/t3work-projectBacklogTicketKinds";
 import type { ProjectTicket } from "~/t3work/t3work-types";
 
+export {
+  buildProjectBacklogAssigneeFilterOptions,
+  defaultProjectBacklogAssigneeFilterScope,
+  defaultProjectBacklogVisibleIssueTypes,
+  getProjectBacklogAssigneeFilterValue,
+  PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL,
+  PROJECT_BACKLOG_ASSIGNEE_FILTER_UNASSIGNED,
+  projectBacklogAssigneeFilterScopeOptions,
+  projectBacklogIssueTypeFilterOptions,
+  resolveProjectBacklogAssigneeFilter,
+} from "~/t3work/t3work-projectBacklogFilterOptions";
+export type {
+  ProjectBacklogAssigneeFilterOption,
+  ProjectBacklogAssigneeFilterScope,
+  ProjectBacklogAssigneeFilterScopeKey,
+  ProjectBacklogIssueTypeFilterKey,
+} from "~/t3work/t3work-projectBacklogFilterOptions";
+export {
+  areProjectBacklogAssigneeFilterScopesEqual,
+  parseProjectBacklogAssigneeFilterScope,
+  parseProjectBacklogAssigneeFilterScopeRouteValue,
+  parseProjectBacklogVisibleIssueTypes,
+  parseProjectBacklogVisibleIssueTypesRouteValue,
+  serializeProjectBacklogAssigneeFilterScopeRouteValue,
+  serializeProjectBacklogVisibleIssueTypesRouteValue,
+} from "~/t3work/t3work-projectBacklogFilterSerialization";
+export {
+  getProjectBacklogAssigneeFilterCategory,
+  getProjectBacklogIssueTypeFilterCategory,
+  getProjectTicketIssueTypeKey,
+  hasProjectBacklogAssignee,
+  hasProjectBacklogEstimate,
+  isProjectTicketEpic,
+  isProjectTicketHourTracked,
+  isProjectTicketSubtask,
+} from "~/t3work/t3work-projectBacklogTicketKinds";
+
 export type ProjectBacklogFocusFilter = "all" | "needs-plan" | "unassigned" | "with-subtasks";
-
-export const PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL = "__all__";
-export const PROJECT_BACKLOG_ASSIGNEE_FILTER_UNASSIGNED = "__unassigned__";
-
-export type ProjectBacklogAssigneeFilterOption = {
-  readonly value: string;
-  readonly label: string;
-};
-
-export function hasProjectBacklogAssignee(ticket: ProjectTicket): boolean {
-  return Boolean(ticket.assigneeAccountId ?? ticket.assignee);
-}
-
-export function hasProjectBacklogEstimate(ticket: ProjectTicket): boolean {
-  return typeof ticket.estimateValue === "number";
-}
-
-export function getProjectTicketIssueTypeKey(ticket: ProjectTicket): string {
-  return (ticket.issueType ?? ticket.ref.type ?? "").trim().toLowerCase();
-}
-
-export function getProjectBacklogAssigneeFilterValue(ticket: ProjectTicket): string {
-  if (ticket.assigneeAccountId?.trim()) {
-    return `account:${ticket.assigneeAccountId}`;
-  }
-
-  if (ticket.assignee?.trim()) {
-    return `name:${ticket.assignee.trim().toLowerCase()}`;
-  }
-
-  return PROJECT_BACKLOG_ASSIGNEE_FILTER_UNASSIGNED;
-}
-
-export function buildProjectBacklogAssigneeFilterOptions(
-  tickets: readonly ProjectTicket[],
-  preferredDisplayName?: string,
-): ReadonlyArray<ProjectBacklogAssigneeFilterOption> {
-  const byValue = new Map<string, ProjectBacklogAssigneeFilterOption>();
-  const normalizedPreferredDisplayName = preferredDisplayName?.trim().toLocaleLowerCase();
-
-  for (const ticket of tickets) {
-    const value = getProjectBacklogAssigneeFilterValue(ticket);
-    if (value === PROJECT_BACKLOG_ASSIGNEE_FILTER_UNASSIGNED) {
-      byValue.set(PROJECT_BACKLOG_ASSIGNEE_FILTER_UNASSIGNED, {
-        value: PROJECT_BACKLOG_ASSIGNEE_FILTER_UNASSIGNED,
-        label: "Unassigned",
-      });
-      continue;
-    }
-
-    if (!byValue.has(value) && ticket.assignee?.trim()) {
-      byValue.set(value, {
-        value,
-        label: ticket.assignee.trim(),
-      });
-    }
-  }
-
-  return [
-    { value: PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL, label: "All assignees" },
-    ...Array.from(byValue.values()).toSorted((left, right) => {
-      const leftIsPreferred =
-        normalizedPreferredDisplayName !== undefined &&
-        left.label.trim().toLocaleLowerCase() === normalizedPreferredDisplayName;
-      const rightIsPreferred =
-        normalizedPreferredDisplayName !== undefined &&
-        right.label.trim().toLocaleLowerCase() === normalizedPreferredDisplayName;
-      if (leftIsPreferred !== rightIsPreferred) {
-        return leftIsPreferred ? -1 : 1;
-      }
-      return left.label.localeCompare(right.label);
-    }),
-  ];
-}
-
-export function resolveProjectBacklogAssigneeFilter(
-  tickets: readonly ProjectTicket[],
-  assigneeFilter?: string,
-): string {
-  if (!assigneeFilter || assigneeFilter === PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL) {
-    return PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL;
-  }
-
-  return tickets.some((ticket) => getProjectBacklogAssigneeFilterValue(ticket) === assigneeFilter)
-    ? assigneeFilter
-    : PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL;
-}
-
-export function isProjectTicketSubtask(ticket: ProjectTicket): boolean {
-  if (ticket.issueTypeIsSubtask === true) {
-    return true;
-  }
-
-  const issueType = getProjectTicketIssueTypeKey(ticket);
-  return issueType.includes("subtask") || issueType.includes("sub-task");
-}
-
-export function isProjectTicketHourTracked(ticket: ProjectTicket): boolean {
-  const issueType = getProjectTicketIssueTypeKey(ticket);
-  if (issueType.length > 0) {
-    if (issueType.includes("story")) {
-      return false;
-    }
-    return issueType.includes("bug") || isProjectTicketSubtask(ticket);
-  }
-
-  if (
-    ticket.timeOriginalEstimateSeconds !== undefined ||
-    ticket.timeRemainingEstimateSeconds !== undefined ||
-    ticket.aggregateTimeOriginalEstimateSeconds !== undefined ||
-    ticket.aggregateTimeRemainingEstimateSeconds !== undefined
-  ) {
-    return true;
-  }
-
-  return false;
-}
 
 function matchesFocusFilter(
   ticket: ProjectTicket,
@@ -133,14 +74,6 @@ function matchesFocusFilter(
     default:
       return true;
   }
-}
-
-function matchesAssigneeFilter(ticket: ProjectTicket, assigneeFilter: string): boolean {
-  if (!assigneeFilter || assigneeFilter === PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL) {
-    return true;
-  }
-
-  return getProjectBacklogAssigneeFilterValue(ticket) === assigneeFilter;
 }
 
 function buildProjectBacklogSearchHaystack(
@@ -196,18 +129,41 @@ export function filterProjectBacklogTickets({
   query,
   focusFilter,
   assigneeFilter = PROJECT_BACKLOG_ASSIGNEE_FILTER_ALL,
+  assigneeFilterScope = defaultProjectBacklogAssigneeFilterScope,
+  visibleIssueTypes = defaultProjectBacklogVisibleIssueTypes,
 }: {
   tickets: readonly ProjectTicket[];
   query: string;
   focusFilter: ProjectBacklogFocusFilter;
   assigneeFilter?: string;
+  assigneeFilterScope?: ProjectBacklogAssigneeFilterScope;
+  visibleIssueTypes?: ReadonlyArray<ProjectBacklogIssueTypeFilterKey>;
 }): ProjectTicket[] {
   const normalizedQuery = query.trim().toLowerCase();
   const resolvedAssigneeFilter = resolveProjectBacklogAssigneeFilter(tickets, assigneeFilter);
+  const resolvedAssigneeFilterName = normalizeProjectBacklogAssigneeName(
+    tickets.find(
+      (ticket) => getProjectBacklogAssigneeFilterValue(ticket) === resolvedAssigneeFilter,
+    )?.assignee,
+  );
   const ticketById = new Map(tickets.map((ticket) => [ticket.id, ticket]));
+  const assigneeFilterContext: ProjectBacklogAssigneeFilterContext = {
+    assigneeFilter: resolvedAssigneeFilter,
+    assigneeFilterName: resolvedAssigneeFilterName,
+    scope: assigneeFilterScope,
+    ticketById,
+    childrenByParentId: buildProjectBacklogChildrenByParentId(tickets),
+    storyIncludedCache: new Map(),
+    epicIncludedCache: new Map(),
+  };
+  const visibleIssueTypeSet = new Set(
+    parseProjectBacklogVisibleIssueTypes(visibleIssueTypes) ??
+      defaultProjectBacklogVisibleIssueTypes,
+  );
   return tickets
+    .filter((ticket) => visibleIssueTypeSet.has(getProjectBacklogIssueTypeFilterCategory(ticket)))
     .filter((ticket) => matchesFocusFilter(ticket, focusFilter))
-    .filter((ticket) => matchesAssigneeFilter(ticket, resolvedAssigneeFilter))
+    .filter((ticket) => matchesAssigneeFilter(ticket, assigneeFilterContext))
     .filter((ticket) => {
       if (!normalizedQuery) return true;
       const haystack = buildProjectBacklogSearchHaystack(ticket, ticketById);

@@ -134,14 +134,21 @@ export function ProjectBacklogRowEstimateCell({
           <div
             ref={estimateInputContainerRef}
             onMouseDown={handleEstimateWrapperMouseDown}
+            title={estimateError ?? undefined}
             className={
               compact
-                ? "inline-flex h-7 min-w-[5.25rem] cursor-text items-center gap-1 rounded-md border border-border/70 bg-background/90 px-1.5"
-                : "inline-flex h-8 cursor-text items-center rounded-md border border-border/70 bg-background/90 px-2"
+                ? `inline-flex h-7 min-w-[5.25rem] cursor-text items-center gap-1 rounded-md border bg-background/90 px-1.5 ${
+                    estimateError ? "border-destructive" : "border-border/70"
+                  }`
+                : `inline-flex h-8 cursor-text items-center rounded-md border bg-background/90 px-2 ${
+                    estimateError ? "border-destructive" : "border-border/70"
+                  }`
             }
           >
             <Input
               aria-label={`${resolvedEstimateLabel} for ${ticket.ref.displayId}`}
+              aria-invalid={estimateError ? true : undefined}
+              aria-errormessage={estimateError ? `${ticket.id}-estimate-error` : undefined}
               unstyled
               className={
                 compact
@@ -189,7 +196,11 @@ export function ProjectBacklogRowEstimateCell({
       ) : (
         <Badge variant="outline">Unavailable</Badge>
       )}
-      {estimateError ? <div className="mt-1 text-xs text-destructive">{estimateError}</div> : null}
+      {estimateError ? (
+        <span id={`${ticket.id}-estimate-error`} className="sr-only">
+          {estimateError}
+        </span>
+      ) : null}
     </div>
   );
 }

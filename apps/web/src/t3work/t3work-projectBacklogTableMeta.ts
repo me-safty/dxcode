@@ -1,6 +1,7 @@
 import type { ProjectBacklogPlanningState } from "./t3work-projectBacklogPresentation";
 
 export type ProjectBacklogTableGroupBy =
+  | "none"
   | "planning-state"
   | "sprint"
   | "assignee"
@@ -32,6 +33,7 @@ export const projectBacklogTableGroupOptions: ReadonlyArray<{
   value: ProjectBacklogTableGroupBy;
   label: string;
 }> = [
+  { value: "none", label: "No grouping" },
   { value: "planning-state", label: "Planning state" },
   { value: "sprint", label: "Sprint" },
   { value: "assignee", label: "Assignee" },

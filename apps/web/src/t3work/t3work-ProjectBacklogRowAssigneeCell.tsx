@@ -11,8 +11,6 @@ export function ProjectBacklogRowAssigneeCell({
   onSearchAssignableUsers,
   onUpdateAssignee,
   compact = false,
-  selectedAssigneeLabel,
-  onSelectAssignee,
 }: {
   ticket: ProjectTicket;
   onSearchAssignableUsers: (
@@ -24,8 +22,6 @@ export function ProjectBacklogRowAssigneeCell({
     assignee: AtlassianAssignableUser | null,
   ) => Promise<void>;
   compact?: boolean;
-  selectedAssigneeLabel?: string;
-  onSelectAssignee?: (assignee: AtlassianAssignableUser | null) => void;
 }) {
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [assigneeQuery, setAssigneeQuery] = useState("");
@@ -61,15 +57,9 @@ export function ProjectBacklogRowAssigneeCell({
     };
   }, [assigneeOpen, deferredAssigneeQuery, onSearchAssignableUsers, ticket]);
 
-  const resolvedAssigneeLabel = selectedAssigneeLabel ?? ticket.assignee ?? "Unassigned";
+  const resolvedAssigneeLabel = ticket.assignee ?? "Unassigned";
 
   function handleAssigneeSelection(assignee: AtlassianAssignableUser | null) {
-    if (onSelectAssignee) {
-      onSelectAssignee(assignee);
-      setAssigneeOpen(false);
-      return;
-    }
-
     void onUpdateAssignee(ticket, assignee).then(() => setAssigneeOpen(false));
   }
 

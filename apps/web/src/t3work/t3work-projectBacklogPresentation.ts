@@ -13,7 +13,12 @@ import {
 
 export { projectBacklogViewModes } from "./t3work-projectBacklogPresentationMeta";
 
-export type ProjectBacklogViewMode = "hierarchy" | "planning" | "ownership" | "table";
+export type ProjectBacklogViewMode =
+  | "hierarchy"
+  | "planning"
+  | "ownership"
+  | "table"
+  | "planning-space";
 export type ProjectBacklogPlanningState =
   | "needs-owner-and-estimate"
   | "needs-owner"
