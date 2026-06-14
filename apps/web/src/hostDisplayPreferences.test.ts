@@ -12,6 +12,7 @@ const allVisiblePreferences: T3HostDisplayPreferences = {
   showCheckoutModeIndicator: true,
   showBranchSelector: true,
   enableTerminal: true,
+  enableSourceControlPanel: true,
   threadConversationMaxWidthPx: null,
 };
 
@@ -20,6 +21,7 @@ const allHiddenPreferences: T3HostDisplayPreferences = {
   showCheckoutModeIndicator: false,
   showBranchSelector: false,
   enableTerminal: false,
+  enableSourceControlPanel: false,
   threadConversationMaxWidthPx: null,
 };
 
@@ -49,6 +51,7 @@ describe("resolveHostDisplayPreferences", () => {
         preferences: {
           showBranchSelector: true,
           enableTerminal: true,
+          enableSourceControlPanel: true,
           threadConversationMaxWidthPx: 960,
         },
       }),
@@ -56,6 +59,7 @@ describe("resolveHostDisplayPreferences", () => {
       ...allHiddenPreferences,
       showBranchSelector: true,
       enableTerminal: true,
+      enableSourceControlPanel: true,
       threadConversationMaxWidthPx: 960,
     });
   });

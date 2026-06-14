@@ -316,6 +316,208 @@ export const VcsPullResult = Schema.Struct({
 });
 export type VcsPullResult = typeof VcsPullResult.Type;
 
+export const VcsPanelFileStatus = Schema.Literals([
+  "added",
+  "modified",
+  "deleted",
+  "renamed",
+  "copied",
+  "untracked",
+  "conflicted",
+]);
+export type VcsPanelFileStatus = typeof VcsPanelFileStatus.Type;
+
+export const VcsPanelChangeGroupKind = Schema.Literals(["staged", "unstaged", "conflicts"]);
+export type VcsPanelChangeGroupKind = typeof VcsPanelChangeGroupKind.Type;
+
+export const VcsPanelFileChange = Schema.Struct({
+  path: TrimmedNonEmptyStringSchema,
+  originalPath: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  status: VcsPanelFileStatus,
+  insertions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+export type VcsPanelFileChange = typeof VcsPanelFileChange.Type;
+
+export const VcsPanelChangeGroup = Schema.Struct({
+  kind: VcsPanelChangeGroupKind,
+  files: Schema.Array(VcsPanelFileChange),
+});
+export type VcsPanelChangeGroup = typeof VcsPanelChangeGroup.Type;
+
+export const VcsPanelRemote = Schema.Struct({
+  name: TrimmedNonEmptyStringSchema,
+  fetchUrl: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  pushUrl: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  provider: Schema.NullOr(SourceControlProviderInfo),
+  branches: Schema.Array(
+    Schema.Struct({
+      name: TrimmedNonEmptyStringSchema,
+      fullRefName: TrimmedNonEmptyStringSchema,
+      isDefaultRemoteHead: Schema.Boolean,
+    }),
+  ),
+});
+export type VcsPanelRemote = typeof VcsPanelRemote.Type;
+
+export const VcsPanelStash = Schema.Struct({
+  refName: TrimmedNonEmptyStringSchema,
+  sha: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  message: TrimmedNonEmptyStringSchema,
+});
+export type VcsPanelStash = typeof VcsPanelStash.Type;
+
+export const VcsPanelCommitSummary = Schema.Struct({
+  sha: TrimmedNonEmptyStringSchema,
+  shortSha: TrimmedNonEmptyStringSchema,
+  message: TrimmedNonEmptyStringSchema,
+  authorName: Schema.NullOr(Schema.String),
+  authoredAt: Schema.NullOr(Schema.String),
+  files: Schema.Array(VcsPanelFileChange),
+});
+export type VcsPanelCommitSummary = typeof VcsPanelCommitSummary.Type;
+
+export const VcsPanelBranchDetails = Schema.Struct({
+  name: TrimmedNonEmptyStringSchema,
+  fullRefName: TrimmedNonEmptyStringSchema,
+  isRemote: Schema.Boolean,
+  remoteName: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  current: Schema.Boolean,
+  isDefault: Schema.Boolean,
+  worktreePath: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+  upstreamRef: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+  baseRef: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+  aheadCommits: Schema.Array(VcsPanelCommitSummary),
+  behindCommits: Schema.Array(VcsPanelCommitSummary),
+  commits: Schema.Array(VcsPanelCommitSummary),
+  commitsRemaining: NonNegativeInt,
+  compareFiles: Schema.Array(VcsPanelFileChange),
+});
+export type VcsPanelBranchDetails = typeof VcsPanelBranchDetails.Type;
+
+export const VcsPanelBranchDetailsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  branch: VcsRef,
+  defaultCompareRef: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+});
+export type VcsPanelBranchDetailsInput = typeof VcsPanelBranchDetailsInput.Type;
+
+export const VcsPanelBranchCommitsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  branch: VcsRef,
+  skip: NonNegativeInt,
+  limit: PositiveInt.check(Schema.isLessThanOrEqualTo(50)),
+});
+export type VcsPanelBranchCommitsInput = typeof VcsPanelBranchCommitsInput.Type;
+
+export const VcsPanelBranchCommitsResult = Schema.Struct({
+  commits: Schema.Array(VcsPanelCommitSummary),
+  remaining: NonNegativeInt,
+});
+export type VcsPanelBranchCommitsResult = typeof VcsPanelBranchCommitsResult.Type;
+
+export const VcsPanelStashDetailsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  stashRef: TrimmedNonEmptyStringSchema,
+});
+export type VcsPanelStashDetailsInput = typeof VcsPanelStashDetailsInput.Type;
+
+export const VcsPanelStashDetails = Schema.Struct({
+  refName: TrimmedNonEmptyStringSchema,
+  files: Schema.Array(VcsPanelFileChange),
+});
+export type VcsPanelStashDetails = typeof VcsPanelStashDetails.Type;
+
+export const VcsPanelSnapshotInput = VcsStatusInput;
+export type VcsPanelSnapshotInput = typeof VcsPanelSnapshotInput.Type;
+
+export const VcsPanelSnapshotResult = Schema.Struct({
+  status: VcsStatusResult,
+  changeGroups: Schema.Array(VcsPanelChangeGroup),
+  localBranches: Schema.Array(VcsRef),
+  branchDetails: Schema.Array(VcsPanelBranchDetails),
+  remotes: Schema.Array(VcsPanelRemote),
+  stashes: Schema.Array(VcsPanelStash),
+  recentCommits: Schema.Array(VcsPanelCommitSummary),
+  defaultCompareRef: Schema.NullOr(TrimmedNonEmptyStringSchema),
+});
+export type VcsPanelSnapshotResult = typeof VcsPanelSnapshotResult.Type;
+
+export const VcsPanelFileActionInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  paths: Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
+  staged: Schema.optional(Schema.Boolean),
+});
+export type VcsPanelFileActionInput = typeof VcsPanelFileActionInput.Type;
+
+export const VcsPanelFileDiffInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  path: TrimmedNonEmptyStringSchema,
+  staged: Schema.Boolean,
+});
+export type VcsPanelFileDiffInput = typeof VcsPanelFileDiffInput.Type;
+
+export const VcsPanelFileDiffResult = Schema.Struct({
+  path: TrimmedNonEmptyStringSchema,
+  staged: Schema.Boolean,
+  patch: Schema.String,
+});
+export type VcsPanelFileDiffResult = typeof VcsPanelFileDiffResult.Type;
+
+export const VcsPanelCommitInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  message: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000)),
+  push: Schema.optional(Schema.Boolean),
+});
+export type VcsPanelCommitInput = typeof VcsPanelCommitInput.Type;
+
+export const VcsPanelBranchActionInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  branchName: TrimmedNonEmptyStringSchema,
+  force: Schema.optional(Schema.Boolean),
+});
+export type VcsPanelBranchActionInput = typeof VcsPanelBranchActionInput.Type;
+
+export const VcsPanelRemoteInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  remoteName: TrimmedNonEmptyStringSchema,
+});
+export type VcsPanelRemoteInput = typeof VcsPanelRemoteInput.Type;
+
+export const VcsPanelAddRemoteInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  name: TrimmedNonEmptyStringSchema,
+  url: TrimmedNonEmptyStringSchema,
+});
+export type VcsPanelAddRemoteInput = typeof VcsPanelAddRemoteInput.Type;
+
+export const VcsPanelStashInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  stashRef: Schema.optional(TrimmedNonEmptyStringSchema),
+  message: Schema.optional(TrimmedNonEmptyStringSchema),
+  includeUntracked: Schema.optional(Schema.Boolean),
+  mode: Schema.optional(Schema.Literals(["all", "staged", "unstaged"])),
+});
+export type VcsPanelStashInput = typeof VcsPanelStashInput.Type;
+
+const VcsPanelCompareTarget = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("working-tree") }),
+  Schema.Struct({ kind: Schema.Literal("branch"), refName: TrimmedNonEmptyStringSchema }),
+  Schema.Struct({ kind: Schema.Literal("stash"), refName: TrimmedNonEmptyStringSchema }),
+]);
+
+export const VcsPanelCompareInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  left: VcsPanelCompareTarget,
+  right: VcsPanelCompareTarget,
+});
+export type VcsPanelCompareInput = typeof VcsPanelCompareInput.Type;
+
+export const VcsPanelCompareResult = Schema.Struct({
+  patch: Schema.String,
+});
+export type VcsPanelCompareResult = typeof VcsPanelCompareResult.Type;
+
 // RPC / domain errors
 export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()("GitCommandError", {
   operation: Schema.String,

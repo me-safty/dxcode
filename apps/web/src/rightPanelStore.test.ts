@@ -88,6 +88,20 @@ describe("rightPanelStore", () => {
     ).toHaveLength(2);
   });
 
+  it("opens source control as a singleton surface", () => {
+    useRightPanelStore.getState().open(refA, "source-control");
+    useRightPanelStore.getState().open(refA, "source-control");
+
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe(
+      "source-control",
+    );
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "source-control",
+      surfaces: [{ id: "source-control", kind: "source-control" }],
+    });
+  });
+
   it("close hides the panel without clearing its selected surface", () => {
     useRightPanelStore.getState().open(refA, "plan");
     useRightPanelStore.getState().close(refA);
@@ -132,6 +146,31 @@ describe("rightPanelStore", () => {
     expect(
       selectActiveRightPanelKindWithUrl(useRightPanelStore.getState().byThreadKey, refA, false),
     ).toBe("preview");
+  });
+
+  it("keeps valid source control surfaces during migration", () => {
+    expect(
+      migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "source-control",
+            surfaces: [
+              { id: "source-control", kind: "source-control" },
+              { id: "unexpected", kind: "source-control" },
+            ],
+          },
+        },
+      }),
+    ).toEqual({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "source-control",
+          surfaces: [{ id: "source-control", kind: "source-control" }],
+        },
+      },
+    });
   });
 
   it("removeThread clears persisted state", () => {

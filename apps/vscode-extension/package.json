@@ -123,6 +123,11 @@
           "default": false,
           "description": "Enable the T3 Code terminal drawer, terminal actions, and terminal keybindings inside VS Code webviews."
         },
+        "t3code.ui.enableSourceControlPanel": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the T3 Code source-control right-panel surface inside VS Code webviews."
+        },
         "t3code.ui.threadConversationMaxWidth": {
           "type": [
             "number",

@@ -14,6 +14,7 @@ export interface WebviewDisplayPreferences {
   readonly showCheckoutModeIndicator: boolean;
   readonly showBranchSelector: boolean;
   readonly enableTerminal: boolean;
+  readonly enableSourceControlPanel: boolean;
   readonly threadConversationMaxWidthPx: number | null;
 }
 
@@ -266,6 +267,7 @@ const DEFAULT_DISPLAY_PREFERENCES: WebviewDisplayPreferences = {
   showCheckoutModeIndicator: false,
   showBranchSelector: false,
   enableTerminal: false,
+  enableSourceControlPanel: false,
   threadConversationMaxWidthPx: null,
 };
 

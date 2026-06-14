@@ -1,6 +1,6 @@
 import type { PreviewSessionSnapshot } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
-import { ClipboardList, FileDiff, Globe2, Plus, TerminalSquare, X } from "lucide-react";
+import { ClipboardList, FileDiff, GitBranch, Globe2, Plus, TerminalSquare, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { isElectron } from "~/env";
@@ -23,9 +23,11 @@ interface RightPanelTabsProps {
   onAddBrowser: () => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
+  onAddSourceControl: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
+  sourceControlAvailable: boolean;
   children: ReactNode;
 }
 
@@ -33,11 +35,20 @@ function RightPanelEmptyState(props: {
   onAddBrowser: () => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
+  onAddSourceControl: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
+  sourceControlAvailable: boolean;
 }) {
   const actions = [
+    {
+      label: "Source Control",
+      description: "Review repository changes and sync state.",
+      icon: GitBranch,
+      available: props.sourceControlAvailable,
+      onClick: props.onAddSourceControl,
+    },
     {
       label: "Browser",
       description: "Open a local app or URL.",
@@ -70,7 +81,7 @@ function RightPanelEmptyState(props: {
             Choose what to show in the right panel.
           </p>
         </div>
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2">
           {actions.map((action) => {
             const Icon = action.icon;
             return (
@@ -79,7 +90,7 @@ function RightPanelEmptyState(props: {
                 type="button"
                 disabled={!action.available}
                 onClick={action.onClick}
-                className="flex min-h-28 flex-col items-start rounded-lg border border-border/80 bg-card/40 p-4 text-left transition hover:border-border hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex min-h-28 min-w-0 flex-col items-start rounded-lg border border-border/80 bg-card/40 p-4 text-left transition hover:border-border hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Icon className="mb-3 size-5" />
                 <span className="text-sm font-medium">{action.label}</span>
@@ -110,6 +121,8 @@ function surfaceTitle(
       );
     case "plan":
       return "Plan";
+    case "source-control":
+      return "Source Control";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -158,6 +171,8 @@ function SurfaceIcon({
       return <TerminalSquare className="size-3.5 shrink-0" />;
     case "plan":
       return <ClipboardList className="size-3.5 shrink-0" />;
+    case "source-control":
+      return <GitBranch className="size-3.5 shrink-0" />;
   }
 }
 
@@ -235,6 +250,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               <FileDiff />
               Diff
             </MenuItem>
+            <MenuItem onClick={props.onAddSourceControl} disabled={!props.sourceControlAvailable}>
+              <GitBranch />
+              Source Control
+            </MenuItem>
           </MenuPopup>
         </Menu>
       </div>
@@ -244,9 +263,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddBrowser={props.onAddBrowser}
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
+            onAddSourceControl={props.onAddSourceControl}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
+            sourceControlAvailable={props.sourceControlAvailable}
           />
         ) : (
           props.children

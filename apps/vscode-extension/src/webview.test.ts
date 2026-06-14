@@ -108,6 +108,7 @@ describe("renderT3Webview", () => {
     expect(html).toContain('root.removeAttribute("data-t3-thread-conversation-width")');
     expect(html).toContain('"showOpenInPicker":false');
     expect(html).toContain('"enableTerminal":false');
+    expect(html).toContain('"enableSourceControlPanel":false');
     expect(html).toContain('"threadConversationMaxWidthPx":null');
     expect(html).toContain('"themeSource":"default"');
     expect(html).toContain("getClientSettings()");
@@ -179,6 +180,7 @@ describe("renderT3Webview", () => {
         showCheckoutModeIndicator: true,
         showBranchSelector: false,
         enableTerminal: true,
+        enableSourceControlPanel: true,
         threadConversationMaxWidthPx: 960,
       },
       hostAppearance: {
@@ -191,6 +193,7 @@ describe("renderT3Webview", () => {
     expect(html).toContain('"showOpenInPicker":true');
     expect(html).toContain('"showBranchSelector":false');
     expect(html).toContain('"enableTerminal":true');
+    expect(html).toContain('"enableSourceControlPanel":true');
     expect(html).toContain('"threadConversationMaxWidthPx":960');
     expect(html).toContain('"themeSource":"vscode"');
     expect(html).toContain('"colorScheme":"dark"');
@@ -217,6 +220,7 @@ describe("VS Code display preference settings", () => {
     expect(properties["t3code.ui.showCheckoutModeIndicator"]?.default).toBe(false);
     expect(properties["t3code.ui.showBranchSelector"]?.default).toBe(false);
     expect(properties["t3code.ui.enableTerminal"]?.default).toBe(false);
+    expect(properties["t3code.ui.enableSourceControlPanel"]?.default).toBe(false);
     expect(properties["t3code.ui.threadConversationMaxWidth"]?.type).toEqual(["number", "null"]);
     expect(properties["t3code.ui.threadConversationMaxWidth"]?.default).toBeNull();
     expect(properties["t3code.ui.threadConversationMaxWidth"]?.minimum).toBe(

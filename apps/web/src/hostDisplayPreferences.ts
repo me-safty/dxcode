@@ -9,6 +9,7 @@ const DEFAULT_DISPLAY_PREFERENCES: T3HostDisplayPreferences = {
   showCheckoutModeIndicator: true,
   showBranchSelector: true,
   enableTerminal: true,
+  enableSourceControlPanel: true,
   threadConversationMaxWidthPx: null,
 };
 
@@ -17,6 +18,7 @@ const VSCODE_DISPLAY_PREFERENCES: T3HostDisplayPreferences = {
   showCheckoutModeIndicator: false,
   showBranchSelector: false,
   enableTerminal: false,
+  enableSourceControlPanel: false,
   threadConversationMaxWidthPx: null,
 };
 
@@ -32,6 +34,8 @@ export function resolveHostDisplayPreferences(input: {
       preferences?.showCheckoutModeIndicator ?? defaults.showCheckoutModeIndicator,
     showBranchSelector: preferences?.showBranchSelector ?? defaults.showBranchSelector,
     enableTerminal: preferences?.enableTerminal ?? defaults.enableTerminal,
+    enableSourceControlPanel:
+      preferences?.enableSourceControlPanel ?? defaults.enableSourceControlPanel,
     threadConversationMaxWidthPx: normalizeThreadConversationMaxWidth(
       preferences?.threadConversationMaxWidthPx,
     ),
@@ -53,6 +57,7 @@ function areDisplayPreferencesEqual(
     left.showCheckoutModeIndicator === right.showCheckoutModeIndicator &&
     left.showBranchSelector === right.showBranchSelector &&
     left.enableTerminal === right.enableTerminal &&
+    left.enableSourceControlPanel === right.enableSourceControlPanel &&
     left.threadConversationMaxWidthPx === right.threadConversationMaxWidthPx
   );
 }

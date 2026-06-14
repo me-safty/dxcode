@@ -119,6 +119,26 @@ export interface WsRpcClient {
   readonly vcs: {
     readonly pull: RpcUnaryMethod<typeof WS_METHODS.vcsPull>;
     readonly refreshStatus: RpcUnaryMethod<typeof WS_METHODS.vcsRefreshStatus>;
+    readonly panelSnapshot: RpcUnaryMethod<typeof WS_METHODS.vcsPanelSnapshot>;
+    readonly branchDetails: RpcUnaryMethod<typeof WS_METHODS.vcsPanelBranchDetails>;
+    readonly branchCommits: RpcUnaryMethod<typeof WS_METHODS.vcsPanelBranchCommits>;
+    readonly stashDetails: RpcUnaryMethod<typeof WS_METHODS.vcsPanelStashDetails>;
+    readonly stageFiles: RpcUnaryMethod<typeof WS_METHODS.vcsPanelStageFiles>;
+    readonly unstageFiles: RpcUnaryMethod<typeof WS_METHODS.vcsPanelUnstageFiles>;
+    readonly discardFiles: RpcUnaryMethod<typeof WS_METHODS.vcsPanelDiscardFiles>;
+    readonly readFileDiff: RpcUnaryMethod<typeof WS_METHODS.vcsPanelReadFileDiff>;
+    readonly commitStaged: RpcUnaryMethod<typeof WS_METHODS.vcsPanelCommitStaged>;
+    readonly pullBranch: RpcUnaryMethod<typeof WS_METHODS.vcsPanelPullBranch>;
+    readonly pushBranch: RpcUnaryMethod<typeof WS_METHODS.vcsPanelPushBranch>;
+    readonly fetchRemote: RpcUnaryMethod<typeof WS_METHODS.vcsPanelFetchRemote>;
+    readonly fetchAllRemotes: RpcUnaryMethod<typeof WS_METHODS.vcsPanelFetchAllRemotes>;
+    readonly addRemote: RpcUnaryMethod<typeof WS_METHODS.vcsPanelAddRemote>;
+    readonly removeRemote: RpcUnaryMethod<typeof WS_METHODS.vcsPanelRemoveRemote>;
+    readonly createStash: RpcUnaryMethod<typeof WS_METHODS.vcsPanelCreateStash>;
+    readonly applyStash: RpcUnaryMethod<typeof WS_METHODS.vcsPanelApplyStash>;
+    readonly popStash: RpcUnaryMethod<typeof WS_METHODS.vcsPanelPopStash>;
+    readonly dropStash: RpcUnaryMethod<typeof WS_METHODS.vcsPanelDropStash>;
+    readonly compare: RpcUnaryMethod<typeof WS_METHODS.vcsPanelCompare>;
     readonly onStatus: (
       input: RpcInput<typeof WS_METHODS.subscribeVcsStatus>,
       listener: (status: VcsStatusResult) => void,
@@ -296,6 +316,45 @@ export function createWsRpcClient(
       pull: (input) => transport.request((client) => client[WS_METHODS.vcsPull](input)),
       refreshStatus: (input) =>
         transport.request((client) => client[WS_METHODS.vcsRefreshStatus](input)),
+      panelSnapshot: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelSnapshot](input)),
+      branchDetails: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelBranchDetails](input)),
+      branchCommits: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelBranchCommits](input)),
+      stashDetails: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelStashDetails](input)),
+      stageFiles: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelStageFiles](input)),
+      unstageFiles: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelUnstageFiles](input)),
+      discardFiles: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelDiscardFiles](input)),
+      readFileDiff: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelReadFileDiff](input)),
+      commitStaged: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelCommitStaged](input)),
+      pullBranch: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelPullBranch](input)),
+      pushBranch: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelPushBranch](input)),
+      fetchRemote: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelFetchRemote](input)),
+      fetchAllRemotes: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelFetchAllRemotes](input)),
+      addRemote: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelAddRemote](input)),
+      removeRemote: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelRemoveRemote](input)),
+      createStash: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelCreateStash](input)),
+      applyStash: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelApplyStash](input)),
+      popStash: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelPopStash](input)),
+      dropStash: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelDropStash](input)),
+      compare: (input) => transport.request((client) => client[WS_METHODS.vcsPanelCompare](input)),
       onStatus: (input, listener, options) => {
         let current: VcsStatusResult | null = null;
         return transport.subscribe(

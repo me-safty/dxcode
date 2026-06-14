@@ -1,0 +1,953 @@
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
+import { detectSourceControlProviderFromRemoteUrl } from "@t3tools/shared/sourceControl";
+import {
+  GitCommandError,
+  type VcsPanelAddRemoteInput,
+  type VcsPanelBranchActionInput,
+  type VcsPanelBranchCommitsInput,
+  type VcsPanelBranchCommitsResult,
+  type VcsPanelBranchDetails,
+  type VcsPanelBranchDetailsInput,
+  type VcsPanelCommitInput,
+  type VcsPanelChangeGroup,
+  type VcsPanelCompareInput,
+  type VcsPanelCompareResult,
+  type VcsPanelFileActionInput,
+  type VcsPanelFileChange,
+  type VcsPanelFileDiffInput,
+  type VcsPanelFileDiffResult,
+  type VcsPanelFileStatus,
+  type VcsPanelRemote,
+  type VcsPanelRemoteInput,
+  type VcsPanelSnapshotInput,
+  type VcsPanelSnapshotResult,
+  type VcsPanelStash,
+  type VcsPanelStashDetails,
+  type VcsPanelStashDetailsInput,
+  type VcsPanelStashInput,
+  type VcsPullResult,
+  type VcsRef,
+  type VcsStatusLocalResult,
+} from "@t3tools/contracts";
+
+import { GitWorkflowService } from "../git/GitWorkflowService.ts";
+import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
+const isGitCommandError = Schema.is(GitCommandError);
+
+export interface SourceControlPanelServiceShape {
+  readonly snapshot: (
+    input: VcsPanelSnapshotInput,
+  ) => Effect.Effect<VcsPanelSnapshotResult, GitCommandError>;
+  readonly branchDetails: (
+    input: VcsPanelBranchDetailsInput,
+  ) => Effect.Effect<VcsPanelBranchDetails, GitCommandError>;
+  readonly branchCommits: (
+    input: VcsPanelBranchCommitsInput,
+  ) => Effect.Effect<VcsPanelBranchCommitsResult, GitCommandError>;
+  readonly stashDetails: (
+    input: VcsPanelStashDetailsInput,
+  ) => Effect.Effect<VcsPanelStashDetails, GitCommandError>;
+  readonly stageFiles: (input: VcsPanelFileActionInput) => Effect.Effect<void, GitCommandError>;
+  readonly unstageFiles: (input: VcsPanelFileActionInput) => Effect.Effect<void, GitCommandError>;
+  readonly discardFiles: (input: VcsPanelFileActionInput) => Effect.Effect<void, GitCommandError>;
+  readonly readFileDiff: (
+    input: VcsPanelFileDiffInput,
+  ) => Effect.Effect<VcsPanelFileDiffResult, GitCommandError>;
+  readonly commitStaged: (input: VcsPanelCommitInput) => Effect.Effect<void, GitCommandError>;
+  readonly pullBranch: (
+    input: VcsPanelBranchActionInput,
+  ) => Effect.Effect<VcsPullResult, GitCommandError>;
+  readonly pushBranch: (input: VcsPanelBranchActionInput) => Effect.Effect<void, GitCommandError>;
+  readonly fetchRemote: (input: VcsPanelRemoteInput) => Effect.Effect<void, GitCommandError>;
+  readonly fetchAllRemotes: (input: VcsPanelSnapshotInput) => Effect.Effect<void, GitCommandError>;
+  readonly addRemote: (input: VcsPanelAddRemoteInput) => Effect.Effect<void, GitCommandError>;
+  readonly removeRemote: (input: VcsPanelRemoteInput) => Effect.Effect<void, GitCommandError>;
+  readonly createStash: (input: VcsPanelStashInput) => Effect.Effect<void, GitCommandError>;
+  readonly applyStash: (input: VcsPanelStashInput) => Effect.Effect<void, GitCommandError>;
+  readonly popStash: (input: VcsPanelStashInput) => Effect.Effect<void, GitCommandError>;
+  readonly dropStash: (input: VcsPanelStashInput) => Effect.Effect<void, GitCommandError>;
+  readonly compare: (
+    input: VcsPanelCompareInput,
+  ) => Effect.Effect<VcsPanelCompareResult, GitCommandError>;
+}
+
+export class SourceControlPanelService extends Context.Service<
+  SourceControlPanelService,
+  SourceControlPanelServiceShape
+>()("t3/sourceControl/SourceControlPanelService") {}
+
+function commandLabel(args: readonly string[]): string {
+  return `git ${args.join(" ")}`;
+}
+
+function gitError(operation: string, cwd: string, args: readonly string[], detail: string) {
+  return new GitCommandError({ operation, command: commandLabel(args), cwd, detail });
+}
+
+function detailFromUnknown(cause: unknown): string {
+  if (cause instanceof Error && cause.message.length > 0) return cause.message;
+  if (typeof cause === "object" && cause !== null && "detail" in cause) {
+    const detail = cause.detail;
+    if (typeof detail === "string" && detail.length > 0) return detail;
+  }
+  return "Source control operation failed.";
+}
+
+function asGitCommandError(operation: string, cwd: string, args: readonly string[]) {
+  return (cause: unknown) =>
+    isGitCommandError(cause) ? cause : gitError(operation, cwd, args, detailFromUnknown(cause));
+}
+
+function parseNumstat(output: string): Map<string, { insertions: number; deletions: number }> {
+  const stats = new Map<string, { insertions: number; deletions: number }>();
+  for (const line of output.split("\n")) {
+    const [insertionsRaw, deletionsRaw, path] = line.split("\t");
+    if (!path) continue;
+    const insertions = Number.parseInt(insertionsRaw ?? "0", 10);
+    const deletions = Number.parseInt(deletionsRaw ?? "0", 10);
+    stats.set(path, {
+      insertions: Number.isFinite(insertions) ? insertions : 0,
+      deletions: Number.isFinite(deletions) ? deletions : 0,
+    });
+  }
+  return stats;
+}
+
+function statusFromCode(code: string, fallback: VcsPanelFileStatus): VcsPanelFileStatus {
+  switch (code) {
+    case "A":
+      return "added";
+    case "D":
+      return "deleted";
+    case "R":
+      return "renamed";
+    case "C":
+      return "copied";
+    case "U":
+      return "conflicted";
+    case "M":
+      return "modified";
+    default:
+      return fallback;
+  }
+}
+
+function addChange(
+  target: VcsPanelFileChange[],
+  input: {
+    path: string;
+    originalPath: string | null;
+    status: VcsPanelFileStatus;
+    stats?: { insertions: number; deletions: number } | undefined;
+  },
+) {
+  target.push({
+    path: input.path,
+    originalPath: input.originalPath,
+    status: input.status,
+    insertions: input.stats?.insertions ?? 0,
+    deletions: input.stats?.deletions ?? 0,
+  });
+}
+
+function parsePorcelainStatus(input: {
+  status: string;
+  stagedStats: Map<string, { insertions: number; deletions: number }>;
+  unstagedStats: Map<string, { insertions: number; deletions: number }>;
+}): VcsPanelChangeGroup[] {
+  const staged: VcsPanelFileChange[] = [];
+  const unstaged: VcsPanelFileChange[] = [];
+  const conflicts: VcsPanelFileChange[] = [];
+
+  for (const line of input.status.split(/\r?\n/u)) {
+    if (line.length === 0 || line.startsWith("#")) continue;
+    if (line.startsWith("? ")) {
+      const path = line.slice(2);
+      addChange(unstaged, { path, originalPath: null, status: "untracked" });
+      continue;
+    }
+    if (line.startsWith("u ")) {
+      const fields = line.split(" ");
+      const path = fields.slice(10).join(" ");
+      if (path.length > 0) {
+        addChange(conflicts, {
+          path,
+          originalPath: null,
+          status: "conflicted",
+          stats: input.unstagedStats.get(path) ?? input.stagedStats.get(path),
+        });
+      }
+      continue;
+    }
+
+    if (!line.startsWith("1 ") && !line.startsWith("2 ")) continue;
+    const xy = line.slice(2, 4);
+    const stagedCode = xy[0] ?? ".";
+    const unstagedCode = xy[1] ?? ".";
+    const isRename = line.startsWith("2 ");
+    const pathPart = isRename
+      ? line.split(" ").slice(9).join(" ")
+      : line.split(" ").slice(8).join(" ");
+    const [path = "", originalPath = null] = pathPart.split("\t");
+    if (path.length === 0) continue;
+    if (stagedCode === "U" || unstagedCode === "U") {
+      addChange(conflicts, {
+        path,
+        originalPath,
+        status: "conflicted",
+        stats: input.unstagedStats.get(path) ?? input.stagedStats.get(path),
+      });
+      continue;
+    }
+    if (stagedCode !== ".") {
+      addChange(staged, {
+        path,
+        originalPath,
+        status: statusFromCode(stagedCode, "modified"),
+        stats: input.stagedStats.get(path),
+      });
+    }
+    if (unstagedCode !== ".") {
+      addChange(unstaged, {
+        path,
+        originalPath,
+        status: statusFromCode(unstagedCode, "modified"),
+        stats: input.unstagedStats.get(path),
+      });
+    }
+  }
+
+  const sortFiles = (files: VcsPanelFileChange[]) =>
+    files.toSorted((left, right) => left.path.localeCompare(right.path));
+  return [
+    { kind: "staged" as const, files: sortFiles(staged) },
+    { kind: "unstaged" as const, files: sortFiles(unstaged) },
+    { kind: "conflicts" as const, files: sortFiles(conflicts) },
+  ];
+}
+
+function parsePorcelainBranchSync(status: string) {
+  let hasUpstream = false;
+  let aheadCount = 0;
+  let behindCount = 0;
+
+  for (const line of status.split(/\r?\n/u)) {
+    if (line.startsWith("# branch.upstream ")) {
+      hasUpstream = true;
+      continue;
+    }
+    if (line.startsWith("# branch.ab ")) {
+      for (const part of line.slice("# branch.ab ".length).split(" ")) {
+        if (part.startsWith("+")) {
+          const ahead = Number.parseInt(part.slice(1), 10);
+          if (Number.isFinite(ahead)) aheadCount = ahead;
+        }
+        if (part.startsWith("-")) {
+          const behind = Number.parseInt(part.slice(1), 10);
+          if (Number.isFinite(behind)) behindCount = behind;
+        }
+      }
+    }
+  }
+
+  return { hasUpstream, aheadCount, behindCount };
+}
+
+function panelStatusFromLocal(
+  local: VcsStatusLocalResult,
+  porcelain: string,
+): VcsPanelSnapshotResult["status"] {
+  const sync = parsePorcelainBranchSync(porcelain);
+  return {
+    ...local,
+    ...sync,
+    aheadOfDefaultCount: 0,
+    pr: null,
+  };
+}
+
+function parseRemoteVerbose(output: string): VcsPanelRemote[] {
+  const byName = new Map<string, { fetchUrl: string | null; pushUrl: string | null }>();
+  for (const line of output.split("\n")) {
+    const match = /^(\S+)\s+(\S+)\s+\((fetch|push)\)$/u.exec(line.trim());
+    if (!match) continue;
+    const [, name, url, direction] = match;
+    if (!name || !url || !direction) continue;
+    const current = byName.get(name) ?? { fetchUrl: null, pushUrl: null };
+    if (direction === "fetch") current.fetchUrl = url;
+    if (direction === "push") current.pushUrl = url;
+    byName.set(name, current);
+  }
+  return [...byName.entries()].map(([name, remote]) => ({
+    name,
+    fetchUrl: remote.fetchUrl,
+    pushUrl: remote.pushUrl,
+    provider: remote.fetchUrl ? detectSourceControlProviderFromRemoteUrl(remote.fetchUrl) : null,
+    branches: [],
+  }));
+}
+
+function parseRemoteBranches(output: string, remoteName: string): VcsPanelRemote["branches"] {
+  const seen = new Set<string>();
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((name) => name !== `${remoteName}/HEAD`)
+    .filter((name) => name !== remoteName)
+    .filter((name) => {
+      if (seen.has(name)) return false;
+      seen.add(name);
+      return true;
+    })
+    .map((name) => ({
+      name: name.startsWith(`${remoteName}/`) ? name.slice(remoteName.length + 1) : name,
+      fullRefName: name,
+      isDefaultRemoteHead: false,
+    }));
+}
+
+function parseStashes(output: string): VcsPanelStash[] {
+  return output.split("\n").flatMap((line) => {
+    const [refName, sha, message] = line.split("\t");
+    if (!refName) return [];
+    return [
+      {
+        refName,
+        sha: sha && sha.length > 0 ? sha : null,
+        message: message && message.trim().length > 0 ? message.trim() : refName,
+      },
+    ];
+  });
+}
+
+function parseLocalBranches(output: string): VcsRef[] {
+  const rows = output
+    .split(/\r?\n/u)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const [name = "", head = "", worktreePath = ""] = line.split("\t");
+      return {
+        name,
+        current: head.trim() === "*",
+        worktreePath: worktreePath.length > 0 ? worktreePath : null,
+      };
+    })
+    .filter((branch) => branch.name.length > 0);
+  const defaultName =
+    rows.find((branch) => branch.name === "main")?.name ??
+    rows.find((branch) => branch.name === "master")?.name ??
+    rows.find((branch) => !branch.current)?.name ??
+    rows[0]?.name ??
+    null;
+
+  return rows.map((branch) => ({
+    name: branch.name,
+    current: branch.current,
+    isDefault: branch.name === defaultName,
+    worktreePath: branch.worktreePath,
+  }));
+}
+
+function parseCommits(output: string): VcsPanelSnapshotResult["recentCommits"] {
+  return output.split("\n").flatMap((line) => {
+    const [sha, shortSha, authorName, authoredAt, message] = line.split("\t");
+    if (!sha || !shortSha || !message) return [];
+    return [
+      {
+        sha,
+        shortSha,
+        message,
+        authorName: authorName ?? null,
+        authoredAt: authoredAt ?? null,
+        files: [],
+      },
+    ];
+  });
+}
+
+function fileStatusFromNameStatus(status: string | undefined): VcsPanelFileStatus {
+  if (!status) return "modified";
+  if (status.startsWith("R")) return "renamed";
+  if (status.startsWith("C")) return "copied";
+  return statusFromCode(status[0] ?? "M", "modified");
+}
+
+function parseNameStatus(
+  output: string,
+): Map<string, { status: VcsPanelFileStatus; originalPath: string | null }> {
+  const statuses = new Map<string, { status: VcsPanelFileStatus; originalPath: string | null }>();
+  for (const line of output.split("\n")) {
+    const [statusRaw, firstPath, secondPath] = line.split("\t");
+    if (!statusRaw || !firstPath) continue;
+    const path = secondPath ?? firstPath;
+    statuses.set(path, {
+      status: fileStatusFromNameStatus(statusRaw),
+      originalPath: secondPath ? firstPath : null,
+    });
+  }
+  return statuses;
+}
+
+function parseFileChangesFromNumstat(input: {
+  numstat: string;
+  statuses?: Map<string, { status: VcsPanelFileStatus; originalPath: string | null }>;
+}): VcsPanelFileChange[] {
+  const files: VcsPanelFileChange[] = [];
+  for (const line of input.numstat.split("\n")) {
+    const [insertionsRaw, deletionsRaw, pathRaw, renamedPathRaw] = line.split("\t");
+    const path = renamedPathRaw ?? pathRaw;
+    if (!path) continue;
+    const insertions = Number.parseInt(insertionsRaw ?? "0", 10);
+    const deletions = Number.parseInt(deletionsRaw ?? "0", 10);
+    const status = input.statuses?.get(path);
+    files.push({
+      path,
+      originalPath: status?.originalPath ?? null,
+      status: status?.status ?? "modified",
+      insertions: Number.isFinite(insertions) ? insertions : 0,
+      deletions: Number.isFinite(deletions) ? deletions : 0,
+    });
+  }
+  return files.toSorted((left, right) => left.path.localeCompare(right.path));
+}
+
+function targetRef(target: VcsPanelCompareInput["left"]): string {
+  switch (target.kind) {
+    case "working-tree":
+      return "";
+    case "branch":
+      return target.refName;
+    case "stash":
+      return target.refName;
+  }
+}
+
+export const make = Effect.fn("makeSourceControlPanelService")(function* () {
+  const git = yield* GitVcsDriver;
+  const workflow = yield* GitWorkflowService;
+
+  const run = (
+    operation: string,
+    cwd: string,
+    args: readonly string[],
+    options?: { readonly allowNonZeroExit?: boolean },
+  ) =>
+    git
+      .execute({
+        operation,
+        cwd,
+        args,
+        allowNonZeroExit: options?.allowNonZeroExit ?? false,
+        timeoutMs: 30_000,
+        maxOutputBytes: 8 * 1024 * 1024,
+        appendTruncationMarker: true,
+      })
+      .pipe(
+        Effect.flatMap((result) => {
+          if (options?.allowNonZeroExit === true || result.exitCode === 0) {
+            return Effect.succeed(result.stdout);
+          }
+          return Effect.fail(
+            gitError(operation, cwd, args, result.stderr.trim() || result.stdout.trim()),
+          );
+        }),
+        Effect.mapError(asGitCommandError(operation, cwd, args)),
+      );
+
+  const COMMIT_PAGE_SIZE = 5;
+
+  const commitFiles = (cwd: string, sha: string) =>
+    Effect.all(
+      [
+        run("vcs.panel.commitNumstat", cwd, ["show", "--format=", "--numstat", sha]),
+        run("vcs.panel.commitNameStatus", cwd, [
+          "show",
+          "--format=",
+          "--name-status",
+          "--find-renames",
+          sha,
+        ]),
+      ],
+      { concurrency: "unbounded" },
+    ).pipe(
+      Effect.map(([numstat, nameStatus]) =>
+        parseFileChangesFromNumstat({
+          numstat,
+          statuses: parseNameStatus(nameStatus),
+        }),
+      ),
+      Effect.orElseSucceed(() => []),
+    );
+
+  const withCommitFiles = (cwd: string, commits: VcsPanelSnapshotResult["recentCommits"]) =>
+    Effect.forEach(
+      commits,
+      (commit) =>
+        commitFiles(cwd, commit.sha).pipe(
+          Effect.map((files) => ({
+            ...commit,
+            files,
+          })),
+        ),
+      { concurrency: 2 },
+    );
+
+  const parseCount = (value: string) => {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  };
+
+  const countCommitsForRange = (cwd: string, range: string) =>
+    run("vcs.panel.branchCommitCount", cwd, ["rev-list", "--count", range]).pipe(
+      Effect.map(parseCount),
+      Effect.orElseSucceed(() => 0),
+    );
+
+  const commitsForRange = (
+    cwd: string,
+    range: string,
+    maxCount: number,
+    skip = 0,
+  ): Effect.Effect<VcsPanelSnapshotResult["recentCommits"], GitCommandError> =>
+    run("vcs.panel.branchCommits", cwd, [
+      "log",
+      `--skip=${skip}`,
+      `--max-count=${maxCount}`,
+      "--format=%H%x09%h%x09%an%x09%aI%x09%s",
+      range,
+    ]).pipe(
+      Effect.map(parseCommits),
+      Effect.flatMap((commits) => withCommitFiles(cwd, commits)),
+    );
+
+  const branchCommits = (
+    cwd: string,
+    branch: VcsRef,
+    skip: number,
+    limit: number,
+  ): Effect.Effect<VcsPanelBranchCommitsResult, GitCommandError> =>
+    Effect.gen(function* () {
+      const refName = branch.name;
+      const [total, commits] = yield* Effect.all(
+        [countCommitsForRange(cwd, refName), commitsForRange(cwd, refName, limit, skip)],
+        { concurrency: "unbounded" },
+      );
+      return {
+        commits,
+        remaining: Math.max(0, total - skip - commits.length),
+      };
+    });
+
+  const stashDetails = (
+    cwd: string,
+    stashRef: string,
+  ): Effect.Effect<VcsPanelStashDetails, GitCommandError> =>
+    Effect.all(
+      [
+        run("vcs.panel.stashNumstat", cwd, [
+          "stash",
+          "show",
+          "--numstat",
+          "--include-untracked",
+          stashRef,
+        ]),
+        run("vcs.panel.stashNameStatus", cwd, [
+          "stash",
+          "show",
+          "--name-status",
+          "--find-renames",
+          "--include-untracked",
+          stashRef,
+        ]),
+      ],
+      { concurrency: "unbounded" },
+    ).pipe(
+      Effect.map(([numstat, nameStatus]) =>
+        parseFileChangesFromNumstat({
+          numstat,
+          statuses: parseNameStatus(nameStatus),
+        }),
+      ),
+      Effect.orElseSucceed(() => []),
+      Effect.map((files) => ({
+        refName: stashRef,
+        files,
+      })),
+    );
+
+  const compareFiles = (cwd: string, baseRef: string | null, refName: string) => {
+    if (!baseRef) return Effect.succeed([]);
+    return Effect.all(
+      [
+        run("vcs.panel.branchCompareNumstat", cwd, [
+          "diff",
+          "--numstat",
+          `${baseRef}...${refName}`,
+        ]),
+        run("vcs.panel.branchCompareNameStatus", cwd, [
+          "diff",
+          "--name-status",
+          "--find-renames",
+          `${baseRef}...${refName}`,
+        ]),
+      ],
+      { concurrency: "unbounded" },
+    ).pipe(
+      Effect.map(([numstat, nameStatus]) =>
+        parseFileChangesFromNumstat({
+          numstat,
+          statuses: parseNameStatus(nameStatus),
+        }),
+      ),
+      Effect.orElseSucceed(() => []),
+    );
+  };
+
+  const upstreamForRef = (cwd: string, refName: string) =>
+    run("vcs.panel.branchUpstream", cwd, [
+      "rev-parse",
+      "--abbrev-ref",
+      "--symbolic-full-name",
+      `${refName}@{upstream}`,
+    ]).pipe(
+      Effect.map((value) => value.trim()),
+      Effect.orElseSucceed(() => ""),
+      Effect.map((value) => (value.length > 0 ? value : null)),
+    );
+
+  const branchDetails = (
+    cwd: string,
+    branch: VcsRef,
+    defaultCompareRef: string | null,
+  ): Effect.Effect<VcsPanelBranchDetails, GitCommandError> =>
+    Effect.gen(function* () {
+      const refName = branch.name;
+      const upstreamRef = branch.isRemote ? null : yield* upstreamForRef(cwd, refName);
+      const baseRef = upstreamRef ?? (!branch.isDefault ? defaultCompareRef : null);
+      const [aheadCommits, behindCommits, totalCommits, commits, files] = yield* Effect.all(
+        [
+          baseRef
+            ? commitsForRange(cwd, `${baseRef}..${refName}`, COMMIT_PAGE_SIZE)
+            : Effect.succeed([]),
+          baseRef
+            ? commitsForRange(cwd, `${refName}..${baseRef}`, COMMIT_PAGE_SIZE)
+            : Effect.succeed([]),
+          countCommitsForRange(cwd, refName),
+          commitsForRange(cwd, refName, COMMIT_PAGE_SIZE),
+          compareFiles(cwd, baseRef, refName),
+        ],
+        { concurrency: "unbounded" },
+      );
+      return {
+        name: branch.name,
+        fullRefName: branch.name,
+        isRemote: branch.isRemote === true,
+        remoteName: branch.remoteName ?? null,
+        current: branch.current,
+        isDefault: branch.isDefault,
+        worktreePath: branch.worktreePath,
+        upstreamRef,
+        baseRef,
+        aheadCommits,
+        behindCommits,
+        commits,
+        commitsRemaining: Math.max(0, totalCommits - commits.length),
+        compareFiles: files,
+      };
+    });
+
+  const snapshot: SourceControlPanelServiceShape["snapshot"] = Effect.fn("snapshot")(
+    function* (input) {
+      const [
+        localStatus,
+        localBranchesOutput,
+        porcelain,
+        unstagedNumstat,
+        stagedNumstat,
+        remotesOutput,
+        stashes,
+      ] = yield* Effect.all(
+        [
+          workflow
+            .localStatus(input)
+            .pipe(
+              Effect.mapError(asGitCommandError("vcs.panel.localStatus", input.cwd, ["status"])),
+            ),
+          run("vcs.panel.localBranches", input.cwd, [
+            "branch",
+            "--format=%(refname:short)%09%(HEAD)%09%(worktreepath)",
+          ]),
+          run("vcs.panel.statusPorcelain", input.cwd, ["status", "--porcelain=2", "--branch"]),
+          run("vcs.panel.unstagedNumstat", input.cwd, ["diff", "--numstat"]),
+          run("vcs.panel.stagedNumstat", input.cwd, ["diff", "--cached", "--numstat"]),
+          run("vcs.panel.remotes", input.cwd, ["remote", "-v"]),
+          run("vcs.panel.stashes", input.cwd, ["stash", "list", "--format=%gd%x09%H%x09%gs"]),
+        ],
+        { concurrency: "unbounded" },
+      );
+
+      const localBranches = parseLocalBranches(localBranchesOutput);
+      const remotes = parseRemoteVerbose(remotesOutput);
+      const remotesWithBranches = yield* Effect.forEach(
+        remotes,
+        (remote) =>
+          run("vcs.panel.remoteBranches", input.cwd, [
+            "branch",
+            "-r",
+            "--list",
+            `${remote.name}/*`,
+            "--format=%(refname:short)",
+          ]).pipe(
+            Effect.map((branchesOutput) => ({
+              ...remote,
+              branches: parseRemoteBranches(branchesOutput, remote.name),
+            })),
+            Effect.orElseSucceed(() => remote),
+          ),
+        { concurrency: "unbounded" },
+      );
+      const defaultCompareRef =
+        localBranches.find((ref) => ref.isDefault && !ref.current)?.name ??
+        localBranches.find((ref) => !ref.current)?.name ??
+        null;
+      return {
+        status: panelStatusFromLocal(localStatus, porcelain),
+        changeGroups: parsePorcelainStatus({
+          status: porcelain,
+          stagedStats: parseNumstat(stagedNumstat),
+          unstagedStats: parseNumstat(unstagedNumstat),
+        }),
+        localBranches,
+        branchDetails: [],
+        remotes: remotesWithBranches,
+        stashes: parseStashes(stashes),
+        recentCommits: [],
+        defaultCompareRef,
+      };
+    },
+  );
+
+  const stageFiles: SourceControlPanelServiceShape["stageFiles"] = (input) =>
+    run("vcs.panel.stageFiles", input.cwd, ["add", "-A", "--", ...input.paths]).pipe(Effect.asVoid);
+
+  const unstageFiles: SourceControlPanelServiceShape["unstageFiles"] = (input) =>
+    run("vcs.panel.unstageFiles", input.cwd, ["reset", "--", ...input.paths]).pipe(Effect.asVoid);
+
+  const discardFiles: SourceControlPanelServiceShape["discardFiles"] = (input) =>
+    Effect.gen(function* () {
+      if (input.staged) {
+        yield* run("vcs.panel.discardStagedFiles", input.cwd, [
+          "restore",
+          "--staged",
+          "--worktree",
+          "--source=HEAD",
+          "--",
+          ...input.paths,
+        ]).pipe(Effect.asVoid);
+        return;
+      }
+
+      yield* run("vcs.panel.discardUnstagedFiles", input.cwd, [
+        "restore",
+        "--worktree",
+        "--",
+        ...input.paths,
+      ]).pipe(
+        Effect.asVoid,
+        Effect.catch(() => Effect.void),
+      );
+      yield* run("vcs.panel.cleanUntrackedFiles", input.cwd, [
+        "clean",
+        "-fd",
+        "--",
+        ...input.paths,
+      ]).pipe(Effect.asVoid);
+    });
+
+  const readFileDiff: SourceControlPanelServiceShape["readFileDiff"] = Effect.fn("readFileDiff")(
+    function* (input) {
+      const args = input.staged
+        ? ["diff", "--cached", "--", input.path]
+        : ["diff", "--", input.path];
+      let patch = yield* run("vcs.panel.readFileDiff", input.cwd, args);
+      if (!input.staged && patch.trim().length === 0) {
+        patch = yield* run(
+          "vcs.panel.readUntrackedFileDiff",
+          input.cwd,
+          ["diff", "--no-index", "--", "/dev/null", input.path],
+          { allowNonZeroExit: true },
+        );
+      }
+      return { path: input.path, staged: input.staged, patch };
+    },
+  );
+
+  const pushBranchDirect = Effect.fn("pushBranchDirect")(function* (
+    cwd: string,
+    branchName: string,
+    force: boolean,
+  ) {
+    const upstream = yield* run("vcs.panel.pushBranch.upstream", cwd, [
+      "rev-parse",
+      "--abbrev-ref",
+      "--symbolic-full-name",
+      "@{upstream}",
+    ]).pipe(
+      Effect.map((value) => value.trim()),
+      Effect.orElseSucceed(() => ""),
+    );
+    const [remoteName = "origin", ...remoteBranchParts] =
+      upstream.length > 0 ? upstream.split("/") : ["origin", branchName];
+    const remoteBranchName = remoteBranchParts.join("/") || branchName;
+    yield* run("vcs.panel.pushBranch", cwd, [
+      "push",
+      force ? "--force-with-lease" : "-u",
+      remoteName,
+      `HEAD:refs/heads/${remoteBranchName}`,
+    ]).pipe(Effect.asVoid);
+  });
+
+  const commitStaged: SourceControlPanelServiceShape["commitStaged"] = Effect.fn("commitStaged")(
+    function* (input) {
+      const [subject = input.message, ...bodyLines] = input.message.split(/\r?\n/u);
+      const args = ["commit", "-m", subject.trim()];
+      const body = bodyLines.join("\n").trim();
+      if (body.length > 0) args.push("-m", body);
+      yield* run("vcs.panel.commitStaged", input.cwd, args).pipe(Effect.asVoid);
+      if (input.push) {
+        const status = yield* workflow
+          .status({ cwd: input.cwd })
+          .pipe(
+            Effect.mapError(
+              asGitCommandError("vcs.panel.commitStaged.status", input.cwd, ["status"]),
+            ),
+          );
+        if (!status.refName) {
+          return yield* gitError(
+            "vcs.panel.commitStaged.push",
+            input.cwd,
+            ["push"],
+            "Cannot push from detached HEAD.",
+          );
+        }
+        yield* pushBranchDirect(input.cwd, status.refName, false);
+      }
+    },
+  );
+
+  const pullBranch: SourceControlPanelServiceShape["pullBranch"] = Effect.fn("pullBranch")(
+    function* (input) {
+      const status = yield* workflow
+        .status({ cwd: input.cwd })
+        .pipe(
+          Effect.mapError(asGitCommandError("vcs.panel.pullBranch.status", input.cwd, ["status"])),
+        );
+      if (status.refName !== input.branchName) {
+        return yield* gitError(
+          "vcs.panel.pullBranch",
+          input.cwd,
+          ["pull"],
+          "Only the current branch can be pulled from the source-control panel.",
+        );
+      }
+      if (input.force) {
+        yield* run("vcs.panel.forcePullBranch", input.cwd, ["fetch"]);
+        const upstream = yield* run("vcs.panel.forcePullBranch.upstream", input.cwd, [
+          "rev-parse",
+          "--abbrev-ref",
+          "--symbolic-full-name",
+          "@{upstream}",
+        ]).pipe(Effect.map((value) => value.trim()));
+        yield* run("vcs.panel.forcePullBranch.reset", input.cwd, [
+          "reset",
+          "--hard",
+          upstream,
+        ]).pipe(Effect.asVoid);
+        return {
+          status: "pulled" as const,
+          refName: input.branchName,
+          upstreamRef: upstream,
+        };
+      }
+      return yield* workflow.pullCurrentBranch(input.cwd);
+    },
+  );
+
+  const pushBranch: SourceControlPanelServiceShape["pushBranch"] = Effect.fn("pushBranch")(
+    function* (input) {
+      yield* pushBranchDirect(input.cwd, input.branchName, input.force ?? false);
+    },
+  );
+
+  return SourceControlPanelService.of({
+    snapshot,
+    branchDetails: (input) => branchDetails(input.cwd, input.branch, input.defaultCompareRef),
+    branchCommits: (input) => branchCommits(input.cwd, input.branch, input.skip, input.limit),
+    stashDetails: (input) => stashDetails(input.cwd, input.stashRef),
+    stageFiles,
+    unstageFiles,
+    discardFiles,
+    readFileDiff,
+    commitStaged,
+    pullBranch,
+    pushBranch,
+    fetchRemote: (input) =>
+      run("vcs.panel.fetchRemote", input.cwd, ["fetch", input.remoteName]).pipe(Effect.asVoid),
+    fetchAllRemotes: (input) =>
+      run("vcs.panel.fetchAllRemotes", input.cwd, ["fetch", "--all"]).pipe(Effect.asVoid),
+    addRemote: (input) =>
+      run("vcs.panel.addRemote", input.cwd, ["remote", "add", input.name, input.url]).pipe(
+        Effect.asVoid,
+      ),
+    removeRemote: (input) =>
+      run("vcs.panel.removeRemote", input.cwd, ["remote", "remove", input.remoteName]).pipe(
+        Effect.asVoid,
+      ),
+    createStash: (input) => {
+      const mode = input.mode ?? "all";
+      const modeArgs =
+        mode === "staged"
+          ? ["--staged"]
+          : mode === "unstaged" || input.includeUntracked
+            ? ["--include-untracked", ...(mode === "unstaged" ? ["--keep-index"] : [])]
+            : [];
+      return run("vcs.panel.createStash", input.cwd, [
+        "stash",
+        "push",
+        ...modeArgs,
+        "-m",
+        input.message?.trim() || "T3 Code stash",
+      ]).pipe(Effect.asVoid);
+    },
+    applyStash: (input) =>
+      run("vcs.panel.applyStash", input.cwd, [
+        "stash",
+        "apply",
+        input.stashRef ?? "stash@{0}",
+      ]).pipe(Effect.asVoid),
+    popStash: (input) =>
+      run("vcs.panel.popStash", input.cwd, ["stash", "pop", input.stashRef ?? "stash@{0}"]).pipe(
+        Effect.asVoid,
+      ),
+    dropStash: (input) =>
+      run("vcs.panel.dropStash", input.cwd, ["stash", "drop", input.stashRef ?? "stash@{0}"]).pipe(
+        Effect.asVoid,
+      ),
+    compare: (input) => {
+      const left = targetRef(input.left);
+      const right = targetRef(input.right);
+      const range = left && right ? `${left}..${right}` : left || right;
+      const args = range ? ["diff", "--no-ext-diff", "--patch", "--minimal", range] : ["diff"];
+      return run("vcs.panel.compare", input.cwd, args).pipe(
+        Effect.map((patch): VcsPanelCompareResult => ({ patch })),
+      );
+    },
+  });
+});
+
+export const layer = Layer.effect(SourceControlPanelService, make());

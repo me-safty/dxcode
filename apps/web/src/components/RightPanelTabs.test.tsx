@@ -17,9 +17,11 @@ describe("RightPanelTabs", () => {
         onAddBrowser={vi.fn()}
         onAddTerminal={vi.fn()}
         onAddDiff={vi.fn()}
+        onAddSourceControl={vi.fn()}
         browserAvailable
         terminalAvailable={false}
         diffAvailable
+        sourceControlAvailable
       >
         <div />
       </RightPanelTabs>,

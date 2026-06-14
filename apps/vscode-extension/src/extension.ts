@@ -326,6 +326,7 @@ const DISPLAY_PREFERENCE_SETTINGS = [
   "t3code.ui.showCheckoutModeIndicator",
   "t3code.ui.showBranchSelector",
   "t3code.ui.enableTerminal",
+  "t3code.ui.enableSourceControlPanel",
   "t3code.ui.threadConversationMaxWidth",
 ] as const;
 
@@ -438,6 +439,7 @@ function readWebviewDisplayPreferences(): WebviewDisplayPreferences {
     showCheckoutModeIndicator: configuration.get<boolean>("ui.showCheckoutModeIndicator", false),
     showBranchSelector: configuration.get<boolean>("ui.showBranchSelector", false),
     enableTerminal: configuration.get<boolean>("ui.enableTerminal", false),
+    enableSourceControlPanel: configuration.get<boolean>("ui.enableSourceControlPanel", false),
     threadConversationMaxWidthPx: normalizeThreadConversationMaxWidth(
       configuration.get<number | null>("ui.threadConversationMaxWidth"),
     ),

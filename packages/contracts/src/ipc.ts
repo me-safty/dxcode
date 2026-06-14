@@ -6,6 +6,24 @@ import type {
   VcsInitInput,
   VcsListRefsInput,
   VcsListRefsResult,
+  VcsPanelAddRemoteInput,
+  VcsPanelBranchActionInput,
+  VcsPanelBranchCommitsInput,
+  VcsPanelBranchCommitsResult,
+  VcsPanelBranchDetails,
+  VcsPanelBranchDetailsInput,
+  VcsPanelCommitInput,
+  VcsPanelCompareInput,
+  VcsPanelCompareResult,
+  VcsPanelFileActionInput,
+  VcsPanelFileDiffInput,
+  VcsPanelFileDiffResult,
+  VcsPanelRemoteInput,
+  VcsPanelSnapshotInput,
+  VcsPanelSnapshotResult,
+  VcsPanelStashDetails,
+  VcsPanelStashDetailsInput,
+  VcsPanelStashInput,
   VcsPullInput,
   VcsPullResult,
   VcsRemoveWorktreeInput,
@@ -280,6 +298,7 @@ export interface T3HostDisplayPreferences {
   showCheckoutModeIndicator: boolean;
   showBranchSelector: boolean;
   enableTerminal: boolean;
+  enableSourceControlPanel: boolean;
   threadConversationMaxWidthPx: number | null;
 }
 
@@ -298,6 +317,7 @@ export const T3HostDisplayPreferencesSchema = Schema.Struct({
   showCheckoutModeIndicator: Schema.Boolean,
   showBranchSelector: Schema.Boolean,
   enableTerminal: Schema.Boolean,
+  enableSourceControlPanel: Schema.Boolean,
   threadConversationMaxWidthPx: Schema.NullOr(ThreadConversationMaxWidthPxSchema),
 });
 
@@ -1233,6 +1253,26 @@ export interface EnvironmentApi {
     init: (input: VcsInitInput) => Promise<void>;
     pull: (input: VcsPullInput) => Promise<VcsPullResult>;
     refreshStatus: (input: VcsStatusInput) => Promise<VcsStatusResult>;
+    panelSnapshot: (input: VcsPanelSnapshotInput) => Promise<VcsPanelSnapshotResult>;
+    branchDetails: (input: VcsPanelBranchDetailsInput) => Promise<VcsPanelBranchDetails>;
+    branchCommits: (input: VcsPanelBranchCommitsInput) => Promise<VcsPanelBranchCommitsResult>;
+    stashDetails: (input: VcsPanelStashDetailsInput) => Promise<VcsPanelStashDetails>;
+    stageFiles: (input: VcsPanelFileActionInput) => Promise<void>;
+    unstageFiles: (input: VcsPanelFileActionInput) => Promise<void>;
+    discardFiles: (input: VcsPanelFileActionInput) => Promise<void>;
+    readFileDiff: (input: VcsPanelFileDiffInput) => Promise<VcsPanelFileDiffResult>;
+    commitStaged: (input: VcsPanelCommitInput) => Promise<void>;
+    pullBranch: (input: VcsPanelBranchActionInput) => Promise<VcsPullResult>;
+    pushBranch: (input: VcsPanelBranchActionInput) => Promise<void>;
+    fetchRemote: (input: VcsPanelRemoteInput) => Promise<void>;
+    fetchAllRemotes: (input: VcsPanelSnapshotInput) => Promise<void>;
+    addRemote: (input: VcsPanelAddRemoteInput) => Promise<void>;
+    removeRemote: (input: VcsPanelRemoteInput) => Promise<void>;
+    createStash: (input: VcsPanelStashInput) => Promise<void>;
+    applyStash: (input: VcsPanelStashInput) => Promise<void>;
+    popStash: (input: VcsPanelStashInput) => Promise<void>;
+    dropStash: (input: VcsPanelStashInput) => Promise<void>;
+    compare: (input: VcsPanelCompareInput) => Promise<VcsPanelCompareResult>;
     onStatus: (
       input: VcsStatusInput,
       callback: (status: VcsStatusResult) => void,

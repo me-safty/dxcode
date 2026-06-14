@@ -127,6 +127,11 @@ const PreviewPanel = lazy(() =>
   import("./preview/PreviewPanel").then((mod) => ({ default: mod.PreviewPanel })),
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
+const SourceControlPanel = lazy(() =>
+  import("./source-control/SourceControlPanel").then((mod) => ({
+    default: mod.SourceControlPanel,
+  })),
+);
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
@@ -1146,6 +1151,7 @@ export default function ChatView(props: ChatViewProps) {
   const settings = useSettings();
   const hostDisplayPreferences = useHostDisplayPreferences();
   const terminalEnabled = hostDisplayPreferences.enableTerminal;
+  const sourceControlPanelEnabled = hostDisplayPreferences.enableSourceControlPanel;
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -2321,6 +2327,18 @@ export default function ChatView(props: ChatViewProps) {
         worktreePath: activeThread?.worktreePath ?? null,
       })
     : null;
+  const sourceControlAvailable = sourceControlPanelEnabled && isServerThread && gitCwd !== null;
+  const visibleRightPanelSurfaces = useMemo(
+    () =>
+      sourceControlAvailable
+        ? rightPanelState.surfaces
+        : rightPanelState.surfaces.filter((surface) => surface.kind !== "source-control"),
+    [rightPanelState.surfaces, sourceControlAvailable],
+  );
+  const visibleActiveRightPanelSurface =
+    activeRightPanelSurface?.kind === "source-control" && !sourceControlAvailable
+      ? null
+      : activeRightPanelSurface;
   const gitStatusQuery = useVcsStatus({ environmentId, cwd: gitCwd });
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
@@ -2410,6 +2428,10 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen,
     threadId,
   ]);
+  const addSourceControlSurface = useCallback(() => {
+    if (!activeThreadRef || !sourceControlAvailable) return;
+    useRightPanelStore.getState().open(activeThreadRef, "source-control");
+  }, [activeThreadRef, sourceControlAvailable]);
   // Right-panel arbitration:
   //   - The diff panel's openness is mirrored by the `?diff=1` URL search
   //     param so it deep-links cleanly. The store still records preview/plan
@@ -4959,8 +4981,8 @@ export default function ChatView(props: ChatViewProps) {
       {!shouldUsePlanSidebarSheet && rightPanelOpen && activeThreadRef ? (
         <RightPanelTabs
           mode="inline"
-          surfaces={rightPanelState.surfaces}
-          activeSurfaceId={activeRightPanelSurface?.id ?? null}
+          surfaces={visibleRightPanelSurfaces}
+          activeSurfaceId={visibleActiveRightPanelSurface?.id ?? null}
           previewSessions={activePreviewState.sessions}
           terminalLabelsById={activeTerminalLabelsById}
           onActivate={activateRightPanelSurface}
@@ -4968,24 +4990,26 @@ export default function ChatView(props: ChatViewProps) {
           onAddBrowser={createBrowserSurface}
           onAddTerminal={addTerminalSurface}
           onAddDiff={addDiffSurface}
+          onAddSourceControl={addSourceControlSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={terminalEnabled}
           diffAvailable={isServerThread && isGitRepo}
+          sourceControlAvailable={sourceControlAvailable}
         >
-          {activeRightPanelSurface?.kind === "preview" ? (
+          {visibleActiveRightPanelSurface?.kind === "preview" ? (
             <Suspense fallback={null}>
               <PreviewPanel
                 mode="embedded"
                 threadRef={activeThreadRef}
-                tabId={activeRightPanelSurface.resourceId}
+                tabId={visibleActiveRightPanelSurface.resourceId}
                 configuredUrls={configuredPreviewUrls}
                 visible
               />
             </Suspense>
-          ) : activeRightPanelSurface?.kind === "terminal" ? (
+          ) : visibleActiveRightPanelSurface?.kind === "terminal" ? (
             <PersistentThreadTerminalPanel
               threadRef={activeThreadRef}
-              surface={activeRightPanelSurface}
+              surface={visibleActiveRightPanelSurface}
               launchContext={activeTerminalLaunchContext ?? null}
               focusRequestId={terminalFocusRequestId}
               keybindings={keybindings}
@@ -5000,12 +5024,21 @@ export default function ChatView(props: ChatViewProps) {
               newShortcutLabel={newTerminalShortcutLabel ?? undefined}
               closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
             />
-          ) : activeRightPanelSurface?.kind === "diff" ? (
+          ) : visibleActiveRightPanelSurface?.kind === "diff" ? (
             <DiffWorkerPoolProvider>
               <Suspense fallback={null}>
                 <DiffPanel mode="embedded" />
               </Suspense>
             </DiffWorkerPoolProvider>
+          ) : visibleActiveRightPanelSurface?.kind === "source-control" && gitCwd ? (
+            <Suspense fallback={null}>
+              <SourceControlPanel
+                environmentId={environmentId}
+                threadId={activeThreadRef.threadId}
+                cwd={gitCwd}
+                worktreePath={activeThreadWorktreePath}
+              />
+            </Suspense>
           ) : null}
         </RightPanelTabs>
       ) : null}
@@ -5014,8 +5047,8 @@ export default function ChatView(props: ChatViewProps) {
         <RightPanelSheet open onClose={closePreviewPanel}>
           <RightPanelTabs
             mode="sheet"
-            surfaces={rightPanelState.surfaces}
-            activeSurfaceId={activeRightPanelSurface?.id ?? null}
+            surfaces={visibleRightPanelSurfaces}
+            activeSurfaceId={visibleActiveRightPanelSurface?.id ?? null}
             previewSessions={activePreviewState.sessions}
             terminalLabelsById={activeTerminalLabelsById}
             onActivate={activateRightPanelSurface}
@@ -5023,24 +5056,26 @@ export default function ChatView(props: ChatViewProps) {
             onAddBrowser={createBrowserSurface}
             onAddTerminal={addTerminalSurface}
             onAddDiff={addDiffSurface}
+            onAddSourceControl={addSourceControlSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={terminalEnabled}
             diffAvailable={isServerThread && isGitRepo}
+            sourceControlAvailable={sourceControlAvailable}
           >
-            {activeRightPanelSurface?.kind === "preview" ? (
+            {visibleActiveRightPanelSurface?.kind === "preview" ? (
               <Suspense fallback={null}>
                 <PreviewPanel
                   mode="embedded"
                   threadRef={activeThreadRef}
-                  tabId={activeRightPanelSurface.resourceId}
+                  tabId={visibleActiveRightPanelSurface.resourceId}
                   configuredUrls={configuredPreviewUrls}
                   visible
                 />
               </Suspense>
-            ) : activeRightPanelSurface?.kind === "terminal" ? (
+            ) : visibleActiveRightPanelSurface?.kind === "terminal" ? (
               <PersistentThreadTerminalPanel
                 threadRef={activeThreadRef}
-                surface={activeRightPanelSurface}
+                surface={visibleActiveRightPanelSurface}
                 launchContext={activeTerminalLaunchContext ?? null}
                 focusRequestId={terminalFocusRequestId}
                 keybindings={keybindings}
@@ -5055,13 +5090,13 @@ export default function ChatView(props: ChatViewProps) {
                 newShortcutLabel={newTerminalShortcutLabel ?? undefined}
                 closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
               />
-            ) : activeRightPanelSurface?.kind === "diff" ? (
+            ) : visibleActiveRightPanelSurface?.kind === "diff" ? (
               <DiffWorkerPoolProvider>
                 <Suspense fallback={null}>
                   <DiffPanel mode="embedded" />
                 </Suspense>
               </DiffWorkerPoolProvider>
-            ) : activeRightPanelSurface?.kind === "plan" ? (
+            ) : visibleActiveRightPanelSurface?.kind === "plan" ? (
               <PlanSidebar
                 activePlan={activePlan}
                 activeProposedPlan={sidebarProposedPlan}
@@ -5074,6 +5109,15 @@ export default function ChatView(props: ChatViewProps) {
                 mode="embedded"
                 onClose={closePlanSidebar}
               />
+            ) : visibleActiveRightPanelSurface?.kind === "source-control" && gitCwd ? (
+              <Suspense fallback={null}>
+                <SourceControlPanel
+                  environmentId={environmentId}
+                  threadId={activeThreadRef.threadId}
+                  cwd={gitCwd}
+                  worktreePath={activeThreadWorktreePath}
+                />
+              </Suspense>
             ) : null}
           </RightPanelTabs>
         </RightPanelSheet>

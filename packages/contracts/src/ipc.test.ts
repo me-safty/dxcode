@@ -14,6 +14,7 @@ const basePreferences = {
   showCheckoutModeIndicator: false,
   showBranchSelector: false,
   enableTerminal: false,
+  enableSourceControlPanel: false,
 };
 
 describe("T3HostDisplayPreferencesSchema", () => {

@@ -140,7 +140,10 @@ export function invalidateSourceControlState(scope?: {
   if (cwd !== null) {
     vcsRefManager.invalidateScope({ environmentId, cwd });
     if (environmentId !== null) {
-      return refreshVcsStatus({ environmentId, cwd }).then(
+      return Promise.all([
+        refreshVcsStatus({ environmentId, cwd }),
+        vcsRefManager.load({ environmentId, cwd, query: null }),
+      ]).then(
         () => undefined,
         () => undefined,
       );

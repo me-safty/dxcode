@@ -35,7 +35,16 @@ Build a macOS arm64 DMG using the same desktop artifact path used for this branc
 
 ```sh
 pnpm run dist:desktop:dmg:arm64
-open "$(ls -t release/T3-Code-*-arm64.dmg | head -1)"
+dmg="$(ls -t release/T3-Code-*-arm64.dmg | head -1)"
+mount_dir="$(mktemp -d /tmp/t3-code-dmg.XXXXXX)"
+cleanup() { hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true; rmdir "$mount_dir" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+osascript -e 'tell application id "com.t3tools.t3code" to quit' >/dev/null 2>&1 || true
+hdiutil attach "$dmg" -nobrowse -quiet -mountpoint "$mount_dir"
+rm -rf "/Applications/T3 Code (Alpha).app"
+ditto "$mount_dir/T3 Code (Alpha).app" "/Applications/T3 Code (Alpha).app"
+cleanup
+trap - EXIT
 ```
 
 ### Mobile App
