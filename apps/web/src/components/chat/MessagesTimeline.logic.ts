@@ -112,6 +112,13 @@ export function resolveAssistantMessageCopyState({
   };
 }
 
+export function shouldShowChangedFilesReport(
+  summary: TurnDiffSummary | undefined,
+): summary is TurnDiffSummary {
+  if (!summary || summary.files.length === 0) return false;
+  return summary.attribution === "edit-snapshots" || summary.attribution === "touched-paths";
+}
+
 function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<TimelineEntry>) {
   const lastAssistantMessageIdByResponseKey = new Map<string, string>();
   let nullTurnResponseIndex = 0;
@@ -171,6 +178,7 @@ function deriveTurnFolds(input: {
   terminalAssistantMessageIds: ReadonlySet<string>;
   latestTurn: TimelineLatestTurn | null;
   unsettledTurnId: TurnId | null;
+  isWorking: boolean;
 }): ReadonlyMap<string, TurnFold> {
   interface TurnGroup {
     entries: Array<TimelineEntry>;
@@ -271,8 +279,12 @@ function deriveTurnFolds(input: {
     const duration = elapsedMs !== null ? formatDuration(elapsedMs) : null;
     const label = isLatestInterruptedTurn
       ? duration
-        ? `You stopped after ${duration}`
-        : "You stopped this response"
+        ? input.isWorking
+          ? `Stopped after ${duration}`
+          : `You stopped after ${duration}`
+        : input.isWorking
+          ? "Response stopped"
+          : "You stopped this response"
       : duration
         ? `Worked for ${duration}`
         : "Worked";
@@ -308,6 +320,7 @@ export function deriveMessagesTimelineRows(input: {
     terminalAssistantMessageIds,
     latestTurn: input.latestTurn ?? null,
     unsettledTurnId,
+    isWorking: input.isWorking,
   });
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {

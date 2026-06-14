@@ -68,6 +68,7 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  shouldShowChangedFilesReport,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   type TimelineLatestTurn,
@@ -596,16 +597,23 @@ function timelineRowAnchorId(row: MessagesTimelineRow): string | undefined {
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
+function timelineRowPaddingClass(row: TimelineRow): string {
+  if (row.kind === "message") {
+    return row.message.role === "assistant" && !row.showAssistantMeta
+      ? "pt-0.5 pb-1"
+      : "pt-0.5 pb-1.5";
+  }
+  if (row.kind === "work") {
+    return "pt-0.5 pb-1";
+  }
+  return "pt-0.5 pb-2";
+}
+
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
       className={cn(
-        // Commentary (non-terminal assistant) rows carry no metadata row, so
-        // they sit closer to the work that follows them.
-        (row.kind === "message" && row.message.role === "assistant" && !row.showAssistantMeta) ||
-          row.kind === "work"
-          ? "pb-2"
-          : "pb-4",
+        timelineRowPaddingClass(row),
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
       data-timeline-row-id={row.id}
@@ -634,7 +642,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   const canRevertAgentWork = typeof row.revertTurnCount === "number";
 
   return (
-    <div className="group flex flex-col items-end gap-1">
+    <div className="group flex flex-col items-end gap-0.5">
       <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary p-3">
         <MessageImageGrid images={userImages} onImageExpand={ctx.onImageExpand} className="mb-2" />
         <CollapsibleUserMessageBody
@@ -644,10 +652,12 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           markdownCwd={ctx.markdownCwd}
         />
       </div>
-      <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+      <div className="flex h-5 w-full max-w-[80%] items-center justify-end pe-1 text-[11px] leading-none tabular-nums opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover:opacity-100 max-sm:opacity-100">
         <div className="flex shrink-0 items-center gap-2">
           <Tooltip>
-            <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
+            <TooltipTrigger
+              render={<p className="text-[11px] text-muted-foreground tabular-nums" />}
+            >
               {formatShortTimestamp(row.message.createdAt, ctx.timestampFormat)}
             </TooltipTrigger>
             <TooltipPopup>
@@ -657,7 +667,11 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           <div className="flex items-center gap-0.5">
             {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
             {displayedUserMessage.copyText && (
-              <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
+              <MessageCopyButton
+                text={displayedUserMessage.copyText}
+                variant="ghost"
+                className="h-5 px-1.5"
+              />
             )}
           </div>
         </div>
@@ -678,6 +692,7 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
             type="button"
             size="xs"
             variant="ghost"
+            className="h-5 px-1.5"
             disabled={activity.isRevertingCheckpoint || activity.isWorking}
             onClick={() => ctx.onRevertUserMessage(messageId)}
             aria-label="Revert to this message"
@@ -720,7 +735,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
 
   return (
     <>
-      <div className="relative min-w-0 px-1 py-0.5">
+      <div className="relative min-w-0 px-1 py-0">
         {messageText.length > 0 ? (
           <ChatMarkdown
             text={messageText}
@@ -734,7 +749,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         <MessageImageGrid
           images={assistantImages}
           onImageExpand={ctx.onImageExpand}
-          className={messageText.length > 0 ? "mt-2 mb-2" : "mb-2"}
+          className={messageText.length > 0 ? "mt-1 mb-1" : "mb-1"}
         />
         <AssistantChangedFilesSection
           turnSummary={row.assistantTurnDiffSummary}
@@ -743,12 +758,12 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
         {row.showAssistantMeta ? (
-          <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+          <div className="mt-0.5 flex h-5 items-center gap-2 text-[11px] leading-none tabular-nums opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100 max-sm:opacity-100">
             <AssistantCopyButton row={row} />
             {!row.message.streaming && (
               <Tooltip>
                 <TooltipTrigger
-                  render={<p className="text-muted-foreground text-xs tabular-nums" />}
+                  render={<p className="text-[11px] text-muted-foreground tabular-nums" />}
                 >
                   {formatShortTimestamp(
                     row.message.completedAt ?? row.message.createdAt,
@@ -781,7 +796,13 @@ function AssistantCopyButton({ row }: { row: Extract<TimelineRow, { kind: "messa
     return null;
   }
 
-  return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
+  return (
+    <MessageCopyButton
+      text={assistantCopyState.text ?? ""}
+      variant="ghost"
+      className="h-5 px-1.5"
+    />
+  );
 }
 
 function ProposedPlanTimelineRow({
@@ -928,7 +949,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
           {groupLabel}
         </p>
       )}
-      <div className="space-y-px">
+      <div className="space-y-0.5">
         {visibleEntries.map((workEntry) => (
           <SimpleWorkEntryRow
             key={`work-row:${workEntry.stableId ?? workEntry.id}`}
@@ -991,9 +1012,8 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
   resolvedTheme: "light" | "dark";
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  if (!turnSummary) return null;
+  if (!shouldShowChangedFilesReport(turnSummary)) return null;
   const checkpointFiles = turnSummary.files;
-  if (checkpointFiles.length === 0) return null;
 
   return (
     <AssistantChangedFilesSectionInner

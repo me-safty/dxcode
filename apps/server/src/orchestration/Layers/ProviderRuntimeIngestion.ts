@@ -629,24 +629,7 @@ function runtimeEventToActivities(
     }
 
     case "account.rate-limits.updated": {
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: "info",
-          kind: "account.rate-limits.updated",
-          summary: "Usage limits updated",
-          payload: {
-            provider: event.provider,
-            ...(event.providerInstanceId !== undefined
-              ? { providerInstanceId: event.providerInstanceId }
-              : {}),
-            rateLimits: event.payload.rateLimits,
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ];
+      return [];
     }
 
     case "item.updated": {

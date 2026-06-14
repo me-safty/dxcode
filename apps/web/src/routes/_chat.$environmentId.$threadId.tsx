@@ -34,7 +34,6 @@ import {
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
 import { SidebarInset, useSidebar } from "~/components/ui/sidebar";
-import { WORKSPACE_FILE_INLINE_DIFF_SELECTOR } from "../workspaceFilePreviewDom";
 import {
   closeWorkspaceFilePreview,
   reopenWorkspaceFilePanel,
@@ -247,7 +246,7 @@ function ChatThreadRouteView() {
   useMobileEdgeSwipe({
     action: "close",
     enabled: shouldUseDiffSheet && sourceControlOpen && !rightFilePanel.sourceControlHiddenByDiff,
-    horizontalScrollOwnerScope: { ancestorSelector: WORKSPACE_FILE_INLINE_DIFF_SELECTOR },
+    horizontalScrollOwnerScope: "all",
     onSwipe: closeSourceControlPanel,
     side: "right",
     startArea: "screen",
@@ -257,7 +256,7 @@ function ChatThreadRouteView() {
   useMobileEdgeSwipe({
     action: "close",
     enabled: shouldUseDiffSheet && diffOpen,
-    horizontalScrollOwnerScope: { ancestorSelector: WORKSPACE_FILE_INLINE_DIFF_SELECTOR },
+    horizontalScrollOwnerScope: "all",
     onSwipe: closeDiff,
     side: "right",
     startArea: "screen",
@@ -267,7 +266,7 @@ function ChatThreadRouteView() {
   useMobileEdgeSwipe({
     action: "close",
     enabled: shouldUseDiffSheet && rightFilePanel.open && !sourceControlOpen,
-    horizontalScrollOwnerScope: { ancestorSelector: WORKSPACE_FILE_INLINE_DIFF_SELECTOR },
+    horizontalScrollOwnerScope: "all",
     onSwipe: closeWorkspaceFilePreview,
     side: "right",
     startArea: "screen",

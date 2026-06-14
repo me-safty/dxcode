@@ -162,7 +162,9 @@ function webBrandAssetsPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [
-    tanstackRouter(),
+    tanstackRouter({
+      autoCodeSplitting: true,
+    }),
     react(),
     babel({
       // We need to be explicit about the parser options after moving to @vitejs/plugin-react v6.0.0
@@ -223,6 +225,7 @@ export default defineConfig({
   ],
   optimizeDeps: {
     include: [
+      "@base-ui/react/checkbox",
       "@pierre/diffs",
       "@pierre/diffs/react",
       "@pierre/diffs/worker/worker.js",

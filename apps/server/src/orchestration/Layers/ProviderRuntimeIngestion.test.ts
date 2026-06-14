@@ -1360,7 +1360,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(item?.result).toBeUndefined();
   });
 
-  it("projects provider account rate-limit updates into thread activities", async () => {
+  it("does not persist provider account rate-limit telemetry as thread activities", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
 
@@ -1387,35 +1387,14 @@ describe("ProviderRuntimeIngestion", () => {
       },
     });
 
-    const thread = await waitForThread(harness.readModel, (entry) =>
-      entry.activities.some(
+    await harness.drain();
+    const snapshot = await harness.readModel();
+    const thread = snapshot.threads.find((entry) => entry.id === "thread-1");
+    expect(
+      thread?.activities.some(
         (activity: ProviderRuntimeTestActivity) => activity.id === "evt-rate-limits-updated",
       ),
-    );
-    const activity = thread.activities.find(
-      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-rate-limits-updated",
-    );
-    const payload =
-      activity?.payload && typeof activity.payload === "object"
-        ? (activity.payload as Record<string, unknown>)
-        : undefined;
-
-    expect(activity?.kind).toBe("account.rate-limits.updated");
-    expect(activity?.summary).toBe("Usage limits updated");
-    expect(payload?.provider).toBe("codex");
-    expect(payload?.providerInstanceId).toBe("codex");
-    expect(payload?.rateLimits).toEqual({
-      rateLimits: {
-        primary: {
-          usedPercent: 25,
-          windowDurationMins: 300,
-        },
-        secondary: {
-          usedPercent: 10,
-          windowDurationMins: 10_080,
-        },
-      },
-    });
+    ).toBe(false);
   });
 
   it("normalizes command execution activities to ran-command summaries", async () => {

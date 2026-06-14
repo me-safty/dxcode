@@ -31,7 +31,6 @@ import {
   type WorkspaceFilePreviewDiffReturnTarget,
   useWorkspaceFilePanelState,
 } from "../workspaceFilePreview";
-import { WORKSPACE_FILE_INLINE_DIFF_SELECTOR } from "../workspaceFilePreviewDom";
 import {
   closeSourceControlPanel,
   openSourceControlPanel,
@@ -258,7 +257,7 @@ function DraftChatThreadRouteView() {
     action: "close",
     enabled:
       shouldUseRightPanelSheet && sourceControlOpen && !rightFilePanel.sourceControlHiddenByDiff,
-    horizontalScrollOwnerScope: { ancestorSelector: WORKSPACE_FILE_INLINE_DIFF_SELECTOR },
+    horizontalScrollOwnerScope: "all",
     onSwipe: closeSourceControlPanel,
     side: "right",
     startArea: "screen",
@@ -268,7 +267,7 @@ function DraftChatThreadRouteView() {
   useMobileEdgeSwipe({
     action: "close",
     enabled: shouldUseRightPanelSheet && diffOpen,
-    horizontalScrollOwnerScope: { ancestorSelector: WORKSPACE_FILE_INLINE_DIFF_SELECTOR },
+    horizontalScrollOwnerScope: "all",
     onSwipe: closeDiff,
     side: "right",
     startArea: "screen",
@@ -278,7 +277,7 @@ function DraftChatThreadRouteView() {
   useMobileEdgeSwipe({
     action: "close",
     enabled: shouldUseRightPanelSheet && rightFilePanel.open && !sourceControlOpen,
-    horizontalScrollOwnerScope: { ancestorSelector: WORKSPACE_FILE_INLINE_DIFF_SELECTOR },
+    horizontalScrollOwnerScope: "all",
     onSwipe: closeWorkspaceFilePreview,
     side: "right",
     startArea: "screen",
