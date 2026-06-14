@@ -23,8 +23,16 @@ import * as Schema from "effect/Schema";
 
 import type { ProjectionRepositoryError } from "../Errors.ts";
 
-/** Run lifecycle, mirrored from the SDK's start/suspend/complete path. */
-export const WorkflowRunStatus = Schema.Literals(["running", "suspended", "completed", "failed"]);
+/** Run lifecycle, mirrored from the SDK's start/suspend/complete path. `sleeping` is the
+ * clock-parked sibling of `suspended` (Epic 27): a run parked on `waitUntil`, woken by the
+ * scheduler at its `wake_at` rather than by an event. */
+export const WorkflowRunStatus = Schema.Literals([
+  "running",
+  "suspended",
+  "sleeping",
+  "completed",
+  "failed",
+]);
 export type WorkflowRunStatus = typeof WorkflowRunStatus.Type;
 
 /** Which ask kind a suspended run is parked on (matches the engine registry's pending kind). */
@@ -48,8 +56,13 @@ export const WorkflowRun = Schema.Struct({
   status: WorkflowRunStatus,
   /** The thread the current ask is parked on (a spawned thread for agent() sub-threads). */
   pendingThreadId: Schema.NullOr(Schema.String),
+  /** The correlation the run is parked on — an ask reply for `suspended`, the `waitUntil` sent
+   * entry for `sleeping` (the scheduler resolves this when the deadline arrives). */
   pendingCorrelationId: Schema.NullOr(Schema.String),
   pendingKind: Schema.NullOr(WorkflowRunPendingKind),
+  /** The wall-clock instant a `sleeping` run is due (Epic 27) — the scheduler's index. Null
+   * for a run not parked on a timer. */
+  wakeAt: Schema.NullOr(IsoDateTime),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -86,6 +99,17 @@ export const ClearWorkflowRunPendingInput = Schema.Struct({
 });
 export type ClearWorkflowRunPendingInput = typeof ClearWorkflowRunPendingInput.Type;
 
+/** Flip a run to `sleeping` and record the timer it is parked on (Epic 27): the `wake_at`
+ * deadline the scheduler arms, plus the `waitUntil` correlation the scheduler resolves on
+ * fire. Clears the thread/kind pending columns (a timer park has no thread). */
+export const SetWorkflowRunSleepingInput = Schema.Struct({
+  runId: Schema.String,
+  wakeAt: IsoDateTime,
+  correlationId: Schema.String,
+  updatedAt: IsoDateTime,
+});
+export type SetWorkflowRunSleepingInput = typeof SetWorkflowRunSleepingInput.Type;
+
 /** WorkflowRunRepositoryShape - service API for durable run records. */
 export interface WorkflowRunRepositoryShape {
   /** Insert or replace a run row (keyed by `runId`). */
@@ -109,6 +133,10 @@ export interface WorkflowRunRepositoryShape {
   /** Clear the pending ask and set the given status (on resume completion/failure). */
   readonly clearPending: (
     input: ClearWorkflowRunPendingInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  /** Flip to `sleeping` and record the wake deadline + `waitUntil` correlation (Epic 27). */
+  readonly setSleeping: (
+    input: SetWorkflowRunSleepingInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 

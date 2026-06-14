@@ -26,6 +26,7 @@ import {
   WorkflowError,
 } from "./t3work-sdk.errors.ts";
 import type { WorkflowPrimitives } from "./t3work-sdk.primitives.ts";
+import type { SchedulePrimitives } from "./t3work-sdk.schedulePrimitive.ts";
 import type { WorkflowThreadPrimitives } from "./t3work-sdk.threadPrimitives.ts";
 import { defineWorkflow } from "./t3work-sdk.ts";
 
@@ -118,6 +119,7 @@ export function buildWorkflowGlobals(opts: {
   readonly runtime: DeterministicSource;
   readonly primitives: WorkflowPrimitives;
   readonly threads: WorkflowThreadPrimitives;
+  readonly schedule: SchedulePrimitives;
 }): Record<string, unknown> {
   const p = opts.primitives;
   const t = opts.threads;
@@ -134,12 +136,19 @@ export function buildWorkflowGlobals(opts: {
     budget: p.budget,
     phase: p.phase,
     log: p.log,
+    // `now()` is the journaled wall clock (same source the deterministic `Date` reads): a
+    // resume replays the recorded value, so time helpers built on it (and `waitUntil(now() +
+    // ms)`) are replay-deterministic (Epic 27 §Time & scheduling helpers).
+    now: opts.runtime.now,
     // The Thread model (Epic 25 §The thread model): `thread` is the launching chat (undefined
     // if headless); `spawnThread` makes an isolated thread; `agent` is the one-shot shortcut
     // for `spawnThread().askAgent()`. `askUser`/`notifyUser` are capability-gated per call.
     thread: t.thread,
     spawnThread: t.spawnThread,
     agent: t.agent,
+    // `waitUntil` (Epic 27) suspends until a wall-clock instant; gated by the `"schedule"`
+    // capability (calling it without that capability throws PermissionDeniedError).
+    waitUntil: opts.schedule.waitUntil,
     // `defineWorkflow` lets a body construct the typed sub-workflow ref `workflow()` needs;
     // it is a pure ref constructor (no capability concern), so it is unconditionally bound.
     defineWorkflow,

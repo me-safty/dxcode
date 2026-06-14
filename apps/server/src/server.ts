@@ -115,6 +115,7 @@ import { t3workThreadToolContextRouteLayer } from "./t3work-thread-tool-context-
 import { T3workThreadToolContextStoreLive } from "./t3work-threadToolContextStore.ts";
 import { T3workWorkflowEngineReactorLive } from "./t3work-workflowEngineReactor.ts";
 import { T3workWorkflowEngineRegistryLive } from "./t3work-workflowEngineRegistry.ts";
+import { T3workWorkflowSchedulerLive } from "./t3work-workflowScheduler.ts";
 import { T3workToolBrokerLive } from "./t3work-toolBrokerLive.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
@@ -295,12 +296,19 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
 // The workflow-engine singletons share one provideMerge slot (the `pipe` arity is capped):
 // the in-memory run registry (reactor's hot index) + the durable run record + the SQLite
 // journal store. Repo + store get the memoized SqlClient from PersistenceLayerLive (Epic 25
-// §Open question 2); the registry needs nothing.
-const WorkflowEngineDurabilityLive = Layer.mergeAll(
-  T3workWorkflowEngineRegistryLive,
-  WorkflowRunRepositoryLive,
-  WorkflowJournalStoreLive,
-).pipe(Layer.provide(PersistenceLayerLive));
+// §Open question 2); the registry needs nothing. The scheduler (Epic 27) is layered ON TOP via
+// `provideMerge` so it shares that same registry + repo (its arm/fire path resolves runs from
+// the one registry and reads the sleeping set from the one repo).
+const WorkflowEngineDurabilityLive = T3workWorkflowSchedulerLive.pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(
+      T3workWorkflowEngineRegistryLive,
+      WorkflowRunRepositoryLive,
+      WorkflowJournalStoreLive,
+    ),
+  ),
+  Layer.provide(PersistenceLayerLive),
+);
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Core Services

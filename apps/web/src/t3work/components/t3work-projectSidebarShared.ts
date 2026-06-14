@@ -23,9 +23,34 @@ export const TICKET_VIEW_LABELS: Record<TicketViewMode, string> = {
   tree: "Hierarchy",
 };
 
+/** Render a scheduled-workflow wake instant as the `Sleeping` pill's trailing detail
+ * ("until Mon 09:00"). Tolerates a malformed instant with a generic suffix. */
+export function formatSleepingUntil(wakeAtIso: string): string {
+  const date = new Date(wakeAtIso);
+  if (Number.isNaN(date.getTime())) return "until later";
+  const formatted = new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+  return `until ${formatted}`;
+}
+
 export function resolveThreadStatusPill(thread: {
   status: ProjectThread["status"];
+  sleepingUntil?: string;
 }): ThreadStatusPill | null {
+  // A scheduled-workflow run parked on the clock (Epic 27): dormant, woken at `wake_at`. Takes
+  // precedence over the derived run status so the dormant thread reads "Sleeping until <time>".
+  if (thread.sleepingUntil !== undefined && thread.sleepingUntil !== "") {
+    return {
+      label: "Sleeping",
+      detail: formatSleepingUntil(thread.sleepingUntil),
+      colorClass: "text-slate-500 dark:text-slate-300/80",
+      dotClass: "bg-slate-400 dark:bg-slate-300/80",
+      pulse: false,
+    };
+  }
   switch (thread.status) {
     case "running":
       return {
@@ -57,6 +82,7 @@ export function resolveProjectStatusIndicator(threads: ProjectThread[]): ThreadS
   const priority: Record<ThreadStatusPill["label"], number> = {
     Working: 3,
     Error: 2,
+    Sleeping: 1,
     Completed: 1,
     Idle: 0,
   };

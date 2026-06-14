@@ -169,6 +169,26 @@ async function clickButton(container: HTMLElement, label: string) {
   });
 }
 
+/** Set a controlled input/select value the way React's synthetic onChange expects. */
+async function setControlValue(element: HTMLInputElement | HTMLSelectElement, value: string) {
+  const proto =
+    element instanceof HTMLSelectElement
+      ? HTMLSelectElement.prototype
+      : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+  await act(async () => {
+    setter?.call(element, value);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+async function toggleCheckbox(element: HTMLInputElement) {
+  await act(async () => {
+    element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  });
+}
+
 afterEach(async () => {
   while (mountedRoots.length > 0) {
     const mounted = mountedRoots.pop();
@@ -291,6 +311,98 @@ describe("T3workWorkflowDecisionCard clicks", () => {
 
     await clickButton(container, "hold");
     expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it("renders a boolean affordance as two labelled buttons and posts the chosen boolean", async () => {
+    const onChoose = vi.fn(async () => {});
+    const container = await renderNode(
+      <T3workWorkflowDecisionCard
+        decision={{
+          question: "Approve the release?",
+          affordance: { kind: "boolean", labels: { true: "Ship it", false: "Hold" } },
+          correlationId: "run-4:1",
+        }}
+        active
+        onChoose={onChoose}
+      />,
+    );
+
+    expect(container.textContent).toContain("Ship it");
+    expect(container.textContent).toContain("Hold");
+
+    await clickButton(container, "Ship it");
+    expect(onChoose).toHaveBeenCalledExactlyOnceWith({
+      choice: "Ship it",
+      value: true,
+      correlationId: "run-4:1",
+    });
+  });
+
+  it("defaults boolean labels to Yes/No and posts false for the reject button", async () => {
+    const onChoose = vi.fn(async () => {});
+    const container = await renderNode(
+      <T3workWorkflowDecisionCard
+        decision={{
+          question: "Proceed?",
+          affordance: { kind: "boolean" },
+          correlationId: "run-5:1",
+        }}
+        active
+        onChoose={onChoose}
+      />,
+    );
+
+    expect(container.textContent).toContain("Yes");
+    expect(container.textContent).toContain("No");
+
+    await clickButton(container, "No");
+    expect(onChoose).toHaveBeenCalledExactlyOnceWith({
+      choice: "No",
+      value: false,
+      correlationId: "run-5:1",
+    });
+  });
+
+  it("renders a form and posts the collected structured value on submit", async () => {
+    const onChoose = vi.fn(async () => {});
+    const container = await renderNode(
+      <T3workWorkflowDecisionCard
+        decision={{
+          question: "Triage the bug",
+          affordance: {
+            kind: "form",
+            fields: [
+              { name: "severity", type: "literals", options: ["low", "high"], optional: false },
+              { name: "note", type: "string", optional: false },
+              { name: "urgent", type: "boolean", optional: false },
+              { name: "owner", type: "string", optional: true },
+            ],
+          },
+          correlationId: "run-6:1",
+        }}
+        active
+        onChoose={onChoose}
+      />,
+    );
+
+    const select = container.querySelector("select");
+    const textInputs = [...container.querySelectorAll('input[type="text"]')];
+    const checkbox = container.querySelector('input[type="checkbox"]');
+    expect(select).not.toBeNull();
+    expect(textInputs).toHaveLength(2); // note + owner
+    expect(checkbox).not.toBeNull();
+
+    await setControlValue(select as HTMLSelectElement, "high");
+    await setControlValue(textInputs[0] as HTMLInputElement, "rounding bug");
+    await toggleCheckbox(checkbox as HTMLInputElement);
+    // `owner` (optional) left blank → omitted from the submission.
+
+    await clickButton(container, "Submit");
+    expect(onChoose).toHaveBeenCalledExactlyOnceWith({
+      choice: "severity: high, note: rounding bug, urgent: true",
+      value: { severity: "high", note: "rounding bug", urgent: true },
+      correlationId: "run-6:1",
+    });
   });
 
   it("renders no buttons for a text affordance — the composer is the reply path", async () => {

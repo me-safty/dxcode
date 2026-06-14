@@ -4,6 +4,7 @@ import {
   isProjectRecipeWorkflowCardActivityPayload,
   PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_CARD,
   PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_DECISION,
+  PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_SHAPE,
   type ProjectRecipeWorkflowCardActivityPayload,
 } from "@t3tools/project-recipes";
 
@@ -46,7 +47,8 @@ export function getT3workRenderableAttachments(
     (attachment) =>
       attachment.kind !== "view" ||
       (attachment.miniappId !== PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_CARD &&
-        attachment.miniappId !== PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_DECISION),
+        attachment.miniappId !== PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_DECISION &&
+        attachment.miniappId !== PROJECT_RECIPE_MESSAGE_VIEW_WORKFLOW_SHAPE),
   );
 }
 

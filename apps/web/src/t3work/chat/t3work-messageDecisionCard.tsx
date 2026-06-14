@@ -21,6 +21,8 @@ import {
 import { Button } from "~/components/ui/button";
 import type { ChatMessage } from "~/types";
 
+import { T3workWorkflowDecisionForm } from "./t3work-messageDecisionForm";
+
 export type WorkflowDecisionChooseHandler = (input: {
   /** The chosen option label — the reply message's display text. */
   choice: string;
@@ -75,14 +77,56 @@ export function findActiveWorkflowInputMessageId(
   return lastWaitingIndex > lastUserIndex ? lastWaitingId : null;
 }
 
+/** A summary of a form submission for the reply message's display text. */
+function summarizeFormValue(value: Record<string, unknown>): string {
+  const entries = Object.entries(value);
+  return entries.length === 0
+    ? "Submitted"
+    : entries.map(([key, fieldValue]) => `${key}: ${String(fieldValue)}`).join(", ");
+}
+
+function DecisionButton(props: {
+  label: string;
+  busy: boolean;
+  disabled: boolean;
+  primary?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={props.primary ? "default" : "outline"}
+      disabled={props.disabled}
+      onClick={props.onClick}
+    >
+      {props.busy ? <LoaderCircleIcon className="mr-1 size-3 animate-spin" /> : null}
+      {props.label}
+    </Button>
+  );
+}
+
 export function T3workWorkflowDecisionCard(props: {
   decision: ProjectRecipeWorkflowDecisionPayload;
   active: boolean;
   onChoose?: WorkflowDecisionChooseHandler | undefined;
 }) {
   const { decision, active, onChoose } = props;
-  const [submittingChoice, setSubmittingChoice] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState<string | null>(null);
   const affordance = decision.affordance;
+  const locked = !active || !onChoose || submitting !== null;
+
+  // Every affordance funnels through one submit: optimistic-lock on the chosen label, post the
+  // structured value, release the lock when the round-trip settles.
+  const runChoose = (choice: string, value: unknown) => {
+    if (!onChoose || locked) {
+      return;
+    }
+    setSubmitting(choice);
+    void onChoose({ choice, value, correlationId: decision.correlationId }).finally(() =>
+      setSubmitting((current) => (current === choice ? null : current)),
+    );
+  };
 
   return (
     <div className="rounded-lg border border-primary/35 bg-background/65 px-4 py-3">
@@ -93,45 +137,60 @@ export function T3workWorkflowDecisionCard(props: {
         </span>
       </div>
       <p className="text-sm leading-6 text-foreground">{decision.question}</p>
+
       {affordance.kind === "choice" ? (
         <div className="mt-3 flex flex-wrap gap-2">
-          {affordance.options.map((option) => {
-            const isSubmitting = submittingChoice === option;
-            const disabled = !active || !onChoose || submittingChoice !== null;
+          {affordance.options.map((option) => (
+            <DecisionButton
+              key={`choice:${decision.correlationId}:${option}`}
+              label={option}
+              busy={submitting === option}
+              disabled={locked}
+              onClick={() =>
+                runChoose(
+                  option,
+                  affordance.field === undefined ? option : { [affordance.field]: option },
+                )
+              }
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {affordance.kind === "boolean" ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {([true, false] as const).map((bool) => {
+            const label = bool
+              ? (affordance.labels?.true ?? "Yes")
+              : (affordance.labels?.false ?? "No");
             return (
-              <Button
-                key={`decision:${decision.correlationId}:${option}`}
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={disabled}
-                onClick={() => {
-                  if (!onChoose || disabled) {
-                    return;
-                  }
-                  setSubmittingChoice(option);
-                  void onChoose({
-                    choice: option,
-                    value:
-                      affordance.field === undefined ? option : { [affordance.field]: option },
-                    correlationId: decision.correlationId,
-                  }).finally(() =>
-                    setSubmittingChoice((current) => (current === option ? null : current)),
-                  );
-                }}
-              >
-                {isSubmitting ? <LoaderCircleIcon className="mr-1 size-3 animate-spin" /> : null}
-                {option}
-              </Button>
+              <DecisionButton
+                key={`boolean:${decision.correlationId}:${String(bool)}`}
+                label={label}
+                busy={submitting === label}
+                disabled={locked}
+                primary={bool}
+                onClick={() => runChoose(label, bool)}
+              />
             );
           })}
         </div>
       ) : null}
+
+      {affordance.kind === "form" ? (
+        <T3workWorkflowDecisionForm
+          fields={affordance.fields}
+          disabled={!active || !onChoose}
+          submitting={submitting !== null}
+          onSubmit={(value) => runChoose(summarizeFormValue(value), value)}
+        />
+      ) : null}
+
       {active ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          {affordance.kind === "choice"
-            ? "…or reply in the composer below."
-            : "Reply in the composer below."}
+          {affordance.kind === "text"
+            ? "Reply in the composer below."
+            : "…or reply in the composer below."}
         </p>
       ) : null}
     </div>

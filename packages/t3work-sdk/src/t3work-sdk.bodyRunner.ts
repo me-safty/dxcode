@@ -18,6 +18,7 @@ import { WorkflowError } from "./t3work-sdk.errors.ts";
 import type { HandleDispatch } from "./t3work-sdk.handles.ts";
 import { decodeWithSchema, setNestedValue } from "./t3work-sdk.internal.ts";
 import { createWorkflowPrimitives, type WorkflowPrimitives } from "./t3work-sdk.primitives.ts";
+import { createSchedulePrimitives } from "./t3work-sdk.schedulePrimitive.ts";
 import { createThreadPrimitives } from "./t3work-sdk.threadPrimitives.ts";
 import {
   extractMeta,
@@ -98,12 +99,19 @@ export async function runPreparedBody(opts: {
           `Invalid inputs for workflow '${meta.name}'`,
         );
   // Build the Thread-model globals; capability-gate askUser/notifyUser against meta.capabilities.
+  const capabilities = engineCapabilities(meta);
   const threads = createThreadPrimitives({
     dispatch: opts.handleDispatch,
     broker: opts.broker ?? defaultBroker,
-    capabilities: engineCapabilities(meta),
+    capabilities,
     launchThreadId: opts.launchThreadId,
     defaultModel: opts.defaultModel,
+  });
+  // `waitUntil` (Epic 27) — capability-gated against the same meta.capabilities (`"schedule"`).
+  const schedule = createSchedulePrimitives({
+    dispatch: opts.handleDispatch,
+    broker: opts.broker ?? defaultBroker,
+    capabilities,
   });
   const globals = buildWorkflowGlobals({
     args: decodedArgs,
@@ -112,6 +120,7 @@ export async function runPreparedBody(opts: {
     runtime: opts.runtime,
     primitives: opts.primitives,
     threads,
+    schedule,
   });
   const output = await withWorkflowRuntime(opts.runtime, () =>
     runWorkflowBody(prepared, source, globals),

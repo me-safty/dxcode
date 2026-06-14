@@ -114,7 +114,7 @@ describe("durable workflow engine — Thread model", () => {
     expect(before.bySeq.size).toBe(1);
     expect(before.byCorrelation.size).toBe(0);
 
-    // A non-choice ask journals the EXACT pre-decision-card payload — no affordance key — so
+    // A freeform (text) ask journals the EXACT pre-decision-card payload — no affordance key — so
     // runs parked on an older askUser re-derive the same argsHash and still resume.
     expect(broker.sent[0]?.payload).not.toHaveProperty("affordance");
     expect(broker.sent[0]?.payload).not.toHaveProperty("attachments");
@@ -123,7 +123,7 @@ describe("durable workflow engine — Thread model", () => {
       runsRoot,
       runId: run.runId,
       correlationId: run.correlationId,
-      reply: JSON.stringify({ answer: "approved" }),
+      reply: "approved",
     });
     expect(wrote).toBe(true);
 
@@ -216,7 +216,7 @@ describe("durable workflow engine — Thread model", () => {
   });
 
   it("derives a deterministic correlationId ('<runId>:<seq>') that is stable across replay", async () => {
-    const broker = createMockBroker(resolveTurnsBy([["id?", { answer: "stable" }]]));
+    const broker = createMockBroker(resolveTurnsBy([["id?", "stable"]]));
     const base = launchBase(broker);
     const run = await startWorkflow(askResponseWorkflow, { question: "id?" }, base);
     expect(completed(run)).toEqual({ answer: "stable" });

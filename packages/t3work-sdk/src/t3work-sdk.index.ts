@@ -57,6 +57,7 @@ export {
   withWorkflowRuntime,
 } from "./t3work-sdk.ts";
 export { renameThreadTool } from "./tools/t3work-sdk.t3work.ts";
+export { deriveWorkflowShape } from "./t3work-sdk.workflowShape.ts";
 
 export type {
   HandleKind,
@@ -74,7 +75,7 @@ export type {
   WorkflowRunOptions,
   WorkflowRunResult,
 } from "./t3work-sdk.engine.ts";
-export type { AskAffordance } from "./t3work-sdk.affordance.ts";
+export type { AskAffordance, AskFormField } from "./t3work-sdk.affordance.ts";
 export type {
   AskOpts,
   AskUserAttachment,
@@ -90,6 +91,11 @@ export type { JournalEntry, JournalMaps, ResolvedEntry } from "./t3work-sdk.jour
 export type { JournalSink, JournalStore } from "./t3work-sdk.journalStore.ts";
 export type { ResolvedWireInput } from "./t3work-sdk.journalWriter.ts";
 export type { WorkflowMeta } from "./t3work-sdk.loader.ts";
+export type {
+  WorkflowShape,
+  WorkflowShapeStep,
+  WorkflowStepKind,
+} from "./t3work-sdk.workflowShape.ts";
 export type {
   EngineCapability,
   FetchLike,

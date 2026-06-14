@@ -20,6 +20,7 @@ import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/
 import { WorkflowRunRepositoryLive } from "./persistence/Layers/WorkflowRuns.ts";
 import { WorkflowJournalStoreLive } from "./persistence/Layers/SqliteJournalStore.ts";
 import { T3workWorkflowEngineRegistryLive } from "./t3work-workflowEngineRegistry.ts";
+import { T3workWorkflowSchedulerLive } from "./t3work-workflowScheduler.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
@@ -282,12 +283,18 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
 
 // Durable workflow-engine singletons (Epic 25 §Open question 2): registry + run record +
 // SQLite journal store, shared in one provideMerge slot. Boot rehydration (in the shared
-// ServerRuntimeStartup) resolves these to rebuild suspended runs.
-const WorkflowEngineDurabilityLive = Layer.mergeAll(
-  T3workWorkflowEngineRegistryLive,
-  WorkflowRunRepositoryLive,
-  WorkflowJournalStoreLive,
-).pipe(Layer.provide(PersistenceLayerLive));
+// ServerRuntimeStartup) resolves these to rebuild suspended runs. The scheduler (Epic 27) is
+// layered on top so it shares the same registry + repo (its arm/fire path needs both).
+const WorkflowEngineDurabilityLive = T3workWorkflowSchedulerLive.pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(
+      T3workWorkflowEngineRegistryLive,
+      WorkflowRunRepositoryLive,
+      WorkflowJournalStoreLive,
+    ),
+  ),
+  Layer.provide(PersistenceLayerLive),
+);
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Core Services

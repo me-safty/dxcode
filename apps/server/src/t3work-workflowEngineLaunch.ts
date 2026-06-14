@@ -43,7 +43,11 @@ import {
   type WorkflowRunResult,
 } from "@t3work/sdk";
 
-import { createWorkflowEngineBroker, type WorkflowEnginePendingAsk } from "./t3work-workflowEngineBroker.ts";
+import {
+  createWorkflowEngineBroker,
+  type WorkflowEnginePendingAsk,
+  type WorkflowEngineSleep,
+} from "./t3work-workflowEngineBroker.ts";
 import type { T3workWorkflowEngineRegistryShape } from "./t3work-workflowEngineRegistry.ts";
 
 export type WorkflowLaunchStatus = "completed" | "suspended" | "failed";
@@ -58,6 +62,9 @@ export interface WorkflowRunLifecycle {
   readonly recordRunning: () => Promise<void>;
   /** Flip to `suspended` + record the ask the run parked on (driven by the broker). */
   readonly recordSuspended: (pending: WorkflowEnginePendingAsk) => Promise<void>;
+  /** Flip to `sleeping` + record the wake deadline the run parked on (Epic 27; driven by the
+   * broker when the body fires `waitUntil`). */
+  readonly recordSleeping: (sleep: WorkflowEngineSleep) => Promise<void>;
   /** Mark the run `completed` and clear the pending ask. */
   readonly recordCompleted: () => Promise<void>;
   /** Mark the run `failed` and clear the pending ask. */
@@ -129,7 +136,10 @@ export function createWorkflowRunController(input: LaunchWorkflowRecipeInput): W
     nowIso: input.nowIso,
     ...(input.lifecycle === undefined
       ? {}
-      : { recordPending: (pending) => input.lifecycle!.recordSuspended(pending) }),
+      : {
+          recordPending: (pending) => input.lifecycle!.recordSuspended(pending),
+          recordSleeping: (sleep) => input.lifecycle!.recordSleeping(sleep),
+        }),
   });
   const options: WorkflowRunOptions = {
     runsRoot: input.runsRoot,

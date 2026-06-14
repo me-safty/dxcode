@@ -27,12 +27,14 @@ import {
   type ThreadMessagePayload,
   type ThreadTurnPayload,
   type UserInputPayload,
+  type WaitUntilPayload,
   type WorkflowEngineBrokerDeps,
 } from "./t3work-workflowEngineBrokerTypes.ts";
 
 export type {
   WorkflowEngineBrokerDeps,
   WorkflowEnginePendingAsk,
+  WorkflowEngineSleep,
 } from "./t3work-workflowEngineBrokerTypes.ts";
 
 /** Attachment refs from the workflow are opaque payload (SDK black-box rule); only refs that
@@ -140,6 +142,15 @@ export function createWorkflowEngineBroker(deps: WorkflowEngineBrokerDeps): Mess
           }),
         ),
       );
+      return;
+    }
+    if (kind === "wait.until") {
+      // The clock park (Epic 27): record the wake deadline + this `waitUntil` correlation so
+      // the scheduler can arm a timer and resolve it on fire. No orchestration command (a timer
+      // has no message) and no resolver settle — the run suspends out of band until the
+      // scheduler appends the resolved entry at the deadline.
+      const p = payload as WaitUntilPayload;
+      await deps.recordSleeping?.({ correlationId, deadline: p.deadline });
       return;
     }
     // thread.message — one-way; agent-directed messages read as a user turn-input, user-directed

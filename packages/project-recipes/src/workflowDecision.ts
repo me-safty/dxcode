@@ -19,10 +19,34 @@ export const ProjectRecipeWorkflowDecisionAffordance = Schema.Union([
     field: Schema.optional(Schema.String),
     options: Schema.Array(Schema.String),
   }),
+  Schema.Struct({
+    kind: Schema.Literal("boolean"),
+    labels: Schema.optional(
+      Schema.Struct({ true: Schema.String, false: Schema.String }),
+    ),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("form"),
+    fields: Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        type: Schema.Literals(["string", "number", "boolean", "literals"]),
+        options: Schema.optional(Schema.Array(Schema.String)),
+        optional: Schema.Boolean,
+      }),
+    ),
+  }),
   Schema.Struct({ kind: Schema.Literal("text") }),
 ]);
 export type ProjectRecipeWorkflowDecisionAffordance =
   typeof ProjectRecipeWorkflowDecisionAffordance.Type;
+
+/** One scalar field of a `form` affordance (mirrors the SDK's `AskFormField`) — the shape the web
+ * renders one input per. */
+export type ProjectRecipeWorkflowDecisionFormField = Extract<
+  ProjectRecipeWorkflowDecisionAffordance,
+  { kind: "form" }
+>["fields"][number];
 
 export const ProjectRecipeWorkflowDecisionPayload = Schema.Struct({
   question: Schema.String,

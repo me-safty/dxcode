@@ -47,6 +47,7 @@ import Migration0031 from "./Migrations/031_AuthAuthorizationScopes.ts";
 import Migration0032 from "./Migrations/032_AuthPairingProofKeyThumbprint.ts";
 import Migration0033 from "./Migrations/t3work-033_ProjectionThreadMessageT3workExt.ts";
 import Migration0034 from "./Migrations/t3work-034_WorkflowDurability.ts";
+import Migration0035 from "./Migrations/t3work-035_WorkflowScheduler.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -93,6 +94,7 @@ export const migrationEntries = [
   [32, "AuthPairingProofKeyThumbprint", Migration0032],
   [33, "ProjectionThreadMessageT3workExt", Migration0033],
   [34, "WorkflowDurability", Migration0034],
+  [35, "WorkflowScheduler", Migration0035],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

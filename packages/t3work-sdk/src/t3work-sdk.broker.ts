@@ -25,8 +25,15 @@ import { WorkflowError } from "./t3work-sdk.errors.ts";
 import type { ReplyResolver } from "./t3work-sdk.handles.ts";
 import { defaultRunsRoot, FsJournalStore, type JournalStore } from "./t3work-sdk.journalStore.ts";
 
-/** The four thread-verb primitives, as the broker sees them. */
-export type HandleKind = "thread.create" | "thread.turn" | "thread.message" | "user.input";
+/** The thread-verb primitives, as the broker sees them, plus the clock-driven `wait.until`
+ * (Epic 27): a durable suspension fired through the broker like an ask, but woken by the
+ * scheduler at its journaled deadline rather than by an event. */
+export type HandleKind =
+  | "thread.create"
+  | "thread.turn"
+  | "thread.message"
+  | "user.input"
+  | "wait.until";
 
 /** What the host is handed for one fired side effect. `payload` carries the verb's data —
  * always a `threadId`, plus `prompt`/`question`/`text`/`name`/`model` per kind. */
@@ -85,6 +92,9 @@ export interface HostBrokerHandlers {
   readonly "thread.turn"?: (envelope: MessageEnvelope) => Promise<void>;
   readonly "thread.message"?: (envelope: MessageEnvelope) => Promise<void>;
   readonly "user.input"?: (envelope: MessageEnvelope) => Promise<void>;
+  /** Record the run's wake deadline with the scheduler (Epic 27); no reply settled here —
+   * the scheduler appends the resolved entry when the clock reaches the deadline. */
+  readonly "wait.until"?: (envelope: MessageEnvelope) => Promise<void>;
 }
 
 /**

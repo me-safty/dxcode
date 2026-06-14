@@ -12,6 +12,7 @@ import {
   GetWorkflowRunInput,
   ListWorkflowRunsByStatusInput,
   SetWorkflowRunPendingInput,
+  SetWorkflowRunSleepingInput,
   SetWorkflowRunStatusInput,
   WorkflowRun,
   WorkflowRunRepository,
@@ -47,6 +48,7 @@ const makeWorkflowRunRepository = Effect.gen(function* () {
           pending_thread_id,
           pending_correlation_id,
           pending_kind,
+          wake_at,
           created_at,
           updated_at
         )
@@ -64,6 +66,7 @@ const makeWorkflowRunRepository = Effect.gen(function* () {
           ${row.pendingThreadId},
           ${row.pendingCorrelationId},
           ${row.pendingKind},
+          ${row.wakeAt},
           ${row.createdAt},
           ${row.updatedAt}
         )
@@ -81,6 +84,7 @@ const makeWorkflowRunRepository = Effect.gen(function* () {
           pending_thread_id = excluded.pending_thread_id,
           pending_correlation_id = excluded.pending_correlation_id,
           pending_kind = excluded.pending_kind,
+          wake_at = excluded.wake_at,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at
       `,
@@ -105,6 +109,7 @@ const makeWorkflowRunRepository = Effect.gen(function* () {
           pending_thread_id AS "pendingThreadId",
           pending_correlation_id AS "pendingCorrelationId",
           pending_kind AS "pendingKind",
+          wake_at AS "wakeAt",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM workflow_runs
@@ -131,6 +136,7 @@ const makeWorkflowRunRepository = Effect.gen(function* () {
           pending_thread_id AS "pendingThreadId",
           pending_correlation_id AS "pendingCorrelationId",
           pending_kind AS "pendingKind",
+          wake_at AS "wakeAt",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM workflow_runs
@@ -158,6 +164,7 @@ const makeWorkflowRunRepository = Effect.gen(function* () {
             pending_thread_id = ${pendingThreadId},
             pending_correlation_id = ${pendingCorrelationId},
             pending_kind = ${pendingKind},
+            wake_at = NULL,
             updated_at = ${updatedAt}
         WHERE run_id = ${runId}
       `,
@@ -171,6 +178,24 @@ const makeWorkflowRunRepository = Effect.gen(function* () {
         SET status = ${status},
             pending_thread_id = NULL,
             pending_correlation_id = NULL,
+            pending_kind = NULL,
+            wake_at = NULL,
+            updated_at = ${updatedAt}
+        WHERE run_id = ${runId}
+      `,
+  });
+
+  // A timer park (Epic 27): record the wake deadline + the `waitUntil` correlation the
+  // scheduler resolves on fire. A timer has no thread/kind, so those pending columns clear.
+  const setWorkflowRunSleepingRow = SqlSchema.void({
+    Request: SetWorkflowRunSleepingInput,
+    execute: ({ runId, wakeAt, correlationId, updatedAt }) =>
+      sql`
+        UPDATE workflow_runs
+        SET status = 'sleeping',
+            wake_at = ${wakeAt},
+            pending_thread_id = NULL,
+            pending_correlation_id = ${correlationId},
             pending_kind = NULL,
             updated_at = ${updatedAt}
         WHERE run_id = ${runId}
@@ -207,6 +232,11 @@ const makeWorkflowRunRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("WorkflowRunRepository.clearPending:query")),
     );
 
+  const setSleeping: WorkflowRunRepositoryShape["setSleeping"] = (input) =>
+    setWorkflowRunSleepingRow(input).pipe(
+      Effect.mapError(toPersistenceSqlError("WorkflowRunRepository.setSleeping:query")),
+    );
+
   return {
     upsert,
     getById,
@@ -214,6 +244,7 @@ const makeWorkflowRunRepository = Effect.gen(function* () {
     setStatus,
     setPending,
     clearPending,
+    setSleeping,
   } satisfies WorkflowRunRepositoryShape;
 });
 

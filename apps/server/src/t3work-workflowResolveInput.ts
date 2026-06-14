@@ -8,6 +8,8 @@
  * corrective-retry loop handles it).
  */
 
+import type { AskFormField } from "@t3work/sdk";
+
 import type { WorkflowPendingAsk } from "./t3work-workflowEngineRegistry.ts";
 
 export interface WorkflowResolveValueCheck {
@@ -35,12 +37,57 @@ export function rejectWorkflowResolveValue(check: WorkflowResolveValueCheck): st
   // Unknown affordance (hot index lost across a restart): pass through — the SDK still
   // schema-validates on resume.
   if (affordance === undefined) return null;
-  if (affordance.kind !== "choice") {
-    return "This ask takes a freeform text reply, not a structured value.";
+  if (affordance.kind === "choice") {
+    const chosen =
+      affordance.field === undefined ? value : pickSingleField(value, affordance.field);
+    if (typeof chosen === "string" && affordance.options.includes(chosen)) return null;
+    return `Value does not match the offered choices (${affordance.options.join(", ")}).`;
   }
-  const chosen = affordance.field === undefined ? value : pickSingleField(value, affordance.field);
-  if (typeof chosen === "string" && affordance.options.includes(chosen)) return null;
-  return `Value does not match the offered choices (${affordance.options.join(", ")}).`;
+  if (affordance.kind === "boolean") {
+    return typeof value === "boolean" ? null : "This decision expects yes or no.";
+  }
+  if (affordance.kind === "form") {
+    return rejectFormValue(value, affordance.fields);
+  }
+  return "This ask takes a freeform text reply, not a structured value.";
+}
+
+/** Type-check a structured form submission against the affordance's fields. A pre-check only —
+ * unknown extra keys are left to the SDK's authoritative Struct decode on resume. */
+function rejectFormValue(value: unknown, fields: ReadonlyArray<AskFormField>): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return "This decision expects a form submission.";
+  }
+  const record = value as Record<string, unknown>;
+  for (const field of fields) {
+    const fieldValue = record[field.name];
+    if (fieldValue === undefined) {
+      if (field.optional) continue;
+      return `Missing required field "${field.name}".`;
+    }
+    const reason = rejectFieldValue(field, fieldValue);
+    if (reason !== null) return reason;
+  }
+  return null;
+}
+
+function rejectFieldValue(field: AskFormField, value: unknown): string | null {
+  switch (field.type) {
+    case "string":
+      return typeof value === "string" ? null : `Field "${field.name}" must be text.`;
+    case "number":
+      return typeof value === "number" && Number.isFinite(value)
+        ? null
+        : `Field "${field.name}" must be a number.`;
+    case "boolean":
+      return typeof value === "boolean" ? null : `Field "${field.name}" must be yes or no.`;
+    case "literals": {
+      const options = field.options ?? [];
+      return typeof value === "string" && options.includes(value)
+        ? null
+        : `Field "${field.name}" must be one of: ${options.join(", ")}.`;
+    }
+  }
 }
 
 /** A fielded choice must be submitted as exactly `{ [field]: option }`. */

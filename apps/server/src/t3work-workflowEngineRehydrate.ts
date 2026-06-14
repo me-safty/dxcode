@@ -13,6 +13,14 @@
  * uptime or recovered from a prior one. No local-disk journal is involved — replay reads the
  * DB-backed journal through the injected store.
  *
+ * ── Clock-parked runs (Epic 27) ──────────────────────────────────────────────
+ * A run parked on `waitUntil` is in status `sleeping`, not `suspended`. It rebuilds the same
+ * resume closure (so the scheduler can drive it forward), but is woken by the CLOCK, not an
+ * event — so it does NOT restore a reactor pending ask; instead the scheduler re-arms its
+ * `wake_at`. A deadline that passed during downtime fires immediately on the first arm. The
+ * rebuilt lifecycle's `onSleep` re-pokes the scheduler so a run that sleeps again keeps the
+ * soonest-deadline timer current.
+ *
  * Single-instance only (Epic 25 §Out of scope): no lease/lock, so this assumes one server owns
  * these rows. A row whose pending ask is missing is logged and skipped (it cannot be resolved).
  */
@@ -28,6 +36,7 @@ import { t3workRandomUUID } from "./t3work-random.ts";
 import { makeWorkflowRunLifecycle } from "./t3work-workflowEngineDurability.ts";
 import { createWorkflowRunController } from "./t3work-workflowEngineLaunch.ts";
 import { T3workWorkflowEngineRegistry } from "./t3work-workflowEngineRegistry.ts";
+import { T3workWorkflowScheduler } from "./t3work-workflowScheduler.ts";
 
 function nowIso(): string {
   return DateTime.formatIso(DateTime.nowUnsafe());
@@ -40,9 +49,11 @@ export const rehydrateSuspendedWorkflowRuns = Effect.fn("rehydrateSuspendedWorkf
     const registry = yield* T3workWorkflowEngineRegistry;
     const orchestration = yield* OrchestrationEngineService;
     const serverConfig = yield* ServerConfig;
+    const scheduler = yield* T3workWorkflowScheduler;
 
     const suspended = yield* repo.listByStatus({ status: "suspended" });
-    if (suspended.length === 0) return;
+    const sleeping = yield* repo.listByStatus({ status: "sleeping" });
+    if (suspended.length === 0 && sleeping.length === 0) return;
 
     // The journal lives in the DB (store), so `runsRoot` only backs the workspace-root default
     // for tool scratch files; the server cwd matches the bootstrapped project's workspace.
@@ -50,22 +61,19 @@ export const rehydrateSuspendedWorkflowRuns = Effect.fn("rehydrateSuspendedWorkf
     const dispatch = (command: Parameters<typeof orchestration.dispatch>[0]): Promise<void> =>
       Effect.runPromise(orchestration.dispatch(command)).then(() => undefined);
 
-    let restored = 0;
-    for (const run of suspended) {
-      if (
-        run.pendingThreadId === null ||
-        run.pendingCorrelationId === null ||
-        run.pendingKind === null
-      ) {
-        yield* Effect.logWarning("skipping suspended workflow run with no recorded pending ask", {
-          runId: run.runId,
-        });
-        continue;
-      }
-
-      // Rebuild the resume closure (CODE from layers) over the persisted DATA, then restore
-      // the pending ask so the reactor resolves it exactly as if set this uptime.
-      const lifecycle = makeWorkflowRunLifecycle({ repo, row: run, nowIso });
+    // Rebuild the resume closure (CODE from layers) over the persisted DATA. Shared by both wake
+    // sources — the reactor (suspended) and the scheduler (sleeping) — so a restored run drives
+    // forward identically. `onSleep` re-arms the scheduler whenever a rebuilt run parks on a new
+    // `waitUntil` after resuming.
+    const rebuildController = (run: (typeof suspended)[number]): void => {
+      const lifecycle = makeWorkflowRunLifecycle({
+        repo,
+        row: run,
+        nowIso,
+        onSleep: () => {
+          void scheduler.rearm();
+        },
+      });
       createWorkflowRunController({
         runId: run.runId,
         workflowPath: run.workflowPath,
@@ -83,6 +91,22 @@ export const rehydrateSuspendedWorkflowRuns = Effect.fn("rehydrateSuspendedWorkf
         store,
         lifecycle,
       });
+    };
+
+    let restored = 0;
+    for (const run of suspended) {
+      if (
+        run.pendingThreadId === null ||
+        run.pendingCorrelationId === null ||
+        run.pendingKind === null
+      ) {
+        yield* Effect.logWarning("skipping suspended workflow run with no recorded pending ask", {
+          runId: run.runId,
+        });
+        continue;
+      }
+      // Rebuild, then restore the pending ask so the reactor resolves it as if set this uptime.
+      rebuildController(run);
       registry.setPending(run.pendingThreadId, {
         runId: run.runId,
         correlationId: run.pendingCorrelationId,
@@ -91,6 +115,24 @@ export const rehydrateSuspendedWorkflowRuns = Effect.fn("rehydrateSuspendedWorkf
       restored += 1;
     }
 
-    yield* Effect.logInfo("rehydrated suspended workflow runs", { restored });
+    let armed = 0;
+    for (const run of sleeping) {
+      if (run.pendingCorrelationId === null || run.wakeAt === null) {
+        yield* Effect.logWarning("skipping sleeping workflow run with no recorded wake deadline", {
+          runId: run.runId,
+        });
+        continue;
+      }
+      // Rebuild the resume closure; the scheduler (re-armed below) wakes it at `wake_at`. No
+      // reactor pending ask — the clock, not an event, resolves a sleeping run.
+      rebuildController(run);
+      armed += 1;
+    }
+
+    // Arm the single soonest-deadline timer over every rebuilt sleeping run. A past-due deadline
+    // computes a 0ms delay and fires immediately — the downtime catch-up guarantee.
+    yield* Effect.promise(() => scheduler.rearm());
+
+    yield* Effect.logInfo("rehydrated durable workflow runs", { restored, armed });
   },
 );

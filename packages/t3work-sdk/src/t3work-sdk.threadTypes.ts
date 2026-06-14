@@ -43,6 +43,9 @@ export interface AskUserAttachment {
 /** Options for `askUser` — `AskOpts` plus resources to show on the decision card. */
 export interface AskUserOpts<R = string> extends AskOpts<R> {
   readonly attachments?: ReadonlyArray<AskUserAttachment>;
+  /** Approve/reject button labels for a `Schema.Boolean` ask (the descriptor's `boolean`
+   * affordance). Absent → the card defaults to "Yes"/"No". Ignored for non-boolean schemas. */
+  readonly labels?: { readonly true: string; readonly false: string };
 }
 
 /** Options for `spawnThread`. */

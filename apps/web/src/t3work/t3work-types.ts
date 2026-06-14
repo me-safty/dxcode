@@ -45,6 +45,10 @@ export type ProjectThread = {
   selectedToolIds?: ReadonlyArray<T3workThreadToolId>;
   kickoffWorkflow?: T3workKickoffWorkflow;
   status: "idle" | "running" | "completed" | "error";
+  /** ISO instant a scheduled-workflow run on this thread is sleeping until (Epic 27), or
+   * absent when no run is clock-parked. Drives the "Sleeping until <time>" status pill.
+   * (Sourcing this from `workflow_runs.wake_at` through the thread payload is the next slice.) */
+  sleepingUntil?: string;
 };
 
 export type ThreadMessage = {
@@ -126,7 +130,10 @@ export type ProjectSortOrder = "updated_at" | "created_at";
 export type ThreadSortOrder = "updated_at" | "created_at";
 
 export type ThreadStatusPill = {
-  label: "Working" | "Completed" | "Error" | "Idle";
+  label: "Working" | "Completed" | "Error" | "Idle" | "Sleeping";
+  /** Optional trailing context for the pill — the wake time for a `Sleeping` routine
+   * ("until Mon 09:00"), shown after the label in its tooltip. */
+  detail?: string;
   colorClass: string;
   dotClass: string;
   pulse: boolean;

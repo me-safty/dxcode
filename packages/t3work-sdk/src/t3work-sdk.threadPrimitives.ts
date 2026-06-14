@@ -15,7 +15,7 @@
  * throwing {@link SchemaExhaustedError}. Each attempt is journaled, so the loop replays.
  */
 
-import { schemaToAffordance } from "./t3work-sdk.affordance.ts";
+import { planAskRender } from "./t3work-sdk.askRender.ts";
 import type { MessageBroker } from "./t3work-sdk.broker.ts";
 import { PermissionDeniedError, SchemaExhaustedError } from "./t3work-sdk.errors.ts";
 import type { HandleDispatch, ReplyResolver } from "./t3work-sdk.handles.ts";
@@ -42,22 +42,6 @@ export type {
 /** One attempt + two corrective retries. */
 const MAX_SCHEMA_ATTEMPTS = 3;
 
-const SCHEMA_INSTRUCTION =
-  "Respond with ONLY a single JSON value matching the required schema — no prose, no code fence.";
-
-/** Coerce a raw reply into a value a schema can decode: parse a JSON string (tolerating a
- * ```json fence); pass objects through; leave an unparseable string as-is so the decode fails
- * and the retry loop fires. */
-function coerceReply(reply: unknown): unknown {
-  if (typeof reply !== "string") return reply;
-  const unfenced = reply.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  try {
-    return JSON.parse(unfenced);
-  } catch {
-    return reply;
-  }
-}
-
 export function createThreadPrimitives(deps: {
   readonly dispatch: HandleDispatch;
   readonly broker: MessageBroker;
@@ -83,44 +67,25 @@ export function createThreadPrimitives(deps: {
     const schema = opts?.schema;
     const model = opts?.model ?? deps.defaultModel;
     const promptField = kind === "thread.turn" ? "prompt" : "question";
-    // A `user.input` carries everything the host needs to render the decision card: the
-    // affordance descriptor derived from the schema (the live schema object stays inside the
-    // runtime) and the attachment refs. Derivation is a pure AST walk, so the payload — and its
-    // argsHash — re-derives identically on replay. `{ kind: "text" }` is the host's implicit
-    // default and is OMITTED, keeping the journaled payload byte-identical to pre-card journals
-    // for every non-choice ask — a run parked on an older askUser still resumes. (A run parked
-    // on a string-literal-schema askUser recorded before decision cards existed is the one
-    // shape that drifts; none can predate the feature.)
-    const affordance = kind === "user.input" ? schemaToAffordance(schema) : undefined;
-    const choice = affordance?.kind === "choice" ? affordance : undefined;
-    const attachments = kind === "user.input" ? opts?.attachments : undefined;
-    const renderFields = {
-      ...(affordance === undefined || affordance.kind === "text" ? {} : { affordance }),
-      ...(attachments === undefined || attachments.length === 0 ? {} : { attachments }),
-    };
-    // A choice renders as buttons — the JSON-reply instruction would mislead the user (and leak
-    // into the card), so a choice ask keeps the bare question; its corrective re-ask names the
-    // offered options instead.
-    const correctiveInstruction =
-      choice === undefined ? SCHEMA_INSTRUCTION : `Reply with exactly one of: ${choice.options.join(", ")}.`;
-    // A reply that IS one of the offered options needs no JSON coercion — the literal string
-    // (field-wrapped for a fielded choice) is the value. Running coerceReply on it would corrupt
-    // JSON-parseable options ("true" → boolean, "42" → number) and fail the literal decode.
-    const coerceChoiceReply = (value: unknown): unknown => {
-      if (choice !== undefined && typeof value === "string" && choice.options.includes(value)) {
-        return choice.field === undefined ? value : { [choice.field]: value };
-      }
-      return coerceReply(value);
-    };
-    let prompt =
-      schema === undefined || choice !== undefined ? basePrompt : `${basePrompt}\n\n${SCHEMA_INSTRUCTION}`;
+    // A `user.input` carries everything the host needs to render the decision card: the affordance
+    // descriptor derived from the schema (the live schema object stays inside the runtime), the
+    // attachment refs, and the prompt/coercion the affordance implies. The plan is a pure function
+    // of the (replay-stable) schema + opts, so the payload — and its argsHash — re-derives
+    // identically on replay.
+    const plan = planAskRender({
+      kind,
+      schema,
+      attachments: kind === "user.input" ? opts?.attachments : undefined,
+      labels: opts?.labels,
+    });
+    let prompt = `${basePrompt}${plan.promptSuffix}`;
     let attempt = 0;
     for (;;) {
       attempt += 1;
       const payload = {
         threadId,
         [promptField]: prompt,
-        ...renderFields,
+        ...plan.renderFields,
         ...(model === undefined ? {} : { model }),
       };
       const correlationId = await dispatch.send({
@@ -132,7 +97,7 @@ export function createThreadPrimitives(deps: {
       const reply = await dispatch.awaitResolution<unknown>(correlationId, undefined);
       if (schema === undefined) return String(reply) as R;
       try {
-        return await decodeWithSchema(schema, coerceChoiceReply(reply), "Invalid thread reply");
+        return await decodeWithSchema(schema, plan.coerceReply(reply), "Invalid thread reply");
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         if (attempt >= MAX_SCHEMA_ATTEMPTS) {
@@ -140,7 +105,7 @@ export function createThreadPrimitives(deps: {
             `${kind} on thread '${threadId}' did not satisfy the response schema after ${attempt} attempts: ${detail}`,
           );
         }
-        prompt = `${basePrompt}\n\nYour previous reply did not match the required schema (${detail}). ${correctiveInstruction}`;
+        prompt = `${basePrompt}\n\nYour previous reply did not match the required schema (${detail}). ${plan.correctiveInstruction}`;
       }
     }
   };

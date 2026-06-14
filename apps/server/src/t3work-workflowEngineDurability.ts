@@ -20,6 +20,7 @@ import {
   type RuntimeMode,
 } from "@t3tools/contracts";
 import { hashArgs } from "@t3work/sdk";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
 import type { WorkflowRun, WorkflowRunRepositoryShape } from "./persistence/Services/WorkflowRuns.ts";
@@ -53,16 +54,25 @@ export function buildRunningWorkflowRunRow(input: BuildRunningRowInput): Workflo
     pendingThreadId: null,
     pendingCorrelationId: null,
     pendingKind: null,
+    wakeAt: null,
     createdAt: input.nowIso,
     updatedAt: input.nowIso,
   };
 }
 
-/** Adapt the Effect repo into the Promise-based lifecycle the launch controller drives. */
+/** Format an epoch-millis wake deadline as the ISO instant stored in `wake_at`. */
+function isoFromMillis(millis: number): string {
+  return DateTime.formatIso(DateTime.makeUnsafe(millis));
+}
+
+/** Adapt the Effect repo into the Promise-based lifecycle the launch controller drives.
+ * `onSleep` (Epic 27) is a best-effort poke fired after a clock park is recorded, so the
+ * scheduler re-arms its soonest-deadline timer for the freshly-slept run. */
 export function makeWorkflowRunLifecycle(opts: {
   readonly repo: WorkflowRunRepositoryShape;
   readonly row: WorkflowRun;
   readonly nowIso: () => string;
+  readonly onSleep?: () => void;
 }): WorkflowRunLifecycle {
   const { repo, row } = opts;
   return {
@@ -77,6 +87,17 @@ export function makeWorkflowRunLifecycle(opts: {
           updatedAt: opts.nowIso(),
         }),
       ),
+    recordSleeping: (sleep) =>
+      Effect.runPromise(
+        repo.setSleeping({
+          runId: row.runId,
+          wakeAt: isoFromMillis(sleep.deadline),
+          correlationId: sleep.correlationId,
+          updatedAt: opts.nowIso(),
+        }),
+      ).then(() => {
+        opts.onSleep?.();
+      }),
     recordCompleted: () =>
       Effect.runPromise(
         repo.clearPending({ runId: row.runId, status: "completed", updatedAt: opts.nowIso() }),

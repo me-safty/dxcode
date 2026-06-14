@@ -16,9 +16,8 @@
  *     (possibly hours later, via the broker), so it does not occupy a replay position.
  * A line with no `phase` is a normal `"call"` entry (25.2/25.3) — unchanged.
  *
- * The `result` field is a *result envelope*: `{ "v": <value> }` for a normal return,
- * `{ "void": true }` for a void handler/empty reply, or `{ "dismissed": true }` for a
- * dismissed Handle. Absent for `"script-never"` markers and `"sent"` entries.
+ * The `result` field is a *result envelope*: `{ "v": <value> }` (return), `{ "void": true }`
+ * (void/empty), or `{ "dismissed": true }`. Absent for `"script-never"` + `"sent"` entries.
  *
  * ── Torn-tail recovery ──────────────────────────────────────────────────────
  * A single *torn final line* — the final line fails to parse AND the file does not end
@@ -66,6 +65,7 @@ export const JournalEntrySchema = Schema.Struct({
     "thread.turn",
     "thread.message",
     "user.input",
+    "wait.until",
   ]),
   /** Tool id (e.g. `github.pull_request.merge`) or script/primitive registration name. */
   refId: Schema.String,

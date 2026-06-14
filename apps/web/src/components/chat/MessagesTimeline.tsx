@@ -93,6 +93,10 @@ import {
   type WorkflowDecisionChooseHandler,
 } from "~/t3work/chat/t3work-messageDecisionCard";
 import {
+  getT3workWorkflowShapeAttachment,
+  T3workWorkflowShapeCard,
+} from "~/t3work/chat/t3work-messageShapeCard";
+import {
   buildReviewCommentRenderablePatch,
   parseReviewCommentMessageSegments,
   type ReviewCommentContext,
@@ -633,10 +637,11 @@ function SystemTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message
   const ctx = use(TimelineRowCtx);
   const workflowCard = getT3workWorkflowCardAttachment(row.message);
   const decision = getT3workWorkflowDecisionAttachment(row.message);
+  const shape = getT3workWorkflowShapeAttachment(row.message);
   const attachments = getT3workRenderableAttachments(row.message);
-  // The decision card renders the question itself; the message text (the same question) would
-  // double up above it.
-  const hasText = decision === null && row.message.text.trim().length > 0;
+  // The decision / shape cards render their own header; the message text (a short echo) would
+  // double up above them.
+  const hasText = decision === null && shape === null && row.message.text.trim().length > 0;
 
   if (row.message.t3workExt?.visibleToUser === false) {
     return null;
@@ -671,8 +676,13 @@ function SystemTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message
             onChoose={ctx.onResolveWorkflowDecision}
           />
         ) : null}
+        {shape ? (
+          <div className={hasText || workflowCard ? "mt-3" : undefined}>
+            <T3workWorkflowShapeCard shape={shape} />
+          </div>
+        ) : null}
         {attachments.length > 0 ? <T3workMessageAttachmentList attachments={attachments} /> : null}
-        {!hasText && !workflowCard && !decision && attachments.length === 0 ? (
+        {!hasText && !workflowCard && !decision && !shape && attachments.length === 0 ? (
           <ChatMarkdown
             text="(empty system message)"
             cwd={ctx.markdownCwd}

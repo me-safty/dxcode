@@ -26,6 +26,28 @@ const fieldedPending: WorkflowPendingAsk = {
   affordance: { kind: "choice", field: "severity", options: ["low", "high"] },
 };
 
+const booleanPending: WorkflowPendingAsk = {
+  runId: "run-1",
+  correlationId: "run-1:1",
+  kind: "user.input",
+  affordance: { kind: "boolean", labels: { true: "Ship it", false: "Hold" } },
+};
+
+const formPending: WorkflowPendingAsk = {
+  runId: "run-1",
+  correlationId: "run-1:1",
+  kind: "user.input",
+  affordance: {
+    kind: "form",
+    fields: [
+      { name: "severity", type: "literals", options: ["low", "high"], optional: false },
+      { name: "note", type: "string", optional: false },
+      { name: "urgent", type: "boolean", optional: false },
+      { name: "owner", type: "string", optional: true },
+    ],
+  },
+};
+
 describe("rejectWorkflowResolveValue", () => {
   it("accepts an offered choice", () => {
     expect(
@@ -55,6 +77,49 @@ describe("rejectWorkflowResolveValue", () => {
     expect(rejectWorkflowResolveValue({ ...base, value: "high" })).not.toBeNull();
     expect(rejectWorkflowResolveValue({ ...base, value: { severity: "high", extra: 1 } })).not.toBeNull();
     expect(rejectWorkflowResolveValue({ ...base, value: { severity: "medium" } })).not.toBeNull();
+  });
+
+  it("accepts a boolean for a boolean ask and rejects anything else", () => {
+    const base = { pending: booleanPending, correlationId: undefined, hasValue: true };
+    expect(rejectWorkflowResolveValue({ ...base, value: true })).toBeNull();
+    expect(rejectWorkflowResolveValue({ ...base, value: false })).toBeNull();
+    expect(rejectWorkflowResolveValue({ ...base, value: "Ship it" })).toMatch(/yes or no/);
+    expect(rejectWorkflowResolveValue({ ...base, value: 1 })).toMatch(/yes or no/);
+  });
+
+  it("accepts a well-typed form submission (optional field may be omitted)", () => {
+    const base = { pending: formPending, correlationId: undefined, hasValue: true };
+    expect(
+      rejectWorkflowResolveValue({
+        ...base,
+        value: { severity: "high", note: "rounding bug", urgent: true },
+      }),
+    ).toBeNull();
+    expect(
+      rejectWorkflowResolveValue({
+        ...base,
+        value: { severity: "low", note: "x", urgent: false, owner: "pj" },
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects a form submission with a missing required field, bad type, or out-of-range literal", () => {
+    const base = { pending: formPending, correlationId: undefined, hasValue: true };
+    expect(rejectWorkflowResolveValue({ ...base, value: { severity: "high", note: "x" } })).toMatch(
+      /Missing required field "urgent"/,
+    );
+    expect(
+      rejectWorkflowResolveValue({ ...base, value: { severity: "high", note: 7, urgent: true } }),
+    ).toMatch(/Field "note" must be text/);
+    expect(
+      rejectWorkflowResolveValue({
+        ...base,
+        value: { severity: "mid", note: "x", urgent: true },
+      }),
+    ).toMatch(/Field "severity" must be one of/);
+    expect(rejectWorkflowResolveValue({ ...base, value: "not-an-object" })).toMatch(
+      /expects a form submission/,
+    );
   });
 
   it("rejects a stale correlationId (the card's ask is no longer pending)", () => {

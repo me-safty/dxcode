@@ -28,6 +28,13 @@ export interface WorkflowEnginePendingAsk {
   readonly kind: "thread.turn" | "user.input";
 }
 
+/** The timer a run parks on when it fires `waitUntil` (Epic 27): the `waitUntil` correlation
+ * the scheduler resolves on fire, plus the wake deadline (epoch millis) it arms a timer for. */
+export interface WorkflowEngineSleep {
+  readonly correlationId: string;
+  readonly deadline: number;
+}
+
 export interface WorkflowEngineBrokerDeps {
   readonly runId: string;
   readonly projectId: ProjectId;
@@ -46,6 +53,12 @@ export interface WorkflowEngineBrokerDeps {
    * the source of truth. No-op (undefined) on the fs/in-memory path.
    */
   readonly recordPending?: (pending: WorkflowEnginePendingAsk) => Promise<void>;
+  /**
+   * Durably record a clock park (status=sleeping + `wake_at` + the `waitUntil` correlation)
+   * before the run suspends, so the scheduler finds it on boot (Epic 27). Mirrors
+   * {@link recordPending} for the timer wake source. No-op (undefined) on the fs/in-memory path.
+   */
+  readonly recordSleeping?: (sleep: WorkflowEngineSleep) => Promise<void>;
 }
 
 export interface ThreadCreatePayload {
@@ -69,6 +82,10 @@ export interface UserInputPayload {
   readonly affordance?: AskAffordance;
   /** External-resource refs to render as cards on the decision message. */
   readonly attachments?: ReadonlyArray<unknown>;
+}
+/** The `wait.until` envelope payload: the wall-clock deadline (epoch millis) the run sleeps to. */
+export interface WaitUntilPayload {
+  readonly deadline: number;
 }
 
 export function messageUpsert(

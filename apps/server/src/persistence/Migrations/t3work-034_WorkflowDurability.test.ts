@@ -58,6 +58,7 @@ layer("t3work-034_WorkflowDurability", (it) => {
           "runtime_mode",
           "status",
           "updated_at",
+          "wake_at", // added by t3work-035 (Epic 27 scheduler)
           "workflow_path",
         ],
       );
@@ -67,6 +68,8 @@ layer("t3work-034_WorkflowDurability", (it) => {
       );
       const runIndexes = yield* sql<IndexRow>`PRAGMA index_list(workflow_runs)`;
       assert.ok(runIndexes.some((i) => i.name === "idx_workflow_runs_status"));
+      // t3work-035 adds the scheduler's partial index over sleeping runs' wake_at.
+      assert.ok(runIndexes.some((i) => i.name === "idx_workflow_runs_wake_at"));
 
       // Existing projections are unaffected by the new migration.
       const tables = yield* sql<TableRow>`SELECT name FROM sqlite_master WHERE type = 'table'`;

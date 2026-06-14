@@ -139,10 +139,9 @@ export type WorkflowSdkRegistry = {
 };
 
 /**
- * Every journaled primitive. `tool`/`script`/`script-never`, `now`/`random`/`uuid`, and the
- * `wait`/`parallel`/`pipeline`/`workflow` composition primitives are normal journaled calls;
- * the four Thread-model verbs split into a `sent`/`resolved` pair (Epic 25 §The thread model) —
- * `thread.create`/`thread.message` are one-way, `thread.turn`/`user.input` are ask-shaped.
+ * Every journaled primitive. tool/script/now/random/uuid + wait/parallel/pipeline/workflow are
+ * normal journaled calls; the Thread verbs split into a `sent`/`resolved` pair (Epic 25), and
+ * `wait.until` (Epic 27) is their clock-driven sibling, resolved by the scheduler at its deadline.
  */
 export type PrimitiveKind =
   | "tool"
@@ -158,7 +157,8 @@ export type PrimitiveKind =
   | "thread.create"
   | "thread.turn"
   | "thread.message"
-  | "user.input";
+  | "user.input"
+  | "wait.until";
 
 /**
  * A single journaled primitive call. The engine assigns it a `seq`, hashes `args`, and

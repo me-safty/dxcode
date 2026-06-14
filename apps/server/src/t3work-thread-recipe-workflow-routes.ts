@@ -10,6 +10,7 @@ import { PROJECT_RECIPE_ACTIVITY_KIND_LAUNCH } from "@t3tools/project-recipes";
 import type { LaunchProjectRecipeWorkflowRequest } from "@t3tools/project-recipes";
 import { createModelSelection } from "@t3tools/shared/model";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import { HttpRouter } from "effect/unstable/http";
 
 import {
@@ -34,7 +35,9 @@ import {
 } from "./t3work-thread-recipe-workflow-routes-shared.ts";
 import { nowIso } from "./t3work-thread-recipe-workflow-routes-resolve.ts";
 import { launchWorkflowRecipe } from "./t3work-workflowEngineLaunch.ts";
+import { buildWorkflowShapePreviewCommand } from "./t3work-workflowShapePreview.ts";
 import { T3workWorkflowEngineRegistry } from "./t3work-workflowEngineRegistry.ts";
+import { T3workWorkflowScheduler } from "./t3work-workflowScheduler.ts";
 
 export { t3workThreadWorkflowResolveInputRouteLayer } from "./t3work-thread-recipe-workflow-routes-resolve.ts";
 
@@ -52,6 +55,7 @@ export const t3workThreadRecipeWorkflowLaunchRouteLayer = HttpRouter.add(
     const registry = yield* T3workWorkflowEngineRegistry;
     const runRepository = yield* WorkflowRunRepository;
     const journalStore = yield* WorkflowJournalStore;
+    const scheduler = yield* T3workWorkflowScheduler;
     const input = yield* readJsonBody<LaunchProjectRecipeWorkflowRequest>();
 
     const threadIdInput = input.threadId?.trim() ?? "";
@@ -107,6 +111,11 @@ export const t3workThreadRecipeWorkflowLaunchRouteLayer = HttpRouter.add(
         nowIso: nowIso(),
       }),
       nowIso,
+      // When the body fires `waitUntil`, re-arm the scheduler's soonest-deadline timer for the
+      // freshly-slept run (Epic 27).
+      onSleep: () => {
+        void scheduler.rearm();
+      },
     });
 
     // Stamp the launch thread with a recipe-launch activity BEFORE starting the run. The web
@@ -131,6 +140,28 @@ export const t3workThreadRecipeWorkflowLaunchRouteLayer = HttpRouter.add(
         createdAt: nowIso(),
       }),
     );
+
+    // Emit the play-as-shape "plan" before the run starts so the user sees WHAT THE RECIPE WILL
+    // DO while it spins up. Best-effort: an unreadable source / underivable shape skips the
+    // preview, and the launch proceeds unchanged.
+    const fileSystem = yield* FileSystem.FileSystem;
+    const shapeSource = yield* fileSystem
+      .readFileString(workflowPath)
+      .pipe(Effect.orElseSucceed(() => null));
+    const shapeCommand =
+      shapeSource === null
+        ? null
+        : buildWorkflowShapePreviewCommand({
+            threadId: threadIdInput,
+            workflowPath,
+            sourceText: shapeSource,
+            runId,
+            newId: () => t3workRandomUUID(),
+            nowIso: nowIso(),
+          });
+    if (shapeCommand) {
+      yield* Effect.promise(() => dispatch(shapeCommand));
+    }
 
     const result = yield* Effect.promise(() =>
       launchWorkflowRecipe({
