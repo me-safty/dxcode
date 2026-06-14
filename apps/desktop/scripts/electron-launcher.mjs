@@ -130,6 +130,17 @@ function writeDevelopmentLauncherScript(targetBinaryPath, electronBinaryPath) {
   chmodSync(targetBinaryPath, 0o755);
 }
 
+function developmentLauncherEnvironmentMetadata() {
+  return {
+    VITE_DEV_SERVER_URL: process.env.VITE_DEV_SERVER_URL ?? null,
+    T3CODE_PORT: process.env.T3CODE_PORT ?? null,
+    T3CODE_HOME: process.env.T3CODE_HOME ?? null,
+    T3CODE_COMMIT_HASH: process.env.T3CODE_COMMIT_HASH ?? null,
+    T3CODE_OTLP_TRACES_URL: process.env.T3CODE_OTLP_TRACES_URL ?? null,
+    T3CODE_OTLP_EXPORT_INTERVAL_MS: process.env.T3CODE_OTLP_EXPORT_INTERVAL_MS ?? null,
+  };
+}
+
 function registerMacLauncherBundle(appBundlePath) {
   runChecked(
     "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
@@ -282,6 +293,9 @@ function buildMacLauncher(electronBinaryPath) {
     iconMtimeMs: statSync(iconPath).mtimeMs,
     appBundleId: APP_BUNDLE_ID,
     appProtocolSchemes: APP_PROTOCOL_SCHEMES,
+    ...(isDevelopment
+      ? { developmentLauncherEnvironment: developmentLauncherEnvironmentMetadata() }
+      : {}),
   };
 
   const currentMetadata = readJson(metadataPath);

@@ -128,16 +128,18 @@ reviewable mutation flow, and cross-provider link resolution.
 ```ts
 // Illustrative North-Star shape — peer to defineRecipe.
 const atlassian = defineConnector({
-  id: "atlassian",                 // open slug; unique per project
+  id: "atlassian", // open slug; unique per project
   label: "Atlassian",
   domains: ["jira-issue", "confluence-page"], // product family
-  auth: oauthSite({ /* platform-managed */ }),
-  listProjects,                    // back-end-specific reads...
+  auth: oauthSite({
+    /* platform-managed */
+  }),
+  listProjects, // back-end-specific reads...
   listResources,
   getResource,
   search,
   getAvailableActions,
-  extractRelations,                // link extraction → cross-provider graph (Epic 13)
+  extractRelations, // link extraction → cross-provider graph (Epic 13)
   prepareMutation,
   commitMutation,
 });
@@ -183,6 +185,42 @@ The cache layer has two complementary storage forms:
 The t3work-Atlassian backlog cache
 ([apps/server/src/t3work-atlassian-backlog-cacheReadWrite.ts](../../apps/server/src/t3work-atlassian-backlog-cacheReadWrite.ts))
 is the existing template for new providers.
+
+## Backlog Sync Contract
+
+Backlog and work-list surfaces must be cache-first and page-synced. They must never load an
+entire external project in the foreground request that opens the UI.
+
+The required flow:
+
+1. **Visible load** returns quickly from local SQL cache when available, otherwise fetches a
+   bounded first page from the provider. The default foreground page size should be small
+   enough to finish within the UI request budget, for example 50-100 issues.
+2. **Background sync** continues paging the selected source, board, sprint, saved filter, or
+   JQL view into the local cache. Each page is written incrementally and advances a sync
+   cursor/checkpoint, so a large Jira project cannot force one huge in-memory payload.
+3. **Debounce and coalescing** apply to high-churn view selections. Board, sprint, saved
+   filter, JQL, search, and focus-filter changes should wait briefly, for example 300-500ms,
+   before starting a new provider sync. A newer selection cancels or supersedes older
+   in-flight sync work.
+4. **Stale fallback** is mandatory. If the provider is slow, offline, rate-limited, or
+   unavailable, the UI should show the last cached backlog slice with freshness metadata
+   instead of failing the whole surface.
+5. **Sync budgets** protect the app and provider. A sync run should cap pages, elapsed time,
+   and memory use, then resume later through the freshness polling/sync service. Example:
+   sync at most 10 pages or 30 seconds per run, then schedule continuation.
+6. **Reactive invalidation** publishes cache fingerprint/freshness changes to clients. The UI
+   updates from the cache as new pages arrive; agents and recipes read the same queryable
+   cache rather than issuing their own unbounded provider reads.
+
+For example, opening a Jira backlog should show cached items immediately, fetch the first
+remote page if the cache is empty or stale, then continue syncing later pages in the
+background. Switching from Sprint 7.6 to Sprint 7.7 cancels the old sprint sync and starts a
+new debounced sync for the latest selection.
+
+The existing direct Atlassian backlog endpoint is a compatibility path. Its foreground work
+must stay bounded; full-project freshness belongs to the server-owned sync loop described
+above.
 
 ## Future Connectors
 
