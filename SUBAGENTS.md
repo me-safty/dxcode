@@ -10,7 +10,7 @@ The current behavior is:
 - Active subagent threads appear in the sidebar nested under the direct parent that spawned them.
 - Completed, errored, interrupted, or stopped subagent threads are normally hidden from the sidebar but remain reachable from the parent conversation view. When a terminal subagent conversation is the active route, that subagent and any intermediate subagent ancestors are shown in the sidebar at their normal nested positions until the user navigates away.
 - A parent conversation view shows only parent-owned output and subagent summary blocks for direct children.
-- A child conversation view shows only that child's output, tool calls, diffs, MCP calls, and other actions. Grandchildren appear only as blocks inside their direct parent child view.
+- A child conversation view shows the raw initial prompt that launched that child when Codex exposes it, followed by that child's output, tool calls, diffs, MCP calls, and other actions. Grandchildren appear only as blocks inside their direct parent child view.
 - Users cannot prompt or steer a subagent. The child view exposes stop control only while the child is running and a header button for returning to its direct parent conversation.
 - Stopping a parent does not automatically stop running children. Stopping a child explicitly targets that child.
 - Archive/delete actions are exposed only for root parent conversations and should include descendant subagent threads as part of that root lifecycle.
@@ -57,15 +57,19 @@ Review fixes added preservation guards so a normal root/default projection upser
 
 2. Codex collab lifecycle items now carry `subagentChildren` metadata on the parent activity payload. Each child reference includes the provider thread id, local child thread id, optional parent item id, and optional title seed. The parent UI uses this metadata to render the compact `Subagent - <title>` block.
 
-3. Child-thread creation and updates happen through orchestration ingestion. The server preserves the direct parent, root thread id, depth, parent activity sequence, title seed, provider thread id, and started timestamp. Synthetic child shells are created so hidden child routes can be opened before the full projection catches up.
+3. Codex collab lifecycle tracking preserves both the raw child prompt and the title seed. The raw prompt comes from the collab tool item `prompt` field and is used as displayable child-thread conversation history; the title seed remains the input for generated child titles and parent summary labeling. Whitespace-only raw prompts are ignored.
 
-4. Child terminal status is derived from child lifecycle events, not from the parent collab item alone. Terminal updates apply only while the relation is still `running`, which prevents later `session.exited` events from overwriting a more specific `completed`, `errored`, `interrupted`, or `stopped` result.
+4. Child-thread creation and updates happen through orchestration ingestion. The server preserves the direct parent, root thread id, depth, parent activity sequence, title seed, provider thread id, and started timestamp. Synthetic child shells are created so hidden child routes can be opened before the full projection catches up.
 
-5. Child stop/interrupt handling routes through the provider-bound root session while targeting the selected child thread/turn. Parent stop remains scoped to the requested parent thread and does not cascade to active children.
+5. When Codex exposes a raw child prompt, ingestion appends it to the child thread as a non-streaming user message through an internal `thread.message.user.append` command. The prompt message uses stable ids derived from `childThreadId + parentItemId`, is not bound to the parent turn, and is appended even if the child shell already exists because Codex first emitted a started item without a prompt and later emitted a completed item with the concrete prompt.
 
-6. Completed child detail remains tied to the root parent lifecycle. The web action layer dispatches archive/delete lifecycle actions for the root and collected descendant subagent threads, with root actions last. Delete also attempts to stop and close terminal state for involved lifecycle thread ids.
+6. Child terminal status is derived from child lifecycle events, not from the parent collab item alone. Terminal updates apply only while the relation is still `running`, which prevents later `session.exited` events from overwriting a more specific `completed`, `errored`, `interrupted`, or `stopped` result.
 
-7. Unsupported providers keep the previous fallback behavior. No durable nested-thread behavior should be inferred for Claude, Cursor, OpenCode, or other providers until their event streams expose enough lineage to make child routing reliable.
+7. Child stop/interrupt handling routes through the provider-bound root session while targeting the selected child thread/turn. Parent stop remains scoped to the requested parent thread and does not cascade to active children.
+
+8. Completed child detail remains tied to the root parent lifecycle. The web action layer dispatches archive/delete lifecycle actions for the root and collected descendant subagent threads, with root actions last. Delete also attempts to stop and close terminal state for involved lifecycle thread ids.
+
+9. Unsupported providers keep the previous fallback behavior. No durable nested-thread behavior should be inferred for Claude, Cursor, OpenCode, or other providers until their event streams expose enough lineage to make child routing reliable.
 
 ## Web Implementation
 
@@ -75,9 +79,9 @@ Review fixes added preservation guards so a normal root/default projection upser
 
 3. Parent timelines render direct child summary blocks from `subagentChildren`. The block text is `Subagent` while the generated child title is pending or still the placeholder, then `Subagent - <title>` once a generated child title is available. The child title is generated from the child title seed derived from the initial subagent prompt when available, and raw child prompts are not used as the visible title fallback. Duration and status display use shared helpers, with running children described as `Working for <duration>` and completed children described as `Completed in <duration>`.
 
-4. Parent timelines do not render child output, child shell commands, child file diffs, child MCP calls, or child action boxes. Those entries appear only inside the child thread view.
+4. Parent timelines do not render child prompt messages, child output, child shell commands, child file diffs, child MCP calls, or child action boxes. Those entries appear only inside the child thread view.
 
-5. Child timelines render their own output/actions and can render their own direct child summary blocks. This gives arbitrary-depth nesting without showing grandchildren in the original root parent view.
+5. Child timelines render their raw launch prompt when available, then their own output/actions, and can render their own direct child summary blocks. This gives arbitrary-depth nesting without showing grandchildren in the original root parent view.
 
 6. Child conversation views replace the normal composer with a subagent control bar. Users cannot send prompts to a subagent. While a child is running, the available user control is stop. The chat header also includes an up-navigation button that opens the direct parent conversation.
 
@@ -90,6 +94,7 @@ Review fixes added preservation guards so a normal root/default projection upser
 - Persistence retention: child detail is tied to parent lifecycle.
 - Provider scope: Codex only for first implementation; unsupported providers degrade to current behavior.
 - Title semantics: use the child title seed from the Codex collab item, normally derived from the subagent's initial prompt.
+- Prompt history semantics: use the raw Codex collab item prompt as the child thread's initial user message when available. Do not use the title seed as a fallback prompt, because generated/summarized title seeds are not necessarily the literal child instruction.
 - Error semantics: child failures do not bubble up as parent failures. Parent status and child status are independent.
 - Missing completion events: follow the same lifecycle behavior as normal agent sessions. Use available terminal events where present; otherwise preserve running/unknown state until a stop, interrupt, session exit, reconnect reconciliation, or later terminal event updates it.
 - Stop behavior: stopping a parent does not stop children; stopping a child is allowed from the child view.
@@ -102,8 +107,9 @@ Review fixes added preservation guards so a normal root/default projection upser
 The implementation and review fixes have been covered by focused automated tests and Playwright regression checks:
 
 - Server tests cover Codex subagent ingestion, child terminal status, parent-relation persistence, projection upsert preservation, and child stop/interrupt routing through the provider-bound root session.
+- Server tests cover raw subagent prompt projection into child threads, including start-then-complete late prompt updates and whitespace-only prompt suppression.
 - Web tests cover sidebar/thread state behavior, duplicate parent subagent control-row removal, child composer suppression, subagent stop control behavior, and duration fallback labels.
-- Playwright checked Codex subagent behavior with a low-reasoning mini model: the parent showed exactly one compact subagent block, child output/actions did not leak into the parent, the child view was reachable from the parent block, the child view showed the child command/output, and the child view did not expose a prompt composer.
+- Playwright checked Codex subagent behavior with marker prompts: before the prompt projection fix, the child view showed the output marker but not the initial prompt marker; after the fix, the child view showed the initial prompt marker followed by the output marker. Earlier Playwright coverage also checked that the parent showed exactly one compact subagent block, child output/actions did not leak into the parent, the child view was reachable from the parent block, the child view showed the child command/output, and the child view did not expose a prompt composer.
 
 Current completion gates for this repo remain:
 
