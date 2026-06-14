@@ -27,14 +27,17 @@ function makeNotification(tag: unknown): FakeNotification {
   return notification;
 }
 
-function installPushSupport(getRegistration: () => Promise<unknown>): void {
+function installPushSupport(
+  getRegistration: () => Promise<unknown>,
+  ready?: Promise<unknown>,
+): void {
   vi.stubGlobal("window", {
     isSecureContext: true,
     PushManager: function PushManager() {},
     Notification: function Notification() {},
   });
   vi.stubGlobal("navigator", {
-    serviceWorker: { getRegistration },
+    serviceWorker: { getRegistration, ...(ready ? { ready } : {}) },
   });
 }
 
@@ -130,6 +133,60 @@ describe("getDisplayedTurnCompletionThreadCount", () => {
     installPushSupport(async () => null);
 
     await expect(getDisplayedTurnCompletionThreadCount()).resolves.toBeNull();
+  });
+
+  it("falls back to the ready service worker registration on first launch", async () => {
+    const readyRegistration = Promise.resolve({
+      getNotifications: async () => [makeNotification("thread:thread-1:turn:turn-1")],
+    });
+    installPushSupport(async () => null, readyRegistration);
+
+    await expect(getDisplayedTurnCompletionThreadCount()).resolves.toBe(1);
+  });
+
+  it("falls back to the ready registration when direct registration lookup rejects", async () => {
+    const readyRegistration = Promise.resolve({
+      getNotifications: async () => [makeNotification("thread:thread-1:turn:turn-1")],
+    });
+    installPushSupport(async () => {
+      throw new Error("registration lookup failed");
+    }, readyRegistration);
+
+    await expect(getDisplayedTurnCompletionThreadCount()).resolves.toBe(1);
+  });
+
+  it("returns null when the ready service worker registration times out", async () => {
+    vi.useFakeTimers();
+    try {
+      installPushSupport(
+        async () => null,
+        new Promise<never>(() => {
+          // Intentionally never resolves.
+        }),
+      );
+
+      const count = getDisplayedTurnCompletionThreadCount();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(3000);
+
+      await expect(count).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns null when the ready service worker registration rejects", async () => {
+    let rejectReady!: (error: unknown) => void;
+    const readyRegistration = new Promise<unknown>((_resolve, reject) => {
+      rejectReady = reject;
+    });
+    installPushSupport(async () => null, readyRegistration);
+
+    const count = getDisplayedTurnCompletionThreadCount();
+    await Promise.resolve();
+    rejectReady(new Error("ready failed"));
+
+    await expect(count).resolves.toBeNull();
   });
 
   it("returns null when push support is unavailable", async () => {
@@ -250,6 +307,25 @@ describe("clearTurnCompletionAlerts", () => {
     await expect(clearTurnCompletionAlerts()).resolves.toBeUndefined();
 
     expect(notifications.map((notification) => notification.closed)).toEqual([true, false]);
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "t3.clear-turn-completion-notifications",
+    });
+  });
+
+  it("uses the ready service worker registration when the immediate registration is missing", async () => {
+    const postMessage = vi.fn();
+    const notifications = [makeNotification("thread:thread-1:turn:turn-1")];
+    installPushSupport(
+      async () => null,
+      Promise.resolve({
+        active: { postMessage },
+        getNotifications: async () => notifications,
+      }),
+    );
+
+    await expect(clearTurnCompletionAlerts()).resolves.toBeUndefined();
+
+    expect(notifications[0]?.closed).toBe(true);
     expect(postMessage).toHaveBeenCalledWith({
       type: "t3.clear-turn-completion-notifications",
     });

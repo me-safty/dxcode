@@ -118,6 +118,11 @@
   padding-right: max(env(safe-area-inset-right), 0px);
 }
 
+.popup-height-locked {
+  height: var(--popup-locked-height) !important;
+  max-height: var(--popup-locked-height) !important;
+}
+
 /* Suppress all transitions during theme changes */
 .no-transitions,
 .no-transitions *,

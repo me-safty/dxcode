@@ -498,7 +498,7 @@ describe("t3-service-worker app badge", () => {
     expect(harness.getBadgeClearCallCount()).toBe(0);
   });
 
-  it("decrements and clears the badge when notifications are clicked", async () => {
+  it("clears all completed-turn notifications when a notification is clicked", async () => {
     await harness.dispatchPush({
       tag: "thread:thread-1:turn:turn-1",
       url: TARGET_URL,
@@ -510,14 +510,8 @@ describe("t3-service-worker app badge", () => {
 
     await harness.dispatchNotificationClick(0);
 
-    expect(harness.getDisplayedNotificationCount()).toBe(1);
-    expect(harness.getBadgeSetCalls()).toEqual([1, 2, 1]);
-    expect(harness.getBadgeClearCallCount()).toBe(0);
-
-    await harness.dispatchNotificationClick(0);
-
     expect(harness.getDisplayedNotificationCount()).toBe(0);
-    expect(harness.getBadgeSetCalls()).toEqual([1, 2, 1]);
+    expect(harness.getBadgeSetCalls()).toEqual([1, 2]);
     expect(harness.getBadgeClearCallCount()).toBe(1);
   });
 

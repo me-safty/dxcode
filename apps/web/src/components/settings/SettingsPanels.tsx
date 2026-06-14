@@ -1,5 +1,4 @@
 import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
-import { Link } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   defaultInstanceIdForDriver,
@@ -891,7 +890,7 @@ export function GeneralSettingsPanel() {
           title="Diagnostics"
           description={diagnosticsDescription}
           control={
-            <Button render={<Link to="/settings/diagnostics" />} size="xs" variant="outline">
+            <Button render={<a href="/settings/diagnostics" />} size="xs" variant="outline">
               View diagnostics
             </Button>
           }

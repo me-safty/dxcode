@@ -30,6 +30,11 @@ const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
 const loadReplayHistory = process.env.T3_ACP_LOAD_REPLAY_HISTORY === "1";
 const failLoadSession = process.env.T3_ACP_FAIL_LOAD_SESSION === "1";
 const loadReplayModeId = process.env.T3_ACP_LOAD_REPLAY_MODE_ID;
+const requestedModelFixture = process.env.T3_ACP_MODEL_FIXTURE;
+const modelFixture =
+  requestedModelFixture === "grok" || requestedModelFixture === "all"
+    ? requestedModelFixture
+    : "cursor";
 const promptDelayMs = Number(process.env.T3_ACP_PROMPT_DELAY_MS ?? "0");
 const permissionOptionIds = {
   allowOnce: process.env.T3_ACP_ALLOW_ONCE_OPTION_ID ?? "allow-once",
@@ -39,7 +44,7 @@ const permissionOptionIds = {
 const sessionId = "mock-session-1";
 
 let currentModeId = "ask";
-let currentModelId = "default";
+let currentModelId = modelFixture === "grok" ? "grok-build" : "default";
 let parameterizedModelPicker = false;
 let currentReasoning = "medium";
 let currentContext = "272k";
@@ -230,109 +235,127 @@ function listAvailableModelsResponse(): {
     readonly configOptions?: ReadonlyArray<AcpSchema.SessionConfigOption>;
   }>;
 } {
-  return {
-    models: [
-      {
-        value: "grok-build",
-        name: "Grok Build",
-        configOptions: [],
-      },
-      {
-        value: "grok-mock-alt",
-        name: "Grok Mock Alt",
-        configOptions: [],
-      },
-      {
-        value: "default",
-        name: "Auto",
-        configOptions: [],
-      },
-      {
-        value: "composer-2",
-        name: "Composer 2",
-        configOptions: [
-          {
-            id: "fast",
-            name: "Fast",
-            category: "model_config",
-            type: "select",
-            currentValue: "true",
-            options: [
-              { value: "false", name: "Off" },
-              { value: "true", name: "Fast" },
-            ],
-          },
-        ],
-      },
-      {
-        value: "gpt-5.4",
-        name: "GPT-5.4",
-        configOptions: [
-          {
-            id: "reasoning",
-            name: "Reasoning",
-            category: "thought_level",
-            type: "select",
-            currentValue: currentReasoning,
-            options: [
-              { value: "none", name: "None" },
-              { value: "low", name: "Low" },
-              { value: "medium", name: "Medium" },
-              { value: "high", name: "High" },
-              { value: "extra-high", name: "Extra High" },
-            ],
-          },
-          {
-            id: "context",
-            name: "Context",
-            category: "model_config",
-            type: "select",
-            currentValue: currentContext,
-            options: [
-              { value: "272k", name: "272K" },
-              { value: "1m", name: "1M" },
-            ],
-          },
-          {
-            id: "fast",
-            name: "Fast",
-            category: "model_config",
-            type: "select",
-            currentValue: String(currentFast),
-            options: [
-              { value: "false", name: "Off" },
-              { value: "true", name: "Fast" },
-            ],
-          },
-        ],
-      },
-      {
-        value: "claude-opus-4-6",
-        name: "Opus 4.6",
-        configOptions: [
-          {
-            id: "reasoning",
-            name: "Reasoning",
-            category: "thought_level",
-            type: "select",
-            currentValue: "high",
-            options: [
-              { value: "low", name: "Low" },
-              { value: "medium", name: "Medium" },
-              { value: "high", name: "High" },
-            ],
-          },
-          {
-            id: "thinking",
-            name: "Thinking",
-            category: "model_config",
-            type: "boolean",
-            currentValue: true,
-          },
-        ],
-      },
-    ],
-  };
+  const grokModels = [
+    {
+      value: "grok-build",
+      name: "Grok Build",
+      configOptions: [],
+    },
+    {
+      value: "grok-mock-alt",
+      name: "Grok Mock Alt",
+      configOptions: [],
+    },
+  ] satisfies ReadonlyArray<{
+    readonly value: string;
+    readonly name: string;
+    readonly configOptions?: ReadonlyArray<AcpSchema.SessionConfigOption>;
+  }>;
+
+  const cursorModels = [
+    {
+      value: "default",
+      name: "Auto",
+      configOptions: [],
+    },
+    {
+      value: "composer-2",
+      name: "Composer 2",
+      configOptions: [
+        {
+          id: "fast",
+          name: "Fast",
+          category: "model_config",
+          type: "select",
+          currentValue: "true",
+          options: [
+            { value: "false", name: "Off" },
+            { value: "true", name: "Fast" },
+          ],
+        },
+      ],
+    },
+    {
+      value: "gpt-5.4",
+      name: "GPT-5.4",
+      configOptions: [
+        {
+          id: "reasoning",
+          name: "Reasoning",
+          category: "thought_level",
+          type: "select",
+          currentValue: currentReasoning,
+          options: [
+            { value: "none", name: "None" },
+            { value: "low", name: "Low" },
+            { value: "medium", name: "Medium" },
+            { value: "high", name: "High" },
+            { value: "extra-high", name: "Extra High" },
+          ],
+        },
+        {
+          id: "context",
+          name: "Context",
+          category: "model_config",
+          type: "select",
+          currentValue: currentContext,
+          options: [
+            { value: "272k", name: "272K" },
+            { value: "1m", name: "1M" },
+          ],
+        },
+        {
+          id: "fast",
+          name: "Fast",
+          category: "model_config",
+          type: "select",
+          currentValue: String(currentFast),
+          options: [
+            { value: "false", name: "Off" },
+            { value: "true", name: "Fast" },
+          ],
+        },
+      ],
+    },
+    {
+      value: "claude-opus-4-6",
+      name: "Opus 4.6",
+      configOptions: [
+        {
+          id: "reasoning",
+          name: "Reasoning",
+          category: "thought_level",
+          type: "select",
+          currentValue: "high",
+          options: [
+            { value: "low", name: "Low" },
+            { value: "medium", name: "Medium" },
+            { value: "high", name: "High" },
+          ],
+        },
+        {
+          id: "thinking",
+          name: "Thinking",
+          category: "model_config",
+          type: "boolean",
+          currentValue: true,
+        },
+      ],
+    },
+  ] satisfies ReadonlyArray<{
+    readonly value: string;
+    readonly name: string;
+    readonly configOptions?: ReadonlyArray<AcpSchema.SessionConfigOption>;
+  }>;
+
+  switch (modelFixture) {
+    case "grok":
+      return { models: grokModels };
+    case "all":
+      return { models: [...grokModels, ...cursorModels] };
+    case "cursor":
+      return { models: cursorModels };
+  }
 }
 
 function sessionModels(): AcpSchema.SessionModelState {

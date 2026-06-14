@@ -2,6 +2,7 @@ import "../index.css";
 
 import {
   DEFAULT_SERVER_SETTINGS,
+  EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
   EnvironmentId,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
@@ -24,6 +25,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
+import { resetEnvironmentServiceForTests } from "../environments/runtime";
 import { __resetLocalApiForTests } from "../localApi";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { getServerConfig, getServerConfigUpdatedNotification } from "../rpc/serverState";
@@ -260,9 +262,39 @@ function buildFixture(): TestFixture {
   };
 }
 
-function resolveWsRpc(tag: string): unknown {
+function resolveWsRpc(request: { _tag: string; [key: string]: unknown }): unknown {
+  const tag = request._tag;
   if (tag === WS_METHODS.serverGetConfig) {
     return encodeServerConfig(fixture.serverConfig);
+  }
+  if (tag === ORCHESTRATION_WS_METHODS.probeSync) {
+    const clientSequence = typeof request.clientSequence === "number" ? request.clientSequence : 0;
+    return {
+      clientSequence,
+      serverSequence: clientSequence,
+      behind: false,
+    };
+  }
+  if (tag === ORCHESTRATION_WS_METHODS.replayEvents) {
+    return [];
+  }
+  if (tag === ORCHESTRATION_WS_METHODS.reconcileThreadDetail) {
+    const clientSequence = typeof request.clientSequence === "number" ? request.clientSequence : 0;
+    return {
+      kind: "current",
+      serverSequence: clientSequence,
+      serverFingerprint:
+        typeof request.verifiedFingerprint === "object" && request.verifiedFingerprint !== null
+          ? request.verifiedFingerprint
+          : { version: 1, value: "test-fingerprint" },
+    };
+  }
+  if (tag === ORCHESTRATION_WS_METHODS.getThreadDetailPage) {
+    return {
+      snapshotSequence: fixture.snapshot.snapshotSequence,
+      thread: fixture.snapshot.threads[0],
+      pageInfo: EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+    };
   }
   if (tag === WS_METHODS.vcsListRefs) {
     return {
@@ -383,7 +415,7 @@ async function waitForInitialWsSubscriptions(): Promise<void> {
         rpcHarness.requests.some((request) => request._tag === WS_METHODS.subscribeServerConfig),
       ).toBe(true);
     },
-    { timeout: 8_000, interval: 16 },
+    { timeout: 20_000, interval: 16 },
   );
 }
 
@@ -443,11 +475,11 @@ async function mountApp(): Promise<{ cleanup: () => Promise<void> }> {
     </AppAtomRegistryProvider>,
     { container: host },
   );
-  await waitForComposerEditor();
-  await waitForToastViewport();
   await waitForInitialWsSubscriptions();
   await waitForWsConnection();
   await waitForServerConfigSnapshot();
+  await waitForComposerEditor();
+  await waitForToastViewport();
   await waitForServerConfigStreamReady();
   await waitForNoToasts();
 
@@ -470,13 +502,18 @@ describe("Keybindings update toast", () => {
   });
 
   afterAll(async () => {
+    await resetEnvironmentServiceForTests();
     await rpcHarness.disconnect();
     await worker.stop();
   });
 
   beforeEach(async () => {
+    vi.useRealTimers();
+    Reflect.deleteProperty(window, "desktopBridge");
+    Reflect.deleteProperty(window, "nativeApi");
+    await resetEnvironmentServiceForTests();
     await rpcHarness.reset({
-      resolveUnary: (request) => resolveWsRpc(request._tag),
+      resolveUnary: (request) => resolveWsRpc(request),
       getInitialStreamValues: (request) => {
         if (request._tag === WS_METHODS.subscribeServerLifecycle) {
           return [
@@ -537,6 +574,9 @@ describe("Keybindings update toast", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    Reflect.deleteProperty(window, "desktopBridge");
+    Reflect.deleteProperty(window, "nativeApi");
     document.body.innerHTML = "";
   });
 

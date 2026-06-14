@@ -51,9 +51,29 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function waitForProcessExit(pid: number, attempts = 80): Effect.Effect<void> {
+function isProcessRunning(pid: number): Effect.Effect<boolean, never, FileSystem.FileSystem> {
   return Effect.gen(function* () {
-    if (!isProcessAlive(pid)) {
+    if (process.platform === "linux") {
+      const fs = yield* FileSystem.FileSystem;
+      const stat = yield* fs
+        .readFileString(`/proc/${pid}/stat`)
+        .pipe(Effect.orElseSucceed(() => ""));
+      const stateStart = stat.lastIndexOf(")") + 2;
+      if (stateStart >= 2 && stat.slice(stateStart).startsWith("Z ")) {
+        return false;
+      }
+    }
+
+    return isProcessAlive(pid);
+  });
+}
+
+function waitForProcessExit(
+  pid: number,
+  attempts = 80,
+): Effect.Effect<void, never, FileSystem.FileSystem> {
+  return Effect.gen(function* () {
+    if (!(yield* isProcessRunning(pid))) {
       return;
     }
     if (attempts <= 0) {
@@ -197,7 +217,7 @@ it.layer(NodeServices.layer)("checkGrokProviderStatus", (it) => {
       expect(result.snapshot.installed).toBe(true);
       expect(result.snapshot.status).toBe("error");
       expect((result.snapshot.message ?? "").toLowerCase()).toMatch(/timed out|timeout/);
-      expect(isProcessAlive(result.pid)).toBe(false);
+      expect(yield* isProcessRunning(result.pid)).toBe(false);
     }),
   );
 });

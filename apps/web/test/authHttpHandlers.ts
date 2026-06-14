@@ -5,7 +5,7 @@ import {
 } from "@t3tools/contracts";
 import { HttpResponse, http } from "msw";
 
-const TEST_SESSION_EXPIRES_AT = "2026-05-01T12:00:00.000Z";
+const TEST_SESSION_EXPIRES_AT = "2099-05-01T12:00:00.000Z";
 const TEST_ENVIRONMENT_DESCRIPTOR: ExecutionEnvironmentDescriptor = {
   environmentId: EnvironmentId.make("environment-local"),
   label: "Local environment",

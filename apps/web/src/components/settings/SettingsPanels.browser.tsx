@@ -22,14 +22,6 @@ import * as Option from "effect/Option";
 import { page } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
-import type { ReactNode } from "react";
-import {
-  RouterProvider,
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  createRouter,
-} from "@tanstack/react-router";
 
 import { __resetLocalApiForTests } from "../../localApi";
 import { AppAtomRegistryProvider, resetAppAtomRegistryForTests } from "../../rpc/atomRegistry";
@@ -40,21 +32,9 @@ import { DiagnosticsSettingsPanel } from "./DiagnosticsSettings";
 import { GeneralSettingsPanel, ProviderSettingsPanel } from "./SettingsPanels";
 import { SourceControlSettingsPanel } from "./SourceControlSettings";
 
-function renderWithTestRouter(children: ReactNode) {
-  const rootRoute = createRootRoute({
-    component: () => children,
-  });
-  const indexRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/",
-  });
-  const router = createRouter({
-    routeTree: rootRoute.addChildren([indexRoute]),
-    history: createMemoryHistory({ initialEntries: ["/"] }),
-  });
-
-  return render(<RouterProvider router={router} />);
-}
+vi.mock("./PushNotificationSettings", () => ({
+  PushNotificationSettingsRow: () => null,
+}));
 
 const authAccessHarness = vi.hoisted(() => {
   type Snapshot = AuthAccessSnapshot;
@@ -742,7 +722,7 @@ describe("GeneralSettingsPanel observability", () => {
   it("shows diagnostics inside About with a diagnostics link", async () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
-    mounted = await renderWithTestRouter(
+    mounted = await render(
       <AppAtomRegistryProvider>
         <GeneralSettingsPanel />
       </AppAtomRegistryProvider>,
@@ -1250,10 +1230,14 @@ describe("SourceControlSettingsPanel discovery states", () => {
     discoverSourceControl: () => Promise<SourceControlDiscoveryResult>,
   ) {
     window.nativeApi = {
+      persistence: {
+        getClientSettings: vi.fn().mockResolvedValue(null),
+        setClientSettings: vi.fn().mockResolvedValue(undefined),
+      },
       server: {
         discoverSourceControl,
       },
-    } as LocalApi;
+    } as unknown as LocalApi;
   }
 
   it("shows skeleton sections while the first source control scan is pending", async () => {

@@ -51,7 +51,7 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(
     (async () => {
-      await syncDisplayedNotificationBadge();
+      await clearTurnCompletionNotificationsAndBadge();
       await openNotificationUrl(url);
     })(),
   );
