@@ -38,7 +38,7 @@ const realSleepMillis = (millis: number): void => {
 async function makeMockGrokWrapper(extraEnv?: Record<string, string>) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "grok-acp-mock-"));
   const wrapperPath = path.join(dir, "fake-grok.sh");
-  const envExports = Object.entries(extraEnv ?? {})
+  const envExports = Object.entries({ T3_ACP_MODEL_FIXTURE: "grok", ...extraEnv })
     .map(([key, value]) => `export ${key}=${JSON.stringify(value)}`)
     .join("\n");
   const script = `#!/bin/sh

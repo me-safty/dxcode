@@ -32,12 +32,15 @@ const GrokTextGenerationTestLayer = ServerConfig.layerTest(process.cwd(), {
 function makeAcpGrokWrapper(dir: string, env: Record<string, string>): string {
   const binDir = path.join(dir, "bin");
   const grokPath = path.join(binDir, "grok");
+  const effectiveEnv = { T3_ACP_MODEL_FIXTURE: "grok", ...env };
   mkdirSync(binDir, { recursive: true });
   writeFileSync(
     grokPath,
     [
       "#!/bin/sh",
-      ...Object.entries(env).map(([key, value]) => `export ${key}=${shellSingleQuote(value)}`),
+      ...Object.entries(effectiveEnv).map(
+        ([key, value]) => `export ${key}=${shellSingleQuote(value)}`,
+      ),
       'if [ "$1" != "agent" ] || [ "$2" != "stdio" ]; then',
       '  printf "%s\\n" "unexpected args: $*" >&2',
       "  exit 11",
