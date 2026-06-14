@@ -216,7 +216,7 @@ export const ChatHeader = memo(function ChatHeader({
                 pressed={terminalOpen}
                 onPressedChange={onToggleTerminal}
                 aria-label="Toggle terminal drawer"
-                variant="ghost"
+                variant="outline"
                 size="xs"
                 disabled={!terminalAvailable}
               >

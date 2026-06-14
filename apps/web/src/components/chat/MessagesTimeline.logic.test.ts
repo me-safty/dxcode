@@ -5,6 +5,7 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  shouldShowChangedFilesReport,
 } from "./MessagesTimeline.logic";
 
 describe("computeMessageDurationStart", () => {
@@ -137,6 +138,29 @@ describe("computeMessageDurationStart", () => {
 
   it("returns empty map for empty input", () => {
     expect(computeMessageDurationStart([])).toEqual(new Map());
+  });
+});
+
+describe("shouldShowChangedFilesReport", () => {
+  it("shows changed-file reports only when attribution is turn-local", () => {
+    const baseSummary = {
+      turnId: "turn-1" as never,
+      completedAt: "2026-01-01T00:00:30Z",
+      files: [{ path: "src/index.ts", additions: 3, deletions: 1 }],
+    };
+
+    expect(shouldShowChangedFilesReport({ ...baseSummary, attribution: "edit-snapshots" })).toBe(
+      true,
+    );
+    expect(shouldShowChangedFilesReport({ ...baseSummary, attribution: "touched-paths" })).toBe(
+      true,
+    );
+    expect(shouldShowChangedFilesReport({ ...baseSummary, attribution: "unattributed" })).toBe(
+      false,
+    );
+    expect(shouldShowChangedFilesReport(baseSummary)).toBe(false);
+    expect(shouldShowChangedFilesReport({ ...baseSummary, files: [] })).toBe(false);
+    expect(shouldShowChangedFilesReport(undefined)).toBe(false);
   });
 });
 
@@ -608,6 +632,47 @@ describe("deriveMessagesTimelineRows", () => {
         turnId: "turn-1",
         label: "You stopped after 47s",
         expanded: false,
+      }),
+    ]);
+  });
+
+  it("uses a neutral stopped label for an interrupted previous turn while work is active", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "work-entry-1",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:05Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:05Z",
+            turnId: "turn-1" as never,
+            label: "Ran command",
+            tone: "tool" as const,
+          },
+        },
+      ],
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "interrupted",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:47Z",
+      },
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:01:00Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        kind: "turn-fold",
+        turnId: "turn-1",
+        label: "Stopped after 47s",
+        expanded: false,
+      }),
+      expect.objectContaining({
+        kind: "working",
       }),
     ]);
   });
