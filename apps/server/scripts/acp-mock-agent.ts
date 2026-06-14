@@ -18,6 +18,7 @@ const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
 const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS === "1";
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
+const emitXAiAskUserQuestion = process.env.T3_ACP_EMIT_XAI_ASK_USER_QUESTION === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const failListAvailableModels = process.env.T3_ACP_FAIL_LIST_AVAILABLE_MODELS === "1";
 const includeSessionModels =
@@ -29,6 +30,12 @@ const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
 const loadReplayHistory = process.env.T3_ACP_LOAD_REPLAY_HISTORY === "1";
 const failLoadSession = process.env.T3_ACP_FAIL_LOAD_SESSION === "1";
 const loadReplayModeId = process.env.T3_ACP_LOAD_REPLAY_MODE_ID;
+const promptDelayMs = Number(process.env.T3_ACP_PROMPT_DELAY_MS ?? "0");
+const permissionOptionIds = {
+  allowOnce: process.env.T3_ACP_ALLOW_ONCE_OPTION_ID ?? "allow-once",
+  allowAlways: process.env.T3_ACP_ALLOW_ALWAYS_OPTION_ID ?? "allow-always",
+  rejectOnce: process.env.T3_ACP_REJECT_ONCE_OPTION_ID ?? "reject-once",
+};
 const sessionId = "mock-session-1";
 
 let currentModeId = "ask";
@@ -226,6 +233,16 @@ function listAvailableModelsResponse(): {
   return {
     models: [
       {
+        value: "grok-build",
+        name: "Grok Build",
+        configOptions: [],
+      },
+      {
+        value: "grok-mock-alt",
+        name: "Grok Mock Alt",
+        configOptions: [],
+      },
+      {
         value: "default",
         name: "Auto",
         configOptions: [],
@@ -328,6 +345,10 @@ function sessionModels(): AcpSchema.SessionModelState {
   };
 }
 
+function isAdvertisedSessionModelId(modelId: string): boolean {
+  return sessionModels().availableModels.some((model) => model.modelId === modelId);
+}
+
 const program = Effect.gen(function* () {
   const agent = yield* EffectAcpAgent.AcpAgent;
 
@@ -415,6 +436,22 @@ const program = Effect.gen(function* () {
     }),
   );
 
+  yield* agent.handleSetSessionModel((request) =>
+    Effect.gen(function* () {
+      if (!isAdvertisedSessionModelId(request.modelId)) {
+        return yield* AcpError.AcpRequestError.invalidParams(
+          `Unknown mock model id: ${request.modelId}`,
+          {
+            method: "session/set_model",
+            params: request,
+          },
+        );
+      }
+      currentModelId = request.modelId;
+      return {};
+    }),
+  );
+
   yield* agent.handleSetSessionConfigOption((request) =>
     Effect.gen(function* () {
       if (exitOnSetConfigOption) {
@@ -463,6 +500,10 @@ const program = Effect.gen(function* () {
   yield* agent.handlePrompt((request) =>
     Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
+
+      if (Number.isFinite(promptDelayMs) && promptDelayMs > 0) {
+        yield* Effect.sleep(`${promptDelayMs} millis`);
+      }
 
       if (emitInterleavedAssistantToolCalls) {
         const toolCallId = "tool-call-1";
@@ -558,9 +599,13 @@ const program = Effect.gen(function* () {
             ],
           },
           options: [
-            { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
-            { optionId: "allow-always", name: "Allow always", kind: "allow_always" },
-            { optionId: "reject-once", name: "Reject", kind: "reject_once" },
+            { optionId: permissionOptionIds.allowOnce, name: "Allow once", kind: "allow_once" },
+            {
+              optionId: permissionOptionIds.allowAlways,
+              name: "Allow always",
+              kind: "allow_always",
+            },
+            { optionId: permissionOptionIds.rejectOnce, name: "Reject", kind: "reject_once" },
           ],
         });
 
@@ -656,6 +701,43 @@ const program = Effect.gen(function* () {
 
         if (hangPromptAfterPermission) {
           return yield* Effect.never;
+        }
+
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitXAiAskUserQuestion) {
+        const result = yield* agent.client.extRequest("_x.ai/ask_user_question", {
+          method: "x.ai/ask_user_question",
+          params: {
+            sessionId: requestedSessionId,
+            toolCallId: "ask-user-question-tool-call-1",
+            questions: [
+              {
+                question: "Which scope should Grok use?",
+                multiSelect: null,
+                options: [
+                  { label: "Workspace", description: "Use the current workspace" },
+                  { label: "Session", description: "Only use this session" },
+                ],
+              },
+            ],
+            mode: "default",
+          },
+        });
+        if (typeof result !== "object" || result === null || !("outcome" in result)) {
+          throw new Error("Expected _x.ai/ask_user_question response outcome.");
+        }
+        if (result.outcome === "cancelled") {
+          return { stopReason: "end_turn" };
+        }
+        if (
+          result.outcome !== "accepted" ||
+          !("answers" in result) ||
+          typeof result.answers !== "object" ||
+          result.answers === null
+        ) {
+          throw new Error("Expected accepted _x.ai/ask_user_question response answers.");
         }
 
         return { stopReason: "end_turn" };

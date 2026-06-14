@@ -95,6 +95,10 @@
       "types": "./src/keybindings.ts",
       "import": "./src/keybindings.ts"
     },
+    "./composerTrigger": {
+      "types": "./src/composerTrigger.ts",
+      "import": "./src/composerTrigger.ts"
+    },
     "./imageMime": {
       "types": "./src/imageMime.ts",
       "import": "./src/imageMime.ts"

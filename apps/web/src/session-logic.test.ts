@@ -1,18 +1,15 @@
 import {
   EventId,
   MessageId,
-  ProviderDriverKind,
   ThreadId,
   TurnId,
   type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
-  deriveCompletionDividerBeforeEntryId,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
-  derivePhase,
   derivePendingApprovals,
   derivePendingUserInputs,
   deriveTimelineEntries,
@@ -20,9 +17,10 @@ import {
   findLatestProposedPlan,
   findSidebarProposedPlan,
   hasActionableProposedPlan,
-  hasActiveSessionWork,
-  hasToolActivityForTurn,
   isLatestTurnSettled,
+  workEntryIndicatesToolFailure,
+  workEntryIndicatesToolNeutralStatus,
+  workEntryIndicatesToolSuccess,
 } from "./session-logic";
 
 let nextActivityId = 0;
@@ -302,7 +300,7 @@ describe("derivePendingUserInputs", () => {
         payload: {
           requestId: "req-user-input-stale-1",
           detail:
-            "Stale pending user-input request: req-user-input-stale-1. Provider callback state does not survive app restarts or recovered sessions. Restart the turn to continue.",
+            "Provider adapter request failed (codex) for item/tool/requestUserInput: Unknown pending Codex user input request: req-user-input-stale-1",
         },
       }),
     ];
@@ -575,6 +573,123 @@ describe("findSidebarProposedPlan", () => {
   });
 });
 
+describe("workEntryIndicatesToolFailure", () => {
+  const base = {
+    id: "w1",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    label: "Read",
+  };
+
+  it("is true for error tone", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        tone: "error",
+        detail: "nothing special",
+      }),
+    ).toBe(true);
+  });
+
+  it("is true when lifecycle says failed even if detail is empty", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "failed",
+      }),
+    ).toBe(true);
+  });
+
+  it("detects file-not-found style tool output with completed lifecycle", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "completed",
+        detail: "File not found: C:\\foo\\nonexistent.ts",
+      }),
+    ).toBe(true);
+  });
+
+  it("detects glob no files and PowerShell command errors", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        label: "Glob",
+        tone: "tool",
+        detail: "No files found",
+      }),
+    ).toBe(true);
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        label: "Bash",
+        tone: "tool",
+        detail:
+          "The term 'this_is_not_a_command' is not recognized as the name of a cmdlet, function, script file, or operable program.",
+      }),
+    ).toBe(true);
+  });
+
+  it("is false for successful completed tools", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "completed",
+        detail: "Found 3 matching files",
+      }),
+    ).toBe(false);
+  });
+
+  it("treats successful tool rows as success candidates", () => {
+    expect(
+      workEntryIndicatesToolSuccess({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "completed",
+        detail: "ok",
+      }),
+    ).toBe(true);
+    expect(
+      workEntryIndicatesToolSuccess({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "inProgress",
+        detail: "…",
+      }),
+    ).toBe(false);
+    expect(workEntryIndicatesToolSuccess({ ...base, tone: "thinking", detail: "…" })).toBe(false);
+    expect(
+      workEntryIndicatesToolNeutralStatus({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "inProgress",
+        detail: "…",
+      }),
+    ).toBe(true);
+    expect(
+      workEntryIndicatesToolNeutralStatus({
+        ...base,
+        tone: "tool",
+        toolLifecycleStatus: "completed",
+        detail: "ok",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not run heuristics on non-tool info rows", () => {
+    expect(
+      workEntryIndicatesToolFailure({
+        ...base,
+        label: "Context compacted",
+        tone: "info",
+        detail: "File not found in conversation",
+      }),
+    ).toBe(false);
+  });
+});
+
 describe("deriveWorkLogEntries", () => {
   it("omits tool started entries and keeps completed entries", () => {
     const activities: OrchestrationThreadActivity[] = [
@@ -592,7 +707,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
   });
 
@@ -621,7 +736,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
     expect(entries.map((entry) => entry.id)).toEqual(["task-progress", "task-complete"]);
   });
 
@@ -637,7 +752,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
     expect(entries[0]?.label).toBe("Searching for API endpoints");
   });
 
@@ -653,61 +768,77 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
     expect(entries[0]?.label).toBe("Failed to deploy changes");
     expect(entries[0]?.tone).toBe("error");
   });
 
-  it("filters by turn id when provided", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({ id: "turn-1", turnId: "turn-1", summary: "Tool call", kind: "tool.started" }),
+  it("uses runtime warning messages as expandable work log detail", () => {
+    const entries = deriveWorkLogEntries([
       makeActivity({
-        id: "turn-2",
-        turnId: "turn-2",
-        summary: "Tool call complete",
-        kind: "tool.completed",
-      }),
-      makeActivity({ id: "no-turn", summary: "Checkpoint captured", tone: "info" }),
-    ];
-
-    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-2"));
-    expect(entries.map((entry) => entry.id)).toEqual(["turn-2"]);
-  });
-
-  it("keeps runtime warnings visible across latest-turn filtering", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({
-        id: "old-warning",
-        createdAt: "2026-02-23T00:00:01.000Z",
-        turnId: "turn-1",
+        id: "runtime-warning",
+        createdAt: "2026-02-23T00:00:03.000Z",
         kind: "runtime.warning",
         summary: "Runtime warning",
         tone: "info",
         payload: { message: "Reconnecting... 2/5" },
       }),
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "runtime-warning",
+      label: "Runtime warning",
+      detail: "Reconnecting... 2/5",
+      tone: "info",
+      sourceActivityKind: "runtime.warning",
+    });
+  });
+
+  it("uses runtime error messages as expandable work log detail", () => {
+    const entries = deriveWorkLogEntries([
       makeActivity({
-        id: "old-tool",
-        createdAt: "2026-02-23T00:00:02.000Z",
+        id: "runtime-error",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "runtime.error",
+        summary: "Runtime error",
+        tone: "error",
+        payload: { message: "Provider process exited" },
+      }),
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "runtime-error",
+      label: "Runtime error",
+      detail: "Provider process exited",
+      tone: "error",
+      sourceActivityKind: "runtime.error",
+    });
+  });
+
+  it("keeps tool entries from every turn and tags each with its turn id", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "turn-1-tool",
         turnId: "turn-1",
-        summary: "Ran command",
+        summary: "Tool call complete",
         kind: "tool.completed",
       }),
       makeActivity({
-        id: "current-tool",
-        createdAt: "2026-02-23T00:00:03.000Z",
+        id: "turn-2-tool",
         turnId: "turn-2",
-        summary: "Ran command",
+        summary: "Tool call complete",
         kind: "tool.completed",
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-2"));
-    expect(entries.map((entry) => entry.id)).toEqual(["old-warning", "current-tool"]);
-    expect(entries[0]).toMatchObject({
-      label: "Provider warning",
-      detail: "Reconnecting... 2/5",
-      tone: "info",
-    });
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries.map((entry) => entry.id)).toEqual(["turn-1-tool", "turn-2-tool"]);
+    expect(entries.map((entry) => entry.turnId)).toEqual([
+      TurnId.make("turn-1"),
+      TurnId.make("turn-2"),
+    ]);
   });
 
   it("omits checkpoint captured info entries", () => {
@@ -727,7 +858,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
   });
 
@@ -763,7 +894,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
     expect(entries.map((entry) => entry.id)).toEqual(["real-work-log"]);
   });
 
@@ -785,7 +916,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
     expect(entries.map((entry) => entry.id)).toEqual(["first", "second"]);
   });
 
@@ -806,8 +937,45 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const [entry] = deriveWorkLogEntries(activities, undefined);
+    const [entry] = deriveWorkLogEntries(activities);
     expect(entry?.command).toBe("bun run lint");
+  });
+
+  it("extracts failed tool lifecycle status from item payloads", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tool-failed",
+        kind: "tool.updated",
+        summary: "Glob",
+        tone: "tool",
+        payload: {
+          itemType: "mcp_tool_call",
+          status: "failed",
+          detail: "No files found",
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.toolLifecycleStatus).toBe("failed");
+  });
+
+  it("defaults tool.completed entries to completed lifecycle status", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tool-done",
+        kind: "tool.completed",
+        summary: "Glob",
+        tone: "tool",
+        payload: {
+          itemType: "mcp_tool_call",
+          detail: "Found 3 files",
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.toolLifecycleStatus).toBe("completed");
   });
 
   it("unwraps PowerShell command wrappers for displayed command text", () => {
@@ -827,7 +995,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const [entry] = deriveWorkLogEntries(activities, undefined);
+    const [entry] = deriveWorkLogEntries(activities);
     expect(entry?.command).toBe("bun run lint");
     expect(entry?.rawCommand).toBe(
       "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -Command 'bun run lint'",
@@ -851,7 +1019,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const [entry] = deriveWorkLogEntries(activities, undefined);
+    const [entry] = deriveWorkLogEntries(activities);
     expect(entry?.command).toBe("rg -n foo .");
     expect(entry?.rawCommand).toBe(
       '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n foo ."',
@@ -872,7 +1040,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const [entry] = deriveWorkLogEntries(activities, undefined);
+    const [entry] = deriveWorkLogEntries(activities);
     expect(entry?.command).toBe('rg -n -F "new Date()" .');
     expect(entry?.rawCommand).toBe(
       `"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoLogo -NoProfile -Command 'rg -n -F "new Date()" .'`,
@@ -896,7 +1064,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const [entry] = deriveWorkLogEntries(activities, undefined);
+    const [entry] = deriveWorkLogEntries(activities);
     expect(entry?.command).toBe("bash script.sh");
     expect(entry?.rawCommand).toBeUndefined();
   });
@@ -925,7 +1093,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const [entry] = deriveWorkLogEntries(activities, undefined);
+    const [entry] = deriveWorkLogEntries(activities);
     expect(entry).toMatchObject({
       command: "bun run dev",
       detail: '{ "dev": "vite dev --port 3000" }',
@@ -954,7 +1122,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const [entry] = deriveWorkLogEntries(activities, undefined);
+    const [entry] = deriveWorkLogEntries(activities);
     expect(entry?.changedFiles).toEqual([
       "apps/web/src/components/ChatView.tsx",
       "apps/web/src/session-logic.ts",
@@ -975,7 +1143,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const [entry] = deriveWorkLogEntries(activities, undefined);
+    const [entry] = deriveWorkLogEntries(activities);
     expect(entry?.toolTitle).toBe("Read File");
     expect(entry?.detail).toBeUndefined();
   });
@@ -1019,7 +1187,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       id: "grep-complete",
@@ -1068,7 +1236,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       id: "read-complete",
@@ -1102,7 +1270,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const [entry] = deriveWorkLogEntries(activities, undefined);
+    const [entry] = deriveWorkLogEntries(activities);
     expect(entry).toMatchObject({
       id: "cursor-command-complete",
       label: "Ran command",
@@ -1144,7 +1312,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       id: "legacy-read-complete",
@@ -1196,7 +1364,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
 
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
@@ -1245,7 +1413,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
 
     expect(entries).toHaveLength(2);
     expect(entries[0]).toMatchObject({
@@ -1312,7 +1480,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
 
     expect(entries).toHaveLength(2);
     expect(entries.map((entry) => entry.id)).toEqual(["tool-a-complete", "tool-b-complete"]);
@@ -1371,7 +1539,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
 
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete-1", "tool-complete-2"]);
     expect(entries.map((entry) => entry.stableId)).toEqual(["tool-update-1", "tool-update-2"]);
@@ -1410,7 +1578,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
 
     expect(entries.map((entry) => entry.id)).toEqual([
       "tool-update",
@@ -1467,7 +1635,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
 
     expect(entries.map((entry) => entry.id)).toEqual(["tool-1-complete", "tool-2-complete"]);
   });
@@ -1509,7 +1677,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities, undefined);
+    const entries = deriveWorkLogEntries(activities);
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.id).toBe("a-complete-same-timestamp");
@@ -1559,109 +1727,44 @@ describe("deriveTimelineEntries", () => {
       },
     });
   });
-
-  it("anchors the completion divider to latestTurn.assistantMessageId before timestamp fallback", () => {
-    const entries = deriveTimelineEntries(
-      [
-        {
-          id: MessageId.make("assistant-earlier"),
-          role: "assistant",
-          text: "progress update",
-          createdAt: "2026-02-23T00:00:01.000Z",
-          streaming: false,
-        },
-        {
-          id: MessageId.make("assistant-final"),
-          role: "assistant",
-          text: "final answer",
-          createdAt: "2026-02-23T00:00:01.000Z",
-          streaming: false,
-        },
-      ],
-      [],
-      [],
-    );
-
-    expect(
-      deriveCompletionDividerBeforeEntryId(entries, {
-        assistantMessageId: MessageId.make("assistant-final"),
-        startedAt: "2026-02-23T00:00:00.000Z",
-        completedAt: "2026-02-23T00:00:02.000Z",
-      }),
-    ).toBe("assistant-final");
-  });
 });
 
-describe("deriveWorkLogEntries usage telemetry handling", () => {
-  it("excludes usage telemetry updates from the work log", () => {
-    const entries = deriveWorkLogEntries(
-      [
-        makeActivity({
-          id: "context-1",
-          turnId: "turn-1",
-          kind: "context-window.updated",
-          summary: "Context window updated",
-          tone: "info",
-        }),
-        makeActivity({
-          id: "rate-limits-1",
-          turnId: "turn-1",
-          kind: "account.rate-limits.updated",
-          summary: "Usage limits updated",
-          tone: "info",
-        }),
-        makeActivity({
-          id: "tool-1",
-          turnId: "turn-1",
-          kind: "tool.completed",
-          summary: "Ran command",
-          tone: "tool",
-        }),
-      ],
-      TurnId.make("turn-1"),
-    );
+describe("deriveWorkLogEntries context window handling", () => {
+  it("excludes context window updates from the work log", () => {
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        id: "context-1",
+        turnId: "turn-1",
+        kind: "context-window.updated",
+        summary: "Context window updated",
+        tone: "info",
+      }),
+      makeActivity({
+        id: "tool-1",
+        turnId: "turn-1",
+        kind: "tool.completed",
+        summary: "Ran command",
+        tone: "tool",
+      }),
+    ]);
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.label).toBe("Ran command");
   });
 
   it("keeps context compaction activities as normal work log entries", () => {
-    const entries = deriveWorkLogEntries(
-      [
-        makeActivity({
-          id: "compaction-1",
-          turnId: "turn-1",
-          kind: "context-compaction",
-          summary: "Context compacted",
-          tone: "info",
-        }),
-      ],
-      TurnId.make("turn-1"),
-    );
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        id: "compaction-1",
+        turnId: "turn-1",
+        kind: "context-compaction",
+        summary: "Context compacted",
+        tone: "info",
+      }),
+    ]);
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.label).toBe("Context compacted");
-  });
-});
-
-describe("hasToolActivityForTurn", () => {
-  it("returns false when turn id is missing", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({ id: "tool-1", turnId: "turn-1", kind: "tool.completed", tone: "tool" }),
-    ];
-
-    expect(hasToolActivityForTurn(activities, undefined)).toBe(false);
-    expect(hasToolActivityForTurn(activities, null)).toBe(false);
-  });
-
-  it("returns true only for matching tool activity in the target turn", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({ id: "tool-1", turnId: "turn-1", kind: "tool.completed", tone: "tool" }),
-      makeActivity({ id: "info-1", turnId: "turn-2", kind: "turn.completed", tone: "info" }),
-    ];
-
-    expect(hasToolActivityForTurn(activities, TurnId.make("turn-1"))).toBe(true);
-    expect(hasToolActivityForTurn(activities, TurnId.make("turn-2"))).toBe(false);
   });
 });
 
@@ -1672,30 +1775,12 @@ describe("isLatestTurnSettled", () => {
     completedAt: "2026-02-27T21:10:06.000Z",
   } as const;
 
-  it("returns false while a running session still owns the completed latest turn", () => {
-    // A completed assistant message can stamp latestTurn.completedAt before
-    // the provider turn itself is done. While activeTurnId still names that
-    // turn, the active session is the authoritative signal.
+  it("returns false while the same turn is still active in a running session", () => {
     expect(
       isLatestTurnSettled(latestTurn, {
         orchestrationStatus: "running",
         activeTurnId: TurnId.make("turn-1"),
       }),
-    ).toBe(false);
-  });
-
-  it("returns false while the same turn is still active before completion", () => {
-    expect(
-      isLatestTurnSettled(
-        {
-          ...latestTurn,
-          completedAt: null,
-        },
-        {
-          orchestrationStatus: "running",
-          activeTurnId: TurnId.make("turn-1"),
-        },
-      ),
     ).toBe(false);
   });
 
@@ -1706,15 +1791,6 @@ describe("isLatestTurnSettled", () => {
         activeTurnId: TurnId.make("turn-2"),
       }),
     ).toBe(false);
-  });
-
-  it("returns true when a stale running session has no active turn after completion", () => {
-    expect(
-      isLatestTurnSettled(latestTurn, {
-        orchestrationStatus: "running",
-        activeTurnId: undefined,
-      }),
-    ).toBe(true);
   });
 
   it("returns true once the session is no longer running that turn", () => {
@@ -1740,103 +1816,6 @@ describe("isLatestTurnSettled", () => {
   });
 });
 
-describe("derivePhase", () => {
-  const completedLatestTurn = {
-    turnId: TurnId.make("turn-1"),
-    startedAt: "2026-02-27T21:10:00.000Z",
-    completedAt: "2026-02-27T21:10:06.000Z",
-  } as const;
-
-  it("treats a running session with no active turn as ready when the latest turn is complete", () => {
-    expect(
-      derivePhase(
-        {
-          provider: ProviderDriverKind.make("codex"),
-          status: "running",
-          orchestrationStatus: "running",
-          activeTurnId: undefined,
-          createdAt: "2026-02-27T21:10:00.000Z",
-          updatedAt: "2026-02-27T21:10:06.000Z",
-        },
-        completedLatestTurn,
-      ),
-    ).toBe("ready");
-  });
-
-  it("treats a running session with no active turn and no latest turn as ready", () => {
-    expect(
-      derivePhase(
-        {
-          provider: ProviderDriverKind.make("codex"),
-          status: "running",
-          orchestrationStatus: "running",
-          activeTurnId: undefined,
-          createdAt: "2026-02-27T21:10:00.000Z",
-          updatedAt: "2026-02-27T21:10:06.000Z",
-        },
-        null,
-      ),
-    ).toBe("ready");
-  });
-
-  it("keeps running while the session still owns the completed latest turn", () => {
-    // latestTurn.completedAt can mean the current assistant message finished,
-    // not that the whole provider turn finished.
-    expect(
-      derivePhase(
-        {
-          provider: ProviderDriverKind.make("codex"),
-          status: "running",
-          orchestrationStatus: "running",
-          activeTurnId: TurnId.make("turn-1"),
-          createdAt: "2026-02-27T21:10:00.000Z",
-          updatedAt: "2026-02-27T21:10:00.000Z",
-        },
-        completedLatestTurn,
-      ),
-    ).toBe("running");
-  });
-
-  it("keeps running when latestTurn is running before the session status catches up", () => {
-    expect(
-      derivePhase(
-        {
-          provider: ProviderDriverKind.make("codex"),
-          status: "ready",
-          orchestrationStatus: "ready",
-          activeTurnId: undefined,
-          createdAt: "2026-02-27T21:10:00.000Z",
-          updatedAt: "2026-02-27T21:10:00.000Z",
-        },
-        {
-          ...completedLatestTurn,
-          state: "running",
-          completedAt: null,
-        },
-      ),
-    ).toBe("running");
-  });
-
-  it("keeps running when the provider has an active incomplete turn", () => {
-    expect(
-      derivePhase(
-        {
-          provider: ProviderDriverKind.make("codex"),
-          status: "running",
-          orchestrationStatus: "running",
-          activeTurnId: TurnId.make("turn-1"),
-          createdAt: "2026-02-27T21:10:00.000Z",
-          updatedAt: "2026-02-27T21:10:00.000Z",
-        },
-        {
-          ...completedLatestTurn,
-          completedAt: null,
-        },
-      ),
-    ).toBe("running");
-  });
-});
-
 describe("deriveActiveWorkStartedAt", () => {
   const latestTurn = {
     turnId: TurnId.make("turn-1"),
@@ -1845,22 +1824,6 @@ describe("deriveActiveWorkStartedAt", () => {
   } as const;
 
   it("prefers the in-flight turn start when the latest turn is not settled", () => {
-    expect(
-      deriveActiveWorkStartedAt(
-        {
-          ...latestTurn,
-          completedAt: null,
-        },
-        {
-          orchestrationStatus: "running",
-          activeTurnId: TurnId.make("turn-1"),
-        },
-        "2026-02-27T21:11:00.000Z",
-      ),
-    ).toBe("2026-02-27T21:10:00.000Z");
-  });
-
-  it("keeps the active turn start while a running session still owns a completed latest turn", () => {
     expect(
       deriveActiveWorkStartedAt(
         latestTurn,
@@ -1911,88 +1874,5 @@ describe("deriveActiveWorkStartedAt", () => {
         "2026-02-27T21:11:00.000Z",
       ),
     ).toBe("2026-02-27T21:11:00.000Z");
-  });
-});
-
-describe("hasActiveSessionWork", () => {
-  const completedLatestTurn = {
-    turnId: TurnId.make("turn-1"),
-    startedAt: "2026-02-27T21:10:00.000Z",
-    completedAt: "2026-02-27T21:10:06.000Z",
-  } as const;
-
-  it("treats an active turn as work until the session leaves running status", () => {
-    expect(
-      hasActiveSessionWork(completedLatestTurn, {
-        orchestrationStatus: "running",
-        activeTurnId: TurnId.make("turn-1"),
-      }),
-    ).toBe(true);
-
-    expect(
-      hasActiveSessionWork(completedLatestTurn, {
-        orchestrationStatus: "ready",
-        activeTurnId: TurnId.make("turn-1"),
-      }),
-    ).toBe(false);
-  });
-
-  it("treats an active turn as work while latestTurn shows it still in flight", () => {
-    expect(
-      hasActiveSessionWork(
-        { ...completedLatestTurn, completedAt: null },
-        {
-          orchestrationStatus: "running",
-          activeTurnId: TurnId.make("turn-1"),
-        },
-      ),
-    ).toBe(true);
-  });
-
-  it("treats a running latestTurn as work while the session status is still ready", () => {
-    expect(
-      hasActiveSessionWork(
-        {
-          ...completedLatestTurn,
-          state: "running",
-          completedAt: null,
-        },
-        {
-          orchestrationStatus: "ready",
-          activeTurnId: undefined,
-        },
-      ),
-    ).toBe(true);
-  });
-
-  it("treats a different active turn as work even when the latest projected turn completed", () => {
-    expect(
-      hasActiveSessionWork(completedLatestTurn, {
-        orchestrationStatus: "running",
-        activeTurnId: TurnId.make("turn-2"),
-      }),
-    ).toBe(true);
-  });
-
-  it("falls back to latest-turn completion only when the session has no active turn id", () => {
-    expect(
-      hasActiveSessionWork(
-        {
-          ...completedLatestTurn,
-          completedAt: null,
-        },
-        {
-          orchestrationStatus: "running",
-          activeTurnId: undefined,
-        },
-      ),
-    ).toBe(true);
-
-    expect(
-      hasActiveSessionWork(completedLatestTurn, {
-        orchestrationStatus: "running",
-        activeTurnId: undefined,
-      }),
-    ).toBe(false);
   });
 });

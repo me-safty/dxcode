@@ -1786,26 +1786,30 @@ async function waitForButtonByText(text: string): Promise<HTMLButtonElement> {
   return waitForElement(() => findButtonByText(text), `Unable to find "${text}" button.`);
 }
 
-function findButtonContainingText(text: string): HTMLButtonElement | null {
-  return (Array.from(document.querySelectorAll("button")).find((button) =>
-    button.textContent?.includes(text),
-  ) ?? null) as HTMLButtonElement | null;
+function findButtonContainingText(text: string): HTMLElement | null {
+  return (
+    Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]')).find((button) =>
+      button.textContent?.includes(text),
+    ) ?? null
+  );
 }
 
-async function waitForButtonContainingText(text: string): Promise<HTMLButtonElement> {
+async function waitForButtonContainingText(text: string): Promise<HTMLElement> {
   return waitForElement(
     () => findButtonContainingText(text),
     `Unable to find button containing "${text}".`,
   );
 }
 
-async function waitForSelectItemContainingText(text: string): Promise<HTMLElement> {
+async function waitForAccessOptionContainingText(text: string): Promise<HTMLElement> {
   return waitForElement(
     () =>
-      Array.from(document.querySelectorAll<HTMLElement>('[data-slot="select-item"]')).find((item) =>
-        item.textContent?.includes(text),
-      ) ?? null,
-    `Unable to find select item containing "${text}".`,
+      Array.from(
+        document.querySelectorAll<HTMLElement>(
+          '[data-slot="select-item"], [data-slot="menu-radio-item"]',
+        ),
+      ).find((item) => item.textContent?.includes(text)) ?? null,
+    `Unable to find access option containing "${text}".`,
   );
 }
 
@@ -2721,7 +2725,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const runButton = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
-            (button) => button.title === "Run Lint",
+            (button) => button.getAttribute("aria-label") === "Run Lint",
           ) as HTMLButtonElement | null,
         "Unable to find Run Lint button.",
       );
@@ -2800,7 +2804,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const runButton = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
-            (button) => button.title === "Run Test",
+            (button) => button.getAttribute("aria-label") === "Run Test",
           ) as HTMLButtonElement | null,
         "Unable to find Run Test button.",
       );
@@ -3540,7 +3544,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       const initialModeButton = await waitForInteractionModeButton("Build");
-      expect(initialModeButton.title).toContain("enter plan mode");
+      expect(initialModeButton.getAttribute("aria-label")).toContain("enter plan mode");
+      expect(initialModeButton.hasAttribute("title")).toBe(false);
 
       window.dispatchEvent(
         new KeyboardEvent("keydown", {
@@ -3552,7 +3557,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
       await waitForLayout();
 
-      expect((await waitForInteractionModeButton("Build")).title).toContain("enter plan mode");
+      expect((await waitForInteractionModeButton("Build")).getAttribute("aria-label")).toContain(
+        "enter plan mode",
+      );
 
       const composerEditor = await waitForComposerEditor();
       composerEditor.focus();
@@ -3567,7 +3574,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         async () => {
-          expect((await waitForInteractionModeButton("Plan")).title).toContain(
+          expect((await waitForInteractionModeButton("Plan")).getAttribute("aria-label")).toContain(
             "return to normal build mode",
           );
         },
@@ -3585,11 +3592,96 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         async () => {
-          expect((await waitForInteractionModeButton("Build")).title).toContain("enter plan mode");
+          expect(
+            (await waitForInteractionModeButton("Build")).getAttribute("aria-label"),
+          ).toContain("enter plan mode");
         },
         { timeout: 8_000, interval: 16 },
       );
     } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("focuses the composer and inserts printable text typed from the page background", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-type-to-focus" as MessageId,
+        targetText: "type-to-focus target",
+      }),
+    });
+
+    const backgroundTarget = document.createElement("div");
+    backgroundTarget.tabIndex = -1;
+    document.body.append(backgroundTarget);
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      backgroundTarget.focus();
+      expect(document.activeElement).not.toBe(composerEditor);
+
+      const event = new KeyboardEvent("keydown", {
+        key: "h",
+        bubbles: true,
+        cancelable: true,
+      });
+      backgroundTarget.dispatchEvent(event);
+
+      await waitForComposerText("h");
+      expect(event.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(composerEditor);
+
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "i",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await waitForComposerText("hi");
+    } finally {
+      backgroundTarget.remove();
+      await mounted.cleanup();
+    }
+  });
+
+  it("does not steal printable keys from editable targets or shortcut modifiers", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-type-to-focus-guards" as MessageId,
+        targetText: "type-to-focus guards target",
+      }),
+    });
+    const input = document.createElement("input");
+    document.body.append(input);
+
+    try {
+      input.focus();
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "x",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await waitForLayout();
+      expect(useComposerDraftStore.getState().draftsByThreadKey[THREAD_KEY]?.prompt ?? "").toBe("");
+
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "k",
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await waitForLayout();
+      expect(useComposerDraftStore.getState().draftsByThreadKey[THREAD_KEY]?.prompt ?? "").toBe("");
+    } finally {
+      input.remove();
       await mounted.cleanup();
     }
   });
@@ -3993,13 +4085,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
-      await waitForComposerText("hi @package.json there");
+      await waitForComposerText("hi [package.json](package.json) there");
       await setComposerSelectionByTextOffsets({
         start: "hi package.json ".length,
         end: "hi package.json there".length,
       });
       await pressComposerKey("(");
-      await waitForComposerText("hi @package.json (there)");
+      await waitForComposerText("hi [package.json](package.json) (there)");
     } finally {
       await mounted.cleanup();
     }
@@ -4031,7 +4123,48 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("shows runtime mode descriptions in the desktop composer access select", async () => {
+  it("stores selected file tags as markdown links while keeping the composer chip", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "@pack");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-file-tag-encoding" as MessageId,
+        targetText: "file tag encoding",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag !== WS_METHODS.projectsSearchEntries) {
+          return undefined;
+        }
+        return {
+          entries: [
+            {
+              path: "path/to/package.json",
+              kind: "file",
+              parentPath: "path/to",
+            },
+          ],
+          truncated: false,
+        };
+      },
+    });
+
+    try {
+      const item = await waitForComposerMenuItem("path:file:path/to/package.json");
+      item.click();
+
+      await waitForComposerText("[package.json](path/to/package.json) ");
+      const chip = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-composer-mention-chip="true"]'),
+        "Unable to find rendered composer file chip.",
+      );
+      expect(chip.textContent).toContain("package.json");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows runtime mode descriptions in the desktop composer access control", async () => {
     setDraftThreadWithoutWorktree();
 
     const mounted = await mountChatView({
@@ -4043,13 +4176,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const runtimeModeSelect = await waitForButtonByText("Full access");
       runtimeModeSelect.click();
 
-      expect((await waitForSelectItemContainingText("Supervised")).textContent).toContain(
+      expect((await waitForAccessOptionContainingText("Supervised")).textContent).toContain(
         "Ask before commands and file changes",
       );
 
-      const autoAcceptItem = await waitForSelectItemContainingText("Auto-accept edits");
+      const autoAcceptItem = await waitForAccessOptionContainingText("Auto-accept edits");
       expect(autoAcceptItem.textContent).toContain("Auto-approve edits");
-      expect((await waitForSelectItemContainingText("Full access")).textContent).toContain(
+      expect((await waitForAccessOptionContainingText("Full access")).textContent).toContain(
         "Allow commands and edits without prompts",
       );
     } finally {

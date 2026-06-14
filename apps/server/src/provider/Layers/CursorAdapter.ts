@@ -145,6 +145,10 @@ interface CursorSessionContext {
   lastPlanFingerprint: string | undefined;
   activeTurn: ActiveCursorTurn | undefined;
   activeTurnId: TurnId | undefined;
+  /** Number of sendTurn prompts currently in flight or being prepared.
+   * >0 means a turn is actively running, so a new sendTurn is a steer that
+   * continues it, and only the last remaining prompt settles the turn. */
+  promptsInFlight: number;
   stopped: boolean;
 }
 
@@ -836,6 +840,7 @@ export function makeCursorAdapter(
             lastPlanFingerprint: undefined,
             activeTurn: undefined,
             activeTurnId: undefined,
+            promptsInFlight: 0,
             stopped: false,
           };
 
@@ -964,192 +969,226 @@ export function makeCursorAdapter(
     const sendTurn: CursorAdapterShape["sendTurn"] = (input) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(input.threadId);
-        const turnId = TurnId.make(yield* randomUUIDv4);
-        const turnModelSelection =
-          input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
-        const model = turnModelSelection?.model ?? ctx.session.model;
-        const resolvedModel = resolveCursorAcpBaseModelId(model);
-        yield* applyRequestedSessionConfiguration({
-          runtime: ctx.acp,
-          runtimeMode: ctx.session.runtimeMode,
-          interactionMode: input.interactionMode,
-          modelSelection:
-            model === undefined
-              ? undefined
-              : {
-                  model,
-                  options: turnModelSelection?.options,
-                },
-          mapError: ({ cause, method }) =>
-            mapAcpToAdapterError(PROVIDER, input.threadId, method, cause),
-        });
-        const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
-        if (input.input?.trim()) {
-          promptParts.push({ type: "text", text: input.input.trim() });
-        }
-        if (input.attachments && input.attachments.length > 0) {
-          for (const attachment of input.attachments) {
-            const attachmentPath = resolveAttachmentPath({
-              attachmentsDir: serverConfig.attachmentsDir,
-              attachment,
-            });
-            if (!attachmentPath) {
-              return yield* new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method: "session/prompt",
-                detail: `Invalid attachment id '${attachment.id}'.`,
+        // A sendTurn while a prompt is in flight is a steer: the agent folds
+        // the new prompt into the ongoing work, so the active turn id is
+        // reused instead of opening a new turn.
+        const steeringTurnId = ctx.promptsInFlight > 0 ? ctx.activeTurnId : undefined;
+        const turnId = steeringTurnId ?? TurnId.make(yield* randomUUIDv4);
+        // Count this prompt immediately so a superseded in-flight prompt
+        // resolving from here on does not settle the turn; the matching
+        // decrement is the `ensuring` below.
+        ctx.promptsInFlight += 1;
+
+        return yield* Effect.gen(function* () {
+          const turnModelSelection =
+            input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
+          const model = turnModelSelection?.model ?? ctx.session.model;
+          const resolvedModel = resolveCursorAcpBaseModelId(model);
+          yield* applyRequestedSessionConfiguration({
+            runtime: ctx.acp,
+            runtimeMode: ctx.session.runtimeMode,
+            interactionMode: input.interactionMode,
+            modelSelection:
+              model === undefined
+                ? undefined
+                : {
+                    model,
+                    options: turnModelSelection?.options,
+                  },
+            mapError: ({ cause, method }) =>
+              mapAcpToAdapterError(PROVIDER, input.threadId, method, cause),
+          });
+
+          const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
+          if (input.input?.trim()) {
+            promptParts.push({ type: "text", text: input.input.trim() });
+          }
+          if (input.attachments && input.attachments.length > 0) {
+            for (const attachment of input.attachments) {
+              const attachmentPath = resolveAttachmentPath({
+                attachmentsDir: serverConfig.attachmentsDir,
+                attachment,
+              });
+              if (!attachmentPath) {
+                return yield* new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "session/prompt",
+                  detail: `Invalid attachment id '${attachment.id}'.`,
+                });
+              }
+              const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapterRequestError({
+                      provider: PROVIDER,
+                      method: "session/prompt",
+                      detail: cause.message,
+                      cause,
+                    }),
+                ),
+              );
+              promptParts.push({
+                type: "image",
+                data: Buffer.from(bytes).toString("base64"),
+                mimeType: attachment.mimeType,
               });
             }
-            const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ProviderAdapterRequestError({
-                    provider: PROVIDER,
-                    method: "session/prompt",
-                    detail: cause.message,
-                    cause,
-                  }),
-              ),
-            );
-            promptParts.push({
-              type: "image",
-              data: Buffer.from(bytes).toString("base64"),
-              mimeType: attachment.mimeType,
+          }
+
+          if (promptParts.length === 0) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "sendTurn",
+              issue: "Turn requires non-empty text or attachments.",
             });
           }
-        }
 
-        if (promptParts.length === 0) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "sendTurn",
-            issue: "Turn requires non-empty text or attachments.",
-          });
-        }
+          const activeTurn: ActiveCursorTurn =
+            steeringTurnId !== undefined && ctx.activeTurn?.id === turnId
+              ? ctx.activeTurn
+              : {
+                  id: turnId,
+                  forceInterrupted: yield* Deferred.make<void>(),
+                  completed: yield* Deferred.make<void>(),
+                  cancelRequestedAt: undefined,
+                  fallbackFiber: undefined,
+                };
+          ctx.activeTurn = activeTurn;
+          ctx.activeTurnId = turnId;
+          if (steeringTurnId === undefined) {
+            ctx.lastPlanFingerprint = undefined;
+          }
+          ctx.session = {
+            ...ctx.session,
+            status: "running",
+            activeTurnId: turnId,
+            updatedAt: yield* nowIso,
+          };
 
-        const activeTurn: ActiveCursorTurn = {
-          id: turnId,
-          forceInterrupted: yield* Deferred.make<void>(),
-          completed: yield* Deferred.make<void>(),
-          cancelRequestedAt: undefined,
-          fallbackFiber: undefined,
-        };
-        ctx.activeTurn = activeTurn;
-        ctx.activeTurnId = turnId;
-        ctx.lastPlanFingerprint = undefined;
-        ctx.session = {
-          ...ctx.session,
-          status: "running",
-          activeTurnId: turnId,
-          updatedAt: yield* nowIso,
-        };
+          if (steeringTurnId === undefined) {
+            yield* offerRuntimeEvent({
+              type: "turn.started",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              turnId,
+              payload: { model: resolvedModel },
+            });
+          }
 
-        yield* offerRuntimeEvent({
-          type: "turn.started",
-          ...(yield* makeEventStamp()),
-          provider: PROVIDER,
-          threadId: input.threadId,
-          turnId,
-          payload: { model: resolvedModel },
-        });
+          const promptEffect = ctx.acp
+            .prompt({
+              prompt: promptParts,
+            })
+            .pipe(
+              Effect.map((result) => ({ _tag: "provider" as const, result })),
+              Effect.mapError((error) =>
+                mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
+              ),
+            );
+          const promptResult =
+            yield* Deferred.make<
+              Exit.Exit<Effect.Success<typeof promptEffect>, Effect.Error<typeof promptEffect>>
+            >();
+          yield* promptEffect.pipe(
+            Effect.exit,
+            Effect.flatMap((exit) => Deferred.succeed(promptResult, exit)),
+            Effect.forkDetach({ startImmediately: true }),
+          );
 
-        const promptEffect = ctx.acp
-          .prompt({
-            prompt: promptParts,
-          })
-          .pipe(
-            Effect.map((result) => ({ _tag: "provider" as const, result })),
-            Effect.mapError((error) =>
-              mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
+          type PromptProviderOutcome = Effect.Success<typeof promptEffect>;
+          type PromptRaceOutcome = PromptProviderOutcome | { readonly _tag: "forced" };
+          type PromptError = Effect.Error<typeof promptEffect>;
+          const promptOutcome = yield* Effect.raceFirst(
+            Deferred.await(promptResult).pipe(
+              Effect.map((exit): Exit.Exit<PromptRaceOutcome, PromptError> => exit),
+            ),
+            Deferred.await(activeTurn.forceInterrupted).pipe(
+              Effect.as(Exit.succeed<PromptRaceOutcome>({ _tag: "forced" })),
             ),
           );
-        const promptResult =
-          yield* Deferred.make<
-            Exit.Exit<Effect.Success<typeof promptEffect>, Effect.Error<typeof promptEffect>>
-          >();
-        yield* promptEffect.pipe(
-          Effect.exit,
-          Effect.flatMap((exit) => Deferred.succeed(promptResult, exit)),
-          Effect.forkDetach({ startImmediately: true }),
-        );
 
-        type PromptProviderOutcome = Effect.Success<typeof promptEffect>;
-        type PromptRaceOutcome = PromptProviderOutcome | { readonly _tag: "forced" };
-        type PromptError = Effect.Error<typeof promptEffect>;
-        const promptOutcome = yield* Effect.raceFirst(
-          Deferred.await(promptResult).pipe(
-            Effect.map((exit): Exit.Exit<PromptRaceOutcome, PromptError> => exit),
-          ),
-          Deferred.await(activeTurn.forceInterrupted).pipe(
-            Effect.as(Exit.succeed<PromptRaceOutcome>({ _tag: "forced" })),
-          ),
-        );
-
-        if (Exit.isFailure(promptOutcome)) {
-          yield* clearActiveTurnAfterPrompt(ctx, activeTurn, { interruptFallback: true });
-          return yield* Effect.failCause(promptOutcome.cause);
-        }
-
-        const completion = (() => {
-          const outcome = promptOutcome.value;
-          if (outcome._tag === "forced") {
-            return {
-              state: "interrupted" as const,
-              stopReason: CURSOR_LOCAL_INTERRUPT_STOP_REASON,
-            };
+          if (Exit.isFailure(promptOutcome)) {
+            if (ctx.promptsInFlight === 1) {
+              yield* clearActiveTurnAfterPrompt(ctx, activeTurn, { interruptFallback: true });
+            }
+            return yield* Effect.failCause(promptOutcome.cause);
           }
-          if (outcome.result.stopReason === "cancelled") {
+
+          const completion = (() => {
+            const outcome = promptOutcome.value;
+            if (outcome._tag === "forced") {
+              return {
+                state: "interrupted" as const,
+                stopReason: CURSOR_LOCAL_INTERRUPT_STOP_REASON,
+              };
+            }
+            if (outcome.result.stopReason === "cancelled") {
+              return {
+                state: "cancelled" as const,
+                stopReason: "cancelled",
+              };
+            }
             return {
-              state: "cancelled" as const,
-              stopReason: "cancelled",
+              state:
+                activeTurn.cancelRequestedAt === undefined
+                  ? ("completed" as const)
+                  : ("interrupted" as const),
+              stopReason: outcome.result.stopReason ?? null,
             };
-          }
-          return {
-            state:
-              activeTurn.cancelRequestedAt === undefined
-                ? ("completed" as const)
-                : ("interrupted" as const),
-            stopReason: outcome.result.stopReason ?? null,
+          })();
+
+          const turnRecord = ctx.turns.find((turn) => turn.id === turnId);
+          const turnItem = {
+            prompt: promptParts,
+            result:
+              promptOutcome.value._tag === "provider" ? promptOutcome.value.result : completion,
           };
-        })();
+          if (turnRecord) {
+            turnRecord.items.push(turnItem);
+          } else {
+            ctx.turns.push({ id: turnId, items: [turnItem] });
+          }
+          ctx.session = {
+            ...ctx.session,
+            activeTurnId: turnId,
+            updatedAt: yield* nowIso,
+            model: resolvedModel,
+          };
 
-        ctx.turns.push({
-          id: turnId,
-          items: [
-            {
-              prompt: promptParts,
-              result:
-                promptOutcome.value._tag === "provider" ? promptOutcome.value.result : completion,
-            },
-          ],
-        });
-        ctx.session = {
-          ...ctx.session,
-          updatedAt: yield* nowIso,
-          model: resolvedModel,
-        };
+          // Only the last remaining prompt settles the turn. A steer-
+          // superseded prompt resolving while another is in flight must leave
+          // the merged turn running.
+          if (ctx.promptsInFlight === 1) {
+            yield* offerRuntimeEvent({
+              type: "turn.completed",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              turnId,
+              payload: {
+                state: completion.state,
+                stopReason: completion.stopReason,
+              },
+            });
 
-        yield* offerRuntimeEvent({
-          type: "turn.completed",
-          ...(yield* makeEventStamp()),
-          provider: PROVIDER,
-          threadId: input.threadId,
-          turnId,
-          payload: {
-            state: completion.state,
-            stopReason: completion.stopReason,
-          },
-        });
+            yield* clearActiveTurnAfterPrompt(ctx, activeTurn, {
+              interruptFallback: promptOutcome.value._tag !== "forced",
+            });
+          }
 
-        yield* clearActiveTurnAfterPrompt(ctx, activeTurn, {
-          interruptFallback: promptOutcome.value._tag !== "forced",
-        });
-
-        return {
-          threadId: input.threadId,
-          turnId,
-          resumeCursor: ctx.session.resumeCursor,
-        };
+          return {
+            threadId: input.threadId,
+            turnId,
+            resumeCursor: ctx.session.resumeCursor,
+          };
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1);
+            }),
+          ),
+        );
       });
 
     const interruptTurn: CursorAdapterShape["interruptTurn"] = (threadId, turnId) =>

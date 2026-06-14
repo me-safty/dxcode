@@ -1,54 +1,51 @@
 import { EnvironmentId, MessageId } from "@t3tools/contracts";
 import { createRef, type ReactNode, type Ref } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import type { LegendListRef } from "@legendapp/list/react";
 import type { VirtualizedListHandle } from "../virtualization/VirtualizedList";
 
-const virtualizedListMockState = vi.hoisted(() => ({
-  latestProps: null as
-    | null
-    | (Record<string, unknown> & {
-        readonly firstItemIndex?: never;
-        readonly onStartReached?: never;
-        readonly onVisibleRangeChange?: never;
-      }),
-}));
+vi.mock("@legendapp/list/react", async () => {
+  const legendListTestId = "legend-list";
 
-vi.mock("../virtualization/VirtualizedList", () => {
-  const virtualizedListTestId = "virtualized-list";
-
-  const VirtualizedList = (props: {
+  const LegendList = (props: {
     data: Array<{ id: string }>;
     keyExtractor: (item: { id: string }) => string;
-    renderItem: (args: { item: { id: string }; index: number }) => ReactNode;
+    renderItem: (args: { item: { id: string } }) => ReactNode;
     ListHeaderComponent?: ReactNode;
     ListFooterComponent?: ReactNode;
-    maintainVisibleContentPosition?: unknown;
-    ref?: Ref<VirtualizedListHandle>;
-    "data-testid"?: string;
-  }) => {
-    virtualizedListMockState.latestProps = props;
-    return (
-      <div data-testid={props["data-testid"] ?? virtualizedListTestId}>
-        {props.ListHeaderComponent}
-        {props.data.map((item, index) => (
-          <div key={props.keyExtractor(item)}>{props.renderItem({ item, index })}</div>
-        ))}
-        {props.ListFooterComponent}
-      </div>
-    );
-  };
+    ref?: Ref<LegendListRef>;
+  }) => (
+    <div data-testid={legendListTestId}>
+      {props.ListHeaderComponent}
+      {props.data.map((item) => (
+        <div key={props.keyExtractor(item)}>{props.renderItem({ item })}</div>
+      ))}
+      {props.ListFooterComponent}
+    </div>
+  );
 
-  return { VirtualizedList };
+  return { LegendList };
 });
 
-vi.mock("../ChatMarkdown", () => ({
-  default: (props: { text: string; environmentId?: EnvironmentId }) => (
-    <div data-chat-markdown-environment-id={props.environmentId ?? ""}>{props.text}</div>
-  ),
-}));
+function MockFileDiff(props: {
+  fileDiff: { name?: string | null; prevName?: string | null };
+  renderCustomHeader?: (fileDiff: {
+    name?: string | null;
+    prevName?: string | null;
+  }) => React.ReactNode;
+}) {
+  return (
+    <div data-testid="file-diff">
+      {props.renderCustomHeader?.(props.fileDiff)}
+      {props.fileDiff.name ?? props.fileDiff.prevName ?? "diff"}
+    </div>
+  );
+}
 
-import { MessagesTimeline } from "./MessagesTimeline";
+vi.mock("@pierre/diffs/react", () => {
+  return { FileDiff: MockFileDiff };
+});
 
 function matchMedia() {
   return {
@@ -91,13 +88,6 @@ beforeAll(() => {
   });
 });
 
-function getLatestVirtualizedListProps() {
-  if (!virtualizedListMockState.latestProps) {
-    throw new Error("VirtualizedList was not rendered.");
-  }
-  return virtualizedListMockState.latestProps;
-}
-
 const ACTIVE_THREAD_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const MESSAGE_CREATED_AT = "2026-03-17T19:12:28.000Z";
 
@@ -105,11 +95,9 @@ function buildProps() {
   return {
     isWorking: false,
     activeTurnInProgress: false,
-    activeTurnId: null,
     activeTurnStartedAt: null,
     listRef: createRef<VirtualizedListHandle | null>(),
-    completionDividerBeforeEntryId: null,
-    completionSummary: null,
+    latestTurn: null,
     turnDiffSummaryByAssistantMessageId: new Map(),
     routeThreadKey: "environment-local:thread-1",
     onOpenTurnDiff: () => {},
@@ -147,111 +135,9 @@ function buildUserTimelineEntry(text: string) {
   };
 }
 
-function buildAssistantTimelineEntry(text: string) {
-  return {
-    id: "entry-1",
-    kind: "message" as const,
-    createdAt: MESSAGE_CREATED_AT,
-    message: {
-      id: MessageId.make("message-1"),
-      role: "assistant" as const,
-      text,
-      createdAt: MESSAGE_CREATED_AT,
-      streaming: false,
-    },
-  };
-}
-
 describe("MessagesTimeline", () => {
-  it("renders an older-page control when thread detail has more history", () => {
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        hasOlderThreadDetail
-        onLoadOlderThreadDetail={() => {}}
-        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
-      />,
-    );
-
-    expect(markup).toContain("Older");
-    expect(markup).toContain("lucide-chevron-up");
-    expect(markup).not.toContain('disabled=""');
-  });
-
-  it("does not pass prepend or auto-load props into the timeline virtualizer", () => {
-    renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
-      />,
-    );
-
-    expect(getLatestVirtualizedListProps().firstItemIndex).toBeUndefined();
-    expect(getLatestVirtualizedListProps().onStartReached).toBeUndefined();
-    expect(getLatestVirtualizedListProps().onVisibleRangeChange).toBeUndefined();
-    expect(getLatestVirtualizedListProps().maintainVisibleContentPosition).toEqual({
-      data: true,
-      size: true,
-    });
-  });
-
-  it("shows the older-page control as busy while loading history", () => {
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        hasOlderThreadDetail
-        isLoadingOlderThreadDetail
-        onLoadOlderThreadDetail={() => {}}
-        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
-      />,
-    );
-
-    expect(markup).toContain("Loading earlier messages...");
-    expect(markup).toContain("lucide-loader-circle");
-    expect(markup).toContain('role="status"');
-    expect(markup).not.toContain("lucide-chevron-up");
-  });
-
-  it("renders the manual older button without auto-calling the loader", () => {
-    const onLoadOlderThreadDetail = vi.fn();
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        hasOlderThreadDetail
-        onLoadOlderThreadDetail={onLoadOlderThreadDetail}
-        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
-      />,
-    );
-
-    expect(markup).toContain("Older");
-    expect(onLoadOlderThreadDetail).not.toHaveBeenCalled();
-  });
-
-  it("does not wire automatic older history loading while loading or without older history", () => {
-    renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        hasOlderThreadDetail
-        isLoadingOlderThreadDetail
-        onLoadOlderThreadDetail={() => {}}
-        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
-      />,
-    );
-    expect(getLatestVirtualizedListProps().onStartReached).toBeUndefined();
-    expect(getLatestVirtualizedListProps().onVisibleRangeChange).toBeUndefined();
-
-    renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        onLoadOlderThreadDetail={() => {}}
-        timelineEntries={[buildAssistantTimelineEntry("Recent answer.")]}
-      />,
-    );
-    expect(getLatestVirtualizedListProps().onStartReached).toBeUndefined();
-    expect(getLatestVirtualizedListProps().onVisibleRangeChange).toBeUndefined();
-  });
-
-  it("renders collapse controls for long user messages", () => {
+  it("renders collapse controls for long user messages", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -265,7 +151,8 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
-  it("does not render collapse controls for short user messages", () => {
+  it("does not render collapse controls for short user messages", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -277,19 +164,8 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-collapsible="false"');
   });
 
-  it("passes the active environment id into assistant markdown for file previews", () => {
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        markdownCwd="/repo/project"
-        timelineEntries={[buildAssistantTimelineEntry("[index.ts](src/index.ts)")]}
-      />,
-    );
-
-    expect(markup).toContain('data-chat-markdown-environment-id="environment-local"');
-  });
-
-  it("renders inline terminal labels with the composer chip UI", () => {
+  it("renders inline terminal labels with the composer chip UI", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -311,11 +187,13 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("Terminal 1 lines 1-5");
     expect(markup).toContain("lucide-terminal");
-    expect(markup).toContain("yoo what&#x27;s ");
+    expect(markup).toContain("yoo what&#x27;s</p>");
+    expect(markup).toContain('<span aria-hidden="true"> </span>');
     expect(markup).toContain("Show full message");
   }, 20_000);
 
-  it("keeps the copy button for collapsed long user messages", () => {
+  it("keeps the copy button for collapsed long user messages", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -328,7 +206,8 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
-  it("renders context compaction entries in the normal work log", () => {
+  it("renders context compaction entries in the normal work log", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -349,10 +228,11 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("Context compacted");
-    expect(markup).toContain("Work log");
+    expect(markup).toContain("work log");
   });
 
-  it("formats changed file paths from the workspace root", () => {
+  it("formats changed file paths from the workspace root", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
@@ -376,5 +256,71 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("t3code/apps/web/src/session-logic.ts");
     expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
+  });
+
+  it("renders review comment contexts as structured cards instead of raw tags", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            message: {
+              id: MessageId.make("message-2"),
+              role: "user",
+              text: [
+                '<review_comment sectionId="turn:2" sectionTitle="Turn 2" filePath="apps/web/src/lib/contextWindow.test.ts" startIndex="3" endIndex="14" rangeLabel="+47 to +58">',
+                "Wadduo",
+                "```diff",
+                "@@ -0,0 +47,2 @@",
+                '+  it("keeps valid zero-usage snapshots", () => {',
+                "+    expect(snapshot).not.toBeNull();",
+                "```",
+                "</review_comment>",
+              ].join("\n"),
+              createdAt: "2026-03-17T19:12:28.000Z",
+              streaming: false,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("contextWindow.test.ts");
+    expect(markup).toContain("Wadduo");
+    expect(markup).toContain('data-testid="file-diff"');
+    expect(markup).not.toContain(">Review comment<");
+    expect(markup).not.toContain("&lt;review_comment");
+    expect(markup).not.toContain("&lt;/review_comment&gt;");
+  });
+
+  it("renders a failure marker for failed tool lifecycle entries", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Glob",
+              tone: "tool",
+              toolLifecycleStatus: "failed",
+              detail: "No files found",
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("lucide-x");
+    expect(markup).toContain('aria-label="Tool call failed"');
   });
 });

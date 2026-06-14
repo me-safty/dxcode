@@ -191,12 +191,14 @@ describe("DesktopShellEnvironment", () => {
         LOCALAPPDATA: "C:\\Users\\testuser\\AppData\\Local",
         USERPROFILE: "C:\\Users\\testuser",
       };
+      const commands: ChildProcess.Command[] = [];
 
       yield* runShellEnvironment({
         env,
         platform: "win32",
         handler: (command) => {
           if (command._tag !== "StandardCommand") return "";
+          commands.push(command);
           const loadProfile = !command.args.includes("-NoProfile");
           return loadProfile
             ? envOutput({
@@ -221,6 +223,15 @@ describe("DesktopShellEnvironment", () => {
           "C:\\Users\\testuser\\scoop\\shims",
           "C:\\Custom\\Bin",
         ].join(";"),
+      );
+      assert.deepEqual(
+        commands.map((command) =>
+          command._tag === "StandardCommand" ? [command.command, command.options.shell] : [],
+        ),
+        [
+          ["pwsh.exe", false],
+          ["pwsh.exe", false],
+        ],
       );
       assert.equal(env.FNM_DIR, "C:\\Users\\testuser\\AppData\\Roaming\\fnm");
       assert.equal(

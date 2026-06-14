@@ -1159,6 +1159,73 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("steers a running turn instead of opening a new one on mid-turn sendTurn", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "turn.completed",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      const turn = yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "run 5 commands",
+        attachments: [],
+      });
+
+      // Steer: a second sendTurn while the turn is still running continues
+      // the same turn — the message is queued into the live agent loop.
+      const steeredTurn = yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "actually run 15",
+        attachments: [],
+      });
+      assert.equal(String(steeredTurn.turnId), String(turn.turnId));
+
+      harness.query.emit({
+        type: "assistant",
+        session_id: "sdk-session-steer",
+        uuid: "assistant-steer-1",
+        parent_tool_use_id: null,
+        message: {
+          id: "assistant-message-steer-1",
+          content: [{ type: "text", text: "Adjusting to 15." }],
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-steer",
+        uuid: "result-steer-1",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const turnStartedEvents = runtimeEvents.filter((event) => event.type === "turn.started");
+      const turnCompletedEvents = runtimeEvents.filter((event) => event.type === "turn.completed");
+
+      // One turn boundary for the whole run: the steer produced no
+      // turn.completed/turn.started pair.
+      assert.equal(turnStartedEvents.length, 1);
+      assert.equal(String(turnStartedEvents[0]?.turnId), String(turn.turnId));
+      assert.equal(turnCompletedEvents.length, 1);
+      assert.equal(String(turnCompletedEvents[0]?.turnId), String(turn.turnId));
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("maps Claude reasoning deltas, streamed tool inputs, and tool results", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -1822,6 +1889,98 @@ describe("ClaudeAdapterLive", () => {
         );
         assert.equal(progressEvent.payload.description, "Running background teammate");
       }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("handles Claude SDK system subtypes without warning floods", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      harness.query.emit({
+        type: "system",
+        subtype: "thinking_tokens",
+        token_count: 4096,
+        uuid: "thinking-tokens-1",
+        session_id: "sdk-session-system-subtypes",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "system",
+        subtype: "permission_denied",
+        tool_name: "Bash",
+        tool_use_id: "toolu-denied-1",
+        tool_input: {},
+        decision_reason: "Denied by auto mode",
+        agent_id: "agent-reviewer",
+        message: "Permission denied",
+        uuid: "permission-denied-1",
+        session_id: "sdk-session-system-subtypes",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "system",
+        subtype: "mirror_error",
+        error: "append timed out",
+        key: {
+          projectKey: "project-1",
+          sessionId: "sdk-session-system-subtypes",
+        },
+        uuid: "mirror-error-1",
+        session_id: "sdk-session-system-subtypes",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      assert.deepEqual(
+        runtimeEvents.map((event) => event.type),
+        [
+          "session.started",
+          "session.configured",
+          "session.state.changed",
+          "thread.started",
+          "tool.denied",
+          "runtime.error",
+        ],
+      );
+
+      const toolDenied = runtimeEvents.find((event) => event.type === "tool.denied");
+      assert.equal(toolDenied?.type, "tool.denied");
+      if (toolDenied?.type === "tool.denied") {
+        assert.deepEqual(toolDenied.payload, {
+          toolName: "Bash",
+          toolUseId: "toolu-denied-1",
+          reason: "Denied by auto mode",
+          agentId: "agent-reviewer",
+        });
+      }
+
+      const runtimeError = runtimeEvents.find((event) => event.type === "runtime.error");
+      assert.equal(runtimeError?.type, "runtime.error");
+      if (runtimeError?.type === "runtime.error") {
+        assert.equal(
+          runtimeError.payload.message,
+          "Claude workspace mirror error: append timed out",
+        );
+      }
+
+      assert.equal(
+        runtimeEvents.some((event) => event.type === "runtime.warning"),
+        false,
+      );
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
