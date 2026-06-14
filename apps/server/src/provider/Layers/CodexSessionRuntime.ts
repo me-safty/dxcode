@@ -726,8 +726,8 @@ export const makeCodexSessionRuntime = (
       ...options.environment,
       ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
     };
-      const child = yield* spawner
-        .spawn(
+    const child = yield* spawner
+      .spawn(
         ChildProcess.make(
           options.binaryPath,
           sanitizeShellModeArgs(["app-server", ...(options.appServerArgs ?? [])], hostPlatform),
@@ -735,9 +735,10 @@ export const makeCodexSessionRuntime = (
             cwd: options.cwd,
             env,
             extendEnv: options.environment === undefined,
-          forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER,
-          shell: hostPlatform === "win32",
-        }),
+            forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER,
+            shell: hostPlatform === "win32",
+          },
+        ),
       )
       .pipe(
         Effect.provideService(Scope.Scope, runtimeScope),

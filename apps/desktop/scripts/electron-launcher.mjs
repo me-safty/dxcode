@@ -315,7 +315,7 @@ function buildMacLauncher(electronBinaryPath) {
 }
 
 function isLinuxSetuidSandboxConfigured(electronBinaryPath) {
-  if (process.platform !== "linux") {
+  if (hostPlatform !== "linux") {
     return true;
   }
 
