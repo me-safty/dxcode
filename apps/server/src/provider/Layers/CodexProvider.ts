@@ -24,7 +24,6 @@ import type {
 import { ServerSettingsError } from "@t3tools/contracts";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import {
   AUTH_PROBE_TIMEOUT_MS,
@@ -301,9 +300,9 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     ...input.environment,
     ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
   };
-  const hostEnvironment = yield* HostProcessEnvironment;
   const spawnCommand = yield* resolveSpawnCommand(input.binaryPath, ["app-server"], {
-    env: { ...hostEnvironment, ...environment },
+    env: environment,
+    extendEnv: true,
   });
   const child = yield* spawner
     .spawn(

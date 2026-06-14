@@ -13,7 +13,6 @@ import * as EffectAcpClient from "effect-acp/client";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 import type * as EffectAcpProtocol from "effect-acp/protocol";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import {
@@ -203,10 +202,11 @@ const makeAcpSessionRuntime = (
         ),
       );
 
-    const hostEnvironment = yield* HostProcessEnvironment;
-    const spawnCommand = yield* resolveSpawnCommand(options.spawn.command, options.spawn.args, {
-      env: { ...hostEnvironment, ...options.spawn.env },
-    });
+    const spawnCommand = yield* resolveSpawnCommand(
+      options.spawn.command,
+      options.spawn.args,
+      options.spawn.env ? { env: options.spawn.env, extendEnv: true } : {},
+    );
     const child = yield* spawner
       .spawn(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {

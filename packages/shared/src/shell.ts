@@ -35,6 +35,7 @@ function canExecuteFile(filePath: string): boolean {
 
 export interface CommandAvailabilityOptions {
   readonly env?: NodeJS.ProcessEnv;
+  readonly extendEnv?: boolean;
 }
 
 export type CommandAvailabilityChecker = (
@@ -576,7 +577,13 @@ export const resolveSpawnCommand = Effect.fn("shell.resolveSpawnCommand")(functi
     return { command, args: [...args], shell: false };
   }
 
-  const env = options.env ?? (yield* HostProcessEnvironment);
+  const hostEnvironment = yield* HostProcessEnvironment;
+  const env =
+    options.env === undefined
+      ? hostEnvironment
+      : options.extendEnv
+        ? { ...hostEnvironment, ...options.env }
+        : options.env;
   const resolveExecutable = yield* SpawnExecutableResolution;
   const resolvedCommand = resolveExecutable(command, platform, env) ?? command;
   const extension = NodePath.win32.extname(resolvedCommand).toLowerCase();

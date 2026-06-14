@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -404,6 +404,32 @@ effectIt.layer(NodeServices.layer)("resolveSpawnCommand", (it) => {
         '^"^%PATH^%^"',
         '^"quote\\^"value^"',
       ]);
+    }),
+  );
+
+  it.effect("resolves against the effective environment when extending host env", () =>
+    Effect.gen(function* () {
+      let resolvedEnvironment: NodeJS.ProcessEnv | undefined;
+      yield* resolveSpawnCommand("codex", ["app-server"], {
+        env: { CODEX_HOME: "C:\\Users\\tester\\.codex" },
+        extendEnv: true,
+      }).pipe(
+        Effect.provideService(HostProcessPlatform, "win32"),
+        Effect.provideService(HostProcessEnvironment, {
+          PATH: "C:\\Users\\tester\\AppData\\Roaming\\npm",
+          PATHEXT: ".COM;.EXE;.BAT;.CMD",
+        }),
+        Effect.provideService(SpawnExecutableResolution, (_command, _platform, env) => {
+          resolvedEnvironment = env;
+          return "C:\\Users\\tester\\AppData\\Roaming\\npm\\codex.cmd";
+        }),
+      );
+
+      expect(resolvedEnvironment).toEqual({
+        PATH: "C:\\Users\\tester\\AppData\\Roaming\\npm",
+        PATHEXT: ".COM;.EXE;.BAT;.CMD",
+        CODEX_HOME: "C:\\Users\\tester\\.codex",
+      });
     }),
   );
 

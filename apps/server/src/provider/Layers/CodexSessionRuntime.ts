@@ -724,17 +724,18 @@ export const makeCodexSessionRuntime = (
       ...options.environment,
       ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
     };
+    const extendEnv = options.environment === undefined;
     const spawnCommand = yield* resolveSpawnCommand(
       options.binaryPath,
       ["app-server", ...(options.appServerArgs ?? [])],
-      { env },
+      { env, extendEnv },
     );
     const child = yield* spawner
       .spawn(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
           cwd: options.cwd,
           env,
-          extendEnv: options.environment === undefined,
+          extendEnv,
           forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER,
           shell: spawnCommand.shell,
         }),
