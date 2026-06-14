@@ -24,6 +24,7 @@ interface RightPanelTabsProps {
   onAddTerminal: () => void;
   onAddDiff: () => void;
   browserAvailable: boolean;
+  terminalAvailable: boolean;
   diffAvailable: boolean;
   children: ReactNode;
 }
@@ -33,6 +34,7 @@ function RightPanelEmptyState(props: {
   onAddTerminal: () => void;
   onAddDiff: () => void;
   browserAvailable: boolean;
+  terminalAvailable: boolean;
   diffAvailable: boolean;
 }) {
   const actions = [
@@ -47,7 +49,7 @@ function RightPanelEmptyState(props: {
       label: "Terminal",
       description: "Start a shell in this workspace.",
       icon: TerminalSquare,
-      available: true,
+      available: props.terminalAvailable,
       onClick: props.onAddTerminal,
     },
     {
@@ -225,7 +227,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               <Globe2 />
               Browser
             </MenuItem>
-            <MenuItem onClick={props.onAddTerminal}>
+            <MenuItem onClick={props.onAddTerminal} disabled={!props.terminalAvailable}>
               <TerminalSquare />
               Terminal
             </MenuItem>
@@ -243,6 +245,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
             browserAvailable={props.browserAvailable}
+            terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
           />
         ) : (

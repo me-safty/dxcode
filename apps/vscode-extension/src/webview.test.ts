@@ -107,6 +107,7 @@ describe("renderT3Webview", () => {
     );
     expect(html).toContain('root.removeAttribute("data-t3-thread-conversation-width")');
     expect(html).toContain('"showOpenInPicker":false');
+    expect(html).toContain('"enableTerminal":false');
     expect(html).toContain('"threadConversationMaxWidthPx":null');
     expect(html).toContain('"themeSource":"default"');
     expect(html).toContain("getClientSettings()");

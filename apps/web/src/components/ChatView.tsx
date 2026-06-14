@@ -4969,6 +4969,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddTerminal={addTerminalSurface}
           onAddDiff={addDiffSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
+          terminalAvailable={terminalEnabled}
           diffAvailable={isServerThread && isGitRepo}
         >
           {activeRightPanelSurface?.kind === "preview" ? (
@@ -5023,6 +5024,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddTerminal={addTerminalSurface}
             onAddDiff={addDiffSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
+            terminalAvailable={terminalEnabled}
             diffAvailable={isServerThread && isGitRepo}
           >
             {activeRightPanelSurface?.kind === "preview" ? (
