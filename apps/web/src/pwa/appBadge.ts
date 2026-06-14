@@ -17,6 +17,9 @@ let lastRequestedBadgeCount: number | null = null;
 let badgeSyncGeneration = 0;
 let appStoreUnsubscribe: (() => void) | null = null;
 let uiStateStoreUnsubscribe: (() => void) | null = null;
+let clearRetryTimerIds: Array<ReturnType<typeof setTimeout>> = [];
+
+const COMPLETED_TURN_ALERT_CLEAR_RETRY_DELAYS_MS = [0, 250, 1000] as const;
 
 function readBadgeNavigator(): AppBadgeNavigator | null {
   return typeof navigator === "undefined" ? null : (navigator as AppBadgeNavigator);
@@ -66,6 +69,11 @@ export async function writeAppBadgeCount(
 
 function syncAppBadge(): void {
   syncScheduled = false;
+  if (isDocumentVisible()) {
+    clearCompletedTurnAlertsAndBadge();
+    return;
+  }
+
   const generation = ++badgeSyncGeneration;
 
   void (async () => {
@@ -87,19 +95,67 @@ function syncAppBadge(): void {
   })();
 }
 
+function isDocumentVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState === "visible";
+}
+
+function clearPendingClearRetryTimers(): void {
+  for (const timerId of clearRetryTimerIds) {
+    clearTimeout(timerId);
+  }
+  clearRetryTimerIds = [];
+}
+
+function removeClearRetryTimer(timerId: ReturnType<typeof setTimeout>): void {
+  clearRetryTimerIds = clearRetryTimerIds.filter((candidate) => candidate !== timerId);
+}
+
+function scheduleCompletedTurnAlertClearAttempt(generation: number, attemptIndex: number): void {
+  const delay = COMPLETED_TURN_ALERT_CLEAR_RETRY_DELAYS_MS[attemptIndex];
+  if (delay === undefined) {
+    return;
+  }
+
+  const runAttempt = () => {
+    void (async () => {
+      await clearTurnCompletionAlerts();
+      if (generation !== badgeSyncGeneration) {
+        return;
+      }
+      lastRequestedBadgeCount = 0;
+      const updated = await writeAppBadgeCount(0);
+      if (!updated && generation === badgeSyncGeneration && lastRequestedBadgeCount === 0) {
+        lastRequestedBadgeCount = null;
+      }
+      if (generation === badgeSyncGeneration) {
+        scheduleCompletedTurnAlertClearAttempt(generation, attemptIndex + 1);
+      }
+    })();
+  };
+
+  if (delay === 0) {
+    queueMicrotask(runAttempt);
+    return;
+  }
+
+  const timerId = setTimeout(() => {
+    removeClearRetryTimer(timerId);
+    runAttempt();
+  }, delay);
+  clearRetryTimerIds.push(timerId);
+}
+
 function clearCompletedTurnAlertsAndBadge(): void {
+  clearPendingClearRetryTimers();
+  syncScheduled = false;
   const generation = ++badgeSyncGeneration;
-  void (async () => {
-    await clearTurnCompletionAlerts();
-    if (generation !== badgeSyncGeneration) {
-      return;
-    }
-    lastRequestedBadgeCount = 0;
-    const updated = await writeAppBadgeCount(0);
+  lastRequestedBadgeCount = 0;
+  void writeAppBadgeCount(0).then((updated) => {
     if (!updated && generation === badgeSyncGeneration && lastRequestedBadgeCount === 0) {
       lastRequestedBadgeCount = null;
     }
-  })();
+  });
+  scheduleCompletedTurnAlertClearAttempt(generation, 0);
 }
 
 function scheduleAppBadgeSync(): void {
@@ -153,6 +209,7 @@ export function __resetPwaAppBadgeSyncForTests(): void {
   if (typeof document !== "undefined") {
     document.removeEventListener("visibilitychange", handleDocumentVisibilityChange);
   }
+  clearPendingClearRetryTimers();
   badgeSyncInstalled = false;
   syncScheduled = false;
   lastRequestedBadgeCount = null;

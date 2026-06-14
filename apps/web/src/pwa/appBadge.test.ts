@@ -258,7 +258,7 @@ describe("installPwaAppBadgeSync", () => {
     await flushBadgeSync();
 
     expect(navigatorLike.setAppBadge).not.toHaveBeenCalled();
-    expect(navigatorLike.clearAppBadge).toHaveBeenCalledTimes(1);
+    expect(navigatorLike.clearAppBadge).toHaveBeenCalled();
   });
 
   it("clears the badge when displayed notifications are unavailable", async () => {
@@ -273,7 +273,7 @@ describe("installPwaAppBadgeSync", () => {
     await flushBadgeSync();
 
     expect(navigatorLike.setAppBadge).not.toHaveBeenCalled();
-    expect(navigatorLike.clearAppBadge).toHaveBeenCalledTimes(1);
+    expect(navigatorLike.clearAppBadge).toHaveBeenCalled();
   });
 
   it("re-syncs when displayed completed-turn notifications change", async () => {
@@ -282,6 +282,7 @@ describe("installPwaAppBadgeSync", () => {
     setBadgeStoreState([thread1, thread2]);
     const { navigatorLike, setDisplayedNotifications } = installBadgeGlobals({
       displayedNotifications: [makeDisplayedNotification("thread:thread-1:turn:turn-1")],
+      visibilityState: "hidden",
     });
 
     installPwaAppBadgeSync();
@@ -298,6 +299,28 @@ describe("installPwaAppBadgeSync", () => {
     expect(navigatorLike.setAppBadge).toHaveBeenCalledWith(2);
   });
 
+  it("clears instead of restoring displayed notifications while the app is visible", async () => {
+    const thread1 = makeCompletedThread("thread-1", "2026-06-12T12:00:00.000Z");
+    const thread2 = makeCompletedThread("thread-2", "2026-06-12T12:01:00.000Z");
+    setBadgeStoreState([thread1, thread2]);
+    const { navigatorLike } = installBadgeGlobals({
+      displayedNotifications: [
+        makeDisplayedNotification("thread:thread-1:turn:turn-1"),
+        makeDisplayedNotification("thread:thread-2:turn:turn-1"),
+      ],
+    });
+
+    installPwaAppBadgeSync();
+    await flushBadgeSync();
+    navigatorLike.clearAppBadge.mockClear();
+
+    resyncAppBadge();
+    await flushBadgeSync();
+
+    expect(navigatorLike.setAppBadge).not.toHaveBeenCalled();
+    expect(navigatorLike.clearAppBadge).toHaveBeenCalled();
+  });
+
   it("does not let stale async notification reads overwrite newer badge syncs", async () => {
     const thread1 = makeCompletedThread("thread-1", "2026-06-12T12:00:00.000Z");
     const thread2 = makeCompletedThread("thread-2", "2026-06-12T12:01:00.000Z");
@@ -305,6 +328,7 @@ describe("installPwaAppBadgeSync", () => {
     const firstRegistration = createDeferred<unknown>();
     const secondRegistration = createDeferred<unknown>();
     const { navigatorLike, getRegistration } = installBadgeGlobals({
+      visibilityState: "hidden",
       getRegistration: vi
         .fn()
         .mockResolvedValueOnce({ getNotifications: async () => [] })
@@ -356,14 +380,14 @@ describe("installPwaAppBadgeSync", () => {
     installPwaAppBadgeSync();
     await flushBadgeSync();
 
-    expect(navigatorLike.clearAppBadge).toHaveBeenCalledTimes(1);
+    expect(navigatorLike.clearAppBadge).toHaveBeenCalled();
     navigatorLike.clearAppBadge.mockClear();
 
     windowStub.dispatchEvent(new Event("focus"));
     await flushBadgeSync();
 
     expect(navigatorLike.setAppBadge).not.toHaveBeenCalled();
-    expect(navigatorLike.clearAppBadge).toHaveBeenCalledTimes(1);
+    expect(navigatorLike.clearAppBadge).toHaveBeenCalled();
   });
 
   it("clears completed-turn alerts when the document becomes visible", async () => {
@@ -392,7 +416,7 @@ describe("installPwaAppBadgeSync", () => {
     await flushBadgeSync();
 
     expect(navigatorLike.setAppBadge).not.toHaveBeenCalled();
-    expect(navigatorLike.clearAppBadge).toHaveBeenCalledTimes(1);
+    expect(navigatorLike.clearAppBadge).toHaveBeenCalled();
   });
 
   it("allows callers to force a cache-bypassing re-sync", async () => {
@@ -400,6 +424,7 @@ describe("installPwaAppBadgeSync", () => {
     setBadgeStoreState([thread]);
     const { navigatorLike } = installBadgeGlobals({
       displayedNotifications: [makeDisplayedNotification("thread:thread-1:turn:turn-1")],
+      visibilityState: "hidden",
     });
 
     installPwaAppBadgeSync();

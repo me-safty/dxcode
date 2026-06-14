@@ -12,6 +12,8 @@ import {
   useRef,
   useState,
   useTransition,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
@@ -78,6 +80,24 @@ function getBranchTriggerLabel(input: {
     return `From ${resolvedActiveBranch}`;
   }
   return resolvedActiveBranch;
+}
+
+function readElementHeight(element: HTMLElement | null): number | null {
+  if (!element) {
+    return null;
+  }
+
+  const height = element.getBoundingClientRect().height;
+  return Number.isFinite(height) && height > 0 ? Math.ceil(height) : null;
+}
+
+function resolveBranchPopupShell(popupElement: HTMLElement | null): HTMLElement | null {
+  if (!popupElement) {
+    return null;
+  }
+  return popupElement.parentElement instanceof HTMLElement
+    ? popupElement.parentElement
+    : popupElement;
 }
 
 export function BranchToolbarBranchSelector({
@@ -431,19 +451,76 @@ export function BranchToolbarBranchSelector({
   // ---------------------------------------------------------------------------
   // Combobox / list plumbing
   // ---------------------------------------------------------------------------
+  const branchPopupRef = useRef<HTMLDivElement | null>(null);
+  const branchMenuOpenHeightRef = useRef<number | null>(null);
+  const [lockedBranchMenuHeight, setLockedBranchMenuHeight] = useState<number | null>(null);
   const handleOpenChange = useCallback(
     (open: boolean) => {
+      const wasOpen = isBranchMenuOpen;
       setIsBranchMenuOpen(open);
       if (!open) {
+        branchMenuOpenHeightRef.current = null;
+        setLockedBranchMenuHeight(null);
         setBranchQuery("");
         return;
       }
+      if (wasOpen) {
+        return;
+      }
+      branchMenuOpenHeightRef.current = null;
+      setLockedBranchMenuHeight(null);
       void queryClient.invalidateQueries({
         queryKey: gitQueryKeys.refs(environmentId, branchCwd),
       });
     },
-    [branchCwd, environmentId, queryClient],
+    [branchCwd, environmentId, isBranchMenuOpen, queryClient],
   );
+
+  const readBranchPopupHeight = useCallback(() => {
+    return readElementHeight(resolveBranchPopupShell(branchPopupRef.current));
+  }, []);
+  const captureBranchMenuOpenHeight = useCallback((target?: HTMLElement | null) => {
+    const closestPopup = target?.closest('[data-slot="combobox-popup"]');
+    const currentHeight = readElementHeight(
+      resolveBranchPopupShell(
+        closestPopup instanceof HTMLElement ? closestPopup : branchPopupRef.current,
+      ),
+    );
+    if (currentHeight !== null) {
+      branchMenuOpenHeightRef.current = currentHeight;
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isBranchMenuOpen) {
+      return;
+    }
+
+    if (lockedBranchMenuHeight !== null) {
+      return;
+    }
+
+    const currentHeight = readBranchPopupHeight();
+    const hasSearchQuery = trimmedBranchQuery.length > 0;
+    if (!hasSearchQuery) {
+      if (currentHeight !== null) {
+        branchMenuOpenHeightRef.current = currentHeight;
+      }
+      return;
+    }
+
+    const nextLockedHeight = branchMenuOpenHeightRef.current ?? currentHeight;
+    if (nextLockedHeight !== null) {
+      setLockedBranchMenuHeight(nextLockedHeight);
+    }
+  }, [
+    branchStatusText,
+    filteredBranchPickerItems.length,
+    isBranchMenuOpen,
+    lockedBranchMenuHeight,
+    readBranchPopupHeight,
+    trimmedBranchQuery.length,
+  ]);
 
   const branchListScrollElementRef = useRef<HTMLElement | null>(null);
   const [showTopBranchScrollFade, setShowTopBranchScrollFade] = useState(false);
@@ -553,6 +630,27 @@ export function BranchToolbarBranchSelector({
     effectiveEnvMode,
     resolvedActiveBranch,
   });
+  const branchPopupStyle =
+    lockedBranchMenuHeight === null
+      ? undefined
+      : ({ "--popup-locked-height": `${lockedBranchMenuHeight}px` } as CSSProperties);
+  const focusBranchSearchInputFromContainer = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const input = event.currentTarget.querySelector<HTMLInputElement>("input");
+      if (!input || event.target === input) {
+        return;
+      }
+
+      event.preventDefault();
+      captureBranchMenuOpenHeight(input);
+      input.focus({ preventScroll: true });
+    },
+    [captureBranchMenuOpenHeight],
+  );
 
   function renderPickerItem(itemValue: string, index: number) {
     if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
@@ -659,9 +757,22 @@ export function BranchToolbarBranchSelector({
         <span className="min-w-0 max-w-[240px] truncate">{triggerLabel}</span>
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </ComboboxTrigger>
-      <ComboboxPopup align="end" side="top" className="flex w-80 flex-col">
+      <ComboboxPopup
+        align="end"
+        side="top"
+        className={cn(
+          "flex w-80 flex-col",
+          lockedBranchMenuHeight !== null && "popup-height-locked",
+        )}
+        containerStyle={branchPopupStyle}
+        popupRef={branchPopupRef}
+      >
         <div className="shrink-0 px-3 pt-2.5">
-          <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
+          <div
+            className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring"
+            data-branch-ref-search-container="true"
+            onPointerDown={focusBranchSearchInputFromContainer}
+          >
             <SearchIcon
               aria-hidden="true"
               className="pointer-events-none absolute top-1.5 left-0 size-4 shrink-0 text-muted-foreground/55"
@@ -674,7 +785,11 @@ export function BranchToolbarBranchSelector({
               size="sm"
               unstyled
               value={branchQuery}
-              onChange={(event) => setBranchQuery(event.target.value)}
+              onFocus={(event) => captureBranchMenuOpenHeight(event.currentTarget)}
+              onChange={(event) => {
+                captureBranchMenuOpenHeight(event.currentTarget);
+                setBranchQuery(event.target.value);
+              }}
             />
           </div>
         </div>

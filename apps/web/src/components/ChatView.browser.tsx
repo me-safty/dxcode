@@ -3905,15 +3905,41 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
       branchButton.click();
 
-      await waitForElement(
+      const branchInput = await waitForElement(
         () => document.querySelector<HTMLInputElement>('input[placeholder="Search refs..."]'),
         "Unable to find ref search input.",
       );
+      const branchSearchContainer = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-branch-ref-search-container="true"]'),
+        "Unable to find ref search input container.",
+      );
+
+      await vi.waitFor(
+        () => {
+          const inputRect = branchInput.getBoundingClientRect();
+          const containerRect = branchSearchContainer.getBoundingClientRect();
+
+          expect(Math.abs(inputRect.right - containerRect.right)).toBeLessThanOrEqual(1);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      branchInput.blur();
+      expect(document.activeElement).not.toBe(branchInput);
+      branchSearchContainer.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          pointerType: "mouse",
+        }),
+      );
+      expect(document.activeElement).toBe(branchInput);
 
       const popup = await waitForElement(
         () => document.querySelector<HTMLElement>('[data-slot="combobox-popup"]'),
         "Unable to find the branch picker popup.",
       );
+      const popupShell = popup.parentElement instanceof HTMLElement ? popup.parentElement : popup;
 
       await vi.waitFor(
         () => {
@@ -3922,6 +3948,23 @@ describe("ChatView timeline estimator parity (full app)", () => {
             popupSpans.some((element) => element.textContent?.trim() === "feature/current"),
           ).toBe(true);
           expect(popupSpans.some((element) => element.textContent?.trim() === "main")).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const openHeight = popupShell.getBoundingClientRect().height;
+      expect(openHeight).toBeGreaterThan(0);
+
+      await page.getByPlaceholder("Search refs...").fill("feature/selected");
+
+      await vi.waitFor(
+        () => {
+          const popupText = popup.textContent ?? "";
+          const searchHeight = popupShell.getBoundingClientRect().height;
+
+          expect(popupText).toContain("feature/selected");
+          expect(popupText).not.toContain("main");
+          expect(Math.abs(searchHeight - openHeight)).toBeLessThanOrEqual(1);
         },
         { timeout: 8_000, interval: 16 },
       );

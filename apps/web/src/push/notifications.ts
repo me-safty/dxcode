@@ -5,6 +5,7 @@ import { ensureLocalApi } from "../localApi";
 
 const SERVICE_WORKER_URL = "/t3-service-worker.js";
 const TURN_NOTIFICATION_TAG_PATTERN = /^thread:(.+):turn:[^:]+$/;
+const SERVICE_WORKER_READY_TIMEOUT_MS = 3000;
 export const SYNC_BADGE_MESSAGE_TYPE = "t3.sync-displayed-notification-badge";
 export const CLEAR_TURN_COMPLETION_NOTIFICATIONS_MESSAGE_TYPE =
   "t3.clear-turn-completion-notifications";
@@ -98,12 +99,54 @@ export function countTurnCompletionNotificationThreads(
   return threadIds.size;
 }
 
+async function getReadyServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+    return null;
+  }
+
+  const ready = navigator.serviceWorker.ready;
+  if (!ready || typeof ready.then !== "function") {
+    return null;
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<null>((resolve) => {
+      timeoutId = setTimeout(() => resolve(null), SERVICE_WORKER_READY_TIMEOUT_MS);
+    });
+    return await Promise.race([ready, timeout]);
+  } catch {
+    return null;
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+async function getInspectableServiceWorkerRegistration(
+  registration?: ServiceWorkerRegistration | null,
+): Promise<ServiceWorkerRegistration | null> {
+  if (registration) {
+    return registration;
+  }
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+    return null;
+  }
+
+  const directRegistration =
+    typeof navigator.serviceWorker.getRegistration === "function"
+      ? await navigator.serviceWorker.getRegistration()
+      : null;
+  return directRegistration ?? getReadyServiceWorkerRegistration();
+}
+
 export async function getDisplayedTurnCompletionThreadCount(): Promise<number | null> {
   if (!getBrowserPushSupport().supported) {
     return null;
   }
   try {
-    const registration = await navigator.serviceWorker.getRegistration();
+    const registration = await getInspectableServiceWorkerRegistration();
     if (!registration || typeof registration.getNotifications !== "function") {
       return null;
     }
@@ -121,7 +164,7 @@ export async function closeTurnCompletionNotifications(
     return null;
   }
   try {
-    const resolvedRegistration = registration ?? (await navigator.serviceWorker.getRegistration());
+    const resolvedRegistration = await getInspectableServiceWorkerRegistration(registration);
     if (!resolvedRegistration || typeof resolvedRegistration.getNotifications !== "function") {
       return null;
     }
@@ -158,7 +201,7 @@ export async function requestServiceWorkerBadgeSync(
     return false;
   }
   try {
-    const resolvedRegistration = registration ?? (await navigator.serviceWorker.getRegistration());
+    const resolvedRegistration = registration ?? (await getInspectableServiceWorkerRegistration());
     if (!resolvedRegistration) {
       return false;
     }
@@ -175,7 +218,7 @@ export async function requestServiceWorkerTurnCompletionNotificationClear(
     return false;
   }
   try {
-    const resolvedRegistration = registration ?? (await navigator.serviceWorker.getRegistration());
+    const resolvedRegistration = registration ?? (await getInspectableServiceWorkerRegistration());
     if (!resolvedRegistration) {
       return false;
     }

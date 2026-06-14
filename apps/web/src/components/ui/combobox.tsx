@@ -74,7 +74,7 @@ function ComboboxInput({
   const sizeValue = (size ?? "default") as "sm" | "default" | "lg" | number;
 
   return (
-    <div className="relative not-has-[>*.w-full]:w-fit w-full text-foreground has-disabled:opacity-64">
+    <div className="relative w-full min-w-0 text-foreground has-disabled:opacity-64">
       {startAddon && (
         <div
           aria-hidden="true"
@@ -96,7 +96,7 @@ function ComboboxInput({
         data-slot="combobox-input"
         render={
           <Input
-            className={cn("has-disabled:opacity-100", inputClassName)}
+            className={cn("w-full has-disabled:opacity-100", inputClassName)}
             nativeInput
             size={sizeValue}
             unstyled={unstyled}
@@ -141,6 +141,8 @@ function ComboboxTrigger({ className, children, ...props }: ComboboxPrimitive.Tr
 function ComboboxPopup({
   className,
   children,
+  containerStyle,
+  popupRef,
   side = "bottom",
   sideOffset = 4,
   alignOffset,
@@ -153,6 +155,8 @@ function ComboboxPopup({
   alignOffset?: ComboboxPrimitive.Positioner.Props["alignOffset"];
   side?: ComboboxPrimitive.Positioner.Props["side"];
   anchor?: ComboboxPrimitive.Positioner.Props["anchor"];
+  containerStyle?: React.CSSProperties | undefined;
+  popupRef?: React.Ref<HTMLDivElement>;
 }) {
   const { chipsRef } = React.use(ComboboxContext);
   const anchor = anchorProp ?? chipsRef;
@@ -173,11 +177,13 @@ function ComboboxPopup({
             "relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-lg border bg-popover not-dark:bg-clip-padding shadow-lg/5 transition-[scale,opacity] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
             className,
           )}
+          style={containerStyle}
         >
           <ComboboxPrimitive.Popup
+            {...props}
+            ref={popupRef}
             className="flex max-h-[min(var(--available-height),23rem)] flex-1 flex-col text-foreground"
             data-slot="combobox-popup"
-            {...props}
           >
             {children}
           </ComboboxPrimitive.Popup>
