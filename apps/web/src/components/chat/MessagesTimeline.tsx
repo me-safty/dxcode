@@ -170,6 +170,7 @@ interface MessagesTimelineProps {
   listRef: React.RefObject<VirtualizedListHandle | null>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   latestTurn: TimelineLatestTurn | null;
+  activeTurnId: TurnId | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
@@ -202,6 +203,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   listRef,
   timelineEntries,
   latestTurn,
+  activeTurnId,
   turnDiffSummaryByAssistantMessageId,
   routeThreadKey,
   onOpenTurnDiff,
@@ -294,6 +296,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       deriveMessagesTimelineRows({
         timelineEntries,
         latestTurn,
+        activeTurnId,
         expandedTurnIds,
         isWorking,
         activeTurnStartedAt,
@@ -303,6 +306,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [
       timelineEntries,
       latestTurn,
+      activeTurnId,
       expandedTurnIds,
       isWorking,
       activeTurnStartedAt,

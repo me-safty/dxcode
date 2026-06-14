@@ -265,6 +265,7 @@ const TimelineHarness = forwardRef<TimelineHarnessHandle>(function TimelineHarne
         listRef={listRef}
         timelineEntries={timelineEntries}
         latestTurn={null}
+        activeTurnId={null}
         turnDiffSummaryByAssistantMessageId={emptyTurnDiffSummary}
         routeThreadKey="environment-local:thread-real-list"
         onOpenTurnDiff={() => {}}
@@ -312,6 +313,7 @@ function TimelineFixture({
         listRef={listRef}
         timelineEntries={timelineEntries}
         latestTurn={null}
+        activeTurnId={null}
         turnDiffSummaryByAssistantMessageId={emptyTurnDiffSummary}
         routeThreadKey="environment-local:thread-overflow"
         onOpenTurnDiff={() => {}}

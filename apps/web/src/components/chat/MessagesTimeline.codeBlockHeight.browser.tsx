@@ -172,6 +172,7 @@ const TimelineHarness = forwardRef<TimelineHarnessHandle>(function TimelineHarne
         listRef={listRef}
         timelineEntries={timelineEntries}
         latestTurn={null}
+        activeTurnId={null}
         turnDiffSummaryByAssistantMessageId={emptyTurnDiffSummary}
         routeThreadKey="environment-local:thread-code-block-height"
         onOpenTurnDiff={() => {}}

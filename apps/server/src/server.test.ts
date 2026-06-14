@@ -68,7 +68,12 @@ function emptyWorkingTree() {
 
 import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
-import { makeRoutesLayer } from "./server.ts";
+import {
+  HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
+  makeBunHttpServerOptions,
+  makeNodeHttpServerOptions,
+  makeRoutesLayer,
+} from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import {
   CheckpointDiffQuery,
@@ -963,6 +968,27 @@ const getWsServerUrl = (
   });
 
 it.layer(NodeServices.layer)("server router seam", (it) => {
+  it.effect("configures platform HTTP servers with zero preemptive shutdown grace", () =>
+    Effect.sync(() => {
+      const config = {
+        host: "127.0.0.1",
+        port: 0,
+      };
+
+      assert.deepEqual(makeBunHttpServerOptions(config), {
+        port: 0,
+        hostname: "127.0.0.1",
+        gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
+      });
+      assert.deepEqual(makeNodeHttpServerOptions(config), {
+        host: "127.0.0.1",
+        port: 0,
+        gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
+      });
+      assert.equal(HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS, 0);
+    }),
+  );
+
   it.effect("serves static index content for GET / when staticDir is configured", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

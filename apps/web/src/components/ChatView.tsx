@@ -4410,6 +4410,7 @@ export default function ChatView(props: ChatViewProps) {
               listRef={timelineListRef}
               timelineEntries={timelineEntries}
               latestTurn={activeLatestTurn}
+              activeTurnId={activeThread.session?.activeTurnId ?? null}
               turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
               activeThreadEnvironmentId={activeThread.environmentId}
               routeThreadKey={routeThreadKey}
