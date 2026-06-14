@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 
-import { ServerConfig } from "./config.ts";
+import { ServerConfig, type ServerConfigShape } from "./config.ts";
 import {
   attachmentsRouteLayer,
   otlpTracesProxyRouteLayer,
@@ -100,6 +100,26 @@ import {
 import * as NetService from "@t3tools/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
+// Effect's default preemptive shutdown waits 20s before finalizing request scopes.
+// T3's primary transport is long-lived WebSocket RPC, whose Effect scope finalizer
+// already closes the websocket gracefully. Do not add an artificial drain before
+// those finalizers get a chance to run.
+export const HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS = 0;
+
+type HttpServerConfig = Pick<ServerConfigShape, "host" | "port">;
+
+export const makeBunHttpServerOptions = (config: HttpServerConfig) => ({
+  port: config.port,
+  ...(config.host ? { hostname: config.host } : {}),
+  gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
+});
+
+export const makeNodeHttpServerOptions = (config: HttpServerConfig) => ({
+  host: config.host,
+  port: config.port,
+  gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
+});
+
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
     if (typeof Bun !== "undefined") {
@@ -119,19 +139,13 @@ const HttpServerLive = Layer.unwrap(
       const BunHttpServer = yield* Effect.promise(
         () => import("@effect/platform-bun/BunHttpServer"),
       );
-      return BunHttpServer.layer({
-        port: config.port,
-        ...(config.host ? { hostname: config.host } : {}),
-      });
+      return BunHttpServer.layer(makeBunHttpServerOptions(config));
     } else {
       const [NodeHttpServer, NodeHttp] = yield* Effect.all([
         Effect.promise(() => import("@effect/platform-node/NodeHttpServer")),
         Effect.promise(() => import("node:http")),
       ]);
-      return NodeHttpServer.layer(NodeHttp.createServer, {
-        host: config.host,
-        port: config.port,
-      });
+      return NodeHttpServer.layer(NodeHttp.createServer, makeNodeHttpServerOptions(config));
     }
   }),
 );

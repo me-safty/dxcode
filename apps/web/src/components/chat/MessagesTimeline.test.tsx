@@ -98,6 +98,7 @@ function buildProps() {
     activeTurnStartedAt: null,
     listRef: createRef<VirtualizedListHandle | null>(),
     latestTurn: null,
+    activeTurnId: null,
     turnDiffSummaryByAssistantMessageId: new Map(),
     routeThreadKey: "environment-local:thread-1",
     onOpenTurnDiff: () => {},

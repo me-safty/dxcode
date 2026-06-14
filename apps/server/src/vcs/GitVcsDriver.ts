@@ -71,6 +71,17 @@ export interface GitStatusDetails {
   aheadOfDefaultCount: number;
 }
 
+export interface GitRemoteStatusDetails {
+  isRepo: boolean;
+  isDefaultBranch: boolean;
+  branch: string | null;
+  upstreamRef: string | null;
+  hasUpstream: boolean;
+  aheadCount: number;
+  behindCount: number;
+  aheadOfDefaultCount: number;
+}
+
 export interface GitPreparedCommitContext {
   stagedSummary: string;
   stagedPatch: string;
@@ -165,6 +176,9 @@ export interface GitVcsDriverShape {
   readonly status: (input: VcsStatusInput) => Effect.Effect<VcsStatusResult, GitCommandError>;
   readonly statusDetails: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
   readonly statusDetailsLocal: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
+  readonly statusDetailsRemote: (
+    cwd: string,
+  ) => Effect.Effect<GitRemoteStatusDetails, GitCommandError>;
   readonly readWorkingTreeDiff: (
     input: VcsWorkingTreeDiffInput,
   ) => Effect.Effect<VcsWorkingTreeDiffResult, GitCommandError>;

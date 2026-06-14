@@ -744,6 +744,175 @@ describe("deriveMessagesTimelineRows", () => {
     expect(finalRow?.kind === "message" && finalRow.showAssistantMeta).toBe(true);
   });
 
+  it("keeps queued follow-up turn entries expanded while work is active before latestTurn advances", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "user-1" as never,
+            role: "user",
+            text: "Build it",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "work-entry-1",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:05Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:05Z",
+            turnId: "turn-1" as never,
+            label: "Ran command",
+            tone: "tool" as const,
+          },
+        },
+        {
+          id: "assistant-final-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:20Z",
+          message: {
+            id: "assistant-final" as never,
+            role: "assistant",
+            text: "Done",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:20Z",
+            completedAt: "2026-01-01T00:00:22Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "queued-user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:01:00Z",
+          message: {
+            id: "queued-user" as never,
+            role: "user",
+            text: "Actually include tests",
+            turnId: null,
+            createdAt: "2026-01-01T00:01:00Z",
+            completedAt: "2026-01-01T00:01:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "assistant-current-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:01:05Z",
+          message: {
+            id: "assistant-current" as never,
+            role: "assistant",
+            text: "Updating the implementation.",
+            turnId: "turn-2" as never,
+            createdAt: "2026-01-01T00:01:05Z",
+            completedAt: "2026-01-01T00:01:06Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "work-entry-2",
+          kind: "work",
+          createdAt: "2026-01-01T00:01:08Z",
+          entry: {
+            id: "work-2",
+            createdAt: "2026-01-01T00:01:08Z",
+            turnId: "turn-2" as never,
+            label: "Edited file",
+            tone: "tool" as const,
+          },
+        },
+      ],
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "completed",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:22Z",
+      },
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:01:00Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(
+      rows
+        .filter(
+          (row): row is Extract<(typeof rows)[number], { kind: "turn-fold" }> =>
+            row.kind === "turn-fold",
+        )
+        .map((row) => row.turnId),
+    ).toEqual(["turn-1"]);
+    expect(rows.map((row) => row.id)).toEqual([
+      "user-entry",
+      "turn-fold:turn-1",
+      "assistant-final-entry",
+      "queued-user-entry",
+      "assistant-current-entry",
+      "work-group:after:assistant-current-entry",
+      "working-indicator-row",
+    ]);
+    const currentAssistantRow = rows.find((row) => row.id === "assistant-current-entry");
+    expect(currentAssistantRow?.kind === "message" && currentAssistantRow.showAssistantMeta).toBe(
+      false,
+    );
+  });
+
+  it("uses activeTurnId to keep the current turn expanded when latestTurn lags", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "work-entry-2",
+          kind: "work",
+          createdAt: "2026-01-01T00:01:08Z",
+          entry: {
+            id: "work-2",
+            createdAt: "2026-01-01T00:01:08Z",
+            turnId: "turn-2" as never,
+            label: "Edited file",
+            tone: "tool" as const,
+          },
+        },
+        {
+          id: "assistant-current-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:01:10Z",
+          message: {
+            id: "assistant-current" as never,
+            role: "assistant",
+            text: "Still working.",
+            turnId: "turn-2" as never,
+            createdAt: "2026-01-01T00:01:10Z",
+            completedAt: "2026-01-01T00:01:11Z",
+            streaming: false,
+          },
+        },
+      ],
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "completed",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: "2026-01-01T00:00:22Z",
+      },
+      activeTurnId: "turn-2" as never,
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:01:00Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.some((row) => row.kind === "turn-fold" && row.turnId === "turn-2")).toBe(false);
+    expect(rows.map((row) => row.id)).toEqual([
+      "work-group:after:start",
+      "assistant-current-entry",
+      "working-indicator-row",
+    ]);
+  });
+
   it("does not fold the active in-progress turn", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [

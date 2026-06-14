@@ -211,6 +211,67 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("reports remote divergence without reading working-tree details", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const remote = yield* makeTmpDir("git-vcs-driver-remote-");
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        yield* git(remote, ["init", "--bare"]);
+        yield* git(cwd, ["remote", "add", "origin", remote]);
+        yield* git(cwd, ["push", "-u", "origin", initialBranch]);
+        yield* git(cwd, ["checkout", "-b", "feature/remote-status"]);
+        yield* writeTextFile(cwd, "feature.txt", "feature\n");
+        yield* git(cwd, ["add", "feature.txt"]);
+        yield* git(cwd, ["commit", "-m", "feature commit"]);
+        yield* git(cwd, ["push", "-u", "origin", "feature/remote-status"]);
+        yield* writeTextFile(cwd, "untracked.txt", "local-only\n");
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsRemote(cwd);
+
+        assert.equal(status.isRepo, true);
+        assert.equal(status.branch, "feature/remote-status");
+        assert.equal(status.hasUpstream, true);
+        assert.equal(status.aheadCount, 0);
+        assert.equal(status.behindCount, 0);
+        assert.equal(status.aheadOfDefaultCount, 1);
+        assert.notProperty(status, "workingTree");
+        assert.notProperty(status, "hasWorkingTreeChanges");
+      }),
+    );
+
+    it.effect("uses origin HEAD for default-branch detection with a non-origin upstream", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const origin = yield* makeTmpDir("git-vcs-driver-origin-");
+        const upstream = yield* makeTmpDir("git-vcs-driver-upstream-");
+        yield* initRepoWithCommit(cwd);
+        yield* git(origin, ["init", "--bare"]);
+        yield* git(upstream, ["init", "--bare"]);
+        yield* git(cwd, ["branch", "-M", "main"]);
+        yield* git(cwd, ["remote", "add", "origin", origin]);
+        yield* git(cwd, ["remote", "add", "upstream", upstream]);
+        yield* git(cwd, ["push", "origin", "main"]);
+        yield* git(cwd, ["push", "upstream", "main"]);
+        yield* git(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+        yield* git(cwd, ["checkout", "-b", "release"]);
+        yield* writeTextFile(cwd, "release.txt", "release\n");
+        yield* git(cwd, ["add", "release.txt"]);
+        yield* git(cwd, ["commit", "-m", "release commit"]);
+        yield* git(cwd, ["push", "-u", "upstream", "release"]);
+        yield* git(cwd, [
+          "symbolic-ref",
+          "refs/remotes/upstream/HEAD",
+          "refs/remotes/upstream/release",
+        ]);
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsRemote(cwd);
+
+        assert.equal(status.branch, "release");
+        assert.equal(status.upstreamRef, "upstream/release");
+        assert.equal(status.isDefaultBranch, false);
+      }),
+    );
+
     it.effect("disables SSH askpass for background upstream status fetches", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -753,6 +814,42 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         const status = yield* git(cwd, ["status", "--porcelain"]);
         assert.include(status, "?? b.txt");
         assert.notInclude(status, "a.txt");
+      }),
+    );
+
+    it.effect("ignores configured external diff tools for generated patch output", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const tempDir = yield* makeTmpDir("git-vcs-driver-ext-diff-");
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        const externalDiffPath = pathService.join(tempDir, "external-diff.sh");
+
+        yield* fileSystem.writeFileString(
+          externalDiffPath,
+          ["#!/bin/sh", 'printf "EXTERNAL_DIFF_USED\\n"', ""].join("\n"),
+        );
+        yield* fileSystem.chmod(externalDiffPath, 0o755);
+        yield* git(cwd, ["config", "diff.external", externalDiffPath]);
+
+        yield* writeTextFile(cwd, "staged.txt", "staged\n");
+        yield* git(cwd, ["add", "staged.txt"]);
+        const stagedContext = yield* driver.readStagedCommitContext(cwd);
+
+        assert.include(stagedContext?.stagedPatch ?? "", "diff --git");
+        assert.notInclude(stagedContext?.stagedPatch ?? "", "EXTERNAL_DIFF_USED");
+
+        yield* driver.commit(cwd, "Add staged fixture", "");
+        const baseRef = yield* git(cwd, ["rev-parse", "HEAD"]);
+        yield* writeTextFile(cwd, "range.txt", "range\n");
+        yield* git(cwd, ["add", "range.txt"]);
+        yield* git(cwd, ["commit", "-m", "Add range fixture"]);
+        const rangeContext = yield* driver.readRangeContext(cwd, baseRef);
+
+        assert.include(rangeContext.diffPatch, "diff --git");
+        assert.notInclude(rangeContext.diffPatch, "EXTERNAL_DIFF_USED");
       }),
     );
   });
