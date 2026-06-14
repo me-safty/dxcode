@@ -38,6 +38,7 @@ const STREAM_METHODS = new Set<string>([
 ]);
 
 const ALL_RPC_METHODS = Array.from(WsRpcGroup.requests.keys());
+const MOCK_HEARTBEAT_PONG_INTERVAL_MS = 5_000;
 
 function normalizeRequest(tag: string, payload: unknown): NormalizedWsRpcRequestBody {
   if (payload && typeof payload === "object" && !Array.isArray(payload)) {
@@ -60,9 +61,11 @@ export class BrowserWsRpcHarness {
   readonly requests: Array<NormalizedWsRpcRequestBody> = [];
 
   private readonly parser = RpcSerialization.json.makeUnsafe();
+  private connectionId = 0;
   private client: BrowserWsClient | null = null;
   private scope: Scope.Closeable | null = null;
   private serverReady: Promise<RpcServerInstance> | null = null;
+  private heartbeatIntervalId: ReturnType<typeof setInterval> | null = null;
   private resolveUnary: NonNullable<BrowserWsRpcHarnessOptions["resolveUnary"]> = () => ({});
   private getInitialStreamValues: NonNullable<
     BrowserWsRpcHarnessOptions["getInitialStreamValues"]
@@ -70,40 +73,73 @@ export class BrowserWsRpcHarness {
   private streamPubSubs = new Map<string, PubSub.PubSub<unknown>>();
 
   async reset(options?: BrowserWsRpcHarnessOptions): Promise<void> {
-    await this.disconnect();
     this.requests.length = 0;
     this.resolveUnary = options?.resolveUnary ?? (() => ({}));
     this.getInitialStreamValues = options?.getInitialStreamValues ?? (() => []);
-    this.initializeStreamPubSubs();
+    await this.disconnect();
+    if (!this.scope && this.streamPubSubs.size === 0) {
+      this.initializeStreamPubSubs();
+    }
   }
 
   connect(client: BrowserWsClient): void {
     if (this.scope) {
-      void Effect.runPromise(Scope.close(this.scope, Exit.void)).catch(() => undefined);
+      void this.disconnect();
     }
     if (this.streamPubSubs.size === 0) {
       this.initializeStreamPubSubs();
     }
+    const connectionId = this.connectionId + 1;
+    this.connectionId = connectionId;
     this.client = client;
     this.scope = Effect.runSync(Scope.make());
     this.serverReady = Effect.runPromise(
       Scope.provide(this.scope)(
-        RpcServer.makeNoSerialization(WsRpcGroup, this.makeServerOptions()),
+        RpcServer.makeNoSerialization(WsRpcGroup, this.makeServerOptions(connectionId)),
       ).pipe(Effect.provide(this.makeLayer())),
     ) as Promise<RpcServerInstance>;
+    this.startHeartbeatPongs(connectionId);
   }
 
   async disconnect(): Promise<void> {
-    if (this.scope) {
-      await Effect.runPromise(Scope.close(this.scope, Exit.void)).catch(() => undefined);
-      this.scope = null;
-    }
-    for (const pubsub of this.streamPubSubs.values()) {
-      Effect.runSync(PubSub.shutdown(pubsub));
-    }
-    this.streamPubSubs.clear();
+    const scope = this.scope;
+    const streamPubSubs = this.streamPubSubs;
+    this.connectionId += 1;
+    this.stopHeartbeatPongs();
+    this.scope = null;
     this.serverReady = null;
     this.client = null;
+    this.streamPubSubs = new Map();
+
+    for (const pubsub of streamPubSubs.values()) {
+      Effect.runSync(PubSub.shutdown(pubsub));
+    }
+    if (scope) {
+      await Effect.runPromise(Scope.close(scope, Exit.void)).catch(() => undefined);
+    }
+  }
+
+  private startHeartbeatPongs(connectionId: number): void {
+    this.stopHeartbeatPongs();
+    const sendPong = () => {
+      if (!this.client || this.connectionId !== connectionId) {
+        return;
+      }
+      const encoded = this.parser.encode(RpcMessage.constPong);
+      if (typeof encoded === "string") {
+        this.client.send(encoded);
+      }
+    };
+    sendPong();
+    setTimeout(sendPong, 0);
+    this.heartbeatIntervalId = setInterval(sendPong, MOCK_HEARTBEAT_PONG_INTERVAL_MS);
+  }
+
+  private stopHeartbeatPongs(): void {
+    if (this.heartbeatIntervalId !== null) {
+      clearInterval(this.heartbeatIntervalId);
+      this.heartbeatIntervalId = null;
+    }
   }
 
   private initializeStreamPubSubs(): void {
@@ -148,11 +184,11 @@ export class BrowserWsRpcHarness {
     return WsRpcGroup.toLayer(handlers as never);
   }
 
-  private makeServerOptions() {
+  private makeServerOptions(connectionId: number) {
     return {
       onFromServer: (response: unknown) =>
         Effect.sync(() => {
-          if (!this.client) {
+          if (!this.client || this.connectionId !== connectionId) {
             return;
           }
           const encoded = this.parser.encode(response);

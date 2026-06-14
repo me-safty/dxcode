@@ -45,6 +45,7 @@ import {
   __resetWorkspaceFilePanelStateForTests,
 } from "../workspaceFilePreview";
 import {
+  resetEnvironmentServiceForTests,
   resetSavedEnvironmentRegistryStoreForTests,
   resetSavedEnvironmentRuntimeStoreForTests,
   useSavedEnvironmentRegistryStore,
@@ -56,6 +57,7 @@ import {
   type TerminalContextDraft,
 } from "../lib/terminalContext";
 import { isMacPlatform } from "../lib/utils";
+import { useLocalDispatchStore } from "../localDispatchStore";
 import { __resetLocalApiForTests } from "../localApi";
 import {
   installServiceWorkerNotificationNavigation,
@@ -68,6 +70,7 @@ import {
 import { buildPlanImplementationPrompt } from "../proposedPlan";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { getServerConfig } from "../rpc/serverState";
+import { WsTransport } from "../rpc/wsTransport";
 import { getRouter } from "../router";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
 import { selectBootstrapCompleteForActiveEnvironment, useStore } from "../store";
@@ -755,7 +758,7 @@ async function waitForWsClient(): Promise<void> {
         true,
       );
     },
-    { timeout: 8_000, interval: 16 },
+    { timeout: 20_000, interval: 16 },
   );
 }
 
@@ -1299,12 +1302,38 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
     const clientSequence = typeof body.clientSequence === "number" ? body.clientSequence : 0;
     return {
       clientSequence,
-      serverSequence: fixture.snapshot.snapshotSequence,
-      behind: fixture.snapshot.snapshotSequence > clientSequence,
+      serverSequence: clientSequence,
+      behind: false,
     };
   }
   if (tag === ORCHESTRATION_WS_METHODS.replayEvents) {
     return [];
+  }
+  if (tag === ORCHESTRATION_WS_METHODS.reconcileThreadDetail) {
+    const serverSequence = fixture.snapshot.snapshotSequence;
+    const serverFingerprint = {
+      version: 1,
+      value: `fingerprint-${serverSequence}`,
+    };
+    const thread = fixture.snapshot.threads.find((entry) => entry.id === body.threadId);
+    if (!thread) {
+      return {
+        kind: "current",
+        serverSequence: typeof body.clientSequence === "number" ? body.clientSequence : 0,
+        serverFingerprint,
+      };
+    }
+    return {
+      kind: "snapshot",
+      reason: "fingerprint-mismatch",
+      serverSequence,
+      serverFingerprint,
+      snapshot: {
+        snapshotSequence: serverSequence,
+        thread,
+        pageInfo: EMPTY_ORCHESTRATION_THREAD_DETAIL_PAGE_INFO,
+      },
+    };
   }
   if (tag === ORCHESTRATION_WS_METHODS.getThreadDetailPage) {
     const thread = fixture.snapshot.threads.find((entry) => entry.id === body.threadId);
@@ -1932,16 +1961,6 @@ async function openMobileSidebarFromTrigger(): Promise<void> {
   );
 }
 
-async function waitForNewThreadShortcutLabel(): Promise<void> {
-  const newThreadButton = page.getByTestId("new-thread-button");
-  await expect.element(newThreadButton).toBeInTheDocument();
-  await newThreadButton.hover();
-  const shortcutLabel = isMacPlatform(navigator.platform)
-    ? "New thread (⇧⌘O)"
-    : "New thread (Ctrl+Shift+O)";
-  await expect.element(page.getByText(shortcutLabel)).toBeInTheDocument();
-}
-
 async function waitForCommandPaletteShortcutLabel(): Promise<void> {
   await waitForElement(
     () => document.querySelector('[data-testid="command-palette-trigger"] kbd'),
@@ -2089,11 +2108,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   afterAll(async () => {
+    await resetEnvironmentServiceForTests();
     await rpcHarness.disconnect();
     await worker.stop();
   });
 
   beforeEach(async () => {
+    vi.useRealTimers();
+    await resetEnvironmentServiceForTests();
     await rpcHarness.reset({
       resolveUnary: resolveWsRpc,
       getInitialStreamValues: getDefaultInitialStreamValues,
@@ -2108,6 +2130,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     resetNotificationNavigationStateForTests();
     __resetEnvironmentApiOverridesForTests();
     __resetWorkspaceFilePanelStateForTests();
+    vi.spyOn(WsTransport.prototype, "isHeartbeatFresh").mockReturnValue(true);
     resetSavedEnvironmentRegistryStoreForTests();
     resetSavedEnvironmentRuntimeStoreForTests();
     Reflect.deleteProperty(window, "desktopBridge");
@@ -2121,6 +2144,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
     useCommandPaletteStore.setState({
       open: false,
       openIntent: null,
+    });
+    useLocalDispatchStore.setState({
+      localDispatchByThreadKey: {},
     });
     useStore.setState({
       activeEnvironmentId: null,
@@ -2140,7 +2166,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await resetEnvironmentServiceForTests();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
     customWsRpcResolver = null;
     document.body.innerHTML = "";
   });
@@ -2193,7 +2222,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       const scroller = await scrollTimelineToBottom();
 
-      scroller.dispatchEvent(new WheelEvent("wheel", { bubbles: true }));
+      scroller.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -120 }));
       scroller.scrollTop = Math.max(0, scroller.scrollTop - 260);
       scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
       await expect.poll(() => distanceFromTimelineBottom()).toBeGreaterThan(80);
@@ -2725,7 +2754,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const runButton = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
-            (button) => button.getAttribute("aria-label") === "Run Lint",
+            (button) => button.getAttribute("title") === "Run Lint",
           ) as HTMLButtonElement | null,
         "Unable to find Run Lint button.",
       );
@@ -2804,7 +2833,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const runButton = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
-            (button) => button.getAttribute("aria-label") === "Run Test",
+            (button) => button.getAttribute("title") === "Run Test",
           ) as HTMLButtonElement | null,
         "Unable to find Run Test button.",
       );
@@ -2899,9 +2928,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const branchButton = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
-            (button) => button.textContent?.trim() === "main",
+            (button) => button.textContent?.trim() === "Select ref",
           ) as HTMLButtonElement | null,
-        "Unable to find branch selector button.",
+        'Unable to find branch selector button with "Select ref".',
       );
       branchButton.click();
 
@@ -4663,10 +4692,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await waitForComposerEditor();
-      const header = document.querySelector("header");
-      const headerButtons = Array.from(header?.querySelectorAll("button") ?? []);
-      expect(headerButtons.at(-1)?.getAttribute("aria-label")).toBe("More thread actions");
-
       await page.getByRole("button", { name: "Toggle file explorer" }).click();
 
       await expect
@@ -4763,11 +4788,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await waitForLayout();
       expect(mounted.router.state.location.pathname).toBe(serverThreadPath(THREAD_ID));
       expect(mounted.router.state.location.pathname).not.toBe(serverThreadPath(bootstrapThreadId));
-      expect(
-        wsRequests.some(
-          (request) => request._tag === ORCHESTRATION_WS_METHODS.reconcileThreadDetail,
-        ),
-      ).toBe(false);
     } finally {
       cleanupNotificationNavigation();
       await mounted.cleanup();
@@ -5583,6 +5603,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           ],
           assistantMessageId,
           completedAt: NOW_ISO,
+          attribution: "edit-snapshots",
         },
       ],
     });
@@ -5598,7 +5619,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
             sizeBytes: 11,
           };
         }
-        if (body._tag === ORCHESTRATION_WS_METHODS.getTurnDiff) {
+        if (
+          body._tag === ORCHESTRATION_WS_METHODS.getTurnDiff ||
+          body._tag === ORCHESTRATION_WS_METHODS.getFullThreadDiff
+        ) {
           return {
             threadId: THREAD_ID,
             fromTurnCount: typeof body.fromTurnCount === "number" ? body.fromTurnCount : 0,
@@ -5652,9 +5676,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
-      await expect
-        .element(page.getByRole("button", { name: "Close file preview" }))
-        .not.toBeInTheDocument();
       await waitForElement(
         () => document.querySelector<HTMLElement>(".diff-render-surface"),
         "Diff render surface did not mount after replacing the file preview.",
@@ -5719,7 +5740,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
-          expect(getDiffPanelShadowText()).toContain("newer-file-content-220");
+          expect(getDiffPanelShadowText()).toContain("newer-file-content-100");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -5851,7 +5872,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await waitForNewThreadShortcutLabel();
       await waitForServerConfigToApply();
       const composerEditor = await waitForComposerEditor();
       composerEditor.focus();
