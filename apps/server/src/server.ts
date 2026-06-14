@@ -345,7 +345,7 @@ export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig;
 
-    fixPath();
+    yield* fixPath();
 
     const httpListeningLayer = Layer.effectDiscard(
       Effect.gen(function* () {

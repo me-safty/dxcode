@@ -4,6 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stdio from "effect/Stdio";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as CodexRpc from "./_generated/meta.gen.ts";
@@ -16,8 +17,6 @@ import {
   runHandler,
 } from "./_internal/shared.ts";
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
-
-const DEFAULT_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
 
 export interface CodexAppServerClientOptions {
   readonly logIncoming?: boolean;
@@ -253,11 +252,15 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
 export const layerChildProcess = (
   handle: ChildProcessSpawner.ChildProcessHandle,
   options: CodexAppServerClientOptions = {},
-): Layer.Layer<CodexAppServerClient> => {
-  const stdio = makeChildStdio(handle);
-  const terminationError = makeTerminationError(handle);
-  return Layer.effect(CodexAppServerClient, make(stdio, options, terminationError));
-};
+): Layer.Layer<CodexAppServerClient> =>
+  Layer.effect(CodexAppServerClient, makeChildProcessClient(handle, options));
+
+const makeChildProcessClient = Effect.fn(
+  "effect-codex-app-server/CodexAppServerClient.makeChildProcessClient",
+)(function* (handle: ChildProcessSpawner.ChildProcessHandle, options: CodexAppServerClientOptions) {
+  yield* Stream.runDrain(handle.stderr).pipe(Effect.ignore, Effect.forkScoped);
+  return yield* make(makeChildStdio(handle), options, makeTerminationError(handle));
+});
 
 export interface CodexAppServerCommandLayerOptions extends CodexAppServerClientOptions {
   readonly command: string;
@@ -293,8 +296,6 @@ export const layerCommand = (
         ),
       );
     }).pipe(
-      Effect.flatMap((handle) =>
-        make(makeChildStdio(handle), options, makeTerminationError(handle)),
-      ),
+      Effect.flatMap((handle) => makeChildProcessClient(handle, options)),
     ),
   );
