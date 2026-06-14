@@ -302,7 +302,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   // through cmd.exe shell mode with explicitly sanitized arguments.
   const child = yield* spawner
     .spawn(
-      ChildProcess.make(input.binaryPath, sanitizeShellModeArgs(["app-server"], hostPlatform), {
+      ChildProcess.make(input.binaryPath, yield* sanitizeShellModeArgs(["app-server"]), {
         cwd: input.cwd,
         env: {
           ...input.environment,

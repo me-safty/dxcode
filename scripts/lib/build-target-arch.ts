@@ -10,8 +10,6 @@ interface PlatformConfig {
   readonly archChoices: ReadonlyArray<BuildArch>;
 }
 
-export { HostProcessArchitecture, HostProcessPlatform };
-
 const WindowsProcessorArchitectureConfig = Config.all({
   processorArchitecture: Config.string("PROCESSOR_ARCHITECTURE").pipe(Config.option),
   processorArchitectureW6432: Config.string("PROCESSOR_ARCHITEW6432").pipe(Config.option),
@@ -28,7 +26,7 @@ function normalizeWindowsArch(value: string | undefined): BuildArch | undefined 
 const optionToUndefined = <A>(value: Option.Option<A>): A | undefined =>
   Option.getOrUndefined(value);
 
-export const resolveHostProcessArch = Effect.fn("resolveHostProcessArch")(function* () {
+const resolveHostProcessArch = Effect.fn("resolveHostProcessArch")(function* () {
   const platform = yield* HostProcessPlatform;
   const processArch = yield* HostProcessArchitecture;
   if (processArch === "arm64") return "arm64";

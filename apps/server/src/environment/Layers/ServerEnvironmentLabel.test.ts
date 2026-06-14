@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessHostname, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { vi } from "vite-plus/test";
 
 import { ProcessRunner, ProcessSpawnError, type ProcessRunnerShape } from "../../processRunner.ts";
@@ -32,7 +32,13 @@ const LinuxMachineInfoLayer = Layer.merge(
 const withHostPlatform = <ROut, E, RIn>(
   layer: Layer.Layer<ROut, E, RIn>,
   platform: NodeJS.Platform,
-) => Layer.merge(layer, Layer.succeed(HostProcessPlatform, platform));
+  hostname: string,
+) =>
+  Layer.mergeAll(
+    layer,
+    Layer.succeed(HostProcessPlatform, platform),
+    Layer.succeed(HostProcessHostname, hostname),
+  );
 
 afterEach(() => {
   runMock.mockReset();
@@ -43,8 +49,7 @@ describe("resolveServerEnvironmentLabel", () => {
     Effect.gen(function* () {
       const result = yield* resolveServerEnvironmentLabel({
         cwdBaseName: "t3code",
-        hostname: "macbook-pro",
-      }).pipe(Effect.provide(withHostPlatform(TestLayer, "win32")));
+      }).pipe(Effect.provide(withHostPlatform(TestLayer, "win32", "macbook-pro")));
 
       expect(result).toBe("macbook-pro");
     }),
@@ -65,8 +70,7 @@ describe("resolveServerEnvironmentLabel", () => {
 
       const result = yield* resolveServerEnvironmentLabel({
         cwdBaseName: "t3code",
-        hostname: "macbook-pro",
-      }).pipe(Effect.provide(withHostPlatform(TestLayer, "darwin")));
+      }).pipe(Effect.provide(withHostPlatform(TestLayer, "darwin", "macbook-pro")));
 
       expect(result).toBe("Julius's MacBook Pro");
       expect(runMock).toHaveBeenCalledWith(
@@ -83,8 +87,7 @@ describe("resolveServerEnvironmentLabel", () => {
     Effect.gen(function* () {
       const result = yield* resolveServerEnvironmentLabel({
         cwdBaseName: "t3code",
-        hostname: "buildbox",
-      }).pipe(Effect.provide(withHostPlatform(LinuxMachineInfoLayer, "linux")));
+      }).pipe(Effect.provide(withHostPlatform(LinuxMachineInfoLayer, "linux", "buildbox")));
 
       expect(result).toBe("Build Agent 01");
       expect(runMock).not.toHaveBeenCalled();
@@ -106,8 +109,7 @@ describe("resolveServerEnvironmentLabel", () => {
 
       const result = yield* resolveServerEnvironmentLabel({
         cwdBaseName: "t3code",
-        hostname: "runner-01",
-      }).pipe(Effect.provide(withHostPlatform(TestLayer, "linux")));
+      }).pipe(Effect.provide(withHostPlatform(TestLayer, "linux", "runner-01")));
 
       expect(result).toBe("CI Runner");
       expect(runMock).toHaveBeenCalledWith(
@@ -124,8 +126,7 @@ describe("resolveServerEnvironmentLabel", () => {
     Effect.gen(function* () {
       const result = yield* resolveServerEnvironmentLabel({
         cwdBaseName: "t3code",
-        hostname: "JULIUS-LAPTOP",
-      }).pipe(Effect.provide(withHostPlatform(TestLayer, "win32")));
+      }).pipe(Effect.provide(withHostPlatform(TestLayer, "win32", "JULIUS-LAPTOP")));
 
       expect(result).toBe("JULIUS-LAPTOP");
     }),
@@ -145,8 +146,7 @@ describe("resolveServerEnvironmentLabel", () => {
 
       const result = yield* resolveServerEnvironmentLabel({
         cwdBaseName: "t3code",
-        hostname: "macbook-pro",
-      }).pipe(Effect.provide(withHostPlatform(TestLayer, "darwin")));
+      }).pipe(Effect.provide(withHostPlatform(TestLayer, "darwin", "macbook-pro")));
 
       expect(result).toBe("macbook-pro");
     }),
@@ -167,8 +167,7 @@ describe("resolveServerEnvironmentLabel", () => {
 
       const result = yield* resolveServerEnvironmentLabel({
         cwdBaseName: "t3code",
-        hostname: "   ",
-      }).pipe(Effect.provide(withHostPlatform(TestLayer, "linux")));
+      }).pipe(Effect.provide(withHostPlatform(TestLayer, "linux", "   ")));
 
       expect(result).toBe("t3code");
     }),

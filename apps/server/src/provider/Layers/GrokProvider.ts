@@ -159,7 +159,7 @@ const runGrokVersionCommand = (
     // through cmd.exe shell mode with explicitly sanitized arguments.
     return yield* spawnAndCollect(
       command,
-      ChildProcess.make(command, sanitizeShellModeArgs(["--version"], hostPlatform), {
+      ChildProcess.make(command, yield* sanitizeShellModeArgs(["--version"]), {
         env: environment,
         shell: hostPlatform === "win32",
       }),

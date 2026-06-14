@@ -361,11 +361,3 @@ const make = Effect.gen(function* PortDiscoveryMake() {
 }).pipe(Effect.withSpan("PortDiscovery.make"));
 
 export const layer = Layer.effect(PortDiscovery, make);
-
-/** Exposed for tests. */
-export const __testing = {
-  parseLsofOutput,
-  parsePortFromLsofName,
-  parseWindowsListenerOutput,
-  serversEqual,
-};

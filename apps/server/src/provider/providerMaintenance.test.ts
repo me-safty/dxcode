@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { afterEach, expect, it } from "@effect/vitest";
+import { expect, it } from "@effect/vitest";
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeOS from "node:os";
@@ -8,13 +8,15 @@ import { ProviderDriverKind } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import { HttpClient } from "effect/unstable/http";
 import {
-  clearLatestProviderVersionCacheForTests,
   createProviderVersionAdvisory,
   makePackageManagedProviderMaintenanceResolver,
   makeProviderMaintenanceCapabilities,
   makeStaticProviderMaintenanceResolver,
   normalizeCommandPath,
+  ProviderVersionCache,
+  resolveLatestProviderVersion,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "./providerMaintenance.ts";
 
@@ -66,11 +68,33 @@ const staticToolUpdate = makeStaticProviderMaintenanceResolver(
   }),
 );
 
-afterEach(() => {
-  clearLatestProviderVersionCacheForTests();
-});
-
 it.layer(NodeServices.layer)("providerMaintenance", (it) => {
+  it.effect("reads cached versions through the injectable cache reference", () =>
+    resolveLatestProviderVersion(packageToolUpdate.resolve()).pipe(
+      Effect.provideService(
+        ProviderVersionCache,
+        new Map([
+          [
+            "@example/package-tool",
+            {
+              expiresAt: Number.MAX_SAFE_INTEGER,
+              version: "9.9.9",
+            },
+          ],
+        ]),
+      ),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make(() =>
+          Effect.die("cached provider version should not make an HTTP request"),
+        ),
+      ),
+      Effect.map((version) => {
+        expect(version).toBe("9.9.9");
+      }),
+    ),
+  );
+
   it("marks providers with unknown current versions as unknown", () => {
     expect(
       createProviderVersionAdvisory({

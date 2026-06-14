@@ -38,17 +38,15 @@ const resolveNodePtySpawnHelperPath = Effect.gen(function* () {
   return null;
 }).pipe(Effect.orElseSucceed(() => null));
 
-export const ensureNodePtySpawnHelperExecutable = Effect.fn(function* (explicitPath?: string) {
+const ensureNodePtySpawnHelperExecutable = Effect.fn(function* () {
   const fs = yield* FileSystem.FileSystem;
   const platform = yield* HostProcessPlatform;
   if (platform === "win32") return;
-  if (!explicitPath && didEnsureSpawnHelperExecutable) return;
+  if (didEnsureSpawnHelperExecutable) return;
 
-  const helperPath = explicitPath ?? (yield* resolveNodePtySpawnHelperPath);
+  const helperPath = yield* resolveNodePtySpawnHelperPath;
   if (!helperPath) return;
-  if (!explicitPath) {
-    didEnsureSpawnHelperExecutable = true;
-  }
+  didEnsureSpawnHelperExecutable = true;
 
   if (!(yield* fs.exists(helperPath))) {
     return;

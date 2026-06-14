@@ -2,13 +2,9 @@ import { assert, describe, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
-import {
-  getDefaultBuildArch,
-  HostProcessArchitecture,
-  HostProcessPlatform,
-  resolveHostProcessArch,
-} from "./build-target-arch.ts";
+import { getDefaultBuildArch } from "./build-target-arch.ts";
 
 const compactEnv = (env: Readonly<Record<string, string | undefined>>): Record<string, string> =>
   Object.fromEntries(
@@ -29,41 +25,6 @@ const withHostRuntime = (
   );
 
 describe("build-target-arch", () => {
-  it.effect("prefers arm64 for Windows-on-Arm hosts running x64 emulation", () =>
-    Effect.gen(function* () {
-      // Windows-on-Arm can run an x64 Node process under emulation while still
-      // exposing the real host CPU via PROCESSOR_ARCHITEW6432.
-      const hostArch = yield* resolveHostProcessArch().pipe(
-        withHostRuntime("win32", "x64", {
-          PROCESSOR_ARCHITECTURE: "AMD64", // The currently running Node process is x64.
-          PROCESSOR_ARCHITEW6432: "ARM64", // Windows exposes the real host CPU here when x64 runs under ARM emulation.
-        }),
-      );
-
-      assert.equal(hostArch, "arm64");
-    }),
-  );
-
-  it.effect("falls back to x64 for native x64 Windows hosts", () =>
-    Effect.gen(function* () {
-      const hostArch = yield* resolveHostProcessArch().pipe(
-        withHostRuntime("win32", "x64", {
-          PROCESSOR_ARCHITECTURE: "AMD64", // Both the process and the Windows host are native x64.
-        }),
-      );
-
-      assert.equal(hostArch, "x64");
-    }),
-  );
-
-  it.effect("keeps arm64 when the current process is already native arm64", () =>
-    Effect.gen(function* () {
-      const hostArch = yield* resolveHostProcessArch().pipe(withHostRuntime("win32", "arm64"));
-
-      assert.equal(hostArch, "arm64");
-    }),
-  );
-
   it.effect("uses the resolved host arch when selecting the default Windows build arch", () =>
     Effect.gen(function* () {
       // This mirrors the packaging script's default-path behavior: the current

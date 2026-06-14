@@ -611,14 +611,10 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
   // The provider binary may be an npm-installed `.cmd` shim, so Windows spawns
   // through cmd.exe shell mode with explicitly sanitized arguments.
-  const command = ChildProcess.make(
-    claudeSettings.binaryPath,
-    sanitizeShellModeArgs(args, hostPlatform),
-    {
-      env: claudeEnvironment,
-      shell: hostPlatform === "win32",
-    },
-  );
+  const command = ChildProcess.make(claudeSettings.binaryPath, yield* sanitizeShellModeArgs(args), {
+    env: claudeEnvironment,
+    shell: hostPlatform === "win32",
+  });
   return yield* spawnAndCollect(claudeSettings.binaryPath, command);
 });
 

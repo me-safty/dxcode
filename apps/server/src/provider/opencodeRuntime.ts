@@ -285,7 +285,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       // The opencode binary may be an npm-installed `.cmd` shim, so Windows
       // spawns through cmd.exe shell mode with explicitly sanitized arguments.
       const child = yield* spawner.spawn(
-        ChildProcess.make(input.binaryPath, sanitizeShellModeArgs(input.args, hostPlatform), {
+        ChildProcess.make(input.binaryPath, yield* sanitizeShellModeArgs(input.args), {
           shell: hostPlatform === "win32",
           ...(input.environment ? { env: input.environment } : { extendEnv: true }),
         }),
@@ -342,7 +342,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
 
       const child = yield* spawner
         .spawn(
-          ChildProcess.make(input.binaryPath, sanitizeShellModeArgs(args, hostPlatform), {
+          ChildProcess.make(input.binaryPath, yield* sanitizeShellModeArgs(args), {
             detached: hostPlatform !== "win32",
             shell: hostPlatform === "win32",
             env: {

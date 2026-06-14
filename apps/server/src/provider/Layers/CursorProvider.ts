@@ -938,7 +938,7 @@ const runCursorCommand = (
     // through cmd.exe shell mode with explicitly sanitized arguments.
     const command = ChildProcess.make(
       cursorSettings.binaryPath,
-      sanitizeShellModeArgs(args, hostPlatform),
+      yield* sanitizeShellModeArgs(args),
       {
         ...(environment ? { env: environment } : { extendEnv: true }),
         shell: hostPlatform === "win32",

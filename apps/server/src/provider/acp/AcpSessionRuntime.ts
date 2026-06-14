@@ -208,15 +208,11 @@ const makeAcpSessionRuntime = (
       .spawn(
         // The agent binary may be an npm-installed `.cmd` shim, so Windows spawns
         // through cmd.exe shell mode with explicitly sanitized arguments.
-        ChildProcess.make(
-          options.spawn.command,
-          sanitizeShellModeArgs(options.spawn.args, hostPlatform),
-          {
-            ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
-            ...(options.spawn.env ? { env: options.spawn.env, extendEnv: true } : {}),
-            shell: hostPlatform === "win32",
-          },
-        ),
+        ChildProcess.make(options.spawn.command, yield* sanitizeShellModeArgs(options.spawn.args), {
+          ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
+          ...(options.spawn.env ? { env: options.spawn.env, extendEnv: true } : {}),
+          shell: hostPlatform === "win32",
+        }),
       )
       .pipe(
         Effect.provideService(Scope.Scope, runtimeScope),

@@ -1,12 +1,14 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
-  escapeWindowsShellArg,
   extractPathFromShellOutput,
-  isCommandAvailableForPlatform,
+  CommandAvailability,
+  type CommandAvailabilityChecker,
+  isCommandAvailable,
   listLoginShellCandidates,
   mergePathEntries,
   mergePathValues,
@@ -14,50 +16,22 @@ import {
   readEnvironmentFromWindowsShell,
   readPathFromLaunchctl,
   readPathFromLoginShell,
-  resolveCommandPathForPlatform,
+  resolveCommandPath,
   resolveKnownWindowsCliDirs,
   resolveWindowsEnvironment,
-  sanitizeShellModeArgs,
+  WindowsShellEnvironment,
+  type WindowsShellEnvironmentReader,
 } from "./shell.ts";
 
-describe("escapeWindowsShellArg", () => {
-  it("quotes plain arguments", () => {
-    expect(escapeWindowsShellArg("--version")).toBe('^"--version^"');
-  });
-
-  it("preserves embedded whitespace through quoting", () => {
-    expect(escapeWindowsShellArg("C:\\Users\\John Doe\\project")).toBe(
-      '^"C:\\Users\\John^ Doe\\project^"',
-    );
-  });
-
-  it("escapes embedded double quotes for CommandLineToArgvW", () => {
-    expect(escapeWindowsShellArg('say "hi"')).toBe('^"say^ \\^"hi\\^"^"');
-  });
-
-  it("doubles trailing backslashes so the closing quote survives", () => {
-    expect(escapeWindowsShellArg("C:\\dir\\")).toBe('^"C:\\dir\\\\^"');
-  });
-
-  it("escapes cmd.exe metacharacters", () => {
-    expect(escapeWindowsShellArg("a|b&c>d")).toBe('^"a^|b^&c^>d^"');
-    expect(escapeWindowsShellArg("100%")).toBe('^"100^%^"');
-  });
-
-  it("handles empty arguments", () => {
-    expect(escapeWindowsShellArg("")).toBe('^"^"');
-  });
-});
-
-describe("sanitizeShellModeArgs", () => {
-  it("escapes arguments on win32", () => {
-    expect(sanitizeShellModeArgs(["--goto", "a b"], "win32")).toEqual(['^"--goto^"', '^"a^ b^"']);
-  });
-
-  it("returns arguments untouched on other platforms", () => {
-    expect(sanitizeShellModeArgs(["--goto", "a b"], "darwin")).toEqual(["--goto", "a b"]);
-  });
-});
+const withWindowsEnvironmentMocks = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  readEnvironment: WindowsShellEnvironmentReader,
+  commandAvailable: CommandAvailabilityChecker,
+) =>
+  effect.pipe(
+    Effect.provideService(WindowsShellEnvironment, readEnvironment),
+    Effect.provideService(CommandAvailability, commandAvailable),
+  );
 
 describe("extractPathFromShellOutput", () => {
   it("extracts the path between capture markers", () => {
@@ -370,10 +344,9 @@ effectIt.layer(NodeServices.layer)("isCommandAvailable", (it) => {
   it.effect("returns false when PATH is empty", () =>
     Effect.gen(function* () {
       expect(
-        yield* isCommandAvailableForPlatform("definitely-not-installed", {
-          platform: "win32",
+        yield* isCommandAvailable("definitely-not-installed", {
           env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
-        }),
+        }).pipe(Effect.provideService(HostProcessPlatform, "win32")),
       ).toBe(false);
     }),
   );
@@ -382,10 +355,9 @@ effectIt.layer(NodeServices.layer)("isCommandAvailable", (it) => {
 effectIt.layer(NodeServices.layer)("resolveCommandPath", (it) => {
   it.effect("fails when PATH is empty", () =>
     Effect.gen(function* () {
-      const result = yield* resolveCommandPathForPlatform("definitely-not-installed", {
-        platform: "win32",
+      const result = yield* resolveCommandPath("definitely-not-installed", {
         env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
-      }).pipe(Effect.result);
+      }).pipe(Effect.provideService(HostProcessPlatform, "win32"), Effect.result);
 
       expect(result._tag).toBe("Failure");
     }),
@@ -404,17 +376,15 @@ effectIt.layer(NodeServices.layer)("resolveWindowsEnvironment", (it) => {
       const commandAvailable = vi.fn(() => Effect.succeed(true));
 
       expect(
-        yield* resolveWindowsEnvironment(
-          {
+        yield* withWindowsEnvironmentMocks(
+          resolveWindowsEnvironment({
             PATH: "C:\\Windows\\System32",
             APPDATA: "C:\\Users\\testuser\\AppData\\Roaming",
             LOCALAPPDATA: "C:\\Users\\testuser\\AppData\\Local",
             USERPROFILE: "C:\\Users\\testuser",
-          },
-          {
-            readEnvironment,
-            commandAvailable,
-          },
+          }),
+          readEnvironment,
+          commandAvailable,
         ),
       ).toEqual({
         PATH: [
@@ -432,7 +402,7 @@ effectIt.layer(NodeServices.layer)("resolveWindowsEnvironment", (it) => {
       expect(readEnvironment).toHaveBeenCalledWith(["PATH"], { loadProfile: false });
       expect(commandAvailable).toHaveBeenCalledWith(
         "node",
-        expect.objectContaining({ platform: "win32", env: expect.any(Object) }),
+        expect.objectContaining({ env: expect.any(Object) }),
       );
     }),
   );
@@ -452,17 +422,15 @@ effectIt.layer(NodeServices.layer)("resolveWindowsEnvironment", (it) => {
       const commandAvailable = vi.fn(() => Effect.succeed(false));
 
       expect(
-        yield* resolveWindowsEnvironment(
-          {
+        yield* withWindowsEnvironmentMocks(
+          resolveWindowsEnvironment({
             PATH: "C:\\Windows\\System32",
             APPDATA: "C:\\Users\\testuser\\AppData\\Roaming",
             LOCALAPPDATA: "C:\\Users\\testuser\\AppData\\Local",
             USERPROFILE: "C:\\Users\\testuser",
-          },
-          {
-            readEnvironment,
-            commandAvailable,
-          },
+          }),
+          readEnvironment,
+          commandAvailable,
         ),
       ).toEqual({
         PATH: [
@@ -500,16 +468,14 @@ effectIt.layer(NodeServices.layer)("resolveWindowsEnvironment", (it) => {
       const commandAvailable = vi.fn(() => Effect.succeed(false));
 
       expect(
-        yield* resolveWindowsEnvironment(
-          {
+        yield* withWindowsEnvironmentMocks(
+          resolveWindowsEnvironment({
             PATH: "C:\\Windows\\System32",
             APPDATA: "C:\\Users\\testuser\\AppData\\Roaming",
             USERPROFILE: "C:\\Users\\testuser",
-          },
-          {
-            readEnvironment,
-            commandAvailable,
-          },
+          }),
+          readEnvironment,
+          commandAvailable,
         ),
       ).toEqual({
         PATH: [

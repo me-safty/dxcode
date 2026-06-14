@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
 import { fromYaml } from "@t3tools/shared/schemaYaml";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
-import { getDefaultBuildArch, HostProcessPlatform } from "./lib/build-target-arch.ts";
+import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";

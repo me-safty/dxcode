@@ -13,11 +13,7 @@ import {
   type LaunchEditorInput,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import {
-  isCommandAvailableForPlatform,
-  sanitizeShellModeArgs,
-  type PlatformCommandAvailabilityOptions,
-} from "@t3tools/shared/shell";
+import { isCommandAvailable, sanitizeShellModeArgs } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -34,8 +30,6 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 export { ExternalLauncherError };
 export type { LaunchEditorInput };
-export { isCommandAvailableForPlatform } from "@t3tools/shared/shell";
-
 interface EditorLaunch {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
@@ -149,10 +143,10 @@ function resolveEditorArgs(
 
 const resolveAvailableCommand = Effect.fn("externalLauncher.resolveAvailableCommand")(function* (
   commands: ReadonlyArray<string>,
-  options: PlatformCommandAvailabilityOptions,
+  env: NodeJS.ProcessEnv,
 ): Effect.fn.Return<Option.Option<string>, never, FileSystem.FileSystem | Path.Path> {
   for (const command of commands) {
-    if (yield* isCommandAvailableForPlatform(command, options)) {
+    if (yield* isCommandAvailable(command, { env })) {
       return Option.some(command);
     }
   }
@@ -259,13 +253,13 @@ const buildAvailableEditors = Effect.fn("externalLauncher.buildAvailableEditors"
   for (const editor of EDITORS) {
     if (editor.commands === null) {
       const command = fileManagerCommandForPlatform(platform);
-      if (yield* isCommandAvailableForPlatform(command, { platform, env })) {
+      if (yield* isCommandAvailable(command, { env })) {
         available.push(editor.id);
       }
       continue;
     }
 
-    const command = yield* resolveAvailableCommand(editor.commands, { platform, env });
+    const command = yield* resolveAvailableCommand(editor.commands, env);
     if (Option.isSome(command)) {
       available.push(editor.id);
     }
@@ -274,7 +268,7 @@ const buildAvailableEditors = Effect.fn("externalLauncher.buildAvailableEditors"
   return available;
 });
 
-export const resolveBrowserLaunch = Effect.fn("externalLauncher.resolveBrowserLaunch")(function* (
+const resolveBrowserLaunch = Effect.fn("externalLauncher.resolveBrowserLaunch")(function* (
   target: string,
 ) {
   const platform = yield* HostProcessPlatform;
@@ -282,18 +276,17 @@ export const resolveBrowserLaunch = Effect.fn("externalLauncher.resolveBrowserLa
   return buildBrowserLaunch(target, platform, env);
 });
 
-export const resolveAvailableEditors = Effect.fn("externalLauncher.resolveAvailableEditors")(
-  function* () {
-    const platform = yield* HostProcessPlatform;
-    const env = yield* readCommandLookupEnv;
-    return yield* buildAvailableEditors(platform, env);
-  },
-);
+const resolveAvailableEditors = Effect.fn("externalLauncher.resolveAvailableEditors")(function* () {
+  const platform = yield* HostProcessPlatform;
+  const env = yield* readCommandLookupEnv;
+  return yield* buildAvailableEditors(platform, env);
+});
 
 /**
  * ExternalLauncherShape - Service API for browser and editor launch actions.
  */
 export interface ExternalLauncherShape {
+  readonly resolveAvailableEditors: () => Effect.Effect<ReadonlyArray<EditorId>>;
   /**
    * Launch a URL target in the default browser.
    */
@@ -318,7 +311,7 @@ export class ExternalLauncher extends Context.Service<ExternalLauncher, External
 // Implementations
 // ==============================
 
-export const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
+const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   input: LaunchEditorInput,
 ): Effect.fn.Return<EditorLaunch, ExternalLauncherError, FileSystem.FileSystem | Path.Path> {
   const platform = yield* HostProcessPlatform;
@@ -335,7 +328,7 @@ export const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
 
   if (editorDef.commands) {
     const command = Option.getOrElse(
-      yield* resolveAvailableCommand(editorDef.commands, { platform, env }),
+      yield* resolveAvailableCommand(editorDef.commands, env),
       () => editorDef.commands[0],
     );
     return {
@@ -366,14 +359,14 @@ const launchAndUnref = Effect.fn("externalLauncher.launchAndUnref")(function* (
   );
 });
 
-export const launchBrowser = Effect.fn("externalLauncher.launchBrowser")(function* (
+const launchBrowser = Effect.fn("externalLauncher.launchBrowser")(function* (
   target: string,
 ): Effect.fn.Return<void, ExternalLauncherError, ChildProcessSpawner.ChildProcessSpawner> {
   const launch = yield* resolveBrowserLaunch(target);
   return yield* launchAndUnref(launch, "Browser auto-open failed");
 });
 
-export const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProcess")(function* (
+const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProcess")(function* (
   launch: EditorLaunch,
 ): Effect.fn.Return<
   void,
@@ -382,7 +375,7 @@ export const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProce
 > {
   const platform = yield* HostProcessPlatform;
   const env = yield* readCommandLookupEnv;
-  if (!(yield* isCommandAvailableForPlatform(launch.command, { platform, env }))) {
+  if (!(yield* isCommandAvailable(launch.command, { env }))) {
     return yield* new ExternalLauncherError({
       message: `Editor command not found: ${launch.command}`,
     });
@@ -392,7 +385,7 @@ export const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProce
   yield* launchAndUnref(
     {
       command: launch.command,
-      args: sanitizeShellModeArgs(launch.args, platform),
+      args: yield* sanitizeShellModeArgs(launch.args),
       options: {
         detached: true,
         shell: isWin32,
@@ -419,6 +412,7 @@ const make = Effect.gen(function* () {
     );
 
   return {
+    resolveAvailableEditors: () => provideCommandResolutionServices(resolveAvailableEditors()),
     launchBrowser: (target) =>
       launchBrowser(target).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),

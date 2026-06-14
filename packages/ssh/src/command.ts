@@ -24,8 +24,10 @@ export const SSH_COMMAND = "ssh";
  * spawned directly — cmd.exe shell mode would re-tokenize arguments such as
  * identity-file paths containing spaces.
  */
-export const sshCommandForPlatform = (platform: NodeJS.Platform): string =>
+const sshCommandForPlatform = (platform: NodeJS.Platform): string =>
   platform === "win32" ? "ssh.exe" : "ssh";
+
+export const resolveSshCommand = Effect.map(HostProcessPlatform, sshCommandForPlatform);
 
 const encoder = new TextEncoder();
 
@@ -200,7 +202,6 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
     ...(input.remoteCommandArgs ?? []),
   ];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const hostPlatform = yield* HostProcessPlatform;
   yield* Effect.logDebug("ssh.command.start", {
     ...sshTargetLogFields(target),
     command: [SSH_COMMAND, ...args],
@@ -209,7 +210,7 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
   });
   const child = yield* spawner
     .spawn(
-      ChildProcess.make(sshCommandForPlatform(hostPlatform), args, {
+      ChildProcess.make(yield* resolveSshCommand, args, {
         env: environment,
         extendEnv: true,
         stdin: {

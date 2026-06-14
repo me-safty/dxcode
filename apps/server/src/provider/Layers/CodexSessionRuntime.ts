@@ -730,7 +730,7 @@ export const makeCodexSessionRuntime = (
       .spawn(
         ChildProcess.make(
           options.binaryPath,
-          sanitizeShellModeArgs(["app-server", ...(options.appServerArgs ?? [])], hostPlatform),
+          yield* sanitizeShellModeArgs(["app-server", ...(options.appServerArgs ?? [])]),
           {
             cwd: options.cwd,
             env,

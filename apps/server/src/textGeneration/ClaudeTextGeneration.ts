@@ -163,21 +163,18 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         claudeSettings.binaryPath || "claude",
         // The provider binary may be an npm-installed `.cmd` shim, so Windows
         // spawns through cmd.exe shell mode with explicitly sanitized arguments.
-        sanitizeShellModeArgs(
-          [
-            "-p",
-            "--output-format",
-            "json",
-            "--json-schema",
-            jsonSchemaStr,
-            "--model",
-            resolveClaudeApiModelId(modelSelection),
-            ...(cliEffort ? ["--effort", cliEffort] : []),
-            ...(settingsJson ? ["--settings", settingsJson] : []),
-            "--dangerously-skip-permissions",
-          ],
-          hostPlatform,
-        ),
+        yield* sanitizeShellModeArgs([
+          "-p",
+          "--output-format",
+          "json",
+          "--json-schema",
+          jsonSchemaStr,
+          "--model",
+          resolveClaudeApiModelId(modelSelection),
+          ...(cliEffort ? ["--effort", cliEffort] : []),
+          ...(settingsJson ? ["--settings", settingsJson] : []),
+          "--dangerously-skip-permissions",
+        ]),
         {
           env: claudeEnvironment,
           cwd,

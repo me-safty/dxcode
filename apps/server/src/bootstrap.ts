@@ -169,7 +169,7 @@ const isBootstrapFdPathDuplicationError = Predicate.compose(
   (_) => _.code === "ENXIO" || _.code === "EINVAL" || _.code === "EPERM",
 );
 
-export function resolveFdPath(fd: number, platform: NodeJS.Platform): string | undefined {
+function resolveFdPath(fd: number, platform: NodeJS.Platform): string | undefined {
   if (platform === "linux") {
     return `/proc/self/fd/${fd}`;
   }

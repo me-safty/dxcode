@@ -3,7 +3,6 @@ import type {
   DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { extractJsonObject, fromLenientJson } from "@t3tools/shared/schemaJson";
 import { satisfiesSemverRange } from "@t3tools/shared/semver";
 import * as Context from "effect/Context";
@@ -35,10 +34,10 @@ import {
   collectProcessOutput,
   getLastNonEmptyOutputLine,
   remoteStateKey,
+  resolveSshCommand,
   resolveSshTarget,
   runSshCommand,
   SSH_COMMAND,
-  sshCommandForPlatform,
   targetConnectionKey,
 } from "./command.ts";
 import {
@@ -1073,7 +1072,6 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
   ];
   const tunnelCommand = [SSH_COMMAND, ...args];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const hostPlatform = yield* HostProcessPlatform;
   const scope = yield* Scope.Scope;
   yield* Effect.logDebug("ssh.tunnel.spawn.start", {
     ...sshTargetLogFields(input.resolvedTarget),
@@ -1085,7 +1083,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
   });
   const child = yield* spawner
     .spawn(
-      ChildProcess.make(sshCommandForPlatform(hostPlatform), args, {
+      ChildProcess.make(yield* resolveSshCommand, args, {
         env: childEnvironment,
         extendEnv: true,
         stdin: {

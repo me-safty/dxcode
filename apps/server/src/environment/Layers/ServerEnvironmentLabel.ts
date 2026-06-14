@@ -1,6 +1,4 @@
-import * as OS from "node:os";
-
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessHostname, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -9,7 +7,6 @@ import { ProcessRunner } from "../../processRunner.ts";
 
 interface ResolveServerEnvironmentLabelInput {
   readonly cwdBaseName: string;
-  readonly hostname?: string | null;
 }
 
 function normalizeLabel(value: string | null | undefined): string | null {
@@ -98,7 +95,7 @@ export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironment
     return friendlyHostLabel;
   }
 
-  const hostname = normalizeLabel(input.hostname ?? OS.hostname());
+  const hostname = normalizeLabel(yield* HostProcessHostname);
   if (hostname) {
     return hostname;
   }
