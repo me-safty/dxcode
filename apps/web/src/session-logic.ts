@@ -721,6 +721,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? payload.detail
       : null;
   const taskLabel = taskSummary || taskDetailAsLabel;
+  const runtimeDiagnosticMessage = extractRuntimeDiagnosticMessage(activity.kind, payload);
   const detail = isTaskActivity
     ? !taskDetailAsLabel &&
       payload &&
@@ -728,7 +729,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       payload.detail.length > 0
       ? stripTrailingExitCode(payload.detail).output
       : null
-    : extractToolDetail(payload, title ?? activity.summary);
+    : (runtimeDiagnosticMessage ?? extractToolDetail(payload, title ?? activity.summary));
   const toolCallId = isTaskActivity ? null : extractToolCallId(payload);
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
@@ -782,6 +783,16 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     entry.collapseKey = collapseKey;
   }
   return entry;
+}
+
+function extractRuntimeDiagnosticMessage(
+  kind: OrchestrationThreadActivity["kind"],
+  payload: Record<string, unknown> | null,
+): string | null {
+  if (kind !== "runtime.warning" && kind !== "runtime.error") {
+    return null;
+  }
+  return asTrimmedString(payload?.message);
 }
 
 function collapseDerivedWorkLogEntries(

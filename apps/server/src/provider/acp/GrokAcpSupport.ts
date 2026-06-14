@@ -49,7 +49,8 @@ export function buildGrokAcpSpawnInput(
 }
 
 function resolveGrokAuthMethodId(environment: NodeJS.ProcessEnv | undefined): string {
-  return environment?.[GROK_API_KEY_ENV]?.trim()
+  const effectiveEnv = { ...process.env, ...environment };
+  return effectiveEnv[GROK_API_KEY_ENV]?.trim()
     ? GROK_AUTH_METHOD_API_KEY
     : GROK_AUTH_METHOD_CACHED_TOKEN;
 }

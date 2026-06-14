@@ -773,6 +773,50 @@ describe("deriveWorkLogEntries", () => {
     expect(entries[0]?.tone).toBe("error");
   });
 
+  it("uses runtime warning messages as expandable work log detail", () => {
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        id: "runtime-warning",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "runtime.warning",
+        summary: "Runtime warning",
+        tone: "info",
+        payload: { message: "Reconnecting... 2/5" },
+      }),
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "runtime-warning",
+      label: "Runtime warning",
+      detail: "Reconnecting... 2/5",
+      tone: "info",
+      sourceActivityKind: "runtime.warning",
+    });
+  });
+
+  it("uses runtime error messages as expandable work log detail", () => {
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        id: "runtime-error",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "runtime.error",
+        summary: "Runtime error",
+        tone: "error",
+        payload: { message: "Provider process exited" },
+      }),
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "runtime-error",
+      label: "Runtime error",
+      detail: "Provider process exited",
+      tone: "error",
+      sourceActivityKind: "runtime.error",
+    });
+  });
+
   it("keeps tool entries from every turn and tags each with its turn id", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

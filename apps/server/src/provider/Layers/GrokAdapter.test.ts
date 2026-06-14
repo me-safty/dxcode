@@ -29,6 +29,11 @@ const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const mockAgentPath = path.join(__dirname, "../../../scripts/acp-mock-agent.ts");
 const mockAgentCommand = process.execPath;
+const realSleepLock = new Int32Array(new SharedArrayBuffer(4));
+
+const realSleepMillis = (millis: number): void => {
+  Atomics.wait(realSleepLock, 0, 0, millis);
+};
 
 async function makeMockGrokWrapper(extraEnv?: Record<string, string>) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "grok-acp-mock-"));
@@ -57,7 +62,7 @@ function waitForFileContent(filePath: string, attempts = 40): Effect.Effect<stri
       if (raw.trim().length > 0) {
         return raw;
       }
-      yield* Effect.sleep("25 millis");
+      yield* Effect.sync(() => realSleepMillis(25));
       return yield* readAttempt(remainingAttempts - 1);
     });
   return readAttempt(attempts);
@@ -70,6 +75,34 @@ async function readJsonLines(filePath: string) {
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+const countSessionPromptRequests = (filePath: string): Effect.Effect<number> =>
+  Effect.tryPromise(() => readJsonLines(filePath)).pipe(
+    Effect.map((entries) => entries.filter((entry) => entry.method === "session/prompt").length),
+    Effect.orElseSucceed(() => 0),
+  );
+
+function waitForSessionPromptRequestCount(
+  filePath: string,
+  expectedCount: number,
+  attempts = 40,
+): Effect.Effect<void> {
+  const readAttempt = (remainingAttempts: number): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      if (remainingAttempts <= 0) {
+        return yield* Effect.die(
+          new Error(`Timed out waiting for ${expectedCount} session/prompt requests`),
+        );
+      }
+      const count = yield* countSessionPromptRequests(filePath);
+      if (count >= expectedCount) {
+        return;
+      }
+      yield* Effect.sync(() => realSleepMillis(25));
+      return yield* readAttempt(remainingAttempts - 1);
+    });
+  return readAttempt(attempts);
 }
 
 const grokAdapterTestLayer = ServerConfig.layerTest(process.cwd(), {
@@ -219,6 +252,47 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       );
 
       assert.equal(error._tag, "ProviderAdapterValidationError");
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("serializes prompt RPCs for concurrent turns on the same thread", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-serialized-turns");
+      const tempDir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "grok-acp-")));
+      const requestLogPath = path.join(tempDir, "requests.ndjson");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({
+          T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+          T3_ACP_PROMPT_DELAY_MS: "1000",
+        }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("grok"), model: "grok-build" },
+      });
+
+      const firstTurnFiber = yield* adapter
+        .sendTurn({ threadId, input: "first delayed prompt", attachments: [] })
+        .pipe(Effect.forkChild);
+      yield* waitForSessionPromptRequestCount(requestLogPath, 1);
+
+      const secondTurnFiber = yield* adapter
+        .sendTurn({ threadId, input: "second queued prompt", attachments: [] })
+        .pipe(Effect.forkChild);
+      yield* Effect.sync(() => realSleepMillis(100));
+
+      assert.equal(yield* countSessionPromptRequests(requestLogPath), 1);
+
+      yield* Fiber.join(firstTurnFiber);
+      yield* Fiber.join(secondTurnFiber);
+      assert.equal(yield* countSessionPromptRequests(requestLogPath), 2);
 
       yield* adapter.stopSession(threadId);
     }),

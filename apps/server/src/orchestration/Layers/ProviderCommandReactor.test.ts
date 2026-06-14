@@ -9,6 +9,7 @@ import {
   ProviderSession,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import {
@@ -68,6 +69,33 @@ const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
+
+function driverKindForProviderInstanceId(instanceId: ProviderInstanceId): ProviderDriverKind {
+  const raw = String(instanceId);
+  return ProviderDriverKind.make(
+    raw.startsWith("claude") ? "claudeAgent" : raw.startsWith("codex") ? "codex" : raw,
+  );
+}
+
+function makeServerProviderSnapshot(
+  instanceId: ProviderInstanceId,
+  overrides: Partial<ServerProvider> = {},
+): ServerProvider {
+  return {
+    instanceId,
+    driver: driverKindForProviderInstanceId(instanceId),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-01-01T00:00:00.000Z",
+    models: [],
+    slashCommands: [],
+    skills: [],
+    ...overrides,
+  };
+}
 
 function emptyWorkingTree() {
   return {
@@ -347,12 +375,12 @@ describe("ProviderCommandReactor", () => {
       ),
     );
     const providerSnapshots = [
-      {
-        instanceId: modelSelection.instanceId,
-        ...(input?.requiresNewThreadForModelChange === true
+      makeServerProviderSnapshot(
+        modelSelection.instanceId,
+        input?.requiresNewThreadForModelChange === true
           ? { requiresNewThreadForModelChange: true }
-          : {}),
-      },
+          : {},
+      ),
     ];
 
     const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
@@ -410,7 +438,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
-      Layer.provideMerge(makeProviderRegistryLayer(providerSnapshots as never)),
+      Layer.provideMerge(makeProviderRegistryLayer(providerSnapshots)),
       Layer.provideMerge(
         Layer.mock(GitWorkflowService)({
           renameBranch,

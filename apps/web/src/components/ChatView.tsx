@@ -4219,7 +4219,7 @@ export default function ChatView(props: ChatViewProps) {
       };
       const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
         providers: providerStatuses,
-        hasStartedSession: activeThread.session !== null,
+        hasStartedSession: threadHasStarted(activeThread),
         currentModelSelection: activeThread.modelSelection,
         currentProviderInstanceId: activeThread.session?.providerInstanceId ?? null,
         nextModelSelection,

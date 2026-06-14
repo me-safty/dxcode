@@ -233,6 +233,16 @@ function listAvailableModelsResponse(): {
   return {
     models: [
       {
+        value: "grok-build",
+        name: "Grok Build",
+        configOptions: [],
+      },
+      {
+        value: "grok-mock-alt",
+        name: "Grok Mock Alt",
+        configOptions: [],
+      },
+      {
         value: "default",
         name: "Auto",
         configOptions: [],
@@ -335,10 +345,9 @@ function sessionModels(): AcpSchema.SessionModelState {
   };
 }
 
-const grokAcpModels: ReadonlyArray<AcpSchema.ModelInfo> = [
-  { modelId: "grok-build", name: "Grok Build" },
-  { modelId: "grok-mock-alt", name: "Grok Mock Alt" },
-];
+function isAdvertisedSessionModelId(modelId: string): boolean {
+  return sessionModels().availableModels.some((model) => model.modelId === modelId);
+}
 
 const program = Effect.gen(function* () {
   const agent = yield* EffectAcpAgent.AcpAgent;
@@ -429,7 +438,7 @@ const program = Effect.gen(function* () {
 
   yield* agent.handleSetSessionModel((request) =>
     Effect.gen(function* () {
-      if (!grokAcpModels.some((model) => model.modelId === request.modelId)) {
+      if (!isAdvertisedSessionModelId(request.modelId)) {
         return yield* AcpError.AcpRequestError.invalidParams(
           `Unknown mock model id: ${request.modelId}`,
           {

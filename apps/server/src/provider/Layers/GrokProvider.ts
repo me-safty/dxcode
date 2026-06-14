@@ -1,3 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import {
+  spawn as spawnChildProcess,
+  type ChildProcessWithoutNullStreams,
+} from "node:child_process";
 import {
   type GrokSettings,
   type ModelCapabilities,
@@ -13,16 +18,17 @@ import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import { HttpClient } from "effect/unstable/http";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
 
 import {
   buildServerProvider,
+  type CommandResult,
   detailFromResult,
   isCommandMissingCause,
   parseGenericCliVersion,
+  ProviderCommandExecutionError,
   providerModelsFromSettings,
-  spawnAndCollect,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
 import {
@@ -30,6 +36,7 @@ import {
   type ProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
 import { makeGrokAcpRuntime, resolveGrokAcpBaseModelId } from "../acp/GrokAcpSupport.ts";
+import { isWindowsCommandNotFound } from "../../processRunner.ts";
 
 const GROK_PRESENTATION = {
   displayName: "Grok",
@@ -151,13 +158,105 @@ const runGrokVersionCommand = (
   environment: NodeJS.ProcessEnv = process.env,
 ) => {
   const command = grokSettings.binaryPath || "grok";
-  return spawnAndCollect(
-    command,
-    ChildProcess.make(command, ["--version"], {
-      env: environment,
-      shell: process.platform === "win32",
-    }),
-  );
+  return Effect.callback<CommandResult, ProviderCommandExecutionError>((resume, signal) => {
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = spawnChildProcess(command, ["--version"], {
+        env: environment,
+        shell: process.platform === "win32",
+        detached: process.platform !== "win32",
+      });
+    } catch (error) {
+      resume(
+        Effect.fail(
+          new ProviderCommandExecutionError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        ),
+      );
+      return;
+    }
+
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const terminate = (killSignal: NodeJS.Signals) => {
+      if (process.platform !== "win32" && child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, killSignal);
+        } catch {
+          // The process group may already be gone.
+        }
+      }
+      try {
+        child.kill(killSignal);
+      } catch {
+        // The process may already have exited.
+      }
+    };
+
+    const removeListeners = () => {
+      signal.removeEventListener("abort", onAbort);
+      child.stdout.removeAllListeners();
+      child.stderr.removeAllListeners();
+      child.removeListener("error", onError);
+      child.removeListener("close", onClose);
+    };
+
+    const finish = (effect: Effect.Effect<CommandResult, ProviderCommandExecutionError>) => {
+      if (settled) return;
+      settled = true;
+      removeListeners();
+      resume(effect);
+    };
+
+    const interrupt = () => {
+      if (settled) return;
+      settled = true;
+      removeListeners();
+      terminate("SIGTERM");
+      terminate("SIGKILL");
+    };
+
+    const onAbort = () => interrupt();
+    const onError = (error: Error) =>
+      finish(
+        Effect.fail(
+          new ProviderCommandExecutionError({
+            message: error.message,
+          }),
+        ),
+      );
+    const onClose = (code: number | null) => {
+      const exitCode = typeof code === "number" ? code : 1;
+      if (isWindowsCommandNotFound(exitCode, stderr)) {
+        finish(
+          Effect.fail(new ProviderCommandExecutionError({ message: `spawn ${command} ENOENT` })),
+        );
+        return;
+      }
+      finish(Effect.succeed({ stdout, stderr, code: exitCode }));
+    };
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string | Buffer) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk: string | Buffer) => {
+      stderr += String(chunk);
+    });
+    child.on("error", onError);
+    child.on("close", onClose);
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    if (signal.aborted) {
+      interrupt();
+    }
+
+    return Effect.sync(interrupt);
+  });
 };
 
 export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(function* (
@@ -190,6 +289,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
 
   if (Result.isFailure(versionResult)) {
     const error = versionResult.failure;
+    const detail = error instanceof Error ? error.message : "Unknown Grok CLI health check error";
     return buildServerProvider({
       presentation: GROK_PRESENTATION,
       enabled: grokSettings.enabled,
@@ -202,7 +302,7 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
         auth: { status: "unknown" },
         message: isCommandMissingCause(error)
           ? "Grok CLI (`grok`) is not installed or not on PATH."
-          : `Failed to execute Grok CLI health check: ${error instanceof Error ? error.message : String(error)}.`,
+          : `Failed to execute Grok CLI health check: ${detail}.`,
       },
     });
   }
