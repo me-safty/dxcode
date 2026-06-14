@@ -134,10 +134,14 @@ async function getInspectableServiceWorkerRegistration(
     return null;
   }
 
-  const directRegistration =
-    typeof navigator.serviceWorker.getRegistration === "function"
-      ? await navigator.serviceWorker.getRegistration()
-      : null;
+  let directRegistration: ServiceWorkerRegistration | null = null;
+  if (typeof navigator.serviceWorker.getRegistration === "function") {
+    try {
+      directRegistration = (await navigator.serviceWorker.getRegistration()) ?? null;
+    } catch {
+      directRegistration = null;
+    }
+  }
   return directRegistration ?? getReadyServiceWorkerRegistration();
 }
 

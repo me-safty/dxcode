@@ -480,6 +480,8 @@ export function BranchToolbarBranchSelector({
     return readElementHeight(resolveBranchPopupShell(branchPopupRef.current));
   }, []);
   const captureBranchMenuOpenHeight = useCallback((target?: HTMLElement | null) => {
+    // `branchPopupRef` is stable; read `.current` at call time so the callback
+    // does not need to be recreated when the popup element changes.
     const closestPopup = target?.closest('[data-slot="combobox-popup"]');
     const currentHeight = readElementHeight(
       resolveBranchPopupShell(
