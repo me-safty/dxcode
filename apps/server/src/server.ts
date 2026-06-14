@@ -6,9 +6,8 @@ import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import { ServerConfig } from "./config.ts";
 import {
-  attachmentsRouteLayer,
   otlpTracesProxyRouteLayer,
-  projectFaviconRouteLayer,
+  assetRouteLayer,
   serverEnvironmentHttpApiLayer,
   staticAndDevRouteLayer,
   browserApiCorsLayer,
@@ -35,6 +34,11 @@ import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { TerminalManagerLive } from "./terminal/Layers/Manager.ts";
+import * as McpHttpServer from "./mcp/McpHttpServer.ts";
+import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
+import * as PreviewManager from "./preview/Manager.ts";
+import * as PortScanner from "./preview/PortScanner.ts";
+import * as ProcessRunner from "./processRunner.ts";
 import * as GitManager from "./git/GitManager.ts";
 import { KeybindingsLive } from "./keybindings.ts";
 import { ServerRuntimeStartup, ServerRuntimeStartupLive } from "./serverRuntimeStartup.ts";
@@ -237,7 +241,17 @@ const CheckpointingLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
 );
 
-const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
+const PortScannerLayerLive = PortScanner.layer.pipe(Layer.provide(ProcessRunner.layer));
+
+const TerminalLayerLive = TerminalManagerLive.pipe(
+  Layer.provide(PtyAdapterLive),
+  Layer.provide(PortScannerLayerLive),
+);
+
+const PreviewLayerLive = Layer.empty.pipe(
+  Layer.provideMerge(PreviewManager.layer),
+  Layer.provideMerge(PortScannerLayerLive),
+);
 
 const WorkspaceEntriesLayerLive = WorkspaceEntriesLive.pipe(
   Layer.provide(WorkspacePathsLive),
@@ -253,6 +267,10 @@ const WorkspaceLayerLive = Layer.mergeAll(
   WorkspacePathsLive,
   WorkspaceEntriesLayerLive,
   WorkspaceFileSystemLayerLive,
+);
+
+const ProjectFaviconResolverLayerLive = ProjectFaviconResolverLive.pipe(
+  Layer.provide(WorkspacePathsLive),
 );
 
 const AuthLayerLive = EnvironmentAuth.layer.pipe(
@@ -280,7 +298,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(Layer.mergeAll(GitLayerLive, TextGeneration.layer)),
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
-  Layer.provideMerge(TerminalLayerLive),
+  Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive)),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
@@ -304,7 +322,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(OpenCodeRuntimeLive),
   Layer.provideMerge(ServerSettingsLive),
   Layer.provideMerge(WorkspaceLayerLive),
-  Layer.provideMerge(ProjectFaviconResolverLive),
+  Layer.provideMerge(ProjectFaviconResolverLayerLive),
   Layer.provideMerge(RepositoryIdentityResolverLive),
   Layer.provideMerge(ServerEnvironmentLive),
   Layer.provideMerge(AuthLayerLive),
@@ -333,21 +351,23 @@ const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
 );
 
 export const makeRoutesLayer = Layer.mergeAll(
-  HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
-    Layer.provide(authHttpApiLayer),
-    Layer.provide(connectHttpApiLayer),
-    Layer.provide(orchestrationHttpApiLayer),
-    Layer.provide(serverEnvironmentHttpApiLayer),
-    Layer.provide(environmentAuthenticatedAuthLayer),
+  Layer.mergeAll(
+    HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
+      Layer.provide(authHttpApiLayer),
+      Layer.provide(connectHttpApiLayer),
+      Layer.provide(orchestrationHttpApiLayer),
+      Layer.provide(serverEnvironmentHttpApiLayer),
+      Layer.provide(environmentAuthenticatedAuthLayer),
+    ),
+    otlpTracesProxyRouteLayer,
+    assetRouteLayer,
+    staticAndDevRouteLayer,
+    websocketRpcRouteLayer,
   ),
-  attachmentsRouteLayer,
   authBearerBootstrapCompatibilityRouteLayer,
   authSessionRevokeCompatibilityRouteLayer,
-  otlpTracesProxyRouteLayer,
-  projectFaviconRouteLayer,
-  staticAndDevRouteLayer,
   vscodeWorkspaceBootstrapRouteLayer,
-  websocketRpcRouteLayer,
+  McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
 ).pipe(Layer.provide(browserApiCorsLayer));
 
 export const makeServerLayer = Layer.unwrap(

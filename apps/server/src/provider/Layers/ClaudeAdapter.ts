@@ -71,6 +71,7 @@ import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { resolveHostMcpServersForProviderStart } from "../hostMcpDiscovery.ts";
 import { hostMcpServersToStdioServers } from "../hostMcpServers.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
@@ -950,13 +951,10 @@ function buildUserMessage(input: {
 
 function buildClaudeMcpServers(
   hostMcpServers: ReadonlyArray<DesktopBootstrapMcpServer>,
+  mcpSession: McpProviderSession.McpProviderSessionConfig | undefined,
 ): ClaudeMcpServers | undefined {
-  const servers = hostMcpServersToStdioServers(hostMcpServers);
-  if (servers.length === 0) {
-    return undefined;
-  }
-  return Object.fromEntries(
-    servers.map((server) => [
+  const stdioServers = Object.fromEntries(
+    hostMcpServersToStdioServers(hostMcpServers).map((server) => [
       server.name,
       {
         type: "stdio",
@@ -965,7 +963,22 @@ function buildClaudeMcpServers(
         ...(Object.keys(server.env).length > 0 ? { env: { ...server.env } } : {}),
       } satisfies McpServerConfig,
     ]),
-  );
+  ) as ClaudeMcpServers;
+  const mcpServers = {
+    ...stdioServers,
+    ...(mcpSession
+      ? {
+          "t3-code": {
+            type: "http",
+            url: mcpSession.endpoint,
+            headers: {
+              Authorization: mcpSession.authorizationHeader,
+            },
+          } satisfies McpServerConfig,
+        }
+      : {}),
+  };
+  return Object.keys(mcpServers).length > 0 ? mcpServers : undefined;
 }
 
 function buildClaudeMcpServersDiagnostics(mcpServers: ClaudeMcpServers | undefined): unknown {
@@ -974,6 +987,9 @@ function buildClaudeMcpServersDiagnostics(mcpServers: ClaudeMcpServers | undefin
   }
   return Object.fromEntries(
     Object.entries(mcpServers).map(([name, server]) => {
+      if ("url" in server) {
+        return [name, { type: server.type, url: server.url }];
+      }
       const stdioServer = server as {
         readonly type?: unknown;
         readonly command?: unknown;
@@ -3499,10 +3515,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(fastMode ? { fastMode: true } : {}),
         ...(ultracode ? { ultracode: true } : {}),
       };
+      const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
       const hostMcpServers = yield* Effect.promise(() =>
         resolveHostMcpServersForProviderStart({ serverConfig, sessionInput: input }),
       );
-      const mcpServers = buildClaudeMcpServers(hostMcpServers);
+      const mcpServers = buildClaudeMcpServers(hostMcpServers, mcpSession);
       const mcpServersDiagnostics = buildClaudeMcpServersDiagnostics(mcpServers);
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
