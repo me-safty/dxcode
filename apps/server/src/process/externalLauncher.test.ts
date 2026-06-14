@@ -10,6 +10,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 import { ExternalLauncher, layer as ExternalLauncherLive } from "./externalLauncher.ts";
 
 function makeMockDetachedHandle(onUnref: () => void = () => undefined) {
@@ -34,6 +35,7 @@ function makeMockDetachedHandle(onUnref: () => void = () => undefined) {
 const testLayer = (input: {
   readonly platform: NodeJS.Platform;
   readonly env?: Record<string, string>;
+  readonly resolveExecutable?: (command: string) => string | undefined;
   readonly onSpawn?: (command: ChildProcess.StandardCommand) => void;
   readonly onUnref?: () => void;
 }) => {
@@ -54,6 +56,10 @@ const testLayer = (input: {
   return Layer.mergeAll(
     ExternalLauncherLive.pipe(Layer.provide(Layer.merge(NodeServices.layer, spawnerLayer))),
     Layer.succeed(HostProcessPlatform, input.platform),
+    Layer.succeed(
+      SpawnExecutableResolution,
+      (command) => input.resolveExecutable?.(command) ?? command,
+    ),
     ConfigProvider.layer(ConfigProvider.fromEnv({ env: input.env ?? {} })),
   );
 };
@@ -105,6 +111,8 @@ it.effect("launches an installed editor with platform-safe arguments", () =>
         testLayer({
           platform: "win32",
           env: { PATH: binDir, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+          resolveExecutable: (command) =>
+            command === "code" ? "C:\\Program Files\\Microsoft VS Code\\bin\\code.CMD" : command,
           onSpawn: (command) => {
             spawned = command;
           },
@@ -113,7 +121,7 @@ it.effect("launches an installed editor with platform-safe arguments", () =>
     );
 
     assert.ok(spawned);
-    assert.equal(spawned.command, "code");
+    assert.equal(spawned.command, '^"C:\\Program^ Files\\Microsoft^ VS^ Code\\bin\\code.CMD^"');
     assert.deepEqual(spawned.args, [
       '^"--goto^"',
       '^"C:\\workspace^ with^ spaces\\src\\index.ts:12:4^"',

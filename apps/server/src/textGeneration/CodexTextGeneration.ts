@@ -9,8 +9,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { type CodexSettings, type ModelSelection } from "@t3tools/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { sanitizeShellModeArgs } from "@t3tools/shared/shell";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
@@ -52,7 +51,6 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   const path = yield* Path.Path;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const serverConfig = yield* Effect.service(ServerConfig);
-  const hostPlatform = yield* HostProcessPlatform;
   const resolvedEnvironment = environment ?? process.env;
 
   type MaterializedImageAttachments = {
@@ -184,11 +182,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
         CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT;
       const serviceTier = getCodexServiceTierOptionValue(modelSelection);
-      const command = ChildProcess.make(
+      const spawnCommand = yield* resolveSpawnCommand(
         codexConfig.binaryPath || "codex",
-        // The provider binary may be an npm-installed `.cmd` shim, so Windows
-        // spawns through cmd.exe shell mode with explicitly sanitized arguments.
-        yield* sanitizeShellModeArgs([
+        [
           "exec",
           "--ephemeral",
           "--skip-git-repo-check",
@@ -205,19 +201,20 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           outputPath,
           ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
           "-",
-        ]),
-        {
-          env: {
-            ...resolvedEnvironment,
-            ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
-          },
-          cwd,
-          shell: hostPlatform === "win32",
-          stdin: {
-            stream: Stream.encodeText(Stream.make(prompt)),
-          },
-        },
+        ],
+        { env: resolvedEnvironment },
       );
+      const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+        env: {
+          ...resolvedEnvironment,
+          ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
+        },
+        cwd,
+        shell: spawnCommand.shell,
+        stdin: {
+          stream: Stream.encodeText(Stream.make(prompt)),
+        },
+      });
 
       const child = yield* commandSpawner
         .spawn(command)

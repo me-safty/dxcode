@@ -23,9 +23,9 @@ import type {
 } from "@t3tools/contracts";
 import { ServerSettingsError } from "@t3tools/contracts";
 
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { createModelCapabilities } from "@t3tools/shared/model";
-import { sanitizeShellModeArgs } from "@t3tools/shared/shell";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import {
   AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
@@ -297,20 +297,22 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   // Expand here for parity with `CodexTextGeneration`/`CodexSessionRuntime`.
   const resolvedHomePath = input.homePath ? expandHomePath(input.homePath) : undefined;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const hostPlatform = yield* HostProcessPlatform;
-  // The codex binary may be an npm-installed `.cmd` shim, so Windows spawns
-  // through cmd.exe shell mode with explicitly sanitized arguments.
+  const environment = {
+    ...input.environment,
+    ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
+  };
+  const hostEnvironment = yield* HostProcessEnvironment;
+  const spawnCommand = yield* resolveSpawnCommand(input.binaryPath, ["app-server"], {
+    env: { ...hostEnvironment, ...environment },
+  });
   const child = yield* spawner
     .spawn(
-      ChildProcess.make(input.binaryPath, yield* sanitizeShellModeArgs(["app-server"]), {
+      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         cwd: input.cwd,
-        env: {
-          ...input.environment,
-          ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
-        },
+        env: environment,
         extendEnv: true,
         forceKillAfter: CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER,
-        shell: hostPlatform === "win32",
+        shell: spawnCommand.shell,
       }),
     )
     .pipe(

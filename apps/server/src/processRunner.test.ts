@@ -69,7 +69,6 @@ const runWith =
       Effect.flatMap((runner) =>
         runner.run({
           ...input,
-          shell: input.shell ?? false,
         }),
       ),
       Effect.provide(

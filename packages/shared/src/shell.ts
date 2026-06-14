@@ -1,7 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { execFileSync } from "node:child_process";
-import { accessSync, constants as fileSystemConstants } from "node:fs";
+import { accessSync, constants as fileSystemConstants, statSync } from "node:fs";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -79,11 +80,64 @@ function sanitizeShellModeArgsForPlatform(
   return platform === "win32" ? args.map(escapeWindowsShellArg) : [...args];
 }
 
-export const sanitizeShellModeArgs = Effect.fn("shell.sanitizeShellModeArgs")(function* (
-  args: ReadonlyArray<string>,
-) {
-  return sanitizeShellModeArgsForPlatform(args, yield* HostProcessPlatform);
-});
+export interface ResolvedSpawnCommand {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly shell: boolean;
+}
+
+export type SpawnExecutableResolver = (
+  command: string,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+) => string | undefined;
+
+function resolveSpawnExecutableWithNode(
+  command: string,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  const path = platform === "win32" ? NodePath.win32 : NodePath.posix;
+  const windowsPathExtensions = platform === "win32" ? resolveWindowsPathExtensions(env) : [];
+  const candidates = resolveCommandCandidates(
+    command,
+    platform,
+    windowsPathExtensions,
+    path.extname,
+  );
+  const isExecutable = (candidate: string) => {
+    try {
+      if (!statSync(candidate).isFile()) return false;
+      if (platform === "win32") {
+        return windowsPathExtensions.includes(path.extname(candidate).toUpperCase());
+      }
+      return canExecuteFile(candidate);
+    } catch {
+      return false;
+    }
+  };
+
+  if (command.includes("/") || command.includes("\\")) {
+    return candidates.find(isExecutable);
+  }
+
+  for (const pathEntry of (readEnvPath(env) ?? "").split(pathDelimiterForPlatform(platform))) {
+    const normalizedPathEntry = stripWrappingQuotes(pathEntry.trim());
+    if (normalizedPathEntry.length === 0) continue;
+    for (const candidate of candidates) {
+      const candidatePath = path.join(normalizedPathEntry, candidate);
+      if (isExecutable(candidatePath)) return candidatePath;
+    }
+  }
+  return undefined;
+}
+
+export const SpawnExecutableResolution = Context.Reference<SpawnExecutableResolver>(
+  "@t3tools/shared/shell/SpawnExecutableResolution",
+  {
+    defaultValue: () => resolveSpawnExecutableWithNode,
+  },
+);
 
 export interface WindowsEnvironmentProbeOptions {
   readonly loadProfile?: boolean;
@@ -510,6 +564,31 @@ export const resolveCommandPath = Effect.fn("shell.resolveCommandPath")(function
     env: options.env ?? (yield* HostProcessEnvironment),
     platform: yield* HostProcessPlatform,
   });
+});
+
+export const resolveSpawnCommand = Effect.fn("shell.resolveSpawnCommand")(function* (
+  command: string,
+  args: ReadonlyArray<string>,
+  options: CommandAvailabilityOptions = {},
+): Effect.fn.Return<ResolvedSpawnCommand> {
+  const platform = yield* HostProcessPlatform;
+  if (platform !== "win32") {
+    return { command, args: [...args], shell: false };
+  }
+
+  const env = options.env ?? (yield* HostProcessEnvironment);
+  const resolveExecutable = yield* SpawnExecutableResolution;
+  const resolvedCommand = resolveExecutable(command, platform, env) ?? command;
+  const extension = NodePath.win32.extname(resolvedCommand).toLowerCase();
+  if (extension !== ".cmd" && extension !== ".bat") {
+    return { command: resolvedCommand, args: [...args], shell: false };
+  }
+
+  return {
+    command: escapeWindowsShellArg(resolvedCommand),
+    args: sanitizeShellModeArgsForPlatform(args, platform),
+    shell: true,
+  };
 });
 
 export const isCommandAvailable = Effect.fn("shell.isCommandAvailable")(function* (

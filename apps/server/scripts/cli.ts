@@ -18,7 +18,7 @@ import {
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import { fromYaml } from "@t3tools/shared/schemaYaml";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import serverPackageJson from "../package.json" with { type: "json" };
 
 interface PackageJson {
@@ -168,7 +168,6 @@ const buildCmd = Command.make(
       const path = yield* Path.Path;
       const fs = yield* FileSystem.FileSystem;
       const repoRoot = yield* RepoRoot;
-      const platform = yield* HostProcessPlatform;
       const serverDir = path.join(repoRoot, "apps/server");
 
       yield* Effect.log("[cli] Running tsdown...");
@@ -177,8 +176,7 @@ const buildCmd = Command.make(
           cwd: serverDir,
           stdout: config.verbose ? "inherit" : "ignore",
           stderr: "inherit",
-          // Windows needs shell mode to resolve `.cmd` shims on PATH.
-          shell: platform === "win32",
+          shell: false,
         }),
       );
 
@@ -294,16 +292,15 @@ const publishCmd = Command.make(
         () =>
           Effect.gen(function* () {
             const args = createVpPmPublishArgs(config);
-            const platform = yield* HostProcessPlatform;
+            const spawnCommand = yield* resolveSpawnCommand("vp", ["pm", ...args]);
 
             yield* Effect.log(`[cli] Running: vp pm ${args.join(" ")}`);
             yield* runCommand(
-              ChildProcess.make("vp", ["pm", ...args], {
+              ChildProcess.make(spawnCommand.command, spawnCommand.args, {
                 cwd: repoRoot,
                 stdout: config.verbose ? "inherit" : "ignore",
                 stderr: "inherit",
-                // Windows needs shell mode to resolve .cmd shims.
-                shell: platform === "win32",
+                shell: spawnCommand.shell,
               }),
             );
           }),

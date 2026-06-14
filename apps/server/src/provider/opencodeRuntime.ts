@@ -32,7 +32,7 @@ import { isWindowsCommandNotFound } from "../processRunner.ts";
 import { collectStreamAsString } from "./providerSnapshot.ts";
 import * as NetService from "@t3tools/shared/Net";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { sanitizeShellModeArgs } from "@t3tools/shared/shell";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString);
 const OPENCODE_EMPTY_CONFIG_CONTENT = "{}";
 
@@ -279,14 +279,15 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const netService = yield* NetService.NetService;
   const hostPlatform = yield* HostProcessPlatform;
+  const resolveCommand = (command: string, args: ReadonlyArray<string>, env?: NodeJS.ProcessEnv) =>
+    resolveSpawnCommand(command, args, env ? { env } : {});
 
   const runOpenCodeCommand: OpenCodeRuntimeShape["runOpenCodeCommand"] = (input) =>
     Effect.gen(function* () {
-      // The opencode binary may be an npm-installed `.cmd` shim, so Windows
-      // spawns through cmd.exe shell mode with explicitly sanitized arguments.
+      const spawnCommand = yield* resolveCommand(input.binaryPath, input.args, input.environment);
       const child = yield* spawner.spawn(
-        ChildProcess.make(input.binaryPath, yield* sanitizeShellModeArgs(input.args), {
-          shell: hostPlatform === "win32",
+        ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+          shell: spawnCommand.shell,
           ...(input.environment ? { env: input.environment } : { extendEnv: true }),
         }),
       );
@@ -339,12 +340,13 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
         ));
       const timeoutMs = input.timeoutMs ?? DEFAULT_OPENCODE_SERVER_TIMEOUT_MS;
       const args = ["serve", `--hostname=${hostname}`, `--port=${port}`];
+      const spawnCommand = yield* resolveCommand(input.binaryPath, args, input.environment);
 
       const child = yield* spawner
         .spawn(
-          ChildProcess.make(input.binaryPath, yield* sanitizeShellModeArgs(args), {
+          ChildProcess.make(spawnCommand.command, spawnCommand.args, {
             detached: hostPlatform !== "win32",
-            shell: hostPlatform === "win32",
+            shell: spawnCommand.shell,
             env: {
               ...input.environment,
               OPENCODE_CONFIG_CONTENT: OPENCODE_EMPTY_CONFIG_CONTENT,

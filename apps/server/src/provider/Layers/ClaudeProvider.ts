@@ -18,8 +18,7 @@ import {
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { sanitizeShellModeArgs } from "@t3tools/shared/shell";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { compareSemverVersions } from "@t3tools/shared/semver";
 import {
   query as claudeQuery,
@@ -607,13 +606,13 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   args: ReadonlyArray<string>,
   environment?: NodeJS.ProcessEnv,
 ) {
-  const hostPlatform = yield* HostProcessPlatform;
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
-  // The provider binary may be an npm-installed `.cmd` shim, so Windows spawns
-  // through cmd.exe shell mode with explicitly sanitized arguments.
-  const command = ChildProcess.make(claudeSettings.binaryPath, yield* sanitizeShellModeArgs(args), {
+  const spawnCommand = yield* resolveSpawnCommand(claudeSettings.binaryPath, args, {
     env: claudeEnvironment,
-    shell: hostPlatform === "win32",
+  });
+  const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+    env: claudeEnvironment,
+    shell: spawnCommand.shell,
   });
   return yield* spawnAndCollect(claudeSettings.binaryPath, command);
 });

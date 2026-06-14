@@ -13,7 +13,7 @@ import {
   type LaunchEditorInput,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { isCommandAvailable, sanitizeShellModeArgs } from "@t3tools/shared/shell";
+import { isCommandAvailable, resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -373,7 +373,6 @@ const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProcess")(fu
   ExternalLauncherError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
-  const platform = yield* HostProcessPlatform;
   const env = yield* readCommandLookupEnv;
   if (!(yield* isCommandAvailable(launch.command, { env }))) {
     return yield* new ExternalLauncherError({
@@ -381,14 +380,14 @@ const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProcess")(fu
     });
   }
 
-  const isWin32 = platform === "win32";
+  const spawnCommand = yield* resolveSpawnCommand(launch.command, launch.args, { env });
   yield* launchAndUnref(
     {
-      command: launch.command,
-      args: yield* sanitizeShellModeArgs(launch.args),
+      command: spawnCommand.command,
+      args: spawnCommand.args,
       options: {
         detached: true,
-        shell: isWin32,
+        shell: spawnCommand.shell,
         stdin: "ignore",
         stdout: "ignore",
         stderr: "ignore",

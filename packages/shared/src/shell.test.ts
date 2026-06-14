@@ -18,7 +18,9 @@ import {
   readPathFromLoginShell,
   resolveCommandPath,
   resolveKnownWindowsCliDirs,
+  resolveSpawnCommand,
   resolveWindowsEnvironment,
+  SpawnExecutableResolution,
   WindowsShellEnvironment,
   type WindowsShellEnvironmentReader,
 } from "./shell.ts";
@@ -360,6 +362,62 @@ effectIt.layer(NodeServices.layer)("resolveCommandPath", (it) => {
       }).pipe(Effect.provideService(HostProcessPlatform, "win32"), Effect.result);
 
       expect(result._tag).toBe("Failure");
+    }),
+  );
+});
+
+effectIt.layer(NodeServices.layer)("resolveSpawnCommand", (it) => {
+  it.effect("runs Windows executables directly without a shell", () =>
+    Effect.gen(function* () {
+      const command = yield* resolveSpawnCommand("node.exe", ["script.js", "hello & goodbye"], {
+        env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+      }).pipe(Effect.provideService(HostProcessPlatform, "win32"));
+
+      expect(command).toEqual({
+        command: "node.exe",
+        args: ["script.js", "hello & goodbye"],
+        shell: false,
+      });
+    }),
+  );
+
+  it.effect("escapes the executable and arguments for Windows command shims", () =>
+    Effect.gen(function* () {
+      const command = yield* resolveSpawnCommand(
+        "vp",
+        ["run", "value & calc", "%PATH%", 'quote"value'],
+        { env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" } },
+      ).pipe(
+        Effect.provideService(HostProcessPlatform, "win32"),
+        Effect.provideService(
+          SpawnExecutableResolution,
+          () => "C:\\Program Files\\npm & tools\\vp.cmd",
+        ),
+      );
+
+      expect(command.shell).toBe(true);
+      expect(command.command).not.toContain(" & ");
+      expect(command.command).toContain("^&");
+      expect(command.args).toEqual([
+        '^"run^"',
+        '^"value^ ^&^ calc^"',
+        '^"^%PATH^%^"',
+        '^"quote\\^"value^"',
+      ]);
+    }),
+  );
+
+  it.effect("does not fall back to a shell for unresolved Windows commands", () =>
+    Effect.gen(function* () {
+      const command = yield* resolveSpawnCommand("missing & calc", ["unsafe & value"], {
+        env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+      }).pipe(Effect.provideService(HostProcessPlatform, "win32"));
+
+      expect(command).toEqual({
+        command: "missing & calc",
+        args: ["unsafe & value"],
+        shell: false,
+      });
     }),
   );
 });

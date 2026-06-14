@@ -25,7 +25,6 @@ export interface ProcessRunInput {
   readonly maxOutputBytes?: number | undefined;
   readonly outputMode?: "error" | "truncate" | undefined;
   readonly truncatedMarker?: string | undefined;
-  readonly shell?: boolean | string | undefined;
   /**
    * On timeout, return a synthetic timedOut result.
    * Partial stdout/stderr are not preserved.
@@ -246,7 +245,6 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
               extendEnv: true,
             }
           : {}),
-        ...(input.shell !== undefined ? { shell: input.shell } : {}),
       }),
     )
     .pipe(
