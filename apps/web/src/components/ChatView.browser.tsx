@@ -61,6 +61,7 @@ import {
 } from "../lib/terminalContext";
 import { isMacPlatform } from "../lib/utils";
 import { __resetLocalApiForTests } from "../localApi";
+import { useLocalDispatchStore } from "../localDispatchStore";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { getServerConfig } from "../rpc/serverState";
 import { getRouter } from "../router";
@@ -672,6 +673,34 @@ async function materializePromotedDraftThreadViaDomainEvent(threadId: ThreadId):
   await waitForWsClient();
   fixture.snapshot = addThreadToSnapshot(fixture.snapshot, threadId);
   fixture.snapshot = updateThreadSessionInSnapshot(fixture.snapshot, threadId, null);
+  sendShellThreadUpsert(threadId, { session: null });
+}
+
+async function materializePromotedDraftThreadWithUserMessageViaDomainEvent(
+  threadId: ThreadId,
+): Promise<void> {
+  await waitForWsClient();
+  fixture.snapshot = addThreadToSnapshot(fixture.snapshot, threadId);
+  fixture.snapshot = {
+    ...fixture.snapshot,
+    snapshotSequence: fixture.snapshot.snapshotSequence + 1,
+    threads: fixture.snapshot.threads.map((thread) =>
+      thread.id === threadId
+        ? {
+            ...thread,
+            session: null,
+            messages: [
+              createUserMessage({
+                id: "msg-promoted-draft-pending-start" as MessageId,
+                text: "Ship it",
+                offsetSeconds: 1,
+              }),
+            ],
+            updatedAt: NOW_ISO,
+          }
+        : thread,
+    ),
+  };
   sendShellThreadUpsert(threadId, { session: null });
 }
 
@@ -1814,6 +1843,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
     useRightPanelStore.persist.clearStorage();
     useRightPanelStore.setState({ byThreadKey: {} });
+    useLocalDispatchStore.setState({ byThreadKey: {} });
   });
 
   afterEach(() => {
@@ -2789,6 +2819,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(sendButton.disabled).toBe(false);
       sendButton.click();
 
+      await expect.element(page.getByText("Starting request for", { exact: false })).toBeVisible();
+
       await vi.waitFor(
         () => {
           const dispatchRequest = wsRequests.find(
@@ -2822,6 +2854,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+
+      await materializePromotedDraftThreadWithUserMessageViaDomainEvent(THREAD_ID);
+      await waitForURL(
+        mounted.router,
+        (path) => path === serverThreadPath(THREAD_ID),
+        "Promoted draft should canonicalize after the user message is persisted.",
+      );
+      await expect.element(page.getByText("Starting request for", { exact: false })).toBeVisible();
 
       expect(wsRequests.some((request) => request._tag === WS_METHODS.vcsCreateWorktree)).toBe(
         false,
