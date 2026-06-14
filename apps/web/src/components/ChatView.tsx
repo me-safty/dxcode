@@ -115,7 +115,6 @@ import {
   setActiveWorkspaceFileExplorerContext,
   useWorkspaceFilePanelState,
 } from "../workspaceFilePreview";
-import { WORKSPACE_FILE_INLINE_DIFF_SELECTOR } from "../workspaceFilePreviewDom";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveLiveThreadBranchUpdate } from "./GitActionsControl.logic";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -1842,7 +1841,11 @@ export default function ChatView(props: ChatViewProps) {
   // `codex_personal`) surfaces its own status/message in the banner rather
   // than the default Codex's. Falls back to first-match-by-kind when no
   // saved instance id is available or the instance no longer exists.
+  const selectedProviderInstanceId =
+    providerStatuses.find((status) => status.instanceId === selectedProviderByThreadId)
+      ?.instanceId ?? null;
   const activeProviderInstanceId =
+    selectedProviderInstanceId ??
     activeThread?.session?.providerInstanceId ??
     activeThread?.modelSelection.instanceId ??
     activeProject?.defaultModelSelection?.instanceId ??
@@ -2585,7 +2588,7 @@ export default function ChatView(props: ChatViewProps) {
   useMobileEdgeSwipe({
     action: "close",
     enabled: shouldUsePlanSidebarSheet && planSidebarOpen,
-    horizontalScrollOwnerScope: { ancestorSelector: WORKSPACE_FILE_INLINE_DIFF_SELECTOR },
+    horizontalScrollOwnerScope: "all",
     onSwipe: closePlanSidebar,
     side: "right",
     startArea: "screen",

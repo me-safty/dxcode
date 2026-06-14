@@ -276,6 +276,44 @@ describe("useMobileEdgeSwipe over Pierre shadow scroll content", () => {
     }
   });
 
+  it("does not close the right panel over generic Pierre scroll content when all horizontal scrollers are guarded", async () => {
+    const onSwipe = vi.fn();
+    const screen = await render(
+      <RightPanelSwipeHarness horizontalScrollOwnerScope="all" onSwipe={onSwipe} />,
+    );
+
+    try {
+      const { code, line } = appendPierreShadowScrollFixture({ scrollLeft: 100 });
+      expect(code.scrollLeft).toBeGreaterThan(1);
+
+      dispatchTouchPointer(line, "pointerdown", 200);
+      dispatchTouchPointer(line, "pointermove", 264);
+
+      expect(onSwipe).not.toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("closes the right panel over generic Pierre scroll content guarded by all when it starts at the left edge", async () => {
+    const onSwipe = vi.fn();
+    const screen = await render(
+      <RightPanelSwipeHarness horizontalScrollOwnerScope="all" onSwipe={onSwipe} />,
+    );
+
+    try {
+      const { code, line } = appendPierreShadowScrollFixture({ scrollLeft: 0 });
+      expect(code.scrollLeft).toBe(0);
+
+      dispatchTouchPointer(line, "pointerdown", 200);
+      dispatchTouchPointer(line, "pointermove", 264);
+
+      expect(onSwipe).toHaveBeenCalledOnce();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("does not close the right panel when the inline file diff scroll owner can still scroll left", async () => {
     const onSwipe = vi.fn();
     const screen = await render(
