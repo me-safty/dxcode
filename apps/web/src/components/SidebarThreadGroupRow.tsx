@@ -117,7 +117,7 @@ const SidebarThreadGroupRow = memo(function SidebarThreadGroupRow(
         data-thread-selection-safe
         data-testid={`thread-group-${group.id}`}
         className={`h-6 w-full translate-x-0 cursor-pointer justify-start gap-1.5 px-1.5 text-left text-[11px] font-medium text-muted-foreground/80 hover:bg-accent hover:text-foreground ${
-          isOver ? "ring-1 ring-primary/50" : ""
+          isOver ? "bg-primary/20 text-foreground ring-2 ring-inset ring-primary" : ""
         }`}
         onClick={handleClick}
         onKeyDown={handleKeyDown}

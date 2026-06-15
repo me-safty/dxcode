@@ -5,6 +5,7 @@ import {
   CloudIcon,
   FolderPlusIcon,
   Globe2Icon,
+  GripVerticalIcon,
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -27,6 +28,7 @@ import {
   type DragCancelEvent,
   type CollisionDetection,
   DragOverlay,
+  type Modifier,
   PointerSensor,
   type DragStartEvent,
   closestCorners,
@@ -225,6 +227,13 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
 // Stable empty array so per-project folder-order selectors don't churn renders.
 const EMPTY_STRING_ARRAY: readonly string[] = [];
+// Nudge the drag overlay down-right of the cursor so the row/folder being
+// targeted underneath stays visible (the overlay no longer hides the drop spot).
+const DRAG_OVERLAY_CURSOR_OFFSET: Modifier = ({ transform }) => ({
+  ...transform,
+  x: transform.x + 16,
+  y: transform.y + 14,
+});
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
   repository: "Group by repository",
   repository_path: "Group by repository path",
@@ -328,12 +337,16 @@ interface SidebarThreadRowProps {
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
   openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
   threadDragInProgressRef: React.RefObject<boolean>;
-  suppressThreadClickAfterDragRef: React.RefObject<boolean>;
   /** When true the row sits inside a folder and is inset with a guide line. */
   indented?: boolean;
 }
 
-const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
+// The heavy row content. Deliberately NOT a sortable: it is wrapped by the thin
+// SidebarThreadRow below which owns useSortable, so this (expensive) subtree is
+// not re-rendered on every drag-move frame.
+const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
+  props: SidebarThreadRowProps,
+) {
   const {
     orderedProjectThreadKeys,
     isActive,
@@ -358,22 +371,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     openPrLink,
     thread,
     threadDragInProgressRef,
-    suppressThreadClickAfterDragRef,
-    indented = false,
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
-  const isRenamingThisRow = renamingThreadKey === threadKey;
-  const {
-    attributes: dragAttributes,
-    listeners: dragListeners,
-    setNodeRef: setDragNodeRef,
-    transform: dragTransform,
-    transition: dragTransition,
-    isDragging,
-  } = useSortable({ id: threadKey, disabled: isRenamingThisRow });
-  // Suppress drag listeners while renaming so typing never starts a drag.
-  const rowDragHandleProps = isRenamingThisRow ? {} : { ...dragAttributes, ...dragListeners };
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const runningTerminalIds = useThreadRunningTerminalIds({
@@ -433,45 +433,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const clearConfirmingArchive = useCallback(() => {
     setConfirmingArchiveThreadKey((current) => (current === threadKey ? null : current));
   }, [setConfirmingArchiveThreadKey, threadKey]);
-  const handleMouseLeave = useCallback(() => {
-    clearConfirmingArchive();
-  }, [clearConfirmingArchive]);
-  const handleBlurCapture = useCallback(
-    (event: React.FocusEvent<HTMLLIElement>) => {
-      const currentTarget = event.currentTarget;
-      requestAnimationFrame(() => {
-        if (currentTarget.contains(document.activeElement)) {
-          return;
-        }
-        clearConfirmingArchive();
-      });
-    },
-    [clearConfirmingArchive],
-  );
   const handleRowClick = useCallback(
     (event: React.MouseEvent) => {
-      // Mirror the project drag-vs-click guards: a drag in flight, or the
-      // trailing click dnd-kit emits after a drop, must not navigate/select.
+      // A drag in flight (and the synchronous trailing click dnd-kit may emit on
+      // drop) must not navigate/select. threadDragInProgressRef is cleared on the
+      // next animation frame after a drag ends, so a real click later still works.
       if (threadDragInProgressRef.current) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      if (suppressThreadClickAfterDragRef.current) {
-        suppressThreadClickAfterDragRef.current = false;
         event.preventDefault();
         event.stopPropagation();
         return;
       }
       handleThreadClick(event, threadRef, orderedProjectThreadKeys);
     },
-    [
-      handleThreadClick,
-      orderedProjectThreadKeys,
-      suppressThreadClickAfterDragRef,
-      threadDragInProgressRef,
-      threadRef,
-    ],
+    [handleThreadClick, orderedProjectThreadKeys, threadDragInProgressRef, threadRef],
   );
   const handleOpenDiscoveredPort = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -607,219 +581,259 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const rowButtonRender = useMemo(() => <div role="button" tabIndex={0} />, []);
 
   return (
-    <SidebarMenuSubItem
-      ref={setDragNodeRef}
-      style={{ transform: CSS.Translate.toString(dragTransform), transition: dragTransition }}
-      className={`w-full ${
-        indented ? "ml-3 border-l border-border/70 pl-2" : ""
-      } ${isDragging ? "z-20 opacity-80" : ""}`}
-      data-thread-item
-      onMouseLeave={handleMouseLeave}
-      onBlurCapture={handleBlurCapture}
+    <SidebarMenuSubButton
+      render={rowButtonRender}
+      size="sm"
+      isActive={isActive}
+      data-testid={`thread-row-${thread.id}`}
+      className={`${resolveThreadRowClassName({
+        isActive,
+        isSelected,
+      })} relative isolate`}
+      onClick={handleRowClick}
+      onKeyDown={handleRowKeyDown}
+      onContextMenu={handleRowContextMenu}
     >
-      <SidebarMenuSubButton
-        render={rowButtonRender}
-        size="sm"
-        isActive={isActive}
-        data-testid={`thread-row-${thread.id}`}
-        className={`${resolveThreadRowClassName({
-          isActive,
-          isSelected,
-        })} relative isolate`}
-        onClick={handleRowClick}
-        onKeyDown={handleRowKeyDown}
-        onContextMenu={handleRowContextMenu}
-        {...rowDragHandleProps}
-      >
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
-          {prStatus && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    aria-label={prStatus.tooltip}
-                    className={`inline-flex items-center justify-center ${prStatus.colorClass} cursor-pointer rounded-sm outline-hidden focus-visible:ring-1 focus-visible:ring-ring`}
-                    onClick={handlePrClick}
-                  >
-                    <ChangeRequestStatusIcon className="size-3" />
-                  </button>
-                }
-              />
-              <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
-            </Tooltip>
-          )}
-          {threadStatus && <ThreadStatusLabel status={threadStatus} />}
-          {renamingThreadKey === threadKey ? (
-            <input
-              ref={handleRenameInputRef}
-              className="min-w-0 flex-1 truncate text-base sm:text-xs bg-transparent outline-none border border-ring rounded px-0.5"
-              value={renamingTitle}
-              onChange={handleRenameInputChange}
-              onKeyDown={handleRenameInputKeyDown}
-              onBlur={handleRenameInputBlur}
-              onClick={handleRenameInputClick}
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+        {prStatus && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={prStatus.tooltip}
+                  className={`inline-flex items-center justify-center ${prStatus.colorClass} cursor-pointer rounded-sm outline-hidden focus-visible:ring-1 focus-visible:ring-ring`}
+                  onClick={handlePrClick}
+                >
+                  <ChangeRequestStatusIcon className="size-3" />
+                </button>
+              }
             />
-          ) : (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span
-                    className="min-w-0 flex-1 truncate text-xs"
-                    data-testid={`thread-title-${thread.id}`}
-                  >
-                    {thread.title}
-                  </span>
-                }
-              />
-              <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
-                {thread.title}
-              </TooltipPopup>
-            </Tooltip>
-          )}
-        </div>
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {discoveredPorts.length > 0 && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    aria-label={`Open localhost:${discoveredPorts[0]?.port ?? ""}`}
-                    className="inline-flex cursor-pointer items-center justify-center text-emerald-600 outline-hidden focus-visible:ring-1 focus-visible:ring-ring dark:text-emerald-400"
-                    onClick={handleOpenDiscoveredPort}
-                  />
-                }
-              >
-                <Globe2Icon className="size-3" />
-              </TooltipTrigger>
-              <TooltipPopup side="top">
-                Open localhost:{discoveredPorts[0]?.port}
-                {discoveredPorts.length > 1 ? ` (+${discoveredPorts.length - 1})` : ""}
-              </TooltipPopup>
-            </Tooltip>
-          )}
-          {terminalStatus && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span
-                    role="img"
-                    aria-label={terminalStatus.label}
-                    className={`inline-flex items-center justify-center ${terminalStatus.colorClass}`}
-                  />
-                }
-              >
-                <TerminalIcon className={`size-3 ${terminalStatus.pulse ? "animate-pulse" : ""}`} />
-              </TooltipTrigger>
-              <TooltipPopup side="top">{terminalStatus.label}</TooltipPopup>
-            </Tooltip>
-          )}
-          <div
-            className={`flex min-w-12 justify-end ${
-              isRemoteThread ? "max-sm:min-w-24" : "max-sm:min-w-20"
-            }`}
-          >
-            {isConfirmingArchive ? (
-              <button
-                ref={handleConfirmArchiveRef}
-                type="button"
-                data-thread-selection-safe
-                data-testid={`thread-archive-confirm-${thread.id}`}
-                aria-label={`Confirm archive ${thread.title}`}
-                className="absolute top-1/2 right-1 inline-flex h-5 -translate-y-1/2 cursor-pointer items-center rounded-md bg-destructive/12 px-2 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/18 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-destructive/40"
-                onPointerDown={stopPropagationOnPointerDown}
-                onClick={handleConfirmArchiveClick}
-              >
-                Confirm
-              </button>
-            ) : !isThreadRunning ? (
-              appSettingsConfirmThreadArchive ? (
-                <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
-                  <button
-                    type="button"
-                    data-thread-selection-safe
-                    data-testid={`thread-archive-${thread.id}`}
-                    aria-label={`Archive ${thread.title}`}
-                    className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
-                    onPointerDown={stopPropagationOnPointerDown}
-                    onClick={handleStartArchiveConfirmation}
-                  >
-                    <ArchiveIcon className="size-3.5" />
-                  </button>
-                </div>
-              ) : (
+            <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
+          </Tooltip>
+        )}
+        {threadStatus && <ThreadStatusLabel status={threadStatus} />}
+        {renamingThreadKey === threadKey ? (
+          <input
+            ref={handleRenameInputRef}
+            className="min-w-0 flex-1 truncate text-base sm:text-xs bg-transparent outline-none border border-ring rounded px-0.5"
+            value={renamingTitle}
+            onChange={handleRenameInputChange}
+            onKeyDown={handleRenameInputKeyDown}
+            onBlur={handleRenameInputBlur}
+            onClick={handleRenameInputClick}
+          />
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  className="min-w-0 flex-1 truncate text-xs"
+                  data-testid={`thread-title-${thread.id}`}
+                >
+                  {thread.title}
+                </span>
+              }
+            />
+            <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
+              {thread.title}
+            </TooltipPopup>
+          </Tooltip>
+        )}
+      </div>
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {discoveredPorts.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={`Open localhost:${discoveredPorts[0]?.port ?? ""}`}
+                  className="inline-flex cursor-pointer items-center justify-center text-emerald-600 outline-hidden focus-visible:ring-1 focus-visible:ring-ring dark:text-emerald-400"
+                  onClick={handleOpenDiscoveredPort}
+                />
+              }
+            >
+              <Globe2Icon className="size-3" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              Open localhost:{discoveredPorts[0]?.port}
+              {discoveredPorts.length > 1 ? ` (+${discoveredPorts.length - 1})` : ""}
+            </TooltipPopup>
+          </Tooltip>
+        )}
+        {terminalStatus && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  role="img"
+                  aria-label={terminalStatus.label}
+                  className={`inline-flex items-center justify-center ${terminalStatus.colorClass}`}
+                />
+              }
+            >
+              <TerminalIcon className={`size-3 ${terminalStatus.pulse ? "animate-pulse" : ""}`} />
+            </TooltipTrigger>
+            <TooltipPopup side="top">{terminalStatus.label}</TooltipPopup>
+          </Tooltip>
+        )}
+        <div
+          className={`flex min-w-12 justify-end ${
+            isRemoteThread ? "max-sm:min-w-24" : "max-sm:min-w-20"
+          }`}
+        >
+          {isConfirmingArchive ? (
+            <button
+              ref={handleConfirmArchiveRef}
+              type="button"
+              data-thread-selection-safe
+              data-testid={`thread-archive-confirm-${thread.id}`}
+              aria-label={`Confirm archive ${thread.title}`}
+              className="absolute top-1/2 right-1 inline-flex h-5 -translate-y-1/2 cursor-pointer items-center rounded-md bg-destructive/12 px-2 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/18 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-destructive/40"
+              onPointerDown={stopPropagationOnPointerDown}
+              onClick={handleConfirmArchiveClick}
+            >
+              Confirm
+            </button>
+          ) : !isThreadRunning ? (
+            appSettingsConfirmThreadArchive ? (
+              <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                <button
+                  type="button"
+                  data-thread-selection-safe
+                  data-testid={`thread-archive-${thread.id}`}
+                  aria-label={`Archive ${thread.title}`}
+                  className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
+                  onPointerDown={stopPropagationOnPointerDown}
+                  onClick={handleStartArchiveConfirmation}
+                >
+                  <ArchiveIcon className="size-3.5" />
+                </button>
+              </div>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                      <button
+                        type="button"
+                        data-thread-selection-safe
+                        data-testid={`thread-archive-${thread.id}`}
+                        aria-label={`Archive ${thread.title}`}
+                        className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
+                        onPointerDown={stopPropagationOnPointerDown}
+                        onClick={handleArchiveImmediateClick}
+                      >
+                        <ArchiveIcon className="size-3.5" />
+                      </button>
+                    </div>
+                  }
+                />
+                <TooltipPopup side="top">Archive</TooltipPopup>
+              </Tooltip>
+            )
+          ) : null}
+          <span className={threadMetaClassName}>
+            <span className="inline-flex items-center gap-1">
+              {isRemoteThread && (
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <div className="pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
-                        <button
-                          type="button"
-                          data-thread-selection-safe
-                          data-testid={`thread-archive-${thread.id}`}
-                          aria-label={`Archive ${thread.title}`}
-                          className={SIDEBAR_ICON_ACTION_BUTTON_CLASS}
-                          onPointerDown={stopPropagationOnPointerDown}
-                          onClick={handleArchiveImmediateClick}
-                        >
-                          <ArchiveIcon className="size-3.5" />
-                        </button>
-                      </div>
+                      <span
+                        aria-label={threadEnvironmentLabel ?? "Remote"}
+                        className="inline-flex items-center justify-center"
+                      />
                     }
-                  />
-                  <TooltipPopup side="top">Archive</TooltipPopup>
-                </Tooltip>
-              )
-            ) : null}
-            <span className={threadMetaClassName}>
-              <span className="inline-flex items-center gap-1">
-                {isRemoteThread && (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span
-                          aria-label={threadEnvironmentLabel ?? "Remote"}
-                          className="inline-flex items-center justify-center"
-                        />
-                      }
-                    >
-                      <CloudIcon className="size-3 text-muted-foreground/40" />
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">{threadEnvironmentLabel}</TooltipPopup>
-                  </Tooltip>
-                )}
-                {jumpLabel ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span
-                          aria-label={jumpLabel}
-                          className="inline-flex h-5 items-center rounded-full border border-border/80 bg-background/90 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground shadow-sm"
-                        />
-                      }
-                    >
-                      {jumpLabel}
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
-                  </Tooltip>
-                ) : (
-                  <span
-                    className={`text-[10px] tabular-nums ${
-                      isHighlighted
-                        ? "text-foreground/72 dark:text-foreground/82"
-                        : "text-muted-foreground/40"
-                    }`}
                   >
-                    {formatRelativeTimeLabel(
-                      thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
-                    )}
-                  </span>
-                )}
-              </span>
+                    <CloudIcon className="size-3 text-muted-foreground/40" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">{threadEnvironmentLabel}</TooltipPopup>
+                </Tooltip>
+              )}
+              {jumpLabel ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        aria-label={jumpLabel}
+                        className="inline-flex h-5 items-center rounded-full border border-border/80 bg-background/90 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground shadow-sm"
+                      />
+                    }
+                  >
+                    {jumpLabel}
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
+                </Tooltip>
+              ) : (
+                <span
+                  className={`text-[10px] tabular-nums ${
+                    isHighlighted
+                      ? "text-foreground/72 dark:text-foreground/82"
+                      : "text-muted-foreground/40"
+                  }`}
+                >
+                  {formatRelativeTimeLabel(
+                    thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
+                  )}
+                </span>
+              )}
             </span>
-          </div>
+          </span>
         </div>
-      </SidebarMenuSubButton>
+      </div>
+    </SidebarMenuSubButton>
+  );
+});
+
+// Thin sortable wrapper: owns useSortable + the draggable <li>, and the
+// archive-confirm mouse/blur handlers. The expensive SidebarThreadRowContent
+// inside is memoized and receives only stable props, so it is skipped while a
+// drag is in progress (dnd-kit re-renders sortable nodes on every move).
+const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
+  const { thread, indented = false, renamingThreadKey, setConfirmingArchiveThreadKey } = props;
+  const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+  const isRenaming = renamingThreadKey === threadKey;
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: threadKey,
+    disabled: isRenaming,
+  });
+  const clearConfirmingArchive = useCallback(() => {
+    setConfirmingArchiveThreadKey((current) => (current === threadKey ? null : current));
+  }, [setConfirmingArchiveThreadKey, threadKey]);
+  const handleMouseLeave = useCallback(() => {
+    clearConfirmingArchive();
+  }, [clearConfirmingArchive]);
+  const handleBlurCapture = useCallback(
+    (event: React.FocusEvent<HTMLLIElement>) => {
+      const currentTarget = event.currentTarget;
+      requestAnimationFrame(() => {
+        if (currentTarget.contains(document.activeElement)) {
+          return;
+        }
+        clearConfirmingArchive();
+      });
+    },
+    [clearConfirmingArchive],
+  );
+  return (
+    <SidebarMenuSubItem
+      ref={setNodeRef}
+      // The actively-dragged row stays put and dims into a placeholder; only the
+      // compact DragOverlay follows the cursor (so it no longer covers the list).
+      style={{
+        transform: isDragging ? undefined : CSS.Translate.toString(transform),
+        transition,
+      }}
+      className={`w-full ${indented ? "ml-3 border-l border-border/70 pl-2" : ""} ${
+        isDragging ? "opacity-40" : ""
+      }`}
+      data-thread-item
+      onMouseLeave={handleMouseLeave}
+      onBlurCapture={handleBlurCapture}
+      {...(isRenaming ? {} : { ...attributes, ...listeners })}
+    >
+      <SidebarThreadRowContent {...props} />
     </SidebarMenuSubItem>
   );
 });
@@ -908,7 +922,6 @@ interface SidebarProjectThreadListProps {
   onThreadDragCancel: (event: DragCancelEvent) => void;
   activeDragLabel: string | null;
   threadDragInProgressRef: React.RefObject<boolean>;
-  suppressThreadClickAfterDragRef: React.RefObject<boolean>;
 }
 
 const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
@@ -964,7 +977,6 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     onThreadDragCancel,
     activeDragLabel,
     threadDragInProgressRef,
-    suppressThreadClickAfterDragRef,
   } = props;
   const showMoreButtonRender = useMemo(() => <button type="button" />, []);
   const showLessButtonRender = useMemo(() => <button type="button" />, []);
@@ -1000,7 +1012,6 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           attemptArchiveThread={attemptArchiveThread}
           openPrLink={openPrLink}
           threadDragInProgressRef={threadDragInProgressRef}
-          suppressThreadClickAfterDragRef={suppressThreadClickAfterDragRef}
         />
       );
     },
@@ -1026,7 +1037,6 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
       renamingTitle,
       setConfirmingArchiveThreadKey,
       setRenamingTitle,
-      suppressThreadClickAfterDragRef,
       threadDragInProgressRef,
       threadJumpLabelByKey,
     ],
@@ -1158,10 +1168,11 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           </>
         ) : null}
       </SidebarMenuSub>
-      <DragOverlay>
+      <DragOverlay dropAnimation={null} modifiers={[DRAG_OVERLAY_CURSOR_OFFSET]}>
         {activeDragLabel !== null ? (
-          <div className="pointer-events-none rounded-md border border-border bg-popover px-2 py-1 text-xs text-foreground shadow-md">
-            {activeDragLabel}
+          <div className="pointer-events-none inline-flex max-w-50 items-center gap-1.5 rounded-md border border-primary/40 bg-popover px-2 py-1 text-xs text-foreground shadow-md">
+            <GripVerticalIcon className="size-3 shrink-0 text-muted-foreground/70" />
+            <span className="truncate">{activeDragLabel}</span>
           </div>
         ) : null}
       </DragOverlay>
@@ -1360,8 +1371,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const [renamingGroupTitle, setRenamingGroupTitle] = useState("");
   const [activeDragLabel, setActiveDragLabel] = useState<string | null>(null);
   const threadDragInProgressRef = useRef(false);
-  const suppressThreadClickAfterDragRef = useRef(false);
-  const suppressGroupClickAfterDragRef = useRef(false);
   const memberProjectByScopedKey = useMemo(
     () =>
       new Map(
@@ -2404,8 +2413,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
   const handleToggleGroup = useCallback(
     (groupId: string) => {
-      if (suppressGroupClickAfterDragRef.current) {
-        suppressGroupClickAfterDragRef.current = false;
+      // Ignore the trailing click that follows a folder-reorder drag.
+      if (threadDragInProgressRef.current) {
         return;
       }
       toggleThreadGroup(groupId);
@@ -2480,11 +2489,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const activeId = String(event.active.id);
       threadDragInProgressRef.current = true;
       if (activeId.startsWith("group-header:")) {
-        suppressGroupClickAfterDragRef.current = true;
         setActiveDragLabel(null);
         return;
       }
-      suppressThreadClickAfterDragRef.current = true;
       const draggedKeys = resolveDraggedThreadKeys(activeId);
       if (draggedKeys.length > 1) {
         setActiveDragLabel(`${draggedKeys.length} threads`);
@@ -2495,19 +2502,26 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [resolveDraggedThreadKeys],
   );
 
-  const handleThreadDragCancel = useCallback((_event: DragCancelEvent) => {
-    threadDragInProgressRef.current = false;
-    // Clear the click-suppression flags set on drag start, otherwise the next
-    // click on the row/header after a cancelled drag is swallowed.
-    suppressThreadClickAfterDragRef.current = false;
-    suppressGroupClickAfterDragRef.current = false;
+  // Clear the in-progress flag on the next frame so the synchronous trailing
+  // click dnd-kit may emit on drop is still suppressed, but a real click after
+  // is not.
+  const endThreadDrag = useCallback(() => {
     setActiveDragLabel(null);
+    requestAnimationFrame(() => {
+      threadDragInProgressRef.current = false;
+    });
   }, []);
+
+  const handleThreadDragCancel = useCallback(
+    (_event: DragCancelEvent) => {
+      endThreadDrag();
+    },
+    [endThreadDrag],
+  );
 
   const handleThreadDragEnd = useCallback(
     (event: DragEndEvent) => {
-      threadDragInProgressRef.current = false;
-      setActiveDragLabel(null);
+      endThreadDrag();
       const { active, over } = event;
       if (!over) return;
       const activeId = String(active.id);
@@ -2547,7 +2561,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         moveThreadsToGroup(draggedKeys, overGroupId, overId);
       }
     },
-    [moveThreadsToGroup, project.projectKey, reorderThreadGroupsAction, resolveDraggedThreadKeys],
+    [
+      endThreadDrag,
+      moveThreadsToGroup,
+      project.projectKey,
+      reorderThreadGroupsAction,
+      resolveDraggedThreadKeys,
+    ],
   );
 
   const threadDnDSensors = useSensors(
@@ -2713,7 +2733,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         onThreadDragCancel={handleThreadDragCancel}
         activeDragLabel={activeDragLabel}
         threadDragInProgressRef={threadDragInProgressRef}
-        suppressThreadClickAfterDragRef={suppressThreadClickAfterDragRef}
       />
 
       <Dialog
