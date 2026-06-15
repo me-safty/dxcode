@@ -621,6 +621,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
   const generatedStashMessage = (
     cwd: string,
     mode: "all" | "staged" | "unstaged",
+    paths?: readonly string[],
   ): Effect.Effect<string, never> =>
     Effect.gen(function* () {
       const fallback = `T3 Code ${mode} stash`;
@@ -632,11 +633,12 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
         mode === "staged"
           ? (["diff", "--cached", "--no-ext-diff", "--patch", "--minimal"] as const)
           : (["diff", "--no-ext-diff", "--patch", "--minimal"] as const);
+      const pathArgs = paths && paths.length > 0 ? (["--", ...paths] as const) : [];
       const [settings, summary, patch, status] = yield* Effect.all(
         [
           serverSettings.getSettings,
-          run("vcs.panel.stashMessageSummary", cwd, diffArgs),
-          run("vcs.panel.stashMessagePatch", cwd, patchArgs),
+          run("vcs.panel.stashMessageSummary", cwd, [...diffArgs, ...pathArgs]),
+          run("vcs.panel.stashMessagePatch", cwd, [...patchArgs, ...pathArgs]),
           run("vcs.panel.stashMessageStatus", cwd, ["status", "--short"]),
         ],
         { concurrency: "unbounded" },
@@ -1022,13 +1024,17 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
             ? ["--include-untracked", ...(mode === "unstaged" ? ["--keep-index"] : [])]
             : [];
       return Effect.gen(function* () {
-        const message = input.message?.trim() || (yield* generatedStashMessage(input.cwd, mode));
+        const paths = input.paths ?? [];
+        const pathArgs = paths.length > 0 ? ["--", ...paths] : [];
+        const message =
+          input.message?.trim() || (yield* generatedStashMessage(input.cwd, mode, paths));
         yield* run("vcs.panel.createStash", input.cwd, [
           "stash",
           "push",
           ...modeArgs,
           "-m",
           message,
+          ...pathArgs,
         ]).pipe(Effect.asVoid);
       });
     },

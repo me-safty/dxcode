@@ -506,6 +506,7 @@ export const VcsPanelStashInput = Schema.Struct({
   message: Schema.optional(TrimmedNonEmptyStringSchema),
   includeUntracked: Schema.optional(Schema.Boolean),
   mode: Schema.optional(Schema.Literals(["all", "staged", "unstaged"])),
+  paths: Schema.optional(Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1))),
 });
 export type VcsPanelStashInput = typeof VcsPanelStashInput.Type;
 
