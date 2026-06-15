@@ -57,23 +57,30 @@ export function buildBakeoffViews(
   runs: ReadonlyArray<AgentRun>,
 ): BakeoffView[] {
   const runsByThreadKey = new Map(
-    runs.map((run) => [`${run.thread.environmentId}:${run.thread.id}`, run]),
+    runs.map((run) => [bakeoffThreadKey(run.thread.environmentId, run.thread.id), run]),
   );
   return bakeoffs
     .map((bakeoff) => ({
       bakeoff,
       contestants: bakeoff.contestants.map((contestant) => ({
         contestant,
-        run: runsByThreadKey.get(`${bakeoff.environmentId}:${contestant.threadId}`) ?? null,
+        run:
+          runsByThreadKey.get(bakeoffThreadKey(bakeoff.environmentId, contestant.threadId)) ?? null,
       })),
     }))
     .toSorted((left, right) => right.bakeoff.createdAt.localeCompare(left.bakeoff.createdAt));
 }
 
+export function bakeoffThreadKey(environmentId: string, threadId: string): string {
+  return `${environmentId}:${threadId}`;
+}
+
 export function bakeoffThreadKeys(bakeoffs: ReadonlyArray<Bakeoff>): ReadonlySet<string> {
   return new Set(
     bakeoffs.flatMap((bakeoff) =>
-      bakeoff.contestants.map((contestant) => `${bakeoff.environmentId}:${contestant.threadId}`),
+      bakeoff.contestants.map((contestant) =>
+        bakeoffThreadKey(bakeoff.environmentId, contestant.threadId),
+      ),
     ),
   );
 }

@@ -5,6 +5,7 @@ import {
   deriveLocalBranchNameFromRemoteRef,
   resolveEnvironmentOptionLabel,
   resolveBranchSelectionTarget,
+  resolveBranchPresentation,
   resolveCurrentWorkspaceLabel,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
@@ -81,6 +82,34 @@ describe("resolveBranchToolbarValue", () => {
         currentGitBranch: "main",
       }),
     ).toBe("main");
+  });
+});
+
+describe("resolveBranchPresentation", () => {
+  it("shows the section thread title and exposes the underlying branch in a tooltip", () => {
+    expect(
+      resolveBranchPresentation({
+        defaultLabel: "section-thread/thread-1",
+        branch: "section-thread/thread-1",
+        sectionThreadTitle: "Add clean section worktrees",
+      }),
+    ).toEqual({
+      label: "Add clean section worktrees",
+      tooltip: "section-thread/thread-1",
+    });
+  });
+
+  it("keeps manually selected branches visible in section threads", () => {
+    expect(
+      resolveBranchPresentation({
+        defaultLabel: "feature/manual",
+        branch: "feature/manual",
+        sectionThreadTitle: "Add clean section worktrees",
+      }),
+    ).toEqual({
+      label: "feature/manual",
+      tooltip: null,
+    });
   });
 });
 

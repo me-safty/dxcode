@@ -1,7 +1,7 @@
 import type { ModelSelection, ServerConfig } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { GitCompareArrowsIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { launchBakeoff, type Bakeoff } from "../bakeoffs";
 import { deriveProviderInstanceEntries } from "../providerInstances";
@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Input } from "./ui/input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Textarea } from "./ui/textarea";
 import { toastManager } from "./ui/toast";
 
@@ -37,7 +38,7 @@ function contestantOptions(config: ServerConfig | null): ContestantOption[] {
     if (!entry.enabled || !entry.isAvailable || entry.status !== "ready") return [];
     return entry.models.map((model) => ({
       key: `${entry.instanceId}\0${model.slug}`,
-      label: `${entry.displayName} · ${model.name}`,
+      label: [entry.displayName, model.subProvider, model.name].filter(Boolean).join(" · "),
       modelSelection: createModelSelection(entry.instanceId, model.slug),
     }));
   });
@@ -68,17 +69,28 @@ export function BakeoffCreateDialog(props: {
       ),
     [props.configByEnvironmentId, selectedProject],
   );
+  const projectKeyForContestantOptions = useRef<string | null>(null);
 
   useEffect(() => {
     if (!props.open) return;
+    setTitle("");
+    setPrompt("");
     setSelectedProjectKey(
       (current) => current || (props.projects[0] ? projectKey(props.projects[0]) : ""),
     );
   }, [props.open, props.projects]);
 
   useEffect(() => {
+    if (!props.open) {
+      projectKeyForContestantOptions.current = null;
+      return;
+    }
+    if (!selectedProjectKey || projectKeyForContestantOptions.current === selectedProjectKey) {
+      return;
+    }
+    projectKeyForContestantOptions.current = selectedProjectKey;
     setSelectedContestantKeys(new Set(options.slice(0, 2).map((option) => option.key)));
-  }, [options]);
+  }, [props.open, selectedProjectKey, options]);
 
   const selectedContestants = options.filter((option) => selectedContestantKeys.has(option.key));
   const canLaunch =
@@ -133,17 +145,25 @@ export function BakeoffCreateDialog(props: {
         <DialogPanel className="grid gap-5">
           <label className="grid gap-1.5 text-sm font-medium">
             Project
-            <select
-              className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/24"
+            <Select
               value={selectedProjectKey}
-              onChange={(event) => setSelectedProjectKey(event.target.value)}
+              onValueChange={(value) => setSelectedProjectKey(value ?? "")}
             >
-              {props.projects.map((project) => (
-                <option key={projectKey(project)} value={projectKey(project)}>
-                  {project.name} · {project.cwd}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger aria-label="Project">
+                <SelectValue>
+                  {selectedProject
+                    ? `${selectedProject.name} · ${selectedProject.cwd}`
+                    : "Select a project"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                {props.projects.map((project) => (
+                  <SelectItem key={projectKey(project)} value={projectKey(project)}>
+                    {project.name} · {project.cwd}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           </label>
           <label className="grid gap-1.5 text-sm font-medium">
             Name
@@ -155,9 +175,9 @@ export function BakeoffCreateDialog(props: {
             />
           </label>
           <label className="grid gap-1.5 text-sm font-medium">
-            Task
+            Agent prompt
             <Textarea
-              placeholder="Describe the implementation task every contestant should complete."
+              placeholder="Enter the prompt that will be given to every agent."
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
             />

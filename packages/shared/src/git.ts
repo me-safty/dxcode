@@ -11,6 +11,7 @@ import * as Result from "effect/Result";
 import { detectSourceControlProviderFromRemoteUrl } from "./sourceControl.ts";
 
 export const WORKTREE_BRANCH_PREFIX = "t3code";
+export const SECTION_THREAD_BRANCH_PREFIX = "section-thread/";
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
 
 /**
@@ -95,6 +96,10 @@ export function buildTemporaryWorktreeBranchName(
 
 export function isTemporaryWorktreeBranch(refName: string): boolean {
   return TEMP_WORKTREE_BRANCH_PATTERN.test(refName.trim().toLowerCase());
+}
+
+export function isSectionThreadBranch(refName: string): boolean {
+  return refName.startsWith(SECTION_THREAD_BRANCH_PREFIX);
 }
 
 /**

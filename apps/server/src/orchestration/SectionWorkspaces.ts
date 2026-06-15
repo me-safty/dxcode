@@ -1,4 +1,5 @@
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
+import { isSectionThreadBranch, SECTION_THREAD_BRANCH_PREFIX } from "@t3tools/shared/git";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
@@ -7,7 +8,6 @@ import * as Path from "effect/Path";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 
 const SECTION_BASE_REF = "refs/morecode/section-base";
-const SECTION_THREAD_BRANCH_PREFIX = "section-thread/";
 const SAFE_MANAGED_PATH_SEGMENT = /^[a-zA-Z0-9_-]+$/;
 
 function managedPathSegment(value: string): string {
@@ -201,7 +201,7 @@ export const removeSectionThreadWorktree = Effect.fn("removeSectionThreadWorktre
       path: input.worktreePath,
       force: true,
     });
-    if (branch?.startsWith(SECTION_THREAD_BRANCH_PREFIX)) {
+    if (branch && isSectionThreadBranch(branch)) {
       yield* runGit("SectionWorkspaces.removeThreadBranch", input.sectionWorkspaceRoot, [
         "branch",
         "-D",
