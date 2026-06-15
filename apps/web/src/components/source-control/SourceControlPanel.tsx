@@ -20,11 +20,17 @@ import {
   Download,
   ExternalLink,
   GitBranch,
+  GitBranchPlus,
   GitCommit,
   GitCompare,
+  GitMerge,
   Plus,
   RefreshCw,
+  RotateCcw,
+  Tag,
+  Target,
   Trash2,
+  Undo2,
   Upload,
   X,
 } from "lucide-react";
@@ -236,12 +242,6 @@ function formatReadableDate(value: string | null | undefined): string | null {
   return commitDateFormatter.format(new Date(time));
 }
 
-function shortRemoteBranchName(details: VcsPanelBranchDetails): string {
-  return details.remoteName && details.fullRefName.startsWith(`${details.remoteName}/`)
-    ? details.fullRefName.slice(details.remoteName.length + 1)
-    : details.name;
-}
-
 function mapBranchDetails(
   details: readonly VcsPanelBranchDetails[],
 ): ReadonlyMap<string, VcsPanelBranchDetails> {
@@ -269,6 +269,22 @@ function remoteBranchRef(
   };
 }
 
+function localBranchForRemoteBranch(
+  snapshot: VcsPanelSnapshotResult,
+  remote: VcsPanelRemote,
+  branch: VcsPanelRemote["branches"][number],
+): VcsRef | null {
+  return (
+    snapshot.localBranches.find((localBranch) => localBranch.upstreamName === branch.fullRefName) ??
+    snapshot.localBranches.find(
+      (localBranch) =>
+        localBranch.name === branch.name &&
+        localBranch.upstreamName === `${remote.name}/${branch.name}`,
+    ) ??
+    null
+  );
+}
+
 function expandedBranchesForSnapshot(
   snapshot: VcsPanelSnapshotResult,
   expanded: ReadonlySet<string>,
@@ -278,8 +294,17 @@ function expandedBranchesForSnapshot(
   );
   const remoteBranches = snapshot.remotes.flatMap((remote) =>
     remote.branches
-      .map((branch) => remoteBranchRef(remote, branch))
-      .filter((branch) => expanded.has(treeKey("remote-branch", branch.name))),
+      .map((branch) => ({
+        displayName: branch.name,
+        ref:
+          localBranchForRemoteBranch(snapshot, remote, branch) ?? remoteBranchRef(remote, branch),
+      }))
+      .filter((branch) =>
+        expanded.has(
+          treeKey("remote-branch", `${branch.ref.remoteName ?? "local"}:${branch.displayName}`),
+        ),
+      )
+      .map((branch) => branch.ref),
   );
   return [...localBranches, ...remoteBranches];
 }
@@ -307,11 +332,11 @@ function BranchSyncLabels({
   readonly aheadCount: number;
   readonly behindCount: number;
 }) {
-  const label = formatSyncCounts(aheadCount, behindCount);
-  if (!label) return null;
+  if (aheadCount === 0 && behindCount === 0) return null;
   return (
-    <span className="shrink-0 whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
-      {label}
+    <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] tabular-nums">
+      {aheadCount > 0 ? <span className="text-success-foreground">↑{aheadCount}</span> : null}
+      {behindCount > 0 ? <span className="text-destructive-foreground">↓{behindCount}</span> : null}
     </span>
   );
 }
@@ -396,9 +421,9 @@ function AttentionIcon({ kind }: { readonly kind: AttentionKind }) {
     case "diverged":
       return <AlertTriangle className="size-3.5 shrink-0 text-destructive-foreground" />;
     case "behind":
-      return <Download className="size-3.5 shrink-0 text-warning-foreground" />;
+      return <Download className="size-3.5 shrink-0 text-destructive-foreground" />;
     case "unpushed":
-      return <Upload className="size-3.5 shrink-0 text-info-foreground" />;
+      return <Upload className="size-3.5 shrink-0 text-success-foreground" />;
     case "dirty":
       return <GitCommit className="size-3.5 shrink-0 text-warning-foreground" />;
     case "stale":
@@ -460,8 +485,8 @@ function displayHeadRefs(headRefs: readonly string[]): DisplayHeadRef[] {
   return refs;
 }
 
-function SyncedIcon() {
-  return <Check className="size-3 shrink-0" aria-label="Synced upstream" />;
+function SyncedIcon({ className }: { readonly className?: string }) {
+  return <Target className={cn("size-3 shrink-0", className)} aria-label="Synced upstream" />;
 }
 
 function RefLabels({ commit }: { readonly commit: VcsPanelCommitSummary }) {
@@ -472,14 +497,18 @@ function RefLabels({ commit }: { readonly commit: VcsPanelCommitSummary }) {
       {headRefs.map((ref) => (
         <CompactBadge key={`head:${ref.kind}:${ref.name}`}>
           <span className="inline-flex items-center gap-0.5">
-            {ref.kind === "remote" ? <SyncedIcon /> : null}
+            {ref.kind === "remote" || (ref.kind === "local" && ref.synced) ? <SyncedIcon /> : null}
             <span>{ref.name}</span>
-            {ref.kind === "local" && ref.synced ? <SyncedIcon /> : null}
           </span>
         </CompactBadge>
       ))}
       {commit.tags.map((tag) => (
-        <CompactBadge key={`tag:${tag}`}>{tag}</CompactBadge>
+        <CompactBadge key={`tag:${tag}`}>
+          <span className="inline-flex items-center gap-0.5">
+            <Tag className="size-3 shrink-0" />
+            <span>{tag}</span>
+          </span>
+        </CompactBadge>
       ))}
     </span>
   );
@@ -506,6 +535,10 @@ function CommitTooltip({ commit }: { readonly commit: VcsPanelCommitSummary }) {
         </div>
       ) : null}
       <div className="line-clamp-3">{commit.message}</div>
+      <StatLabels
+        insertions={sumFiles(commit.files).insertions}
+        deletions={sumFiles(commit.files).deletions}
+      />
       <RefLabels commit={commit} />
     </div>
   );
@@ -969,6 +1002,90 @@ export function SourceControlPanel({
     [api, confirm, cwd, runAction],
   );
 
+  const undoLatestCommit = useCallback(
+    (branchName: string) =>
+      void (async () => {
+        if (!(await confirm(`Undo latest commit on ${branchName}?`))) return;
+        await runAction(
+          `branch-undo-latest:${branchName}`,
+          () => api?.vcs.undoLatestCommit({ cwd }) ?? Promise.resolve(),
+        );
+      })(),
+    [api, confirm, cwd, runAction],
+  );
+
+  const mergeBranchIntoCurrent = useCallback(
+    (branchName: string) =>
+      void (async () => {
+        if (!(await confirm(`Merge ${branchName} into the current branch?`))) return;
+        await runAction(
+          `branch-merge:${branchName}`,
+          () => api?.vcs.mergeBranchIntoCurrent({ cwd, refName: branchName }) ?? Promise.resolve(),
+        );
+      })(),
+    [api, confirm, cwd, runAction],
+  );
+
+  const rebaseCurrentOnto = useCallback(
+    (refName: string) =>
+      void (async () => {
+        if (!(await confirm(`Rebase the current branch onto ${refName}?`))) return;
+        await runAction(
+          `rebase-current:${refName}`,
+          () => api?.vcs.rebaseCurrentOnto({ cwd, refName }) ?? Promise.resolve(),
+        );
+      })(),
+    [api, confirm, cwd, runAction],
+  );
+
+  const revertCommit = useCallback(
+    (commit: VcsPanelCommitSummary) =>
+      void (async () => {
+        if (!(await confirm(`Revert commit ${commit.shortSha}?`))) return;
+        await runAction(
+          `commit-revert:${commit.sha}`,
+          () => api?.vcs.revertCommit({ cwd, sha: commit.sha }) ?? Promise.resolve(),
+        );
+      })(),
+    [api, confirm, cwd, runAction],
+  );
+
+  const checkoutCommitDetached = useCallback(
+    (commit: VcsPanelCommitSummary) =>
+      void (async () => {
+        if (!(await confirm(`Checkout ${commit.shortSha} as detached HEAD?`))) return;
+        await runAction(`commit-checkout:${commit.sha}`, async () => {
+          if (!api) return;
+          const result = await api.vcs.checkoutCommit({ cwd, sha: commit.sha });
+          await readEnvironmentApi(environmentId)?.orchestration.dispatchCommand({
+            type: "thread.meta.update",
+            commandId: newCommandId(),
+            threadId,
+            branch: result.refName,
+            worktreePath,
+          });
+        });
+      })(),
+    [api, confirm, cwd, environmentId, runAction, threadId, worktreePath],
+  );
+
+  const createBranchFromCommit = useCallback(
+    (commit: VcsPanelCommitSummary) =>
+      void (async () => {
+        const branchName = window.prompt(`Create branch from ${commit.shortSha}`, "");
+        const trimmed = branchName?.trim();
+        if (!trimmed) return;
+        await runAction(`commit-create-branch:${commit.sha}:${trimmed}`, async () => {
+          await api?.vcs.createBranchFromCommit({
+            cwd,
+            sha: commit.sha,
+            branchName: trimmed,
+          });
+        });
+      })(),
+    [api, cwd, runAction],
+  );
+
   const syncBranch = useCallback(
     (branch: VcsRef, event: ReactMouseEvent<HTMLButtonElement>) => {
       if (!snapshot) return;
@@ -1414,7 +1531,7 @@ export function SourceControlPanel({
               <div
                 role="button"
                 tabIndex={0}
-                className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-xs hover:bg-accent/60"
+                className="group relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-xs hover:bg-accent/60"
                 onClick={() => toggleTree(key)}
                 onKeyDown={(event) => toggleTreeFromKeyboard(key, event)}
               >
@@ -1427,10 +1544,33 @@ export function SourceControlPanel({
                 <AuthorAvatar commit={commit} />
                 <span className="min-w-0 flex-1 truncate">{commit.message}</span>
                 <RefLabels commit={commit} />
+                <StatLabels insertions={stats.insertions} deletions={stats.deletions} />
                 {relativeDate ? (
                   <span className="shrink-0 text-[11px] text-muted-foreground">{relativeDate}</span>
                 ) : null}
-                <StatLabels insertions={stats.insertions} deletions={stats.deletions} />
+                <RowActions>
+                  <IconButton label="Revert commit" onClick={() => revertCommit(commit)}>
+                    <RotateCcw className="size-3.5" />
+                  </IconButton>
+                  <IconButton
+                    label="Rebase current branch onto commit"
+                    onClick={() => rebaseCurrentOnto(commit.sha)}
+                  >
+                    <GitMerge className="size-3.5" />
+                  </IconButton>
+                  <IconButton
+                    label="Checkout as detached HEAD"
+                    onClick={() => checkoutCommitDetached(commit)}
+                  >
+                    <GitCommit className="size-3.5" />
+                  </IconButton>
+                  <IconButton
+                    label="Create branch from commit"
+                    onClick={() => createBranchFromCommit(commit)}
+                  >
+                    <GitBranchPlus className="size-3.5" />
+                  </IconButton>
+                </RowActions>
               </div>
             }
           />
@@ -1514,6 +1654,7 @@ export function SourceControlPanel({
             id: "ahead",
             title: `${details.aheadCommits.length} Ahead`,
             count: null,
+            icon: <Upload className="size-3.5 shrink-0 text-success-foreground" />,
             children: details.aheadCommits.map(renderCommit),
           })
         : null}
@@ -1523,13 +1664,14 @@ export function SourceControlPanel({
             id: "behind",
             title: `${details.behindCommits.length} Behind`,
             count: null,
+            icon: <Download className="size-3.5 shrink-0 text-destructive-foreground" />,
             children: details.behindCommits.map(renderCommit),
           })
         : null}
       {renderBranchSubsection({
         details,
         id: "commits",
-        title: "Commits",
+        title: "History",
         count: null,
         defaultExpanded: true,
         children: (
@@ -1569,6 +1711,9 @@ export function SourceControlPanel({
     const switchKey = `branch-switch:${branch.name}`;
     const syncKey = `branch-sync:${branch.name}`;
     const deleteKey = `branch-delete:${branch.name}`;
+    const undoKey = `branch-undo-latest:${branch.name}`;
+    const mergeKey = `branch-merge:${branch.name}`;
+    const rebaseKey = `rebase-current:${branch.name}`;
     const syncLabel = branchSyncActionLabel(syncState);
     const relativeDate = formatRelativeDate(branch.lastActivityAt);
     return (
@@ -1576,7 +1721,7 @@ export function SourceControlPanel({
         <div
           role="button"
           tabIndex={0}
-          className="group relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 pr-20 text-left text-xs hover:bg-accent/60"
+          className="group relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-xs hover:bg-accent/60"
           onClick={() => toggleBranchTree(key, branch)}
           onKeyDown={(event) => toggleBranchTreeFromKeyboard(key, branch, event)}
         >
@@ -1590,7 +1735,7 @@ export function SourceControlPanel({
           <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1">
             {hasUpstream && aheadCount === 0 && behindCount === 0 ? (
               <span className="inline-flex size-4 shrink-0 items-center justify-center text-success-foreground">
-                <SyncedIcon />
+                <SyncedIcon className="text-success-foreground" />
               </span>
             ) : null}
             {!hasUpstream ? <CompactBadge>local</CompactBadge> : null}
@@ -1625,6 +1770,33 @@ export function SourceControlPanel({
             >
               <Trash2 className="size-3.5" />
             </IconButton>
+            {current && aheadCount > 0 ? (
+              <IconButton
+                label="Undo latest commit"
+                disabled={isActionRunning(undoKey)}
+                onClick={() => undoLatestCommit(branch.name)}
+              >
+                <Undo2 className="size-3.5" />
+              </IconButton>
+            ) : null}
+            {!current ? (
+              <>
+                <IconButton
+                  label="Merge branch into current"
+                  disabled={isActionRunning(mergeKey)}
+                  onClick={() => mergeBranchIntoCurrent(branch.name)}
+                >
+                  <GitMerge className="size-3.5" />
+                </IconButton>
+                <IconButton
+                  label="Rebase current branch onto branch"
+                  disabled={isActionRunning(rebaseKey)}
+                  onClick={() => rebaseCurrentOnto(branch.name)}
+                >
+                  <Upload className="size-3.5" />
+                </IconButton>
+              </>
+            ) : null}
           </RowActions>
         </div>
         {expanded && details ? renderBranchTree(branch, details) : null}
@@ -1637,21 +1809,29 @@ export function SourceControlPanel({
     );
   };
 
-  const remoteBranchRow = (branch: VcsRef) => {
+  const remoteBranchRow = (branch: VcsRef, displayName: string, hasLocalBranch: boolean) => {
     const details = branchDetailsByRef.get(branch.name);
-    const key = treeKey("remote-branch", branch.name);
+    const key = treeKey("remote-branch", `${branch.remoteName ?? "local"}:${displayName}`);
     const expanded = expandedTree.has(key);
     const loadingDetails = loadingBranchDetails.has(branch.name);
+    const current = branch.current;
     const relativeDate = formatRelativeDate(branch.lastActivityAt);
+    const { aheadCount, behindCount } = branchSyncCounts(branch, snapshot);
+    const hasUpstream = branchHasUpstream(branch, snapshot);
+    const syncState = branchSyncState(branch, snapshot);
     const switchKey = `branch-switch:${branch.name}`;
+    const syncKey = `branch-sync:${branch.name}`;
     const fetchKey = `branch-fetch:${branch.name}`;
     const deleteKey = `branch-delete:${branch.name}`;
+    const undoKey = `branch-undo-latest:${branch.name}`;
+    const mergeKey = `branch-merge:${branch.name}`;
+    const rebaseKey = `rebase-current:${branch.name}`;
     return (
-      <div key={branch.name} className="space-y-0.5">
+      <div key={`${branch.remoteName ?? "local"}:${displayName}`} className="space-y-0.5">
         <div
           role="button"
           tabIndex={0}
-          className="group relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 pr-20 text-left text-xs hover:bg-accent/60"
+          className="group relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-xs hover:bg-accent/60"
           onClick={() => toggleBranchTree(key, branch)}
           onKeyDown={(event) => toggleBranchTreeFromKeyboard(key, branch, event)}
         >
@@ -1661,43 +1841,87 @@ export function SourceControlPanel({
             <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
           )}
           <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-sm">
-            {details
-              ? shortRemoteBranchName(details)
-              : branch.name.replace(`${branch.remoteName}/`, "")}
-          </span>
-          {relativeDate ? (
-            <span className="shrink-0 text-[11px] text-muted-foreground">{relativeDate}</span>
-          ) : null}
-          {branch.isDefault ? <CompactBadge>default</CompactBadge> : null}
+          <span className="min-w-0 flex-1 truncate text-sm">{displayName}</span>
+          <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1">
+            {hasLocalBranch && hasUpstream && aheadCount === 0 && behindCount === 0 ? (
+              <span className="inline-flex size-4 shrink-0 items-center justify-center text-success-foreground">
+                <SyncedIcon className="text-success-foreground" />
+              </span>
+            ) : null}
+            {hasLocalBranch && !hasUpstream ? <CompactBadge>local</CompactBadge> : null}
+            {current ? <CompactBadge>current</CompactBadge> : null}
+            {branch.isDefault ? <CompactBadge>default</CompactBadge> : null}
+            <BranchSyncLabels aheadCount={aheadCount} behindCount={behindCount} />
+            {relativeDate ? (
+              <span className="shrink-0 text-[11px] text-muted-foreground">{relativeDate}</span>
+            ) : null}
+          </div>
           <RowActions>
             <IconButton
               label="Switch branch"
-              disabled={isActionRunning(switchKey)}
+              disabled={current || isActionRunning(switchKey)}
               onClick={() => void switchRef(branch.name)}
             >
               <GitBranch className="size-3.5" />
             </IconButton>
+            {hasLocalBranch ? (
+              <IconButton
+                label={branchSyncActionLabel(syncState)}
+                disabled={isActionRunning(syncKey) || isActionRunning(fetchKey)}
+                onClick={(event) => syncBranch(branch, event)}
+              >
+                <BranchSyncActionIcon state={syncState} />
+              </IconButton>
+            ) : (
+              <IconButton
+                label="Fetch branch"
+                disabled={isActionRunning(fetchKey)}
+                onClick={() =>
+                  void runAction(
+                    fetchKey,
+                    () =>
+                      api?.vcs.fetchBranch({ cwd, branchName: branch.name }) ?? Promise.resolve(),
+                  )
+                }
+              >
+                <RefreshCw className="size-3.5" />
+              </IconButton>
+            )}
             <IconButton
-              label="Fetch branch"
-              disabled={isActionRunning(fetchKey)}
-              onClick={() =>
-                void runAction(
-                  fetchKey,
-                  () => api?.vcs.fetchBranch({ cwd, branchName: branch.name }) ?? Promise.resolve(),
-                )
-              }
-            >
-              <RefreshCw className="size-3.5" />
-            </IconButton>
-            <IconButton
-              label="Delete remote branch"
+              label={hasLocalBranch ? "Delete branch. Shift: force." : "Delete remote branch"}
               destructive
               disabled={isActionRunning(deleteKey)}
-              onClick={() => deleteBranch(branch, false)}
+              onClick={(event) => deleteBranch(branch, hasLocalBranch && isActionForced(event))}
             >
               <Trash2 className="size-3.5" />
             </IconButton>
+            {current && aheadCount > 0 ? (
+              <IconButton
+                label="Undo latest commit"
+                disabled={isActionRunning(undoKey)}
+                onClick={() => undoLatestCommit(branch.name)}
+              >
+                <Undo2 className="size-3.5" />
+              </IconButton>
+            ) : null}
+            {!current ? (
+              <>
+                <IconButton
+                  label="Merge branch into current"
+                  disabled={isActionRunning(mergeKey)}
+                  onClick={() => mergeBranchIntoCurrent(branch.name)}
+                >
+                  <GitMerge className="size-3.5" />
+                </IconButton>
+                <IconButton
+                  label="Rebase current branch onto branch"
+                  disabled={isActionRunning(rebaseKey)}
+                  onClick={() => rebaseCurrentOnto(branch.name)}
+                >
+                  <Upload className="size-3.5" />
+                </IconButton>
+              </>
+            ) : null}
           </RowActions>
         </div>
         {expanded && details ? renderBranchTree(branch, details) : null}
@@ -1720,7 +1944,7 @@ export function SourceControlPanel({
         <div
           role="button"
           tabIndex={0}
-          className="group relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 pr-16 text-left text-xs hover:bg-accent/60"
+          className="group relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-xs hover:bg-accent/60"
           onClick={() => toggleTree(key)}
           onKeyDown={(event) => toggleTreeFromKeyboard(key, event)}
         >
@@ -1771,7 +1995,12 @@ export function SourceControlPanel({
               <div className="px-1.5 py-1 text-xs text-muted-foreground">No remote branches.</div>
             ) : (
               remote.branches.map((branch) => {
-                return remoteBranchRow(remoteBranchRef(remote, branch));
+                const localBranch = localBranchForRemoteBranch(snapshot, remote, branch);
+                return remoteBranchRow(
+                  localBranch ?? remoteBranchRef(remote, branch),
+                  branch.name,
+                  localBranch !== null,
+                );
               })
             )}
           </div>
@@ -1794,7 +2023,7 @@ export function SourceControlPanel({
         <div
           role="button"
           tabIndex={0}
-          className="group relative flex h-7 min-w-0 items-center justify-between gap-1.5 rounded px-1.5 pr-24 text-xs hover:bg-accent/60"
+          className="group relative flex h-7 min-w-0 items-center justify-between gap-1.5 rounded px-1.5 text-xs hover:bg-accent/60"
           onClick={() => toggleStashTree(key, stash.refName)}
           onKeyDown={(event) => {
             if (event.key !== "Enter" && event.key !== " ") return;
@@ -1991,7 +2220,11 @@ export function SourceControlPanel({
       activity: currentBranch ? branchActivityTimestamp(currentBranch) : 0,
     },
     ...snapshot.localBranches
-      .filter((branch) => !branch.current)
+      .filter((branch) => {
+        if (branch.current) return false;
+        const { aheadCount, behindCount } = branchSyncCounts(branch, snapshot);
+        return !branchHasUpstream(branch, snapshot) || aheadCount > 0 || behindCount > 0;
+      })
       .map((branch) => ({
         kind: "branch" as const,
         key: `branch:${branch.name}`,
@@ -2024,7 +2257,7 @@ export function SourceControlPanel({
         <div
           role="button"
           tabIndex={0}
-          className="group relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 pr-20 text-left text-xs hover:bg-accent/60"
+          className="group relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-xs hover:bg-accent/60"
           onClick={() => toggleTree(key, true)}
           onKeyDown={(event) => toggleTreeFromKeyboard(key, event, true)}
         >
@@ -2034,7 +2267,7 @@ export function SourceControlPanel({
             <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
           )}
           <AttentionIcon kind={workingTreeAttention} />
-          <span className="min-w-0 flex-1 truncate text-sm">Current working tree</span>
+          <span className="min-w-0 flex-1 truncate text-sm">Working tree</span>
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {currentBranch ? <CompactBadge>{currentBranch.name}</CompactBadge> : null}
             {changedFiles.length > 0 ? (
@@ -2058,6 +2291,15 @@ export function SourceControlPanel({
               >
                 <BranchSyncActionIcon state={syncState} />
               </IconButton>
+              {aheadCount > 0 ? (
+                <IconButton
+                  label="Undo latest commit"
+                  disabled={isActionRunning(`branch-undo-latest:${currentBranch.name}`)}
+                  onClick={() => undoLatestCommit(currentBranch.name)}
+                >
+                  <Undo2 className="size-3.5" />
+                </IconButton>
+              ) : null}
             </RowActions>
           ) : null}
         </div>

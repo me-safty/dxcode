@@ -131,6 +131,16 @@ export interface WsRpcClient {
     readonly pullBranch: RpcUnaryMethod<typeof WS_METHODS.vcsPanelPullBranch>;
     readonly pushBranch: RpcUnaryMethod<typeof WS_METHODS.vcsPanelPushBranch>;
     readonly deleteBranch: RpcUnaryMethod<typeof WS_METHODS.vcsPanelDeleteBranch>;
+    readonly undoLatestCommit: RpcUnaryMethod<typeof WS_METHODS.vcsPanelUndoLatestCommit>;
+    readonly revertCommit: RpcUnaryMethod<typeof WS_METHODS.vcsPanelRevertCommit>;
+    readonly checkoutCommit: RpcUnaryMethod<typeof WS_METHODS.vcsPanelCheckoutCommit>;
+    readonly createBranchFromCommit: RpcUnaryMethod<
+      typeof WS_METHODS.vcsPanelCreateBranchFromCommit
+    >;
+    readonly mergeBranchIntoCurrent: RpcUnaryMethod<
+      typeof WS_METHODS.vcsPanelMergeBranchIntoCurrent
+    >;
+    readonly rebaseCurrentOnto: RpcUnaryMethod<typeof WS_METHODS.vcsPanelRebaseCurrentOnto>;
     readonly fetchBranch: RpcUnaryMethod<typeof WS_METHODS.vcsPanelFetchBranch>;
     readonly fetchRemote: RpcUnaryMethod<typeof WS_METHODS.vcsPanelFetchRemote>;
     readonly fetchAllRemotes: RpcUnaryMethod<typeof WS_METHODS.vcsPanelFetchAllRemotes>;
@@ -342,6 +352,18 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.vcsPanelPushBranch](input)),
       deleteBranch: (input) =>
         transport.request((client) => client[WS_METHODS.vcsPanelDeleteBranch](input)),
+      undoLatestCommit: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelUndoLatestCommit](input)),
+      revertCommit: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelRevertCommit](input)),
+      checkoutCommit: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelCheckoutCommit](input)),
+      createBranchFromCommit: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelCreateBranchFromCommit](input)),
+      mergeBranchIntoCurrent: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelMergeBranchIntoCurrent](input)),
+      rebaseCurrentOnto: (input) =>
+        transport.request((client) => client[WS_METHODS.vcsPanelRebaseCurrentOnto](input)),
       fetchBranch: (input) =>
         transport.request((client) => client[WS_METHODS.vcsPanelFetchBranch](input)),
       fetchRemote: (input) =>

@@ -14,6 +14,7 @@ import {
   type VcsPanelBranchCommitsResult,
   type VcsPanelBranchDetails,
   type VcsPanelBranchDetailsInput,
+  type VcsPanelCommitActionInput,
   type VcsPanelCommitInput,
   type VcsPanelChangeGroup,
   type VcsPanelCompareInput,
@@ -26,6 +27,7 @@ import {
   type VcsPanelFileStatus,
   type VcsPanelRemote,
   type VcsPanelRemoteInput,
+  type VcsPanelRefActionInput,
   type VcsPanelSnapshotInput,
   type VcsPanelSnapshotResult,
   type VcsPanelStash,
@@ -68,6 +70,20 @@ export interface SourceControlPanelServiceShape {
   ) => Effect.Effect<VcsPullResult, GitCommandError>;
   readonly pushBranch: (input: VcsPanelBranchActionInput) => Effect.Effect<void, GitCommandError>;
   readonly deleteBranch: (input: VcsPanelDeleteBranchInput) => Effect.Effect<void, GitCommandError>;
+  readonly undoLatestCommit: (input: VcsPanelSnapshotInput) => Effect.Effect<void, GitCommandError>;
+  readonly revertCommit: (input: VcsPanelCommitActionInput) => Effect.Effect<void, GitCommandError>;
+  readonly checkoutCommit: (
+    input: VcsPanelCommitActionInput,
+  ) => Effect.Effect<{ readonly refName: string }, GitCommandError>;
+  readonly createBranchFromCommit: (
+    input: VcsPanelCommitActionInput,
+  ) => Effect.Effect<{ readonly refName: string }, GitCommandError>;
+  readonly mergeBranchIntoCurrent: (
+    input: VcsPanelRefActionInput,
+  ) => Effect.Effect<void, GitCommandError>;
+  readonly rebaseCurrentOnto: (
+    input: VcsPanelRefActionInput,
+  ) => Effect.Effect<void, GitCommandError>;
   readonly fetchBranch: (input: VcsPanelBranchActionInput) => Effect.Effect<void, GitCommandError>;
   readonly fetchRemote: (input: VcsPanelRemoteInput) => Effect.Effect<void, GitCommandError>;
   readonly fetchAllRemotes: (input: VcsPanelSnapshotInput) => Effect.Effect<void, GitCommandError>;
@@ -1170,6 +1186,52 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
     },
   );
 
+  const undoLatestCommit: SourceControlPanelServiceShape["undoLatestCommit"] = (input) =>
+    run("vcs.panel.undoLatestCommit", input.cwd, ["reset", "--soft", "HEAD~1"]).pipe(Effect.asVoid);
+
+  const revertCommit: SourceControlPanelServiceShape["revertCommit"] = (input) =>
+    run("vcs.panel.revertCommit", input.cwd, ["revert", "--no-edit", input.sha]).pipe(
+      Effect.asVoid,
+    );
+
+  const checkoutCommit: SourceControlPanelServiceShape["checkoutCommit"] = Effect.fn(
+    "checkoutCommit",
+  )(function* (input) {
+    yield* run("vcs.panel.checkoutCommit", input.cwd, ["checkout", "--detach", input.sha]).pipe(
+      Effect.asVoid,
+    );
+    return { refName: input.sha };
+  });
+
+  const createBranchFromCommit: SourceControlPanelServiceShape["createBranchFromCommit"] =
+    Effect.fn("createBranchFromCommit")(function* (input) {
+      const branchName = input.branchName?.trim();
+      if (!branchName) {
+        return yield* gitError(
+          "vcs.panel.createBranchFromCommit",
+          input.cwd,
+          ["branch", "<name>", input.sha],
+          "Branch name is required.",
+        );
+      }
+      yield* run("vcs.panel.createBranchFromCommit", input.cwd, [
+        "branch",
+        branchName,
+        input.sha,
+      ]).pipe(Effect.asVoid);
+      return { refName: branchName };
+    });
+
+  const mergeBranchIntoCurrent: SourceControlPanelServiceShape["mergeBranchIntoCurrent"] = (
+    input,
+  ) =>
+    run("vcs.panel.mergeBranchIntoCurrent", input.cwd, ["merge", "--no-edit", input.refName]).pipe(
+      Effect.asVoid,
+    );
+
+  const rebaseCurrentOnto: SourceControlPanelServiceShape["rebaseCurrentOnto"] = (input) =>
+    run("vcs.panel.rebaseCurrentOnto", input.cwd, ["rebase", input.refName]).pipe(Effect.asVoid);
+
   return SourceControlPanelService.of({
     snapshot,
     branchDetails: (input) => branchDetails(input.cwd, input.branch, input.defaultCompareRef),
@@ -1183,6 +1245,12 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
     pullBranch,
     pushBranch,
     deleteBranch,
+    undoLatestCommit,
+    revertCommit,
+    checkoutCommit,
+    createBranchFromCommit,
+    mergeBranchIntoCurrent,
+    rebaseCurrentOnto,
     fetchBranch,
     fetchRemote: (input) =>
       run("vcs.panel.fetchRemote", input.cwd, ["fetch", input.remoteName]).pipe(Effect.asVoid),

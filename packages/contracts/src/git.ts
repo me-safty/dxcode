@@ -496,6 +496,19 @@ export const VcsPanelDeleteBranchInput = Schema.Struct({
 });
 export type VcsPanelDeleteBranchInput = typeof VcsPanelDeleteBranchInput.Type;
 
+export const VcsPanelCommitActionInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  sha: TrimmedNonEmptyStringSchema,
+  branchName: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type VcsPanelCommitActionInput = typeof VcsPanelCommitActionInput.Type;
+
+export const VcsPanelRefActionInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  refName: TrimmedNonEmptyStringSchema,
+});
+export type VcsPanelRefActionInput = typeof VcsPanelRefActionInput.Type;
+
 export const VcsPanelRemoteInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   remoteName: TrimmedNonEmptyStringSchema,

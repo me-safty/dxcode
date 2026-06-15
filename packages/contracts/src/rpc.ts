@@ -37,6 +37,7 @@ import {
   VcsPanelBranchCommitsResult,
   VcsPanelBranchDetails,
   VcsPanelBranchDetailsInput,
+  VcsPanelCommitActionInput,
   VcsPanelCommitInput,
   VcsPanelCompareInput,
   VcsPanelCompareResult,
@@ -45,6 +46,7 @@ import {
   VcsPanelFileDiffInput,
   VcsPanelFileDiffResult,
   VcsPanelRemoteInput,
+  VcsPanelRefActionInput,
   VcsPanelSnapshotInput,
   VcsPanelSnapshotResult,
   VcsPanelStashDetails,
@@ -188,6 +190,12 @@ export const WS_METHODS = {
   vcsPanelPullBranch: "vcs.panel.pullBranch",
   vcsPanelPushBranch: "vcs.panel.pushBranch",
   vcsPanelDeleteBranch: "vcs.panel.deleteBranch",
+  vcsPanelUndoLatestCommit: "vcs.panel.undoLatestCommit",
+  vcsPanelRevertCommit: "vcs.panel.revertCommit",
+  vcsPanelCheckoutCommit: "vcs.panel.checkoutCommit",
+  vcsPanelCreateBranchFromCommit: "vcs.panel.createBranchFromCommit",
+  vcsPanelMergeBranchIntoCurrent: "vcs.panel.mergeBranchIntoCurrent",
+  vcsPanelRebaseCurrentOnto: "vcs.panel.rebaseCurrentOnto",
   vcsPanelFetchBranch: "vcs.panel.fetchBranch",
   vcsPanelFetchRemote: "vcs.panel.fetchRemote",
   vcsPanelFetchAllRemotes: "vcs.panel.fetchAllRemotes",
@@ -506,6 +514,44 @@ export const WsVcsPanelPushBranchRpc = Rpc.make(WS_METHODS.vcsPanelPushBranch, {
 
 export const WsVcsPanelDeleteBranchRpc = Rpc.make(WS_METHODS.vcsPanelDeleteBranch, {
   payload: VcsPanelDeleteBranchInput,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+export const WsVcsPanelUndoLatestCommitRpc = Rpc.make(WS_METHODS.vcsPanelUndoLatestCommit, {
+  payload: VcsPanelSnapshotInput,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+export const WsVcsPanelRevertCommitRpc = Rpc.make(WS_METHODS.vcsPanelRevertCommit, {
+  payload: VcsPanelCommitActionInput,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+export const WsVcsPanelCheckoutCommitRpc = Rpc.make(WS_METHODS.vcsPanelCheckoutCommit, {
+  payload: VcsPanelCommitActionInput,
+  success: VcsSwitchRefResult,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+export const WsVcsPanelCreateBranchFromCommitRpc = Rpc.make(
+  WS_METHODS.vcsPanelCreateBranchFromCommit,
+  {
+    payload: VcsPanelCommitActionInput,
+    success: VcsCreateRefResult,
+    error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsVcsPanelMergeBranchIntoCurrentRpc = Rpc.make(
+  WS_METHODS.vcsPanelMergeBranchIntoCurrent,
+  {
+    payload: VcsPanelRefActionInput,
+    error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsVcsPanelRebaseCurrentOntoRpc = Rpc.make(WS_METHODS.vcsPanelRebaseCurrentOnto, {
+  payload: VcsPanelRefActionInput,
   error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
 });
 
@@ -865,6 +911,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsPanelPullBranchRpc,
   WsVcsPanelPushBranchRpc,
   WsVcsPanelDeleteBranchRpc,
+  WsVcsPanelUndoLatestCommitRpc,
+  WsVcsPanelRevertCommitRpc,
+  WsVcsPanelCheckoutCommitRpc,
+  WsVcsPanelCreateBranchFromCommitRpc,
+  WsVcsPanelMergeBranchIntoCurrentRpc,
+  WsVcsPanelRebaseCurrentOntoRpc,
   WsVcsPanelFetchBranchRpc,
   WsVcsPanelFetchRemoteRpc,
   WsVcsPanelFetchAllRemotesRpc,

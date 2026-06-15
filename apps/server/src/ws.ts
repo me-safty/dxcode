@@ -219,6 +219,12 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.vcsPanelPullBranch, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsPanelPushBranch, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsPanelDeleteBranch, AuthOrchestrationOperateScope],
+  [WS_METHODS.vcsPanelUndoLatestCommit, AuthOrchestrationOperateScope],
+  [WS_METHODS.vcsPanelRevertCommit, AuthOrchestrationOperateScope],
+  [WS_METHODS.vcsPanelCheckoutCommit, AuthOrchestrationOperateScope],
+  [WS_METHODS.vcsPanelCreateBranchFromCommit, AuthOrchestrationOperateScope],
+  [WS_METHODS.vcsPanelMergeBranchIntoCurrent, AuthOrchestrationOperateScope],
+  [WS_METHODS.vcsPanelRebaseCurrentOnto, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsPanelFetchBranch, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsPanelFetchRemote, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsPanelFetchAllRemotes, AuthOrchestrationOperateScope],
@@ -1536,6 +1542,54 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
             WS_METHODS.vcsPanelDeleteBranch,
             sourceControlPanel
               .deleteBranch(input)
+              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsPanelUndoLatestCommit]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsPanelUndoLatestCommit,
+            sourceControlPanel
+              .undoLatestCommit(input)
+              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsPanelRevertCommit]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsPanelRevertCommit,
+            sourceControlPanel
+              .revertCommit(input)
+              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsPanelCheckoutCommit]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsPanelCheckoutCommit,
+            sourceControlPanel
+              .checkoutCommit(input)
+              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsPanelCreateBranchFromCommit]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsPanelCreateBranchFromCommit,
+            sourceControlPanel
+              .createBranchFromCommit(input)
+              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsPanelMergeBranchIntoCurrent]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsPanelMergeBranchIntoCurrent,
+            sourceControlPanel
+              .mergeBranchIntoCurrent(input)
+              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsPanelRebaseCurrentOnto]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsPanelRebaseCurrentOnto,
+            sourceControlPanel
+              .rebaseCurrentOnto(input)
               .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             { "rpc.aggregate": "vcs" },
           ),

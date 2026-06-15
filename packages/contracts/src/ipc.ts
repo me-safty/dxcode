@@ -12,6 +12,7 @@ import type {
   VcsPanelBranchCommitsResult,
   VcsPanelBranchDetails,
   VcsPanelBranchDetailsInput,
+  VcsPanelCommitActionInput,
   VcsPanelCommitInput,
   VcsPanelCompareInput,
   VcsPanelCompareResult,
@@ -20,6 +21,7 @@ import type {
   VcsPanelFileDiffInput,
   VcsPanelFileDiffResult,
   VcsPanelRemoteInput,
+  VcsPanelRefActionInput,
   VcsPanelSnapshotInput,
   VcsPanelSnapshotResult,
   VcsPanelStashDetails,
@@ -1266,6 +1268,12 @@ export interface EnvironmentApi {
     pullBranch: (input: VcsPanelBranchActionInput) => Promise<VcsPullResult>;
     pushBranch: (input: VcsPanelBranchActionInput) => Promise<void>;
     deleteBranch: (input: VcsPanelDeleteBranchInput) => Promise<void>;
+    undoLatestCommit: (input: VcsPanelSnapshotInput) => Promise<void>;
+    revertCommit: (input: VcsPanelCommitActionInput) => Promise<void>;
+    checkoutCommit: (input: VcsPanelCommitActionInput) => Promise<VcsSwitchRefResult>;
+    createBranchFromCommit: (input: VcsPanelCommitActionInput) => Promise<VcsCreateRefResult>;
+    mergeBranchIntoCurrent: (input: VcsPanelRefActionInput) => Promise<void>;
+    rebaseCurrentOnto: (input: VcsPanelRefActionInput) => Promise<void>;
     fetchBranch: (input: VcsPanelBranchActionInput) => Promise<void>;
     fetchRemote: (input: VcsPanelRemoteInput) => Promise<void>;
     fetchAllRemotes: (input: VcsPanelSnapshotInput) => Promise<void>;
