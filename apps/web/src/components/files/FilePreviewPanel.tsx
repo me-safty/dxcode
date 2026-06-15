@@ -15,6 +15,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import FileBrowserPanel from "./FileBrowserPanel";
 import { projectFileCacheKey } from "./fileContentRevision";
 import { fileBreadcrumbs } from "./filePath";
+import { FileSaveCoordinator } from "./fileSaveCoordinator";
 import {
   confirmProjectFileQueryData,
   setProjectFileQueryData,
@@ -31,30 +32,7 @@ interface FilePreviewPanelProps {
 }
 
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
-
-class PendingFileWrites {
-  private pending = 0;
-  private failed = false;
-
-  constructor(
-    private readonly relativePath: string,
-    private readonly onPendingChange: (relativePath: string, pending: boolean) => void,
-  ) {}
-
-  begin(): void {
-    if (this.pending === 0) this.failed = false;
-    this.pending += 1;
-    this.onPendingChange(this.relativePath, true);
-  }
-
-  finish(success: boolean): void {
-    if (!success) this.failed = true;
-    this.pending -= 1;
-    if (this.pending === 0 && !this.failed) {
-      this.onPendingChange(this.relativePath, false);
-    }
-  }
-}
+const FILE_SAVE_DEBOUNCE_MS = 500;
 
 interface EditableFileSurfaceProps {
   environmentId: EnvironmentId;
@@ -73,37 +51,42 @@ function EditableFileSurface({
   resolvedTheme,
   onPendingChange,
 }: EditableFileSurfaceProps) {
-  const pendingWrites = useMemo(
-    () => new PendingFileWrites(relativePath, onPendingChange),
-    [onPendingChange, relativePath],
+  const saveCoordinator = useMemo(
+    () =>
+      new FileSaveCoordinator({
+        debounceMs: FILE_SAVE_DEBOUNCE_MS,
+        onPendingChange: (pending) => onPendingChange(relativePath, pending),
+        persist: async (nextContents) => {
+          await ensureEnvironmentApi(environmentId).projects.writeFile({
+            cwd,
+            relativePath,
+            contents: nextContents,
+          });
+        },
+        onConfirmed: (confirmedContents) => {
+          confirmProjectFileQueryData(environmentId, cwd, relativePath, confirmedContents);
+        },
+      }),
+    [cwd, environmentId, onPendingChange, relativePath],
   );
   const editor = useMemo(
     () =>
       new Editor({
         onChange: (file) => {
-          pendingWrites.begin();
           setProjectFileQueryData(environmentId, cwd, relativePath, file.contents);
-          void ensureEnvironmentApi(environmentId)
-            .projects.writeFile({
-              cwd,
-              relativePath,
-              contents: file.contents,
-            })
-            .then(
-              () => {
-                confirmProjectFileQueryData(environmentId, cwd, relativePath, file.contents);
-                pendingWrites.finish(true);
-              },
-              () => {
-                pendingWrites.finish(false);
-              },
-            );
+          saveCoordinator.change(file.contents);
         },
       }),
-    [cwd, environmentId, pendingWrites, relativePath],
+    [cwd, environmentId, relativePath, saveCoordinator],
   );
 
-  useEffect(() => () => editor.cleanUp(), [editor]);
+  useEffect(
+    () => () => {
+      editor.cleanUp();
+      saveCoordinator.dispose();
+    },
+    [editor, saveCoordinator],
+  );
 
   return (
     <EditorProvider editor={editor}>
