@@ -133,7 +133,10 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
   ];
   const screen = await render(
     <CompactComposerControlsMenu
+      activePlan={false}
       interactionMode="default"
+      planSidebarLabel="Plan"
+      planSidebarOpen={false}
       runtimeMode="approval-required"
       showInteractionModeToggle
       traitsMenuContent={
@@ -148,6 +151,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
         />
       }
       onToggleInteractionMode={vi.fn()}
+      onTogglePlanSidebar={vi.fn()}
       onRuntimeModeChange={vi.fn()}
     />,
     { container: host },
@@ -291,10 +295,14 @@ describe("CompactComposerControlsMenu", () => {
     document.body.append(host);
     const screen = await render(
       <CompactComposerControlsMenu
+        activePlan={false}
         interactionMode="default"
+        planSidebarLabel="Plan"
+        planSidebarOpen={false}
         runtimeMode="approval-required"
         showInteractionModeToggle={false}
         onToggleInteractionMode={vi.fn()}
+        onTogglePlanSidebar={vi.fn()}
         onRuntimeModeChange={vi.fn()}
       />,
       { container: host },

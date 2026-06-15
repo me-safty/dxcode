@@ -7,8 +7,12 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import * as NodeOS from "node:os";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
+
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone health script has no Effect runtime.
+const hostPlatform = NodeOS.platform();
 
 export interface HealthCheckConfig {
   readonly localBaseUrl: string;
@@ -250,7 +254,7 @@ function runCommand(
 }
 
 async function checkWindowsService(serviceName: string, timeoutMs: number): Promise<CheckResult> {
-  if (process.platform !== "win32") {
+  if (hostPlatform !== "win32") {
     return {
       name: `windows service ${serviceName}`,
       ok: true,
@@ -283,7 +287,7 @@ async function checkWindowsService(serviceName: string, timeoutMs: number): Prom
 }
 
 async function checkT3ServerRuntime(config: HealthCheckConfig): Promise<CheckResult> {
-  if (process.platform !== "win32") {
+  if (hostPlatform !== "win32") {
     return {
       name: "T3 server runtime",
       ok: true,

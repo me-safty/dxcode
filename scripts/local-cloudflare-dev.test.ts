@@ -21,7 +21,7 @@ describe("local-cloudflare-dev", () => {
 
   it("uses the configured cloudflared path when provided", () => {
     assert.equal(
-      resolveCloudflaredCommand({ T3CODE_CLOUDFLARED_PATH: "C:\\tools\\cloudflared.exe" }),
+      resolveCloudflaredCommand({ T3CODE_CLOUDFLARED_PATH: "C:\\tools\\cloudflared.exe" }, "linux"),
       "C:\\tools\\cloudflared.exe",
     );
   });

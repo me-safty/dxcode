@@ -20,10 +20,10 @@ import React, {
   memo,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
-import { GlobeIcon } from "lucide-react";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
@@ -1212,21 +1212,13 @@ function ChatMarkdown({
   }, []);
   const markdownComponents = useMemo<Components>(
     () => ({
-      p({ node: _node, ref, children, ...props }) {
-        return (
-          <p {...props} ref={ref as React.Ref<HTMLParagraphElement> | undefined}>
-            {renderSkillInlineMarkdownChildren(children, skills)}
-          </p>
-        );
+      p({ node: _node, children, ...props }) {
+        return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
       },
-      li({ node: _node, ref, children, ...props }) {
-        return (
-          <li {...props} ref={ref as React.Ref<HTMLLIElement> | undefined}>
-            {renderSkillInlineMarkdownChildren(children, skills)}
-          </li>
-        );
+      li({ node: _node, children, ...props }) {
+        return <li {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</li>;
       },
-      a({ node: _node, ref, href, ...props }) {
+      a({ node, href, children, ...props }) {
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
         const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
         if (!fileLinkMeta) {
@@ -1277,7 +1269,7 @@ function ChatMarkdown({
         if (typeof parentSuffix === "string" && parentSuffix.length > 0) {
           labelParts.push(parentSuffix);
         }
-        if (fileLinkMeta.line && fileLinkMeta.line !== 1) {
+        if (fileLinkMeta.line) {
           labelParts.push(
             `L${fileLinkMeta.line}${fileLinkMeta.column ? `:C${fileLinkMeta.column}` : ""}`,
           );
@@ -1298,34 +1290,29 @@ function ChatMarkdown({
           />
         );
       },
-      pre({ node, ref, children, ...props }) {
+      table({ node: _node, ...props }) {
+        return <MarkdownTable {...props} />;
+      },
+      details({ node: _node, children, open: detailsOpen }) {
+        return <MarkdownDetails open={detailsOpen}>{children}</MarkdownDetails>;
+      },
+      pre({ node, children, ...props }) {
         const codeBlock = extractCodeBlock(children);
         if (!codeBlock) {
-          return (
-            <pre {...props} ref={ref as React.Ref<HTMLPreElement> | undefined}>
-              {children}
-            </pre>
-          );
+          return <pre {...props}>{children}</pre>;
         }
 
         const language = extractFenceLanguage(codeBlock.className);
         const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
         return (
-          <MarkdownCodeBlock>
-            <CodeHighlightErrorBoundary
-              fallback={
-                <pre {...props} ref={ref as React.Ref<HTMLPreElement> | undefined}>
-                  {children}
-                </pre>
-              }
-            >
-              <Suspense
-                fallback={
-                  <pre {...props} ref={ref as React.Ref<HTMLPreElement> | undefined}>
-                    {children}
-                  </pre>
-                }
-              >
+          <MarkdownCodeBlock
+            code={codeBlock.code}
+            language={language}
+            fenceTitle={fenceTitle}
+            theme={resolvedTheme}
+          >
+            <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
+              <Suspense fallback={<pre {...props}>{children}</pre>}>
                 <SuspenseShikiCodeBlock
                   className={codeBlock.className}
                   code={codeBlock.code}
@@ -1350,7 +1337,13 @@ function ChatMarkdown({
   );
 
   return (
-    <div className="chat-markdown w-full min-w-0 text-xs leading-relaxed text-foreground">
+    <div
+      className={cn(
+        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80",
+        className,
+      )}
+      onCopy={handleCopy}
+    >
       <ReactMarkdown
         remarkPlugins={
           lineBreaks

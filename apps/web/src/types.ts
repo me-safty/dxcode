@@ -41,7 +41,6 @@ export interface ChatImageAttachment {
   mimeType: string;
   sizeBytes: number;
   previewUrl?: string;
-  downloadUrl?: string;
 }
 
 export interface ChatFileAttachment {
@@ -50,7 +49,7 @@ export interface ChatFileAttachment {
   name: string;
   mimeType: string;
   sizeBytes: number;
-  downloadUrl?: string;
+  previewUrl?: string;
 }
 
 export type ChatAttachment = ChatImageAttachment | ChatFileAttachment;

@@ -1,6 +1,6 @@
 import "../../index.css";
 
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId } from "@t3tools/contracts";
 import { createRef } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { page } from "vite-plus/test/browser";
@@ -44,14 +44,6 @@ vi.mock("@legendapp/list/react", async () => {
   return { LegendList };
 });
 
-vi.mock("../../lib/checkpointDiffState", () => ({
-  useCheckpointDiff: () => ({
-    data: null,
-    error: null,
-    isPending: false,
-  }),
-}));
-
 import { MessagesTimeline } from "./MessagesTimeline";
 
 const MESSAGE_CREATED_AT = "2026-04-13T12:00:00.000Z";
@@ -64,7 +56,6 @@ function buildProps() {
     listRef: createRef<LegendListRef | null>(),
     latestTurn: null,
     turnDiffSummaryByAssistantMessageId: new Map(),
-    turnDiffSummaryByTurnId: new Map(),
     routeThreadKey: "environment-local:thread-1",
     onOpenTurnDiff: vi.fn(),
     revertTurnCountByUserMessageId: new Map(),
@@ -72,7 +63,6 @@ function buildProps() {
     isRevertingCheckpoint: false,
     onImageExpand: vi.fn(),
     activeThreadEnvironmentId: EnvironmentId.make("environment-local"),
-    activeThreadId: ThreadId.make("thread-1"),
     markdownCwd: undefined,
     resolvedTheme: "dark" as const,
     timestampFormat: "24-hour" as const,
@@ -255,7 +245,7 @@ describe("MessagesTimeline", () => {
     );
 
     try {
-      const toggle = page.getByRole("button", { name: "Show more" });
+      const toggle = page.getByRole("button", { name: "Show full message" });
       await expect.element(toggle).toBeVisible();
       await expect.element(toggle).toHaveAttribute("aria-expanded", "false");
 
@@ -263,7 +253,10 @@ describe("MessagesTimeline", () => {
         "[data-user-message-body='true']",
       ) as HTMLDivElement | null;
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");
-      expect(messageBody?.className).toContain("line-clamp-6");
+      expect(messageBody?.className).toContain("max-h-44");
+      expect(messageBody?.className).toContain("overflow-hidden");
+      expect(messageBody?.getAttribute("data-user-message-fade")).toBe("true");
+      expect(messageBody?.style.maskImage).toContain("linear-gradient");
     } finally {
       await screen.unmount();
     }
@@ -278,7 +271,7 @@ describe("MessagesTimeline", () => {
     );
 
     try {
-      const expandButton = page.getByRole("button", { name: "Show more" });
+      const expandButton = page.getByRole("button", { name: "Show full message" });
       await expect.element(expandButton).toBeVisible();
 
       expect(document.body.textContent ?? "").toContain("deep hidden detail only after expand");
@@ -291,14 +284,18 @@ describe("MessagesTimeline", () => {
 
       let messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("false");
-      expect(messageBody?.className).not.toContain("line-clamp-6");
+      expect(messageBody?.className).not.toContain("max-h-44");
+      expect(messageBody?.getAttribute("data-user-message-fade")).toBe("false");
+      expect((messageBody as HTMLDivElement | null)?.style.maskImage ?? "").toBe("");
 
       await collapseButton.click();
 
-      await expect.element(page.getByRole("button", { name: "Show more" })).toBeVisible();
+      await expect.element(page.getByRole("button", { name: "Show full message" })).toBeVisible();
       messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");
-      expect(messageBody?.className).toContain("line-clamp-6");
+      expect(messageBody?.className).toContain("max-h-44");
+      expect(messageBody?.getAttribute("data-user-message-fade")).toBe("true");
+      expect((messageBody as HTMLDivElement | null)?.style.maskImage).toContain("linear-gradient");
     } finally {
       await screen.unmount();
     }
@@ -313,7 +310,7 @@ describe("MessagesTimeline", () => {
     );
 
     try {
-      await expect.element(page.getByRole("button", { name: "Show more" })).toBeVisible();
+      await expect.element(page.getByRole("button", { name: "Show full message" })).toBeVisible();
 
       const messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");

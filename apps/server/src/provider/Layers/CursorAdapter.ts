@@ -40,11 +40,6 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
-import {
-  AGENT_ARTIFACTS_ENV_VAR,
-  appendAgentArtifactInstructions,
-  agentArtifactsDirForThread,
-} from "../../agentArtifacts.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
@@ -539,10 +534,7 @@ export function makeCursorAdapter(
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
           const acp = yield* makeCursorAcpRuntime({
             cursorSettings: effectiveCursorSettings,
-            environment: {
-              ...options?.environment,
-              [AGENT_ARTIFACTS_ENV_VAR]: artifactsDir,
-            },
+            ...(options?.environment ? { environment: options.environment } : {}),
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),

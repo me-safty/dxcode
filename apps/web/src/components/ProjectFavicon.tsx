@@ -4,33 +4,11 @@ import { useEffect, useState } from "react";
 import { useAssetUrl } from "../assets/assetUrls";
 
 const loadedProjectFaviconSrcs = new Set<string>();
-const PROJECT_FAVICON_CACHE_VERSION = "2";
-
-// Single source of truth for the per-project favicon URL, shared by the sidebar
-// icon and the document (browser tab) favicon so both resolve identically.
-export function resolveProjectFaviconUrl(input: {
-  environmentId: EnvironmentId;
-  cwd: string;
-}): string | null {
-  try {
-    return resolveEnvironmentHttpUrl({
-      environmentId: input.environmentId,
-      pathname: "/api/project-favicon",
-      searchParams: {
-        cwd: input.cwd,
-        v: PROJECT_FAVICON_CACHE_VERSION,
-      },
-    });
-  } catch {
-    return null;
-  }
-}
 
 export function ProjectFavicon(input: {
   environmentId: EnvironmentId;
   cwd: string;
   className?: string;
-  isActive?: boolean;
 }) {
   const src = useAssetUrl(input.environmentId, {
     _tag: "project-favicon",

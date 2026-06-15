@@ -258,31 +258,6 @@ function normalizeCodexModelSlug(
   return normalized;
 }
 
-/** Codex model provider id for Amazon Bedrock, matching the user's config.toml/profile. */
-export const CODEX_BEDROCK_MODEL_PROVIDER = "amazon-bedrock";
-
-/**
- * Bedrock serves the same Codex/GPT models under provider-prefixed ids
- * (e.g. `gpt-5.5` -> `openai.gpt-5.5`). When a Codex instance is authed against
- * Amazon Bedrock we send the prefixed id plus `modelProvider`, mirroring what
- * `codex --profile bedrock` does at the CLI. Already-prefixed ids (any known
- * provider namespace) are left untouched.
- */
-const CODEX_BEDROCK_PROVIDER_NAMESPACES = ["openai.", "anthropic.", "amazon."] as const;
-
-export function formatCodexModelForProvider(
-  model: string | undefined,
-  modelProvider: string | undefined,
-): string | undefined {
-  if (!model || modelProvider !== CODEX_BEDROCK_MODEL_PROVIDER) {
-    return model;
-  }
-  const alreadyQualified = CODEX_BEDROCK_PROVIDER_NAMESPACES.some((namespace) =>
-    model.startsWith(namespace),
-  );
-  return alreadyQualified ? model : `openai.${model}`;
-}
-
 function readResumeCursorThreadId(
   resumeCursor: ProviderSession["resumeCursor"],
 ): string | undefined {
@@ -318,16 +293,13 @@ function buildThreadStartParams(input: {
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
-  readonly modelProvider: string | undefined;
 }): EffectCodexSchema.V2ThreadStartParams {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
-  const model = formatCodexModelForProvider(input.model, input.modelProvider);
   return {
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
-    ...(model ? { model } : {}),
-    ...(input.modelProvider ? { modelProvider: input.modelProvider } : {}),
+    ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
   };
 }
@@ -356,13 +328,11 @@ function buildCodexCollaborationMode(input: {
   readonly interactionMode?: ProviderInteractionMode;
   readonly model?: string;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
-  readonly modelProvider?: string;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
   if (input.interactionMode === undefined) {
     return undefined;
   }
-  const normalized = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL;
-  const model = formatCodexModelForProvider(normalized, input.modelProvider) ?? normalized;
+  const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL;
   return {
     mode: input.interactionMode,
     settings: {
@@ -388,7 +358,6 @@ export function buildTurnStartParams(input: {
   readonly serviceTier?: CodexServiceTier;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly interactionMode?: ProviderInteractionMode;
-  readonly modelProvider?: string;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -405,12 +374,10 @@ export function buildTurnStartParams(input: {
   }
 
   const config = runtimeModeToThreadConfig(input.runtimeMode);
-  const turnModel = formatCodexModelForProvider(input.model, input.modelProvider);
   const collaborationMode = buildCodexCollaborationMode({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
-    ...(input.modelProvider ? { modelProvider: input.modelProvider } : {}),
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -418,7 +385,7 @@ export function buildTurnStartParams(input: {
     input: turnInput,
     approvalPolicy: config.approvalPolicy,
     sandboxPolicy: runtimeModeToTurnSandboxPolicy(input.runtimeMode),
-    ...(turnModel ? { model: turnModel } : {}),
+    ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
     ...(collaborationMode ? { collaborationMode } : {}),
@@ -468,33 +435,6 @@ interface CodexThreadOpenClient {
   ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexErrors.CodexAppServerError>;
 }
 
-interface CodexAccountReadClient {
-  readonly request: (
-    method: "account/read",
-    payload: CodexRpc.ClientRequestParamsByMethod["account/read"],
-  ) => Effect.Effect<
-    CodexRpc.ClientRequestResponsesByMethod["account/read"],
-    CodexErrors.CodexAppServerError
-  >;
-}
-
-/**
- * Resolve which Codex model provider this session is authed against. Returns
- * {@link CODEX_BEDROCK_MODEL_PROVIDER} when the account is Amazon Bedrock so the
- * runtime can route models through Bedrock; returns undefined for the default
- * (OpenAI/ChatGPT) auth or when the account cannot be read (we never want a
- * probe failure to block a non-Bedrock session).
- */
-export const resolveCodexModelProvider = (
-  client: CodexAccountReadClient,
-): Effect.Effect<string | undefined> =>
-  client.request("account/read", {}).pipe(
-    Effect.map((response) =>
-      response.account?.type === "amazonBedrock" ? CODEX_BEDROCK_MODEL_PROVIDER : undefined,
-    ),
-    Effect.catch(() => Effect.succeed(undefined)),
-  );
-
 export const openCodexThread = (input: {
   readonly client: CodexThreadOpenClient;
   readonly threadId: ThreadId;
@@ -503,7 +443,6 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
-  readonly modelProvider: string | undefined;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
   const startParams = buildThreadStartParams({
@@ -511,7 +450,6 @@ export const openCodexThread = (input: {
     runtimeMode: input.runtimeMode,
     model: input.requestedModel,
     serviceTier: input.serviceTier,
-    modelProvider: input.modelProvider,
   });
 
   if (resumeThreadId === undefined) {
@@ -777,10 +715,6 @@ export const makeCodexSessionRuntime = (
     const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
     const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>());
     const closedRef = yield* Ref.make(false);
-    // Resolved from `account/read` at session start: when the Codex instance is
-    // authed against Amazon Bedrock we must route the same models through the
-    // Bedrock provider (prefixed model id + modelProvider on thread/start).
-    const modelProviderRef = yield* Ref.make<string | undefined>(undefined);
 
     // `~` is not shell-expanded when env vars are set via
     // `child_process.spawn`; `expandHomePath` lets a configured
@@ -1271,9 +1205,6 @@ export const makeCodexSessionRuntime = (
       yield* client.request("initialize", buildCodexInitializeParams());
       yield* client.notify("initialized", undefined);
 
-      const modelProvider = yield* resolveCodexModelProvider(client);
-      yield* Ref.set(modelProviderRef, modelProvider);
-
       const requestedModel = normalizeCodexModelSlug(options.model);
 
       const opened = yield* openCodexThread({
@@ -1284,7 +1215,6 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
-        modelProvider,
       });
 
       const providerThreadId = opened.thread.id;
@@ -1359,7 +1289,6 @@ export const makeCodexSessionRuntime = (
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
             ...(input.effort ? { effort: input.effort } : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
-            ...(modelProvider ? { modelProvider } : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

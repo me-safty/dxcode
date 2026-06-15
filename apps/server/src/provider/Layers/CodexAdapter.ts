@@ -50,11 +50,6 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
-import {
-  AGENT_ARTIFACTS_ENV_VAR,
-  appendAgentArtifactInstructions,
-  agentArtifactsDirForThread,
-} from "../../agentArtifacts.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import {
@@ -1397,10 +1392,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           providerInstanceId: boundInstanceId,
           cwd: input.cwd ?? process.cwd(),
           binaryPath: codexConfig.binaryPath,
-          environment: {
-            ...options?.environment,
-            [AGENT_ARTIFACTS_ENV_VAR]: artifactsDir,
-          },
+          ...(options?.environment ? { environment: options.environment } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
           ...(isCodexResumeCursorSchema(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
@@ -1529,7 +1521,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
   const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const codexAttachments = yield* Effect.forEach(
-      (input.attachments ?? []).filter((attachment) => attachment.type === "image"),
+      input.attachments ?? [],
       (attachment) => resolveAttachment(input, attachment),
       { concurrency: 1 },
     );
@@ -1545,9 +1537,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         : undefined;
     return yield* session.runtime
       .sendTurn({
-        ...(input.input !== undefined
-          ? { input: appendAgentArtifactInstructions(input.input) ?? input.input }
-          : {}),
+        ...(input.input !== undefined ? { input: input.input } : {}),
         ...(input.modelSelection?.instanceId === boundInstanceId
           ? { model: input.modelSelection.model }
           : {}),

@@ -5,12 +5,20 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
 import ChatMarkdown from "./ChatMarkdown";
-import { CheckIcon, EllipsisIcon, LoaderIcon, PanelRightCloseIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  EllipsisIcon,
+  LoaderIcon,
+  PanelRightCloseIcon,
+} from "lucide-react";
 import { cn } from "~/lib/utils";
 import type { ActivePlanState } from "../session-logic";
 import type { LatestProposedPlanState } from "../session-logic";
 import { formatTimestamp } from "../timestampFormat";
 import {
+  proposedPlanTitle,
   buildProposedPlanMarkdownFilename,
   normalizePlanMarkdownForExport,
   downloadPlanAsTextFile,
@@ -43,55 +51,6 @@ function stepStatusIcon(status: string): React.ReactNode {
   );
 }
 
-/**
- * The live task steps section: an optional explanation paragraph followed by
- * the per-step checklist. Rendered either full-width in the main area (no
- * proposed-plan document) or inside the right rail (alongside the plan
- * document), so it is extracted to avoid duplicating the markup.
- */
-function PlanSteps({ activePlan }: { activePlan: ActivePlanState }) {
-  return (
-    <div className="space-y-4">
-      {activePlan.explanation ? (
-        <p className="text-[13px] leading-relaxed text-muted-foreground/80">
-          {activePlan.explanation}
-        </p>
-      ) : null}
-      {activePlan.steps.length > 0 ? (
-        <div className="space-y-1">
-          <p className="mb-2 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
-            Steps
-          </p>
-          {activePlan.steps.map((step) => (
-            <div
-              key={`${step.status}:${step.step}`}
-              className={cn(
-                "flex items-start gap-2.5 rounded-lg px-2.5 py-2 transition-colors duration-200",
-                step.status === "inProgress" && "bg-blue-500/5",
-                step.status === "completed" && "bg-emerald-500/5",
-              )}
-            >
-              <div className="mt-0.5">{stepStatusIcon(step.status)}</div>
-              <p
-                className={cn(
-                  "text-[13px] leading-snug",
-                  step.status === "completed"
-                    ? "text-muted-foreground/50 line-through decoration-muted-foreground/20"
-                    : step.status === "inProgress"
-                      ? "text-foreground/90"
-                      : "text-muted-foreground/70",
-                )}
-              >
-                {step.step}
-              </p>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 interface PlanSidebarProps {
   activePlan: ActivePlanState | null;
   activeProposedPlan: LatestProposedPlanState | null;
@@ -117,11 +76,13 @@ const PlanSidebar = memo(function PlanSidebar({
   mode = "sidebar",
   onClose,
 }: PlanSidebarProps) {
+  const [proposedPlanExpanded, setProposedPlanExpanded] = useState(false);
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
 
   const planMarkdown = activeProposedPlan?.planMarkdown ?? null;
   const displayedPlanMarkdown = planMarkdown ? stripDisplayedPlanMarkdown(planMarkdown) : null;
+  const planTitle = planMarkdown ? proposedPlanTitle(planMarkdown) : null;
 
   const handleCopyPlan = useCallback(() => {
     if (!planMarkdown) return;
@@ -172,7 +133,7 @@ const PlanSidebar = memo(function PlanSidebar({
       className={cn(
         "flex min-h-0 flex-col bg-card/50",
         mode === "sidebar"
-          ? "h-full w-[clamp(18rem,30vw,340px)] shrink-0 border-l border-border/70"
+          ? "h-full w-[340px] shrink-0 border-l border-border/70"
           : "h-full w-full",
       )}
     >
@@ -221,17 +182,15 @@ const PlanSidebar = memo(function PlanSidebar({
               </MenuPopup>
             </Menu>
           ) : null}
-          {mode === "panel" ? null : (
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              onClick={onClose}
-              aria-label={`Close ${label.toLowerCase()} sidebar`}
-              className="text-muted-foreground/50 hover:text-foreground/70"
-            >
-              <PanelRightCloseIcon className="size-3.5" />
-            </Button>
-          )}
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            onClick={onClose}
+            aria-label={`Close ${label.toLowerCase()} sidebar`}
+            className="text-muted-foreground/50 hover:text-foreground/70"
+          >
+            <PanelRightCloseIcon className="size-3.5" />
+          </Button>
         </div>
       </div>
 
@@ -316,30 +275,9 @@ const PlanSidebar = memo(function PlanSidebar({
                 Plans will appear here when generated.
               </p>
             </div>
-          </ScrollArea>
-          {activePlan && (activePlan.steps.length > 0 || activePlan.explanation) ? (
-            <ScrollArea className="min-h-0 w-[clamp(13rem,22vw,260px)] shrink-0 border-l border-border/60">
-              <div className="p-3">
-                <PlanSteps activePlan={activePlan} />
-              </div>
-            </ScrollArea>
           ) : null}
         </div>
-      ) : activePlan && (activePlan.steps.length > 0 || activePlan.explanation) ? (
-        // No proposed-plan document: live steps fill the main area full-width.
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="p-3">
-            <PlanSteps activePlan={activePlan} />
-          </div>
-        </ScrollArea>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center py-12 text-center">
-          <p className="text-[13px] text-muted-foreground/40">No active plan yet.</p>
-          <p className="mt-1 text-[11px] text-muted-foreground/30">
-            Plans and steps will appear here when generated.
-          </p>
-        </div>
-      )}
+      </ScrollArea>
     </div>
   );
 });

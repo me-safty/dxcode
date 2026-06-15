@@ -1,8 +1,11 @@
 import {
   type EnvironmentId,
   type EditorId,
+  type ProjectScript,
   type ResolvedKeybindingsConfig,
+  type ThreadId,
 } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
@@ -15,9 +18,13 @@ import { cn } from "~/lib/utils";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
+  activeThreadId: ThreadId;
+  draftId?: DraftId;
   activeThreadTitle: string;
   activeProjectName: string | undefined;
   openInCwd: string | null;
+  activeProjectScripts: ProjectScript[] | undefined;
+  preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   gitCwd: string | null;
@@ -42,9 +49,13 @@ export function shouldShowOpenInPicker(input: {
 
 export const ChatHeader = memo(function ChatHeader({
   activeThreadEnvironmentId,
+  activeThreadId,
+  draftId,
   activeThreadTitle,
   activeProjectName,
   openInCwd,
+  activeProjectScripts,
+  preferredScriptId,
   keybindings,
   availableEditors,
   gitCwd,

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { it as effectIt } from "@effect/vitest";
 import { describe, it } from "vite-plus/test";
 import { ThreadId } from "@t3tools/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -17,7 +16,6 @@ import {
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
   openCodexThread,
-  resolveCodexModelProvider,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
@@ -255,7 +253,6 @@ describe("openCodexThread", () => {
         requestedModel: "gpt-5.3-codex",
         serviceTier: undefined,
         resumeThreadId: "stale-thread",
-        modelProvider: undefined,
       }),
     );
 
@@ -296,7 +293,6 @@ describe("openCodexThread", () => {
           requestedModel: "gpt-5.3-codex",
           serviceTier: undefined,
           resumeThreadId: "stale-thread",
-          modelProvider: undefined,
         }),
       ),
       (error: unknown) =>
@@ -304,99 +300,4 @@ describe("openCodexThread", () => {
         error.errorMessage === "timed out waiting for server",
     );
   });
-});
-
-describe("formatCodexModelForProvider", () => {
-  it("prefixes models with openai. when routed through Amazon Bedrock", () => {
-    assert.equal(formatCodexModelForProvider("gpt-5.5", "amazon-bedrock"), "openai.gpt-5.5");
-    assert.equal(
-      formatCodexModelForProvider("gpt-5.3-codex", "amazon-bedrock"),
-      "openai.gpt-5.3-codex",
-    );
-  });
-
-  it("leaves already provider-qualified ids untouched", () => {
-    assert.equal(formatCodexModelForProvider("openai.gpt-5.5", "amazon-bedrock"), "openai.gpt-5.5");
-    assert.equal(
-      formatCodexModelForProvider("anthropic.claude-opus-4-8", "amazon-bedrock"),
-      "anthropic.claude-opus-4-8",
-    );
-  });
-
-  it("passes models through unchanged for the default (non-Bedrock) provider", () => {
-    assert.equal(formatCodexModelForProvider("gpt-5.5", undefined), "gpt-5.5");
-    assert.equal(formatCodexModelForProvider("gpt-5.5", "openai"), "gpt-5.5");
-  });
-
-  it("returns undefined when no model is provided", () => {
-    assert.equal(formatCodexModelForProvider(undefined, "amazon-bedrock"), undefined);
-  });
-});
-
-describe("resolveCodexModelProvider", () => {
-  const makeClient = (
-    response: CodexRpc.ClientRequestResponsesByMethod["account/read"],
-  ): Parameters<typeof resolveCodexModelProvider>[0] => ({
-    request: () => Effect.succeed(response),
-  });
-
-  effectIt.effect("returns amazon-bedrock when the account is Amazon Bedrock", () =>
-    Effect.gen(function* () {
-      const provider = yield* resolveCodexModelProvider(
-        makeClient({ account: { type: "amazonBedrock" }, requiresOpenaiAuth: false }),
-      );
-      assert.equal(provider, "amazon-bedrock");
-    }),
-  );
-
-  effectIt.effect("returns undefined for a ChatGPT/OpenAI account", () =>
-    Effect.gen(function* () {
-      const provider = yield* resolveCodexModelProvider(
-        makeClient({ account: { type: "apiKey" }, requiresOpenaiAuth: false }),
-      );
-      assert.equal(provider, undefined);
-    }),
-  );
-
-  effectIt.effect("returns undefined (never blocks the session) when account/read fails", () =>
-    Effect.gen(function* () {
-      const provider = yield* resolveCodexModelProvider({
-        request: () =>
-          Effect.fail(
-            new CodexErrors.CodexAppServerRequestError({
-              code: -32603,
-              errorMessage: "account read failed",
-            }),
-          ),
-      });
-      assert.equal(provider, undefined);
-    }),
-  );
-});
-
-describe("buildTurnStartParams with Bedrock provider", () => {
-  effectIt.effect("prefixes the turn model id when modelProvider is amazon-bedrock", () =>
-    Effect.gen(function* () {
-      const params = yield* buildTurnStartParams({
-        threadId: "thread-1",
-        runtimeMode: "full-access",
-        prompt: "hi",
-        model: "gpt-5.5",
-        modelProvider: "amazon-bedrock",
-      });
-      assert.equal(params.model, "openai.gpt-5.5");
-    }),
-  );
-
-  effectIt.effect("leaves the turn model id unchanged without a Bedrock provider", () =>
-    Effect.gen(function* () {
-      const params = yield* buildTurnStartParams({
-        threadId: "thread-1",
-        runtimeMode: "full-access",
-        prompt: "hi",
-        model: "gpt-5.5",
-      });
-      assert.equal(params.model, "gpt-5.5");
-    }),
-  );
 });

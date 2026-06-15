@@ -10,6 +10,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import { ChildProcess } from "effect/unstable/process";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import { resolveOwnerPairingUrl, seedOwnerPairingTokenFromEnv } from "./owner-pairing-token.ts";
 
@@ -24,7 +25,7 @@ class LocalCloudflareDevError extends Data.TaggedError("LocalCloudflareDevError"
   readonly cause?: unknown;
 }> {}
 
-export function resolveCloudflaredCommand(env: NodeJS.ProcessEnv, platform = process.platform) {
+export function resolveCloudflaredCommand(env: NodeJS.ProcessEnv, platform: NodeJS.Platform) {
   return (
     env.T3CODE_CLOUDFLARED_PATH ?? (platform === "win32" ? WINDOWS_CLOUDFLARED_PATH : "cloudflared")
   );
@@ -175,6 +176,7 @@ export function runLocalCloudflareDev() {
     const host = process.env.T3CODE_LOCAL_DEV_HOST?.trim() || DEFAULT_HOST;
     const tunnel = process.env.T3CODE_CLOUDFLARE_TUNNEL?.trim() || DEFAULT_TUNNEL;
     const skipCloudflare = process.env.T3CODE_SKIP_CLOUDFLARE === "1";
+    const hostPlatform = yield* HostProcessPlatform;
 
     yield* Effect.logInfo(
       `[local-cloudflare-dev] starting T3 dev server on http://${host}:${port} with hot reload`,
@@ -191,11 +193,11 @@ export function runLocalCloudflareDev() {
         ...(skipCloudflare
           ? []
           : [
-              makeManagedProcess("cloudflared", resolveCloudflaredCommand(process.env), [
-                "tunnel",
-                "run",
-                tunnel,
-              ]),
+              makeManagedProcess(
+                "cloudflared",
+                resolveCloudflaredCommand(process.env, hostPlatform),
+                ["tunnel", "run", tunnel],
+              ),
             ]),
       ],
       { concurrency: "unbounded" },
