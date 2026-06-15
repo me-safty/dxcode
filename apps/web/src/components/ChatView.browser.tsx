@@ -2371,6 +2371,35 @@ describe("ChatView timeline estimator parity (full app)", () => {
         expect(explorerToggle.getBoundingClientRect().height).toBe(28);
       });
 
+      const fileSearchButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label="Search workspace files"]'),
+        "Unable to find the workspace file search button.",
+      );
+      fileSearchButton.click();
+      const fileTree = await waitForElement(
+        () => document.querySelector<HTMLElement>("file-tree-container"),
+        "Unable to find the file tree host.",
+      );
+      const fileSearchInput = await waitForElement(
+        () =>
+          fileTree.shadowRoot?.querySelector<HTMLInputElement>("[data-file-tree-search-input]") ??
+          null,
+        "Unable to find the file tree search input.",
+      );
+      fileSearchInput.focus();
+      const searchKeyEvent = new KeyboardEvent("keydown", {
+        key: "r",
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      });
+      fileSearchInput.dispatchEvent(searchKeyEvent);
+      await waitForLayout();
+      expect(searchKeyEvent.defaultPrevented).toBe(false);
+      expect(fileTree.shadowRoot?.activeElement).toBe(fileSearchInput);
+      expect(useComposerDraftStore.getState().draftsByThreadKey[THREAD_KEY]?.prompt ?? "").toBe("");
+
       useRightPanelStore.getState().openFile(THREAD_REF, "src/large.ts");
       const codeVirtualizer = await waitForElement(
         () => document.querySelector<HTMLElement>(".file-preview-virtualizer"),
