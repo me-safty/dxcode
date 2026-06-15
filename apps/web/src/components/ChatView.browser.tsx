@@ -2235,6 +2235,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       { path: "src/router.ts", kind: "file" as const },
       { path: "src/store.ts", kind: "file" as const },
       { path: "src/styles.css", kind: "file" as const },
+      { path: "src/large.ts", kind: "file" as const },
       { path: "e2e", kind: "directory" as const },
       { path: "e2e/test-results", kind: "directory" as const },
       {
@@ -2267,7 +2268,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
         if (body._tag === WS_METHODS.projectsReadFile) {
           const relativePath =
             typeof body.relativePath === "string" ? body.relativePath : "file.ts";
-          const contents = `// ${relativePath}\n`;
+          const contents =
+            relativePath === "src/large.ts"
+              ? Array.from(
+                  { length: 5_000 },
+                  (_, index) => `export const line${index + 1} = ${index + 1};`,
+                ).join("\n")
+              : `// ${relativePath}\n`;
           return {
             relativePath,
             contents,
@@ -2363,6 +2370,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
         expect(explorerToggle.getBoundingClientRect().width).toBe(28);
         expect(explorerToggle.getBoundingClientRect().height).toBe(28);
       });
+
+      useRightPanelStore.getState().openFile(THREAD_REF, "src/large.ts");
+      const codeVirtualizer = await waitForElement(
+        () => document.querySelector<HTMLElement>(".file-preview-virtualizer"),
+        "Unable to find the virtualized file preview.",
+      );
+      expect(codeVirtualizer.querySelector("diffs-container")).not.toBeNull();
+      expect(codeVirtualizer.classList.contains("overflow-auto")).toBe(true);
     } finally {
       await mounted.cleanup();
     }

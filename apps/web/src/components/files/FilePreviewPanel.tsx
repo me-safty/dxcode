@@ -1,5 +1,5 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { File } from "@pierre/diffs/react";
+import { File, Virtualizer } from "@pierre/diffs/react";
 import { ChevronRight, FolderTree, LoaderCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -143,22 +143,29 @@ export default function FilePreviewPanel({
               <LoaderCircle className="size-5 animate-spin" />
             </div>
           ) : relativePath && file.data ? (
-            <File
+            <Virtualizer
               key={`${relativePath}:${resolvedTheme}:${file.data.byteLength}`}
-              disableWorkerPool
-              file={{
-                name: relativePath,
-                contents: file.data.contents,
-                cacheKey: `${cwd}:${relativePath}:${file.data.byteLength}`,
+              className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
+              config={{
+                overscrollSize: 600,
+                intersectionObserverMargin: 1200,
               }}
-              options={{
-                disableFileHeader: true,
-                overflow: "scroll",
-                theme: resolveDiffThemeName(resolvedTheme),
-                themeType: resolvedTheme,
-              }}
-              className="min-h-0 flex-1 overflow-auto"
-            />
+            >
+              <File
+                file={{
+                  name: relativePath,
+                  contents: file.data.contents,
+                  cacheKey: `${cwd}:${relativePath}:${file.data.byteLength}`,
+                }}
+                options={{
+                  disableFileHeader: true,
+                  overflow: "scroll",
+                  theme: resolveDiffThemeName(resolvedTheme),
+                  themeType: resolvedTheme,
+                }}
+                className="min-h-full"
+              />
+            </Virtualizer>
           ) : null}
         </div>
         {explorerOpen || relativePath === null ? (

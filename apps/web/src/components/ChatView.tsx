@@ -1057,7 +1057,7 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
   );
 });
 
-export default function ChatView(props: ChatViewProps) {
+function ChatViewContent(props: ChatViewProps) {
   const {
     environmentId,
     threadId,
@@ -4832,11 +4832,9 @@ export default function ChatView(props: ChatViewProps) {
               closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
             />
           ) : activeRightPanelSurface?.kind === "diff" ? (
-            <DiffWorkerPoolProvider>
-              <Suspense fallback={null}>
-                <DiffPanel mode="embedded" />
-              </Suspense>
-            </DiffWorkerPoolProvider>
+            <Suspense fallback={null}>
+              <DiffPanel mode="embedded" />
+            </Suspense>
           ) : (activeRightPanelSurface?.kind === "files" ||
               activeRightPanelSurface?.kind === "file") &&
             activeProject ? (
@@ -4905,11 +4903,9 @@ export default function ChatView(props: ChatViewProps) {
                 closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
               />
             ) : activeRightPanelSurface?.kind === "diff" ? (
-              <DiffWorkerPoolProvider>
-                <Suspense fallback={null}>
-                  <DiffPanel mode="embedded" />
-                </Suspense>
-              </DiffWorkerPoolProvider>
+              <Suspense fallback={null}>
+                <DiffPanel mode="embedded" />
+              </Suspense>
             ) : activeRightPanelSurface?.kind === "plan" ? (
               <PlanSidebar
                 activePlan={activePlan}
@@ -4949,5 +4945,13 @@ export default function ChatView(props: ChatViewProps) {
         <ExpandedImageDialog preview={expandedImage} onClose={closeExpandedImage} />
       )}
     </div>
+  );
+}
+
+export default function ChatView(props: ChatViewProps) {
+  return (
+    <DiffWorkerPoolProvider>
+      <ChatViewContent {...props} />
+    </DiffWorkerPoolProvider>
   );
 }
