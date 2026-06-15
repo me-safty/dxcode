@@ -270,10 +270,22 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     } satisfies ThreadTitleGenerationResult;
   });
 
+  const generateBoardProposal: TextGenerationShape["generateBoardProposal"] = () =>
+    // UNSUPPORTED: the Cursor ACP runtime cannot be proven no-tool (its "ask"
+    // mode still exposes tools behind permission prompts), so we reject board
+    // proposals rather than ship a tool-enabled meta-agent.
+    Effect.fail(
+      new TextGenerationError({
+        operation: "generateBoardProposal",
+        detail: "Cursor provider not supported for board proposals (no provable no-tool mode).",
+      }),
+    );
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateBoardProposal,
   } satisfies TextGenerationShape;
 });

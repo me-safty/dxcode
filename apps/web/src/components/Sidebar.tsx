@@ -5,10 +5,13 @@ import {
   CloudIcon,
   FolderPlusIcon,
   Globe2Icon,
+  PencilIcon,
   SearchIcon,
   SettingsIcon,
+  SquareKanbanIcon,
   SquarePenIcon,
   TerminalIcon,
+  Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react";
 import {
@@ -41,6 +44,8 @@ import {
   type ContextMenuItem,
   type DesktopUpdateState,
   ProjectId,
+  type BoardListEntry,
+  type EnvironmentId,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
   type ThreadEnvMode,
@@ -68,6 +73,7 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform, newCommandId } from "../lib/utils";
 import {
   selectProjectByRef,
+  selectBoardsForProject,
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsForProjectRefs,
   selectSidebarThreadsAcrossEnvironments,
@@ -114,6 +120,15 @@ import {
   shouldToastDesktopUpdateActionResult,
 } from "./desktopUpdate.logic";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -161,9 +176,11 @@ import {
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import {
+  getSidebarBoardRowKey,
   getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
+  isSidebarBoardRouteActive,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
@@ -173,13 +190,16 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   useThreadJumpHintVisibility,
-  ThreadStatusPill,
+  type SidebarBoardRouteIdentity,
+  type ThreadStatusPill,
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
 import { readEnvironmentApi } from "../environmentApi";
+import { deleteBoard, listBoards, renameBoard } from "../workflow/boardRpc";
+import { CreateWorkflowDialog } from "./board/CreateWorkflowDialog";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
 import {
@@ -772,13 +792,274 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
 });
 
+interface SidebarBoardRowProps {
+  entry: BoardListEntry;
+  environmentId: EnvironmentId;
+  projectId: ProjectId;
+  isActive: boolean;
+  deleteBoardForProjectMember: (board: SidebarProjectBoardRow) => Promise<void>;
+  renameBoardForProjectMember: (board: SidebarProjectBoardRow, name: string) => Promise<boolean>;
+}
+
+const SidebarBoardRow = memo(function SidebarBoardRow(props: SidebarBoardRowProps) {
+  const {
+    entry,
+    environmentId,
+    projectId,
+    isActive,
+    deleteBoardForProjectMember,
+    renameBoardForProjectMember,
+  } = props;
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameName, setRenameName] = useState(entry.name);
+  const [isRenameSaving, setIsRenameSaving] = useState(false);
+  const renameCommittedRef = useRef(false);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const linkRender = useMemo(
+    () => (
+      <Link
+        to="/$environmentId/board"
+        params={{ environmentId }}
+        search={{ boardId: entry.boardId }}
+      />
+    ),
+    [entry.boardId, environmentId],
+  );
+  const renameRowRender = useMemo(() => <div role="button" tabIndex={0} />, []);
+  const rowRender = isRenaming ? renameRowRender : linkRender;
+  useEffect(() => {
+    if (!isRenaming) {
+      setRenameName(entry.name);
+    }
+  }, [entry.name, isRenaming]);
+  const cancelRename = useCallback(() => {
+    renameCommittedRef.current = true;
+    renameInputRef.current = null;
+    setIsRenaming(false);
+    setRenameName(entry.name);
+  }, [entry.name]);
+  const startRename = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      renameCommittedRef.current = false;
+      setRenameName(entry.name);
+      setIsRenaming(true);
+    },
+    [entry.name],
+  );
+  const handleRenameInputRef = useCallback((element: HTMLInputElement | null) => {
+    if (element && renameInputRef.current !== element) {
+      renameInputRef.current = element;
+      element.focus();
+      element.select();
+    }
+  }, []);
+  const commitRename = useCallback(async () => {
+    const trimmed = renameName.trim();
+    if (trimmed.length === 0) {
+      toastManager.add({
+        type: "warning",
+        title: "Board name cannot be empty",
+      });
+      cancelRename();
+      return;
+    }
+    if (trimmed === entry.name) {
+      cancelRename();
+      return;
+    }
+    setIsRenameSaving(true);
+    try {
+      const renamed = await renameBoardForProjectMember(
+        { entry, environmentId, projectId },
+        trimmed,
+      );
+      if (renamed) {
+        setIsRenaming(false);
+        renameInputRef.current = null;
+      } else {
+        renameCommittedRef.current = false;
+      }
+    } finally {
+      setIsRenameSaving(false);
+    }
+  }, [cancelRename, entry, environmentId, projectId, renameBoardForProjectMember, renameName]);
+  const handleRenameInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    setRenameName(event.target.value);
+  }, []);
+  const handleRenameInputKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        renameCommittedRef.current = true;
+        void commitRename();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        cancelRename();
+      }
+    },
+    [cancelRename, commitRename],
+  );
+  const handleRenameInputBlur = useCallback(() => {
+    if (!renameCommittedRef.current) {
+      cancelRename();
+    }
+  }, [cancelRename]);
+  const stopRenameInputPropagation = useCallback(
+    (event: React.SyntheticEvent<HTMLInputElement>) => {
+      event.stopPropagation();
+    },
+    [],
+  );
+  const openDeleteConfirmation = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDeleteConfirmOpen(true);
+  }, []);
+  const confirmDelete = useCallback(async () => {
+    setIsDeleting(true);
+    try {
+      await deleteBoardForProjectMember({ entry, environmentId, projectId });
+      setDeleteConfirmOpen(false);
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [deleteBoardForProjectMember, entry, environmentId, projectId]);
+
+  return (
+    <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
+      <SidebarMenuSubButton
+        render={rowRender}
+        size="sm"
+        isActive={isActive}
+        data-testid={`board-row-${entry.boardId}`}
+        className="h-6 w-full translate-x-0 justify-start px-2 pr-12 text-left"
+      >
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <SquareKanbanIcon className="size-3 shrink-0 text-muted-foreground/70" />
+          {isRenaming ? (
+            <input
+              ref={handleRenameInputRef}
+              data-testid={`board-rename-input-${entry.boardId}`}
+              aria-label={`Rename board ${entry.name}`}
+              className="min-w-0 flex-1 truncate rounded border border-ring bg-transparent px-0.5 text-base outline-none sm:text-xs"
+              value={renameName}
+              disabled={isRenameSaving}
+              onChange={handleRenameInputChange}
+              onKeyDown={handleRenameInputKeyDown}
+              onBlur={handleRenameInputBlur}
+              onClick={stopRenameInputPropagation}
+              onPointerDown={stopRenameInputPropagation}
+            />
+          ) : (
+            <Tooltip>
+              <TooltipTrigger
+                render={<span className="min-w-0 flex-1 truncate text-xs">{entry.name}</span>}
+              />
+              <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
+                {entry.name}
+              </TooltipPopup>
+            </Tooltip>
+          )}
+        </span>
+        {entry.error ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  aria-label="Board has a loading error"
+                  className="ml-auto mr-5 inline-flex size-4 shrink-0 items-center justify-center text-amber-500"
+                >
+                  <TriangleAlertIcon className="size-3" />
+                </span>
+              }
+            />
+            <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
+              {entry.error}
+            </TooltipPopup>
+          </Tooltip>
+        ) : null}
+      </SidebarMenuSubButton>
+      {!isRenaming ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                data-thread-selection-safe
+                data-testid={`board-rename-${entry.boardId}`}
+                aria-label={`Rename board ${entry.name}`}
+                className="pointer-events-none absolute top-1/2 right-6 inline-flex size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-colors transition-opacity duration-150 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100"
+                onClick={startRename}
+              >
+                <PencilIcon className="size-3.5" />
+              </button>
+            }
+          />
+          <TooltipPopup side="top">Rename board</TooltipPopup>
+        </Tooltip>
+      ) : null}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              data-thread-selection-safe
+              data-testid={`board-delete-${entry.boardId}`}
+              aria-label={`Delete board ${entry.name}`}
+              className="pointer-events-none absolute top-1/2 right-1 inline-flex size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-colors transition-opacity duration-150 hover:bg-destructive/10 hover:text-destructive focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-destructive/40 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100"
+              onClick={openDeleteConfirmation}
+              disabled={isRenaming}
+            >
+              <Trash2Icon className="size-3.5" />
+            </button>
+          }
+        />
+        <TooltipPopup side="top">Delete board</TooltipPopup>
+      </Tooltip>
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete board "{entry.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes the board file, its tickets, and version history.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button
+              variant="destructive"
+              disabled={isDeleting}
+              onClick={() => void confirmDelete()}
+            >
+              Delete board
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    </SidebarMenuSubItem>
+  );
+});
+
+interface SidebarProjectBoardRow {
+  readonly entry: BoardListEntry;
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+}
+
 interface SidebarProjectThreadListProps {
   projectKey: string;
   projectExpanded: boolean;
+  renderedBoards: readonly SidebarProjectBoardRow[];
   hasOverflowingThreads: boolean;
   hiddenThreadStatus: ThreadStatusPill | null;
   orderedProjectThreadKeys: readonly string[];
   renderedThreads: readonly SidebarThreadSummary[];
+  activeRouteBoardRef: SidebarBoardRouteIdentity | null;
   showEmptyThreadState: boolean;
   shouldShowThreadPanel: boolean;
   isThreadListExpanded: boolean;
@@ -794,6 +1075,8 @@ interface SidebarProjectThreadListProps {
   confirmingArchiveThreadKey: string | null;
   setConfirmingArchiveThreadKey: React.Dispatch<React.SetStateAction<string | null>>;
   confirmArchiveButtonRefs: React.RefObject<Map<string, HTMLButtonElement>>;
+  deleteBoardForProjectMember: (board: SidebarProjectBoardRow) => Promise<void>;
+  renameBoardForProjectMember: (board: SidebarProjectBoardRow, name: string) => Promise<boolean>;
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void;
   handleThreadClick: (
     event: React.MouseEvent,
@@ -825,10 +1108,12 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   const {
     projectKey,
     projectExpanded,
+    renderedBoards,
     hasOverflowingThreads,
     hiddenThreadStatus,
     orderedProjectThreadKeys,
     renderedThreads,
+    activeRouteBoardRef,
     showEmptyThreadState,
     shouldShowThreadPanel,
     isThreadListExpanded,
@@ -844,6 +1129,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     confirmingArchiveThreadKey,
     setConfirmingArchiveThreadKey,
     confirmArchiveButtonRefs,
+    deleteBoardForProjectMember,
+    renameBoardForProjectMember,
     attachThreadListAutoAnimateRef,
     handleThreadClick,
     navigateToThread,
@@ -875,6 +1162,26 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           </div>
         </SidebarMenuSubItem>
       ) : null}
+      {shouldShowThreadPanel &&
+        renderedBoards.map((board) => (
+          <SidebarBoardRow
+            key={getSidebarBoardRowKey({
+              environmentId: board.environmentId,
+              projectId: board.projectId,
+              boardId: board.entry.boardId,
+            })}
+            entry={board.entry}
+            environmentId={board.environmentId}
+            projectId={board.projectId}
+            isActive={isSidebarBoardRouteActive(activeRouteBoardRef, {
+              environmentId: board.environmentId,
+              projectId: board.projectId,
+              boardId: board.entry.boardId,
+            })}
+            deleteBoardForProjectMember={deleteBoardForProjectMember}
+            renameBoardForProjectMember={renameBoardForProjectMember}
+          />
+        ))}
       {shouldShowThreadPanel &&
         renderedThreads.map((thread) => {
           const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
@@ -949,6 +1256,7 @@ interface SidebarProjectItemProps {
   project: SidebarProjectSnapshot;
   isThreadListExpanded: boolean;
   activeRouteThreadKey: string | null;
+  activeRouteBoardRef: SidebarBoardRouteIdentity | null;
   newThreadShortcutLabel: string | null;
   handleNewThread: ReturnType<typeof useNewThreadHandler>["handleNewThread"];
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
@@ -969,6 +1277,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     project,
     isThreadListExpanded,
     activeRouteThreadKey,
+    activeRouteBoardRef,
     newThreadShortcutLabel,
     handleNewThread,
     archiveThread,
@@ -1081,6 +1390,28 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       ),
     ),
   );
+  const projectBoardLists = useStore(
+    useShallow(
+      useMemo(
+        () => (state: import("../store").AppState) =>
+          project.memberProjects.map((member) =>
+            selectBoardsForProject(state, scopeProjectRef(member.environmentId, member.id)),
+          ),
+        [project.memberProjects],
+      ),
+    ),
+  );
+  const projectBoards = useMemo<SidebarProjectBoardRow[]>(
+    () =>
+      project.memberProjects.flatMap((member, index) =>
+        (projectBoardLists[index] ?? []).map((entry) => ({
+          entry,
+          environmentId: member.environmentId,
+          projectId: member.id,
+        })),
+      ),
+    [project.memberProjects, projectBoardLists],
+  );
   const sidebarThreadByKey = useMemo(
     () =>
       new Map(
@@ -1100,6 +1431,53 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const projectExpanded = useUiStateStore(
     (state) => state.projectExpandedById[project.projectKey] ?? true,
   );
+  const fetchBoardsForProjectMember = useCallback(async (member: SidebarProjectGroupMember) => {
+    const api = readEnvironmentApi(member.environmentId);
+    if (!api) {
+      return [];
+    }
+    const entries = await listBoards(api, member.id);
+    useStore.getState().setProjectBoards(scopeProjectRef(member.environmentId, member.id), entries);
+    return entries;
+  }, []);
+
+  useEffect(() => {
+    if (!projectExpanded) {
+      return;
+    }
+
+    let cancelled = false;
+    for (const member of project.memberProjects) {
+      const api = readEnvironmentApi(member.environmentId);
+      if (!api) {
+        continue;
+      }
+      void listBoards(api, member.id)
+        .then((entries) => {
+          if (!cancelled) {
+            useStore
+              .getState()
+              .setProjectBoards(scopeProjectRef(member.environmentId, member.id), entries);
+          }
+        })
+        .catch((error) => {
+          if (cancelled) {
+            return;
+          }
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: `Failed to load boards for ${member.name}`,
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [project.memberProjects, projectExpanded]);
   const threadLastVisitedAts = useUiStateStore(
     useShallow((state) =>
       projectThreads.map(
@@ -1122,6 +1500,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const [projectGroupingSelection, setProjectGroupingSelection] = useState<
     SidebarProjectGroupingMode | "inherit"
   >("inherit");
+  // Create-workflow wizard state: which project member to create into (null = closed)
+  const [createBoardTarget, setCreateBoardTarget] = useState<SidebarProjectGroupMember | null>(
+    null,
+  );
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const confirmArchiveButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -1247,12 +1629,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         hiddenThreads.map((thread) => resolveProjectThreadStatus(thread)),
       ),
       renderedThreads,
-      showEmptyThreadState: projectExpanded && visibleProjectThreads.length === 0,
+      showEmptyThreadState:
+        projectExpanded && visibleProjectThreads.length === 0 && projectBoards.length === 0,
       shouldShowThreadPanel: projectExpanded || pinnedCollapsedThread !== null,
     };
   }, [
     isThreadListExpanded,
     pinnedCollapsedThread,
+    projectBoards.length,
     projectExpanded,
     projectThreads,
     sidebarThreadPreviewCount,
@@ -1758,6 +2142,110 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [defaultThreadEnvMode, handleNewThread, isMobile, router, setOpenMobile],
   );
 
+  const deleteBoardForProjectMember = useCallback(
+    async (board: SidebarProjectBoardRow) => {
+      const member = project.memberProjects.find(
+        (candidate) =>
+          candidate.id === board.projectId && candidate.environmentId === board.environmentId,
+      );
+      if (!member) {
+        toastManager.add({
+          type: "error",
+          title: "Project API unavailable",
+        });
+        return;
+      }
+
+      const api = readEnvironmentApi(board.environmentId);
+      if (!api) {
+        toastManager.add({
+          type: "error",
+          title: "Project API unavailable",
+        });
+        return;
+      }
+
+      try {
+        await deleteBoard(api, board.entry.boardId);
+        await fetchBoardsForProjectMember(member);
+        if (
+          isSidebarBoardRouteActive(activeRouteBoardRef, {
+            environmentId: board.environmentId,
+            projectId: board.projectId,
+            boardId: board.entry.boardId,
+          })
+        ) {
+          if (isMobile) {
+            setOpenMobile(false);
+          }
+          void router.navigate({ to: "/", replace: true });
+        }
+      } catch (error) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: `Failed to delete board for ${member.name}`,
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      }
+    },
+    [
+      activeRouteBoardRef,
+      fetchBoardsForProjectMember,
+      isMobile,
+      project.memberProjects,
+      router,
+      setOpenMobile,
+    ],
+  );
+
+  const renameBoardForProjectMember = useCallback(
+    async (board: SidebarProjectBoardRow, name: string) => {
+      const member = project.memberProjects.find(
+        (candidate) =>
+          candidate.id === board.projectId && candidate.environmentId === board.environmentId,
+      );
+      if (!member) {
+        toastManager.add({
+          type: "error",
+          title: "Project API unavailable",
+        });
+        return false;
+      }
+
+      const api = readEnvironmentApi(board.environmentId);
+      if (!api) {
+        toastManager.add({
+          type: "error",
+          title: "Project API unavailable",
+        });
+        return false;
+      }
+
+      try {
+        await renameBoard(api, board.entry.boardId, name);
+        const snapshot = await api.workflow.getBoard({ boardId: board.entry.boardId });
+        useStore.getState().applyBoardStreamItem(board.environmentId, snapshot.board.boardId, {
+          kind: "snapshot",
+          snapshot,
+        });
+        await fetchBoardsForProjectMember(member);
+        return true;
+      } catch (error) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: `Failed to rename board for ${member.name}`,
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+        return false;
+      }
+    },
+    [fetchBoardsForProjectMember, project.memberProjects],
+  );
+
   const handleCreateThreadClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
@@ -1796,6 +2284,49 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       })();
     },
     [createThreadForProjectMember, project.groupedProjectCount, project.memberProjects],
+  );
+
+  const handleAddBoardClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      void (async () => {
+        const api = readLocalApi();
+        if (!api) {
+          return;
+        }
+
+        // Step 1 (multi-member only): pick which project environment to target.
+        let targetMember: SidebarProjectGroupMember | undefined;
+        if (project.memberProjects.length === 1) {
+          targetMember = project.memberProjects[0]!;
+        } else {
+          const clickedMemberKey = await api.contextMenu.show(
+            project.memberProjects.map((member) => ({
+              id: member.physicalProjectKey,
+              label: formatProjectMemberActionLabel(member, project.groupedProjectCount),
+            })),
+            { x: event.clientX, y: event.clientY },
+          );
+          if (!clickedMemberKey) {
+            return;
+          }
+          targetMember = project.memberProjects.find(
+            (member) => member.physicalProjectKey === clickedMemberKey,
+          );
+          if (!targetMember) {
+            return;
+          }
+        }
+
+        // Step 2: open the create-workflow wizard for this project member.
+        // The wizard owns empty/template/import/agent-assisted creation and is
+        // available even with zero agents (agent-only paths disable inside it).
+        setCreateBoardTarget(targetMember);
+      })();
+    },
+    [project.groupedProjectCount, project.memberProjects],
   );
 
   const attemptArchiveThread = useCallback(
@@ -2032,6 +2563,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     ],
   );
 
+  // The add-board action opens the create-workflow wizard, which offers
+  // agent-free paths (empty board, import from file). So the affordance is
+  // available whenever there's a project member to create into — agent-only
+  // paths are disabled inside the wizard, not the whole button.
+  const canCreateBoard = project.memberProjects.length > 0;
+
   return (
     <>
       <div className="group/project-header relative">
@@ -2112,10 +2649,31 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             </TooltipPopup>
           </Tooltip>
         )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <div className="pointer-events-none absolute top-[calc(50%+1px)] right-0.5 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+        <div className="pointer-events-none absolute top-[calc(50%+1px)] right-0.5 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="inline-flex">
+                  <button
+                    type="button"
+                    aria-label={`Add board in ${project.displayName}`}
+                    data-testid="add-board-button"
+                    disabled={!canCreateBoard}
+                    className={`${SIDEBAR_ICON_ACTION_BUTTON_CLASS} hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/60`}
+                    onClick={handleAddBoardClick}
+                  >
+                    <SquareKanbanIcon className="size-3.5" />
+                  </button>
+                </span>
+              }
+            />
+            <TooltipPopup side="top">
+              {canCreateBoard ? "Add board" : "No project available"}
+            </TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
                 <button
                   type="button"
                   aria-label={`Create new thread in ${project.displayName}`}
@@ -2125,22 +2683,24 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 >
                   <SquarePenIcon className="size-3.5" />
                 </button>
-              </div>
-            }
-          />
-          <TooltipPopup side="top">
-            {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
-          </TooltipPopup>
-        </Tooltip>
+              }
+            />
+            <TooltipPopup side="top">
+              {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+            </TooltipPopup>
+          </Tooltip>
+        </div>
       </div>
 
       <SidebarProjectThreadList
         projectKey={project.projectKey}
         projectExpanded={projectExpanded}
+        renderedBoards={projectBoards}
         hasOverflowingThreads={hasOverflowingThreads}
         hiddenThreadStatus={hiddenThreadStatus}
         orderedProjectThreadKeys={orderedProjectThreadKeys}
         renderedThreads={renderedThreads}
+        activeRouteBoardRef={activeRouteBoardRef}
         showEmptyThreadState={showEmptyThreadState}
         shouldShowThreadPanel={shouldShowThreadPanel}
         isThreadListExpanded={isThreadListExpanded}
@@ -2156,6 +2716,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         confirmingArchiveThreadKey={confirmingArchiveThreadKey}
         setConfirmingArchiveThreadKey={setConfirmingArchiveThreadKey}
         confirmArchiveButtonRefs={confirmArchiveButtonRefs}
+        deleteBoardForProjectMember={deleteBoardForProjectMember}
+        renameBoardForProjectMember={renameBoardForProjectMember}
         attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
         handleThreadClick={handleThreadClick}
         navigateToThread={navigateToThread}
@@ -2287,6 +2849,46 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           </DialogFooter>
         </DialogPopup>
       </Dialog>
+
+      {createBoardTarget !== null
+        ? (() => {
+            const createApi = readEnvironmentApi(createBoardTarget.environmentId);
+            if (!createApi) {
+              return null;
+            }
+            const existingBoards = selectBoardsForProject(
+              useStore.getState(),
+              scopeProjectRef(createBoardTarget.environmentId, createBoardTarget.id),
+            );
+            return (
+              <CreateWorkflowDialog
+                open={true}
+                onOpenChange={(next) => {
+                  if (!next) {
+                    setCreateBoardTarget(null);
+                  }
+                }}
+                api={createApi}
+                projectId={createBoardTarget.id}
+                environmentId={createBoardTarget.environmentId}
+                projectName={createBoardTarget.name}
+                existingBoardNames={existingBoards.map((entry) => entry.name)}
+                onCreated={(boardId) => {
+                  if (isMobile) {
+                    setOpenMobile(false);
+                  }
+                  void router.navigate({
+                    to: "/$environmentId/board",
+                    params: { environmentId: createBoardTarget.environmentId },
+                    search: { boardId },
+                  });
+                  // Best-effort list refresh — navigation must not be blocked or skipped if this fails.
+                  void fetchBoardsForProjectMember(createBoardTarget).catch(() => {});
+                }}
+              />
+            );
+          })()
+        : null}
     </>
   );
 });
@@ -2681,6 +3283,26 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     },
     [updateSettings],
   );
+  const activeRouteEnvironmentId = useParams({
+    strict: false,
+    select: (params) => (typeof params.environmentId === "string" ? params.environmentId : null),
+  });
+  const activeRouteBoardId = useLocation({
+    select: (loc) => {
+      const search = loc.search as { readonly boardId?: unknown };
+      return typeof search.boardId === "string" ? search.boardId : null;
+    },
+  });
+  const activeRouteBoardRef = useMemo<SidebarBoardRouteIdentity | null>(
+    () =>
+      activeRouteEnvironmentId && activeRouteBoardId
+        ? {
+            environmentId: activeRouteEnvironmentId,
+            boardId: activeRouteBoardId,
+          }
+        : null,
+    [activeRouteBoardId, activeRouteEnvironmentId],
+  );
 
   return (
     <SidebarContent className="gap-0">
@@ -2788,6 +3410,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                         activeRouteThreadKey={
                           activeRouteProjectKey === project.projectKey ? routeThreadKey : null
                         }
+                        activeRouteBoardRef={activeRouteBoardRef}
                         newThreadShortcutLabel={newThreadShortcutLabel}
                         handleNewThread={handleNewThread}
                         archiveThread={archiveThread}
@@ -2820,6 +3443,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 activeRouteThreadKey={
                   activeRouteProjectKey === project.projectKey ? routeThreadKey : null
                 }
+                activeRouteBoardRef={activeRouteBoardRef}
                 newThreadShortcutLabel={newThreadShortcutLabel}
                 handleNewThread={handleNewThread}
                 archiveThread={archiveThread}

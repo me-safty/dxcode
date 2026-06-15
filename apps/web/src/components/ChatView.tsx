@@ -3149,7 +3149,6 @@ export default function ChatView(props: ChatViewProps) {
       }
     }
     planSidebarDismissedForTurnRef.current = null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- activeThreadRef is reset transitively
   }, [activeThread?.id]);
 
   // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
@@ -3361,6 +3360,20 @@ export default function ChatView(props: ChatViewProps) {
       const command = resolveShortcutCommand(event, keybindings, {
         context: shortcutContext,
       });
+
+      if (
+        !command &&
+        !shortcutContext.terminalFocus &&
+        !shortcutContext.modelPickerOpen &&
+        shouldTypeToFocusComposer(event)
+      ) {
+        if (composerRef.current?.insertTextAtEnd(event.key)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+      }
+
       if (!command) return;
 
       if (command === "terminal.toggle") {

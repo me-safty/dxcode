@@ -5,6 +5,7 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import { ServerConfig } from "./config.ts";
+import { workflowHooksRouteLayer } from "./workflow/webhookRoute.ts";
 import {
   otlpTracesProxyRouteLayer,
   assetRouteLayer,
@@ -16,6 +17,7 @@ import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
+import { ProjectionTurnRepositoryLive } from "./persistence/Layers/ProjectionTurns.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
@@ -80,6 +82,7 @@ import * as CloudCliState from "./cloud/CliState.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
+import { WorkflowServerRuntimeLive } from "./workflow/WorkflowRuntimeLive.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -193,6 +196,15 @@ const SourceControlProviderRegistryLayerLive = SourceControlProviderRegistry.lay
   Layer.provideMerge(VcsDriverRegistryLayerLive),
 );
 
+// The workflow PR steps need GitHubCli alongside the registry. Re-export
+// GitHubCli as a peer output of the registry layer (which consumes it
+// internally but does not surface it); GitHubCli's VcsProcess requirement is
+// satisfied by the single VcsProcess.layer provided at makeServerLayer level,
+// so no second ProcessRunner pool is created.
+const SourceControlForWorkflowLive = SourceControlProviderRegistryLayerLive.pipe(
+  Layer.provideMerge(GitHubCli.layer),
+);
+
 const GitManagerLayerLive = GitManager.layer.pipe(
   Layer.provideMerge(ProjectSetupScriptRunnerLive),
   Layer.provideMerge(GitVcsDriver.layer),
@@ -285,13 +297,27 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+const WorkflowRuntimeLayerLive = WorkflowServerRuntimeLive.pipe(
+  Layer.provideMerge(CheckpointingLayerLive),
+  Layer.provideMerge(SourceControlForWorkflowLive),
+  Layer.provideMerge(GitLayerLive),
+  Layer.provideMerge(GitWorkflowLayerLive),
+  Layer.provideMerge(ProjectSetupScriptRunnerLive),
+  Layer.provideMerge(TerminalLayerLive),
+  Layer.provideMerge(ProviderRuntimeLayerLive),
+  Layer.provideMerge(ProjectionTurnRepositoryLive),
+  Layer.provideMerge(PersistenceLayerLive),
+  Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+);
+
+const RuntimeCoreEngineLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
+  Layer.provideMerge(WorkflowRuntimeLayerLive),
   Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive)),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
@@ -319,6 +345,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ProjectFaviconResolverLayerLive),
   Layer.provideMerge(RepositoryIdentityResolverLive),
   Layer.provideMerge(ServerEnvironmentLive),
+);
+
+const RuntimeCoreDependenciesLive = RuntimeCoreEngineLive.pipe(
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
   Layer.provideMerge(
@@ -359,6 +388,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     websocketRpcRouteLayer,
   ),
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
+  workflowHooksRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));
 
 export const makeServerLayer = Layer.unwrap(

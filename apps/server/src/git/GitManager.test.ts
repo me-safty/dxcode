@@ -381,6 +381,13 @@ function createTextGeneration(overrides: Partial<FakeGitTextGeneration> = {}): T
             }),
         ),
       ),
+    generateBoardProposal: () =>
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateBoardProposal",
+          detail: "fake text generation does not support board proposals",
+        }),
+      ),
   };
 }
 
@@ -610,6 +617,41 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
           cwd: input.cwd,
           args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
         }).pipe(Effect.asVoid),
+      mergePullRequest: (input) =>
+        Effect.fail(
+          new GitHubCliError({
+            operation: "execute",
+            detail: `Unexpected merge: #${input.number}`,
+          }),
+        ),
+      getPullRequestDetail: (input) =>
+        Effect.fail(
+          new GitHubCliError({
+            operation: "execute",
+            detail: `Unexpected detail: #${input.number}`,
+          }),
+        ),
+      listPullRequestChecks: (input) =>
+        Effect.fail(
+          new GitHubCliError({
+            operation: "execute",
+            detail: `Unexpected checks: #${input.number}`,
+          }),
+        ),
+      listPullRequestReviews: (input) =>
+        Effect.fail(
+          new GitHubCliError({
+            operation: "execute",
+            detail: `Unexpected reviews: #${input.number}`,
+          }),
+        ),
+      listPullRequestReviewComments: (input) =>
+        Effect.fail(
+          new GitHubCliError({
+            operation: "execute",
+            detail: `Unexpected review comments: #${input.number}`,
+          }),
+        ),
     },
     ghCalls,
   };

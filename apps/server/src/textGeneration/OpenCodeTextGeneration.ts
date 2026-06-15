@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -18,6 +19,7 @@ import { extractJsonObject } from "@t3tools/shared/schemaJson";
 import { ServerConfig } from "../config.ts";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import {
+  buildBoardProposalPrompt,
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
@@ -104,6 +106,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
   const serverConfig = yield* ServerConfig;
   const openCodeRuntime = yield* OpenCodeRuntime;
   const resolvedEnvironment = environment ?? process.env;
+  const fileSystem = yield* FileSystem.FileSystem;
   const idleFiberScope = yield* Effect.acquireRelease(Scope.make(), (scope) =>
     Scope.close(scope, Exit.void),
   );
@@ -161,7 +164,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateBoardProposal";
   }) =>
     sharedServerMutex.withPermit(
       Effect.gen(function* () {
@@ -271,7 +275,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateBoardProposal";
     readonly cwd: string;
     readonly prompt: string;
     readonly outputSchemaJson: S;
@@ -304,6 +309,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
           });
           const session = await client.session.create({
             title: `T3 Code ${input.operation}`,
+            // SAFETY: deny every tool permission. This is the no-tool guarantee
+            // for all OpenCode text-generation ops, including generateBoardProposal.
             permission: [{ permission: "*", pattern: "*", action: "deny" }],
           });
           if (!session.data) {
@@ -459,10 +466,53 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     };
   });
 
+  const generateBoardProposal: TextGenerationShape["generateBoardProposal"] = Effect.fn(
+    "OpenCodeTextGeneration.generateBoardProposal",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildBoardProposalPrompt({ prompt: input.prompt });
+
+    // SAFETY (defense-in-depth): run the board-proposal op from an empty
+    // throwaway temp dir rather than the repo root. OpenCode already denies all
+    // tool permissions (`permission deny *`) so file access via tools is blocked,
+    // but the cwd is still passed to the SDK client as the session's `directory`.
+    // Pointing it to an empty temp dir ensures prompt-only egress (only the
+    // assembled prompt leaves the machine) and is consistent with the Claude path.
+    // NOTE: this is ONLY for generateBoardProposal — git ops (generateCommitMessage
+    // etc.) must keep the repo cwd they receive via input.cwd.
+    const generated = yield* fileSystem
+      .makeTempDirectoryScoped({ prefix: "t3code-board-proposal-" })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "generateBoardProposal",
+              detail: "Failed to create sandbox working directory for board proposal.",
+              cause,
+            }),
+        ),
+        Effect.flatMap((sandboxCwd) =>
+          runOpenCodeJson({
+            operation: "generateBoardProposal",
+            cwd: sandboxCwd,
+            prompt,
+            outputSchemaJson: outputSchema,
+            modelSelection: input.modelSelection,
+          }),
+        ),
+        Effect.scoped,
+      );
+
+    return {
+      proposedDefinition: generated.proposedDefinition,
+      rationale: generated.rationale.trim(),
+    };
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateBoardProposal,
   } satisfies TextGenerationShape;
 });

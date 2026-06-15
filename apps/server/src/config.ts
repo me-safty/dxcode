@@ -66,6 +66,11 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly baseDir: string;
   readonly staticDir: string | undefined;
   readonly devUrl: URL | undefined;
+  /** Optional base URL for building absolute ticket links in outbound deliveries
+   * (e.g. the Slack "View ticket" button, which requires an absolute URL).
+   * Undefined when unset → outbound links are omitted. Sourced from
+   * T3CODE_WEB_BASE_URL. */
+  readonly webBaseUrl: URL | undefined;
   readonly noBrowser: boolean;
   readonly startupPresentation: StartupPresentation;
   readonly desktopBootstrapToken: string | undefined;
@@ -173,6 +178,7 @@ export class ServerConfig extends Context.Service<ServerConfig, ServerConfigShap
           desktopBootstrapToken: undefined,
           staticDir: undefined,
           devUrl,
+          webBaseUrl: undefined,
           noBrowser: false,
           startupPresentation: "browser",
         } satisfies ServerConfigShape;

@@ -17,6 +17,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
 import * as Context from "effect/Context";
 import * as Console from "effect/Console";
@@ -34,6 +35,12 @@ import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper.ts";
+import { WorkflowBoardNotificationDispatcher } from "./workflow/Services/WorkflowBoardNotificationDispatcher.ts";
+import { WorkflowSourceSyncer } from "./workflow/Services/WorkflowSourceSyncer.ts";
+import { WorkflowOutboundDispatcher } from "./workflow/Services/WorkflowOutboundDispatcher.ts";
+import { WorkflowGitHubPoller } from "./workflow/Services/WorkflowGitHubPoller.ts";
+import { WorkflowRecovery } from "./workflow/Services/WorkflowRecovery.ts";
+import { WorkflowTerminalRetentionSweeper } from "./workflow/Services/WorkflowTerminalRetentionSweeper.ts";
 import {
   formatHeadlessServeOutput,
   formatHostForUrl,
@@ -286,9 +293,15 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
   const keybindings = yield* Keybindings;
   const orchestrationReactor = yield* OrchestrationReactor;
   const providerSessionReaper = yield* ProviderSessionReaper;
+  const workflowTerminalRetentionSweeper = yield* WorkflowTerminalRetentionSweeper;
+  const workflowGitHubPoller = yield* WorkflowGitHubPoller;
   const lifecycleEvents = yield* ServerLifecycleEvents;
   const serverSettings = yield* ServerSettingsService;
   const serverEnvironment = yield* ServerEnvironment;
+  const workflowRecovery = yield* WorkflowRecovery;
+  const workflowBoardNotificationDispatcher = yield* WorkflowBoardNotificationDispatcher;
+  const workflowSourceSyncer = yield* WorkflowSourceSyncer;
+  const workflowOutboundDispatcher = yield* WorkflowOutboundDispatcher;
   const crypto = yield* Crypto.Crypto;
 
   const commandGate = yield* makeCommandGate;
@@ -334,8 +347,73 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope));
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
+        yield* workflowTerminalRetentionSweeper.start().pipe(Scope.provide(reactorScope));
+        yield* workflowGitHubPoller.start().pipe(Scope.provide(reactorScope));
       }),
     );
+
+    yield* Effect.logDebug("startup phase: recovering workflow runtime");
+    // Recovery is non-fatal for the rest of startup (the server must still
+    // boot), but we capture whether it SUCCEEDED so we can gate the board
+    // notification dispatcher on it below.
+    const recovered = yield* runStartupPhase(
+      "workflow.recover",
+      workflowRecovery.recover().pipe(
+        Effect.retry(Schedule.exponential("500 millis").pipe(Schedule.both(Schedule.recurs(3)))),
+        Effect.as(true),
+        Effect.catch((cause) =>
+          Effect.logWarning("workflow recovery failed during startup", {
+            cause,
+          }).pipe(Effect.as(false)),
+        ),
+      ),
+    );
+
+    // Start the board notification dispatcher AFTER recovery SUCCEEDS:
+    // recovery may write outbox rows / fix projections that the dispatcher then
+    // drains, so starting before (or after a failed) recovery risks draining a
+    // half-recovered state — wrongly superseding a needed notification or
+    // publishing stale content.
+    if (recovered) {
+      yield* Effect.logDebug("startup phase: starting workflow board notification dispatcher");
+      yield* runStartupPhase(
+        "workflow.board-notifications.start",
+        workflowBoardNotificationDispatcher.start().pipe(Scope.provide(reactorScope)),
+      );
+    } else {
+      yield* Effect.logWarning(
+        "skipping board-notification dispatcher start: workflow recovery failed",
+      );
+    }
+
+    // Start the work-source syncer ONLY after recovery succeeds: the syncer
+    // creates/admits tickets from upstream sources, so it must not run against a
+    // half-recovered projection. Same recovery gate as the notification
+    // dispatcher above.
+    if (recovered) {
+      yield* Effect.logDebug("startup phase: starting workflow source syncer");
+      yield* runStartupPhase(
+        "workflow.source-sync.start",
+        workflowSourceSyncer.start().pipe(Scope.provide(reactorScope)),
+      );
+    } else {
+      yield* Effect.logWarning("skipping work-source syncer start: workflow recovery failed");
+    }
+
+    // Start the outbound-webhook dispatcher ONLY after recovery succeeds: the
+    // dispatcher drains durable `workflow_outbound_delivery` rows and POSTs
+    // them, so starting before (or after a failed) recovery risks draining a
+    // half-recovered state. Same recovery gate as the notification dispatcher
+    // and work-source syncer above.
+    if (recovered) {
+      yield* Effect.logDebug("startup phase: starting workflow outbound dispatcher");
+      yield* runStartupPhase(
+        "workflow.outbound.start",
+        workflowOutboundDispatcher.start().pipe(Scope.provide(reactorScope)),
+      );
+    } else {
+      yield* Effect.logWarning("skipping outbound dispatcher start: workflow recovery failed");
+    }
 
     const welcomeBase = yield* resolveWelcomeBase;
     const environment = yield* serverEnvironment.getDescriptor;

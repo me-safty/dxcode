@@ -9,8 +9,14 @@ import {
   type ServerSettingsPatch,
   type VcsStatusResult,
   type VcsStatusStreamEvent,
+  WORKFLOW_WS_METHODS,
   WS_METHODS,
 } from "@t3tools/contracts";
+import type {
+  WorkSourceConnectionView,
+  WorkSourceProviderName,
+} from "@t3tools/contracts/workSource";
+import type { OutboundConnectionView, CreateOutboundConnectionInput } from "@t3tools/contracts";
 import { applyGitStatusStreamEvent } from "@t3tools/shared/git";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
@@ -71,6 +77,7 @@ export interface WsRpcClient {
   readonly terminal: {
     readonly open: RpcUnaryMethod<typeof WS_METHODS.terminalOpen>;
     readonly attach: RpcInputStreamMethod<typeof WS_METHODS.terminalAttach>;
+    readonly attachHistory: RpcInputStreamMethod<typeof WS_METHODS.terminalAttachHistory>;
     readonly write: RpcUnaryMethod<typeof WS_METHODS.terminalWrite>;
     readonly resize: RpcUnaryMethod<typeof WS_METHODS.terminalResize>;
     readonly clear: RpcUnaryMethod<typeof WS_METHODS.terminalClear>;
@@ -187,6 +194,71 @@ export interface WsRpcClient {
     readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
   };
+  readonly workflow: {
+    readonly listBoards: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.listBoards>;
+    readonly createBoard: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.createBoard>;
+    readonly importBoard: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.importBoard>;
+    readonly createWorkflowBoard: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.createWorkflowBoard>;
+    readonly generateWorkflowDraft: RpcUnaryMethod<
+      typeof WORKFLOW_WS_METHODS.generateWorkflowDraft
+    >;
+    readonly listBoardTemplates: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.listBoardTemplates>;
+    readonly deleteBoard: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.deleteBoard>;
+    readonly renameBoard: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.renameBoard>;
+    readonly getBoard: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.getBoard>;
+    readonly getBoardDefinition: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.getBoardDefinition>;
+    readonly saveBoardDefinition: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.saveBoardDefinition>;
+    readonly listBoardVersions: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.listBoardVersions>;
+    readonly getBoardVersion: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.getBoardVersion>;
+    readonly subscribeBoard: RpcInputStreamMethod<typeof WORKFLOW_WS_METHODS.subscribeBoard>;
+    readonly createTicket: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.createTicket>;
+    readonly editTicket: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.editTicket>;
+    readonly moveTicket: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.moveTicket>;
+    readonly runLane: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.runLane>;
+    readonly resolveApproval: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.resolveApproval>;
+    readonly answerTicketStep: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.answerTicketStep>;
+    readonly postTicketMessage: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.postTicketMessage>;
+    readonly setProjectScriptTrust: RpcUnaryMethod<
+      typeof WORKFLOW_WS_METHODS.setProjectScriptTrust
+    >;
+    readonly cancelStep: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.cancelStep>;
+    readonly getTicketDetail: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.getTicketDetail>;
+    readonly listNeedsAttentionTickets: RpcUnaryMethod<
+      typeof WORKFLOW_WS_METHODS.listNeedsAttentionTickets
+    >;
+    readonly getTicketDiff: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.getTicketDiff>;
+    readonly intakeTickets: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.intakeTickets>;
+    readonly listTicketArtifacts: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.listTicketArtifacts>;
+    readonly getWebhookConfig: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.getWebhookConfig>;
+    readonly getBoardDigest: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.getBoardDigest>;
+    readonly getBoardMetrics: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.getBoardMetrics>;
+    readonly dryRunBoard: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.dryRunBoard>;
+    readonly listWorkSourceConnections: (
+      input: Record<string, never>,
+    ) => Promise<ReadonlyArray<WorkSourceConnectionView>>;
+    readonly createWorkSourceConnection: (input: {
+      readonly provider: WorkSourceProviderName;
+      readonly displayName: string;
+      readonly token: string;
+    }) => Promise<WorkSourceConnectionView>;
+    readonly deleteWorkSourceConnection: (input: {
+      readonly connectionRef: string;
+    }) => Promise<void>;
+    readonly listOutboundConnections: (
+      input: Record<string, never>,
+    ) => Promise<{ readonly connections: ReadonlyArray<OutboundConnectionView> }>;
+    readonly createOutboundConnection: (
+      input: CreateOutboundConnectionInput,
+    ) => Promise<{ readonly connection: OutboundConnectionView }>;
+    readonly deleteOutboundConnection: (input: { readonly connectionRef: string }) => Promise<void>;
+    readonly proposeBoardImprovement: RpcUnaryMethod<
+      typeof WORKFLOW_WS_METHODS.proposeBoardImprovement
+    >;
+    readonly listBoardProposals: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.listBoardProposals>;
+    readonly getBoardProposal: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.getBoardProposal>;
+    readonly resolveBoardProposal: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.resolveBoardProposal>;
+    readonly revertBoardProposal: RpcUnaryMethod<typeof WORKFLOW_WS_METHODS.revertBoardProposal>;
+  };
 }
 
 export interface CreateWsRpcClientOptions {
@@ -212,6 +284,12 @@ export function createWsRpcClient(
           (client) => client[WS_METHODS.terminalAttach](input),
           listener,
           subscriptionOptions(options, WS_METHODS.terminalAttach),
+        ),
+      attachHistory: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.terminalAttachHistory](input),
+          listener,
+          subscriptionOptions(options, WS_METHODS.terminalAttachHistory),
         ),
       write: (input) => transport.request((client) => client[WS_METHODS.terminalWrite](input)),
       resize: (input) => transport.request((client) => client[WS_METHODS.terminalResize](input)),
@@ -429,6 +507,101 @@ export function createWsRpcClient(
           listener,
           subscriptionOptions(options, ORCHESTRATION_WS_METHODS.subscribeThread),
         ),
+    },
+    workflow: {
+      listBoards: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.listBoards](input)),
+      createBoard: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.createBoard](input)),
+      importBoard: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.importBoard](input)),
+      createWorkflowBoard: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.createWorkflowBoard](input)),
+      generateWorkflowDraft: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.generateWorkflowDraft](input)),
+      listBoardTemplates: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.listBoardTemplates](input)),
+      deleteBoard: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.deleteBoard](input)),
+      renameBoard: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.renameBoard](input)),
+      getBoard: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.getBoard](input)),
+      getBoardDefinition: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.getBoardDefinition](input)),
+      saveBoardDefinition: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.saveBoardDefinition](input)),
+      listBoardVersions: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.listBoardVersions](input)),
+      getBoardVersion: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.getBoardVersion](input)),
+      subscribeBoard: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[WORKFLOW_WS_METHODS.subscribeBoard](input),
+          listener,
+          subscriptionOptions(options, WORKFLOW_WS_METHODS.subscribeBoard),
+        ),
+      createTicket: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.createTicket](input)),
+      editTicket: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.editTicket](input)),
+      moveTicket: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.moveTicket](input)),
+      runLane: (input) => transport.request((client) => client[WORKFLOW_WS_METHODS.runLane](input)),
+      resolveApproval: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.resolveApproval](input)),
+      answerTicketStep: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.answerTicketStep](input)),
+      postTicketMessage: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.postTicketMessage](input)),
+      setProjectScriptTrust: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.setProjectScriptTrust](input)),
+      cancelStep: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.cancelStep](input)),
+      getTicketDetail: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.getTicketDetail](input)),
+      listNeedsAttentionTickets: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.listNeedsAttentionTickets](input)),
+      getTicketDiff: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.getTicketDiff](input)),
+      intakeTickets: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.intakeTickets](input)),
+      listTicketArtifacts: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.listTicketArtifacts](input)),
+      getWebhookConfig: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.getWebhookConfig](input)),
+      getBoardDigest: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.getBoardDigest](input)),
+      getBoardMetrics: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.getBoardMetrics](input)),
+      dryRunBoard: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.dryRunBoard](input)),
+      listWorkSourceConnections: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.listWorkSourceConnections](input)),
+      createWorkSourceConnection: (input) =>
+        transport.request((client) =>
+          client[WORKFLOW_WS_METHODS.createWorkSourceConnection](input),
+        ),
+      deleteWorkSourceConnection: (input) =>
+        transport.request((client) =>
+          client[WORKFLOW_WS_METHODS.deleteWorkSourceConnection](input),
+        ),
+      listOutboundConnections: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.listOutboundConnections](input)),
+      createOutboundConnection: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.createOutboundConnection](input)),
+      deleteOutboundConnection: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.deleteOutboundConnection](input)),
+      proposeBoardImprovement: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.proposeBoardImprovement](input)),
+      listBoardProposals: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.listBoardProposals](input)),
+      getBoardProposal: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.getBoardProposal](input)),
+      resolveBoardProposal: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.resolveBoardProposal](input)),
+      revertBoardProposal: (input) =>
+        transport.request((client) => client[WORKFLOW_WS_METHODS.revertBoardProposal](input)),
     },
   };
 }
