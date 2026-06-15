@@ -112,6 +112,7 @@ const PreviewPanel = lazy(() =>
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
+const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
@@ -1366,6 +1367,41 @@ function ChatViewContent(props: ChatViewProps) {
     : null;
   const activeProject = useStore(
     useMemo(() => createProjectSelectorByRef(activeProjectRef), [activeProjectRef]),
+  );
+  const activeProjectKey = activeProject
+    ? `${activeProject.environmentId}:${activeProject.cwd}`
+    : null;
+  const [pendingFileSurfaceIdsByProject, setPendingFileSurfaceIdsByProject] = useState<
+    ReadonlyMap<string, ReadonlySet<string>>
+  >(() => new Map());
+  const pendingFileSurfaceIds = activeProjectKey
+    ? (pendingFileSurfaceIdsByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS)
+    : EMPTY_PENDING_FILE_SURFACE_IDS;
+  const handleFilePendingChange = useCallback(
+    (relativePath: string, pending: boolean) => {
+      if (!activeProjectKey) return;
+      setPendingFileSurfaceIdsByProject((currentByProject) => {
+        const current = currentByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS;
+        const surfaceId = `file:${relativePath}`;
+        if (current.has(surfaceId) === pending) return currentByProject;
+
+        const next = new Set(current);
+        if (pending) {
+          next.add(surfaceId);
+        } else {
+          next.delete(surfaceId);
+        }
+
+        const nextByProject = new Map(currentByProject);
+        if (next.size === 0) {
+          nextByProject.delete(activeProjectKey);
+        } else {
+          nextByProject.set(activeProjectKey, next);
+        }
+        return nextByProject;
+      });
+    },
+    [activeProjectKey],
   );
   const activeEnvironmentBootstrapComplete = useStore((state) =>
     activeThread
@@ -4792,6 +4828,7 @@ function ChatViewContent(props: ChatViewProps) {
           maximized={rightPanelMaximized}
           surfaces={rightPanelState.surfaces}
           activeSurfaceId={activeRightPanelSurface?.id ?? null}
+          pendingSurfaceIds={pendingFileSurfaceIds}
           previewSessions={activePreviewState.sessions}
           terminalLabelsById={activeTerminalLabelsById}
           onActivate={activateRightPanelSurface}
@@ -4851,6 +4888,7 @@ function ChatViewContent(props: ChatViewProps) {
                     : null
                 }
                 onOpenFile={openFileSurface}
+                onPendingChange={handleFilePendingChange}
               />
             </Suspense>
           ) : null}
@@ -4863,6 +4901,7 @@ function ChatViewContent(props: ChatViewProps) {
             mode="sheet"
             surfaces={rightPanelState.surfaces}
             activeSurfaceId={activeRightPanelSurface?.id ?? null}
+            pendingSurfaceIds={pendingFileSurfaceIds}
             previewSessions={activePreviewState.sessions}
             terminalLabelsById={activeTerminalLabelsById}
             onActivate={activateRightPanelSurface}
@@ -4935,6 +4974,7 @@ function ChatViewContent(props: ChatViewProps) {
                       : null
                   }
                   onOpenFile={openFileSurface}
+                  onPendingChange={handleFilePendingChange}
                 />
               </Suspense>
             ) : null}

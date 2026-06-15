@@ -9,7 +9,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 
 import { ensureEnvironmentApi } from "~/environmentApi";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
@@ -17,6 +17,12 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 const PROJECT_QUERY_STALE_TIME_MS = 30_000;
 const PROJECT_QUERY_IDLE_TTL_MS = 5 * 60_000;
 const EMPTY_PROJECT_FILE_PATH = "";
+interface OptimisticProjectFile {
+  readonly data: ProjectReadFileResult;
+  readonly confirmed: boolean;
+}
+
+const optimisticProjectFiles = new Map<string, OptimisticProjectFile>();
 
 class ProjectQueryError extends Data.TaggedError("ProjectQueryError")<{
   readonly message: string;
@@ -97,6 +103,53 @@ export function getProjectFileQueryAtom(
   return projectFileQueryAtom(fileKey(environmentId, cwd, relativePath ?? EMPTY_PROJECT_FILE_PATH));
 }
 
+export function setProjectFileQueryData(
+  environmentId: EnvironmentId,
+  cwd: string,
+  relativePath: string,
+  contents: string,
+): void {
+  const key = fileKey(environmentId, cwd, relativePath);
+  optimisticProjectFiles.set(key, {
+    confirmed: false,
+    data: {
+      relativePath,
+      contents,
+      byteLength: new TextEncoder().encode(contents).byteLength,
+      truncated: false,
+    },
+  });
+}
+
+export function confirmProjectFileQueryData(
+  environmentId: EnvironmentId,
+  cwd: string,
+  relativePath: string,
+  contents: string,
+): boolean {
+  const key = fileKey(environmentId, cwd, relativePath);
+  const optimisticFile = optimisticProjectFiles.get(key);
+  if (optimisticFile?.data.contents !== contents) return false;
+
+  optimisticProjectFiles.set(key, { ...optimisticFile, confirmed: true });
+  appAtomRegistry.refresh(getProjectFileQueryAtom(environmentId, cwd, relativePath));
+  return true;
+}
+
+export function resolveProjectFileQueryData(
+  environmentId: EnvironmentId,
+  cwd: string,
+  relativePath: string | null,
+  data: ProjectReadFileResult | null,
+): ProjectReadFileResult | null {
+  if (relativePath === null) return data;
+  return optimisticProjectFiles.get(fileKey(environmentId, cwd, relativePath))?.data ?? data;
+}
+
+export function __resetProjectFileQueryDataForTests(): void {
+  optimisticProjectFiles.clear();
+}
+
 function errorMessage<A>(result: AsyncResult.AsyncResult<A, unknown>): string | null {
   if (result._tag !== "Failure") return null;
   const cause = Cause.squash(result.cause);
@@ -126,8 +179,26 @@ export function useProjectFileQuery(
   const atom = getProjectFileQueryAtom(environmentId, cwd, relativePath);
   const result = useAtomValue(atom);
   const refresh = useCallback(() => appAtomRegistry.refresh(atom), [atom]);
+  const data = Option.getOrNull(AsyncResult.value(result));
+  const optimisticFile =
+    relativePath === null
+      ? undefined
+      : optimisticProjectFiles.get(fileKey(environmentId, cwd, relativePath));
+
+  useEffect(() => {
+    if (
+      relativePath === null ||
+      optimisticFile === undefined ||
+      !optimisticFile.confirmed ||
+      data?.contents !== optimisticFile.data.contents
+    ) {
+      return;
+    }
+    optimisticProjectFiles.delete(fileKey(environmentId, cwd, relativePath));
+  }, [cwd, data?.contents, environmentId, optimisticFile, relativePath]);
+
   return {
-    data: Option.getOrNull(AsyncResult.value(result)),
+    data: optimisticFile?.data ?? data,
     error: errorMessage(result),
     isPending: result.waiting,
     refresh,

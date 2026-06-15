@@ -1,8 +1,10 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { File, Virtualizer } from "@pierre/diffs/react";
+import { Editor } from "@pierre/diffs/editor";
+import { EditorProvider, File, Virtualizer } from "@pierre/diffs/react";
 import { ChevronRight, FolderTree, LoaderCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { ensureEnvironmentApi } from "~/environmentApi";
 import { useTheme } from "~/hooks/useTheme";
 import { resolveDiffThemeName } from "~/lib/diffRendering";
 import { cn } from "~/lib/utils";
@@ -11,8 +13,13 @@ import { Toggle } from "~/components/ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
 import FileBrowserPanel from "./FileBrowserPanel";
+import { projectFileCacheKey } from "./fileContentRevision";
 import { fileBreadcrumbs } from "./filePath";
-import { useProjectFileQuery } from "./projectFilesQueryState";
+import {
+  confirmProjectFileQueryData,
+  setProjectFileQueryData,
+  useProjectFileQuery,
+} from "./projectFilesQueryState";
 
 interface FilePreviewPanelProps {
   environmentId: EnvironmentId;
@@ -20,9 +27,112 @@ interface FilePreviewPanelProps {
   projectName: string;
   relativePath: string | null;
   onOpenFile: (relativePath: string) => void;
+  onPendingChange: (relativePath: string, pending: boolean) => void;
 }
 
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
+
+class PendingFileWrites {
+  private pending = 0;
+  private failed = false;
+
+  constructor(
+    private readonly relativePath: string,
+    private readonly onPendingChange: (relativePath: string, pending: boolean) => void,
+  ) {}
+
+  begin(): void {
+    if (this.pending === 0) this.failed = false;
+    this.pending += 1;
+    this.onPendingChange(this.relativePath, true);
+  }
+
+  finish(success: boolean): void {
+    if (!success) this.failed = true;
+    this.pending -= 1;
+    if (this.pending === 0 && !this.failed) {
+      this.onPendingChange(this.relativePath, false);
+    }
+  }
+}
+
+interface EditableFileSurfaceProps {
+  environmentId: EnvironmentId;
+  cwd: string;
+  relativePath: string;
+  contents: string;
+  resolvedTheme: "light" | "dark";
+  onPendingChange: (relativePath: string, pending: boolean) => void;
+}
+
+function EditableFileSurface({
+  environmentId,
+  cwd,
+  relativePath,
+  contents,
+  resolvedTheme,
+  onPendingChange,
+}: EditableFileSurfaceProps) {
+  const pendingWrites = useMemo(
+    () => new PendingFileWrites(relativePath, onPendingChange),
+    [onPendingChange, relativePath],
+  );
+  const editor = useMemo(
+    () =>
+      new Editor({
+        onChange: (file) => {
+          pendingWrites.begin();
+          setProjectFileQueryData(environmentId, cwd, relativePath, file.contents);
+          void ensureEnvironmentApi(environmentId)
+            .projects.writeFile({
+              cwd,
+              relativePath,
+              contents: file.contents,
+            })
+            .then(
+              () => {
+                confirmProjectFileQueryData(environmentId, cwd, relativePath, file.contents);
+                pendingWrites.finish(true);
+              },
+              () => {
+                pendingWrites.finish(false);
+              },
+            );
+        },
+      }),
+    [cwd, environmentId, pendingWrites, relativePath],
+  );
+
+  useEffect(() => () => editor.cleanUp(), [editor]);
+
+  return (
+    <EditorProvider editor={editor}>
+      <Virtualizer
+        className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
+        config={{
+          overscrollSize: 600,
+          intersectionObserverMargin: 1200,
+        }}
+      >
+        <File
+          file={{
+            name: relativePath,
+            contents,
+            cacheKey: projectFileCacheKey(cwd, relativePath, contents),
+          }}
+          options={{
+            disableFileHeader: true,
+            overflow: "scroll",
+            theme: resolveDiffThemeName(resolvedTheme),
+            themeType: resolvedTheme,
+          }}
+          className="min-h-full"
+          contentEditable
+        />
+      </Virtualizer>
+    </EditorProvider>
+  );
+}
 
 function initialExplorerOpen(): boolean {
   try {
@@ -38,6 +148,7 @@ export default function FilePreviewPanel({
   projectName,
   relativePath,
   onOpenFile,
+  onPendingChange,
 }: FilePreviewPanelProps) {
   const { resolvedTheme } = useTheme();
   const file = useProjectFileQuery(environmentId, cwd, relativePath);
@@ -143,29 +254,41 @@ export default function FilePreviewPanel({
               <LoaderCircle className="size-5 animate-spin" />
             </div>
           ) : relativePath && file.data ? (
-            <Virtualizer
-              key={`${relativePath}:${resolvedTheme}:${file.data.byteLength}`}
-              className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
-              config={{
-                overscrollSize: 600,
-                intersectionObserverMargin: 1200,
-              }}
-            >
-              <File
-                file={{
-                  name: relativePath,
-                  contents: file.data.contents,
-                  cacheKey: `${cwd}:${relativePath}:${file.data.byteLength}`,
+            file.data.truncated ? (
+              <Virtualizer
+                key={`${relativePath}:${resolvedTheme}:${file.data.byteLength}`}
+                className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
+                config={{
+                  overscrollSize: 600,
+                  intersectionObserverMargin: 1200,
                 }}
-                options={{
-                  disableFileHeader: true,
-                  overflow: "scroll",
-                  theme: resolveDiffThemeName(resolvedTheme),
-                  themeType: resolvedTheme,
-                }}
-                className="min-h-full"
+              >
+                <File
+                  file={{
+                    name: relativePath,
+                    contents: file.data.contents,
+                    cacheKey: projectFileCacheKey(cwd, relativePath, file.data.contents),
+                  }}
+                  options={{
+                    disableFileHeader: true,
+                    overflow: "scroll",
+                    theme: resolveDiffThemeName(resolvedTheme),
+                    themeType: resolvedTheme,
+                  }}
+                  className="min-h-full"
+                />
+              </Virtualizer>
+            ) : (
+              <EditableFileSurface
+                key={`${relativePath}:${resolvedTheme}`}
+                environmentId={environmentId}
+                cwd={cwd}
+                relativePath={relativePath}
+                contents={file.data.contents}
+                resolvedTheme={resolvedTheme}
+                onPendingChange={onPendingChange}
               />
-            </Virtualizer>
+            )
           ) : null}
         </div>
         {explorerOpen || relativePath === null ? (

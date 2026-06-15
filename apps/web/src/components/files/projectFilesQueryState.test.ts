@@ -1,4 +1,8 @@
-import type { EnvironmentApi, ProjectListEntriesResult } from "@t3tools/contracts";
+import type {
+  EnvironmentApi,
+  ProjectListEntriesResult,
+  ProjectReadFileResult,
+} from "@t3tools/contracts";
 import { EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, AtomRegistry } from "effect/unstable/reactivity";
@@ -8,8 +12,16 @@ import {
   __resetEnvironmentApiOverridesForTests,
   __setEnvironmentApiOverrideForTests,
 } from "~/environmentApi";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
 
-import { getProjectEntriesQueryAtom } from "./projectFilesQueryState";
+import {
+  __resetProjectFileQueryDataForTests,
+  confirmProjectFileQueryData,
+  getProjectEntriesQueryAtom,
+  getProjectFileQueryAtom,
+  resolveProjectFileQueryData,
+  setProjectFileQueryData,
+} from "./projectFilesQueryState";
 
 const environmentId = EnvironmentId.make("environment-project-files-query-test");
 
@@ -23,6 +35,7 @@ function deferred<A>() {
 
 describe("project files queries", () => {
   afterEach(() => {
+    __resetProjectFileQueryDataForTests();
     __resetEnvironmentApiOverridesForTests();
     vi.unstubAllGlobals();
   });
@@ -67,5 +80,50 @@ describe("project files queries", () => {
       expect(Option.getOrNull(AsyncResult.value(registry.get(atom)))).toEqual(second);
     });
     registry.dispose();
+  });
+
+  it("keeps the latest optimistic draft when an older write finishes", async () => {
+    vi.stubGlobal("window", {});
+    const initial = {
+      relativePath: "convex.json",
+      contents: '{"nodeVersion":"20"}',
+      byteLength: 20,
+      truncated: false,
+    } satisfies ProjectReadFileResult;
+    const readFile = vi.fn<EnvironmentApi["projects"]["readFile"]>().mockResolvedValue(initial);
+    __setEnvironmentApiOverrideForTests(environmentId, {
+      projects: { readFile },
+    } as unknown as EnvironmentApi);
+    const atom = getProjectFileQueryAtom(environmentId, "/repo", "convex.json");
+
+    appAtomRegistry.get(atom);
+    await vi.waitFor(() => {
+      expect(Option.getOrNull(AsyncResult.value(appAtomRegistry.get(atom)))).toEqual(initial);
+    });
+
+    setProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"220"}');
+    setProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"22"}');
+
+    expect(
+      confirmProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"220"}'),
+    ).toBe(false);
+
+    expect(
+      resolveProjectFileQueryData(
+        environmentId,
+        "/repo",
+        "convex.json",
+        Option.getOrNull(AsyncResult.value(appAtomRegistry.get(atom))),
+      ),
+    ).toEqual({
+      relativePath: "convex.json",
+      contents: '{"nodeVersion":"22"}',
+      byteLength: 20,
+      truncated: false,
+    });
+
+    expect(
+      confirmProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"22"}'),
+    ).toBe(true);
   });
 });

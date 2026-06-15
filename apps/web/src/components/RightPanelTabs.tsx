@@ -20,6 +20,7 @@ interface RightPanelTabsProps {
   maximized?: boolean;
   surfaces: readonly RightPanelSurface[];
   activeSurfaceId: string | null;
+  pendingSurfaceIds: ReadonlySet<string>;
   previewSessions: Readonly<Record<string, PreviewSessionSnapshot>>;
   terminalLabelsById: ReadonlyMap<string, string>;
   onActivate: (surface: RightPanelSurface) => void;
@@ -225,6 +226,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           <div className="flex h-full w-max min-w-full items-center gap-1">
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId;
+              const pending = props.pendingSurfaceIds.has(surface.id);
               const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById);
               return (
                 <div
@@ -258,11 +260,24 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   </Tooltip>
                   <button
                     type="button"
-                    className="rounded p-0.5 opacity-0 hover:bg-muted group-hover:opacity-100 focus:opacity-100"
+                    className={cn(
+                      "relative flex size-4 shrink-0 items-center justify-center rounded hover:bg-muted focus:opacity-100",
+                      pending ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                    )}
                     aria-label={`Close ${title}`}
                     onClick={() => props.onCloseSurface(surface)}
                   >
-                    <X className="size-3" />
+                    {pending ? (
+                      <>
+                        <span
+                          className="size-2 rounded-full bg-current group-hover:hidden"
+                          aria-hidden
+                        />
+                        <X className="hidden size-3 group-hover:block" />
+                      </>
+                    ) : (
+                      <X className="size-3" />
+                    )}
                   </button>
                 </div>
               );
