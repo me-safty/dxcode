@@ -817,6 +817,8 @@ export function SourceControlPanel({
   const lastFocusRefreshAtRef = useRef(0);
   const lastVcsStatusFingerprintRef = useRef<string | null>(null);
   const previousChangedPathsRef = useRef<ReadonlySet<string>>(new Set());
+  const refreshInFlightRef = useRef(false);
+  const refreshQueuedRef = useRef(false);
   const [snapshot, setSnapshot] = useState<VcsPanelSnapshotResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningActions, setRunningActions] = useState<ReadonlySet<string>>(() => new Set());
@@ -925,36 +927,45 @@ export function SourceControlPanel({
 
   const refresh = useCallback(async () => {
     if (!api) return;
+    if (refreshInFlightRef.current) {
+      refreshQueuedRef.current = true;
+      return;
+    }
+    refreshInFlightRef.current = true;
     setLoading(true);
-    setError(null);
     try {
-      const nextSnapshot = await api.vcs.panelSnapshot({ cwd });
-      syncChangedPathSelection(nextSnapshot.changeGroups);
-      setSnapshot(nextSnapshot);
-      const expandedBranches = expandedBranchesForSnapshot(nextSnapshot, expandedTreeRef.current);
-      const nextDetails = new Map(mapBranchDetails(nextSnapshot.branchDetails));
-      setLoadingBranchDetails(new Set());
-      if (expandedBranches.length > 0) {
-        setLoadingBranchDetails(new Set(expandedBranches.map((branch) => branch.name)));
-        const details = await Promise.all(
-          expandedBranches.map((branch) =>
-            api.vcs.branchDetails({
-              cwd,
-              branch,
-              defaultCompareRef: nextSnapshot.defaultCompareRef,
-              compareBaseRef: compareBaseOverrides.get(branch.name),
-            }),
-          ),
-        );
-        for (const detail of details) {
-          nextDetails.set(detail.fullRefName, detail);
-          nextDetails.set(detail.name, detail);
+      do {
+        refreshQueuedRef.current = false;
+        setError(null);
+        const nextSnapshot = await api.vcs.panelSnapshot({ cwd });
+        syncChangedPathSelection(nextSnapshot.changeGroups);
+        setSnapshot(nextSnapshot);
+        const expandedBranches = expandedBranchesForSnapshot(nextSnapshot, expandedTreeRef.current);
+        const nextDetails = new Map(mapBranchDetails(nextSnapshot.branchDetails));
+        setLoadingBranchDetails(new Set());
+        if (expandedBranches.length > 0) {
+          setLoadingBranchDetails(new Set(expandedBranches.map((branch) => branch.name)));
+          const details = await Promise.all(
+            expandedBranches.map((branch) =>
+              api.vcs.branchDetails({
+                cwd,
+                branch,
+                defaultCompareRef: nextSnapshot.defaultCompareRef,
+                compareBaseRef: compareBaseOverrides.get(branch.name),
+              }),
+            ),
+          );
+          for (const detail of details) {
+            nextDetails.set(detail.fullRefName, detail);
+            nextDetails.set(detail.name, detail);
+          }
         }
-      }
-      setBranchDetailsByRef(nextDetails);
+        setBranchDetailsByRef(nextDetails);
+      } while (refreshQueuedRef.current);
     } catch (nextError) {
       setError(errorMessage(nextError));
     } finally {
+      refreshInFlightRef.current = false;
       setLoadingBranchDetails(new Set());
       setLoading(false);
     }
