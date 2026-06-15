@@ -1,6 +1,13 @@
 import { scopeProjectRef, scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
 import type { VcsStatusResult } from "@t3tools/contracts";
-import { CloudIcon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CloudIcon,
+  GitPullRequestIcon,
+  LoaderCircleIcon,
+  TerminalIcon,
+  XIcon,
+} from "lucide-react";
 import { useMemo } from "react";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import {
@@ -67,6 +74,63 @@ export function prStatusIndicator(
 
 export function ChangeRequestStatusIcon({ className }: { className?: string }) {
   return <GitPullRequestIcon className={className} />;
+}
+
+export type ThreadChecks = NonNullable<ThreadPr>["checks"];
+
+export interface ChecksStatusIndicator {
+  state: "passing" | "failing" | "pending";
+  colorClass: string;
+  tooltip: string;
+}
+
+/**
+ * Maps a change request's rolled-up CI summary to a small chip's color and
+ * tooltip. Returns null when there are no checks (or no PR) so the caller
+ * renders nothing.
+ */
+export function checksStatusIndicator(
+  checks: ThreadChecks | null | undefined,
+): ChecksStatusIndicator | null {
+  if (!checks) return null;
+  if (checks.state === "failing") {
+    const count = checks.failingCount;
+    const summary =
+      count > 0 ? `${count} failing check${count === 1 ? "" : "s"}` : "Some checks failed";
+    return {
+      state: "failing",
+      colorClass: "text-red-600 dark:text-red-400/90",
+      tooltip: `CI: ${summary} (click to view)`,
+    };
+  }
+  if (checks.state === "pending") {
+    return {
+      state: "pending",
+      colorClass: "text-amber-600 dark:text-amber-400/90",
+      tooltip: "CI: checks running (click to view)",
+    };
+  }
+  return {
+    state: "passing",
+    colorClass: "text-emerald-600 dark:text-emerald-300/90",
+    tooltip: "CI: all checks passed (click to view)",
+  };
+}
+
+export function ChecksStatusIcon({
+  state,
+  className,
+}: {
+  state: ChecksStatusIndicator["state"];
+  className?: string;
+}) {
+  if (state === "failing") {
+    return <XIcon className={className} />;
+  }
+  if (state === "pending") {
+    return <LoaderCircleIcon className={`${className ?? ""} animate-spin`} />;
+  }
+  return <CheckIcon className={className} />;
 }
 
 export function resolveThreadPr(

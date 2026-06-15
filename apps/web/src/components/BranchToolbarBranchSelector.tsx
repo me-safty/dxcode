@@ -35,6 +35,8 @@ import {
 } from "./BranchToolbar.logic";
 import {
   ChangeRequestStatusIcon,
+  ChecksStatusIcon,
+  checksStatusIndicator,
   prStatusIndicator,
   resolveThreadPr,
 } from "./ThreadStatusIndicators";
@@ -529,6 +531,16 @@ export function BranchToolbarBranchSelector({
   const branchPrTooltip = branchPr
     ? `Open ${sourceControlPresentation.terminology.singular} #${branchPr.number} (${branchPr.state}) in browser`
     : "";
+  // CI status chip shown next to the PR pill when the PR has checks.
+  const branchPrChecks = checksStatusIndicator(branchPr?.checks);
+  const branchPrChecksUrl = branchPr ? `${branchPr.url}/checks` : "";
+  // For an open PR with CI, color the pill by the check status too (red/amber/green)
+  // so the whole PR cluster reflects health at a glance. Otherwise keep the PR
+  // state color (merged = violet, closed = gray).
+  const branchPrPillColorClass =
+    branchPr?.state === "open" && branchPrChecks
+      ? branchPrChecks.colorClass
+      : branchPrStatus?.colorClass;
   const openPrLink = useOpenPrLink();
 
   function renderPickerItem(itemValue: string, index: number) {
@@ -638,7 +650,7 @@ export function BranchToolbarBranchSelector({
                   onClick={(event) => openPrLink(event, branchPrStatus.url)}
                   className={cn(
                     "inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[11px] font-medium tabular-nums transition-colors hover:bg-muted/60",
-                    branchPrStatus.colorClass,
+                    branchPrPillColorClass,
                   )}
                 />
               }
@@ -647,6 +659,26 @@ export function BranchToolbarBranchSelector({
               <span>#{branchPr.number}</span>
             </TooltipTrigger>
             <TooltipPopup side="top">{branchPrTooltip}</TooltipPopup>
+          </Tooltip>
+        ) : null}
+        {branchPr && branchPrChecks ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={branchPrChecks.tooltip}
+                  onClick={(event) => openPrLink(event, branchPrChecksUrl)}
+                  className={cn(
+                    "inline-flex shrink-0 items-center rounded px-1 py-0.5 transition-colors hover:bg-muted/60",
+                    branchPrChecks.colorClass,
+                  )}
+                />
+              }
+            >
+              <ChecksStatusIcon state={branchPrChecks.state} className="size-3" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">{branchPrChecks.tooltip}</TooltipPopup>
           </Tooltip>
         ) : null}
         <ComboboxTrigger
