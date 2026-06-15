@@ -4,6 +4,7 @@ import {
   ChevronRightIcon,
   CloudIcon,
   FolderPlusIcon,
+  GitCompareArrowsIcon,
   PlusIcon,
   ListTodoIcon,
   SearchIcon,
@@ -193,6 +194,7 @@ import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
 import { readEnvironmentApi } from "../environmentApi";
+import { bakeoffThreadKey, bakeoffThreadKeys, useBakeoffs } from "../bakeoffs";
 import { isThreadAgentRunActive } from "../runs";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
@@ -2586,20 +2588,36 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
   const runs = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const [bakeoffs] = useBakeoffs();
+  const bakeoffKeys = useMemo(() => bakeoffThreadKeys(bakeoffs), [bakeoffs]);
   const runEnvironmentIds = useMemo(
     () => [...new Set(runs.map((thread) => thread.environmentId))],
     [runs],
   );
   const terminalSessions = useKnownTerminalSessionsAcrossEnvironments(runEnvironmentIds);
+  const activeBakeoffRunCount = runs.filter(
+    (thread) =>
+      bakeoffKeys.has(bakeoffThreadKey(thread.environmentId, thread.id)) &&
+      isThreadAgentRunActive(thread),
+  ).length;
   const activeRunCount =
-    runs.filter(isThreadAgentRunActive).length +
-    terminalSessions.filter((session) => session.state.hasRunningSubprocess).length;
+    runs.filter(
+      (thread) =>
+        !bakeoffKeys.has(bakeoffThreadKey(thread.environmentId, thread.id)) &&
+        isThreadAgentRunActive(thread),
+    ).length + terminalSessions.filter((session) => session.state.hasRunningSubprocess).length;
   const { isMobile, setOpenMobile } = useSidebar();
   const handleRunsClick = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);
     }
     void navigate({ to: "/runs" });
+  }, [isMobile, navigate, setOpenMobile]);
+  const handleBakeoffsClick = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    void navigate({ to: "/bakeoffs" });
   }, [isMobile, navigate, setOpenMobile]);
   const handleSettingsClick = useCallback(() => {
     if (isMobile) {
@@ -2613,6 +2631,22 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
       <SidebarProviderUpdatePill />
       <SidebarUpdatePill />
       <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            size="sm"
+            isActive={pathname === "/bakeoffs"}
+            className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+            onClick={handleBakeoffsClick}
+          >
+            <GitCompareArrowsIcon className="size-3.5" />
+            <span className="text-xs">Bakeoffs</span>
+            {activeBakeoffRunCount > 0 ? (
+              <span className="ml-auto rounded-full bg-info/12 px-1.5 text-[10px] font-medium text-info-foreground">
+                {activeBakeoffRunCount}
+              </span>
+            ) : null}
+          </SidebarMenuButton>
+        </SidebarMenuItem>
         <SidebarMenuItem>
           <SidebarMenuButton
             size="sm"

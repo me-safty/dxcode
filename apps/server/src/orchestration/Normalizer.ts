@@ -14,6 +14,11 @@ import {
 import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
+import {
+  ensureSectionRepository,
+  ensureSectionThreadWorktree,
+  sectionWorkspacePath,
+} from "./SectionWorkspaces.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 import { WorkspacePaths } from "../workspace/Services/WorkspacePaths.ts";
 
@@ -33,6 +38,16 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
     const serverConfig = yield* ServerConfig;
     const workspacePaths = yield* WorkspacePaths;
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+    const prepareSectionWorkspace = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      effect.pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationDispatchCommandError({
+              message:
+                cause instanceof Error ? cause.message : "Failed to prepare section workspace.",
+            }),
+        ),
+      );
 
     const normalizeProjectWorkspaceRoot = (workspaceRoot: string) =>
       workspacePaths.normalizeWorkspaceRoot(workspaceRoot).pipe(
@@ -61,17 +76,50 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
           ),
         );
 
+    const prepareSectionThread = Effect.fn("Normalizer.prepareSectionThread")(function* (input: {
+      readonly projectId: Extract<OrchestrationCommand, { type: "thread.create" }>["projectId"];
+      readonly threadId: Extract<OrchestrationCommand, { type: "thread.create" }>["threadId"];
+    }) {
+      const existingThread = yield* projectionSnapshotQuery
+        .getThreadDetailById(input.threadId)
+        .pipe(Effect.map(Option.getOrNull));
+      if (existingThread) {
+        return null;
+      }
+      const project = yield* projectionSnapshotQuery
+        .getProjectShellById(input.projectId)
+        .pipe(Effect.map(Option.getOrNull));
+      if (project?.kind !== "section") {
+        return null;
+      }
+      return yield* prepareSectionWorkspace(
+        ensureSectionThreadWorktree({
+          sectionWorkspaceRoot: project.workspaceRoot,
+          worktreesDir: serverConfig.worktreesDir,
+          projectId: input.projectId,
+          threadId: input.threadId,
+        }),
+      );
+    });
+
     if (command.type === "project.create") {
       const requestedWorkspaceRoot =
         command.kind === "section"
-          ? path.join(serverConfig.sectionsDir, command.projectId)
+          ? yield* sectionWorkspacePath({
+              sectionsDir: serverConfig.sectionsDir,
+              projectId: command.projectId,
+            })
           : command.workspaceRoot;
+      const workspaceRoot = yield* normalizeProjectWorkspaceRootForCreate(
+        requestedWorkspaceRoot,
+        command.kind === "section" ? true : command.createWorkspaceRootIfMissing,
+      );
+      if (command.kind === "section") {
+        yield* prepareSectionWorkspace(ensureSectionRepository(workspaceRoot));
+      }
       return {
         ...command,
-        workspaceRoot: yield* normalizeProjectWorkspaceRootForCreate(
-          requestedWorkspaceRoot,
-          command.kind === "section" ? true : command.createWorkspaceRootIfMissing,
-        ),
+        workspaceRoot,
         createWorkspaceRootIfMissing:
           command.kind === "section" || command.createWorkspaceRootIfMissing === true,
       } satisfies OrchestrationCommand;
@@ -84,6 +132,17 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       } satisfies OrchestrationCommand;
     }
 
+    if (command.type === "thread.create") {
+      const sectionThread = yield* prepareSectionThread(command);
+      return sectionThread
+        ? ({
+            ...command,
+            branch: sectionThread.branch,
+            worktreePath: sectionThread.worktreePath,
+          } satisfies OrchestrationCommand)
+        : (command as OrchestrationCommand);
+    }
+
     if (command.type !== "thread.turn.start") {
       return command as OrchestrationCommand;
     }
@@ -91,12 +150,26 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
     const thread = yield* projectionSnapshotQuery
       .getThreadDetailById(command.threadId)
       .pipe(Effect.map(Option.getOrNull));
-    const project = thread
+    const bootstrapCreateThread = command.bootstrap?.createThread;
+    const projectId = thread?.projectId ?? bootstrapCreateThread?.projectId;
+    const project = projectId
       ? yield* projectionSnapshotQuery
-          .getProjectShellById(thread.projectId)
+          .getProjectShellById(projectId)
           .pipe(Effect.map(Option.getOrNull))
       : null;
-    const workspaceRoot = project?.workspaceRoot ?? null;
+    const sectionThread =
+      !thread && bootstrapCreateThread && project?.kind === "section"
+        ? yield* prepareSectionWorkspace(
+            ensureSectionThreadWorktree({
+              sectionWorkspaceRoot: project.workspaceRoot,
+              worktreesDir: serverConfig.worktreesDir,
+              projectId: bootstrapCreateThread.projectId,
+              threadId: command.threadId,
+            }),
+          )
+        : null;
+    const workspaceRoot =
+      thread?.worktreePath ?? sectionThread?.worktreePath ?? project?.workspaceRoot ?? null;
 
     const normalizedAttachments = yield* Effect.forEach(
       command.message.attachments,
@@ -244,8 +317,24 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       { concurrency: 1 },
     );
 
+    const normalizedBootstrap =
+      sectionThread && command.bootstrap?.createThread
+        ? (() => {
+            const { prepareWorktree: _prepareWorktree, ...bootstrap } = command.bootstrap;
+            return {
+              ...bootstrap,
+              createThread: {
+                ...command.bootstrap.createThread,
+                branch: sectionThread.branch,
+                worktreePath: sectionThread.worktreePath,
+              },
+            };
+          })()
+        : command.bootstrap;
+
     return {
       ...command,
+      ...(normalizedBootstrap ? { bootstrap: normalizedBootstrap } : {}),
       message: {
         ...command.message,
         attachments: normalizedAttachments,

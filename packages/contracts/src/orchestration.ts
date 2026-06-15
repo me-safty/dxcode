@@ -893,6 +893,8 @@ export const ThreadCreatedPayload = Schema.Struct({
 export const ThreadDeletedPayload = Schema.Struct({
   threadId: ThreadId,
   deletedAt: IsoDateTime,
+  sectionWorkspaceRoot: Schema.optionalKey(TrimmedNonEmptyString),
+  worktreePath: Schema.optionalKey(TrimmedNonEmptyString),
 });
 
 export const ThreadArchivedPayload = Schema.Struct({

@@ -13,6 +13,7 @@ import {
   useState,
   useTransition,
 } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { readEnvironmentApi } from "../environmentApi";
@@ -22,11 +23,12 @@ import { newCommandId } from "../lib/utils";
 import { cn } from "../lib/utils";
 import { parsePullRequestReference } from "../pullRequestReference";
 import { getSourceControlPresentation } from "../sourceControlPresentation";
-import { useStore } from "../store";
+import { selectSidebarThreadsForProjectRef, useStore } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
 import {
   deriveLocalBranchNameFromRemoteRef,
   resolveBranchSelectionTarget,
+  resolveBranchPresentation,
   resolveBranchToolbarValue,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
@@ -44,6 +46,7 @@ import {
   ComboboxTrigger,
 } from "./ui/combobox";
 import { stackedThreadToast, toastManager } from "./ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 interface BranchToolbarBranchSelectorProps {
   className?: string;
@@ -117,6 +120,26 @@ export function BranchToolbarBranchSelector({
     [activeProjectRef],
   );
   const activeProject = useStore(activeProjectSelector);
+  const projectThreads = useStore(
+    useShallow(
+      useMemo(
+        () => (state: import("../store").AppState) =>
+          selectSidebarThreadsForProjectRef(state, activeProjectRef),
+        [activeProjectRef],
+      ),
+    ),
+  );
+  const sectionThreadTitleByBranch = useMemo(
+    () =>
+      new Map(
+        activeProject?.kind === "section"
+          ? projectThreads.flatMap((thread) =>
+              thread.branch ? [[thread.branch, thread.title] as const] : [],
+            )
+          : [],
+      ),
+    [activeProject?.kind, projectThreads],
+  );
 
   const activeThreadId = serverThread?.id ?? (draftThread ? threadId : undefined);
   const activeThreadBranch =
@@ -508,10 +531,17 @@ export function BranchToolbarBranchSelector({
     maybeFetchNextBranchPage();
   }, [refs.length, maybeFetchNextBranchPage]);
 
-  const triggerLabel = getBranchTriggerLabel({
+  const defaultTriggerLabel = getBranchTriggerLabel({
     activeWorktreePath,
     effectiveEnvMode,
     resolvedActiveBranch,
+  });
+  const triggerPresentation = resolveBranchPresentation({
+    defaultLabel: defaultTriggerLabel,
+    branch: resolvedActiveBranch,
+    sectionThreadTitle: resolvedActiveBranch
+      ? (sectionThreadTitleByBranch.get(resolvedActiveBranch) ?? null)
+      : null,
   });
 
   function renderPickerItem(itemValue: string, index: number) {
@@ -574,6 +604,11 @@ export function BranchToolbarBranchSelector({
           : refName.isDefault
             ? "default"
             : null;
+    const itemPresentation = resolveBranchPresentation({
+      defaultLabel: itemValue,
+      branch: itemValue,
+      sectionThreadTitle: sectionThreadTitleByBranch.get(itemValue) ?? null,
+    });
     return (
       <ComboboxItem
         hideIndicator
@@ -584,7 +619,16 @@ export function BranchToolbarBranchSelector({
         onClick={() => selectBranch(refName)}
       >
         <div className="flex w-full min-w-0 items-center justify-between gap-2">
-          <span className="min-w-0 flex-1 truncate">{itemValue}</span>
+          {itemPresentation.tooltip ? (
+            <Tooltip>
+              <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>
+                {itemPresentation.label}
+              </TooltipTrigger>
+              <TooltipPopup side="top">{itemPresentation.tooltip}</TooltipPopup>
+            </Tooltip>
+          ) : (
+            <span className="min-w-0 flex-1 truncate">{itemPresentation.label}</span>
+          )}
           {badge && <span className="shrink-0 text-[10px] text-muted-foreground/45">{badge}</span>}
         </div>
       </ComboboxItem>
@@ -616,7 +660,16 @@ export function BranchToolbarBranchSelector({
         disabled={isInitialBranchesLoadPending || isBranchActionPending}
       >
         <GitBranchIcon className="size-3 shrink-0 opacity-70" />
-        <span className="min-w-0 max-w-[240px] truncate">{triggerLabel}</span>
+        {triggerPresentation.tooltip ? (
+          <Tooltip>
+            <TooltipTrigger render={<span className="min-w-0 max-w-[240px] truncate" />}>
+              {triggerPresentation.label}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{triggerPresentation.tooltip}</TooltipPopup>
+          </Tooltip>
+        ) : (
+          <span className="min-w-0 max-w-[240px] truncate">{triggerPresentation.label}</span>
+        )}
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </ComboboxTrigger>
       <ComboboxPopup align="end" side="top" className="flex w-80 flex-col">

@@ -22,6 +22,7 @@ import { useShallow } from "zustand/react/shallow";
 
 import { readEnvironmentApi } from "../environmentApi";
 import {
+  bakeoffThreadKey,
   bakeoffThreadKeys,
   buildBakeoffViews,
   useBakeoffs,
@@ -76,7 +77,17 @@ const STATUS_META: Record<
   failed: { label: "Failed", badge: "error", icon: XCircleIcon },
 };
 
+type ActivitySection = "bakeoffs" | "runs";
+
+export function BakeoffsView() {
+  return <ActivityView section="bakeoffs" />;
+}
+
 export function RunsView() {
+  return <ActivityView section="runs" />;
+}
+
+function ActivityView({ section }: { section: ActivitySection }) {
   const navigate = useNavigate();
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
@@ -102,9 +113,14 @@ export function RunsView() {
     () => buildTerminalProcessRuns({ projects, sessions: terminalSessions, threads }),
     [projects, terminalSessions, threads],
   );
-  const activeCount = runs.filter(isAgentRunActive).length + processRuns.length;
+  const activeCount =
+    runs.filter(
+      (run) =>
+        !bakeoffKeys.has(bakeoffThreadKey(run.thread.environmentId, run.thread.id)) &&
+        isAgentRunActive(run),
+    ).length + processRuns.length;
   const visibleRuns = runs.filter((run) => {
-    if (bakeoffKeys.has(`${run.thread.environmentId}:${run.thread.id}`)) return false;
+    if (bakeoffKeys.has(bakeoffThreadKey(run.thread.environmentId, run.thread.id))) return false;
     if (filter === "active") return isAgentRunActive(run);
     if (filter === "recent") return !isAgentRunActive(run);
     return true;
@@ -115,9 +131,12 @@ export function RunsView() {
     if (filter === "recent") return !hasActiveContestant;
     return true;
   });
+  // Terminal processes are inherently active, so they are not shown under "recent".
   const visibleProcessRuns = filter === "recent" ? [] : processRuns;
-  const hasVisibleRuns =
-    visibleBakeoffViews.length > 0 || visibleRuns.length > 0 || visibleProcessRuns.length > 0;
+  const hasVisibleActivity =
+    section === "bakeoffs"
+      ? visibleBakeoffViews.length > 0
+      : visibleRuns.length > 0 || visibleProcessRuns.length > 0;
   const configByEnvironmentId = useMemo(() => {
     const configs = new Map<string, typeof primaryServerConfig>();
     if (primaryEnvironmentId && primaryServerConfig) {
@@ -206,22 +225,30 @@ export function RunsView() {
         <header className="border-b border-border px-3 py-2 sm:px-5 sm:py-3">
           <div className="flex min-h-7 items-center gap-2">
             <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-            <ListTodoIcon className="size-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Runs</span>
-            {activeCount > 0 ? (
+            {section === "bakeoffs" ? (
+              <GitCompareArrowsIcon className="size-4 text-muted-foreground" />
+            ) : (
+              <ListTodoIcon className="size-4 text-muted-foreground" />
+            )}
+            <span className="text-sm font-medium">
+              {section === "bakeoffs" ? "Bakeoffs" : "Runs"}
+            </span>
+            {section === "runs" && activeCount > 0 ? (
               <Badge variant="info" size="sm">
                 {activeCount} active
               </Badge>
             ) : null}
-            <Button
-              size="xs"
-              className="ml-auto"
-              disabled={projects.length === 0}
-              onClick={() => setCreateBakeoffOpen(true)}
-            >
-              <GitCompareArrowsIcon />
-              New bakeoff
-            </Button>
+            {section === "bakeoffs" ? (
+              <Button
+                size="xs"
+                className="ml-auto"
+                disabled={projects.length === 0}
+                onClick={() => setCreateBakeoffOpen(true)}
+              >
+                <GitCompareArrowsIcon />
+                New bakeoff
+              </Button>
+            ) : null}
           </div>
         </header>
 
@@ -229,9 +256,13 @@ export function RunsView() {
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h1 className="text-xl font-semibold tracking-tight">Runs</h1>
+                <h1 className="text-xl font-semibold tracking-tight">
+                  {section === "bakeoffs" ? "Bakeoffs" : "Runs"}
+                </h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Monitor agent activity and running processes across every environment.
+                  {section === "bakeoffs"
+                    ? "Compare multiple agents working from the same prompt."
+                    : "Monitor agent activity and running processes across every environment."}
                 </p>
               </div>
               <div className="flex rounded-lg border border-border bg-card p-0.5">
@@ -249,27 +280,35 @@ export function RunsView() {
               </div>
             </div>
 
-            {!hasVisibleRuns ? (
+            {!hasVisibleActivity ? (
               <Empty className="min-h-80 rounded-2xl border border-dashed border-border">
                 <EmptyHeader>
                   <EmptyMedia variant="icon">
-                    <Clock3Icon />
+                    {section === "bakeoffs" ? <GitCompareArrowsIcon /> : <Clock3Icon />}
                   </EmptyMedia>
                   <EmptyTitle>
-                    {runs.length === 0 && processRuns.length === 0
-                      ? "No runs yet"
-                      : "No matching runs"}
+                    {section === "bakeoffs"
+                      ? bakeoffs.length === 0
+                        ? "No bakeoffs yet"
+                        : "No matching bakeoffs"
+                      : runs.length === 0 && processRuns.length === 0
+                        ? "No runs yet"
+                        : "No matching runs"}
                   </EmptyTitle>
                   <EmptyDescription>
-                    {runs.length === 0 && processRuns.length === 0
-                      ? "Agent activity and running terminal processes will appear here."
-                      : "Choose another filter to see the rest of your runs."}
+                    {section === "bakeoffs"
+                      ? bakeoffs.length === 0
+                        ? "Launch a bakeoff to compare agents in isolated worktrees."
+                        : "Choose another filter to see the rest of your bakeoffs."
+                      : runs.length === 0 && processRuns.length === 0
+                        ? "Agent activity and running terminal processes will appear here."
+                        : "Choose another filter to see the rest of your runs."}
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
             ) : (
               <div className="flex flex-col gap-6">
-                {visibleBakeoffViews.length > 0 ? (
+                {section === "bakeoffs" && visibleBakeoffViews.length > 0 ? (
                   <section className="grid gap-3">
                     <h2 className="text-sm font-medium">Multi-agent bakeoffs</h2>
                     {visibleBakeoffViews.map((view) => (
@@ -301,7 +340,7 @@ export function RunsView() {
                     ))}
                   </section>
                 ) : null}
-                {visibleProcessRuns.length > 0 ? (
+                {section === "runs" && visibleProcessRuns.length > 0 ? (
                   <section className="grid gap-3">
                     <h2 className="text-sm font-medium">Running processes</h2>
                     {visibleProcessRuns.map((run) => {
@@ -318,9 +357,9 @@ export function RunsView() {
                     })}
                   </section>
                 ) : null}
-                {visibleRuns.length > 0 ? (
+                {section === "runs" && visibleRuns.length > 0 ? (
                   <section className="grid gap-3">
-                    {visibleProcessRuns.length > 0 || visibleBakeoffViews.length > 0 ? (
+                    {visibleProcessRuns.length > 0 ? (
                       <h2 className="text-sm font-medium">Agent activity</h2>
                     ) : null}
                     {visibleRuns.map((run) => {
@@ -390,9 +429,6 @@ function BakeoffCard(props: {
           const isWinner = bakeoff.winnerThreadId === contestant.threadId;
           const meta = run ? STATUS_META[run.status] : null;
           const StatusIcon = meta?.icon ?? Clock3Icon;
-          const pendingKey = run
-            ? `agent:${run.thread.environmentId}:${run.thread.id}`
-            : `agent:${bakeoff.environmentId}:${contestant.threadId}`;
           return (
             <div key={contestant.threadId} className="flex min-w-0 flex-col gap-3 bg-card p-4">
               <div className="flex min-w-0 items-start gap-2">
@@ -427,7 +463,9 @@ function BakeoffCard(props: {
                   <Button
                     size="xs"
                     variant="destructive-outline"
-                    disabled={props.pendingKeys.has(pendingKey)}
+                    disabled={props.pendingKeys.has(
+                      bakeoffThreadKey(run.thread.environmentId, run.thread.id),
+                    )}
                     onClick={() => props.onInterrupt(run)}
                   >
                     <CircleStopIcon />

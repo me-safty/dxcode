@@ -1,4 +1,5 @@
 import type { EnvironmentId, VcsRef, ProjectId } from "@t3tools/contracts";
+import { isSectionThreadBranch } from "@t3tools/shared/git";
 import * as Schema from "effect/Schema";
 export {
   dedupeRemoteBranchesWithLocalMatches,
@@ -95,6 +96,24 @@ export function resolveBranchToolbarValue(input: {
     return activeThreadBranch ?? currentGitBranch;
   }
   return currentGitBranch ?? activeThreadBranch;
+}
+
+export function resolveBranchPresentation(input: {
+  defaultLabel: string;
+  branch: string | null;
+  sectionThreadTitle: string | null;
+}): { label: string; tooltip: string | null } {
+  const { defaultLabel, branch, sectionThreadTitle } = input;
+  if (branch && sectionThreadTitle && isSectionThreadBranch(branch)) {
+    return {
+      label: sectionThreadTitle,
+      tooltip: branch,
+    };
+  }
+  return {
+    label: defaultLabel,
+    tooltip: null,
+  };
 }
 
 export function resolveBranchSelectionTarget(input: {

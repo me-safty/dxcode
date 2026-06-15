@@ -4,8 +4,9 @@
 
 ## Task Completion Requirements
 
-- `vp check` and `vp run typecheck` must pass before considering tasks completed.
-  - If changing native mobile code, `vp run lint:mobile` must also pass.
+- When code is modified, `vp check` and `vp run typecheck` must pass before considering the task completed.
+  - If native mobile code is modified, `vp run lint:mobile` must also pass.
+- Do not run these verification commands for review-only, analysis-only, or other tasks that do not modify code.
 - Use `vp test` for the built-in Vite+ test command and `vp run test` when you specifically need the `test` package script.
 
 ## Project Snapshot

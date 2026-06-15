@@ -7,6 +7,7 @@ import * as Stream from "effect/Stream";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { TerminalManager } from "../../terminal/Services/Manager.ts";
+import { removeSectionThreadWorktree } from "../SectionWorkspaces.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
   ThreadDeletionReactor,
@@ -61,6 +62,16 @@ const make = Effect.gen(function* () {
     const { threadId } = event.payload;
     yield* stopProviderSession(threadId);
     yield* closeThreadTerminals(threadId);
+    if (event.payload.sectionWorkspaceRoot && event.payload.worktreePath) {
+      yield* logCleanupCauseUnlessInterrupted({
+        effect: removeSectionThreadWorktree({
+          sectionWorkspaceRoot: event.payload.sectionWorkspaceRoot,
+          worktreePath: event.payload.worktreePath,
+        }),
+        message: "thread deletion cleanup skipped section worktree removal",
+        threadId,
+      });
+    }
   });
 
   const processThreadDeletedSafely = (event: ThreadDeletedEvent) =>

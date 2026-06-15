@@ -23,6 +23,7 @@ import { Route as SettingsConnectionsRouteImport } from './routes/settings.conne
 import { Route as SettingsCloudRouteImport } from './routes/settings.cloud'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as ChatRunsRouteImport } from './routes/_chat.runs'
+import { Route as ChatBakeoffsRouteImport } from './routes/_chat.bakeoffs'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 
@@ -95,6 +96,11 @@ const ChatRunsRoute = ChatRunsRouteImport.update({
   path: '/runs',
   getParentRoute: () => ChatRoute,
 } as any)
+const ChatBakeoffsRoute = ChatBakeoffsRouteImport.update({
+  id: '/bakeoffs',
+  path: '/bakeoffs',
+  getParentRoute: () => ChatRoute,
+} as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -111,6 +117,7 @@ export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/bakeoffs': typeof ChatBakeoffsRoute
   '/runs': typeof ChatRunsRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/cloud': typeof SettingsCloudRoute
@@ -127,6 +134,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/bakeoffs': typeof ChatBakeoffsRoute
   '/runs': typeof ChatRunsRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/cloud': typeof SettingsCloudRoute
@@ -146,6 +154,7 @@ export interface FileRoutesById {
   '/_chat': typeof ChatRouteWithChildren
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/_chat/bakeoffs': typeof ChatBakeoffsRoute
   '/_chat/runs': typeof ChatRunsRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/cloud': typeof SettingsCloudRoute
@@ -166,6 +175,7 @@ export interface FileRouteTypes {
     | '/'
     | '/pair'
     | '/settings'
+    | '/bakeoffs'
     | '/runs'
     | '/settings/archived'
     | '/settings/cloud'
@@ -182,6 +192,7 @@ export interface FileRouteTypes {
   to:
     | '/pair'
     | '/settings'
+    | '/bakeoffs'
     | '/runs'
     | '/settings/archived'
     | '/settings/cloud'
@@ -200,6 +211,7 @@ export interface FileRouteTypes {
     | '/_chat'
     | '/pair'
     | '/settings'
+    | '/_chat/bakeoffs'
     | '/_chat/runs'
     | '/settings/archived'
     | '/settings/cloud'
@@ -321,6 +333,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatRunsRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/bakeoffs': {
+      id: '/_chat/bakeoffs'
+      path: '/bakeoffs'
+      fullPath: '/bakeoffs'
+      preLoaderRoute: typeof ChatBakeoffsRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
@@ -339,6 +358,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface ChatRouteChildren {
+  ChatBakeoffsRoute: typeof ChatBakeoffsRoute
   ChatRunsRoute: typeof ChatRunsRoute
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
@@ -346,6 +366,7 @@ interface ChatRouteChildren {
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
+  ChatBakeoffsRoute: ChatBakeoffsRoute,
   ChatRunsRoute: ChatRunsRoute,
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
