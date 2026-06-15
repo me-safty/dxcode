@@ -773,6 +773,10 @@ function stashBranchName(stash: VcsPanelStash): string | null {
   return /^(?:WIP\s+)?on\s+([^:]+):/i.exec(stash.message)?.[1]?.trim() ?? null;
 }
 
+function contextMenuSeparator<T extends string>(id: T): ContextMenuItem<T> {
+  return { id, label: "", separator: true };
+}
+
 function FileChangeSummary({ files }: { readonly files: readonly VcsPanelFileChange[] }) {
   const stats = sumFiles(files);
   return (
@@ -1115,6 +1119,7 @@ export function SourceControlPanel({
       openContextMenu(
         event,
         [
+          contextMenuSeparator("copy-separator"),
           { id: "copy-filename", label: "Copy filename", icon: "copy" },
           { id: "copy-full-path", label: "Copy full path to file", icon: "copy" },
         ],
@@ -1721,16 +1726,18 @@ export function SourceControlPanel({
           openContextMenu(
             event,
             [
+              { id: "open", label: "Open file" },
+              contextMenuSeparator("copy-separator"),
+              { id: "copy-filename", label: "Copy filename", icon: "copy" },
+              { id: "copy-full-path", label: "Copy full path to file", icon: "copy" },
+              contextMenuSeparator("discard-separator"),
               {
                 id: "discard",
-                label: "Discard changes",
+                label: "Discard change",
                 destructive: true,
                 disabled: isActionRunning(discardKey),
                 icon: "trash",
               },
-              { id: "open", label: "Open file" },
-              { id: "copy-filename", label: "Copy filename", icon: "copy" },
-              { id: "copy-full-path", label: "Copy full path to file", icon: "copy" },
             ],
             {
               discard: discardFile,
@@ -1798,6 +1805,7 @@ export function SourceControlPanel({
                       { id: "rebase", label: "Rebase current branch onto commit" },
                       { id: "checkout", label: "Checkout as detached HEAD" },
                       { id: "create-branch", label: "Create branch from commit" },
+                      contextMenuSeparator("copy-separator"),
                       { id: "copy-sha", label: "Copy SHA", icon: "copy" },
                       { id: "copy-message", label: "Copy message", icon: "copy" },
                     ],
@@ -2078,15 +2086,8 @@ export function SourceControlPanel({
             openContextMenu(
               event,
               [
-                { id: "switch", label: "Switch branch", disabled: switchDisabled },
+                { id: "switch", label: "Checkout", disabled: switchDisabled },
                 { id: "sync", label: syncLabel, disabled: syncDisabled },
-                {
-                  id: "delete",
-                  label: "Delete branch",
-                  destructive: true,
-                  disabled: deleteDisabled,
-                  icon: "trash",
-                },
                 ...(current && aheadCount > 0
                   ? [
                       {
@@ -2110,6 +2111,15 @@ export function SourceControlPanel({
                       },
                     ]
                   : []),
+                contextMenuSeparator("delete-separator-before"),
+                {
+                  id: "delete",
+                  label: "Delete branch",
+                  destructive: true,
+                  disabled: deleteDisabled,
+                  icon: "trash",
+                },
+                contextMenuSeparator("delete-separator-after"),
                 { id: "copy-branch-name", label: "Copy branch name", icon: "copy" },
               ],
               {
@@ -2148,7 +2158,7 @@ export function SourceControlPanel({
           </div>
           <RowActions>
             <IconButton
-              label="Switch branch"
+              label="Checkout"
               disabled={switchDisabled}
               onClick={() => void switchRef(branch.name)}
             >
@@ -2248,15 +2258,8 @@ export function SourceControlPanel({
             openContextMenu(
               event,
               [
-                { id: "switch", label: "Switch branch", disabled: switchDisabled },
+                { id: "switch", label: "Checkout", disabled: switchDisabled },
                 { id: "sync", label: syncLabel, disabled: syncDisabled },
-                {
-                  id: "delete",
-                  label: hasLocalBranch ? "Delete branch" : "Delete remote branch",
-                  destructive: true,
-                  disabled: deleteDisabled,
-                  icon: "trash",
-                },
                 ...(current && aheadCount > 0
                   ? [
                       {
@@ -2280,6 +2283,15 @@ export function SourceControlPanel({
                       },
                     ]
                   : []),
+                contextMenuSeparator("delete-separator-before"),
+                {
+                  id: "delete",
+                  label: hasLocalBranch ? "Delete branch" : "Delete remote branch",
+                  destructive: true,
+                  disabled: deleteDisabled,
+                  icon: "trash",
+                },
+                contextMenuSeparator("delete-separator-after"),
                 { id: "copy-branch-name", label: "Copy branch name", icon: "copy" },
               ],
               {
@@ -2317,7 +2329,7 @@ export function SourceControlPanel({
           </div>
           <RowActions>
             <IconButton
-              label="Switch branch"
+              label="Checkout"
               disabled={switchDisabled}
               onClick={() => void switchRef(branch.name)}
             >
@@ -2415,6 +2427,7 @@ export function SourceControlPanel({
               event,
               [
                 { id: "fetch", label: "Fetch remote", disabled: isActionRunning(fetchKey) },
+                contextMenuSeparator("remove-separator-before"),
                 {
                   id: "remove",
                   label: "Remove remote",
@@ -2422,6 +2435,7 @@ export function SourceControlPanel({
                   disabled: isActionRunning(removeKey),
                   icon: "trash",
                 },
+                contextMenuSeparator("remove-separator-after"),
                 { id: "copy-name", label: "Copy name", icon: "copy" },
                 { id: "copy-url", label: "Copy url", disabled: !remoteUrl, icon: "copy" },
               ],
@@ -2493,9 +2507,16 @@ export function SourceControlPanel({
           onClick={() => toggleTree(key)}
           onKeyDown={(event) => toggleTreeFromKeyboard(key, event)}
           onContextMenu={(event) =>
-            openContextMenu(event, [{ id: "copy-name", label: "Copy name", icon: "copy" }], {
-              "copy-name": () => copyText("unpublished"),
-            })
+            openContextMenu(
+              event,
+              [
+                contextMenuSeparator("copy-separator"),
+                { id: "copy-name", label: "Copy name", icon: "copy" },
+              ],
+              {
+                "copy-name": () => copyText("unpublished"),
+              },
+            )
           }
         >
           {expanded ? (
@@ -2563,6 +2584,7 @@ export function SourceControlPanel({
               [
                 { id: "apply", label: "Apply stash", disabled: isActionRunning(applyKey) },
                 { id: "pop", label: "Pop stash", disabled: isActionRunning(popKey) },
+                contextMenuSeparator("drop-separator-before"),
                 {
                   id: "drop",
                   label: "Drop stash",
@@ -2570,6 +2592,7 @@ export function SourceControlPanel({
                   disabled: isActionRunning(dropKey),
                   icon: "trash",
                 },
+                contextMenuSeparator("drop-separator-after"),
                 { id: "copy-stash-name", label: "Copy stash name", icon: "copy" },
                 {
                   id: "copy-branch-name",

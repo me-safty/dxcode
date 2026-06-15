@@ -44,6 +44,15 @@ function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextM
       continue;
     }
 
+    if (sourceItem.separator === true) {
+      normalizedItems.push({
+        id: sourceItem.id,
+        label: "",
+        separator: true,
+      });
+      continue;
+    }
+
     // Header items are decorative section labels for the web fallback only —
     // Electron's native menu has no equivalent affordance, so we skip them.
     if (sourceItem.header === true) {
@@ -55,6 +64,7 @@ function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextM
       label: sourceItem.label,
       destructive: sourceItem.destructive === true,
       disabled: sourceItem.disabled === true,
+      separator: false,
     };
 
     if (sourceItem.children) {
@@ -109,11 +119,26 @@ export const layer = Layer.sync(ElectronMenu, () => {
   ): Electron.MenuItemConstructorOptions[] => {
     const template: Electron.MenuItemConstructorOptions[] = [];
     let hasInsertedDestructiveSeparator = false;
+    let lastWasSeparator = false;
 
     for (const item of entries) {
-      if (item.destructive && !hasInsertedDestructiveSeparator && template.length > 0) {
+      if (item.separator === true) {
+        if (template.length > 0 && !lastWasSeparator) {
+          template.push({ type: "separator" });
+          lastWasSeparator = true;
+        }
+        continue;
+      }
+
+      if (
+        item.destructive &&
+        !hasInsertedDestructiveSeparator &&
+        template.length > 0 &&
+        !lastWasSeparator
+      ) {
         template.push({ type: "separator" });
         hasInsertedDestructiveSeparator = true;
+        lastWasSeparator = true;
       }
 
       const itemOption: Electron.MenuItemConstructorOptions = {
@@ -133,6 +158,7 @@ export const layer = Layer.sync(ElectronMenu, () => {
       }
 
       template.push(itemOption);
+      lastWasSeparator = false;
     }
 
     return template;

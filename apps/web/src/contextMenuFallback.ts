@@ -179,12 +179,28 @@ export function showContextMenuFallback<T extends string>(
       inner.style.cssText =
         "max-height:min(24rem,70vh);min-width:0;max-width:24rem;overflow-x:hidden;overflow-y:auto;padding:0.25rem;";
 
+      let hasRenderedItem = false;
+      let lastWasSeparator = false;
       for (const item of entries) {
+        if (item.separator === true) {
+          if (!hasRenderedItem || lastWasSeparator) {
+            continue;
+          }
+          const separator = document.createElement("div");
+          separator.className = "my-1 h-px bg-border";
+          separator.style.cssText = "height:1px;margin:0.25rem 0;background:var(--border);";
+          inner.appendChild(separator);
+          lastWasSeparator = true;
+          continue;
+        }
+
         if (item.header === true) {
           const header = document.createElement("div");
           header.className = "px-2 py-1.5 font-medium text-muted-foreground text-xs";
           header.textContent = item.label;
           inner.appendChild(header);
+          hasRenderedItem = true;
+          lastWasSeparator = false;
           continue;
         }
 
@@ -277,6 +293,8 @@ export function showContextMenuFallback<T extends string>(
         }
 
         inner.appendChild(button);
+        hasRenderedItem = true;
+        lastWasSeparator = false;
       }
 
       menu.appendChild(inner);
