@@ -29,6 +29,7 @@ import * as VcsProcess from "./VcsProcess.ts";
 const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
 const VCS_STATUS_REFRESH_FAILURE_BASE_DELAY = Duration.seconds(30);
 const VCS_STATUS_REFRESH_FAILURE_MAX_DELAY = Duration.minutes(15);
+const VCS_STATUS_WATCH_IGNORED_ROOTS = new Set([".git"]);
 
 interface VcsStatusChange {
   readonly cwd: string;
@@ -107,6 +108,11 @@ function watchEventPath(path: Path.Path, rawCwd: string, eventPath: string): str
   if (!relativePath || relativePath === ".") return null;
   if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) return null;
   return relativePath.split(path.sep).join("/");
+}
+
+export function shouldIgnoreWatchEventPath(relativePath: string): boolean {
+  const [rootSegment] = relativePath.split("/");
+  return rootSegment ? VCS_STATUS_WATCH_IGNORED_ROOTS.has(rootSegment) : false;
 }
 
 export const layer = Layer.effect(
@@ -390,6 +396,7 @@ export const layer = Layer.effect(
       fs.watch(cwd).pipe(
         Stream.map((event) => watchEventPath(path, cwd, event.path)),
         Stream.filter((relativePath): relativePath is string => relativePath !== null),
+        Stream.filter((relativePath) => !shouldIgnoreWatchEventPath(relativePath)),
         Stream.debounce(Duration.millis(150)),
         Stream.filterEffect((relativePath) =>
           Option.match(vcsProcess, {
