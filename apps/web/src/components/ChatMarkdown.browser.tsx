@@ -517,7 +517,7 @@ describe("ChatMarkdown", () => {
 
         // Language with a known icon: icon XOR text — never the redundant pair.
         const languageOnly = titles[0]!;
-        const hasIcon = languageOnly.querySelector("img") != null;
+        const hasIcon = languageOnly.querySelector("svg[data-pierre-icon]") != null;
         const hasText = (languageOnly.textContent ?? "").includes("ts");
         expect(hasIcon || hasText).toBe(true);
         expect(hasIcon && hasText).toBe(false);
@@ -534,7 +534,7 @@ describe("ChatMarkdown", () => {
         expect(titles[1]!.textContent).toBe("src/main.ts");
 
         // Unknown language: no icon attempt, text label.
-        expect(titles[2]!.querySelector("img")).toBeNull();
+        expect(titles[2]!.querySelector("svg[data-pierre-icon]")).toBeNull();
         expect(titles[2]!.textContent).toBe("text");
       } finally {
         await screen.unmount();
