@@ -69,6 +69,7 @@ import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
   getClaudeModelCapabilities,
@@ -122,6 +123,13 @@ interface ClaudeResumeState {
 interface ClaudeTurnState {
   readonly turnId: TurnId;
   readonly startedAt: string;
+  /**
+   * True for turns auto-started by assistant output arriving without an
+   * active turn (background agent/subagent responses between user prompts).
+   * Synthetic turns are auto-closed by the next sendTurn; real turns are
+   * steered instead (the queued message continues the same turn).
+   */
+  readonly synthetic?: boolean;
   readonly items: Array<unknown>;
   readonly assistantTextBlocks: Map<number, AssistantTextBlockState>;
   readonly assistantTextBlockOrder: Array<AssistantTextBlockState>;
@@ -2486,6 +2494,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       context.turnState = {
         turnId,
         startedAt,
+        synthetic: true,
         items: [],
         assistantTextBlocks: new Map(),
         assistantTextBlockOrder: [],
@@ -3437,6 +3446,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(fastMode ? { fastMode: true } : {}),
         ...(ultracode ? { ultracode: true } : {}),
       };
+      const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -3462,6 +3472,19 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         env: claudeEnvironment,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
+        ...(mcpSession
+          ? {
+              mcpServers: {
+                "t3-code": {
+                  type: "http",
+                  url: mcpSession.endpoint,
+                  headers: {
+                    Authorization: mcpSession.authorizationHeader,
+                  },
+                },
+              },
+            }
+          : {}),
       };
 
       yield* Effect.annotateCurrentSpan({
@@ -3629,9 +3652,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ? input.modelSelection
         : undefined;
 
-    if (context.turnState) {
-      // Auto-close a stale synthetic turn (from background agent responses
-      // between user prompts) to prevent blocking the user's next turn.
+    // A sendTurn while a real turn is running is a steer: the message is
+    // queued into the live SDK agent loop and the work continues as the same
+    // turn — no synthetic turn boundary. Stale synthetic turns (from
+    // background agent responses between user prompts) are auto-closed
+    // instead, so they don't block the user's next turn.
+    const steeringTurnState =
+      context.turnState && context.turnState.synthetic !== true ? context.turnState : null;
+    if (context.turnState && steeringTurnState === null) {
       yield* completeTurn(context, "completed");
     }
 
@@ -3666,37 +3694,39 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
     }
 
-    const turnId = TurnId.make(yield* randomUUIDv4);
-    const turnState: ClaudeTurnState = {
-      turnId,
-      startedAt: yield* nowIso,
-      items: [],
-      assistantTextBlocks: new Map(),
-      assistantTextBlockOrder: [],
-      capturedProposedPlanKeys: new Set(),
-      nextSyntheticAssistantBlockIndex: -1,
-    };
+    const turnId = steeringTurnState?.turnId ?? TurnId.make(yield* randomUUIDv4);
+    if (steeringTurnState === null) {
+      const turnState: ClaudeTurnState = {
+        turnId,
+        startedAt: yield* nowIso,
+        items: [],
+        assistantTextBlocks: new Map(),
+        assistantTextBlockOrder: [],
+        capturedProposedPlanKeys: new Set(),
+        nextSyntheticAssistantBlockIndex: -1,
+      };
 
-    const updatedAt = yield* nowIso;
-    context.turnState = turnState;
-    context.session = {
-      ...context.session,
-      status: "running",
-      activeTurnId: turnId,
-      updatedAt,
-    };
+      const updatedAt = yield* nowIso;
+      context.turnState = turnState;
+      context.session = {
+        ...context.session,
+        status: "running",
+        activeTurnId: turnId,
+        updatedAt,
+      };
 
-    const turnStartedStamp = yield* makeEventStamp();
-    yield* offerRuntimeEvent({
-      type: "turn.started",
-      eventId: turnStartedStamp.eventId,
-      provider: PROVIDER,
-      createdAt: turnStartedStamp.createdAt,
-      threadId: context.session.threadId,
-      turnId,
-      payload: modelSelection?.model ? { model: modelSelection.model } : {},
-      providerRefs: {},
-    });
+      const turnStartedStamp = yield* makeEventStamp();
+      yield* offerRuntimeEvent({
+        type: "turn.started",
+        eventId: turnStartedStamp.eventId,
+        provider: PROVIDER,
+        createdAt: turnStartedStamp.createdAt,
+        threadId: context.session.threadId,
+        turnId,
+        payload: modelSelection?.model ? { model: modelSelection.model } : {},
+        providerRefs: {},
+      });
+    }
 
     const message = yield* buildUserMessageEffect(input, {
       fileSystem,
