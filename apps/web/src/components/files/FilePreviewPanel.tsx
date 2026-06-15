@@ -1,9 +1,8 @@
-import type { EnvironmentId, ProjectReadFileResult } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { File } from "@pierre/diffs/react";
 import { ChevronRight, FolderTree, LoaderCircle } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-import { readEnvironmentApi } from "~/environmentApi";
 import { useTheme } from "~/hooks/useTheme";
 import { resolveDiffThemeName } from "~/lib/diffRendering";
 import { cn } from "~/lib/utils";
@@ -11,11 +10,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
 import FileBrowserPanel from "./FileBrowserPanel";
 import { fileBreadcrumbs } from "./filePath";
-
-type FileLoadState =
-  | { status: "loading" }
-  | { status: "loaded"; result: ProjectReadFileResult }
-  | { status: "error"; message: string };
+import { useProjectFileQuery } from "./projectFilesQueryState";
 
 interface FilePreviewPanelProps {
   environmentId: EnvironmentId;
@@ -43,7 +38,7 @@ export default function FilePreviewPanel({
   onOpenFile,
 }: FilePreviewPanelProps) {
   const { resolvedTheme } = useTheme();
-  const [file, setFile] = useState<FileLoadState>({ status: "loading" });
+  const file = useProjectFileQuery(environmentId, cwd, relativePath);
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
   const breadcrumbs = useMemo(
     () => fileBreadcrumbs(projectName, relativePath),
@@ -59,35 +54,6 @@ export default function FilePreviewPanel({
       return next;
     });
   };
-
-  useEffect(() => {
-    let active = true;
-    const api = readEnvironmentApi(environmentId);
-    setFile({ status: "loading" });
-    if (!api) {
-      setFile({ status: "error", message: "Environment is not connected." });
-      return () => {
-        active = false;
-      };
-    }
-
-    void api.projects.readFile({ cwd, relativePath }).then(
-      (result) => {
-        if (active) setFile({ status: "loaded", result });
-      },
-      (error: unknown) => {
-        if (!active) return;
-        setFile({
-          status: "error",
-          message: error instanceof Error ? error.message : String(error),
-        });
-      },
-    );
-
-    return () => {
-      active = false;
-    };
-  }, [cwd, environmentId, relativePath]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
@@ -130,30 +96,29 @@ export default function FilePreviewPanel({
           <TooltipPopup>{explorerOpen ? "Hide file explorer" : "Show file explorer"}</TooltipPopup>
         </Tooltip>
       </div>
-      {file.status === "loaded" && file.result.truncated ? (
+      {file.data?.truncated ? (
         <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/8 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
-          Preview limited to the first 1 MB of a {file.result.byteLength.toLocaleString()} byte
-          file.
+          Preview limited to the first 1 MB of a {file.data.byteLength.toLocaleString()} byte file.
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {file.status === "error" ? (
+          {file.error && file.data === null ? (
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
-              {file.message}
+              {file.error}
             </div>
-          ) : file.status === "loading" ? (
+          ) : file.data === null ? (
             <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
               <LoaderCircle className="size-5 animate-spin" />
             </div>
           ) : (
             <File
-              key={`${relativePath}:${resolvedTheme}:${file.result.byteLength}`}
+              key={`${relativePath}:${resolvedTheme}:${file.data.byteLength}`}
               disableWorkerPool
               file={{
                 name: relativePath,
-                contents: file.result.contents,
-                cacheKey: `${cwd}:${relativePath}:${file.result.byteLength}`,
+                contents: file.data.contents,
+                cacheKey: `${cwd}:${relativePath}:${file.data.byteLength}`,
               }}
               options={{
                 disableFileHeader: true,

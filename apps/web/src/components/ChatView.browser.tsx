@@ -2181,6 +2181,16 @@ describe("ChatView timeline estimator parity (full app)", () => {
         1,
       );
 
+      useRightPanelStore.getState().openFile(THREAD_REF, "components.json");
+      const fileTabIcon = await waitForElement(
+        () =>
+          document.querySelector<SVGElement>(
+            '[data-right-panel-tabbar] [data-pierre-icon][data-icon-token="json"]',
+          ),
+        "Unable to find the Pierre file icon in the file tab.",
+      );
+      expect(fileTabIcon.closest("button")?.textContent).toContain("components.json");
+
       document.documentElement.classList.add("wco");
       expect(rightPanelTabbar.getBoundingClientRect().height).toBe(
         panelLayoutControls.getBoundingClientRect().height,

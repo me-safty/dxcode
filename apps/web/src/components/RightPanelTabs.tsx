@@ -1,15 +1,6 @@
 import type { PreviewSessionSnapshot } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
-import {
-  ClipboardList,
-  FileCode2,
-  FileDiff,
-  Files,
-  Globe2,
-  Plus,
-  TerminalSquare,
-  X,
-} from "lucide-react";
+import { ClipboardList, FileDiff, Files, Globe2, Plus, TerminalSquare, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { isElectron } from "~/env";
@@ -18,8 +9,10 @@ import { cn } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
 import { faviconUrlForOrigin } from "~/lib/favicon";
+import { useTheme } from "~/hooks/useTheme";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
+import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -165,9 +158,11 @@ function PreviewFavicon({ url }: { url: string | null }) {
 function SurfaceIcon({
   surface,
   sessions,
+  theme,
 }: {
   surface: RightPanelSurface;
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>;
+  theme: "light" | "dark";
 }) {
   switch (surface.kind) {
     case "preview": {
@@ -180,7 +175,14 @@ function SurfaceIcon({
     case "files":
       return <Files className="size-3.5 shrink-0" />;
     case "file":
-      return <FileCode2 className="size-3.5 shrink-0" />;
+      return (
+        <PierreEntryIcon
+          pathValue={surface.relativePath}
+          kind="file"
+          theme={theme}
+          className="size-3.5"
+        />
+      );
     case "terminal":
       return <TerminalSquare className="size-3.5 shrink-0" />;
     case "plan":
@@ -190,6 +192,7 @@ function SurfaceIcon({
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
+  const { resolvedTheme } = useTheme();
 
   return (
     <PreviewPanelShell
@@ -227,7 +230,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                         className="flex min-w-0 flex-1 items-center gap-1.5"
                         onClick={() => props.onActivate(surface)}
                       >
-                        <SurfaceIcon surface={surface} sessions={props.previewSessions} />
+                        <SurfaceIcon
+                          surface={surface}
+                          sessions={props.previewSessions}
+                          theme={resolvedTheme}
+                        />
                         <span className="truncate">{title}</span>
                       </button>
                     }

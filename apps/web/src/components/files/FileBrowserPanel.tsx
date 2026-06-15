@@ -1,12 +1,13 @@
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import { RefreshCw, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
-import { readEnvironmentApi } from "~/environmentApi";
 import { useTheme } from "~/hooks/useTheme";
 import { cn } from "~/lib/utils";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
+
+import { useProjectEntriesQuery } from "./projectFilesQueryState";
 
 interface FileBrowserPanelProps {
   environmentId: EnvironmentId;
@@ -38,12 +39,15 @@ export default function FileBrowserPanel({
   onOpenFile,
 }: FileBrowserPanelProps) {
   const { resolvedTheme } = useTheme();
-  const [entries, setEntries] = useState<readonly ProjectEntry[]>([]);
-  const [entriesError, setEntriesError] = useState<string | null>(null);
-  const [isLoadingEntries, setIsLoadingEntries] = useState(true);
-  const [isTruncated, setIsTruncated] = useState(false);
-  const entryKindsRef = useRef(new Map<string, ProjectEntry["kind"]>());
-  const requestGenerationRef = useRef(0);
+  const entriesQuery = useProjectEntriesQuery(environmentId, cwd);
+  const entries = entriesQuery.data?.entries ?? [];
+  const entryKinds = useMemo(
+    () => new Map(entries.map((entry) => [entry.path, entry.kind] as const)),
+    [entries],
+  );
+  const entryKindsRef = useRef<ReadonlyMap<string, ProjectEntry["kind"]>>(entryKinds);
+  const treePaths = useMemo(() => entries.map(treePath), [entries]);
+  const previousTreePathsRef = useRef<readonly string[]>([]);
 
   const { model } = useFileTree({
     density: "compact",
@@ -62,44 +66,12 @@ export default function FileBrowserPanel({
     unsafeCSS: TREE_UNSAFE_CSS,
   });
 
-  const loadEntries = useCallback(() => {
-    const api = readEnvironmentApi(environmentId);
-    requestGenerationRef.current += 1;
-    const generation = requestGenerationRef.current;
-    setIsLoadingEntries(true);
-    setEntriesError(null);
-
-    if (!api) {
-      setEntriesError("Environment is not connected.");
-      setIsLoadingEntries(false);
-      return;
-    }
-
-    void api.projects.listEntries({ cwd }).then(
-      (result) => {
-        if (generation !== requestGenerationRef.current) return;
-        entryKindsRef.current = new Map(
-          result.entries.map((entry) => [entry.path, entry.kind] as const),
-        );
-        setEntries(result.entries);
-        setIsTruncated(result.truncated);
-        model.resetPaths(result.entries.map(treePath));
-        setIsLoadingEntries(false);
-      },
-      (error: unknown) => {
-        if (generation !== requestGenerationRef.current) return;
-        setEntriesError(error instanceof Error ? error.message : String(error));
-        setIsLoadingEntries(false);
-      },
-    );
-  }, [cwd, environmentId, model]);
-
   useEffect(() => {
-    loadEntries();
-    return () => {
-      requestGenerationRef.current += 1;
-    };
-  }, [loadEntries]);
+    if (previousTreePathsRef.current === treePaths) return;
+    entryKindsRef.current = entryKinds;
+    previousTreePathsRef.current = treePaths;
+    model.resetPaths(treePaths);
+  }, [entryKinds, model, treePaths]);
 
   const fileCount = useMemo(
     () => entries.reduce((count, entry) => count + (entry.kind === "file" ? 1 : 0), 0),
@@ -112,8 +84,10 @@ export default function FileBrowserPanel({
         <div className="min-w-0 flex-1">
           <div className="truncate text-xs font-medium text-foreground">{projectName}</div>
           <div className="truncate text-[10px] leading-none text-muted-foreground">
-            {isLoadingEntries ? "Indexing…" : `${fileCount.toLocaleString()} files`}
-            {isTruncated ? " · partial" : ""}
+            {entriesQuery.isPending && entriesQuery.data === null
+              ? "Indexing…"
+              : `${fileCount.toLocaleString()} files`}
+            {entriesQuery.data?.truncated ? " · partial" : ""}
           </div>
         </div>
         <button
@@ -128,13 +102,13 @@ export default function FileBrowserPanel({
           type="button"
           className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
           aria-label="Refresh workspace files"
-          onClick={loadEntries}
+          onClick={entriesQuery.refresh}
         >
-          <RefreshCw className={cn("size-3.5", isLoadingEntries && "animate-spin")} />
+          <RefreshCw className={cn("size-3.5", entriesQuery.isPending && "animate-spin")} />
         </button>
       </div>
-      {entriesError ? (
-        <div className="p-4 text-xs leading-relaxed text-destructive">{entriesError}</div>
+      {entriesQuery.error && entriesQuery.data === null ? (
+        <div className="p-4 text-xs leading-relaxed text-destructive">{entriesQuery.error}</div>
       ) : (
         <FileTree
           model={model}
