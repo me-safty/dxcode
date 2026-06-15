@@ -1,8 +1,8 @@
-# Source Control Panel
+# Version Control Panel
 
 ## Current Status
 
-T3 Code includes a Git-backed source-control surface in the thread right panel. The panel is scoped to the active thread environment and repository cwd, uses server-owned Git operations, and reuses the existing VCS status, source-control provider, and WebSocket RPC infrastructure rather than shelling out from React.
+T3 Code includes a Git-backed Version Control surface in the thread right panel. The panel is scoped to the active thread environment and repository cwd, uses server-owned Git operations, and reuses the existing VCS status, source-control provider, and WebSocket RPC infrastructure rather than shelling out from React.
 
 The panel is intentionally an overview and high-level workflow surface. It focuses on current work, branch sync state, remotes, stashes, selected-file commit/stash flows, and compact branch/commit inspection. It is not a full VS Code SCM replacement and does not implement hunk-level staging.
 
@@ -19,7 +19,7 @@ Primary implementation files:
 
 ## Entry Points And Host Behavior
 
-Source control is a singleton right-panel surface with kind `source-control`. Users open it from the existing right-panel surface picker; it is not duplicated into the main chat header, project sidebar, or conversation timeline.
+Version Control is a singleton right-panel surface with kind `source-control`. Users open it from the existing right-panel surface picker; it is not duplicated into the main chat header, project sidebar, or conversation timeline.
 
 Right-panel integration is owned by:
 
@@ -31,7 +31,7 @@ The VS Code extension exposes the shared T3 Code panel through the `t3code.ui.en
 
 ## Layout
 
-The source-control panel has a compact repository summary at the top and two resizable, collapsible sections:
+The Version Control panel has a compact repository summary at the top and two resizable, collapsible sections:
 
 - `Work in Progress`
 - `Remotes`
@@ -179,7 +179,7 @@ Non-current branch fetches are scoped to the selected branch. Operation busy sta
 
 Git action failures surface through the panel operation state and existing toast/error paths. Destructive actions such as discard, delete branch, remove remote, drop stash, force pull, and force push require confirmation or an explicit dialog choice before execution.
 
-The panel keeps source-control actions server-authoritative across browser, desktop, VS Code, and remote clients. Client code does not directly execute Git commands.
+The panel keeps version-control actions server-authoritative across browser, desktop, VS Code, and remote clients. Client code does not directly execute Git commands.
 
 ## Validation
 

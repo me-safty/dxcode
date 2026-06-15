@@ -1293,7 +1293,7 @@ describe("SourceControlSettingsPanel discovery states", () => {
     } as LocalApi;
   }
 
-  it("shows skeleton sections while the first source control scan is pending", async () => {
+  it("shows skeleton sections while the first version control scan is pending", async () => {
     setSourceControlDiscoveryStub(() => new Promise(() => {}));
 
     mounted = await render(
@@ -1303,7 +1303,7 @@ describe("SourceControlSettingsPanel discovery states", () => {
     );
 
     await expect.element(page.getByText("Version Control")).toBeInTheDocument();
-    await expect.element(page.getByText("Source Control Providers")).toBeInTheDocument();
+    await expect.element(page.getByText("Version Control Providers")).toBeInTheDocument();
     await expect
       .element(page.getByRole("button", { name: "Rescan server environment" }))
       .toBeDisabled();

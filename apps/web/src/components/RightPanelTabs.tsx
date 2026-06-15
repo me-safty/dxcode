@@ -43,7 +43,7 @@ function RightPanelEmptyState(props: {
 }) {
   const actions = [
     {
-      label: "Source Control",
+      label: "Version Control",
       description: "Review repository changes and sync state.",
       icon: GitBranch,
       available: props.sourceControlAvailable,
@@ -122,7 +122,7 @@ function surfaceTitle(
     case "plan":
       return "Plan";
     case "source-control":
-      return "Source Control";
+      return "Version Control";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -252,7 +252,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             </MenuItem>
             <MenuItem onClick={props.onAddSourceControl} disabled={!props.sourceControlAvailable}>
               <GitBranch />
-              Source Control
+              Version Control
             </MenuItem>
           </MenuPopup>
         </Menu>

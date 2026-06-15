@@ -126,7 +126,7 @@
         "t3code.ui.enableSourceControlPanel": {
           "type": "boolean",
           "default": false,
-          "description": "Show the T3 Code source-control right-panel surface inside VS Code webviews."
+          "description": "Show the T3 Code Version Control right-panel surface inside VS Code webviews."
         },
         "t3code.ui.threadConversationMaxWidth": {
           "type": [

@@ -113,7 +113,7 @@ function RedactedAccount(props: { readonly account: string | null }) {
   return (
     <RedactedSensitiveText
       value={props.account}
-      ariaLabel="Toggle source control account visibility"
+      ariaLabel="Toggle version control account visibility"
       revealTooltip="Click to reveal account"
       hideTooltip="Click to hide account"
     />
@@ -471,7 +471,7 @@ export function SourceControlSettingsPanel() {
       {isInitialScanPending ? (
         <>
           <SourceControlSectionSkeleton title="Version Control" headerAction={scanButton} />
-          <SourceControlSectionSkeleton title="Source Control Providers" />
+          <SourceControlSectionSkeleton title="Version Control Providers" />
         </>
       ) : hasDiscoveryItems ? (
         <>
@@ -487,7 +487,7 @@ export function SourceControlSettingsPanel() {
 
           {result.sourceControlProviders.length > 0 ? (
             <SettingsSection
-              title="Source Control Providers"
+              title="Version Control Providers"
               headerAction={result.versionControlSystems.length === 0 ? scanButton : null}
             >
               {result.sourceControlProviders.map((item) => (
