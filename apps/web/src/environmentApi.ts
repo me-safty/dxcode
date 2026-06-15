@@ -54,6 +54,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       commitStaged: rpcClient.vcs.commitStaged,
       pullBranch: rpcClient.vcs.pullBranch,
       pushBranch: rpcClient.vcs.pushBranch,
+      deleteBranch: rpcClient.vcs.deleteBranch,
       fetchRemote: rpcClient.vcs.fetchRemote,
       fetchAllRemotes: rpcClient.vcs.fetchAllRemotes,
       addRemote: rpcClient.vcs.addRemote,

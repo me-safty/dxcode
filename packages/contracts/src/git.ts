@@ -80,6 +80,7 @@ export const VcsRef = Schema.Struct({
   current: Schema.Boolean,
   isDefault: Schema.Boolean,
   worktreePath: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+  lastActivityAt: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type VcsRef = typeof VcsRef.Type;
 
@@ -355,6 +356,7 @@ export const VcsPanelRemote = Schema.Struct({
       name: TrimmedNonEmptyStringSchema,
       fullRefName: TrimmedNonEmptyStringSchema,
       isDefaultRemoteHead: Schema.Boolean,
+      lastActivityAt: Schema.optional(Schema.NullOr(Schema.String)),
     }),
   ),
 });
@@ -477,6 +479,13 @@ export const VcsPanelBranchActionInput = Schema.Struct({
   force: Schema.optional(Schema.Boolean),
 });
 export type VcsPanelBranchActionInput = typeof VcsPanelBranchActionInput.Type;
+
+export const VcsPanelDeleteBranchInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  branch: VcsRef,
+  force: Schema.optional(Schema.Boolean),
+});
+export type VcsPanelDeleteBranchInput = typeof VcsPanelDeleteBranchInput.Type;
 
 export const VcsPanelRemoteInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,

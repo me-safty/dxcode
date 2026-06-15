@@ -1,6 +1,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { detectSourceControlProviderFromRemoteUrl } from "@t3tools/shared/sourceControl";
 import {
@@ -15,6 +16,7 @@ import {
   type VcsPanelChangeGroup,
   type VcsPanelCompareInput,
   type VcsPanelCompareResult,
+  type VcsPanelDeleteBranchInput,
   type VcsPanelFileActionInput,
   type VcsPanelFileChange,
   type VcsPanelFileDiffInput,
@@ -34,6 +36,8 @@ import {
 } from "@t3tools/contracts";
 
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import { TextGeneration } from "../textGeneration/TextGeneration.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 const isGitCommandError = Schema.is(GitCommandError);
 
@@ -61,6 +65,7 @@ export interface SourceControlPanelServiceShape {
     input: VcsPanelBranchActionInput,
   ) => Effect.Effect<VcsPullResult, GitCommandError>;
   readonly pushBranch: (input: VcsPanelBranchActionInput) => Effect.Effect<void, GitCommandError>;
+  readonly deleteBranch: (input: VcsPanelDeleteBranchInput) => Effect.Effect<void, GitCommandError>;
   readonly fetchRemote: (input: VcsPanelRemoteInput) => Effect.Effect<void, GitCommandError>;
   readonly fetchAllRemotes: (input: VcsPanelSnapshotInput) => Effect.Effect<void, GitCommandError>;
   readonly addRemote: (input: VcsPanelAddRemoteInput) => Effect.Effect<void, GitCommandError>;
@@ -296,18 +301,30 @@ function parseRemoteBranches(output: string, remoteName: string): VcsPanelRemote
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
-    .filter((name) => name !== `${remoteName}/HEAD`)
-    .filter((name) => name !== remoteName)
-    .filter((name) => {
+    .map((line) => {
+      const [name = "", lastActivityAt = ""] = line.split("\t");
+      return {
+        name,
+        lastActivityAt: lastActivityAt.length > 0 ? lastActivityAt : null,
+      };
+    })
+    .filter((branch) => branch.name !== `${remoteName}/HEAD`)
+    .filter((branch) => branch.name !== remoteName)
+    .filter((branch) => {
+      const name = branch.name;
       if (seen.has(name)) return false;
       seen.add(name);
       return true;
     })
-    .map((name) => ({
-      name: name.startsWith(`${remoteName}/`) ? name.slice(remoteName.length + 1) : name,
-      fullRefName: name,
+    .map((branch) => ({
+      name: branch.name.startsWith(`${remoteName}/`)
+        ? branch.name.slice(remoteName.length + 1)
+        : branch.name,
+      fullRefName: branch.name,
       isDefaultRemoteHead: false,
-    }));
+      lastActivityAt: branch.lastActivityAt,
+    }))
+    .toSorted(compareBranchActivity);
 }
 
 function parseStashes(output: string): VcsPanelStash[] {
@@ -330,11 +347,12 @@ function parseLocalBranches(output: string): VcsRef[] {
     .map((line) => line.trimEnd())
     .filter((line) => line.length > 0)
     .map((line) => {
-      const [name = "", head = "", worktreePath = ""] = line.split("\t");
+      const [name = "", head = "", worktreePath = "", lastActivityAt = ""] = line.split("\t");
       return {
         name,
         current: head.trim() === "*",
         worktreePath: worktreePath.length > 0 ? worktreePath : null,
+        lastActivityAt: lastActivityAt.length > 0 ? lastActivityAt : null,
       };
     })
     .filter((branch) => branch.name.length > 0);
@@ -345,12 +363,29 @@ function parseLocalBranches(output: string): VcsRef[] {
     rows[0]?.name ??
     null;
 
-  return rows.map((branch) => ({
-    name: branch.name,
-    current: branch.current,
-    isDefault: branch.name === defaultName,
-    worktreePath: branch.worktreePath,
-  }));
+  return rows
+    .map((branch) => ({
+      name: branch.name,
+      current: branch.current,
+      isDefault: branch.name === defaultName,
+      worktreePath: branch.worktreePath,
+      lastActivityAt: branch.lastActivityAt,
+    }))
+    .toSorted(compareBranchActivity);
+}
+
+function branchActivityTime(value: { readonly lastActivityAt?: string | null }): number {
+  if (!value.lastActivityAt) return 0;
+  const time = Date.parse(value.lastActivityAt);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function compareBranchActivity(
+  left: { readonly lastActivityAt?: string | null; readonly name: string },
+  right: { readonly lastActivityAt?: string | null; readonly name: string },
+): number {
+  const activity = branchActivityTime(right) - branchActivityTime(left);
+  return activity !== 0 ? activity : left.name.localeCompare(right.name);
 }
 
 function parseCommits(output: string): VcsPanelSnapshotResult["recentCommits"] {
@@ -430,6 +465,9 @@ function targetRef(target: VcsPanelCompareInput["left"]): string {
 export const make = Effect.fn("makeSourceControlPanelService")(function* () {
   const git = yield* GitVcsDriver;
   const workflow = yield* GitWorkflowService;
+  const serverSettings = yield* ServerSettingsService;
+  const context = yield* Effect.context<never>();
+  const textGeneration = Option.getOrUndefined(Context.getOption(context, TextGeneration));
 
   const run = (
     operation: string,
@@ -459,7 +497,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
         Effect.mapError(asGitCommandError(operation, cwd, args)),
       );
 
-  const COMMIT_PAGE_SIZE = 5;
+  const COMMIT_PAGE_SIZE = 10;
 
   const commitFiles = (cwd: string, sha: string) =>
     Effect.all(
@@ -580,6 +618,42 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
       })),
     );
 
+  const generatedStashMessage = (
+    cwd: string,
+    mode: "all" | "staged" | "unstaged",
+  ): Effect.Effect<string, never> =>
+    Effect.gen(function* () {
+      const fallback = `T3 Code ${mode} stash`;
+      const diffArgs =
+        mode === "staged"
+          ? (["diff", "--cached", "--stat"] as const)
+          : (["diff", "--stat"] as const);
+      const patchArgs =
+        mode === "staged"
+          ? (["diff", "--cached", "--no-ext-diff", "--patch", "--minimal"] as const)
+          : (["diff", "--no-ext-diff", "--patch", "--minimal"] as const);
+      const [settings, summary, patch, status] = yield* Effect.all(
+        [
+          serverSettings.getSettings,
+          run("vcs.panel.stashMessageSummary", cwd, diffArgs),
+          run("vcs.panel.stashMessagePatch", cwd, patchArgs),
+          run("vcs.panel.stashMessageStatus", cwd, ["status", "--short"]),
+        ],
+        { concurrency: "unbounded" },
+      );
+      const stagedSummary = [summary.trim(), status.trim()].filter(Boolean).join("\n");
+      if (!textGeneration) return fallback;
+      if (stagedSummary.length === 0 && patch.trim().length === 0) return fallback;
+      const generated = yield* textGeneration.generateCommitMessage({
+        cwd,
+        branch: null,
+        stagedSummary: stagedSummary.slice(0, 8_000),
+        stagedPatch: patch.slice(0, 50_000),
+        modelSelection: settings.textGenerationModelSelection,
+      });
+      return generated.subject.trim() || fallback;
+    }).pipe(Effect.orElseSucceed(() => `T3 Code ${mode} stash`));
+
   const compareFiles = (cwd: string, baseRef: string | null, refName: string) => {
     if (!baseRef) return Effect.succeed([]);
     return Effect.all(
@@ -680,7 +754,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
             ),
           run("vcs.panel.localBranches", input.cwd, [
             "branch",
-            "--format=%(refname:short)%09%(HEAD)%09%(worktreepath)",
+            "--format=%(refname:short)%09%(HEAD)%09%(worktreepath)%09%(committerdate:iso-strict)",
           ]),
           run("vcs.panel.statusPorcelain", input.cwd, ["status", "--porcelain=2", "--branch"]),
           run("vcs.panel.unstagedNumstat", input.cwd, ["diff", "--numstat"]),
@@ -701,7 +775,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
             "-r",
             "--list",
             `${remote.name}/*`,
-            "--format=%(refname:short)",
+            "--format=%(refname:short)%09%(committerdate:iso-strict)",
           ]).pipe(
             Effect.map((branchesOutput) => ({
               ...remote,
@@ -884,6 +958,36 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
     },
   );
 
+  const deleteBranch: SourceControlPanelServiceShape["deleteBranch"] = Effect.fn("deleteBranch")(
+    function* (input) {
+      if (input.branch.current) {
+        return yield* gitError(
+          "vcs.panel.deleteBranch",
+          input.cwd,
+          ["branch", "-d", input.branch.name],
+          "Cannot delete the current branch.",
+        );
+      }
+      if (input.branch.isRemote && input.branch.remoteName) {
+        const remoteBranchName = input.branch.name.startsWith(`${input.branch.remoteName}/`)
+          ? input.branch.name.slice(input.branch.remoteName.length + 1)
+          : input.branch.name;
+        yield* run("vcs.panel.deleteRemoteBranch", input.cwd, [
+          "push",
+          input.branch.remoteName,
+          "--delete",
+          remoteBranchName,
+        ]).pipe(Effect.asVoid);
+        return;
+      }
+      yield* run("vcs.panel.deleteLocalBranch", input.cwd, [
+        "branch",
+        input.force ? "-D" : "-d",
+        input.branch.name,
+      ]).pipe(Effect.asVoid);
+    },
+  );
+
   return SourceControlPanelService.of({
     snapshot,
     branchDetails: (input) => branchDetails(input.cwd, input.branch, input.defaultCompareRef),
@@ -896,6 +1000,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
     commitStaged,
     pullBranch,
     pushBranch,
+    deleteBranch,
     fetchRemote: (input) =>
       run("vcs.panel.fetchRemote", input.cwd, ["fetch", input.remoteName]).pipe(Effect.asVoid),
     fetchAllRemotes: (input) =>
@@ -916,13 +1021,16 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
           : mode === "unstaged" || input.includeUntracked
             ? ["--include-untracked", ...(mode === "unstaged" ? ["--keep-index"] : [])]
             : [];
-      return run("vcs.panel.createStash", input.cwd, [
-        "stash",
-        "push",
-        ...modeArgs,
-        "-m",
-        input.message?.trim() || "T3 Code stash",
-      ]).pipe(Effect.asVoid);
+      return Effect.gen(function* () {
+        const message = input.message?.trim() || (yield* generatedStashMessage(input.cwd, mode));
+        yield* run("vcs.panel.createStash", input.cwd, [
+          "stash",
+          "push",
+          ...modeArgs,
+          "-m",
+          message,
+        ]).pipe(Effect.asVoid);
+      });
     },
     applyStash: (input) =>
       run("vcs.panel.applyStash", input.cwd, [

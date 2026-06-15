@@ -150,6 +150,7 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
       commitStaged: vi.fn(),
       pullBranch: vi.fn(),
       pushBranch: vi.fn(),
+      deleteBranch: vi.fn(),
       fetchRemote: vi.fn(),
       fetchAllRemotes: vi.fn(),
       addRemote: vi.fn(),

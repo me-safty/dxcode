@@ -40,6 +40,7 @@ import {
   VcsPanelCommitInput,
   VcsPanelCompareInput,
   VcsPanelCompareResult,
+  VcsPanelDeleteBranchInput,
   VcsPanelFileActionInput,
   VcsPanelFileDiffInput,
   VcsPanelFileDiffResult,
@@ -186,6 +187,7 @@ export const WS_METHODS = {
   vcsPanelCommitStaged: "vcs.panel.commitStaged",
   vcsPanelPullBranch: "vcs.panel.pullBranch",
   vcsPanelPushBranch: "vcs.panel.pushBranch",
+  vcsPanelDeleteBranch: "vcs.panel.deleteBranch",
   vcsPanelFetchRemote: "vcs.panel.fetchRemote",
   vcsPanelFetchAllRemotes: "vcs.panel.fetchAllRemotes",
   vcsPanelAddRemote: "vcs.panel.addRemote",
@@ -498,6 +500,11 @@ export const WsVcsPanelPullBranchRpc = Rpc.make(WS_METHODS.vcsPanelPullBranch, {
 
 export const WsVcsPanelPushBranchRpc = Rpc.make(WS_METHODS.vcsPanelPushBranch, {
   payload: VcsPanelBranchActionInput,
+  error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
+});
+
+export const WsVcsPanelDeleteBranchRpc = Rpc.make(WS_METHODS.vcsPanelDeleteBranch, {
+  payload: VcsPanelDeleteBranchInput,
   error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
 });
 
@@ -851,6 +858,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsPanelCommitStagedRpc,
   WsVcsPanelPullBranchRpc,
   WsVcsPanelPushBranchRpc,
+  WsVcsPanelDeleteBranchRpc,
   WsVcsPanelFetchRemoteRpc,
   WsVcsPanelFetchAllRemotesRpc,
   WsVcsPanelAddRemoteRpc,

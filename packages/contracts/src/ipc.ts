@@ -15,6 +15,7 @@ import type {
   VcsPanelCommitInput,
   VcsPanelCompareInput,
   VcsPanelCompareResult,
+  VcsPanelDeleteBranchInput,
   VcsPanelFileActionInput,
   VcsPanelFileDiffInput,
   VcsPanelFileDiffResult,
@@ -1264,6 +1265,7 @@ export interface EnvironmentApi {
     commitStaged: (input: VcsPanelCommitInput) => Promise<void>;
     pullBranch: (input: VcsPanelBranchActionInput) => Promise<VcsPullResult>;
     pushBranch: (input: VcsPanelBranchActionInput) => Promise<void>;
+    deleteBranch: (input: VcsPanelDeleteBranchInput) => Promise<void>;
     fetchRemote: (input: VcsPanelRemoteInput) => Promise<void>;
     fetchAllRemotes: (input: VcsPanelSnapshotInput) => Promise<void>;
     addRemote: (input: VcsPanelAddRemoteInput) => Promise<void>;

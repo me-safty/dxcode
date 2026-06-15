@@ -83,7 +83,7 @@ const DEFAULT_SECTION_WEIGHTS: Record<SectionKey, number> = {
 const COLLAPSED_SECTION_HEIGHT = 32;
 const MIN_SECTION_WEIGHT = 0.35;
 const ACTION_LOCK_TIMEOUT_MS = 15_000;
-const COMMIT_PAGE_SIZE = 5;
+const COMMIT_PAGE_SIZE = 10;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Source control action failed.";
@@ -114,6 +114,28 @@ function shouldFetchBeforePull(event: ReactMouseEvent): boolean {
 
 function treeKey(kind: string, id: string): string {
   return `${kind}:${id}`;
+}
+
+function formatRelativeDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return null;
+  const elapsedMs = Date.now() - time;
+  if (elapsedMs < 60_000) return "just now";
+  const minutes = Math.floor(elapsedMs / 60_000);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks === 1) return "last week";
+  if (days < 30) return `${weeks} weeks ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} month${months === 1 ? "" : "s"} ago`;
+  const years = Math.floor(days / 365);
+  return `${years} year${years === 1 ? "" : "s"} ago`;
 }
 
 function changeGroupStashMode(kind: VcsPanelChangeGroup["kind"]): "staged" | "unstaged" | null {
@@ -150,6 +172,7 @@ function remoteBranchRef(
     current: false,
     isDefault: branch.isDefaultRemoteHead,
     worktreePath: null,
+    lastActivityAt: branch.lastActivityAt,
   };
 }
 
@@ -400,10 +423,14 @@ export function SourceControlPanel({
   const [snapshot, setSnapshot] = useState<VcsPanelSnapshotResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionRunning, setActionRunning] = useState(false);
+  const [panelBusyLabel, setPanelBusyLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<ReadonlySet<SectionKey>>(() => new Set(["stashes"]));
+  const [collapsed, setCollapsed] = useState<ReadonlySet<SectionKey>>(() => new Set(["remotes"]));
   const [sectionWeights, setSectionWeights] = useState(DEFAULT_SECTION_WEIGHTS);
   const [expandedTree, setExpandedTree] = useState<ReadonlySet<string>>(() => new Set());
+  const [collapsedDefaultTree, setCollapsedDefaultTree] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [branchDetailsByRef, setBranchDetailsByRef] = useState<
     ReadonlyMap<string, VcsPanelBranchDetails>
   >(() => new Map());
@@ -419,6 +446,8 @@ export function SourceControlPanel({
   const [addRemoteOpen, setAddRemoteOpen] = useState(false);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [dialogCommitMessage, setDialogCommitMessage] = useState("");
+  const [stashDialogMode, setStashDialogMode] = useState<"staged" | "unstaged" | null>(null);
+  const [dialogStashMessage, setDialogStashMessage] = useState("");
   const [remoteName, setRemoteName] = useState("");
   const [remoteUrl, setRemoteUrl] = useState("");
   const stagedFiles = snapshot?.changeGroups.find((group) => group.kind === "staged")?.files ?? [];
@@ -541,34 +570,64 @@ export function SourceControlPanel({
     [api, cwd, environmentId, runAction, threadId, worktreePath],
   );
 
-  const runPanelCommit = useCallback(
-    () =>
-      runAction(async () => {
-        const commitMessage = dialogCommitMessage.trim();
-        setCommitDialogOpen(false);
-        setDialogCommitMessage("");
-        await gitAction.run({
-          actionId: newCommandId(),
-          action: "commit",
-          ...(commitMessage ? { commitMessage } : {}),
-        });
-      }),
-    [dialogCommitMessage, gitAction, runAction],
+  const deleteBranch = useCallback(
+    (branch: VcsRef, force: boolean) =>
+      void (async () => {
+        const branchLabel = branch.isRemote
+          ? `remote branch ${branch.name}`
+          : `branch ${branch.name}`;
+        if (!(await confirm(`Delete ${branchLabel}?`))) return;
+        await runAction(() => api?.vcs.deleteBranch({ cwd, branch, force }) ?? Promise.resolve());
+      })(),
+    [api, confirm, cwd, runAction],
   );
 
+  const runPanelCommit = useCallback(() => {
+    const commitMessage = dialogCommitMessage.trim();
+    setPanelBusyLabel(
+      commitMessage ? "Committing staged changes..." : "Generating commit message...",
+    );
+    return runAction(async () => {
+      setCommitDialogOpen(false);
+      setDialogCommitMessage("");
+      await gitAction.run({
+        actionId: newCommandId(),
+        action: "commit",
+        ...(commitMessage ? { commitMessage } : {}),
+      });
+    }).finally(() => setPanelBusyLabel(null));
+  }, [dialogCommitMessage, gitAction, runAction]);
+
   const createStash = useCallback(
-    (mode: "staged" | "unstaged") =>
-      runAction(async () => {
+    (mode: "staged" | "unstaged", message?: string) => {
+      const stashMessage = message?.trim();
+      setPanelBusyLabel(stashMessage ? "Stashing changes..." : "Generating stash message...");
+      return runAction(async () => {
         if (!api) return;
         await api.vcs.createStash({
           cwd,
           mode,
           includeUntracked: mode === "unstaged",
-          message: `T3 Code ${mode} stash`,
+          ...(stashMessage ? { message: stashMessage } : {}),
         });
-      }),
+      }).finally(() => setPanelBusyLabel(null));
+    },
     [api, cwd, runAction],
   );
+
+  const openStashDialog = useCallback((mode: "staged" | "unstaged") => {
+    setStashDialogMode(mode);
+    setDialogStashMessage("");
+  }, []);
+
+  const runPanelStash = useCallback(() => {
+    if (!stashDialogMode) return;
+    const mode = stashDialogMode;
+    const message = dialogStashMessage.trim();
+    setStashDialogMode(null);
+    setDialogStashMessage("");
+    void createStash(mode, message);
+  }, [createStash, dialogStashMessage, stashDialogMode]);
 
   const toggleSection = useCallback((key: SectionKey) => {
     setCollapsed((current) => {
@@ -579,7 +638,22 @@ export function SourceControlPanel({
     });
   }, []);
 
-  const toggleTree = useCallback((key: string) => {
+  const isTreeExpanded = useCallback(
+    (key: string, defaultExpanded = false) =>
+      defaultExpanded ? !collapsedDefaultTree.has(key) : expandedTree.has(key),
+    [collapsedDefaultTree, expandedTree],
+  );
+
+  const toggleTree = useCallback((key: string, defaultExpanded = false) => {
+    if (defaultExpanded) {
+      setCollapsedDefaultTree((current) => {
+        const next = new Set(current);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+      return;
+    }
     setExpandedTree((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
@@ -717,10 +791,10 @@ export function SourceControlPanel({
   );
 
   const toggleTreeFromKeyboard = useCallback(
-    (key: string, event: ReactKeyboardEvent<HTMLDivElement>) => {
+    (key: string, event: ReactKeyboardEvent<HTMLDivElement>, defaultExpanded = false) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
-      toggleTree(key);
+      toggleTree(key, defaultExpanded);
     },
     [toggleTree],
   );
@@ -869,6 +943,7 @@ export function SourceControlPanel({
     const key = treeKey("commit", commit.sha);
     const expanded = expandedTree.has(key);
     const stats = sumFiles(commit.files);
+    const relativeDate = formatRelativeDate(commit.authoredAt);
     return (
       <div key={commit.sha} className="space-y-0.5">
         <div
@@ -885,6 +960,9 @@ export function SourceControlPanel({
           )}
           <span className="shrink-0 font-mono text-muted-foreground">{commit.shortSha}</span>
           <span className="min-w-0 flex-1 truncate">{commit.message}</span>
+          {relativeDate ? (
+            <span className="shrink-0 text-[11px] text-muted-foreground">{relativeDate}</span>
+          ) : null}
           <StatLabels insertions={stats.insertions} deletions={stats.deletions} />
         </div>
         {expanded ? (
@@ -903,6 +981,7 @@ export function SourceControlPanel({
     count,
     children,
     icon,
+    defaultExpanded,
   }: {
     readonly details: VcsPanelBranchDetails;
     readonly id: string;
@@ -910,17 +989,18 @@ export function SourceControlPanel({
     readonly count: number | null;
     readonly children: ReactNode;
     readonly icon?: ReactNode;
+    readonly defaultExpanded?: boolean;
   }) => {
     const key = treeKey("branch-subsection", `${details.fullRefName}:${id}`);
-    const expanded = expandedTree.has(key);
+    const expanded = isTreeExpanded(key, defaultExpanded);
     return (
       <div className="space-y-0.5">
         <div
           role="button"
           tabIndex={0}
           className="flex h-6 min-w-0 items-center gap-1.5 rounded px-1.5 text-xs hover:bg-accent/60"
-          onClick={() => toggleTree(key)}
-          onKeyDown={(event) => toggleTreeFromKeyboard(key, event)}
+          onClick={() => toggleTree(key, defaultExpanded)}
+          onKeyDown={(event) => toggleTreeFromKeyboard(key, event, defaultExpanded)}
         >
           {expanded ? (
             <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
@@ -978,6 +1058,7 @@ export function SourceControlPanel({
         id: "commits",
         title: "Commits",
         count: details.commits.length,
+        defaultExpanded: true,
         children: (
           <div className="space-y-0.5">
             {details.commits.length === 0 ? (
@@ -1009,6 +1090,7 @@ export function SourceControlPanel({
     const loadingDetails = loadingBranchDetails.has(branch.name);
     const current = branch.current;
     const shouldPull = current && snapshot.status.hasUpstream && snapshot.status.behindCount > 0;
+    const relativeDate = formatRelativeDate(branch.lastActivityAt);
     return (
       <div key={branch.name} className="space-y-0.5">
         <div
@@ -1025,6 +1107,9 @@ export function SourceControlPanel({
           )}
           <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1 truncate text-sm">{branch.name}</span>
+          {relativeDate ? (
+            <span className="shrink-0 text-[11px] text-muted-foreground">{relativeDate}</span>
+          ) : null}
           {current ? <CompactBadge>current</CompactBadge> : null}
           {branch.isDefault ? <CompactBadge>default</CompactBadge> : null}
           <div
@@ -1077,6 +1162,14 @@ export function SourceControlPanel({
             >
               <UploadCloud className="size-3.5" />
             </IconButton>
+            <IconButton
+              label="Delete branch. Shift: force."
+              destructive
+              disabled={current || actionRunning}
+              onClick={(event) => deleteBranch(branch, isActionForced(event))}
+            >
+              <Trash2 className="size-3.5" />
+            </IconButton>
           </div>
         </div>
         {expanded && details ? renderBranchTree(branch, details) : null}
@@ -1094,6 +1187,7 @@ export function SourceControlPanel({
     const key = treeKey("remote-branch", branch.name);
     const expanded = expandedTree.has(key);
     const loadingDetails = loadingBranchDetails.has(branch.name);
+    const relativeDate = formatRelativeDate(branch.lastActivityAt);
     return (
       <div key={branch.name} className="space-y-0.5">
         <div
@@ -1114,7 +1208,44 @@ export function SourceControlPanel({
               ? shortRemoteBranchName(details)
               : branch.name.replace(`${branch.remoteName}/`, "")}
           </span>
+          {relativeDate ? (
+            <span className="shrink-0 text-[11px] text-muted-foreground">{relativeDate}</span>
+          ) : null}
           {branch.isDefault ? <CompactBadge>default</CompactBadge> : null}
+          <div
+            className="flex shrink-0 items-center gap-0.5"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <IconButton
+              label="Switch branch"
+              disabled={actionRunning}
+              onClick={() => void switchRef(branch.name)}
+            >
+              <GitBranch className="size-3.5" />
+            </IconButton>
+            <IconButton
+              label="Fetch remote"
+              disabled={actionRunning || !branch.remoteName}
+              onClick={() =>
+                void runAction(() =>
+                  branch.remoteName
+                    ? (api?.vcs.fetchRemote({ cwd, remoteName: branch.remoteName }) ??
+                      Promise.resolve())
+                    : Promise.resolve(),
+                )
+              }
+            >
+              <RefreshCw className="size-3.5" />
+            </IconButton>
+            <IconButton
+              label="Delete remote branch"
+              destructive
+              disabled={actionRunning}
+              onClick={() => deleteBranch(branch, false)}
+            >
+              <Trash2 className="size-3.5" />
+            </IconButton>
+          </div>
         </div>
         {expanded && details ? renderBranchTree(branch, details) : null}
         {expanded && !details && loadingDetails ? (
@@ -1298,6 +1429,12 @@ export function SourceControlPanel({
         ) : null}
       </div>
       {error ? <div className="mt-1 text-destructive-foreground">{error}</div> : null}
+      {panelBusyLabel ? (
+        <div className="mt-1 flex items-center gap-1.5 text-muted-foreground">
+          <RefreshCw className="size-3 animate-spin" />
+          <span>{panelBusyLabel}</span>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -1309,10 +1446,63 @@ export function SourceControlPanel({
         snapshot.changeGroups.map((group) =>
           group.files.length === 0 ? null : (
             <div key={group.kind} className="space-y-0.5">
-              <div className="flex h-6 items-center justify-between gap-2 text-xs font-medium uppercase text-muted-foreground">
-                <span>{group.kind}</span>
-                <div className="flex items-center gap-1">
+              <div
+                role="button"
+                tabIndex={0}
+                className="flex h-6 items-center justify-between gap-2 rounded px-1 text-xs font-medium uppercase text-muted-foreground hover:bg-accent/60"
+                onClick={() => toggleTree(treeKey("change-group", group.kind), true)}
+                onKeyDown={(event) =>
+                  toggleTreeFromKeyboard(event.currentTarget.dataset.treeKey ?? "", event, true)
+                }
+                data-tree-key={treeKey("change-group", group.kind)}
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {isTreeExpanded(treeKey("change-group", group.kind), true) ? (
+                    <ChevronDown className="size-3.5 shrink-0" />
+                  ) : (
+                    <ChevronRight className="size-3.5 shrink-0" />
+                  )}
+                  <span>{group.kind}</span>
+                </span>
+                <div
+                  className="flex items-center gap-1"
+                  onClick={(event) => event.stopPropagation()}
+                >
                   <span>{group.files.length}</span>
+                  {group.kind === "staged" ? (
+                    <IconButton
+                      label="Unstage all changes"
+                      disabled={actionRunning}
+                      onClick={() =>
+                        void runAction(
+                          () =>
+                            api?.vcs.unstageFiles({
+                              cwd,
+                              paths: group.files.map((file) => file.path),
+                            }) ?? Promise.resolve(),
+                        )
+                      }
+                    >
+                      <Undo2 className="size-3.5" />
+                    </IconButton>
+                  ) : null}
+                  {group.kind === "unstaged" ? (
+                    <IconButton
+                      label="Stage all changes"
+                      disabled={actionRunning}
+                      onClick={() =>
+                        void runAction(
+                          () =>
+                            api?.vcs.stageFiles({
+                              cwd,
+                              paths: group.files.map((file) => file.path),
+                            }) ?? Promise.resolve(),
+                        )
+                      }
+                    >
+                      <Plus className="size-3.5" />
+                    </IconButton>
+                  ) : null}
                   {group.kind === "staged" && stagedFiles.length > 0 ? (
                     <IconButton
                       label="Commit staged changes"
@@ -1328,7 +1518,7 @@ export function SourceControlPanel({
                       disabled={actionRunning}
                       onClick={() => {
                         const mode = changeGroupStashMode(group.kind);
-                        if (mode) void createStash(mode);
+                        if (mode) openStashDialog(mode);
                       }}
                     >
                       <Archive className="size-3.5" />
@@ -1336,7 +1526,9 @@ export function SourceControlPanel({
                   ) : null}
                 </div>
               </div>
-              {group.files.map((file) => renderWorkingFile(file, group.kind))}
+              {isTreeExpanded(treeKey("change-group", group.kind), true)
+                ? group.files.map((file) => renderWorkingFile(file, group.kind))
+                : null}
             </div>
           ),
         )
@@ -1503,6 +1695,52 @@ export function SourceControlPanel({
               onClick={() => void runPanelCommit()}
             >
               Commit
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+      <Dialog
+        open={stashDialogMode !== null}
+        onOpenChange={(open) => {
+          if (open) return;
+          setStashDialogMode(null);
+          setDialogStashMessage("");
+        }}
+      >
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>Stash {stashDialogMode ?? ""} changes</DialogTitle>
+            <DialogDescription>
+              Provide a message, or leave it blank to auto-generate one.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-3">
+            <label className="block text-sm font-medium" htmlFor="source-control-stash-message">
+              Stash message (optional)
+            </label>
+            <Textarea
+              id="source-control-stash-message"
+              size="sm"
+              value={dialogStashMessage}
+              placeholder="Leave empty to auto-generate"
+              aria-label="Stash message (optional)"
+              disabled={actionRunning}
+              onChange={(event) => setDialogStashMessage(event.currentTarget.value)}
+            />
+          </DialogPanel>
+          <DialogFooter>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setStashDialogMode(null);
+                setDialogStashMessage("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" disabled={actionRunning || !stashDialogMode} onClick={runPanelStash}>
+              Stash
             </Button>
           </DialogFooter>
         </DialogPopup>

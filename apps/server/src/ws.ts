@@ -218,6 +218,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.vcsPanelDiscardFiles, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsPanelPullBranch, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsPanelPushBranch, AuthOrchestrationOperateScope],
+  [WS_METHODS.vcsPanelDeleteBranch, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsPanelFetchRemote, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsPanelFetchAllRemotes, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsPanelAddRemote, AuthOrchestrationOperateScope],
@@ -1526,6 +1527,14 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
             WS_METHODS.vcsPanelPushBranch,
             sourceControlPanel
               .pushBranch(input)
+              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.vcsPanelDeleteBranch]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.vcsPanelDeleteBranch,
+            sourceControlPanel
+              .deleteBranch(input)
               .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             { "rpc.aggregate": "vcs" },
           ),
