@@ -341,18 +341,34 @@ function parseStashes(output: string): VcsPanelStash[] {
   });
 }
 
+function parseBranchTrackCounts(track: string): {
+  readonly aheadCount: number;
+  readonly behindCount: number;
+} {
+  const aheadCount = Number.parseInt(/ahead (\d+)/u.exec(track)?.[1] ?? "0", 10);
+  const behindCount = Number.parseInt(/behind (\d+)/u.exec(track)?.[1] ?? "0", 10);
+  return {
+    aheadCount: Number.isFinite(aheadCount) ? aheadCount : 0,
+    behindCount: Number.isFinite(behindCount) ? behindCount : 0,
+  };
+}
+
 function parseLocalBranches(output: string): VcsRef[] {
   const rows = output
     .split(/\r?\n/u)
     .map((line) => line.trimEnd())
     .filter((line) => line.length > 0)
     .map((line) => {
-      const [name = "", head = "", worktreePath = "", lastActivityAt = ""] = line.split("\t");
+      const [name = "", head = "", worktreePath = "", lastActivityAt = "", track = ""] =
+        line.split("\t");
+      const { aheadCount, behindCount } = parseBranchTrackCounts(track);
       return {
         name,
         current: head.trim() === "*",
         worktreePath: worktreePath.length > 0 ? worktreePath : null,
         lastActivityAt: lastActivityAt.length > 0 ? lastActivityAt : null,
+        aheadCount,
+        behindCount,
       };
     })
     .filter((branch) => branch.name.length > 0);
@@ -370,6 +386,8 @@ function parseLocalBranches(output: string): VcsRef[] {
       isDefault: branch.name === defaultName,
       worktreePath: branch.worktreePath,
       lastActivityAt: branch.lastActivityAt,
+      aheadCount: branch.aheadCount,
+      behindCount: branch.behindCount,
     }))
     .toSorted(compareBranchActivity);
 }
@@ -756,7 +774,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
             ),
           run("vcs.panel.localBranches", input.cwd, [
             "branch",
-            "--format=%(refname:short)%09%(HEAD)%09%(worktreepath)%09%(committerdate:iso-strict)",
+            "--format=%(refname:short)%09%(HEAD)%09%(worktreepath)%09%(committerdate:iso-strict)%09%(upstream:track)",
           ]),
           run("vcs.panel.statusPorcelain", input.cwd, ["status", "--porcelain=2", "--branch"]),
           run("vcs.panel.unstagedNumstat", input.cwd, ["diff", "--numstat"]),
@@ -943,6 +961,24 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
           "reset",
           "--hard",
           upstream,
+        ]).pipe(Effect.asVoid);
+        return {
+          status: "pulled" as const,
+          refName: input.branchName,
+          upstreamRef: upstream,
+        };
+      }
+      if (input.merge) {
+        const upstream = yield* run("vcs.panel.mergePullBranch.upstream", input.cwd, [
+          "rev-parse",
+          "--abbrev-ref",
+          "--symbolic-full-name",
+          "@{upstream}",
+        ]).pipe(Effect.map((value) => value.trim()));
+        yield* run("vcs.panel.mergePullBranch", input.cwd, [
+          "pull",
+          "--no-rebase",
+          "--no-edit",
         ]).pipe(Effect.asVoid);
         return {
           status: "pulled" as const,

@@ -24,7 +24,6 @@ import {
   Plus,
   RefreshCw,
   Trash2,
-  UploadCloud,
   X,
 } from "lucide-react";
 import type {
@@ -94,11 +93,15 @@ function errorMessage(error: unknown): string {
 function formatBranchSync(snapshot: VcsPanelSnapshotResult): string {
   const status = snapshot.status;
   if (!status.hasUpstream) return "No upstream";
-  if (status.aheadCount === 0 && status.behindCount === 0) return "Synced";
+  return formatSyncCounts(status.aheadCount, status.behindCount) ?? "Synced";
+}
+
+function formatSyncCounts(aheadCount: number, behindCount: number): string | null {
   const parts = [];
-  if (status.aheadCount > 0) parts.push(`${status.aheadCount} ahead`);
-  if (status.behindCount > 0) parts.push(`${status.behindCount} behind`);
-  return parts.join(", ");
+  if (aheadCount > 0) parts.push(`↑${aheadCount}`);
+  if (behindCount > 0) parts.push(`↓${behindCount}`);
+  if (parts.length === 0) return null;
+  return parts.join(" ");
 }
 
 interface PanelChangedFile extends VcsPanelFileChange {
@@ -175,6 +178,22 @@ function isActionForced(event: ReactMouseEvent): boolean {
 
 function shouldFetchBeforePull(event: ReactMouseEvent): boolean {
   return event.altKey;
+}
+
+function branchSyncCounts(
+  branch: VcsRef,
+  snapshot: VcsPanelSnapshotResult,
+): { readonly aheadCount: number; readonly behindCount: number } {
+  if (branch.current) {
+    return {
+      aheadCount: snapshot.status.aheadCount,
+      behindCount: snapshot.status.behindCount,
+    };
+  }
+  return {
+    aheadCount: branch.aheadCount ?? 0,
+    behindCount: branch.behindCount ?? 0,
+  };
 }
 
 function treeKey(kind: string, id: string): string {
@@ -262,6 +281,22 @@ function StatLabels({
     <span className="inline-flex shrink-0 items-center gap-1 text-[11px] tabular-nums">
       {insertions > 0 ? <span className="text-success-foreground">+{insertions}</span> : null}
       {deletions > 0 ? <span className="text-destructive-foreground">-{deletions}</span> : null}
+    </span>
+  );
+}
+
+function BranchSyncLabels({
+  aheadCount,
+  behindCount,
+}: {
+  readonly aheadCount: number;
+  readonly behindCount: number;
+}) {
+  const label = formatSyncCounts(aheadCount, behindCount);
+  if (!label) return null;
+  return (
+    <span className="shrink-0 whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
+      {label}
     </span>
   );
 }
@@ -505,6 +540,7 @@ export function SourceControlPanel({
   );
   const [addRemoteOpen, setAddRemoteOpen] = useState(false);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+  const [divergedSyncBranch, setDivergedSyncBranch] = useState<VcsRef | null>(null);
   const [dialogCommitMessage, setDialogCommitMessage] = useState("");
   const [stashDialogTarget, setStashDialogTarget] = useState<{
     readonly label: string;
@@ -682,6 +718,65 @@ export function SourceControlPanel({
         await runAction(() => api?.vcs.deleteBranch({ cwd, branch, force }) ?? Promise.resolve());
       })(),
     [api, confirm, cwd, runAction],
+  );
+
+  const syncBranch = useCallback(
+    (branch: VcsRef, event: ReactMouseEvent<HTMLButtonElement>) => {
+      if (!snapshot) return;
+      const force = isActionForced(event);
+      const fetchFirst = shouldFetchBeforePull(event);
+      const { aheadCount, behindCount } = branchSyncCounts(branch, snapshot);
+      if (!branch.current) {
+        void runAction(() => api?.vcs.fetchAllRemotes({ cwd }) ?? Promise.resolve());
+        return;
+      }
+      if (aheadCount > 0 && behindCount > 0) {
+        setDivergedSyncBranch(branch);
+        return;
+      }
+      void runAction(async () => {
+        if (!api) return;
+        if (fetchFirst) {
+          await api.vcs.fetchAllRemotes({ cwd });
+        }
+        if (!snapshot.status.hasUpstream || aheadCount > 0) {
+          await api.vcs.pushBranch({ cwd, branchName: branch.name });
+          return;
+        }
+        if (behindCount > 0) {
+          await api.vcs.pullBranch({
+            cwd,
+            branchName: branch.name,
+            force,
+          });
+          return;
+        }
+        await api.vcs.fetchAllRemotes({ cwd });
+      });
+    },
+    [api, cwd, runAction, snapshot],
+  );
+
+  const runDivergedSync = useCallback(
+    (mode: "force-pull" | "merge" | "force-push") => {
+      const branch = divergedSyncBranch;
+      setDivergedSyncBranch(null);
+      if (!branch) return;
+      void runAction(async () => {
+        if (!api) return;
+        if (mode === "force-push") {
+          await api.vcs.pushBranch({ cwd, branchName: branch.name, force: true });
+          return;
+        }
+        if (mode === "force-pull") {
+          await api.vcs.pullBranch({ cwd, branchName: branch.name, force: true });
+          return;
+        }
+        await api.vcs.pullBranch({ cwd, branchName: branch.name, merge: true });
+        await api.vcs.pushBranch({ cwd, branchName: branch.name });
+      });
+    },
+    [api, cwd, divergedSyncBranch, runAction],
   );
 
   const runPanelCommit = useCallback(() => {
@@ -1187,7 +1282,18 @@ export function SourceControlPanel({
     const expanded = expandedTree.has(key);
     const loadingDetails = loadingBranchDetails.has(branch.name);
     const current = branch.current;
-    const shouldPull = current && snapshot.status.hasUpstream && snapshot.status.behindCount > 0;
+    const { aheadCount, behindCount } = branchSyncCounts(branch, snapshot);
+    const syncLabel = !current
+      ? "Fetch"
+      : aheadCount > 0 && behindCount > 0
+        ? "Sync diverged"
+        : !snapshot.status.hasUpstream
+          ? "Publish"
+          : behindCount > 0
+            ? "Pull. Shift: reset. Option: fetch."
+            : aheadCount > 0
+              ? "Push"
+              : "Fetch";
     const relativeDate = formatRelativeDate(branch.lastActivityAt);
     return (
       <div key={branch.name} className="space-y-0.5">
@@ -1205,6 +1311,7 @@ export function SourceControlPanel({
           )}
           <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1 truncate text-sm">{branch.name}</span>
+          <BranchSyncLabels aheadCount={aheadCount} behindCount={behindCount} />
           {relativeDate ? (
             <span className="shrink-0 text-[11px] text-muted-foreground">{relativeDate}</span>
           ) : null}
@@ -1222,43 +1329,11 @@ export function SourceControlPanel({
               <GitBranch className="size-3.5" />
             </IconButton>
             <IconButton
-              label={shouldPull ? "Pull. Shift: reset. Option: fetch first." : "Fetch"}
+              label={syncLabel}
               disabled={actionRunning}
-              onClick={(event) =>
-                void runAction(async () => {
-                  if (!api) return;
-                  if (!shouldPull) {
-                    await api.vcs.fetchAllRemotes({ cwd });
-                    return;
-                  }
-                  if (shouldFetchBeforePull(event)) {
-                    await api.vcs.fetchAllRemotes({ cwd });
-                  }
-                  await api.vcs.pullBranch({
-                    cwd,
-                    branchName: branch.name,
-                    force: isActionForced(event),
-                  });
-                })
-              }
+              onClick={(event) => syncBranch(branch, event)}
             >
-              {shouldPull ? <Download className="size-3.5" /> : <RefreshCw className="size-3.5" />}
-            </IconButton>
-            <IconButton
-              label="Push. Shift: force-with-lease."
-              disabled={!current || actionRunning}
-              onClick={(event) =>
-                void runAction(
-                  () =>
-                    api?.vcs.pushBranch({
-                      cwd,
-                      branchName: branch.name,
-                      force: isActionForced(event),
-                    }) ?? Promise.resolve(),
-                )
-              }
-            >
-              <UploadCloud className="size-3.5" />
+              <RefreshCw className="size-3.5" />
             </IconButton>
             <IconButton
               label="Delete branch. Shift: force."
@@ -1710,6 +1785,46 @@ export function SourceControlPanel({
               }
             >
               Add
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+      <Dialog
+        open={divergedSyncBranch !== null}
+        onOpenChange={(open) => {
+          if (!open) setDivergedSyncBranch(null);
+        }}
+      >
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>Sync diverged branch</DialogTitle>
+            <DialogDescription>
+              Choose how to reconcile local and upstream commits for{" "}
+              {divergedSyncBranch?.name ?? "this branch"}.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button size="sm" variant="ghost" onClick={() => setDivergedSyncBranch(null)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={actionRunning}
+              onClick={() => runDivergedSync("force-pull")}
+            >
+              Force pull
+            </Button>
+            <Button size="sm" disabled={actionRunning} onClick={() => runDivergedSync("merge")}>
+              Merge sync
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={actionRunning}
+              onClick={() => runDivergedSync("force-push")}
+            >
+              Force push
             </Button>
           </DialogFooter>
         </DialogPopup>

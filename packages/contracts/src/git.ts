@@ -81,6 +81,8 @@ export const VcsRef = Schema.Struct({
   isDefault: Schema.Boolean,
   worktreePath: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
   lastActivityAt: Schema.optional(Schema.NullOr(Schema.String)),
+  aheadCount: Schema.optional(NonNegativeInt),
+  behindCount: Schema.optional(NonNegativeInt),
 });
 export type VcsRef = typeof VcsRef.Type;
 
@@ -477,6 +479,7 @@ export const VcsPanelBranchActionInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   branchName: TrimmedNonEmptyStringSchema,
   force: Schema.optional(Schema.Boolean),
+  merge: Schema.optional(Schema.Boolean),
 });
 export type VcsPanelBranchActionInput = typeof VcsPanelBranchActionInput.Type;
 
