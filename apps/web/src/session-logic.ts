@@ -54,34 +54,12 @@ export const PROVIDER_OPTIONS: Array<{
   },
 ];
 
-export interface SubagentInfo {
-  sessionId?: string;
-  parentSessionId?: string;
-  subagentType?: string;
-  description?: string;
-  modelId?: string;
-  providerId?: string;
-  report?: string;
-  /** Latest step the subagent is working on (Claude streams these live). */
-  lastStep?: string;
-  /** Name of the tool the subagent last used (e.g. "Bash", "Read"). */
-  lastToolName?: string;
-  /** Cumulative tool-call count reported by the subagent. */
-  toolUses?: number;
-  /** Cumulative wall-clock duration reported by the subagent, in ms. */
-  durationMs?: number;
-}
-
-export interface TodoItem {
-  content: string;
-  status?: "pending" | "in_progress" | "completed" | "cancelled";
-  priority?: "high" | "medium" | "low";
-}
-
-export interface QuestionAnswer {
-  question: string;
-  answer: string;
-}
+export type WorkLogToolLifecycleStatus =
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined"
+  | "stopped";
 
 export interface WorkLogEntry {
   id: string;
@@ -95,17 +73,13 @@ export interface WorkLogEntry {
   tone: "thinking" | "tool" | "info" | "error";
   hidden?: boolean;
   toolTitle?: string;
-  toolName?: string;
+  toolData?: unknown;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
-  /** Target path for a file-read tool, extracted from structured tool input. */
-  readPath?: string;
-  /** Unified-diff patch string for an edit tool, extracted from tool payload. */
-  editDiff?: string;
-  subagent?: SubagentInfo;
-  todos?: ReadonlyArray<TodoItem>;
-  /** Question/answer pairs for a resolved user-input prompt. */
-  questionAnswers?: ReadonlyArray<QuestionAnswer>;
+  /** From runtime item / task payload `status` when present (e.g. tool.updated). */
+  toolLifecycleStatus?: WorkLogToolLifecycleStatus;
+  /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
+  sourceActivityKind?: OrchestrationThreadActivity["kind"];
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -174,10 +148,137 @@ export type TimelineEntry =
       entry: WorkLogEntry;
     };
 
+export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean {
+  if (entry.tone === "tool" || entry.tone === "thinking" || entry.tone === "error") {
+    return true;
+  }
+  if (entry.command !== undefined && entry.command.trim().length > 0) {
+    return true;
+  }
+  if (entry.requestKind !== undefined) {
+    return true;
+  }
+  return entry.itemType !== undefined && isToolLifecycleItemType(entry.itemType);
+}
+
+/** Heuristic: providers often emit successful lifecycle status while error text lives in `detail` / `command`. */
+function toolDetailTextLooksLikeFailure(text: string): boolean {
+  const t = text.toLowerCase();
+  if (t.includes("file not found")) {
+    return true;
+  }
+  if (t.includes("no files found")) {
+    return true;
+  }
+  if (
+    t.includes("enoent") ||
+    t.includes("no such file or directory") ||
+    t.includes("no such file")
+  ) {
+    return true;
+  }
+  if (t.includes("cannot find path") && t.includes("because it does not exist")) {
+    return true;
+  }
+  if (t.includes("commandnotfoundexception")) {
+    return true;
+  }
+  if (t.includes("is not recognized as the name of a cmdlet")) {
+    return true;
+  }
+  if (t.includes("is not recognized") && t.includes("the term '")) {
+    return true;
+  }
+  if (t.includes("a parameter cannot be found that matches parameter name")) {
+    return true;
+  }
+  if (t.includes("command not found")) {
+    return true;
+  }
+  if (/<exited with exit code\s+[1-9]\d*\s*>/i.test(text)) {
+    return true;
+  }
+  if (/exit(?:ed)? with exit code\s+[1-9]\d*/i.test(text)) {
+    return true;
+  }
+  if (/exit code\s*[:\s]\s*[1-9]\d*\b/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+/** True when the row should show a failure affordance (explicit status/tone or error-shaped tool output). */
+export function workEntryIndicatesToolFailure(entry: WorkLogEntry): boolean {
+  if (entry.tone === "error") {
+    return true;
+  }
+  const ls = entry.toolLifecycleStatus;
+  if (ls === "failed" || ls === "declined") {
+    return true;
+  }
+  if (!workLogEntryIsToolLike(entry)) {
+    return false;
+  }
+  const parts: string[] = [];
+  if (entry.detail) {
+    parts.push(entry.detail);
+  }
+  if (entry.command) {
+    parts.push(entry.command);
+  }
+  const blob = parts.join("\n");
+  if (blob.length === 0) {
+    return false;
+  }
+  return toolDetailTextLooksLikeFailure(blob);
+}
+
+/** Tool/command row completed without failure (blue check affordance). */
+export function workEntryIndicatesToolSuccess(entry: WorkLogEntry): boolean {
+  if (!workLogEntryIsToolLike(entry)) {
+    return false;
+  }
+  if (workEntryIndicatesToolFailure(entry)) {
+    return false;
+  }
+  if (entry.tone === "thinking") {
+    return false;
+  }
+  const ls = entry.toolLifecycleStatus;
+  if (ls === "failed" || ls === "declined") {
+    return false;
+  }
+  if (ls === "inProgress") {
+    return false;
+  }
+  if (ls === "stopped") {
+    return false;
+  }
+  return true;
+}
+
+/** Tool-like row with neither clear success nor failure (empty, incomplete, in progress, etc.). */
+export function workEntryIndicatesToolNeutralStatus(entry: WorkLogEntry): boolean {
+  if (!workLogEntryIsToolLike(entry)) {
+    return false;
+  }
+  if (workEntryIndicatesToolFailure(entry)) {
+    return false;
+  }
+  if (workEntryIndicatesToolSuccess(entry)) {
+    return false;
+  }
+  return true;
+}
+
 export function formatDuration(durationMs: number): string {
   if (!Number.isFinite(durationMs) || durationMs < 0) return "0ms";
   if (durationMs < 1_000) return `${Math.max(1, Math.round(durationMs))}ms`;
-  if (durationMs < 10_000) return `${(durationMs / 1_000).toFixed(1)}s`;
+  if (durationMs < 10_000) {
+    const tenths = Math.round(durationMs / 100) / 10;
+    // 9.95s+ rounds up to the next bucket — render "10s", not "10.0s".
+    return tenths >= 10 ? "10s" : `${tenths.toFixed(1)}s`;
+  }
   if (durationMs < 60_000) return `${Math.round(durationMs / 1_000)}s`;
   const minutes = Math.floor(durationMs / 60_000);
   const seconds = Math.round((durationMs % 60_000) / 1_000);
@@ -255,7 +356,9 @@ function isStalePendingRequestFailureDetail(detail: string | undefined): boolean
     normalized.includes("stale pending user-input request") ||
     normalized.includes("unknown pending approval request") ||
     normalized.includes("unknown pending permission request") ||
-    normalized.includes("unknown pending user-input request")
+    normalized.includes("unknown pending user-input request") ||
+    normalized.includes("unknown pending user input request") ||
+    normalized.includes("unknown pending codex user input request")
   );
 }
 
@@ -576,7 +679,6 @@ export function hasActionableProposedPlan(
 
 export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
-  latestTurnId: TurnId | undefined,
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   // Pre-index user-input questions by requestId so the resolved event can be
@@ -597,7 +699,6 @@ export function deriveWorkLogEntries(
 
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of ordered) {
-    if (latestTurnId && activity.turnId !== latestTurnId) continue;
     if (activity.kind === "tool.started") continue;
     if (activity.kind === "task.started") continue;
     if (activity.kind === "context-window.updated") continue;
@@ -608,9 +709,10 @@ export function deriveWorkLogEntries(
     if (activity.kind === "user-input.requested") continue;
     entries.push(toDerivedWorkLogEntry(activity, questionsByRequestId));
   }
-  return collapseDerivedWorkLogEntries(entries).map(
-    ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
-  );
+  return collapseDerivedWorkLogEntries(entries).map((entry) => {
+    const { activityKind, collapseKey: _collapseKey, ...rest } = entry;
+    return Object.assign(rest, { sourceActivityKind: activityKind });
+  });
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {
@@ -625,86 +727,26 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
   return typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:");
 }
 
-function deriveUserInputResolvedEntry(
-  activity: OrchestrationThreadActivity,
+function extractWorkLogToolLifecycleStatus(
   payload: Record<string, unknown> | null,
-  questionsByRequestId?: ReadonlyMap<string, ReadonlyArray<UserInputQuestion>>,
-): DerivedWorkLogEntry {
-  const requestId = typeof payload?.requestId === "string" ? payload.requestId : null;
-  const questions = requestId ? questionsByRequestId?.get(requestId) : undefined;
-  const answers = asRecord(payload?.answers);
-  const pairs = buildUserInputQuestionAnswerPairs(questions, answers);
-
-  const base: DerivedWorkLogEntry = {
-    id: activity.id,
-    createdAt: activity.createdAt,
-    turnId: activity.turnId,
-    label: activity.summary,
-    tone: "info",
-    activityKind: activity.kind,
-  };
-
-  if (pairs.length === 0) {
-    return base;
+): WorkLogToolLifecycleStatus | undefined {
+  if (!payload) {
+    return undefined;
   }
-
-  base.questionAnswers = pairs;
-  base.label =
-    pairs.length === 1 ? `Answered: ${pairs[0]!.question}` : `Answered ${pairs.length} questions`;
-  // Plain-text fallback for the tooltip / non-structured contexts.
-  base.detail = pairs.map((pair) => `${pair.question}\n  ${pair.answer}`).join("\n\n");
-  return base;
+  const s = payload.status;
+  if (
+    s === "inProgress" ||
+    s === "completed" ||
+    s === "failed" ||
+    s === "declined" ||
+    s === "stopped"
+  ) {
+    return s;
+  }
+  return undefined;
 }
 
-interface UserInputQuestionAnswerPair {
-  readonly question: string;
-  readonly answer: string;
-}
-
-function buildUserInputQuestionAnswerPairs(
-  questions: ReadonlyArray<UserInputQuestion> | undefined,
-  answers: Record<string, unknown> | null,
-): UserInputQuestionAnswerPair[] {
-  const pairs: UserInputQuestionAnswerPair[] = [];
-  const formatAnswer = (value: unknown): string =>
-    Array.isArray(value)
-      ? value.map((entry) => String(entry)).join(", ")
-      : typeof value === "string"
-        ? value
-        : value == null
-          ? ""
-          : String(value);
-
-  if (questions && questions.length > 0) {
-    for (const question of questions) {
-      const rawAnswer = answers?.[question.id];
-      const answer = formatAnswer(rawAnswer).trim();
-      pairs.push({
-        question: question.question.trim() || question.header.trim(),
-        answer: answer.length > 0 ? answer : "(no answer)",
-      });
-    }
-    return pairs;
-  }
-
-  // No matching request questions — fall back to whatever answers we have,
-  // keyed by their (often human-readable) ids.
-  if (answers) {
-    for (const [key, value] of Object.entries(answers)) {
-      const answer = formatAnswer(value).trim();
-      pairs.push({
-        question: key.trim(),
-        answer: answer.length > 0 ? answer : "(no answer)",
-      });
-    }
-  }
-  return pairs;
-}
-
-function toDerivedWorkLogEntry(
-  activity: OrchestrationThreadActivity,
-  questionsByRequestId?: ReadonlyMap<string, ReadonlyArray<UserInputQuestion>>,
-): DerivedWorkLogEntry {
+function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
   const payload =
     activity.payload && typeof activity.payload === "object"
       ? (activity.payload as Record<string, unknown>)
@@ -779,8 +821,11 @@ function toDerivedWorkLogEntry(
   if (title) {
     entry.toolTitle = title;
   }
-  if (toolName) {
-    entry.toolName = toolName;
+  if (itemType === "mcp_tool_call") {
+    const data = asRecord(payload?.data);
+    if (data?.item !== undefined) {
+      entry.toolData = data.item;
+    }
   }
   if (itemType) {
     entry.itemType = itemType;
@@ -791,23 +836,12 @@ function toDerivedWorkLogEntry(
   if (toolCallId) {
     entry.toolCallId = toolCallId;
   }
-  const subagent = extractSubagentInfo(payload, activity.kind, detail);
-  if (subagent) {
-    entry.subagent = subagent;
+  let toolLifecycleStatus = extractWorkLogToolLifecycleStatus(payload);
+  if (!toolLifecycleStatus && activity.kind === "tool.completed") {
+    toolLifecycleStatus = "completed";
   }
-  const readPath = itemType === "file_read" ? extractReadPath(payload) : null;
-  if (readPath) {
-    entry.readPath = readPath;
-  }
-  if (isTaskActivity || activity.kind === "task.started") {
-    const taskId = typeof payload?.taskId === "string" ? payload.taskId : null;
-    if (taskId) {
-      entry.taskId = taskId;
-    }
-  }
-  const todos = extractTodos(payload);
-  if (todos) {
-    entry.todos = todos;
+  if (toolLifecycleStatus) {
+    entry.toolLifecycleStatus = toolLifecycleStatus;
   }
   const collapseKey = deriveToolLifecycleCollapseKey(entry);
   if (collapseKey) {
@@ -911,12 +945,8 @@ function mergeDerivedWorkLogEntries(
   const requestKind = next.requestKind ?? previous.requestKind;
   const collapseKey = next.collapseKey ?? previous.collapseKey;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
-  const taskId = next.taskId ?? previous.taskId;
-  const subagent = mergeSubagentInfo(previous.subagent, next.subagent);
-  const todos = next.todos ?? previous.todos;
-  const editDiff = next.editDiff ?? previous.editDiff;
-  const readPath = next.readPath ?? previous.readPath;
-  const questionAnswers = next.questionAnswers ?? previous.questionAnswers;
+  const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
+  const toolData = next.toolData ?? previous.toolData;
   return {
     ...previous,
     ...next,
@@ -930,12 +960,8 @@ function mergeDerivedWorkLogEntries(
     ...(requestKind ? { requestKind } : {}),
     ...(collapseKey ? { collapseKey } : {}),
     ...(toolCallId ? { toolCallId } : {}),
-    ...(taskId ? { taskId } : {}),
-    ...(subagent ? { subagent } : {}),
-    ...(todos ? { todos } : {}),
-    ...(editDiff ? { editDiff } : {}),
-    ...(readPath ? { readPath } : {}),
-    ...(questionAnswers ? { questionAnswers } : {}),
+    ...(toolLifecycleStatus !== undefined ? { toolLifecycleStatus } : {}),
+    ...(toolData !== undefined ? { toolData } : {}),
   };
 }
 
@@ -1632,14 +1658,6 @@ function compareActivityLifecycleRank(kind: string): number {
   return 1;
 }
 
-export function hasToolActivityForTurn(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-  turnId: TurnId | null | undefined,
-): boolean {
-  if (!turnId) return false;
-  return activities.some((activity) => activity.turnId === turnId && activity.tone === "tool");
-}
-
 export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
@@ -1666,53 +1684,6 @@ export function deriveTimelineEntries(
   return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
-}
-
-export function deriveCompletionDividerBeforeEntryId(
-  timelineEntries: ReadonlyArray<TimelineEntry>,
-  latestTurn: Pick<
-    OrchestrationLatestTurn,
-    "assistantMessageId" | "startedAt" | "completedAt"
-  > | null,
-): string | null {
-  if (!latestTurn?.startedAt || !latestTurn.completedAt) {
-    return null;
-  }
-
-  if (latestTurn.assistantMessageId) {
-    const exactMatch = timelineEntries.find(
-      (timelineEntry) =>
-        timelineEntry.kind === "message" &&
-        timelineEntry.message.role === "assistant" &&
-        timelineEntry.message.id === latestTurn.assistantMessageId,
-    );
-    if (exactMatch) {
-      return exactMatch.id;
-    }
-  }
-
-  const turnStartedAt = Date.parse(latestTurn.startedAt);
-  const turnCompletedAt = Date.parse(latestTurn.completedAt);
-  if (Number.isNaN(turnStartedAt) || Number.isNaN(turnCompletedAt)) {
-    return null;
-  }
-
-  let inRangeMatch: string | null = null;
-  let fallbackMatch: string | null = null;
-  for (const timelineEntry of timelineEntries) {
-    if (timelineEntry.kind !== "message" || timelineEntry.message.role !== "assistant") {
-      continue;
-    }
-    const messageAt = Date.parse(timelineEntry.message.createdAt);
-    if (Number.isNaN(messageAt) || messageAt < turnStartedAt) {
-      continue;
-    }
-    fallbackMatch = timelineEntry.id;
-    if (messageAt <= turnCompletedAt) {
-      inRangeMatch = timelineEntry.id;
-    }
-  }
-  return inRangeMatch ?? fallbackMatch;
 }
 
 export function inferCheckpointTurnCountByTurnId(

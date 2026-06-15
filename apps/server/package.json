@@ -22,8 +22,7 @@
     "test": "vp test run"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.154",
-    "@chat-adapter/slack": "4.27.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.170",
     "@effect/platform-bun": "catalog:",
     "@effect/platform-node": "catalog:",
     "@effect/platform-node-shared": "catalog:",

@@ -1,7 +1,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { FolderIcon, FolderOpenIcon } from "lucide-react";
-import { useState } from "react";
-import { resolveEnvironmentHttpUrl } from "../environments/runtime";
+import { FolderIcon } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useAssetUrl } from "../assets/assetUrls";
 
 const loadedProjectFaviconSrcs = new Set<string>();
 const PROJECT_FAVICON_CACHE_VERSION = "2";
@@ -32,37 +32,16 @@ export function ProjectFavicon(input: {
   className?: string;
   isActive?: boolean;
 }) {
-  // When this project holds the active thread, show a themed open-folder icon
-  // that matches the project name color, so the active project reads as one
-  // cohesive, fully-lit unit. Inactive projects keep their resolved favicon
-  // image (or the muted closed-folder fallback).
-  if (input.isActive) {
-    return (
-      <FolderOpenIcon className={`size-3.5 shrink-0 text-foreground/90 ${input.className ?? ""}`} />
-    );
-  }
-
-  return (
-    <ResolvedProjectFavicon
-      environmentId={input.environmentId}
-      cwd={input.cwd}
-      {...(input.className !== undefined ? { className: input.className } : {})}
-    />
-  );
-}
-
-function ResolvedProjectFavicon(input: {
-  environmentId: EnvironmentId;
-  cwd: string;
-  className?: string;
-}) {
-  const src = resolveProjectFaviconUrl({
-    environmentId: input.environmentId,
+  const src = useAssetUrl(input.environmentId, {
+    _tag: "project-favicon",
     cwd: input.cwd,
   });
   const [status, setStatus] = useState<"loading" | "loaded" | "error">(() =>
     src && loadedProjectFaviconSrcs.has(src) ? "loaded" : "loading",
   );
+  useEffect(() => {
+    setStatus(src && loadedProjectFaviconSrcs.has(src) ? "loaded" : "loading");
+  }, [src]);
 
   if (!src) {
     return (
