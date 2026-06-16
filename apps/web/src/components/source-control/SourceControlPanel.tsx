@@ -1547,6 +1547,7 @@ export function SourceControlPanel({
         const result = await api.vcs.branchCommits({
           cwd,
           branch,
+          baseRef: details.baseRef,
           skip: details.commits.length,
           limit: COMMIT_PAGE_SIZE,
         });

@@ -418,6 +418,7 @@ export type VcsPanelBranchDetailsInput = typeof VcsPanelBranchDetailsInput.Type;
 export const VcsPanelBranchCommitsInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   branch: VcsRef,
+  baseRef: Schema.optional(TrimmedNonEmptyStringSchema.pipe(Schema.NullOr)),
   skip: NonNegativeInt,
   limit: PositiveInt.check(Schema.isLessThanOrEqualTo(50)),
 });
