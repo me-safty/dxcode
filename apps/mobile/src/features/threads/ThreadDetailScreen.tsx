@@ -11,6 +11,7 @@ import type {
 } from "@t3tools/contracts";
 import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
 import * as Haptics from "expo-haptics";
+import { useHeaderHeight } from "expo-router/build/react-navigation/elements";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -200,6 +201,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const { onOpenDrawer } = props;
 
   const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const agentLabel = `${props.selectedThread.modelSelection.instanceId} agent`;
   const [composerExpanded, setComposerExpanded] = useState(false);
   const composerBottomInset = composerExpanded ? 0 : Math.max(insets.bottom, 12);
@@ -250,11 +252,14 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       <View className="flex-1">
         {showContent ? (
           <ThreadFeed
+            key={props.selectedThread.id}
             threadId={props.selectedThread.id}
             feed={props.selectedThreadFeed}
             httpBaseUrl={props.httpBaseUrl}
             bearerToken={props.bearerToken}
             agentLabel={agentLabel}
+            latestTurn={props.selectedThread.latestTurn}
+            contentTopInset={headerHeight}
             contentBottomInset={feedBottomInset}
             layoutVariant={layoutVariant}
             composerExpanded={composerExpanded}
