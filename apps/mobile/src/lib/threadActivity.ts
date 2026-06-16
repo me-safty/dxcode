@@ -1,16 +1,19 @@
 import { ApprovalRequestId, isToolLifecycleItemType } from "@t3tools/contracts";
 import type {
+  CommandId,
+  EnvironmentId,
   MessageId,
   OrchestrationLatestTurn,
   OrchestrationThread,
   OrchestrationThreadActivity,
   ToolLifecycleItemType,
+  ThreadId,
   TurnId,
   UserInputQuestion,
 } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
-import type { QueuedThreadMessage } from "../state/thread-outbox";
+import type { DraftComposerImageAttachment } from "./composerImages";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 
@@ -30,6 +33,16 @@ export interface PendingUserInput {
 export interface PendingUserInputDraftAnswer {
   readonly selectedOptionLabel?: string;
   readonly customAnswer?: string;
+}
+
+export interface QueuedThreadMessage {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly messageId: MessageId;
+  readonly commandId: CommandId;
+  readonly text: string;
+  readonly attachments: ReadonlyArray<DraftComposerImageAttachment>;
+  readonly createdAt: string;
 }
 
 export interface ThreadFeedActivity {
