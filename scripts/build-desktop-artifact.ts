@@ -297,6 +297,10 @@ export function createStagePnpmConfig(
     : undefined;
 }
 
+export function resolveStageInstallArgs(): ReadonlyArray<string> {
+  return ["install", "--prod"];
+}
+
 function getPatchedDependencyPackageName(patchKey: string): string {
   const versionSeparator = patchKey.lastIndexOf("@");
   return versionSeparator > 0 ? patchKey.slice(0, versionSeparator) : patchKey;
@@ -945,13 +949,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   }
 
   yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
-  const installCommand = yield* resolveSpawnCommand("vp", ["install", "--prod", "--no-optional"]);
+  const installArgs = resolveStageInstallArgs();
+  const installCommand = yield* resolveSpawnCommand("vp", installArgs);
   yield* runCommand(
     ChildProcess.make(installCommand.command, installCommand.args, {
       cwd: stageAppDir,
       shell: installCommand.shell,
     }),
-    { label: "vp install --prod --no-optional", verbose: options.verbose },
+    { label: `vp ${installArgs.join(" ")}`, verbose: options.verbose },
   );
 
   // electron-builder treats several set-but-empty variables (e.g. CSC_LINK="")

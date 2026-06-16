@@ -15,6 +15,7 @@ import {
   resolveGitHubPublishConfig,
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
+  resolveStageInstallArgs,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -140,6 +141,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       ),
       undefined,
     );
+  });
+
+  it("installs staged production dependencies with optional platform packages", () => {
+    const args = resolveStageInstallArgs();
+
+    assert.deepStrictEqual(args, ["install", "--prod"]);
+    assert.equal(args.includes("--no-optional"), false);
   });
 
   it("falls back to the default mock update port when the configured port is blank", () => {
