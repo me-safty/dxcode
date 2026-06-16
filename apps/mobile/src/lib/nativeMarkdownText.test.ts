@@ -54,7 +54,7 @@ describe("nativeMarkdownTextRuns", () => {
         externalHost: "example.com",
       },
       { text: " " },
-      { text: "README.md:12", fileIcon: "markdown" },
+      { text: "README.md:12", fileIcon: "readme" },
     ]);
   });
 
