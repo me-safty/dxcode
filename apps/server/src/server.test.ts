@@ -27,6 +27,7 @@ import {
   ProviderInstanceId,
   ResolvedKeybindingRule,
   ThreadId,
+  type VcsStatusInput,
   WS_METHODS,
   WsRpcGroup,
   EditorId,
@@ -554,6 +555,13 @@ const buildAppUnderTest = (options?: {
           ready: Effect.void,
           getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
           updateSettings: () => Effect.succeed(DEFAULT_SERVER_SETTINGS),
+          updateProjectSettings: () =>
+            Effect.succeed({
+              remoteOverride: null,
+              automaticGitFetchInterval: null,
+              actionEnvironment: {},
+              disabledProviderInstanceIds: [],
+            }),
           streamChanges: Stream.empty,
           ...options?.layers?.serverSettings,
         }),
@@ -6095,7 +6103,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       Effect.gen(function* () {
         const dispatchedCommands: Array<OrchestrationCommand> = [];
         const bootstrapGitOperations: string[] = [];
-        const refreshStatus = vi.fn((_: string) =>
+        const refreshStatus = vi.fn((_: string | VcsStatusInput) =>
           Effect.succeed({
             isRepo: true,
             hasPrimaryRemote: true,

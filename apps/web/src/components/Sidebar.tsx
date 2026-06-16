@@ -427,7 +427,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     thread.branch != null && gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
-          input: { cwd: gitCwd },
+          input: { cwd: gitCwd, projectId: thread.projectId },
         })
       : null,
   );
@@ -1207,10 +1207,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const [renamingThreadKey, setRenamingThreadKey] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
   const [confirmingArchiveThreadKey, setConfirmingArchiveThreadKey] = useState<string | null>(null);
-  const [projectRenameTarget, setProjectRenameTarget] = useState<SidebarProjectGroupMember | null>(
-    null,
-  );
-  const [projectRenameTitle, setProjectRenameTitle] = useState("");
   const [projectGroupingTarget, setProjectGroupingTarget] =
     useState<SidebarProjectGroupMember | null>(null);
   const [projectGroupingSelection, setProjectGroupingSelection] = useState<
@@ -1375,14 +1371,22 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (useThreadSelectionStore.getState().hasSelection()) {
         clearSelection();
       }
-      setProjectExpanded(projectPreferenceKeys, !projectExpanded);
+      if (isMobile) {
+        setOpenMobile(false);
+      }
+      void router.navigate({
+        to: "/projects/$environmentId/$projectId",
+        params: { environmentId: project.environmentId, projectId: project.id },
+      });
     },
     [
       clearSelection,
       dragInProgressRef,
-      projectExpanded,
-      projectPreferenceKeys,
-      setProjectExpanded,
+      isMobile,
+      project.environmentId,
+      project.id,
+      router,
+      setOpenMobile,
       suppressProjectClickAfterDragRef,
       suppressProjectClickForContextMenuRef,
     ],
@@ -1391,8 +1395,23 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const handleProjectButtonKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>) => {
       if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
       if (dragInProgressRef.current) {
+        event.preventDefault();
+        return;
+      }
+    },
+    [dragInProgressRef],
+  );
+
+  const handleProjectToggleClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (dragInProgressRef.current) {
+        return;
+      }
+      if (suppressProjectClickAfterDragRef.current) {
+        suppressProjectClickAfterDragRef.current = false;
         return;
       }
       setProjectExpanded(projectPreferenceKeys, !projectExpanded);
@@ -1596,7 +1615,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
         const actionHandlers = new Map<string, () => Promise<void> | void>();
         const makeLeaf = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
+          action: "settings" | "rename" | "grouping" | "copy-path" | "delete",
           member: SidebarProjectGroupMember,
           options?: {
             destructive?: boolean;
@@ -1606,6 +1625,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           const id = `${action}:${member.physicalProjectKey}`;
           actionHandlers.set(id, () => {
             switch (action) {
+              case "settings":
+                void router.navigate({
+                  to: "/projects/$environmentId/$projectId",
+                  params: { environmentId: member.environmentId, projectId: member.id },
+                });
+                return;
               case "rename":
                 openProjectRenameDialog(member);
                 return;
@@ -1629,7 +1654,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         };
 
         const buildTargetedItem = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
+          action: "settings" | "rename" | "grouping" | "copy-path" | "delete",
           label: string,
           options?: {
             destructive?: boolean;
@@ -1663,6 +1688,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
         const clicked = await api.contextMenu.show(
           [
+            buildTargetedItem("settings", "Open Settings"),
             buildTargetedItem("rename", "Rename"),
             buildTargetedItem("grouping", "Group into..."),
             buildTargetedItem("copy-path", "Copy Path"),
@@ -1686,10 +1712,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [
       copyPathToClipboard,
       handleRemoveProject,
-      openProjectGroupingDialog,
       openProjectRenameDialog,
+      openProjectGroupingDialog,
       project.groupedProjectCount,
       project.memberProjects,
+      router,
       suppressProjectClickForContextMenuRef,
     ],
   );
@@ -2200,10 +2227,39 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   return (
     <>
       <div className="group/project-header relative">
+        <button
+          type="button"
+          aria-label={`${projectExpanded ? "Collapse" : "Expand"} ${project.displayName} threads`}
+          className="absolute top-1 left-1 z-10 inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+          onClick={handleProjectToggleClick}
+        >
+          {!projectExpanded && projectStatus ? (
+            <span
+              aria-hidden="true"
+              title={projectStatus.label}
+              className={`relative inline-flex size-3.5 items-center justify-center ${projectStatus.colorClass}`}
+            >
+              <span className="absolute inset-0 flex items-center justify-center transition-opacity duration-150 group-hover/project-header:opacity-0">
+                <span
+                  className={`size-[9px] rounded-full ${projectStatus.dotClass} ${
+                    projectStatus.pulse ? "animate-pulse" : ""
+                  }`}
+                />
+              </span>
+              <ChevronRightIcon className="absolute inset-0 m-auto size-3.5 opacity-0 transition-opacity duration-150 group-hover/project-header:opacity-100" />
+            </span>
+          ) : (
+            <ChevronRightIcon
+              className={`size-3.5 transition-transform duration-150 ${
+                projectExpanded ? "rotate-90" : ""
+              }`}
+            />
+          )}
+        </button>
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
           size="sm"
-          className={`gap-2 px-2 py-1.5 pr-8 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground max-sm:pr-14 ${
+          className={`gap-2 py-1.5 pr-8 pl-7 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground max-sm:pr-14 ${
             isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
           }`}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
@@ -2213,34 +2269,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           onKeyDown={handleProjectButtonKeyDown}
           onContextMenu={handleProjectButtonContextMenu}
         >
-          {!projectExpanded && projectStatus ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span
-                    aria-label={projectStatus.label}
-                    className={`-ml-0.5 relative inline-flex size-3.5 shrink-0 items-center justify-center ${projectStatus.colorClass}`}
-                  />
-                }
-              >
-                <span className="absolute inset-0 flex items-center justify-center transition-opacity duration-150 group-hover/project-header:opacity-0">
-                  <span
-                    className={`size-[9px] rounded-full ${projectStatus.dotClass} ${
-                      projectStatus.pulse ? "animate-pulse" : ""
-                    }`}
-                  />
-                </span>
-                <ChevronRightIcon className="absolute inset-0 m-auto size-3.5 text-muted-foreground/70 opacity-0 transition-opacity duration-150 group-hover/project-header:opacity-100" />
-              </TooltipTrigger>
-              <TooltipPopup side="top">{projectStatus.label}</TooltipPopup>
-            </Tooltip>
-          ) : (
-            <ChevronRightIcon
-              className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
-                projectExpanded ? "rotate-90" : ""
-              }`}
-            />
-          )}
           <ProjectFavicon environmentId={project.environmentId} cwd={project.workspaceRoot} />
           <span className="flex min-w-0 flex-1 items-center gap-2">
             <span className="truncate text-xs font-medium text-foreground/90">

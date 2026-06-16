@@ -6,8 +6,10 @@ import {
 import {
   DEFAULT_RUNTIME_MODE,
   DEFAULT_SERVER_SETTINGS,
+  type ModelSelection,
   type ScopedProjectRef,
 } from "@t3tools/contracts";
+import { createDefaultModelSelection } from "@t3tools/shared/model";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -53,9 +55,9 @@ export function useNewThreadHandler() {
         getDraftSessionByLogicalProjectKey,
         getDraftSession,
         getDraftThread,
-        applyStickyState,
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
+        setModelSelection,
       } = useComposerDraftStore.getState();
       const currentRouteTarget = getCurrentRouteTarget();
       const project = projects.find(
@@ -83,6 +85,13 @@ export function useNewThreadHandler() {
       if (storedDraftThreadRef && reusableStoredDraftThread === null) {
         markPromotedDraftThreadByRef(storedDraftThreadRef);
       }
+      const projectDefaultModelSelection: ModelSelection =
+        project?.defaultModelSelection ?? createDefaultModelSelection();
+      const seedNewDraftModelState = (draftId: Parameters<typeof setModelSelection>[0]) => {
+        setModelSelection(draftId, projectDefaultModelSelection, {
+          preserveExistingOptions: false,
+        });
+      };
       const latestActiveDraftThread: DraftThreadState | null = currentRouteTarget
         ? currentRouteTarget.kind === "server"
           ? getDraftThread(currentRouteTarget.threadRef)
@@ -175,7 +184,7 @@ export function useNewThreadHandler() {
             }),
           runtimeMode: DEFAULT_RUNTIME_MODE,
         });
-        applyStickyState(draftId);
+        seedNewDraftModelState(draftId);
 
         await router.navigate({
           to: "/draft/$draftId",
