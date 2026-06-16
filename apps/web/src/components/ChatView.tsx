@@ -4889,7 +4889,7 @@ function ChatViewContent(props: ChatViewProps) {
             />
           ) : activeRightPanelSurface?.kind === "diff" ? (
             <Suspense fallback={null}>
-              <DiffPanel mode="embedded" />
+              <DiffPanel mode="embedded" composerDraftTarget={composerDraftTarget} />
             </Suspense>
           ) : (activeRightPanelSurface?.kind === "files" ||
               activeRightPanelSurface?.kind === "file") &&
@@ -4967,7 +4967,7 @@ function ChatViewContent(props: ChatViewProps) {
               />
             ) : activeRightPanelSurface?.kind === "diff" ? (
               <Suspense fallback={null}>
-                <DiffPanel mode="embedded" />
+                <DiffPanel mode="embedded" composerDraftTarget={composerDraftTarget} />
               </Suspense>
             ) : activeRightPanelSurface?.kind === "plan" ? (
               <PlanSidebar

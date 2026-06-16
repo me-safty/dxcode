@@ -21,6 +21,7 @@ export interface ReviewInlineComment {
   readonly rangeLabel: string;
   readonly text: string;
   readonly diff: string;
+  readonly fenceLanguage?: string;
 }
 
 export type ReviewCommentMessageSegment =
@@ -38,6 +39,7 @@ let currentTarget: ReviewCommentTarget | null = null;
 const listeners = new Set<() => void>();
 const REVIEW_COMMENT_BLOCK_PATTERN = /<review_comment\b([^>]*)>\s*([\s\S]*?)<\/review_comment>/g;
 const REVIEW_COMMENT_ATTRIBUTE_PATTERN = /([a-zA-Z][a-zA-Z0-9_-]*)="([^"]*)"/g;
+const REVIEW_COMMENT_FENCE_PATTERN = /(`{3,})([^\s`]*)[^\n]*\n([\s\S]*?)\n\1/;
 
 function emitChange() {
   listeners.forEach((listener) => listener());
@@ -196,14 +198,20 @@ function readNonNegativeInteger(value: string | undefined): number | null {
 }
 
 function extractReviewCommentText(rawBody: string): string {
-  const fenceIndex = rawBody.indexOf("```diff");
+  const fenceIndex = rawBody.search(REVIEW_COMMENT_FENCE_PATTERN);
   const commentBody = fenceIndex >= 0 ? rawBody.slice(0, fenceIndex) : rawBody;
   return commentBody.trim();
 }
 
-function extractReviewCommentDiff(rawBody: string): string {
-  const match = rawBody.match(/```diff\s*\n([\s\S]*?)\n```/);
-  return match?.[1]?.trim() ?? "";
+function extractReviewCommentFence(rawBody: string): {
+  language: string;
+  contents: string;
+} {
+  const match = rawBody.match(REVIEW_COMMENT_FENCE_PATTERN);
+  return {
+    language: match?.[2]?.trim() || "diff",
+    contents: match?.[3] ?? "",
+  };
 }
 
 function parseReviewInlineComment(
@@ -219,6 +227,7 @@ function parseReviewInlineComment(
   if (!filePath || !sectionId || startIndex === null || endIndex === null) {
     return null;
   }
+  const fence = extractReviewCommentFence(rawBody);
 
   return {
     id: `review-comment:${index}:${sectionId}:${filePath}:${startIndex}:${endIndex}`,
@@ -229,12 +238,19 @@ function parseReviewInlineComment(
     endIndex: Math.max(startIndex, endIndex),
     rangeLabel: attributes.rangeLabel?.trim() || "line",
     text: extractReviewCommentText(rawBody),
-    diff: extractReviewCommentDiff(rawBody),
+    diff: fence.contents,
+    fenceLanguage: fence.language,
   };
 }
 
 export function formatReviewCommentContext(target: ReviewCommentTarget, comment: string): string {
   const rangeLabel = formatReviewSelectedRangeLabel(target);
+  const diff = formatReviewSelectedDiff(target);
+  const longestBacktickRun = Math.max(
+    0,
+    ...Array.from(diff.matchAll(/`+/g), (match) => match[0].length),
+  );
+  const fence = "`".repeat(Math.max(3, longestBacktickRun + 1));
   return [
     [
       "<review_comment",
@@ -247,9 +263,9 @@ export function formatReviewCommentContext(target: ReviewCommentTarget, comment:
       ">",
     ].join(""),
     comment.trim(),
-    "```diff",
-    formatReviewSelectedDiff(target),
-    "```",
+    `${fence}diff`,
+    diff,
+    fence,
     "</review_comment>",
   ].join("\n");
 }

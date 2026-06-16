@@ -1,9 +1,13 @@
+import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   appendReviewCommentsToPrompt,
+  buildDiffReviewComment,
   buildFileReviewComment,
   buildReviewCommentRenderablePatch,
+  formatReviewCommentContext,
+  inferReviewCommentFenceLanguage,
   parseReviewCommentMessageSegments,
 } from "./reviewCommentContext";
 
@@ -99,7 +103,85 @@ describe("review comment context parsing", () => {
           endIndex: 2,
           rangeLabel: "L2 to L3",
           text: "Keep this configurable.",
-          diff: "@@ -2,2 +2,2 @@\n two\n three",
+          diff: "two\nthree",
+          fenceLanguage: "ts",
+        }),
+      }),
+    );
+    expect(prompt).toContain("```ts\ntwo\nthree\n```");
+  });
+
+  it("formats mixed diff-side selections with the mobile review-comment contract", () => {
+    const [fileDiff] = parsePatchFiles(
+      [
+        "diff --git a/src/app.ts b/src/app.ts",
+        "--- a/src/app.ts",
+        "+++ b/src/app.ts",
+        "@@ -1,4 +1,4 @@",
+        " one",
+        "-two",
+        "+TWO",
+        " three",
+        " four",
+      ].join("\n"),
+      "review-comment-test",
+    )[0]!.files;
+
+    const comment = buildDiffReviewComment({
+      id: "comment-2",
+      sectionId: "turn:2",
+      sectionTitle: "Turn 2",
+      filePath: "src/app.ts",
+      fileDiff: fileDiff!,
+      range: {
+        start: 2,
+        side: "deletions",
+        end: 2,
+        endSide: "additions",
+      },
+      text: "Keep this compatible.",
+    });
+
+    expect(comment).toEqual(
+      expect.objectContaining({
+        sectionId: "turn:2",
+        sectionTitle: "Turn 2",
+        filePath: "src/app.ts",
+        startIndex: 1,
+        endIndex: 2,
+        rangeLabel: "2",
+        text: "Keep this compatible.",
+        diff: "@@ -2,1 +2,1 @@\n-two\n+TWO",
+        fenceLanguage: "diff",
+      }),
+    );
+  });
+
+  it("uses file extensions for source comments and preserves nested markdown fences", () => {
+    expect(inferReviewCommentFenceLanguage("docs/plan.md")).toBe("md");
+    expect(inferReviewCommentFenceLanguage("src/view.tsx")).toBe("tsx");
+
+    const serialized = formatReviewCommentContext({
+      id: "comment-3",
+      sectionId: "file:docs/plan.md",
+      sectionTitle: "File comment",
+      filePath: "docs/plan.md",
+      startIndex: 0,
+      endIndex: 2,
+      rangeLabel: "L1 to L3",
+      text: "Update this example.",
+      diff: ["# Example", "```ts", "const value = 1;", "```"].join("\n"),
+      fenceLanguage: "md",
+    });
+    const [segment] = parseReviewCommentMessageSegments(serialized);
+
+    expect(serialized).toContain("````md");
+    expect(segment).toEqual(
+      expect.objectContaining({
+        kind: "review-comment",
+        comment: expect.objectContaining({
+          fenceLanguage: "md",
+          diff: ["# Example", "```ts", "const value = 1;", "```"].join("\n"),
         }),
       }),
     );

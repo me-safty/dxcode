@@ -7,22 +7,12 @@ import type {
 import type { SelectedLineRange } from "@pierre/diffs";
 import { Editor } from "@pierre/diffs/editor";
 import { EditorProvider, File, Virtualizer } from "@pierre/diffs/react";
-import {
-  ChevronRight,
-  Code2,
-  Eye,
-  FolderTree,
-  Globe2,
-  LoaderCircle,
-  MessageCircle,
-  Trash2,
-} from "lucide-react";
+import { ChevronRight, Code2, Eye, FolderTree, Globe2, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import ChatMarkdown from "~/components/ChatMarkdown";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
-import { Button } from "~/components/ui/button";
 import { ensureEnvironmentApi } from "~/environmentApi";
 import { usePrimaryEnvironmentId } from "~/environments/primary/context";
 import { useTheme } from "~/hooks/useTheme";
@@ -31,7 +21,6 @@ import { cn } from "~/lib/utils";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { ScrollArea } from "~/components/ui/scroll-area";
-import { Textarea } from "~/components/ui/textarea";
 import { Toggle } from "~/components/ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -44,10 +33,12 @@ import {
   type FileCommentAnnotationGroup,
   type FileCommentLineAnnotation,
   formatFileCommentRange,
+  nextFileCommentId,
   normalizeFileCommentRange,
   remapFileCommentAnnotations,
 } from "./fileCommentAnnotations";
 import { installFileEditorDismissal } from "./fileEditorDismissal";
+import { LocalCommentAnnotation } from "./LocalCommentAnnotation";
 import { projectFileCacheKey } from "./fileContentRevision";
 import { fileBreadcrumbs } from "./filePath";
 import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
@@ -73,7 +64,6 @@ interface FilePreviewPanelProps {
 
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
 const FILE_SAVE_DEBOUNCE_MS = 500;
-let fileCommentSequence = 0;
 
 interface EditableFileSurfaceProps {
   environmentId: EnvironmentId;
@@ -83,91 +73,6 @@ interface EditableFileSurfaceProps {
   contents: string;
   resolvedTheme: "light" | "dark";
   onPendingChange: (relativePath: string, pending: boolean) => void;
-}
-
-function nextFileCommentId(): string {
-  fileCommentSequence += 1;
-  return `file-comment-${Date.now()}-${fileCommentSequence}`;
-}
-
-function FileCommentAnnotation({
-  entry,
-  onCancel,
-  onComment,
-  onDelete,
-}: {
-  entry: FileCommentAnnotationEntry;
-  onCancel: () => void;
-  onComment: (text: string) => void;
-  onDelete: () => void;
-}) {
-  const [text, setText] = useState("");
-  const rangeLabel = formatFileCommentRange(entry.startLine, entry.endLine);
-
-  if (entry.kind === "comment") {
-    return (
-      <div
-        data-file-comment-annotation
-        className="mx-3 my-2 rounded-xl border border-border/70 bg-background p-3 shadow-sm"
-        contentEditable={false}
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-center gap-2">
-          <MessageCircle className="size-4 text-muted-foreground" />
-          <span className="text-xs font-medium">Local comment</span>
-          <span className="ml-auto text-[11px] text-muted-foreground">{rangeLabel}</span>
-          <Button variant="ghost" size="icon-xs" aria-label="Delete comment" onClick={onDelete}>
-            <Trash2 className="size-3.5" />
-          </Button>
-        </div>
-        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-          {entry.text}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      data-file-comment-annotation
-      className="mx-3 my-2 rounded-xl border border-border/70 bg-background p-3 shadow-lg"
-      contentEditable={false}
-      onPointerDown={(event) => event.stopPropagation()}
-    >
-      <div className="flex items-center gap-2">
-        <MessageCircle className="size-4 text-muted-foreground" />
-        <span className="text-sm font-medium">Local comment</span>
-      </div>
-      <div className="mt-1 text-xs text-muted-foreground">Comment on lines {rangeLabel}</div>
-      <Textarea
-        autoFocus
-        className="mt-3"
-        size="sm"
-        value={text}
-        placeholder="Request change"
-        aria-label={`Comment on lines ${rangeLabel}`}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            onCancel();
-          }
-          if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && text.trim()) {
-            event.preventDefault();
-            onComment(text.trim());
-          }
-        }}
-      />
-      <div className="mt-3 flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button size="sm" disabled={!text.trim()} onClick={() => onComment(text.trim())}>
-          Comment
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 function useFileSaveCoordinator({
@@ -402,9 +307,11 @@ function EditableFileSurface({
             renderAnnotation={(annotation) => (
               <div className="py-1">
                 {annotation.metadata.entries.map((entry) => (
-                  <FileCommentAnnotation
+                  <LocalCommentAnnotation
                     key={entry.id}
-                    entry={entry}
+                    kind={entry.kind}
+                    rangeLabel={formatFileCommentRange(entry.startLine, entry.endLine)}
+                    text={entry.text}
                     onCancel={() => removeAnnotationEntry(entry.id)}
                     onComment={(text) => submitAnnotationEntry(entry.id, text)}
                     onDelete={() => removeAnnotationEntry(entry.id)}
