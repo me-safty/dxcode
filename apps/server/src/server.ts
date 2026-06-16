@@ -422,6 +422,8 @@ export const makeRoutesLayer = Layer.mergeAll(
     ),
     otlpTracesProxyRouteLayer,
     assetRouteLayer,
+    externalRoutesLayer,
+    executionBridgeRoutesLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
   ),
