@@ -10,6 +10,7 @@ describe("RightPanelTabs", () => {
         mode="embedded"
         surfaces={[]}
         activeSurfaceId={null}
+        pendingSurfaceIds={new Set()}
         previewSessions={{}}
         terminalLabelsById={new Map()}
         onActivate={vi.fn()}
@@ -17,10 +18,12 @@ describe("RightPanelTabs", () => {
         onAddBrowser={vi.fn()}
         onAddTerminal={vi.fn()}
         onAddDiff={vi.fn()}
+        onAddFiles={vi.fn()}
         onAddSourceControl={vi.fn()}
         browserAvailable
         terminalAvailable={false}
         diffAvailable
+        filesAvailable
         sourceControlAvailable
       >
         <div />

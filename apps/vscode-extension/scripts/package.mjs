@@ -68,10 +68,14 @@ function resolveExtensionPath(path) {
   return isAbsolute(path) ? path : join(extensionDir, path);
 }
 
+function isWindowsHost() {
+  return process.env.OS === "Windows_NT";
+}
+
 function run(command, args) {
   const result = spawnSync(command, args, {
     cwd: extensionDir,
-    shell: process.platform === "win32",
+    shell: isWindowsHost(),
     stdio: "inherit",
   });
 

@@ -9,11 +9,15 @@ const extensionDir = dirname(fileURLToPath(new URL("../package.json", import.met
 const repoRoot = join(extensionDir, "../..");
 const packageJson = JSON.parse(readFileSync(join(extensionDir, "package.json"), "utf8"));
 
+function isWindowsHost() {
+  return process.env.OS === "Windows_NT";
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? repoRoot,
     env: { ...process.env, ...options.env },
-    shell: process.platform === "win32",
+    shell: isWindowsHost(),
     stdio: "inherit",
   });
 

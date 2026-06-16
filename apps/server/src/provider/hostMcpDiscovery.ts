@@ -7,6 +7,8 @@ import {
   mergeHostMcpServers,
   readHostMcpAdvertisements,
 } from "@t3tools/shared/hostMcp";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as Effect from "effect/Effect";
 import type { ServerConfigShape } from "../config.ts";
 
 const DEFAULT_MCP_PROBE_TIMEOUT_MS = 750;
@@ -73,7 +75,7 @@ export function resolveHostMcpServersForProviderStart(input: {
 }
 
 export function defaultSocketPathExists(socketPath: string): boolean {
-  if (process.platform === "win32" && socketPath.startsWith("\\\\.\\pipe\\")) {
+  if (Effect.runSync(HostProcessPlatform) === "win32" && socketPath.startsWith("\\\\.\\pipe\\")) {
     // Windows named pipes are not reliably visible through fs.existsSync. Let the
     // subsequent protocol probe perform the authoritative availability check.
     return true;

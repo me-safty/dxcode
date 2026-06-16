@@ -567,11 +567,15 @@ function createMcpServerName(): string {
   return `${MCP_SERVER_NAME_PREFIX}-${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
 }
 
+function isWindowsHost(): boolean {
+  return process.env.OS === "Windows_NT";
+}
+
 async function createMcpEndpoint(): Promise<{
   readonly socketDir: string;
   readonly socketPath: string;
 }> {
-  if (process.platform === "win32") {
+  if (isWindowsHost()) {
     const name = `t3code-vscode-mcp-${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
     return {
       socketDir: "",

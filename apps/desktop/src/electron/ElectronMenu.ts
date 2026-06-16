@@ -1,4 +1,5 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -58,7 +59,7 @@ function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextM
       continue;
     }
 
-    // Header items are decorative section labels for the web fallback only —
+    // Header items are decorative section labels for the web fallback only -
     // Electron's native menu has no equivalent affordance, so we skip them.
     if (sourceItem.header === true) {
       continue;
@@ -99,122 +100,126 @@ const normalizePosition = (
     ({ x, y }) => Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0,
   ).pipe(Option.map(({ x, y }) => ({ x: Math.floor(x), y: Math.floor(y) })));
 
-export const layer = Layer.sync(ElectronMenu, () => {
-  let destructiveMenuIconCache: Option.Option<Electron.NativeImage> | undefined;
+export const layer = Layer.effect(
+  ElectronMenu,
+  Effect.gen(function* () {
+    const platform = yield* HostProcessPlatform;
+    let destructiveMenuIconCache: Option.Option<Electron.NativeImage> | undefined;
 
-  const getDestructiveMenuIcon = (): Option.Option<Electron.NativeImage> => {
-    if (process.platform !== "darwin") {
-      return Option.none();
-    }
-    if (destructiveMenuIconCache !== undefined) {
+    const getDestructiveMenuIcon = (): Option.Option<Electron.NativeImage> => {
+      if (platform !== "darwin") {
+        return Option.none();
+      }
+      if (destructiveMenuIconCache !== undefined) {
+        return destructiveMenuIconCache;
+      }
+
+      try {
+        const icon = Electron.nativeImage.createFromNamedImage("trash").resize({
+          width: 12,
+          height: 12,
+        });
+        destructiveMenuIconCache = icon.isEmpty() ? Option.none() : Option.some(icon);
+      } catch {
+        destructiveMenuIconCache = Option.none();
+      }
+
       return destructiveMenuIconCache;
-    }
+    };
 
-    try {
-      const icon = Electron.nativeImage.createFromNamedImage("trash").resize({
-        width: 12,
-        height: 12,
-      });
-      destructiveMenuIconCache = icon.isEmpty() ? Option.none() : Option.some(icon);
-    } catch {
-      destructiveMenuIconCache = Option.none();
-    }
+    const buildTemplate = (
+      entries: readonly ContextMenuItem[],
+      complete: (selectedItemId: Option.Option<string>) => void,
+    ): Electron.MenuItemConstructorOptions[] => {
+      const template: Electron.MenuItemConstructorOptions[] = [];
+      let hasInsertedDestructiveSeparator = false;
+      let lastWasSeparator = false;
 
-    return destructiveMenuIconCache;
-  };
-
-  const buildTemplate = (
-    entries: readonly ContextMenuItem[],
-    complete: (selectedItemId: Option.Option<string>) => void,
-  ): Electron.MenuItemConstructorOptions[] => {
-    const template: Electron.MenuItemConstructorOptions[] = [];
-    let hasInsertedDestructiveSeparator = false;
-    let lastWasSeparator = false;
-
-    for (const item of entries) {
-      if (item.separator === true) {
-        if (template.length > 0 && !lastWasSeparator) {
-          template.push({ type: "separator" });
-          lastWasSeparator = true;
+      for (const item of entries) {
+        if (item.separator === true) {
+          if (template.length > 0 && !lastWasSeparator) {
+            template.push({ type: "separator" });
+            lastWasSeparator = true;
+          }
+          continue;
         }
-        continue;
+
+        if (item.destructive && !hasInsertedDestructiveSeparator) {
+          hasInsertedDestructiveSeparator = true;
+          if (template.length > 0 && !lastWasSeparator) {
+            template.push({ type: "separator" });
+            lastWasSeparator = true;
+          }
+        }
+
+        const itemOption: Electron.MenuItemConstructorOptions = {
+          label: item.label,
+          enabled: !item.disabled,
+        };
+        if (item.children && item.children.length > 0) {
+          itemOption.submenu = buildTemplate(item.children, complete);
+        } else {
+          itemOption.click = () => complete(Option.some(item.id));
+        }
+        if (item.destructive && (!item.children || item.children.length === 0)) {
+          const destructiveIcon = getDestructiveMenuIcon();
+          if (Option.isSome(destructiveIcon)) {
+            itemOption.icon = destructiveIcon.value;
+          }
+        }
+
+        template.push(itemOption);
+        lastWasSeparator = false;
       }
 
-      if (item.destructive && !hasInsertedDestructiveSeparator) {
-        hasInsertedDestructiveSeparator = true;
-        if (template.length > 0 && !lastWasSeparator) {
-          template.push({ type: "separator" });
-          lastWasSeparator = true;
-        }
-      }
+      return template;
+    };
 
-      const itemOption: Electron.MenuItemConstructorOptions = {
-        label: item.label,
-        enabled: !item.disabled,
-      };
-      if (item.children && item.children.length > 0) {
-        itemOption.submenu = buildTemplate(item.children, complete);
-      } else {
-        itemOption.click = () => complete(Option.some(item.id));
-      }
-      if (item.destructive && (!item.children || item.children.length === 0)) {
-        const destructiveIcon = getDestructiveMenuIcon();
-        if (Option.isSome(destructiveIcon)) {
-          itemOption.icon = destructiveIcon.value;
-        }
-      }
-
-      template.push(itemOption);
-      lastWasSeparator = false;
-    }
-
-    return template;
-  };
-
-  return ElectronMenu.of({
-    setApplicationMenu: (template) =>
-      Effect.sync(() => {
-        Electron.Menu.setApplicationMenu(Electron.Menu.buildFromTemplate([...template]));
-      }),
-    popupTemplate: (input) =>
-      Effect.sync(() => {
-        if (input.template.length === 0) {
-          return;
-        }
-        Electron.Menu.buildFromTemplate([...input.template]).popup({ window: input.window });
-      }),
-    showContextMenu: (input) =>
-      Effect.callback<Option.Option<string>>((resume) => {
-        const normalizedItems = normalizeContextMenuItems(input.items);
-        if (normalizedItems.length === 0) {
-          resume(Effect.succeed(Option.none()));
-          return;
-        }
-
-        let completed = false;
-        const complete = (selectedItemId: Option.Option<string>) => {
-          if (completed) {
+    return ElectronMenu.of({
+      setApplicationMenu: (template) =>
+        Effect.sync(() => {
+          Electron.Menu.setApplicationMenu(Electron.Menu.buildFromTemplate([...template]));
+        }),
+      popupTemplate: (input) =>
+        Effect.sync(() => {
+          if (input.template.length === 0) {
             return;
           }
-          completed = true;
-          resume(Effect.succeed(selectedItemId));
-        };
+          Electron.Menu.buildFromTemplate([...input.template]).popup({ window: input.window });
+        }),
+      showContextMenu: (input) =>
+        Effect.callback<Option.Option<string>>((resume) => {
+          const normalizedItems = normalizeContextMenuItems(input.items);
+          if (normalizedItems.length === 0) {
+            resume(Effect.succeed(Option.none()));
+            return;
+          }
 
-        const menu = Electron.Menu.buildFromTemplate(buildTemplate(normalizedItems, complete));
-        const popupPosition = normalizePosition(input.position);
-        const popupOptions = Option.match(popupPosition, {
-          onNone: (): Electron.PopupOptions => ({
-            window: input.window,
-            callback: () => complete(Option.none()),
-          }),
-          onSome: (position): Electron.PopupOptions => ({
-            window: input.window,
-            x: position.x,
-            y: position.y,
-            callback: () => complete(Option.none()),
-          }),
-        });
-        menu.popup(popupOptions);
-      }),
-  });
-});
+          let completed = false;
+          const complete = (selectedItemId: Option.Option<string>) => {
+            if (completed) {
+              return;
+            }
+            completed = true;
+            resume(Effect.succeed(selectedItemId));
+          };
+
+          const menu = Electron.Menu.buildFromTemplate(buildTemplate(normalizedItems, complete));
+          const popupPosition = normalizePosition(input.position);
+          const popupOptions = Option.match(popupPosition, {
+            onNone: (): Electron.PopupOptions => ({
+              window: input.window,
+              callback: () => complete(Option.none()),
+            }),
+            onSome: (position): Electron.PopupOptions => ({
+              window: input.window,
+              x: position.x,
+              y: position.y,
+              callback: () => complete(Option.none()),
+            }),
+          });
+          menu.popup(popupOptions);
+        }),
+    });
+  }),
+);

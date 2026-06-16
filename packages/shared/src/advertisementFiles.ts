@@ -3,6 +3,9 @@
 // @effect-diagnostics globalRandom:off
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as Effect from "effect/Effect";
+
+import { HostProcessPlatform } from "./hostProcess.ts";
 
 export function readAdvertisementFilenames(dir: string): string[] {
   try {
@@ -69,7 +72,7 @@ export function workspaceRootsMatch(left: string, right: string): boolean {
 
 function normalizeWorkspaceRootForMatch(value: string): string {
   const normalized = path.normalize(value.trim());
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  return Effect.runSync(HostProcessPlatform) === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

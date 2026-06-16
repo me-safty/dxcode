@@ -16,6 +16,7 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationThreadShell,
 } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -288,7 +289,7 @@ function workspaceRootsEqual(left: string, right: string): boolean {
 
 function normalizeWorkspaceRootForMatch(value: string): string {
   const normalized = path.normalize(value.trim()).replace(/[\\/]+$/u, "");
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  return Effect.runSync(HostProcessPlatform) === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function resolveWorkspaceName(cwd: string): string {

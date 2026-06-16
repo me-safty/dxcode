@@ -6,16 +6,17 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
+import { CornerLeftUpIcon, PanelBottomIcon, PanelRightIcon } from "lucide-react";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
-import { CornerLeftUpIcon, PanelBottomIcon, PanelRightIcon } from "lucide-react";
+import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
 import { OpenInPicker } from "./OpenInPicker";
-import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { usePrimaryEnvironmentId } from "../../environments/primary/context";
 import { useHostDisplayPreferences } from "../../hostDisplayPreferences";
 import { MainSidebarTrigger } from "../sidebar/MainSidebarTrigger";
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -136,7 +137,13 @@ export const ChatHeader = memo(function ChatHeader({
           <span className="min-w-0 flex-1" aria-hidden="true" />
         </div>
       </div>
-      <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 sm:shrink-0 sm:justify-end @3xl/header-actions:gap-3">
+      <div
+        data-chat-header-actions
+        className={cn(
+          "flex min-w-0 flex-wrap items-center justify-start gap-2 sm:shrink-0 sm:justify-end @3xl/header-actions:gap-3",
+          rightPanelOpen ? "pr-0" : "pr-16",
+        )}
+      >
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}
