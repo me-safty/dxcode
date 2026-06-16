@@ -15,6 +15,7 @@ import { BRAND_ASSET_PATHS, PUBLISH_ICON_OVERRIDES } from "../../../scripts/lib/
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import { fromYaml } from "@t3tools/shared/schemaYaml";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import serverPackageJson from "../package.json" with { type: "json" };
 
 interface PackageJson {
@@ -244,13 +245,13 @@ const buildCmd = Command.make(
       const serverDir = path.join(repoRoot, "apps/server");
 
       yield* Effect.log("[cli] Running Vite+ pack...");
+      const buildSpawnCommand = resolveSpawnCommand(process.execPath, ["--run", "build:bundle"]);
       yield* runCommand(
-        ChildProcess.make(process.execPath, ["--run", "build:bundle"], {
+        ChildProcess.make(buildSpawnCommand.command, buildSpawnCommand.args, {
           cwd: serverDir,
           stdout: config.verbose ? "inherit" : "ignore",
           stderr: "inherit",
-          // Windows needs shell mode to resolve `.cmd` shims on PATH.
-          shell: process.platform === "win32",
+          shell: buildSpawnCommand.shell,
         }),
       );
 
@@ -352,13 +353,13 @@ const publishCmd = Command.make(
             if (Option.isSome(config.otp)) args.push("--otp", config.otp.value);
 
             yield* Effect.log(`[cli] Running: npm ${redactOtpArgs(args).join(" ")}`);
+            const publishSpawnCommand = resolveSpawnCommand("npm", args);
             yield* runCommand(
-              ChildProcess.make("npm", [...args], {
+              ChildProcess.make(publishSpawnCommand.command, publishSpawnCommand.args, {
                 cwd: serverDir,
                 stdout: config.verbose ? "inherit" : "ignore",
                 stderr: "inherit",
-                // Windows needs shell mode to resolve .cmd shims.
-                shell: process.platform === "win32",
+                shell: publishSpawnCommand.shell,
               }),
             );
           }),

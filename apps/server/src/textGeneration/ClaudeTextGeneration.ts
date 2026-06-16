@@ -15,6 +15,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { type ClaudeSettings, type ModelSelection } from "@t3tools/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import { TextGenerationError } from "@t3tools/contracts";
 import { type TextGenerationShape } from "./TextGeneration.ts";
@@ -153,29 +154,30 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         : undefined;
 
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
-      const command = ChildProcess.make(
-        claudeSettings.binaryPath || "claude",
-        [
-          "-p",
-          "--output-format",
-          "json",
-          "--json-schema",
-          jsonSchemaStr,
-          "--model",
-          resolveClaudeApiModelId(modelSelection),
-          ...(cliEffort ? ["--effort", cliEffort] : []),
-          ...(settingsJson ? ["--settings", settingsJson] : []),
-          "--dangerously-skip-permissions",
-        ],
-        {
-          env: claudeEnvironment,
-          cwd,
-          shell: process.platform === "win32",
-          stdin: {
-            stream: Stream.encodeText(Stream.make(prompt)),
-          },
+      const commandName = claudeSettings.binaryPath || "claude";
+      const commandArgs = [
+        "-p",
+        "--output-format",
+        "json",
+        "--json-schema",
+        jsonSchemaStr,
+        "--model",
+        resolveClaudeApiModelId(modelSelection),
+        ...(cliEffort ? ["--effort", cliEffort] : []),
+        ...(settingsJson ? ["--settings", settingsJson] : []),
+        "--dangerously-skip-permissions",
+      ];
+      const spawnCommand = resolveSpawnCommand(commandName, commandArgs, {
+        env: claudeEnvironment,
+      });
+      const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+        env: claudeEnvironment,
+        cwd,
+        shell: spawnCommand.shell,
+        stdin: {
+          stream: Stream.encodeText(Stream.make(prompt)),
         },
-      );
+      });
 
       const child = yield* commandSpawner
         .spawn(command)

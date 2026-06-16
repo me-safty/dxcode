@@ -1,3 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -12,6 +17,7 @@ import {
   readPathFromLoginShell,
   resolveCommandPath,
   resolveKnownWindowsCliDirs,
+  resolveSpawnCommand,
   resolveWindowsEnvironment,
 } from "./shell.ts";
 
@@ -341,6 +347,64 @@ describe("resolveCommandPath", () => {
         env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
       }),
     ).toBeNull();
+  });
+});
+
+describe("resolveSpawnCommand", () => {
+  it("runs Windows executables directly without a shell", () => {
+    expect(
+      resolveSpawnCommand("node.exe", ["script.js", "hello & goodbye"], {
+        platform: "win32",
+        env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+      }),
+    ).toEqual({
+      command: "node.exe",
+      args: ["script.js", "hello & goodbye"],
+      shell: false,
+    });
+  });
+
+  it("resolves and escapes Windows command shims", () => {
+    const dir = mkdtempSync(join(tmpdir(), "t3-shell-"));
+    try {
+      const shim = join(dir, "az.CMD");
+      writeFileSync(shim, "@echo off\r\n");
+
+      const command = resolveSpawnCommand(
+        "az",
+        ["repos", "pr", "list", "--source-branch", "feature & release"],
+        {
+          platform: "win32",
+          env: { PATH: dir, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+        },
+      );
+
+      expect(command.shell).toBe(true);
+      expect(command.command).toContain("az.CMD");
+      expect(command.command).toContain('^"');
+      expect(command.args).toEqual([
+        '^"repos^"',
+        '^"pr^"',
+        '^"list^"',
+        '^"--source-branch^"',
+        '^"feature^ ^&^ release^"',
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not fall back to shell mode for unresolved Windows commands", () => {
+    expect(
+      resolveSpawnCommand("missing & calc", ["unsafe & value"], {
+        platform: "win32",
+        env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+      }),
+    ).toEqual({
+      command: "missing & calc",
+      args: ["unsafe & value"],
+      shell: false,
+    });
   });
 });
 

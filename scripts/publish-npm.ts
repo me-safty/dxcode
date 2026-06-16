@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import process from "node:process";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
@@ -228,13 +229,13 @@ const runCommand = Effect.fn("runCommand")(function* (
   const displayArgs = options?.redact ? redactArgs(args) : args;
   process.stdout.write(`\n$ ${[command, ...displayArgs].map(shellQuote).join(" ")}\n`);
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const spawnCommand = resolveSpawnCommand(command, args);
   const child = yield* spawner.spawn(
-    ChildProcess.make(command, [...args], {
+    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
       cwd: process.cwd(),
       stderr: "inherit",
       stdout: "inherit",
-      // Windows needs shell mode to resolve .cmd shims.
-      shell: process.platform === "win32",
+      shell: spawnCommand.shell,
     }),
   );
   const exitCode = yield* child.exitCode;
@@ -273,12 +274,13 @@ const captureCommand = Effect.fn("captureCommand")(function* (
   args: ReadonlyArray<string>,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const spawnCommand = resolveSpawnCommand(command, args);
   const child = yield* spawner.spawn(
-    ChildProcess.make(command, [...args], {
+    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
       cwd: process.cwd(),
       stderr: "pipe",
       stdout: "pipe",
-      shell: process.platform === "win32",
+      shell: spawnCommand.shell,
     }),
   );
 

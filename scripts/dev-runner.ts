@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -441,14 +442,17 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       return;
     }
 
-    const child = yield* ChildProcess.make("vp", [...MODE_ARGS[input.mode], ...input.runnerArgs], {
+    const args = [...MODE_ARGS[input.mode], ...input.runnerArgs];
+    const spawnCommand = resolveSpawnCommand("vp", args, {
+      env,
+    });
+    const child = yield* ChildProcess.make(spawnCommand.command, spawnCommand.args, {
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",
       env,
       extendEnv: false,
-      // Windows needs shell mode to resolve .cmd shims (e.g. vp.cmd).
-      shell: process.platform === "win32",
+      shell: spawnCommand.shell,
       // Keep Vite+ in the same process group so terminal signals (Ctrl+C)
       // reach it directly. Effect defaults to detached: true on non-Windows,
       // which would put Vite+ in a new group and require manual forwarding.

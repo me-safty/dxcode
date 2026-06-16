@@ -20,6 +20,7 @@ import * as Result from "effect/Result";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import {
   buildServerProvider,
@@ -158,12 +159,15 @@ const runGrokVersionCommand = (
   environment: NodeJS.ProcessEnv = process.env,
 ) => {
   const command = grokSettings.binaryPath || "grok";
+  const spawnCommand = resolveSpawnCommand(command, ["--version"], {
+    env: environment,
+  });
   return Effect.callback<CommandResult, ProviderCommandExecutionError>((resume, signal) => {
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = spawnChildProcess(command, ["--version"], {
+      child = spawnChildProcess(spawnCommand.command, [...spawnCommand.args], {
         env: environment,
-        shell: process.platform === "win32",
+        shell: spawnCommand.shell,
         detached: process.platform !== "win32",
       });
     } catch (error) {

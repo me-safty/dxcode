@@ -1,3 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -21,6 +26,9 @@ import {
 type ChildProcessCommand = {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
+  readonly options?: {
+    readonly shell?: boolean | string;
+  };
 };
 
 // Accesses private properties of ChildProcessCommand for testing purposes
@@ -65,12 +73,7 @@ function makeSpawner(
 const runWith =
   (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]) => (input: ProcessRunInput) =>
     Effect.service(ProcessRunner).pipe(
-      Effect.flatMap((runner) =>
-        runner.run({
-          ...input,
-          shell: input.shell ?? false,
-        }),
-      ),
+      Effect.flatMap((runner) => runner.run(input)),
       Effect.provide(
         ProcessRunnerLive.pipe(
           Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner)),
@@ -122,6 +125,43 @@ describe("runProcess", () => {
       expect(result.stdout).toBe("service ok");
     }).pipe(Effect.provide(layer));
   });
+
+  it.effect("resolves and escapes Windows command shims before spawning", () =>
+    Effect.gen(function* () {
+      const originalPlatform = process.platform;
+      const dir = mkdtempSync(join(tmpdir(), "t3-process-runner-"));
+      try {
+        Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+        writeFileSync(join(dir, "az.CMD"), "@echo off\r\n");
+
+        const spawner = makeSpawner((command) =>
+          Effect.sync(() => {
+            expect(command.command).toContain("az.CMD");
+            expect(command.args).toEqual([
+              '^"repos^"',
+              '^"pr^"',
+              '^"list^"',
+              '^"--source-branch^"',
+              '^"feature^ ^&^ release^"',
+            ]);
+            expect(command.options?.shell).toBe(true);
+            return makeHandle({ stdout: "[]" });
+          }),
+        );
+
+        const result = yield* runWith(spawner)({
+          command: "az",
+          args: ["repos", "pr", "list", "--source-branch", "feature & release"],
+          env: { PATH: dir, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+        });
+
+        expect(result.stdout).toBe("[]");
+      } finally {
+        Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }),
+  );
 
   it.effect("fails when output exceeds max buffer in default mode", () =>
     Effect.gen(function* () {
