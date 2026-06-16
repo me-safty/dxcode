@@ -16,6 +16,8 @@ VITE_DEV_SERVER_URL=http://127.0.0.1:5173 VITE_WS_URL=ws://127.0.0.1:13773 pnpm 
 
 If a pairing URL is required, open the printed `/pair#token=...` URL in the already-open browser window being used for the debug session.
 
+There should be a `throwaway` project already existing, located at `~/Sites/throwaway`. This project is a playground to test git workflow freely where you can perform any git operations including destructive ones. It is ok to leave in it temporary artifacts, commits, branches, staged and unstaged changes, etc, for posterior runs or reference.
+
 ## Installable Build Commands
 
 Use these commands from the repository root when producing local installable artifacts for this customized branch.
