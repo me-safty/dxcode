@@ -2291,7 +2291,6 @@ export function SourceControlPanel({
           id: "commits",
           title: "History",
           count: historyTotal,
-          defaultExpanded: true,
           children: (
             <div className="space-y-0.5">
               {details.commits.length === 0 ? (
