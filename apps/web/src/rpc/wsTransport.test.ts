@@ -261,6 +261,52 @@ describe("WsTransport (web instrumentation)", () => {
     await transport.dispose();
   });
 
+  it("can disable global websocket state tracking for saved environment transports", async () => {
+    const onOpen = vi.fn();
+    const onClose = vi.fn();
+    const transport = createTransport(
+      "ws://remote.example.test",
+      {
+        onOpen,
+        onClose,
+      },
+      {
+        trackGlobalConnectionState: false,
+        trackGlobalRequestLatency: false,
+      },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const socket = getSocket();
+    socket.open();
+    socket.close(1006, "remote tunnel lost");
+
+    await waitFor(() => {
+      expect(onOpen).toHaveBeenCalledOnce();
+      expect(onClose).toHaveBeenCalledWith(
+        {
+          code: 1006,
+          reason: "remote tunnel lost",
+        },
+        {
+          intentional: false,
+        },
+      );
+    });
+    expect(getWsConnectionStatus()).toMatchObject({
+      attemptCount: 0,
+      hasConnected: false,
+      phase: "idle",
+      reconnectAttemptCount: 0,
+      reconnectPhase: "idle",
+    });
+
+    await transport.dispose();
+  });
+
   it("marks unary requests as slow until the first server ack arrives", async () => {
     const slowAckThresholdMs = 25;
     setSlowRpcAckThresholdMsForTests(slowAckThresholdMs);
