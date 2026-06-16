@@ -1,78 +1,64 @@
 import {
   type EnvironmentId,
   type MessageId,
-  type ScopedThreadRef,
   type ServerProviderSkill,
+  type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-import { parseScopedThreadKey } from "@t3tools/client-runtime";
 import {
   createContext,
-  Fragment,
   memo,
   use,
   useCallback,
   useEffect,
-  useLayoutEffect,
+  Fragment,
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { FileDiff } from "@pierre/diffs/react";
-import {
-  deriveTimelineEntries,
-  workEntryIndicatesToolFailure,
-  workEntryIndicatesToolNeutralStatus,
-  workEntryIndicatesToolSuccess,
-  workLogEntryIsToolLike,
-} from "../../session-logic";
+import { FileDiff, type FileDiffMetadata } from "@pierre/diffs/react";
+import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
-import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import {
+  buildFileDiffRenderKey,
   getRenderablePatch,
+  INLINE_DIFF_RENDER_UNSAFE_CSS,
   resolveDiffThemeName,
   resolveFileDiffPath,
 } from "../../lib/diffRendering";
+import { useCheckpointDiff } from "../../lib/checkpointDiffState";
 import ChatMarkdown from "../ChatMarkdown";
 import {
-  BotIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  ChevronUpIcon,
-  CircleAlertIcon,
-  EyeIcon,
-  GlobeIcon,
-  HammerIcon,
-  MessageCircleIcon,
-  MousePointerClickIcon,
-  PaintbrushIcon,
-  MinusIcon,
-  SquarePenIcon,
-  TerminalIcon,
-  Undo2Icon,
-  WrenchIcon,
-  XIcon,
-  ZapIcon,
-} from "lucide-react";
+  IconAlertCircle as CircleAlertIcon,
+  IconArrowBackUp as Undo2Icon,
+  IconCheck as CheckIcon,
+  IconChecklist as ChecklistIcon,
+  IconChevronDown as ChevronDownIcon,
+  IconChevronRight as ChevronRightIcon,
+  IconDownload as DownloadIcon,
+  IconFile as FileIcon,
+  IconMessageQuestion as MessageQuestionIcon,
+  IconPencil as SquarePenIcon,
+  IconRobot as RobotIcon,
+  IconSearch as SearchIcon,
+  IconTerminal2 as TerminalIcon,
+  IconTool as WrenchIcon,
+  type Icon as TablerIcon,
+} from "@tabler/icons-react";
 import { Button } from "../ui/button";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
-import { ChangedFilesTree } from "./ChangedFilesTree";
-import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
+import { ChangedFilesCard } from "./ChangedFilesTree";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
   computeStableMessagesTimelineRows,
-  MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
-  normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
-  type TimelineLatestTurn,
+  type TimelineActivityEntry,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -80,18 +66,10 @@ import {
   deriveDisplayedUserMessageState,
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
-import {
-  extractTrailingElementContexts,
-  type ParsedElementContextEntry,
-} from "~/lib/elementContext";
-import {
-  extractTrailingPreviewAnnotation,
-  type ParsedPreviewAnnotation,
-} from "~/lib/previewAnnotation";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
-import { formatChatTimestampTooltip, formatShortTimestamp } from "../../timestampFormat";
+import { formatTimestamp } from "../../timestampFormat";
 
 import {
   buildInlineTerminalContextText,
@@ -105,6 +83,11 @@ import {
   parseReviewCommentMessageSegments,
   type ReviewCommentContext,
 } from "../../reviewCommentContext";
+import {
+  deriveWorkActivityDisplayEntries,
+  type WorkActivityCategory,
+  type WorkActivitySummary,
+} from "./workActivitySummary";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -116,22 +99,21 @@ import {
 interface TimelineRowSharedState {
   timestampFormat: TimestampFormat;
   routeThreadKey: string;
-  threadRef: ScopedThreadRef | null;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
+  activeThreadId: ThreadId;
+  turnDiffSummaryByTurnId: Map<TurnId, TurnDiffSummary>;
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
-  onToggleTurnFold: (turnId: TurnId) => void;
 }
 
 interface TimelineRowActivityState {
   isWorking: boolean;
   isRevertingCheckpoint: boolean;
-  activeTurnInProgress: boolean;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -139,6 +121,18 @@ const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+type DiffThemeType = "light" | "dark";
+
+function TimelineMessageCopyButton({ text }: { text: string }) {
+  return (
+    <MessageCopyButton
+      text={text}
+      size="icon-xs"
+      variant="ghost"
+      className="text-muted-foreground/60 hover:text-foreground"
+    />
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -147,11 +141,17 @@ const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "d
 interface MessagesTimelineProps {
   isWorking: boolean;
   activeTurnInProgress: boolean;
+  activeTurnId?: TurnId | null;
   activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
-  latestTurn: TimelineLatestTurn | null;
+  completionDividerBeforeEntryId: string | null;
+  completionSummary: string | null;
+  completionSummaryTurnId?: TurnId | null;
+  completionSummaryStartedAt?: string | null;
+  completionSummaryCompletedAt?: string | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
+  turnDiffSummaryByTurnId: Map<TurnId, TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
@@ -159,6 +159,7 @@ interface MessagesTimelineProps {
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   activeThreadEnvironmentId: EnvironmentId;
+  activeThreadId: ThreadId;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
@@ -174,11 +175,17 @@ interface MessagesTimelineProps {
 export const MessagesTimeline = memo(function MessagesTimeline({
   isWorking,
   activeTurnInProgress,
+  activeTurnId,
   activeTurnStartedAt,
   listRef,
   timelineEntries,
-  latestTurn,
+  completionDividerBeforeEntryId,
+  completionSummary,
+  completionSummaryTurnId,
+  completionSummaryStartedAt,
+  completionSummaryCompletedAt,
   turnDiffSummaryByAssistantMessageId,
+  turnDiffSummaryByTurnId,
   routeThreadKey,
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
@@ -186,6 +193,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   isRevertingCheckpoint,
   onImageExpand,
   activeThreadEnvironmentId,
+  activeThreadId,
   markdownCwd,
   resolvedTheme,
   timestampFormat,
@@ -193,90 +201,32 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
 }: MessagesTimelineProps) {
-  const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
-
-  // Toggling a fold inserts/removes rows between the fold row and the final
-  // message — everything above the trigger is unchanged, so the trigger stays
-  // put as long as the list doesn't re-anchor. maintainScrollAtEnd would do
-  // exactly that (pin the bottom content when row data changes while scrolled
-  // to the end), yanking the trigger out of view. Suppress it for the frames
-  // in which the toggle's data change and item measurements settle.
-  const [foldToggleSettling, setFoldToggleSettling] = useState(false);
-  const onToggleTurnFold = useCallback((turnId: TurnId) => {
-    setFoldToggleSettling(true);
-    setExpandedTurnIds((existing) => {
-      const next = new Set(existing);
-      if (next.has(turnId)) {
-        next.delete(turnId);
-      } else {
-        next.add(turnId);
-      }
-      return next;
-    });
-  }, []);
-  useEffect(() => {
-    if (!foldToggleSettling) {
-      return;
-    }
-    let secondFrameId: number | null = null;
-    const firstFrameId = window.requestAnimationFrame(() => {
-      secondFrameId = window.requestAnimationFrame(() => {
-        setFoldToggleSettling(false);
-      });
-    });
-    return () => {
-      window.cancelAnimationFrame(firstFrameId);
-      if (secondFrameId !== null) {
-        window.cancelAnimationFrame(secondFrameId);
-      }
-    };
-  }, [foldToggleSettling]);
-
-  // An in-session interrupt leaves its turn expanded so the user keeps their
-  // place; the next turn (or a reload, since this is local state) folds it.
-  const previousLatestTurnRef = useRef(latestTurn);
-  useEffect(() => {
-    const previous = previousLatestTurnRef.current;
-    previousLatestTurnRef.current = latestTurn;
-    if (!latestTurn || previous?.turnId === undefined) {
-      return;
-    }
-    if (latestTurn.turnId === previous.turnId) {
-      if (previous.state === "running" && latestTurn.state === "interrupted") {
-        setExpandedTurnIds((existing) => {
-          const next = new Set(existing);
-          next.add(latestTurn.turnId);
-          return next;
-        });
-      }
-      return;
-    }
-    setExpandedTurnIds((existing) => {
-      if (!existing.has(previous.turnId)) {
-        return existing;
-      }
-      const next = new Set(existing);
-      next.delete(previous.turnId);
-      return next;
-    });
-  }, [latestTurn]);
-
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
         timelineEntries,
-        latestTurn,
-        expandedTurnIds,
+        completionDividerBeforeEntryId,
+        completionSummary,
+        completionSummaryTurnId: completionSummaryTurnId ?? null,
+        completionSummaryStartedAt: completionSummaryStartedAt ?? null,
+        completionSummaryCompletedAt: completionSummaryCompletedAt ?? null,
         isWorking,
+        activeTurnInProgress,
+        activeTurnId: activeTurnId ?? null,
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
       }),
     [
       timelineEntries,
-      latestTurn,
-      expandedTurnIds,
+      completionDividerBeforeEntryId,
+      completionSummary,
+      completionSummaryTurnId,
+      completionSummaryStartedAt,
+      completionSummaryCompletedAt,
       isWorking,
+      activeTurnInProgress,
+      activeTurnId,
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
@@ -313,16 +263,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     () => ({
       timestampFormat,
       routeThreadKey,
-      threadRef: parseScopedThreadKey(routeThreadKey),
       markdownCwd,
       resolvedTheme,
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      activeThreadId,
+      turnDiffSummaryByTurnId,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
-      onToggleTurnFold,
     }),
     [
       timestampFormat,
@@ -332,19 +282,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      activeThreadId,
+      turnDiffSummaryByTurnId,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
-      onToggleTurnFold,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
     () => ({
       isWorking,
       isRevertingCheckpoint,
-      activeTurnInProgress,
     }),
-    [activeTurnInProgress, isRevertingCheckpoint, isWorking],
+    [isRevertingCheckpoint, isWorking],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
@@ -378,11 +328,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           renderItem={renderItem}
           estimatedItemSize={90}
           initialScrollAtEnd
-          maintainScrollAtEnd={!foldToggleSettling}
+          maintainScrollAtEnd
           maintainScrollAtEndThreshold={0.1}
           maintainVisibleContentPosition
           onScroll={handleScroll}
-          className="scrollbar-gutter-both h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+          className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
           ListHeaderComponent={TIMELINE_LIST_HEADER}
           ListFooterComponent={TIMELINE_LIST_FOOTER}
         />
@@ -401,19 +351,13 @@ function keyExtractor(item: MessagesTimelineRow) {
 
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
-type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
       className={cn(
-        // Commentary (non-terminal assistant) rows carry no metadata row, so
-        // they sit closer to the work that follows them.
-        (row.kind === "message" && row.message.role === "assistant" && !row.showAssistantMeta) ||
-          row.kind === "work"
-          ? "pb-2"
-          : "pb-4",
+        "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
       data-timeline-row-id={row.id}
@@ -421,114 +365,142 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
-      {row.kind === "work" ? <WorkGroupSection groupedEntries={row.groupedEntries} /> : null}
-      {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
+      {row.kind === "work" ? (
+        <WorkGroupSection
+          rowId={row.id}
+          groupedEntries={row.groupedEntries}
+          completionSummary={row.completionSummary}
+          activeStartedAt={row.activeStartedAt}
+        />
+      ) : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
-      {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
     </div>
   );
 });
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const userImages = row.message.attachments ?? [];
   const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
   const terminalContexts = displayedUserMessage.contexts;
-  const previewAnnotations: ParsedPreviewAnnotation[] = [];
-  let visibleText = displayedUserMessage.visibleText;
-  while (true) {
-    const extracted = extractTrailingPreviewAnnotation(visibleText);
-    if (!extracted.annotation) break;
-    previewAnnotations.unshift(extracted.annotation);
-    visibleText = extracted.promptText;
-  }
-  const elementContextState = extractTrailingElementContexts(visibleText);
-  const previewImages = userImages.filter((image) => image.name.startsWith("preview-annotation-"));
-  const regularImages = userImages.filter((image) => !image.name.startsWith("preview-annotation-"));
   const canRevertAgentWork = typeof row.revertTurnCount === "number";
 
   return (
-    <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary p-3">
-        {regularImages.length > 0 && (
-          <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-            {regularImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-              <div
-                key={image.id}
-                className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-              >
-                {image.previewUrl ? (
-                  <button
-                    type="button"
-                    className="h-full w-full cursor-zoom-in"
-                    aria-label={`Preview ${image.name}`}
-                    onClick={() => {
-                      const preview = buildExpandedImagePreview(regularImages, image.id);
-                      if (!preview) return;
-                      ctx.onImageExpand(preview);
-                    }}
-                  >
-                    <img
-                      src={image.previewUrl}
-                      alt={image.name}
-                      className="block h-auto max-h-[220px] w-full object-cover"
-                    />
-                  </button>
-                ) : (
-                  <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                    {image.name}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-        {previewAnnotations.map((annotation, index) => (
-          <UserMessagePreviewAnnotationCard
-            key={annotation.id}
-            annotation={annotation}
-            image={previewImages[index] ?? null}
+    <div className="group/user flex justify-end">
+      <div className="max-w-[80%]">
+        <div className="relative rounded-2xl rounded-br-md bg-secondary px-4 py-3">
+          <MessageAttachments
+            attachments={row.message.attachments ?? []}
+            className="mb-2"
+            onImageExpand={ctx.onImageExpand}
           />
-        ))}
-        {elementContextState.contexts.length > 0 ? (
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {elementContextState.contexts.map((context) => (
-              <UserMessageElementContextChip
-                key={`${context.header}:${context.body}`}
-                context={context}
-              />
-            ))}
-          </div>
-        ) : null}
-        <CollapsibleUserMessageBody
-          text={elementContextState.promptText}
-          terminalContexts={terminalContexts}
-          skills={ctx.skills}
-          markdownCwd={ctx.markdownCwd}
-        />
-      </div>
-      <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
-        <div className="flex shrink-0 items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
-              {formatShortTimestamp(row.message.createdAt, ctx.timestampFormat)}
-            </TooltipTrigger>
-            <TooltipPopup>
-              {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
-            </TooltipPopup>
-          </Tooltip>
-          <div className="flex items-center gap-0.5">
-            {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
-            {displayedUserMessage.copyText && (
-              <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
-            )}
-          </div>
+          <CollapsibleUserMessageBody
+            text={displayedUserMessage.visibleText}
+            terminalContexts={terminalContexts}
+            skills={ctx.skills}
+            markdownCwd={ctx.markdownCwd}
+          />
+        </div>
+        <div className="mt-1 flex min-h-6 items-center justify-end gap-2 pr-2 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/user:opacity-100">
+          <p className="text-right text-xs text-muted-foreground/55">
+            {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
+          </p>
+          {displayedUserMessage.copyText && (
+            <TimelineMessageCopyButton text={displayedUserMessage.copyText} />
+          )}
+          {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
         </div>
       </div>
+    </div>
+  );
+}
+
+function formatAttachmentSize(sizeBytes: number): string {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+    return "";
+  }
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`;
+  }
+  if (sizeBytes < 1024 * 1024) {
+    return `${(sizeBytes / 1024).toFixed(sizeBytes < 10 * 1024 ? 1 : 0)} KB`;
+  }
+  return `${(sizeBytes / (1024 * 1024)).toFixed(sizeBytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function MessageAttachments({
+  attachments,
+  className,
+  onImageExpand,
+}: {
+  attachments: ReadonlyArray<NonNullable<TimelineMessage["attachments"]>[number]>;
+  className?: string;
+  onImageExpand: (preview: NonNullable<ReturnType<typeof buildExpandedImagePreview>>) => void;
+}) {
+  if (attachments.length === 0) {
+    return null;
+  }
+
+  const images = attachments.filter((attachment) => attachment.type === "image");
+  const files = attachments.filter((attachment) => attachment.type === "file");
+
+  return (
+    <div className={cn("space-y-2", className)}>
+      {images.length > 0 ? (
+        <div className="grid max-w-[420px] grid-cols-2 gap-2">
+          {images.map((image) => (
+            <div
+              key={image.id}
+              className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+            >
+              {image.previewUrl ? (
+                <button
+                  type="button"
+                  className="h-full w-full cursor-zoom-in"
+                  aria-label={`Preview ${image.name}`}
+                  onClick={() => {
+                    const preview = buildExpandedImagePreview(images, image.id);
+                    if (!preview) return;
+                    onImageExpand(preview);
+                  }}
+                >
+                  <img
+                    src={image.previewUrl}
+                    alt={image.name}
+                    className="block h-auto max-h-[220px] w-full object-cover"
+                  />
+                </button>
+              ) : (
+                <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                  {image.name}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {files.length > 0 ? (
+        <div className="flex max-w-[520px] flex-col gap-1.5">
+          {files.map((file) => (
+            <a
+              key={file.id}
+              href={file.downloadUrl}
+              download={file.name}
+              className="flex min-w-0 items-center gap-2 rounded-md border border-border/80 bg-background/70 px-2.5 py-2 text-sm text-foreground transition-colors hover:bg-accent"
+            >
+              <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">{file.name}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {formatAttachmentSize(file.sizeBytes)}
+              </span>
+              <DownloadIcon className="size-4 shrink-0 text-muted-foreground" />
+            </a>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -538,91 +510,74 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
   const activity = use(TimelineRowActivityCtx);
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            disabled={activity.isRevertingCheckpoint || activity.isWorking}
-            onClick={() => ctx.onRevertUserMessage(messageId)}
-            aria-label="Revert to this message"
-          />
-        }
-      >
-        <Undo2Icon className="size-3" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">Revert to this message</TooltipPopup>
-    </Tooltip>
-  );
-}
-
-function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-fold" }> }) {
-  const ctx = use(TimelineRowCtx);
-  const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
-
-  return (
-    <div className="border-b border-border/60 pb-2 pt-1">
-      <button
-        type="button"
-        aria-expanded={row.expanded}
-        data-scroll-anchor-ignore
-        onClick={() => ctx.onToggleTurnFold(row.turnId)}
-        className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-xs text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-      >
-        <span>{row.label}</span>
-        <Icon className="size-3.5" />
-      </button>
-    </div>
+    <Button
+      type="button"
+      size="icon-xs"
+      variant="ghost"
+      className="text-muted-foreground/60 hover:text-foreground"
+      aria-label="Revert to this message"
+      disabled={activity.isRevertingCheckpoint || activity.isWorking}
+      onClick={() => ctx.onRevertUserMessage(messageId)}
+      title="Revert to this message"
+    >
+      <Undo2Icon className="size-3" />
+    </Button>
   );
 }
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const hasAttachments = (row.message.attachments?.length ?? 0) > 0;
+  const messageText =
+    row.message.text || (row.message.streaming || hasAttachments ? "" : "(empty response)");
 
   return (
-    <>
-      <div className="relative min-w-0 px-1 py-0.5">
+    <div className="group/assistant-message min-w-0 px-1 py-0.5">
+      {messageText.length > 0 ? (
         <ChatMarkdown
           text={messageText}
           cwd={ctx.markdownCwd}
-          threadRef={ctx.threadRef ?? undefined}
           isStreaming={Boolean(row.message.streaming)}
           skills={ctx.skills}
         />
-        <AssistantChangedFilesSection
-          turnSummary={row.assistantTurnDiffSummary}
-          routeThreadKey={ctx.routeThreadKey}
-          resolvedTheme={ctx.resolvedTheme}
-          onOpenTurnDiff={ctx.onOpenTurnDiff}
-        />
-        {row.showAssistantMeta ? (
-          <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
-            <AssistantCopyButton row={row} />
-            {!row.message.streaming && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={<p className="text-muted-foreground text-xs tabular-nums" />}
-                >
-                  {formatShortTimestamp(
-                    row.message.completedAt ?? row.message.createdAt,
-                    ctx.timestampFormat,
-                  )}
-                </TooltipTrigger>
-                <TooltipPopup>
-                  {formatChatTimestampTooltip(
-                    row.message.completedAt ?? row.message.createdAt,
-                    ctx.timestampFormat,
-                  )}
-                </TooltipPopup>
-              </Tooltip>
-            )}
-          </div>
-        ) : null}
+      ) : null}
+      <MessageAttachments
+        attachments={row.message.attachments ?? []}
+        className="mt-2"
+        onImageExpand={ctx.onImageExpand}
+      />
+      <AssistantChangedFilesSection
+        turnSummary={row.assistantTurnDiffSummary}
+        routeThreadKey={ctx.routeThreadKey}
+        resolvedTheme={ctx.resolvedTheme}
+        onOpenTurnDiff={ctx.onOpenTurnDiff}
+      />
+      <div
+        className={cn(
+          "mt-1.5 flex min-h-5 items-center gap-2 transition-opacity duration-150",
+          row.message.streaming
+            ? "opacity-100"
+            : "opacity-0 focus-within:opacity-100 group-hover/assistant-message:opacity-100",
+        )}
+      >
+        <p className="text-[10px] text-muted-foreground/30">
+          {row.message.streaming ? (
+            <LiveMessageMeta
+              createdAt={row.message.createdAt}
+              durationStart={row.durationStart}
+              timestampFormat={ctx.timestampFormat}
+            />
+          ) : (
+            formatMessageMeta(
+              row.message.createdAt,
+              formatElapsed(row.durationStart, row.message.completedAt),
+              ctx.timestampFormat,
+            )
+          )}
+        </p>
+        <AssistantCopyButton row={row} />
       </div>
-    </>
+    </div>
   );
 }
 
@@ -637,7 +592,7 @@ function AssistantCopyButton({ row }: { row: Extract<TimelineRow, { kind: "messa
     return null;
   }
 
-  return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
+  return <TimelineMessageCopyButton text={assistantCopyState.text ?? ""} />;
 }
 
 function ProposedPlanTimelineRow({
@@ -652,33 +607,9 @@ function ProposedPlanTimelineRow({
       <ProposedPlanCard
         planMarkdown={row.proposedPlan.planMarkdown}
         environmentId={ctx.activeThreadEnvironmentId}
-        threadRef={ctx.threadRef ?? undefined}
         cwd={ctx.markdownCwd}
         workspaceRoot={ctx.workspaceRoot}
       />
-    </div>
-  );
-}
-
-function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
-  return (
-    <div className="py-0.5 pl-1.5">
-      <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70 tabular-nums">
-        <span className="inline-flex items-center gap-[3px]">
-          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
-          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
-          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
-        </span>
-        <span>
-          {row.createdAt ? (
-            <>
-              Working for <WorkingTimer createdAt={row.createdAt} />
-            </>
-          ) : (
-            "Working..."
-          )}
-        </span>
-      </div>
     </div>
   );
 }
@@ -704,11 +635,41 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
     return () => clearInterval(id);
   }, [createdAt]);
 
-  return (
-    <span ref={textRef} className="tabular-nums">
-      {initialText}
-    </span>
-  );
+  return <span ref={textRef}>{initialText}</span>;
+}
+
+/** Live timestamp + elapsed duration for a streaming assistant message. */
+function LiveMessageMeta({
+  createdAt,
+  durationStart,
+  timestampFormat,
+}: {
+  createdAt: string;
+  durationStart: string | null | undefined;
+  timestampFormat: TimestampFormat;
+}) {
+  const textRef = useRef<HTMLSpanElement>(null);
+  const initialText = formatLiveMessageMetaNow(createdAt, durationStart, timestampFormat);
+
+  useEffect(() => {
+    const updateText = () => {
+      if (textRef.current) {
+        textRef.current.textContent = formatLiveMessageMetaNow(
+          createdAt,
+          durationStart,
+          timestampFormat,
+        );
+      }
+    };
+    updateText();
+    if (!durationStart) {
+      return;
+    }
+    const id = setInterval(updateText, 1000);
+    return () => clearInterval(id);
+  }, [createdAt, durationStart, timestampFormat]);
+
+  return <span ref={textRef}>{initialText}</span>;
 }
 
 // ---------------------------------------------------------------------------
@@ -716,122 +677,563 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
 // re-render only the affected row, not the entire list.
 // ---------------------------------------------------------------------------
 
-/** Collapsed state shows the earliest chunk so "Show more" only appends rows downward. */
+/** Owns its own expand/collapse state so toggling re-renders only this row.
+ *  State resets on unmount which is fine — work groups start collapsed. */
 const WorkGroupSection = memo(function WorkGroupSection({
+  rowId,
   groupedEntries,
+  completionSummary,
+  activeStartedAt,
 }: {
+  rowId: string;
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
+  completionSummary: string | null;
+  activeStartedAt: string | null;
 }) {
-  const { workspaceRoot } = use(TimelineRowCtx);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const sectionRef = useRef<HTMLElement>(null);
-  const anchorBottomBeforeToggleRef = useRef<number | null>(null);
-  const nonEmptyEntries = useMemo(
-    () => groupedEntries.filter((entry) => !workEntryIndicatesToolNeutralStatus(entry)),
-    [groupedEntries],
+  const { routeThreadKey, workspaceRoot } = use(TimelineRowCtx);
+  const isExpanded = useUiStateStore(
+    (store) => store.threadWorkGroupExpandedById[routeThreadKey]?.[rowId] ?? false,
   );
-  const hasOverflow = nonEmptyEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
-  const visibleEntries =
-    hasOverflow && !isExpanded
-      ? nonEmptyEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
-      : nonEmptyEntries;
-  const hiddenCount = nonEmptyEntries.length - visibleEntries.length;
-  const onlyToolEntries = nonEmptyEntries.every((entry) => workLogEntryIsToolLike(entry));
-  const groupLabel = onlyToolEntries
-    ? nonEmptyEntries.length === 1
-      ? "1 tool call"
-      : `${nonEmptyEntries.length} tool calls`
-    : "work log";
-
-  useLayoutEffect(() => {
-    const anchorBottomBeforeToggle = anchorBottomBeforeToggleRef.current;
-    anchorBottomBeforeToggleRef.current = null;
-
-    if (anchorBottomBeforeToggle === null) {
-      return;
-    }
-
-    const section = sectionRef.current;
-    if (!section) {
-      return;
-    }
-
-    const delta = section.getBoundingClientRect().bottom - anchorBottomBeforeToggle;
-    if (Math.abs(delta) < 0.5) {
-      return;
-    }
-
-    const scroller = findNearestVerticalScroller(section);
-    if (scroller) {
-      scroller.scrollTop += delta;
-    } else {
-      window.scrollBy(0, delta);
-    }
-  }, [isExpanded]);
-
-  const toggleExpanded = () => {
-    anchorBottomBeforeToggleRef.current =
-      sectionRef.current?.getBoundingClientRect().bottom ?? null;
-    setIsExpanded((v) => !v);
-  };
-
-  if (nonEmptyEntries.length === 0) return null;
+  const setWorkGroupExpanded = useUiStateStore((store) => store.setThreadWorkGroupExpanded);
+  const groupLabel = formatWorkGroupSummary(groupedEntries, completionSummary);
+  const isActive = activeStartedAt !== null;
+  const visibleEntries = groupedEntries.filter(
+    (entry) => entry.kind !== "work" || entry.workEntry.hidden !== true,
+  );
+  const displayEntries = useMemo(
+    () => deriveWorkActivityDisplayEntries(visibleEntries, workspaceRoot),
+    [visibleEntries, workspaceRoot],
+  );
+  const showExpandedEntries = isActive || isExpanded;
 
   return (
-    <section ref={sectionRef} className="-mx-1 space-y-0.5 px-1 py-0.5" aria-label={groupLabel}>
-      {!onlyToolEntries && (
-        <p className="px-0.5 pb-0.5 font-medium text-[11px] text-muted-foreground/65">
-          {groupLabel}
-        </p>
-      )}
-      <div className="space-y-px">
-        {visibleEntries.map((workEntry) => (
-          <SimpleWorkEntryRow
-            key={workEntry.id}
-            workEntry={workEntry}
-            workspaceRoot={workspaceRoot}
-          />
-        ))}
-      </div>
-      {hasOverflow && (
-        <button
-          type="button"
-          className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-          onClick={toggleExpanded}
-        >
-          <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground/65">
-            {isExpanded ? (
-              <ChevronUpIcon className="size-3.5 shrink-0 opacity-70" />
+    <div className="my-2" data-work-group-expanded={showExpandedEntries ? "true" : "false"}>
+      {isActive ? (
+        <div className="flex w-full items-center gap-2 py-1 text-left">
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground/70">
+            {activeStartedAt ? (
+              <>
+                Working for <WorkingTimer createdAt={activeStartedAt} />
+              </>
             ) : (
-              <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+              "Working..."
             )}
           </span>
-          {isExpanded ? (
-            <span className="font-medium text-foreground/82">Show fewer tool calls</span>
-          ) : (
-            <span className="font-medium text-foreground/82">
-              +{hiddenCount} previous tool {hiddenCount === 1 ? "call" : "calls"}
-            </span>
-          )}
+          <span className="h-px min-w-8 flex-1 bg-border/65" />
+        </div>
+      ) : (
+        <button
+          type="button"
+          aria-expanded={isExpanded}
+          className="group flex w-full cursor-pointer items-center gap-2 py-1 text-left"
+          data-scroll-anchor-ignore
+          onClick={() => setWorkGroupExpanded(routeThreadKey, rowId, !isExpanded)}
+        >
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground/70 transition-colors group-hover:text-muted-foreground">
+            {groupLabel}
+            <ChevronRightIcon
+              className={cn(
+                "size-4 transition-transform duration-150",
+                isExpanded ? "rotate-90" : null,
+              )}
+            />
+          </span>
+          <span className="h-px min-w-8 flex-1 bg-border/65" />
         </button>
       )}
-    </section>
+      {showExpandedEntries && displayEntries.length > 0 ? (
+        <div className="mt-2.5 space-y-2">
+          {displayEntries.map((entry) => (
+            <ActivityGroupEntryRow key={`activity-row:${entry.id}`} entry={entry} />
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 });
 
-function findNearestVerticalScroller(element: HTMLElement): HTMLElement | null {
-  let parent = element.parentElement;
-  while (parent) {
-    const { overflowY } = window.getComputedStyle(parent);
-    if (
-      (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") &&
-      parent.scrollHeight > parent.clientHeight
-    ) {
-      return parent;
-    }
-    parent = parent.parentElement;
+const ActivityGroupEntryRow = memo(function ActivityGroupEntryRow({
+  entry,
+}: {
+  entry: ReturnType<typeof deriveWorkActivityDisplayEntries>[number];
+}) {
+  const ctx = use(TimelineRowCtx);
+
+  if (entry.kind === "work-summary") {
+    return <WorkActivitySummaryRow summary={entry.summary} />;
   }
-  return null;
+
+  const messageText = entry.entry.message.text || "(empty response)";
+  return (
+    <div className="min-w-0 py-0.5">
+      <ChatMarkdown
+        text={messageText}
+        cwd={ctx.markdownCwd}
+        isStreaming={Boolean(entry.entry.message.streaming)}
+        skills={ctx.skills}
+      />
+    </div>
+  );
+});
+
+const WorkActivitySummaryRow = memo(function WorkActivitySummaryRow({
+  summary,
+}: {
+  summary: WorkActivitySummary;
+}) {
+  const { routeThreadKey } = use(TimelineRowCtx);
+  const expanded = useUiStateStore(
+    (store) => store.threadWorkActivityExpandedById[routeThreadKey]?.[summary.id] ?? true,
+  );
+  const setWorkActivityExpanded = useUiStateStore((store) => store.setThreadWorkActivityExpanded);
+  const ActivityIcon = workActivityIcon(summary.category);
+  const canExpand = summary.items.length > 0;
+  const summaryButton = (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      disabled={!canExpand}
+      data-scroll-anchor-ignore
+      onClick={() => setWorkActivityExpanded(routeThreadKey, summary.id, !expanded)}
+      className={cn(
+        "group/activity inline-flex h-5 max-w-full items-center gap-1.5 text-left text-xs leading-5",
+        canExpand ? "cursor-pointer" : "cursor-default",
+      )}
+    >
+      <span className="inline-flex size-4 shrink-0 items-center justify-center">
+        <ActivityIcon
+          className={cn(
+            "size-4",
+            summary.category === "error" ? "text-rose-300/60" : "text-muted-foreground/70",
+          )}
+        />
+      </span>
+      <span
+        className={cn(
+          "truncate",
+          expanded ? "text-foreground/90" : "text-muted-foreground/70",
+          canExpand ? "group-hover/activity:text-foreground/85" : null,
+        )}
+      >
+        {summary.label}
+      </span>
+      {canExpand ? (
+        <ChevronRightIcon
+          className={cn(
+            "size-4 shrink-0 text-muted-foreground/65 opacity-0 transition-[opacity,transform,color] duration-150 group-hover/activity:opacity-100 group-focus-visible/activity:opacity-100",
+            expanded ? "rotate-90" : null,
+            expanded ? "opacity-100" : null,
+          )}
+        />
+      ) : null}
+    </button>
+  );
+
+  return (
+    <div className="min-w-0 py-0.5" data-work-activity-category={summary.category}>
+      {import.meta.env.DEV && summary.debugText ? (
+        <Tooltip>
+          <TooltipTrigger render={summaryButton} />
+          <TooltipPopup align="start" className="max-w-[min(56rem,calc(100vw-2rem))]" side="top">
+            <p className="whitespace-pre-wrap wrap-break-word font-mono text-[11px] leading-4">
+              {summary.debugText}
+            </p>
+          </TooltipPopup>
+        </Tooltip>
+      ) : (
+        summaryButton
+      )}
+      {expanded && summary.items.length > 0 ? (
+        <div className="mt-2 space-y-1.5">
+          {summary.items.map((item) => (
+            <WorkActivitySummaryItemRow key={item.id} item={item} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
+function WorkActivitySummaryItemRow({ item }: { item: WorkActivitySummary["items"][number] }) {
+  const ctx = use(TimelineRowCtx);
+  if (item.questionAnswer) {
+    return (
+      <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-5">
+        <span className="wrap-break-word text-muted-foreground/65">
+          {item.questionAnswer.question}
+        </span>
+        <span className="wrap-break-word border-l-2 border-border/60 pl-2 text-foreground/85">
+          {item.questionAnswer.answer}
+        </span>
+      </div>
+    );
+  }
+  const turnSummary = item.turnId ? ctx.turnDiffSummaryByTurnId.get(item.turnId) : undefined;
+  // Prefer the diff the edit tool itself carried (works without a checkpoint
+  // snapshot); fall back to the turn checkpoint diff when there's no payload diff.
+  const editDiff = item.editDiff;
+  const canShowEditDiff = Boolean(editDiff && editDiff.trim().length > 0);
+  const canShowCheckpointDiff = Boolean(turnSummary && item.changedFilePath);
+  const canShowInlineDiff = canShowEditDiff || canShowCheckpointDiff;
+  const subagentReport = item.subagent?.report;
+  const canShowSubagentReport = Boolean(subagentReport && subagentReport.trim().length > 0);
+  const todos = item.todos;
+  const canShowTodos = Boolean(todos && todos.length > 0);
+  const isExpandable = canShowInlineDiff || canShowSubagentReport || canShowTodos;
+  const expanded = useUiStateStore(
+    (store) =>
+      store.threadWorkActivityExpandedById[ctx.routeThreadKey]?.[
+        workActivityItemDiffExpansionKey(item.id)
+      ] ?? false,
+  );
+  const setWorkActivityExpanded = useUiStateStore((store) => store.setThreadWorkActivityExpanded);
+  const debugText = import.meta.env.DEV ? (item.debugText ?? item.title) : item.title;
+  const labelClassName =
+    "min-w-0 truncate text-left text-xs text-muted-foreground/65 transition-colors hover:text-foreground/85";
+  const subagentModel = item.subagent?.modelId;
+  const subagentUsage = formatSubagentUsage(item.subagent);
+  const label = isExpandable ? (
+    <button
+      type="button"
+      className="group/item inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5"
+      data-scroll-anchor-ignore
+      aria-expanded={expanded}
+      onClick={() =>
+        setWorkActivityExpanded(
+          ctx.routeThreadKey,
+          workActivityItemDiffExpansionKey(item.id),
+          !expanded,
+        )
+      }
+      title={item.title ?? item.label}
+    >
+      <span className={labelClassName}>{item.label}</span>
+      {subagentUsage ? (
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground/55">
+          {subagentUsage}
+        </span>
+      ) : null}
+      {subagentModel ? (
+        <span className="shrink-0 rounded bg-muted/60 px-1 py-px font-mono text-[10px] text-muted-foreground/70">
+          {subagentModel}
+        </span>
+      ) : null}
+      <ChevronRightIcon
+        className={cn(
+          "size-4 shrink-0 text-muted-foreground/60 opacity-0 transition-[opacity,transform,color] duration-150 group-hover/item:opacity-100 group-hover/item:text-foreground/80 group-focus-visible/item:opacity-100",
+          expanded ? "rotate-90" : null,
+          expanded ? "opacity-100" : null,
+        )}
+      />
+    </button>
+  ) : (
+    <p
+      className="inline-flex min-w-0 max-w-full items-center gap-1.5"
+      title={item.title ?? item.label}
+    >
+      <span className={labelClassName}>{item.label}</span>
+      {subagentUsage ? (
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground/55">
+          {subagentUsage}
+        </span>
+      ) : null}
+      {subagentModel ? (
+        <span className="shrink-0 rounded bg-muted/60 px-1 py-px font-mono text-[10px] text-muted-foreground/70">
+          {subagentModel}
+        </span>
+      ) : null}
+    </p>
+  );
+
+  const labelWithTooltip =
+    !debugText || debugText === item.label ? (
+      label
+    ) : (
+      <Tooltip>
+        <TooltipTrigger className="block min-w-0 w-full text-left" render={label} />
+        <TooltipPopup align="start" className="max-w-[min(56rem,calc(100vw-2rem))]" side="top">
+          <p className="whitespace-pre-wrap wrap-break-word font-mono text-[11px] leading-4">
+            {debugText}
+          </p>
+        </TooltipPopup>
+      </Tooltip>
+    );
+
+  return (
+    <div className="min-w-0">
+      {labelWithTooltip}
+      {expanded && canShowEditDiff && editDiff ? (
+        <InlineEditDiff editDiff={editDiff} filePath={item.changedFilePath} />
+      ) : canShowInlineDiff && expanded && turnSummary && item.changedFilePath ? (
+        <InlineWorkActivityFileDiff turnSummary={turnSummary} filePath={item.changedFilePath} />
+      ) : null}
+      {!canShowInlineDiff && canShowSubagentReport && expanded && subagentReport ? (
+        <div className="mt-1 max-h-[28rem] overflow-y-auto rounded-md border border-border/50 bg-muted/20 px-3 py-2">
+          <ChatMarkdown text={subagentReport} cwd={ctx.workspaceRoot} />
+        </div>
+      ) : null}
+      {!canShowInlineDiff && !canShowSubagentReport && canShowTodos && expanded && todos ? (
+        <TodoChecklist todos={todos} />
+      ) : null}
+    </div>
+  );
+}
+
+function formatSubagentUsage(
+  subagent: WorkActivitySummary["items"][number]["subagent"],
+): string | null {
+  if (!subagent) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (typeof subagent.toolUses === "number" && subagent.toolUses > 0) {
+    parts.push(`${subagent.toolUses} ${subagent.toolUses === 1 ? "tool" : "tools"}`);
+  }
+  if (typeof subagent.durationMs === "number" && subagent.durationMs > 0) {
+    const seconds = subagent.durationMs / 1000;
+    parts.push(seconds >= 10 ? `${Math.round(seconds)}s` : `${seconds.toFixed(1)}s`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function TodoChecklist({ todos }: { todos: WorkActivitySummary["items"][number]["todos"] }) {
+  if (!todos || todos.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="mt-1 flex flex-col gap-0.5 rounded-md border border-border/50 bg-muted/20 px-3 py-2">
+      {todos.map((todo) => {
+        const status = todo.status ?? "pending";
+        return (
+          <li key={todo.content} className="flex items-start gap-2 text-xs leading-5">
+            <span className="mt-px shrink-0">
+              {status === "completed" ? (
+                <CheckIcon className="size-3.5 text-emerald-400/90" />
+              ) : status === "in_progress" ? (
+                <ChevronRightIcon className="size-3.5 text-amber-400/90" />
+              ) : status === "cancelled" ? (
+                <CircleAlertIcon className="size-3.5 text-muted-foreground/50" />
+              ) : (
+                <span className="ml-1 mr-0.5 inline-block size-2.5 rounded-full border border-muted-foreground/40" />
+              )}
+            </span>
+            <span
+              className={cn(
+                "min-w-0 wrap-break-word",
+                status === "completed"
+                  ? "text-muted-foreground/55 line-through"
+                  : status === "cancelled"
+                    ? "text-muted-foreground/45 line-through"
+                    : "text-muted-foreground/80",
+              )}
+            >
+              {todo.content}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function workActivityItemDiffExpansionKey(itemId: string): string {
+  return `work-activity-item-diff:${itemId}`;
+}
+
+function InlineWorkActivityFileDiff({
+  turnSummary,
+  filePath,
+}: {
+  turnSummary: TurnDiffSummary;
+  filePath: string;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const checkpointTurnCount = turnSummary.checkpointTurnCount;
+  const checkpointRange =
+    typeof checkpointTurnCount === "number"
+      ? {
+          fromTurnCount: Math.max(0, checkpointTurnCount - 1),
+          toTurnCount: checkpointTurnCount,
+        }
+      : null;
+  const checkpointDiff = useCheckpointDiff(
+    {
+      environmentId: ctx.activeThreadEnvironmentId,
+      threadId: ctx.activeThreadId,
+      fromTurnCount: checkpointRange?.fromTurnCount ?? null,
+      toTurnCount: checkpointRange?.toTurnCount ?? null,
+      ignoreWhitespace: false,
+      cacheScope: `timeline-inline:${turnSummary.turnId}`,
+    },
+    { enabled: checkpointRange !== null },
+  );
+  const patch = checkpointDiff.data?.diff;
+  const renderablePatch = useMemo(
+    () => getRenderablePatch(patch, `timeline-inline:${turnSummary.turnId}:${ctx.resolvedTheme}`),
+    [ctx.resolvedTheme, patch, turnSummary.turnId],
+  );
+  const fileDiff = useMemo(() => {
+    if (!renderablePatch || renderablePatch.kind !== "files") {
+      return undefined;
+    }
+    return findRenderableFileDiff(renderablePatch.files, filePath, ctx.workspaceRoot);
+  }, [ctx.workspaceRoot, filePath, renderablePatch]);
+
+  return (
+    <div className="mt-2 max-w-full overflow-hidden rounded-[10px] border border-border/70 bg-background">
+      {checkpointDiff.error && !renderablePatch ? (
+        <p className="px-3 py-2 text-[11px] text-rose-300/80">{checkpointDiff.error}</p>
+      ) : checkpointRange === null ? (
+        <p className="px-3 py-2 text-[11px] text-muted-foreground/65">
+          Diff unavailable for this turn.
+        </p>
+      ) : checkpointDiff.isPending && !renderablePatch ? (
+        <p className="px-3 py-2 text-[11px] text-muted-foreground/65">Loading diff...</p>
+      ) : renderablePatch?.kind === "raw" ? (
+        <div className="p-2">
+          <p className="mb-1 text-[11px] text-muted-foreground/65">{renderablePatch.reason}</p>
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap wrap-break-word rounded-md bg-background/70 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground/90">
+            {renderablePatch.text}
+          </pre>
+        </div>
+      ) : fileDiff ? (
+        <FileDiffView fileDiff={fileDiff} resolvedTheme={ctx.resolvedTheme} />
+      ) : (
+        <p className="px-3 py-2 text-[11px] text-muted-foreground/65">
+          No diff found for {filePath}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Renders an edit's real code change inline from the diff carried in the tool
+ * payload (OpenCode/Codex/Claude), reusing the same `FileDiff` component as the
+ * diff tab. This works without a checkpoint snapshot, so edits show their diff
+ * immediately.
+ */
+function InlineEditDiff({
+  editDiff,
+  filePath,
+}: {
+  editDiff: string;
+  filePath: string | undefined;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const renderablePatch = useMemo(
+    () => getRenderablePatch(editDiff, `timeline-edit:${ctx.resolvedTheme}`),
+    [ctx.resolvedTheme, editDiff],
+  );
+  const fileDiff = useMemo(() => {
+    if (!renderablePatch || renderablePatch.kind !== "files") {
+      return undefined;
+    }
+    if (filePath) {
+      return (
+        findRenderableFileDiff(renderablePatch.files, filePath, ctx.workspaceRoot) ??
+        renderablePatch.files[0]
+      );
+    }
+    return renderablePatch.files[0];
+  }, [ctx.workspaceRoot, filePath, renderablePatch]);
+
+  return (
+    <div className="mt-2 max-w-full overflow-hidden rounded-[10px] border border-border/70 bg-background">
+      {renderablePatch?.kind === "raw" ? (
+        <div className="p-2">
+          <p className="mb-1 text-[11px] text-muted-foreground/65">{renderablePatch.reason}</p>
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap wrap-break-word rounded-md bg-background/70 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground/90">
+            {renderablePatch.text}
+          </pre>
+        </div>
+      ) : fileDiff ? (
+        <FileDiffView fileDiff={fileDiff} resolvedTheme={ctx.resolvedTheme} />
+      ) : (
+        <p className="px-3 py-2 text-[11px] text-muted-foreground/65">No diff to display.</p>
+      )}
+    </div>
+  );
+}
+
+/** Shared compact `FileDiff` renderer used by both checkpoint and payload diffs. */
+function FileDiffView({
+  fileDiff,
+  resolvedTheme,
+}: {
+  fileDiff: FileDiffMetadata;
+  resolvedTheme: DiffThemeType;
+}) {
+  return (
+    <div className="max-h-[28rem] overflow-auto">
+      <FileDiff
+        key={buildFileDiffRenderKey(fileDiff)}
+        fileDiff={fileDiff}
+        options={{
+          collapsed: false,
+          diffIndicators: "bars",
+          diffStyle: "unified",
+          lineDiffType: "word-alt",
+          overflow: "scroll",
+          theme: resolveDiffThemeName(resolvedTheme),
+          themeType: resolvedTheme as DiffThemeType,
+          unsafeCSS: INLINE_DIFF_RENDER_UNSAFE_CSS,
+        }}
+      />
+    </div>
+  );
+}
+
+function findRenderableFileDiff(
+  files: ReadonlyArray<FileDiffMetadata>,
+  filePath: string,
+  workspaceRoot: string | undefined,
+) {
+  const targetPath = normalizeComparableDiffPath(filePath, workspaceRoot);
+  return files.find((file) => {
+    const diffPath = normalizeComparableDiffPath(resolveFileDiffPath(file), workspaceRoot);
+    return diffPath === targetPath;
+  });
+}
+
+function normalizeComparableDiffPath(path: string, workspaceRoot: string | undefined): string {
+  const normalizedPath = path.replaceAll("\\", "/").replace(/^"(.*)"$/u, "$1");
+  const withoutPrefixes = normalizedPath.replace(/^(?:[ab]\/|\.\/)+/u, "");
+  if (!workspaceRoot) {
+    return withoutPrefixes.replace(/^\/+/u, "").toLowerCase();
+  }
+  const normalizedWorkspaceRoot = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/u, "");
+  const pathForCompare = withoutPrefixes.toLowerCase();
+  const workspaceForCompare = normalizedWorkspaceRoot.toLowerCase();
+  if (pathForCompare.startsWith(`${workspaceForCompare}/`)) {
+    return withoutPrefixes.slice(normalizedWorkspaceRoot.length + 1).toLowerCase();
+  }
+  return withoutPrefixes.replace(/^\/+/u, "").toLowerCase();
+}
+
+function workActivityIcon(category: WorkActivityCategory): TablerIcon {
+  switch (category) {
+    case "search":
+      return SearchIcon;
+    case "file":
+      return SearchIcon;
+    case "edit":
+      return SquarePenIcon;
+    case "command":
+      return TerminalIcon;
+    case "subagent":
+      return RobotIcon;
+    case "todo":
+      return ChecklistIcon;
+    case "question":
+      return MessageQuestionIcon;
+    case "tool":
+      return WrenchIcon;
+    case "info":
+      return CheckIcon;
+    case "error":
+      return CircleAlertIcon;
+  }
 }
 
 /** Subscribes directly to the UI state store for expand/collapse state,
@@ -878,53 +1280,21 @@ function AssistantChangedFilesSectionInner({
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
   const allDirectoriesExpanded = useUiStateStore(
-    (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId] ?? true,
+    (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId] ?? false,
   );
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
-  const summaryStat = summarizeTurnDiffStats(checkpointFiles);
-  const changedFileCountLabel = String(checkpointFiles.length);
 
   return (
-    <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-      <div className="sticky top-2 z-10 mb-1.5 flex items-center justify-between gap-2 bg-[color-mix(in_srgb,var(--card)_45%,var(--background))] before:absolute before:inset-x-0 before:-top-2 before:h-2 before:bg-[color-mix(in_srgb,var(--card)_45%,var(--background))] before:content-['']">
-        <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
-          <span>Changed files ({changedFileCountLabel})</span>
-          {hasNonZeroStat(summaryStat) && (
-            <>
-              <span className="mx-1">•</span>
-              <DiffStatLabel additions={summaryStat.additions} deletions={summaryStat.deletions} />
-            </>
-          )}
-        </p>
-        <div className="flex items-center gap-1.5">
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            data-scroll-anchor-ignore
-            onClick={() => setExpanded(routeThreadKey, turnSummary.turnId, !allDirectoriesExpanded)}
-          >
-            {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
-          </Button>
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            onClick={() => onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)}
-          >
-            View diff
-          </Button>
-        </div>
-      </div>
-      <ChangedFilesTree
-        key={`changed-files-tree:${turnSummary.turnId}`}
-        turnId={turnSummary.turnId}
-        files={checkpointFiles}
-        allDirectoriesExpanded={allDirectoriesExpanded}
-        resolvedTheme={resolvedTheme}
-        onOpenTurnDiff={onOpenTurnDiff}
-      />
-    </div>
+    <ChangedFilesCard
+      turnId={turnSummary.turnId}
+      files={checkpointFiles}
+      allDirectoriesExpanded={allDirectoriesExpanded}
+      resolvedTheme={resolvedTheme}
+      onToggleAllDirectories={() =>
+        setExpanded(routeThreadKey, turnSummary.turnId, !allDirectoriesExpanded)
+      }
+      onOpenTurnDiff={onOpenTurnDiff}
+    />
   );
 }
 
@@ -943,85 +1313,8 @@ const UserMessageTerminalContextInlineLabel = memo(
   },
 );
 
-const UserMessageElementContextChip = memo(function UserMessageElementContextChip(props: {
-  context: ParsedElementContextEntry;
-}) {
-  const tooltipText = props.context.body
-    ? `${props.context.header}\n${props.context.body}`
-    : props.context.header;
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-background/70 px-1.5 py-0.5 text-xs text-foreground/85">
-            <MousePointerClickIcon className="size-3 shrink-0" />
-            <span className="truncate">{props.context.header}</span>
-          </span>
-        }
-      />
-      <TooltipPopup side="top" className="max-w-96 whitespace-pre-wrap leading-tight">
-        {tooltipText}
-      </TooltipPopup>
-    </Tooltip>
-  );
-});
-
-function UserMessagePreviewAnnotationCard(props: {
-  annotation: ParsedPreviewAnnotation;
-  image: NonNullable<TimelineMessage["attachments"]>[number] | null;
-}) {
-  const ctx = use(TimelineRowCtx);
-  return (
-    <div className="mb-2 flex max-w-full items-center overflow-hidden rounded-lg border border-border/70 bg-background/70">
-      {props.image?.previewUrl ? (
-        <button
-          type="button"
-          className="size-14 shrink-0 cursor-zoom-in overflow-hidden border-r border-border/70 bg-muted"
-          aria-label={`Preview ${props.image.name}`}
-          onClick={() => {
-            if (!props.image) return;
-            const preview = buildExpandedImagePreview([props.image], props.image.id);
-            if (preview) ctx.onImageExpand(preview);
-          }}
-        >
-          <img
-            src={props.image.previewUrl}
-            alt="Annotated preview crop"
-            className="size-full object-cover"
-          />
-        </button>
-      ) : null}
-      <div className="min-w-0 px-2.5 py-2">
-        {props.annotation.comment ? (
-          <div className="max-w-80 truncate text-xs font-medium text-foreground/90">
-            {props.annotation.comment}
-          </div>
-        ) : null}
-        <div
-          className={cn(
-            "flex items-center gap-2 text-[10px] text-muted-foreground",
-            props.annotation.comment && "mt-1",
-          )}
-        >
-          {props.annotation.targetSummary ? (
-            <span className="truncate">{props.annotation.targetSummary}</span>
-          ) : null}
-          {props.annotation.styleChanges.length > 0 ? (
-            <span className="inline-flex shrink-0 items-center gap-1">
-              <PaintbrushIcon className="size-3" />
-              {props.annotation.styleChanges.length}
-            </span>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const MAX_COLLAPSED_USER_MESSAGE_LINES = 8;
-const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 600;
-const COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM = 1.75;
-const COLLAPSED_USER_MESSAGE_FADE_MASK = `linear-gradient(to bottom, black calc(100% - ${COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM}rem), transparent)`;
+const MAX_COLLAPSED_USER_MESSAGE_LINES = 12;
+const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 1200;
 
 function shouldCollapseUserMessage(text: string): boolean {
   if (text.trim().length === 0) {
@@ -1039,7 +1332,6 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   terminalContexts: ParsedTerminalContextEntry[];
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   markdownCwd: string | undefined;
-  footer?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasVisibleBody = props.text.trim().length > 0 || props.terminalContexts.length > 0;
@@ -1050,19 +1342,10 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
     <div>
       {hasVisibleBody ? (
         <div
-          className={cn("relative", isCollapsed && "max-h-44 overflow-hidden")}
+          className={cn("relative", isCollapsed && "line-clamp-6")}
           data-user-message-body="true"
           data-user-message-collapsed={isCollapsed ? "true" : "false"}
           data-user-message-collapsible={canCollapse ? "true" : "false"}
-          data-user-message-fade={isCollapsed ? "true" : "false"}
-          style={
-            isCollapsed
-              ? {
-                  WebkitMaskImage: COLLAPSED_USER_MESSAGE_FADE_MASK,
-                  maskImage: COLLAPSED_USER_MESSAGE_FADE_MASK,
-                }
-              : undefined
-          }
         >
           <UserMessageBody
             text={props.text}
@@ -1072,30 +1355,20 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
           />
         </div>
       ) : null}
-      {canCollapse || props.footer ? (
-        <div
-          className={cn(
-            "mt-1.5 flex items-center gap-2",
-            canCollapse && props.footer ? "justify-between" : "justify-end",
-          )}
-          data-user-message-footer="true"
-        >
-          {canCollapse ? (
-            <Button
-              type="button"
-              size="xs"
-              variant="ghost"
-              aria-expanded={expanded}
-              data-scroll-anchor-ignore
-              onClick={() => setExpanded((value) => !value)}
-              className="-ml-1 h-6 rounded-md px-1.5 text-xs text-muted-foreground/72 hover:bg-muted/55 hover:text-foreground/85"
-            >
-              {expanded ? "Show less" : "Show full message"}
-            </Button>
-          ) : null}
-          {props.footer ? (
-            <div className="ml-auto flex items-center gap-2">{props.footer}</div>
-          ) : null}
+      {canCollapse ? (
+        <div className="mt-2" data-user-message-footer="true">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            data-scroll-anchor-ignore
+            onClick={() => setExpanded((value) => !value)}
+            className="inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground/75 transition-colors hover:text-foreground/85"
+          >
+            {expanded ? "Show less" : "Show more"}
+            <ChevronDownIcon
+              className={cn("size-4 transition-transform", expanded ? "rotate-180" : null)}
+            />
+          </button>
         </div>
       ) : null}
     </div>
@@ -1108,7 +1381,6 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   markdownCwd: string | undefined;
 }) {
-  const ctx = use(TimelineRowCtx);
   const renderInlineMarkdownSegment = (text: string, key: string) => {
     const leadingWhitespace = /^\s+/.exec(text)?.[0] ?? "";
     const textWithoutLeadingWhitespace = text.slice(leadingWhitespace.length);
@@ -1125,7 +1397,6 @@ const UserMessageBody = memo(function UserMessageBody(props: {
           <ChatMarkdown
             text={content}
             cwd={props.markdownCwd}
-            threadRef={ctx.threadRef ?? undefined}
             skills={props.skills}
             className="text-foreground"
             lineBreaks
@@ -1139,7 +1410,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   const reviewCommentSegments = parseReviewCommentMessageSegments(props.text);
   if (reviewCommentSegments.some((segment) => segment.kind === "review-comment")) {
     return (
-      <div className="space-y-3 text-sm leading-relaxed text-foreground">
+      <div className="space-y-3 text-xs leading-relaxed text-foreground">
         {reviewCommentSegments.map((segment) =>
           segment.kind === "text" ? (
             segment.text.trim().length > 0 ? (
@@ -1147,7 +1418,6 @@ const UserMessageBody = memo(function UserMessageBody(props: {
                 <ChatMarkdown
                   text={segment.text.trim()}
                   cwd={props.markdownCwd}
-                  threadRef={ctx.threadRef ?? undefined}
                   skills={props.skills}
                   className="text-foreground"
                   lineBreaks
@@ -1208,7 +1478,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         }
 
         return (
-          <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+          <div className="whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-foreground">
             {inlineNodes}
           </div>
         );
@@ -1235,7 +1505,6 @@ const UserMessageBody = memo(function UserMessageBody(props: {
           key="user-message-terminal-context-inline-text"
           text={props.text}
           cwd={props.markdownCwd}
-          threadRef={ctx.threadRef ?? undefined}
           skills={props.skills}
           className="text-foreground"
           lineBreaks
@@ -1246,7 +1515,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     }
 
     return (
-      <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+      <div className="whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-foreground">
         {inlineNodes}
       </div>
     );
@@ -1257,14 +1526,9 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   }
 
   return (
-    <ChatMarkdown
-      text={props.text}
-      cwd={props.markdownCwd}
-      threadRef={ctx.threadRef ?? undefined}
-      skills={props.skills}
-      className="text-foreground"
-      lineBreaks
-    />
+    <div className="whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-foreground">
+      <SkillInlineText text={props.text} skills={props.skills} />
+    </div>
   );
 });
 
@@ -1286,7 +1550,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
         </div>
       </div>
       {comment.text.length > 0 && (
-        <div className="whitespace-pre-wrap wrap-break-word text-sm">
+        <div className="whitespace-pre-wrap wrap-break-word text-xs">
           <SkillInlineText text={comment.text} skills={ctx.skills} />
         </div>
       )}
@@ -1362,333 +1626,47 @@ function formatWorkingTimerNow(startIso: string): string {
   return formatWorkingTimer(startIso, new Date().toISOString()) ?? "0s";
 }
 
-type WorkEntryIconName =
-  | "bot"
-  | "check"
-  | "circle-alert"
-  | "eye"
-  | "globe"
-  | "hammer"
-  | "message-circle"
-  | "square-pen"
-  | "terminal"
-  | "wrench"
-  | "x"
-  | "zap";
-
-function WorkEntryIconSvg({ name, className }: { name: WorkEntryIconName; className: string }) {
-  switch (name) {
-    case "bot":
-      return <BotIcon className={className} aria-hidden />;
-    case "check":
-      return <CheckIcon className={className} aria-hidden />;
-    case "circle-alert":
-      return <CircleAlertIcon className={className} aria-hidden />;
-    case "eye":
-      return <EyeIcon className={className} aria-hidden />;
-    case "globe":
-      return <GlobeIcon className={className} aria-hidden />;
-    case "hammer":
-      return <HammerIcon className={className} aria-hidden />;
-    case "message-circle":
-      return <MessageCircleIcon className={className} aria-hidden />;
-    case "square-pen":
-      return <SquarePenIcon className={className} aria-hidden />;
-    case "terminal":
-      return <TerminalIcon className={className} aria-hidden />;
-    case "wrench":
-      return <WrenchIcon className={className} aria-hidden />;
-    case "x":
-      return <XIcon className={className} aria-hidden />;
-    case "zap":
-      return <ZapIcon className={className} aria-hidden />;
-  }
+function formatLiveMessageMetaNow(
+  createdAt: string,
+  durationStart: string | null | undefined,
+  timestampFormat: TimestampFormat,
+): string {
+  const elapsed = durationStart ? formatElapsed(durationStart, new Date().toISOString()) : null;
+  return formatMessageMeta(createdAt, elapsed, timestampFormat);
 }
 
-function workToneIcon(tone: TimelineWorkEntry["tone"]): {
-  iconName: WorkEntryIconName;
-  className: string;
-} {
-  if (tone === "error") {
-    return {
-      iconName: "circle-alert",
-      className: "text-foreground/92",
-    };
-  }
-  if (tone === "thinking") {
-    return {
-      iconName: "bot",
-      className: "text-foreground/92",
-    };
-  }
-  if (tone === "info") {
-    return {
-      iconName: "check",
-      className: "text-muted-foreground",
-    };
-  }
-  return {
-    iconName: "zap",
-    className: "text-foreground/92",
-  };
+function formatMessageMeta(
+  createdAt: string,
+  duration: string | null,
+  timestampFormat: TimestampFormat,
+): string {
+  if (!duration) return formatTimestamp(createdAt, timestampFormat);
+  return `${formatTimestamp(createdAt, timestampFormat)} • ${duration}`;
 }
 
-function workEntryPreview(
-  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
-  workspaceRoot: string | undefined,
-) {
-  if (workEntry.command) return workEntry.command;
-  if (workEntry.detail) return workEntry.detail;
-  if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
-  const [firstPath] = workEntry.changedFiles ?? [];
-  if (!firstPath) return null;
-  const displayPath = formatWorkspaceRelativePath(firstPath, workspaceRoot);
-  return workEntry.changedFiles!.length === 1
-    ? displayPath
-    : `${displayPath} +${workEntry.changedFiles!.length - 1} more`;
-}
-
-function workEntryRawCommand(
-  workEntry: Pick<TimelineWorkEntry, "command" | "rawCommand">,
-): string | null {
-  const rawCommand = workEntry.rawCommand?.trim();
-  if (!rawCommand || !workEntry.command) {
-    return null;
-  }
-  return rawCommand === workEntry.command.trim() ? null : rawCommand;
-}
-
-function buildToolCallExpandedBody(
-  workEntry: TimelineWorkEntry,
-  workspaceRoot: string | undefined,
-): string | null {
-  const blocks: string[] = [];
-  if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
-    blocks.push(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
-  }
-  const raw = workEntryRawCommand(workEntry);
-  if (raw?.trim()) {
-    blocks.push(raw.trim());
-  } else if (workEntry.command?.trim()) {
-    blocks.push(workEntry.command.trim());
-  }
-  if (workEntry.detail?.trim()) {
-    blocks.push(workEntry.detail.trim());
-  }
-  const changedFiles = workEntry.changedFiles ?? [];
-  if (changedFiles.length > 0) {
-    blocks.push(
-      changedFiles
-        .map((filePath) => formatWorkspaceRelativePath(filePath, workspaceRoot))
-        .join("\n"),
-    );
-  }
-  return blocks.length > 0 ? blocks.join("\n\n") : null;
-}
-
-function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
-  if (
-    workEntry.sourceActivityKind === "user-input.requested" ||
-    workEntry.sourceActivityKind === "user-input.resolved"
-  ) {
-    return "message-circle";
-  }
-  if (workEntry.requestKind === "command") return "terminal";
-  if (workEntry.requestKind === "file-read") return "eye";
-  if (workEntry.requestKind === "file-change") return "square-pen";
-
-  if (workEntry.itemType === "command_execution" || workEntry.command) {
-    return "terminal";
-  }
-  if (workEntry.itemType === "file_change" || (workEntry.changedFiles?.length ?? 0) > 0) {
-    return "square-pen";
-  }
-  if (workEntry.itemType === "web_search") return "globe";
-  if (workEntry.itemType === "image_view") return "eye";
-
-  switch (workEntry.itemType) {
-    case "mcp_tool_call":
-      return "wrench";
-    case "dynamic_tool_call":
-    case "collab_agent_tool_call":
-      return "hammer";
-  }
-
-  return workToneIcon(workEntry.tone).iconName;
-}
-
-function capitalizePhrase(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return value;
-  }
-  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
-}
-
-function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
-  if (!workEntry.toolTitle) {
-    return capitalizePhrase(normalizeCompactToolLabel(workEntry.label));
-  }
-  return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
-}
-
-const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
-
-const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
-  workEntry: TimelineWorkEntry;
-  workspaceRoot: string | undefined;
-}) {
-  const { workEntry, workspaceRoot } = props;
-  const activity = use(TimelineRowActivityCtx);
-  const [expanded, setExpanded] = useState(false);
-  const iconConfig = workToneIcon(workEntry.tone);
-  const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
-  const entryIconName = showWarningIndicator ? "x" : workEntryIconName(workEntry);
-  const heading = toolWorkEntryHeading(workEntry);
-  const rawPreview = workEntryPreview(workEntry, workspaceRoot);
-  const preview =
-    rawPreview &&
-    normalizeCompactToolLabel(rawPreview).toLowerCase() ===
-      normalizeCompactToolLabel(heading).toLowerCase()
-      ? null
-      : rawPreview;
-  const displayText = preview ? `${heading} - ${preview}` : heading;
-  const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot);
-  const canExpand = expandedBody !== null;
-  const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
-  const showDestructiveRowStyle =
-    showFailedIndicator &&
-    (workEntry.sourceActivityKind === "runtime.error" || !workLogEntryIsToolLike(workEntry));
-  const iconWrapperClass = cn(
-    "flex size-5 shrink-0 items-center justify-center",
-    showWarningIndicator
-      ? "text-destructive"
-      : showDestructiveRowStyle
-        ? "text-destructive"
-        : workEntry.tone === "tool" || showFailedIndicator
-          ? "text-muted-foreground/65"
-          : iconConfig.className,
+function formatWorkGroupSummary(
+  groupedEntries: ReadonlyArray<TimelineActivityEntry>,
+  completionSummary: string | null,
+): string {
+  const firstEntry = groupedEntries[0];
+  const lastEntry = groupedEntries[groupedEntries.length - 1];
+  const elapsed =
+    firstEntry && lastEntry ? formatWorkingTimer(firstEntry.createdAt, lastEntry.createdAt) : null;
+  const hasHiddenEntries = groupedEntries.some(
+    (entry) => entry.kind === "work" && entry.workEntry.hidden === true,
   );
-  const headingClass = showWarningIndicator
-    ? "font-medium text-warning"
-    : showDestructiveRowStyle
-      ? "font-medium text-destructive"
-      : "font-medium text-foreground/82";
-  const turnSettled = !activity.activeTurnInProgress;
-  const showNeutralIndicator = !turnSettled && workEntryIndicatesToolNeutralStatus(workEntry);
-  const showSuccessIndicator =
-    workEntryIndicatesToolSuccess(workEntry) ||
-    (turnSettled && workEntryIndicatesToolNeutralStatus(workEntry));
-  const rowToggleProps = canExpand
-    ? {
-        role: "button" as const,
-        tabIndex: 0 as const,
-        "aria-label": displayText,
-        onClick: () => setExpanded((v) => !v),
-        onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setExpanded((v) => !v);
-          }
-        },
-      }
-    : {};
 
-  return (
-    <div
-      className={cn(
-        "flex flex-col rounded-md px-0.5 py-0.5 transition-colors",
-        canExpand &&
-          "cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-      )}
-      {...rowToggleProps}
-    >
-      <div className="flex select-none items-center gap-1.5 transition-[opacity,translate] duration-200">
-        <span className={iconWrapperClass}>
-          <WorkEntryIconSvg
-            name={entryIconName}
-            className="block size-3.5 shrink-0 stroke-[1.8] opacity-80"
-          />
-        </span>
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <div className="min-w-0 flex-1 overflow-hidden">
-            <p className="flex min-w-0 w-full items-baseline gap-1.5 text-[12px] leading-5">
-              <span className={cn("min-w-0 shrink truncate", headingClass)}>{heading}</span>
-              {preview && (
-                <span className="min-w-0 flex-1 truncate text-muted-foreground/55">{preview}</span>
-              )}
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-px text-muted-foreground/55">
-            <span
-              className="flex size-4 shrink-0 items-center justify-center"
-              aria-hidden={!canExpand}
-            >
-              {canExpand ? (
-                <ChevronDownIcon
-                  className={cn(
-                    "size-3 shrink-0 opacity-70 transition-transform duration-200",
-                    expanded && "rotate-180",
-                  )}
-                  aria-hidden
-                />
-              ) : null}
-            </span>
-            <span className="flex size-4 shrink-0 items-center justify-center">
-              {showFailedIndicator ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span
-                        className="flex size-4 items-center justify-center"
-                        aria-label="Tool call failed"
-                      />
-                    }
-                  >
-                    <XIcon className="block size-3 shrink-0 text-destructive" aria-hidden />
-                  </TooltipTrigger>
-                  <TooltipPopup>Failed</TooltipPopup>
-                </Tooltip>
-              ) : showSuccessIndicator ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={<span className="flex size-4 items-center justify-center" />}
-                  >
-                    <span className="inline-flex size-4 items-center justify-center">
-                      <CheckIcon
-                        className="block size-3 shrink-0 stroke-current"
-                        stroke="currentColor"
-                        aria-hidden
-                      />
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipPopup>Completed</TooltipPopup>
-                </Tooltip>
-              ) : showNeutralIndicator ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={<span className="flex size-4 items-center justify-center" />}
-                  >
-                    <MinusIcon className="block size-3 shrink-0 opacity-70" aria-hidden />
-                  </TooltipTrigger>
-                  <TooltipPopup>Empty</TooltipPopup>
-                </Tooltip>
-              ) : null}
-            </span>
-          </div>
-        </div>
-      </div>
-      {expanded && canExpand && expandedBody ? (
-        <div
-          className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
-          onClick={stopRowToggle}
-          onPointerDown={stopRowToggle}
-        >
-          <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
-            {expandedBody}
-          </pre>
-        </div>
-      ) : null}
-    </div>
-  );
-});
+  if (hasHiddenEntries && elapsed) {
+    return `Worked for ${elapsed}`;
+  }
+
+  if (completionSummary) {
+    return completionSummary;
+  }
+
+  if (!elapsed) {
+    return "Worked";
+  }
+
+  return `Worked for ${elapsed}`;
+}

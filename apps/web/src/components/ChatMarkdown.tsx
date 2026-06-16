@@ -1,13 +1,4 @@
 import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
-import {
-  CheckIcon,
-  ChevronRightIcon,
-  CopyIcon,
-  GlobeIcon,
-  Maximize2Icon,
-  Minimize2Icon,
-  WrapTextIcon,
-} from "lucide-react";
 import type { ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
 import React, {
   Children,
@@ -20,10 +11,10 @@ import React, {
   memo,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
+import { GlobeIcon } from "lucide-react";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
@@ -33,8 +24,12 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
-import { PierreEntryIcon } from "./chat/PierreEntryIcon";
-import { hasSpecificPierreIconForFileName, syntheticFileNameForLanguageId } from "../pierre-icons";
+import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
+import {
+  getVscodeIconUrlForEntry,
+  hasSpecificVscodeIconForFileName,
+  syntheticFileNameForLanguageId,
+} from "../vscode-icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { Button } from "./ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
@@ -58,13 +53,6 @@ import {
 } from "../markdown-links";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
-import { useRightPanelStore } from "../rightPanelStore";
-import { isPreviewSupportedInRuntime } from "../previewStateStore";
-import {
-  isBrowserPreviewFile,
-  openFileInPreview,
-  openUrlInPreview,
-} from "../browser/openFileInPreview";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -250,325 +238,8 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   return promise;
 }
 
-function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const tableRef = useRef<HTMLTableElement | null>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const expandLabel = expanded ? "Collapse table cells" : "Expand table cells";
-  const copyLabel = copied ? "Copied" : "Copy table";
-
-  function toggleExpanded() {
-    const table = tableRef.current;
-    if (!table) return;
-
-    if (!expanded) {
-      const rows = [...table.rows];
-      const columnWidths = rows.reduce<number[]>((widths, row) => {
-        [...row.cells].forEach((cell, columnIndex) => {
-          widths[columnIndex] = Math.max(
-            widths[columnIndex] ?? 0,
-            cell.getBoundingClientRect().width,
-          );
-        });
-        return widths;
-      }, []);
-
-      [...(table.tHead?.rows[0]?.cells ?? [])].forEach((cell, columnIndex) => {
-        cell.style.minWidth = `${columnWidths[columnIndex] ?? cell.getBoundingClientRect().width}px`;
-      });
-    }
-
-    setExpanded((value) => !value);
-  }
-
-  const handleCopy = useCallback((format: "markdown" | "csv") => {
-    const table = containerRef.current?.querySelector("table");
-    if (!table || typeof navigator === "undefined" || navigator.clipboard == null) {
-      return;
-    }
-    const text =
-      format === "markdown"
-        ? serializeTableElementToMarkdown(table)
-        : serializeTableElementToCsv(table);
-    void navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        if (copiedTimerRef.current != null) {
-          clearTimeout(copiedTimerRef.current);
-        }
-        setCopied(true);
-        copiedTimerRef.current = setTimeout(() => {
-          setCopied(false);
-          copiedTimerRef.current = null;
-        }, 1200);
-      })
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(
-    () => () => {
-      if (copiedTimerRef.current != null) {
-        clearTimeout(copiedTimerRef.current);
-        copiedTimerRef.current = null;
-      }
-    },
-    [],
-  );
-
-  return (
-    <div
-      ref={containerRef}
-      className="chat-markdown-table-container"
-      data-expanded={expanded ? "true" : "false"}
-    >
-      <ScrollArea
-        chainVerticalScroll
-        scrollFade
-        hideScrollbars
-        className="w-full max-w-full rounded-none"
-      >
-        <table ref={tableRef} {...props}>
-          {children}
-        </table>
-      </ScrollArea>
-      <div className="chat-markdown-table-footer select-none">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="chat-markdown-chrome-action"
-                aria-pressed={expanded}
-                onClick={toggleExpanded}
-                aria-label={expandLabel}
-              />
-            }
-          >
-            {expanded ? <Minimize2Icon className="size-3" /> : <Maximize2Icon className="size-3" />}
-          </TooltipTrigger>
-          <TooltipPopup side="top">{expandLabel}</TooltipPopup>
-        </Tooltip>
-        <Menu>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <MenuTrigger
-                  render={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      className="chat-markdown-chrome-action"
-                      aria-label={copyLabel}
-                    />
-                  }
-                />
-              }
-            >
-              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
-            </TooltipTrigger>
-            <TooltipPopup side="top">{copyLabel}</TooltipPopup>
-          </Tooltip>
-          <MenuPopup align="end">
-            <MenuItem onClick={() => handleCopy("markdown")}>Copy as Markdown</MenuItem>
-            <MenuItem onClick={() => handleCopy("csv")}>Copy as CSV</MenuItem>
-          </MenuPopup>
-        </Menu>
-      </div>
-    </div>
-  );
-}
-
-function MarkdownDetails({
-  children,
-  open = false,
-}: Pick<React.ComponentProps<"details">, "children" | "open">) {
-  const [isOpen, setIsOpen] = useState(open);
-  const childNodes = Children.toArray(children);
-  const summaryIndex = childNodes.findIndex(
-    (child) => isValidElement(child) && child.type === "summary",
-  );
-  const summaryNode = summaryIndex >= 0 ? childNodes[summaryIndex] : null;
-  const summary =
-    isValidElement<{ children?: ReactNode }>(summaryNode) && summaryNode.props.children
-      ? summaryNode.props.children
-      : "Details";
-  const content = childNodes.filter((_, index) => index !== summaryIndex);
-
-  return (
-    <Collapsible
-      defaultOpen={open}
-      onOpenChange={setIsOpen}
-      className="chat-markdown-details my-2 border-y border-border/60"
-      data-markdown-details=""
-      data-markdown-details-open={isOpen ? "true" : "false"}
-    >
-      <CollapsibleTrigger
-        className="flex w-full items-center gap-2 py-2 text-left text-sm font-medium text-foreground data-panel-open:[&_svg]:rotate-90"
-        data-markdown-details-summary=""
-      >
-        <ChevronRightIcon
-          className="size-4 shrink-0 text-muted-foreground transition-transform"
-          aria-hidden
-        />
-        <span>{summary}</span>
-      </CollapsibleTrigger>
-      <CollapsiblePanel>
-        <div className="pb-3 ps-6 text-foreground/80" data-markdown-details-content="">
-          {content}
-        </div>
-      </CollapsiblePanel>
-    </Collapsible>
-  );
-}
-
-/**
- * Filename titles render icon + text; language-only titles render just the
- * icon (redundant next to its own name) and fall back to the language text
- * when no specific icon exists or it fails to load.
- */
-function MarkdownCodeBlockTitleContent({
-  fenceTitle,
-  language,
-  theme,
-}: {
-  fenceTitle: string | null;
-  language: string;
-  theme: "light" | "dark";
-}) {
-  if (fenceTitle) {
-    return (
-      <>
-        <PierreEntryIcon pathValue={fenceTitle} kind="file" theme={theme} className="size-3.5" />
-        <span className="truncate">{fenceTitle}</span>
-      </>
-    );
-  }
-
-  const fileName = syntheticFileNameForLanguageId(language);
-  if (!hasSpecificPierreIconForFileName(fileName)) {
-    return <span className="truncate">{language}</span>;
-  }
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span className="inline-flex shrink-0 rounded-sm" aria-label={`Language: ${language}`} />
-        }
-      >
-        <PierreEntryIcon pathValue={fileName} kind="file" theme={theme} className="size-3.5" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">{language}</TooltipPopup>
-    </Tooltip>
-  );
-}
-
-function MarkdownCodeBlock({
-  code,
-  language,
-  fenceTitle,
-  theme,
-  children,
-}: {
-  code: string;
-  language: string;
-  fenceTitle: string | null;
-  theme: "light" | "dark";
-  children: ReactNode;
-}) {
-  const [copied, setCopied] = useState(false);
-  const [wrapped, setWrapped] = useState(false);
-  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines";
-  const copyLabel = copied ? "Copied" : "Copy code";
-  const handleCopy = useCallback(() => {
-    if (typeof navigator === "undefined" || navigator.clipboard == null) {
-      return;
-    }
-    void navigator.clipboard
-      .writeText(code)
-      .then(() => {
-        if (copiedTimerRef.current != null) {
-          clearTimeout(copiedTimerRef.current);
-        }
-        setCopied(true);
-        copiedTimerRef.current = setTimeout(() => {
-          setCopied(false);
-          copiedTimerRef.current = null;
-        }, 1200);
-      })
-      .catch(() => undefined);
-  }, [code]);
-
-  useEffect(
-    () => () => {
-      if (copiedTimerRef.current != null) {
-        clearTimeout(copiedTimerRef.current);
-        copiedTimerRef.current = null;
-      }
-    },
-    [],
-  );
-
-  return (
-    <div
-      className="chat-markdown-codeblock leading-snug"
-      data-language={language}
-      data-wrap={wrapped ? "true" : "false"}
-    >
-      <div className="chat-markdown-codeblock-header select-none">
-        <span className="chat-markdown-codeblock-title">
-          <MarkdownCodeBlockTitleContent
-            fenceTitle={fenceTitle}
-            language={language}
-            theme={theme}
-          />
-        </span>
-        <span className="flex items-center gap-0.5">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  className="chat-markdown-chrome-action"
-                  aria-pressed={wrapped}
-                  onClick={() => setWrapped((value) => !value)}
-                  aria-label={wrapLabel}
-                />
-              }
-            >
-              <WrapTextIcon className="size-3" />
-            </TooltipTrigger>
-            <TooltipPopup side="top">{wrapLabel}</TooltipPopup>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  className="chat-markdown-chrome-action"
-                  onClick={handleCopy}
-                  aria-label={copyLabel}
-                />
-              }
-            >
-              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
-            </TooltipTrigger>
-            <TooltipPopup side="top">{copyLabel}</TooltipPopup>
-          </Tooltip>
-        </span>
-      </div>
-      {children}
-    </div>
-  );
+function MarkdownCodeBlock({ children }: { children: ReactNode }) {
+  return <div className="chat-markdown-codeblock leading-snug">{children}</div>;
 }
 
 interface SuspenseShikiCodeBlockProps {
@@ -656,13 +327,10 @@ function UncachedShikiCodeBlock({
 interface MarkdownFileLinkProps {
   href: string;
   targetPath: string;
-  iconPath: string;
   displayPath: string;
-  workspaceRelativePath: string | null;
   label: string;
   copyMarkdown: string;
   theme: "light" | "dark";
-  threadRef?: ScopedThreadRef | undefined;
   className?: string | undefined;
 }
 
@@ -929,67 +597,16 @@ function MarkdownExternalLinkContent({
   );
 }
 
-function MarkdownExternalLink({
-  href,
-  threadRef,
-  children,
-  ...props
-}: React.ComponentProps<"a"> & {
-  href: string;
-  threadRef?: ScopedThreadRef | undefined;
-}) {
-  const handleContextMenu = useCallback(
-    async (event: ReactMouseEvent<HTMLAnchorElement>) => {
-      if (!threadRef || !isPreviewSupportedInRuntime()) return;
-      event.preventDefault();
-      event.stopPropagation();
-
-      const api = readLocalApi();
-      if (!api) return;
-      const clicked = await api.contextMenu.show(
-        [
-          { id: "open-in-browser", label: "Open in integrated browser" },
-          { id: "open-external", label: "Open in system browser" },
-        ] as const,
-        { x: event.clientX, y: event.clientY },
-      );
-      if (clicked === "open-in-browser") {
-        void openUrlInPreview(threadRef, href).catch((error) => {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Unable to open link in browser",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            }),
-          );
-        });
-      } else if (clicked === "open-external") {
-        void api.shell.openExternal(href);
-      }
-    },
-    [href, threadRef],
-  );
-
-  return (
-    <a {...props} href={href} onContextMenu={handleContextMenu}>
-      {children}
-    </a>
-  );
-}
-
 const MarkdownFileLink = memo(function MarkdownFileLink({
   href,
   targetPath,
-  iconPath,
   displayPath,
-  workspaceRelativePath,
   label,
   copyMarkdown,
   theme,
-  threadRef,
   className,
 }: MarkdownFileLinkProps) {
-  const handleOpenInEditor = useCallback(() => {
+  const handleOpen = useCallback(() => {
     const api = readLocalApi();
     if (!api) {
       toastManager.add({
@@ -1009,27 +626,6 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       );
     });
   }, [targetPath]);
-
-  const handleOpenInFilePreview = useCallback(() => {
-    if (!threadRef || !workspaceRelativePath) {
-      handleOpenInEditor();
-      return;
-    }
-    useRightPanelStore.getState().openFile(threadRef, workspaceRelativePath);
-  }, [handleOpenInEditor, threadRef, workspaceRelativePath]);
-
-  const handleOpenInBrowser = useCallback(() => {
-    if (!threadRef) return;
-    void openFileInPreview(threadRef, iconPath).catch((error) => {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Unable to open file in browser",
-          description: error instanceof Error ? error.message : "An error occurred.",
-        }),
-      );
-    });
-  }, [iconPath, threadRef]);
 
   const handleCopy = useCallback((value: string, title: string) => {
     if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
@@ -1071,14 +667,9 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       const api = readLocalApi();
       if (!api) return;
 
-      const canOpenInBrowser =
-        Boolean(threadRef) && isPreviewSupportedInRuntime() && isBrowserPreviewFile(iconPath);
       const clicked = await api.contextMenu.show(
         [
           { id: "open", label: "Open in editor" },
-          ...(canOpenInBrowser
-            ? ([{ id: "open-in-browser", label: "Open in integrated browser" }] as const)
-            : []),
           { id: "copy-relative", label: "Copy relative path" },
           { id: "copy-full", label: "Copy full path" },
         ] as const,
@@ -1086,11 +677,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       );
 
       if (clicked === "open") {
-        handleOpenInEditor();
-        return;
-      }
-      if (clicked === "open-in-browser") {
-        handleOpenInBrowser();
+        handleOpen();
         return;
       }
       if (clicked === "copy-relative") {
@@ -1101,15 +688,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         handleCopy(targetPath, "Full path");
       }
     },
-    [
-      displayPath,
-      handleCopy,
-      handleOpenInBrowser,
-      handleOpenInEditor,
-      iconPath,
-      targetPath,
-      threadRef,
-    ],
+    [displayPath, handleCopy, handleOpen, targetPath],
   );
 
   return (
@@ -1123,15 +702,11 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              if (threadRef && isPreviewSupportedInRuntime() && isBrowserPreviewFile(iconPath)) {
-                handleOpenInBrowser();
-                return;
-              }
-              handleOpenInFilePreview();
+              handleOpen();
             }}
             onContextMenu={handleContextMenu}
           >
-            <FileTagChipContent path={iconPath} label={label} theme={theme} selectable />
+            <FileTagChipContent path={targetPath} label={label} theme={theme} selectable />
           </a>
         }
       />
@@ -1154,14 +729,10 @@ function areMarkdownFileLinkPropsEqual(
   return (
     previous.href === next.href &&
     previous.targetPath === next.targetPath &&
-    previous.iconPath === next.iconPath &&
     previous.displayPath === next.displayPath &&
-    previous.workspaceRelativePath === next.workspaceRelativePath &&
     previous.label === next.label &&
     previous.copyMarkdown === next.copyMarkdown &&
     previous.theme === next.theme &&
-    previous.threadRef?.environmentId === next.threadRef?.environmentId &&
-    previous.threadRef?.threadId === next.threadRef?.threadId &&
     previous.className === next.className
   );
 }
@@ -1169,7 +740,6 @@ function areMarkdownFileLinkPropsEqual(
 function ChatMarkdown({
   text,
   cwd,
-  threadRef,
   isStreaming = false,
   skills = EMPTY_MARKDOWN_SKILLS,
   className,
@@ -1212,55 +782,32 @@ function ChatMarkdown({
   }, []);
   const markdownComponents = useMemo<Components>(
     () => ({
-      p({ node: _node, children, ...props }) {
-        return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
+      p({ node: _node, ref, children, ...props }) {
+        return (
+          <p {...props} ref={ref as React.Ref<HTMLParagraphElement> | undefined}>
+            {renderSkillInlineMarkdownChildren(children, skills)}
+          </p>
+        );
       },
-      li({ node: _node, children, ...props }) {
-        return <li {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</li>;
+      li({ node: _node, ref, children, ...props }) {
+        return (
+          <li {...props} ref={ref as React.Ref<HTMLLIElement> | undefined}>
+            {renderSkillInlineMarkdownChildren(children, skills)}
+          </li>
+        );
       },
-      a({ node, href, children, ...props }) {
+      a({ node: _node, ref, href, ...props }) {
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
         const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
         if (!fileLinkMeta) {
-          const faviconHost = resolveExternalLinkHost(href);
-          const isSameDocumentLink = href?.startsWith("#") ?? false;
-          const onClick = props.onClick;
-          const link = (
-            <MarkdownExternalLink
-              {...props}
-              href={href ?? ""}
-              threadRef={faviconHost && isPreviewSupportedInRuntime() ? threadRef : undefined}
-              target={isSameDocumentLink ? undefined : "_blank"}
-              rel={isSameDocumentLink ? undefined : "noopener noreferrer"}
-              onClick={(event) => {
-                onClick?.(event);
-                if (isSameDocumentLink && href) {
-                  handleMarkdownFragmentClick(event, href);
-                }
-              }}
-            >
-              {faviconHost ? (
-                <MarkdownExternalLinkContent host={faviconHost} plainText={plainHastText(node)}>
-                  {children}
-                </MarkdownExternalLinkContent>
-              ) : (
-                children
-              )}
-            </MarkdownExternalLink>
-          );
-          if (!faviconHost || !href) {
-            return link;
-          }
           return (
-            <Tooltip>
-              <TooltipTrigger render={link} />
-              <TooltipPopup
-                side="top"
-                className="max-w-[min(36rem,calc(100vw-2rem))] whitespace-normal leading-tight wrap-anywhere"
-              >
-                {href}
-              </TooltipPopup>
-            </Tooltip>
+            <a
+              {...props}
+              ref={ref as React.Ref<HTMLAnchorElement> | undefined}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+            />
           );
         }
 
@@ -1269,7 +816,7 @@ function ChatMarkdown({
         if (typeof parentSuffix === "string" && parentSuffix.length > 0) {
           labelParts.push(parentSuffix);
         }
-        if (fileLinkMeta.line) {
+        if (fileLinkMeta.line && fileLinkMeta.line !== 1) {
           labelParts.push(
             `L${fileLinkMeta.line}${fileLinkMeta.column ? `:C${fileLinkMeta.column}` : ""}`,
           );
@@ -1279,40 +826,42 @@ function ChatMarkdown({
           <MarkdownFileLink
             href={fileLinkMeta.targetPath}
             targetPath={fileLinkMeta.targetPath}
-            iconPath={fileLinkMeta.filePath}
             displayPath={fileLinkMeta.displayPath}
-            workspaceRelativePath={fileLinkMeta.workspaceRelativePath}
             label={labelParts.join(" · ")}
             copyMarkdown={`[${fileLinkMeta.basename}](${normalizedHref})`}
             theme={resolvedTheme}
-            threadRef={threadRef}
             className={props.className}
           />
         );
       },
-      table({ node: _node, ...props }) {
-        return <MarkdownTable {...props} />;
-      },
-      details({ node: _node, children, open: detailsOpen }) {
-        return <MarkdownDetails open={detailsOpen}>{children}</MarkdownDetails>;
-      },
-      pre({ node, children, ...props }) {
+      pre({ node, ref, children, ...props }) {
         const codeBlock = extractCodeBlock(children);
         if (!codeBlock) {
-          return <pre {...props}>{children}</pre>;
+          return (
+            <pre {...props} ref={ref as React.Ref<HTMLPreElement> | undefined}>
+              {children}
+            </pre>
+          );
         }
 
         const language = extractFenceLanguage(codeBlock.className);
         const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
         return (
-          <MarkdownCodeBlock
-            code={codeBlock.code}
-            language={language}
-            fenceTitle={fenceTitle}
-            theme={resolvedTheme}
-          >
-            <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
-              <Suspense fallback={<pre {...props}>{children}</pre>}>
+          <MarkdownCodeBlock>
+            <CodeHighlightErrorBoundary
+              fallback={
+                <pre {...props} ref={ref as React.Ref<HTMLPreElement> | undefined}>
+                  {children}
+                </pre>
+              }
+            >
+              <Suspense
+                fallback={
+                  <pre {...props} ref={ref as React.Ref<HTMLPreElement> | undefined}>
+                    {children}
+                  </pre>
+                }
+              >
                 <SuspenseShikiCodeBlock
                   className={codeBlock.className}
                   code={codeBlock.code}
@@ -1330,20 +879,13 @@ function ChatMarkdown({
       fileLinkParentSuffixByPath,
       isStreaming,
       markdownFileLinkMetaByHref,
-      threadRef,
       resolvedTheme,
       skills,
     ],
   );
 
   return (
-    <div
-      className={cn(
-        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80",
-        className,
-      )}
-      onCopy={handleCopy}
-    >
+    <div className="chat-markdown w-full min-w-0 text-xs leading-relaxed text-foreground">
       <ReactMarkdown
         remarkPlugins={
           lineBreaks

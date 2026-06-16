@@ -1,6 +1,6 @@
 import "../../index.css";
 
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { createRef } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { page } from "vite-plus/test/browser";
@@ -44,6 +44,14 @@ vi.mock("@legendapp/list/react", async () => {
   return { LegendList };
 });
 
+vi.mock("../../lib/checkpointDiffState", () => ({
+  useCheckpointDiff: () => ({
+    data: null,
+    error: null,
+    isPending: false,
+  }),
+}));
+
 import { MessagesTimeline } from "./MessagesTimeline";
 
 const MESSAGE_CREATED_AT = "2026-04-13T12:00:00.000Z";
@@ -52,10 +60,13 @@ function buildProps() {
   return {
     isWorking: false,
     activeTurnInProgress: false,
+    activeTurnId: null,
     activeTurnStartedAt: null,
     listRef: createRef<LegendListRef | null>(),
-    latestTurn: null,
+    completionDividerBeforeEntryId: null,
+    completionSummary: null,
     turnDiffSummaryByAssistantMessageId: new Map(),
+    turnDiffSummaryByTurnId: new Map(),
     routeThreadKey: "environment-local:thread-1",
     onOpenTurnDiff: vi.fn(),
     revertTurnCountByUserMessageId: new Map(),
@@ -63,6 +74,7 @@ function buildProps() {
     isRevertingCheckpoint: false,
     onImageExpand: vi.fn(),
     activeThreadEnvironmentId: EnvironmentId.make("environment-local"),
+    activeThreadId: ThreadId.make("thread-1"),
     markdownCwd: undefined,
     resolvedTheme: "dark" as const,
     timestampFormat: "24-hour" as const,
@@ -127,9 +139,9 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-1",
               createdAt: "2026-04-13T12:00:00.000Z",
-              label: "read files",
+              label: "thinking",
               detail: "Inspecting repository state",
-              tone: "tool",
+              tone: "thinking",
             },
           },
         ]}
@@ -140,51 +152,10 @@ describe("MessagesTimeline", () => {
       await expect
         .element(page.getByText("Send a message to start the conversation."))
         .not.toBeInTheDocument();
-      await expect.element(page.getByText("Inspecting repository state")).toBeVisible();
-      expect(document.querySelector('[data-testid="legend-list"] [title]')).toBeNull();
-    } finally {
-      await screen.unmount();
-    }
-  });
-
-  it("uses accessible expansion instead of native titles or preview tooltips for work entry details", async () => {
-    const screen = await render(
-      <MessagesTimeline
-        {...buildProps()}
-        workspaceRoot="/repo"
-        timelineEntries={[
-          {
-            id: "work-command",
-            kind: "work",
-            createdAt: MESSAGE_CREATED_AT,
-            entry: {
-              id: "work-command",
-              createdAt: MESSAGE_CREATED_AT,
-              label: "command",
-              detail: "Inspecting generated output",
-              command: "git diff -- apps/web/src/components/ChatMarkdown.tsx",
-              rawCommand: "git diff -- apps/web/src/components/ChatMarkdown.tsx --stat",
-              changedFiles: ["/repo/apps/web/src/components/ChatMarkdown.tsx"],
-              tone: "tool",
-            },
-          },
-        ]}
-      />,
-    );
-
-    try {
-      expect(document.querySelector('[data-testid="legend-list"] [title]')).toBeNull();
-
-      const commandTrigger = page.getByLabelText(
-        "Command - git diff -- apps/web/src/components/ChatMarkdown.tsx",
-      );
-      await commandTrigger.hover();
-      expect(document.querySelector('[data-slot="tooltip-popup"]')).toBeNull();
-
-      await commandTrigger.click();
+      await expect.element(page.getByText("Worked for 0s")).toBeVisible();
       await expect
-        .element(page.getByText("git diff -- apps/web/src/components/ChatMarkdown.tsx --stat"))
-        .toBeVisible();
+        .element(page.getByText("Thinking - Inspecting repository state"))
+        .not.toBeInTheDocument();
     } finally {
       await screen.unmount();
     }
@@ -218,16 +189,16 @@ describe("MessagesTimeline", () => {
               entry: {
                 id: "work-1",
                 createdAt: "2026-04-13T12:00:00.000Z",
-                label: "read files",
+                label: "thinking",
                 detail: "Inspecting repository state",
-                tone: "tool",
+                tone: "thinking",
               },
             },
           ]}
         />,
       );
 
-      await expect.element(page.getByText("Inspecting repository state")).toBeVisible();
+      await expect.element(page.getByText("Worked for 0s")).toBeVisible();
       expect(props.onIsAtEndChange).toHaveBeenCalledWith(true);
       expect(scrollToEndSpy).toHaveBeenCalledWith({ animated: false });
       expect(requestAnimationFrameSpy).toHaveBeenCalled();
@@ -245,7 +216,7 @@ describe("MessagesTimeline", () => {
     );
 
     try {
-      const toggle = page.getByRole("button", { name: "Show full message" });
+      const toggle = page.getByRole("button", { name: "Show more" });
       await expect.element(toggle).toBeVisible();
       await expect.element(toggle).toHaveAttribute("aria-expanded", "false");
 
@@ -253,10 +224,7 @@ describe("MessagesTimeline", () => {
         "[data-user-message-body='true']",
       ) as HTMLDivElement | null;
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");
-      expect(messageBody?.className).toContain("max-h-44");
-      expect(messageBody?.className).toContain("overflow-hidden");
-      expect(messageBody?.getAttribute("data-user-message-fade")).toBe("true");
-      expect(messageBody?.style.maskImage).toContain("linear-gradient");
+      expect(messageBody?.className).toContain("line-clamp-6");
     } finally {
       await screen.unmount();
     }
@@ -271,7 +239,7 @@ describe("MessagesTimeline", () => {
     );
 
     try {
-      const expandButton = page.getByRole("button", { name: "Show full message" });
+      const expandButton = page.getByRole("button", { name: "Show more" });
       await expect.element(expandButton).toBeVisible();
 
       expect(document.body.textContent ?? "").toContain("deep hidden detail only after expand");
@@ -284,18 +252,14 @@ describe("MessagesTimeline", () => {
 
       let messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("false");
-      expect(messageBody?.className).not.toContain("max-h-44");
-      expect(messageBody?.getAttribute("data-user-message-fade")).toBe("false");
-      expect((messageBody as HTMLDivElement | null)?.style.maskImage ?? "").toBe("");
+      expect(messageBody?.className).not.toContain("line-clamp-6");
 
       await collapseButton.click();
 
-      await expect.element(page.getByRole("button", { name: "Show full message" })).toBeVisible();
+      await expect.element(page.getByRole("button", { name: "Show more" })).toBeVisible();
       messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");
-      expect(messageBody?.className).toContain("max-h-44");
-      expect(messageBody?.getAttribute("data-user-message-fade")).toBe("true");
-      expect((messageBody as HTMLDivElement | null)?.style.maskImage).toContain("linear-gradient");
+      expect(messageBody?.className).toContain("line-clamp-6");
     } finally {
       await screen.unmount();
     }
@@ -310,7 +274,7 @@ describe("MessagesTimeline", () => {
     );
 
     try {
-      await expect.element(page.getByRole("button", { name: "Show full message" })).toBeVisible();
+      await expect.element(page.getByRole("button", { name: "Show more" })).toBeVisible();
 
       const messageBody = document.querySelector("[data-user-message-body='true']");
       expect(messageBody?.getAttribute("data-user-message-collapsed")).toBe("true");
@@ -371,105 +335,6 @@ describe("MessagesTimeline", () => {
       expect(userFileLink?.getAttribute("href")).toBe("/repo/project/path/to/package.json");
       expect(assistantFileLink?.textContent).toContain("package.json");
       expect(assistantFileLink?.getAttribute("href")).toBe("/repo/project/path/to/package.json");
-    } finally {
-      await screen.unmount();
-    }
-  });
-
-  it("uses the file path without line suffix for markdown file tag icons", async () => {
-    const fileLink = "[package.json](path/to/package.json:25)";
-    const screen = await render(
-      <MessagesTimeline
-        {...buildProps()}
-        markdownCwd="/repo/project"
-        timelineEntries={[buildAssistantTimelineEntry(`Updated ${fileLink}`)]}
-      />,
-    );
-
-    try {
-      const assistantFileLink = document.querySelector(
-        '[data-message-role="assistant"] .chat-markdown-file-link',
-      );
-      const icon = assistantFileLink?.querySelector("svg[data-pierre-icon]");
-
-      expect(assistantFileLink?.textContent).toContain("package.json");
-      expect(assistantFileLink?.textContent).toContain("L25");
-      expect(assistantFileLink?.getAttribute("href")).toBe("/repo/project/path/to/package.json:25");
-      expect(icon?.getAttribute("data-pierre-icon")).toBe("t3-file-icon-package-json");
-    } finally {
-      await screen.unmount();
-    }
-  });
-
-  it("folds settled-turn work behind a Worked-for row and expands it on click", async () => {
-    const screen = await render(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={[
-          {
-            id: "entry-commentary",
-            kind: "message" as const,
-            createdAt: "2026-04-13T12:00:00.000Z",
-            message: {
-              id: "message-commentary" as never,
-              role: "assistant" as const,
-              text: "Let me look around first.",
-              turnId: "turn-1" as never,
-              createdAt: "2026-04-13T12:00:00.000Z",
-              completedAt: "2026-04-13T12:00:02.000Z",
-              streaming: false,
-            },
-          },
-          {
-            id: "entry-work",
-            kind: "work" as const,
-            createdAt: "2026-04-13T12:00:05.000Z",
-            entry: {
-              id: "work-1",
-              createdAt: "2026-04-13T12:00:05.000Z",
-              turnId: "turn-1" as never,
-              label: "read files",
-              detail: "Inspecting repository state",
-              tone: "tool" as const,
-            },
-          },
-          {
-            id: "entry-final",
-            kind: "message" as const,
-            createdAt: "2026-04-13T12:00:20.000Z",
-            message: {
-              id: "message-final" as never,
-              role: "assistant" as const,
-              text: "All done.",
-              turnId: "turn-1" as never,
-              createdAt: "2026-04-13T12:00:20.000Z",
-              completedAt: "2026-04-13T12:00:30.000Z",
-              streaming: false,
-            },
-          },
-        ]}
-      />,
-    );
-
-    try {
-      const foldButton = page.getByRole("button", { name: "Worked for 30s" });
-      await expect.element(foldButton).toBeVisible();
-      await expect.element(foldButton).toHaveAttribute("aria-expanded", "false");
-
-      expect(document.body.textContent).toContain("All done.");
-      expect(document.body.textContent).not.toContain("Let me look around first.");
-      expect(document.body.textContent).not.toContain("Inspecting repository state");
-
-      await foldButton.click();
-
-      await expect.element(foldButton).toHaveAttribute("aria-expanded", "true");
-      expect(document.body.textContent).toContain("Let me look around first.");
-      expect(document.body.textContent).toContain("Inspecting repository state");
-
-      await foldButton.click();
-
-      await expect.element(foldButton).toHaveAttribute("aria-expanded", "false");
-      expect(document.body.textContent).not.toContain("Inspecting repository state");
     } finally {
       await screen.unmount();
     }

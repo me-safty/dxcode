@@ -17,7 +17,7 @@ import { createModelCapabilities, createModelSelection } from "@t3tools/shared/m
 
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { TraitsMenuContent } from "./TraitsPicker";
-import { createEmptyThreadDraft, useComposerDraftStore } from "../../composerDraftStore";
+import { useComposerDraftStore } from "../../composerDraftStore";
 
 const LOCAL_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 
@@ -60,16 +60,20 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
 
   useComposerDraftStore.setState({
     draftsByThreadKey: {
-      // Compose from the canonical empty-draft factory so adding a new
-      // ComposerThreadDraftState slice (e.g. a future attachment kind) doesn't
-      // silently break this stub via `Property X is missing in type ...`.
       [threadKey]: {
-        ...createEmptyThreadDraft(),
         prompt: props?.prompt ?? "",
+        images: [],
+        nonPersistedImageIds: [],
+        persistedAttachments: [],
+        terminalContexts: [],
+        elementContexts: [],
+        previewAnnotations: [],
         modelSelectionByProvider: {
           [instanceId]: createModelSelection(instanceId, model, props?.modelSelection?.options),
         },
         activeProvider: instanceId,
+        runtimeMode: null,
+        interactionMode: null,
       },
     },
     draftThreadsByThreadKey: {},
@@ -133,10 +137,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
   ];
   const screen = await render(
     <CompactComposerControlsMenu
-      activePlan={false}
       interactionMode="default"
-      planSidebarLabel="Plan"
-      planSidebarOpen={false}
       runtimeMode="approval-required"
       showInteractionModeToggle
       traitsMenuContent={
@@ -151,7 +152,6 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
         />
       }
       onToggleInteractionMode={vi.fn()}
-      onTogglePlanSidebar={vi.fn()}
       onRuntimeModeChange={vi.fn()}
     />,
     { container: host },
@@ -295,14 +295,10 @@ describe("CompactComposerControlsMenu", () => {
     document.body.append(host);
     const screen = await render(
       <CompactComposerControlsMenu
-        activePlan={false}
         interactionMode="default"
-        planSidebarLabel="Plan"
-        planSidebarOpen={false}
         runtimeMode="approval-required"
         showInteractionModeToggle={false}
         onToggleInteractionMode={vi.fn()}
-        onTogglePlanSidebar={vi.fn()}
         onRuntimeModeChange={vi.fn()}
       />,
       { container: host },

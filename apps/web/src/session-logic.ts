@@ -70,6 +70,10 @@ export interface WorkLogEntry {
   rawCommand?: string;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
+  hidden?: boolean;
+  readPath?: string;
+  editDiff?: string;
+  toolName?: string;
   toolTitle?: string;
   toolData?: unknown;
   itemType?: ToolLifecycleItemType;
@@ -78,6 +82,9 @@ export interface WorkLogEntry {
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
   sourceActivityKind?: OrchestrationThreadActivity["kind"];
+  subagent?: SubagentInfo;
+  todos?: ReadonlyArray<TodoItem>;
+  questionAnswers?: ReadonlyArray<QuestionAnswer>;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -99,6 +106,31 @@ export interface PendingUserInput {
   questions: ReadonlyArray<UserInputQuestion>;
 }
 
+export interface SubagentInfo {
+  name?: string;
+  role?: string;
+  status?: string;
+  summary?: string;
+  report?: string;
+  modelId?: string;
+  toolUses?: number;
+  durationMs?: number;
+  subagentType?: string;
+  description?: string;
+  lastStep?: string;
+}
+
+export interface TodoItem {
+  content: string;
+  status: "pending" | "inProgress" | "in_progress" | "completed" | "cancelled";
+  priority?: string;
+}
+
+export interface QuestionAnswer {
+  question: string;
+  answer: string;
+}
+
 export interface ActivePlanState {
   createdAt: string;
   turnId: TurnId | null;
@@ -107,6 +139,12 @@ export interface ActivePlanState {
     step: string;
     status: "pending" | "inProgress" | "completed";
   }>;
+}
+
+export interface ActiveTodosState {
+  createdAt: string;
+  turnId: TurnId | null;
+  todos: ReadonlyArray<TodoItem>;
 }
 
 export interface LatestProposedPlanState {
@@ -1364,6 +1402,110 @@ export function deriveTimelineEntries(
   return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
+}
+
+export function deriveActiveTodos(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | undefined,
+): ActiveTodosState | null {
+  const todoActivities = activities
+    .filter((activity) => {
+      if (activity.kind !== "tool.updated" && activity.kind !== "tool.completed") return false;
+      const payload =
+        activity.payload && typeof activity.payload === "object"
+          ? (activity.payload as Record<string, unknown>)
+          : null;
+      return Array.isArray(payload?.todos);
+    })
+    .toSorted(compareActivitiesByOrder);
+  const latest =
+    (latestTurnId
+      ? todoActivities.findLast((activity) => activity.turnId === latestTurnId)
+      : undefined) ?? todoActivities.at(-1);
+  if (!latest) return null;
+  const payload =
+    latest.payload && typeof latest.payload === "object"
+      ? (latest.payload as Record<string, unknown>)
+      : null;
+  const todos = parseTodoItems(payload?.todos);
+  if (todos.length === 0) return null;
+  return {
+    createdAt: latest.createdAt,
+    turnId: latest.turnId,
+    todos,
+  };
+}
+
+function parseTodoItems(value: unknown): TodoItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const content =
+      typeof record.content === "string"
+        ? record.content
+        : typeof record.text === "string"
+          ? record.text
+          : typeof record.title === "string"
+            ? record.title
+            : null;
+    if (!content) return [];
+    const rawStatus = typeof record.status === "string" ? record.status : "";
+    const status: TodoItem["status"] =
+      rawStatus === "completed"
+        ? "completed"
+        : rawStatus === "in_progress" || rawStatus === "inProgress"
+          ? "inProgress"
+          : "pending";
+    return [{ content, status }];
+  });
+}
+
+export function deriveCompletionDividerBeforeEntryId(
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+  latestTurn: Pick<
+    OrchestrationLatestTurn,
+    "assistantMessageId" | "startedAt" | "completedAt"
+  > | null,
+): string | null {
+  if (!latestTurn?.startedAt || !latestTurn.completedAt) {
+    return null;
+  }
+
+  if (latestTurn.assistantMessageId) {
+    const exactMatch = timelineEntries.find(
+      (timelineEntry) =>
+        timelineEntry.kind === "message" &&
+        timelineEntry.message.role === "assistant" &&
+        timelineEntry.message.id === latestTurn.assistantMessageId,
+    );
+    if (exactMatch) {
+      return exactMatch.id;
+    }
+  }
+
+  const turnStartedAt = Date.parse(latestTurn.startedAt);
+  const turnCompletedAt = Date.parse(latestTurn.completedAt);
+  if (Number.isNaN(turnStartedAt) || Number.isNaN(turnCompletedAt)) {
+    return null;
+  }
+
+  let inRangeMatch: string | null = null;
+  let fallbackMatch: string | null = null;
+  for (const timelineEntry of timelineEntries) {
+    if (timelineEntry.kind !== "message" || timelineEntry.message.role !== "assistant") {
+      continue;
+    }
+    const messageAt = Date.parse(timelineEntry.message.createdAt);
+    if (Number.isNaN(messageAt) || messageAt < turnStartedAt) {
+      continue;
+    }
+    fallbackMatch = timelineEntry.id;
+    if (messageAt <= turnCompletedAt) {
+      inRangeMatch = timelineEntry.id;
+    }
+  }
+  return inRangeMatch ?? fallbackMatch;
 }
 
 export function inferCheckpointTurnCountByTurnId(
