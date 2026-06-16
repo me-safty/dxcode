@@ -21,6 +21,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   Download,
   ExternalLink,
   GitBranch,
@@ -1625,6 +1626,34 @@ export function SourceControlPanel({
     void createStash(paths, message);
   }, [createStash, dialogStashMessage, stashDialogTarget]);
 
+  const discardSelectedChanges = useCallback(
+    () =>
+      void (async () => {
+        if (selectedChangedFiles.length === 0) return;
+        const countLabel =
+          selectedChangedFiles.length === 1
+            ? "the selected change"
+            : `${selectedChangedFiles.length} selected changes`;
+        if (!(await confirm(`Discard ${countLabel}?`))) return;
+        const stagedPaths = selectedChangedFiles
+          .filter((file) => file.hasStagedChanges)
+          .map((file) => file.path);
+        const unstagedOnlyPaths = selectedChangedFiles
+          .filter((file) => file.hasUnstagedChanges && !file.hasStagedChanges)
+          .map((file) => file.path);
+        await runAction("changes-discard-selected", async () => {
+          if (!api) return;
+          if (stagedPaths.length > 0) {
+            await api.vcs.discardFiles({ cwd, paths: stagedPaths, staged: true });
+          }
+          if (unstagedOnlyPaths.length > 0) {
+            await api.vcs.discardFiles({ cwd, paths: unstagedOnlyPaths, staged: false });
+          }
+        });
+      })(),
+    [api, confirm, cwd, runAction, selectedChangedFiles],
+  );
+
   const toggleSection = useCallback((key: SectionKey) => {
     setCollapsed((current) => {
       const next = new Set(current);
@@ -1912,8 +1941,19 @@ export function SourceControlPanel({
   if (!snapshot) {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
-        <div className="text-sm text-destructive-foreground">
-          {error ?? "Source control is unavailable."}
+        <div className="relative rounded border border-destructive/35 bg-destructive/10 py-2 pl-2 pr-9 text-xs text-destructive-foreground">
+          <div className="max-h-20 overflow-auto whitespace-pre-wrap break-words">
+            {error ?? "Source control is unavailable."}
+          </div>
+          <div className="absolute right-1 top-1">
+            <IconButton
+              label="Copy error"
+              disabled={!error}
+              onClick={() => copyText(error ?? "", "No error to copy.")}
+            >
+              <Copy className="size-3.5" />
+            </IconButton>
+          </div>
         </div>
         <Button size="sm" variant="outline" onClick={() => void refresh()}>
           <RefreshCw />
@@ -2990,7 +3030,16 @@ export function SourceControlPanel({
           <span>{snapshot.status.aheadOfDefaultCount} ahead of default</span>
         ) : null}
       </div>
-      {error ? <div className="mt-1 text-destructive-foreground">{error}</div> : null}
+      {error ? (
+        <div className="relative mt-1 rounded border border-destructive/35 bg-destructive/10 py-1.5 pl-2 pr-8 text-destructive-foreground">
+          <div className="max-h-20 overflow-auto whitespace-pre-wrap break-words">{error}</div>
+          <div className="absolute right-1 top-1">
+            <IconButton label="Copy error" onClick={() => copyText(error)}>
+              <Copy className="size-3.5" />
+            </IconButton>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -3044,6 +3093,17 @@ export function SourceControlPanel({
                 }
               >
                 <Archive className="size-3.5" />
+              </IconButton>
+              <IconButton
+                label="Discard selected changes"
+                destructive
+                disabled={
+                  isActionRunning("changes-discard-selected") || selectedChangedFiles.length === 0
+                }
+                loading={isActionRunning("changes-discard-selected")}
+                onClick={discardSelectedChanges}
+              >
+                <Trash2 className="size-3.5" />
               </IconButton>
             </div>
           </div>
@@ -3135,6 +3195,53 @@ export function SourceControlPanel({
           className="group relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1.5 text-left text-xs hover:bg-accent/60"
           onClick={() => toggleTree(key, true)}
           onKeyDown={(event) => toggleTreeFromKeyboard(key, event, true)}
+          onContextMenu={(event) =>
+            openContextMenu(
+              event,
+              [
+                {
+                  id: "select-all",
+                  label: "Select all changes",
+                  disabled: selectedChangedFiles.length === changedFiles.length,
+                },
+                {
+                  id: "clear-all",
+                  label: "Clear all changes",
+                  disabled: selectedChangedFiles.length === 0,
+                },
+                {
+                  id: "commit-selected",
+                  label: "Commit selected changes",
+                  disabled:
+                    isActionRunning("changes-commit") ||
+                    gitAction.isPending ||
+                    selectedChangedFiles.length === 0,
+                },
+                {
+                  id: "stash-selected",
+                  label: "Stash selected changes",
+                  disabled: isActionRunning("changes-stash") || selectedChangedFiles.length === 0,
+                },
+                contextMenuSeparator("discard-separator-before"),
+                {
+                  id: "discard-selected",
+                  label: "Discard selected changes",
+                  destructive: true,
+                  disabled:
+                    isActionRunning("changes-discard-selected") ||
+                    selectedChangedFiles.length === 0,
+                  icon: "trash",
+                },
+              ],
+              {
+                "select-all": () => setSelectedChangePaths(new Set(changedPaths)),
+                "clear-all": () => setSelectedChangePaths(new Set()),
+                "commit-selected": () => void runGeneratedPanelCommit(),
+                "stash-selected": () => void runGeneratedPanelStash(),
+                "discard-selected": discardSelectedChanges,
+              },
+            )
+          }
         >
           {expanded ? (
             <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />

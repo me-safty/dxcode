@@ -38,7 +38,7 @@ The Version Control panel has a compact repository summary at the top and two re
 
 `Remotes` is collapsed by default. The sections share the available panel height, each section owns its own overflow area, and section edges can be dragged to resize them relative to each other.
 
-The repository summary shows the current ref, upstream status, changed-file count and line stats, ahead-of-default context, operation progress, and current error state. There are no separate `Repository`, `Commit`, `Sync`, or `Diagnostics` sections in the current layout.
+The repository summary shows the current ref, upstream status, changed-file count and line stats, ahead-of-default context, and current error state. Git operation progress is shown in the action button that started the operation. There are no separate `Repository`, `Commit`, `Sync`, or `Diagnostics` sections in the current layout.
 
 ## Live Updates
 
@@ -69,13 +69,16 @@ The working-tree header actions are:
 - Clear all selected files.
 - Commit selected files.
 - Stash selected files.
+- Discard selected files, with confirmation.
 
 Commit selected and stash selected generate their messages by default. Holding Shift while pressing either action opens the same optional-message dialog path used by the existing Git action control: the commit field is labeled `Commit message (optional)`, its placeholder is `Leave empty to auto-generate`, and a blank message still uses the generation flow. The stash dialog behaves the same way for stash messages.
 
-File rows are compact. They show a one-letter status indicator such as `A`, `D`, or `M`, line change counts, and hover/focus-only action buttons. `+x` uses the added-line color and `-y` uses the removed-line color. Zero counts are hidden. Clicking the file row label itself does nothing. The row actions are:
+File rows are compact. They show a one-letter status indicator such as `A`, `D`, or `M`, line change counts, and hover/focus-only action buttons. `+x` uses the added-line color and `-y` uses the removed-line color. Zero counts are hidden. Expanding a file row opens an inline diff for that file change in working-tree, commit, stash, branch, and compare file lists. The row actions are:
 
 - Open file in the preferred editor or host bridge.
 - Discard changes, with confirmation.
+
+The `Working tree` context menu includes selected-file commit and stash actions plus a separated destructive `Discard selected changes` action.
 
 ## Branch Rows
 
@@ -98,28 +101,25 @@ Smart sync handles diverged branches by prompting for one of three choices: forc
 
 ## Branch Details
 
-Expanding a branch reveals collapsible subsections:
+Expanding a branch reveals branch details:
 
-- `Compare with ...`
+- `vs. ...`, a non-expandable compare-base row.
 - `X Ahead`
 - `Y Behind`
 - `History`
+- `Changes`
 
-Every expanded branch shows `Compare with ...`, even when the current comparison has no file changes. Its default base is the branch's upstream when available, otherwise the repository default comparison ref. The inline `choose` action opens a searchable ref picker so the user can choose another compare base. Compare rows do not show count prefixes. Empty ahead and behind subsections are hidden. Ahead and behind labels include the count directly in the title and use the same colored upload/download icons as branch sync indicators. `History` is expanded by default and loads commits in pages of 10. When more commits are available, a load-more row appends the next page inline until no more history remains.
+Every expanded branch shows the `vs. ...` row first. Its default base is the branch's upstream when available, otherwise the repository default comparison ref. Clicking the row opens a searchable ref picker so the user can choose another compare base. Compare rows do not show count prefixes or extra choose labels. Empty ahead and behind subsections are hidden. Ahead and behind labels include the count directly in the title and use the same colored upload/download icons as branch sync indicators. `History` is collapsed by default and loads commits in pages of 10. When more commits are available, a load-more row appends the next page inline until no more history remains.
 
-Expanding `Compare with ...` shows its own nested rows:
+The branch-level `Changes` row summarizes the selected comparison as file count and line stats before expanding to the changed-file list.
 
-- `X Ahead` and `Y Behind` relative to the selected compare base, hidden when empty.
-- `History`, starting at the most recent commit shared by both compared refs.
-- `Changes`, summarized as file count and line stats before expanding to the changed-file list.
+Branch-level `X Ahead` and `Y Behind` rows are only shown for branches that have an upstream. Local-only branches still support the `vs. ...` compare-base row, but they do not render upstream ahead/behind rows because there is no upstream relationship.
 
-Branch-level `X Ahead` and `Y Behind` rows are only shown for branches that have an upstream. Local-only branches still support `Compare with ...`, but they do not render upstream ahead/behind rows because there is no upstream relationship.
-
-Compare, ahead, behind, history, and changes file lists use the shared compact file-change row model.
+Ahead, behind, history, and changes file lists use the shared compact file-change row model.
 
 ## Commit Rows
 
-Commit rows appear in branch history, ahead/behind lists, compare results, and stash details. They show short SHA, author avatar when available, commit message, branch/tag labels, line-change indicators, and a relative date.
+Commit rows appear in branch history and ahead/behind lists. They show author avatar when available, commit message, branch/tag labels, line-change indicators, and a relative date. The short SHA is available from the commit tooltip and context-menu copy action rather than the row label.
 
 Commit labels are de-duplicated:
 
@@ -158,16 +158,16 @@ Creating a stash is done from the dirty `Working tree` row through `Stash select
 
 Each remote row shows the remote name and fetch URL. Remote action buttons appear on hover/focus and include fetch and remove.
 
-When local-only branches exist, `Remotes` also shows a `local` tree row with those unpublished branches. Publishing one local-only branch sets its upstream. If the repository has multiple remotes, the panel prompts for the remote to publish to.
+When local-only branches exist, `Remotes` also shows an `unpublished` tree row with those branches and an `x branch(es)` secondary label. Publishing one local-only branch sets its upstream. If the repository has multiple remotes, the panel prompts for the remote to publish to.
 
-Expanding a remote lists actual remote branches; pseudo-ref rows such as the remote name itself are de-duplicated. Remote branch rows use the same branch item model as `Actionable`, including local tracking state, `↑x`/`↓y` sync indicators, synced-local target icons, expandable compare/ahead/behind/history subsections, selectable compare bases, and branch actions.
+Expanding a remote lists actual remote branches; pseudo-ref rows such as the remote name itself are de-duplicated. Remote branch rows use the same branch item model as `Actionable`, including local tracking state, `↑x`/`↓y` sync indicators, synced-local target icons, selectable compare bases, branch details, and branch actions.
 
 ## Git Operations
 
 The panel routes all repository mutations through server-side RPC methods and refreshes status after operations. Implemented operation groups include:
 
 - Snapshot and detail loading: panel snapshot, branch details, branch commit pages, stash details, compare data, and file-change details.
-- Working tree operations: selected-file commit, selected-file stash, discard changed files, read/open file data, stage/unstage helpers kept at the service boundary for compatibility.
+- Working tree operations: selected-file commit, selected-file stash, discard selected files, discard individual changed files, read/open file data, stage/unstage helpers kept at the service boundary for compatibility.
 - Branch operations: fetch branch, pull, push, publish, switch, delete, undo latest commit, merge branch into current branch, and rebase current branch onto another branch or commit.
 - Commit operations: revert commit, checkout detached HEAD, and create branch from commit.
 - Stash operations: apply, pop, and drop.
@@ -177,7 +177,7 @@ Non-current branch fetches are scoped to the selected branch. Operation busy sta
 
 ## Error Handling
 
-Git action failures surface through the panel operation state and existing toast/error paths. Destructive actions such as discard, delete branch, remove remote, drop stash, force pull, and force push require confirmation or an explicit dialog choice before execution.
+Git action failures surface through the panel error state and existing toast/error paths. Panel errors are capped to a short scrollable block so large Git output cannot consume the full panel, and the error block has a floating copy action for debugging. Destructive actions such as discard selected changes, discard an individual file, delete branch, remove remote, drop stash, force pull, and force push require confirmation or an explicit dialog choice before execution.
 
 The panel keeps version-control actions server-authoritative across browser, desktop, VS Code, and remote clients. Client code does not directly execute Git commands.
 
