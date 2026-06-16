@@ -5,6 +5,12 @@ import * as Stream from "effect/Stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { WsTransport } from "./wsTransport.ts";
+import {
+  createWsRpcProtocolLayer,
+  type WsProtocolLifecycleHandlers,
+  type WsRpcHeartbeatConfig,
+  type WsRpcProtocolSocketUrlProvider,
+} from "./wsRpcProtocol.ts";
 
 type WsEventType = "open" | "message" | "close" | "error";
 type WsEvent = { code?: number; data?: unknown; reason?: string; type?: string };
@@ -100,6 +106,34 @@ function createTransport(...args: ConstructorParameters<typeof WsTransport>): Ws
   const transport = new WsTransport(...args);
   transports.push(transport);
   return transport;
+}
+
+function createHeartbeatTestTransport(
+  heartbeat: Required<WsRpcHeartbeatConfig>,
+  lifecycleHandlers?: WsProtocolLifecycleHandlers,
+): WsTransport {
+  return createTransport("ws://localhost:3020", lifecycleHandlers, {
+    createProtocolLayer: (
+      url: WsRpcProtocolSocketUrlProvider,
+      handlers?: WsProtocolLifecycleHandlers,
+    ) =>
+      createWsRpcProtocolLayer(url, handlers, {
+        backoff: {
+          initialDelayMs: 1,
+          backoffFactor: 1,
+          maxDelayMs: 1,
+          maxRetries: null,
+        },
+        heartbeat,
+      }),
+  });
+}
+
+function countSentPings(socket: MockWebSocket): number {
+  return socket.sent.filter((message) => {
+    const parsed = JSON.parse(message) as { readonly _tag?: string };
+    return parsed._tag === "Ping";
+  }).length;
 }
 
 beforeEach(() => {
@@ -265,6 +299,168 @@ describe("WsTransport", () => {
     await transport.reconnect();
 
     expect(transport.isHeartbeatFresh()).toBe(false);
+
+    await transport.dispose();
+  });
+
+  it("tolerates missed heartbeat pongs before timing out the websocket", async () => {
+    const onHeartbeatPing = vi.fn();
+    const onHeartbeatTimeout = vi.fn();
+    const transport = createHeartbeatTestTransport(
+      { pingIntervalMs: 25, missedPongLimit: 3 },
+      { onHeartbeatPing, onHeartbeatTimeout },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const socket = getSocket();
+    socket.open();
+
+    await waitFor(() => {
+      expect(countSentPings(socket)).toBe(3);
+    });
+
+    expect(sockets).toHaveLength(1);
+    expect(onHeartbeatPing).toHaveBeenCalledTimes(3);
+    expect(onHeartbeatTimeout).not.toHaveBeenCalled();
+
+    await transport.dispose();
+  });
+
+  it("reconnects after the heartbeat missed pong limit is reached", async () => {
+    const onHeartbeatTimeout = vi.fn();
+    const transport = createHeartbeatTestTransport(
+      { pingIntervalMs: 10, missedPongLimit: 2 },
+      { onHeartbeatTimeout },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    getSocket().open();
+
+    await waitFor(() => {
+      expect(onHeartbeatTimeout).toHaveBeenCalledOnce();
+    });
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    });
+
+    await transport.dispose();
+  });
+
+  it("re-subscribes live stream listeners after a heartbeat timeout reconnect", async () => {
+    const transport = createHeartbeatTestTransport({ pingIntervalMs: 10, missedPongLimit: 2 });
+    const listener = vi.fn();
+    const onResubscribe = vi.fn();
+
+    const unsubscribe = transport.subscribe(
+      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+      listener,
+      { onResubscribe, retryDelay: 1 },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const firstSocket = getSocket();
+    firstSocket.open();
+
+    await waitFor(() => {
+      expect(
+        firstSocket.sent.some((message) => message.includes(WS_METHODS.subscribeServerLifecycle)),
+      ).toBe(true);
+    });
+
+    const firstRequest = firstSocket.sent
+      .map((message) => JSON.parse(message) as { _tag?: string; id?: string; tag?: string })
+      .find(
+        (message): message is { _tag: "Request"; id: string; tag: string } =>
+          message._tag === "Request" && message.tag === WS_METHODS.subscribeServerLifecycle,
+      );
+    if (!firstRequest) {
+      throw new Error("Expected initial lifecycle subscription request");
+    }
+
+    firstSocket.serverMessage(
+      JSON.stringify({
+        _tag: "Chunk",
+        requestId: firstRequest.id,
+        values: [
+          {
+            version: 1,
+            sequence: 1,
+            type: "welcome",
+            payload: {
+              environment: {
+                environmentId: "environment-local",
+                label: "Local environment",
+                platform: { os: "darwin", arch: "arm64" },
+                serverVersion: "0.0.0-test",
+                capabilities: { repositoryIdentity: true },
+              },
+              cwd: "/tmp/one",
+              projectName: "one",
+            },
+          },
+        ],
+      }),
+    );
+
+    await waitFor(() => {
+      expect(listener).toHaveBeenCalledOnce();
+    });
+    await waitFor(() => {
+      expect(sockets).toHaveLength(2);
+    });
+
+    const secondSocket = getSocket();
+    secondSocket.open();
+
+    await waitFor(() => {
+      const secondRequest = secondSocket.sent
+        .map((message) => JSON.parse(message) as { _tag?: string; id?: string; tag?: string })
+        .find(
+          (message): message is { _tag: "Request"; id: string; tag: string } =>
+            message._tag === "Request" && message.tag === WS_METHODS.subscribeServerLifecycle,
+        );
+      expect(secondRequest).toBeDefined();
+    });
+    expect(onResubscribe).toHaveBeenCalled();
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
+  it("resets the missed heartbeat counter when a delayed pong arrives", async () => {
+    const onHeartbeatTimeout = vi.fn();
+    const transport = createHeartbeatTestTransport(
+      { pingIntervalMs: 20, missedPongLimit: 2 },
+      { onHeartbeatTimeout },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const socket = getSocket();
+    socket.open();
+
+    await waitFor(() => {
+      expect(countSentPings(socket)).toBe(1);
+    });
+    socket.serverMessage(JSON.stringify({ _tag: "Pong" }));
+
+    await waitFor(() => {
+      expect(countSentPings(socket)).toBe(3);
+    });
+
+    expect(sockets).toHaveLength(1);
+    expect(onHeartbeatTimeout).not.toHaveBeenCalled();
 
     await transport.dispose();
   });

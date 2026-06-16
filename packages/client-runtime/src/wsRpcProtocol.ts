@@ -11,6 +11,12 @@ import {
   getReconnectDelayMs,
   type ReconnectBackoffConfig,
 } from "./reconnectBackoff.ts";
+import {
+  makeWsRpcTolerantSocketProtocol,
+  type WsRpcHeartbeatConfig,
+} from "./wsRpcTolerantSocketProtocol.ts";
+
+export type { WsRpcHeartbeatConfig };
 
 export interface WsProtocolLifecycleHandlers {
   readonly getConnectionLabel?: () => string | null;
@@ -54,6 +60,8 @@ export interface WsRpcProtocolRequestTelemetry {
 export interface WsRpcProtocolOptions {
   /** Backoff configuration for reconnect retries. */
   readonly backoff?: ReconnectBackoffConfig;
+  /** Heartbeat configuration for browser WebSocket keepalive tolerance. */
+  readonly heartbeat?: WsRpcHeartbeatConfig;
   /**
    * Invoked before user {@link WsProtocolLifecycleHandlers} for each socket lifecycle event.
    * Use for additive telemetry (connection state, clearing request trackers on disconnect).
@@ -200,6 +208,7 @@ export function createWsRpcProtocolLayer(
   const lifecycle = resolveLifecycleHandlers(handlers, options?.telemetryLifecycle);
   const backoff = options?.backoff ?? DEFAULT_RECONNECT_BACKOFF;
   const requestTelemetry = options?.requestTelemetry;
+  const heartbeat = options?.heartbeat;
   const resolvedUrl =
     typeof url === "function"
       ? Effect.promise(() => url()).pipe(
@@ -274,9 +283,12 @@ export function createWsRpcProtocolLayer(
   const protocolLayer = Layer.effect(
     RpcClient.Protocol,
     Effect.map(
-      RpcClient.makeProtocolSocket({
+      makeWsRpcTolerantSocketProtocol({
         retryPolicy,
         retryTransientErrors: true,
+        ...(heartbeat ? { heartbeat } : {}),
+        onHeartbeatPing: lifecycle.onHeartbeatPing,
+        onHeartbeatTimeout: lifecycle.onHeartbeatTimeout,
       }),
       (protocol) => ({
         ...protocol,

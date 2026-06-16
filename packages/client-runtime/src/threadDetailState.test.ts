@@ -67,11 +67,29 @@ function createMockClient(): {
   client: ThreadDetailClient;
   listeners: Set<(event: OrchestrationThreadStreamItem) => void>;
   emit: (event: OrchestrationThreadStreamItem) => void;
+  resubscribe: () => void;
 } {
   const listeners = new Set<(event: OrchestrationThreadStreamItem) => void>();
+  const resubscribeListeners = new Set<() => void>();
   const client: ThreadDetailClient = {
-    subscribeThread: vi.fn((_input, listener: (event: OrchestrationThreadStreamItem) => void) =>
-      registerListener(listeners, listener),
+    subscribeThread: vi.fn(
+      (
+        _input,
+        listener: (event: OrchestrationThreadStreamItem) => void,
+        options?: { readonly onResubscribe?: () => void },
+      ) => {
+        const unregisterListener = registerListener(listeners, listener);
+        const onResubscribe = options?.onResubscribe;
+        if (onResubscribe) {
+          resubscribeListeners.add(onResubscribe);
+        }
+        return () => {
+          unregisterListener();
+          if (onResubscribe) {
+            resubscribeListeners.delete(onResubscribe);
+          }
+        };
+      },
     ),
   };
 
@@ -81,6 +99,11 @@ function createMockClient(): {
     emit: (event) => {
       for (const listener of listeners) {
         listener(event);
+      }
+    },
+    resubscribe: () => {
+      for (const listener of resubscribeListeners) {
+        listener();
       }
     },
   };
@@ -175,6 +198,105 @@ describe("createThreadDetailManager", () => {
       error: null,
       isPending: false,
       isDeleted: false,
+    });
+
+    release();
+  });
+
+  it("marks resubscribed threads pending until a fresh snapshot replaces stale detail", () => {
+    const { client, emit, resubscribe } = createMockClient();
+    const manager = createThreadDetailManager({
+      getRegistry: () => atomRegistry,
+      getClient: () => null,
+    });
+    const turnId = TurnId.make("turn-1");
+    const messageId = MessageId.make("message-1");
+    const staleThread: OrchestrationThread = {
+      ...BASE_THREAD,
+      latestTurn: {
+        turnId,
+        state: "running",
+        requestedAt: "2026-04-01T01:00:00.000Z",
+        startedAt: "2026-04-01T01:00:00.000Z",
+        completedAt: null,
+        assistantMessageId: messageId,
+      },
+      messages: [
+        {
+          id: messageId,
+          role: "assistant",
+          text: "partial",
+          turnId,
+          streaming: true,
+          createdAt: "2026-04-01T01:00:00.000Z",
+          updatedAt: "2026-04-01T01:00:00.000Z",
+        },
+      ],
+    };
+    const completedThread: OrchestrationThread = {
+      ...staleThread,
+      updatedAt: "2026-04-01T01:05:00.000Z",
+      latestTurn: {
+        turnId,
+        state: "completed",
+        requestedAt: "2026-04-01T01:00:00.000Z",
+        startedAt: "2026-04-01T01:00:00.000Z",
+        completedAt: "2026-04-01T01:05:00.000Z",
+        assistantMessageId: messageId,
+      },
+      messages: [
+        {
+          id: messageId,
+          role: "assistant",
+          text: "complete",
+          turnId,
+          streaming: false,
+          createdAt: "2026-04-01T01:00:00.000Z",
+          updatedAt: "2026-04-01T01:05:00.000Z",
+        },
+      ],
+    };
+
+    const release = manager.watch(TARGET, client);
+
+    emit({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 1,
+        thread: staleThread,
+      },
+    });
+    expect(manager.getSnapshot(TARGET)).toMatchObject({
+      data: {
+        latestTurn: { state: "running" },
+        messages: [{ streaming: true, text: "partial" }],
+      },
+      isPending: false,
+    });
+
+    resubscribe();
+    expect(manager.getSnapshot(TARGET)).toMatchObject({
+      data: {
+        latestTurn: { state: "running" },
+        messages: [{ streaming: true, text: "partial" }],
+      },
+      isPending: true,
+    });
+
+    emit({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 2,
+        thread: completedThread,
+      },
+    });
+
+    expect(manager.getSnapshot(TARGET)).toMatchObject({
+      data: {
+        latestTurn: { state: "completed" },
+        messages: [{ streaming: false, text: "complete" }],
+      },
+      isPending: false,
     });
 
     release();
