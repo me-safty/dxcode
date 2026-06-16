@@ -91,10 +91,9 @@ export function ThreadRouteScreen() {
     pendingConnectionError ?? routeEnvironmentRuntime?.connectionError ?? aggregateConnectionError;
 
   /* ─── Native header theming ──────────────────────────────────────── */
-  const isDark = useColorScheme() === "dark";
   const iconColor = String(useThemeColor("--color-icon"));
   const foregroundColor = String(useThemeColor("--color-foreground"));
-  const secondaryFg = isDark ? "#a3a3a3" : "#525252";
+  const secondaryFg = String(useThemeColor("--color-foreground-secondary"));
 
   /* ─── Git status for native header trigger ───────────────────────── */
   const gitStatus = useVcsStatus({

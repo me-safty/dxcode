@@ -28,6 +28,7 @@ import {
   useClerkSettingsSheetDetent,
 } from "../features/cloud/ClerkSettingsSheetDetent";
 import { useAgentNotificationNavigation } from "../features/agent-awareness/notificationNavigation";
+import { useThemeColor } from "../lib/useThemeColor";
 
 function AppNavigator() {
   const pathname = usePathname();
@@ -44,7 +45,7 @@ function AppNavigatorContent() {
   const { isLoadingSavedConnection } = useRemoteEnvironmentState();
   const { collapse, isExpanded } = useClerkSettingsSheetDetent();
   const colorScheme = useColorScheme();
-  const statusBarBg = colorScheme === "dark" ? "#0a0a0a" : "#f2f2f7";
+  const statusBarBg = useThemeColor("--color-status-bar");
   const sheetStyle = useResolveClassNames("bg-sheet");
   useAgentNotificationNavigation();
 
@@ -88,7 +89,7 @@ function AppNavigatorContent() {
     <>
       <StatusBar
         barStyle={colorScheme === "dark" ? "light-content" : "dark-content"}
-        backgroundColor={statusBarBg as string}
+        backgroundColor={String(statusBarBg)}
         translucent
       />
       <Stack screenOptions={{ headerShown: false }}>
