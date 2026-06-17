@@ -188,6 +188,8 @@ Primary reference:
 
 This branch includes a first-class Version Control panel that is not assumed to exist on `main`. Treat the Version Control singleton right-panel surface, VS Code host display setting, live VCS status watcher, Actionable and Remotes panel model, selected-file commit/stash flow, branch/commit/stash/remote actions, and Version Control panel RPC/contracts as part of this branch's customization set during upstream merges.
 
+Preserve the branch-local idle-power safeguards for VCS status: ignore internal `.git/` watcher events before refreshing local status, and keep the default automatic remote Git fetch interval conservative unless upstream provides equivalent lower-churn VCS status behavior.
+
 The implementation details are intentionally kept in `SOURCE_CONTROL.md` instead of being duplicated here. Unlike the other sections in this file, `CUSTOMIZED.md` should only preserve the merge-maintenance rule for this area: keep the Version Control panel work unless `main` has gained an equivalent agent-aware version-control panel, then reconcile against the detailed source-control note.
 
 Primary reference:
@@ -220,8 +222,9 @@ When merging from upstream, keep these local behaviors unless upstream has an eq
 3. Chat conversation and composer surfaces default to no maximum width across all host types.
 4. VS Code extension work remains preserved as a local customization unless `main` has an equivalent implementation; use `apps/vscode-extension/IMPLEMENTATION.md` as the detailed source of truth.
 5. Version Control panel work remains preserved as a local customization unless `main` has an equivalent agent-aware version-control panel; use `SOURCE_CONTROL.md` as the detailed source of truth.
-6. Terminal-backed project actions reuse action terminals where possible and wait for terminal readiness before writing commands.
-7. Mobile EAS project ownership remains pointed at the local Expo project used for installable preview builds unless deliberately changed.
+6. Version Control idle-power safeguards continue to ignore internal `.git/` watcher churn and use a conservative automatic remote Git fetch interval unless upstream ships equivalent low-churn behavior.
+7. Terminal-backed project actions reuse action terminals where possible and wait for terminal readiness before writing commands.
+8. Mobile EAS project ownership remains pointed at the local Expo project used for installable preview builds unless deliberately changed.
 
 ## Retirement Criteria
 
