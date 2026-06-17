@@ -160,7 +160,11 @@ import {
   type TerminalContextDraft,
   type TerminalContextSelection,
 } from "../lib/terminalContext";
-import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import {
+  selectTerminalDevServerLinks,
+  selectThreadTerminalState,
+  useTerminalStateStore,
+} from "../terminalStateStore";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -224,6 +228,7 @@ import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainActiveThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
+import { mergeDevServerLinks } from "../devServerLinks";
 import {
   buildVersionMismatchDismissalKey,
   dismissVersionMismatch,
@@ -902,6 +907,7 @@ export default function ChatView(props: ChatViewProps) {
   const storeNewTerminal = useTerminalStateStore((s) => s.newTerminal);
   const storeSetActiveTerminal = useTerminalStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalStateStore((s) => s.closeTerminal);
+  const storeRecordTerminalSnapshot = useTerminalStateStore((s) => s.recordTerminalSnapshot);
   const serverThreadKeys = useStore(
     useShallow((state) =>
       selectThreadsAcrossEnvironments(state).map((thread) =>
@@ -978,6 +984,76 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const activeThreadEnvironmentId = activeThreadRef?.environmentId ?? null;
+  const activeThreadIdForTerminalSnapshot = activeThreadRef?.threadId ?? null;
+  const activeRunningTerminalIdKey = terminalState.runningTerminalIds.join("\u0000");
+  const devServerLinks = useTerminalStateStore(
+    useShallow((state) => {
+      if (!activeThreadRef) return [];
+      return mergeDevServerLinks(
+        terminalState.runningTerminalIds.flatMap((terminalId) =>
+          selectTerminalDevServerLinks(
+            state.terminalDevServerLinksByKey,
+            activeThreadRef,
+            terminalId,
+          ),
+        ),
+      );
+    }),
+  );
+  useEffect(() => {
+    if (
+      !activeThreadEnvironmentId ||
+      !activeThreadIdForTerminalSnapshot ||
+      terminalState.runningTerminalIds.length === 0
+    ) {
+      return;
+    }
+
+    const api = readEnvironmentApi(activeThreadEnvironmentId);
+    if (!api) {
+      return;
+    }
+
+    let disposed = false;
+    const threadRef = scopeThreadRef(activeThreadEnvironmentId, activeThreadIdForTerminalSnapshot);
+    for (const terminalId of terminalState.runningTerminalIds) {
+      void api.terminal
+        .snapshot({
+          threadId: activeThreadIdForTerminalSnapshot,
+          terminalId,
+        })
+        .then((snapshot) => {
+          if (disposed) return;
+          storeRecordTerminalSnapshot(threadRef, snapshot);
+        })
+        .catch(() => undefined);
+    }
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    activeRunningTerminalIdKey,
+    activeThreadEnvironmentId,
+    activeThreadIdForTerminalSnapshot,
+    storeRecordTerminalSnapshot,
+    terminalState.runningTerminalIds,
+  ]);
+  const probeDevServerUrl = useCallback(
+    async (url: string): Promise<boolean> => {
+      if (!activeThreadEnvironmentId) {
+        return false;
+      }
+      const api = readEnvironmentApi(activeThreadEnvironmentId);
+      if (!api) {
+        return false;
+      }
+      const result = await api.server.probeDevServerUrl({ url });
+      return result.reachable;
+    },
+    [activeThreadEnvironmentId],
+  );
   const lastDiffRouteTargetRef = useRef<LastDiffRouteTarget | null>(null);
   useEffect(() => {
     if (!diffOpen || !activeThreadKey) {
@@ -4431,6 +4507,8 @@ export default function ChatView(props: ChatViewProps) {
           gitCwd={gitCwd}
           diffOpen={diffOpen}
           sourceControlOpen={sourceControlOpen}
+          devServerLinks={devServerLinks}
+          probeDevServerUrl={probeDevServerUrl}
           fileExplorerAvailable={fileExplorerAvailable}
           fileExplorerOpen={fileExplorerOpen}
           onRunProjectScript={runProjectScript}

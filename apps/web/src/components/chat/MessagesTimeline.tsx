@@ -147,11 +147,12 @@ const MAINTAIN_VISIBLE_CONTENT_POSITION_DATA_ANCHORED = {
   data: true,
   size: true,
 } as const;
-// Render the whole loaded conversation up front instead of a small moving window.
-// v3 has no per-item size estimate, so a row first measured during scroll forces
-// a maintainVisibleContentPosition scroll correction. Drawing the loaded page
-// up front avoids that correction while pagination still bounds the row count.
-const TIMELINE_DRAW_DISTANCE_PX = 1_000_000;
+// Keep a small overscan window above and below the viewport so off-screen rows
+// are recycled instead of all being mounted at once. A larger window avoids the
+// occasional maintainVisibleContentPosition scroll correction when a row is first
+// measured during scroll, but mounting the whole page is far more expensive than
+// the rare correction, so prefer a tight window (~a couple screens of rows).
+const TIMELINE_DRAW_DISTANCE_PX = 2_000;
 const TIMELINE_ESTIMATED_ROW_SIZE_PX = 150;
 
 /** Tracks which work entries have already been displayed, so the fade-in-down

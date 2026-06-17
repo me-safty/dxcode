@@ -395,6 +395,16 @@ export const ServerSignalProcessResult = Schema.Struct({
 });
 export type ServerSignalProcessResult = typeof ServerSignalProcessResult.Type;
 
+export const ServerProbeDevServerUrlInput = Schema.Struct({
+  url: TrimmedNonEmptyString,
+});
+export type ServerProbeDevServerUrlInput = typeof ServerProbeDevServerUrlInput.Type;
+
+export const ServerProbeDevServerUrlResult = Schema.Struct({
+  reachable: Schema.Boolean,
+});
+export type ServerProbeDevServerUrlResult = typeof ServerProbeDevServerUrlResult.Type;
+
 export const ServerConfig = Schema.Struct({
   environment: ExecutionEnvironmentDescriptor,
   auth: ServerAuthDescriptor,

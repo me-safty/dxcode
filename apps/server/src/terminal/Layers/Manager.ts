@@ -1847,6 +1847,16 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         }),
       );
 
+    const readSnapshot: TerminalManagerShape["snapshot"] = (input) =>
+      withThreadLock(
+        input.threadId,
+        Effect.gen(function* () {
+          const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
+          const session = yield* requireSession(input.threadId, terminalId);
+          return snapshot(session);
+        }),
+      );
+
     const restart: TerminalManagerShape["restart"] = (input) =>
       withThreadLock(
         input.threadId,
@@ -1953,6 +1963,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       write,
       resize,
       clear,
+      snapshot: readSnapshot,
       restart,
       close,
       subscribe: (listener) =>

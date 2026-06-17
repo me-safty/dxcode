@@ -4,10 +4,12 @@ import {
   type ProjectScript,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
+  GlobeIcon,
   DiffIcon,
   EllipsisIcon,
+  ExternalLinkIcon,
   FolderTreeIcon,
   GitBranchIcon,
   TerminalSquareIcon,
@@ -26,6 +28,8 @@ import {
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Button } from "../ui/button";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { readLocalApi } from "../../localApi";
+import { probeDevServerReachable, type DevServerLink } from "../../devServerLinks";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -45,6 +49,8 @@ interface ChatHeaderProps {
   gitCwd: string | null;
   diffOpen: boolean;
   sourceControlOpen: boolean;
+  devServerLinks: ReadonlyArray<DevServerLink>;
+  probeDevServerUrl: (url: string) => Promise<boolean>;
   fileExplorerAvailable: boolean;
   fileExplorerOpen: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
@@ -87,6 +93,8 @@ export const ChatHeader = memo(function ChatHeader({
   gitCwd,
   diffOpen,
   sourceControlOpen,
+  devServerLinks,
+  probeDevServerUrl,
   fileExplorerAvailable,
   fileExplorerOpen,
   onRunProjectScript,
@@ -184,6 +192,9 @@ export const ChatHeader = memo(function ChatHeader({
             />
           </>
         )}
+        {isCompactHeader ? (
+          <MobileDevServerButton links={devServerLinks} probe={probeDevServerUrl} />
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -309,3 +320,327 @@ export const ChatHeader = memo(function ChatHeader({
     </div>
   );
 });
+
+const DEV_SERVER_WINDOW_TARGET = "salchi-dev-server-preview";
+const DEV_SERVER_PROBE_INITIAL_DELAY_MS = 250;
+const DEV_SERVER_PROBE_INTERVAL_MS = 5000;
+
+let activeDevServerWindow: Window | null = null;
+type DevServerReachabilityStatus = "checking" | "reachable" | "unreachable";
+
+function shouldUseBrowserDevServerWindow(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.desktopBridge === undefined &&
+    window.nativeApi === undefined
+  );
+}
+
+function openBrowserDevServerWindow(url: string): void {
+  if (typeof window === "undefined") return;
+
+  if (activeDevServerWindow && !activeDevServerWindow.closed) {
+    try {
+      activeDevServerWindow.location.href = url;
+      activeDevServerWindow.focus();
+      return;
+    } catch {
+      activeDevServerWindow = null;
+    }
+  }
+
+  const opened = window.open(url, DEV_SERVER_WINDOW_TARGET);
+  if (!opened) return;
+
+  activeDevServerWindow = opened;
+  try {
+    opened.opener = null;
+  } catch {
+    // Some browser WindowProxy implementations reject opener writes.
+  }
+  opened.focus();
+}
+
+export function __resetDevServerWindowForTests(): void {
+  activeDevServerWindow = null;
+}
+
+export function openDevServerLink(url: string): void {
+  if (shouldUseBrowserDevServerWindow()) {
+    openBrowserDevServerWindow(url);
+    return;
+  }
+
+  void readLocalApi()
+    ?.shell.openExternal(url)
+    .catch(() => undefined);
+}
+
+function reconcileProbeStatuses(
+  current: ReadonlyMap<string, DevServerReachabilityStatus>,
+  urls: ReadonlyArray<string>,
+): ReadonlyMap<string, DevServerReachabilityStatus> {
+  let changed = false;
+  const allowedUrls = new Set(urls);
+  const next = new Map<string, DevServerReachabilityStatus>();
+
+  for (const [url, status] of current) {
+    if (allowedUrls.has(url)) {
+      next.set(url, status);
+    } else {
+      changed = true;
+    }
+  }
+
+  for (const url of urls) {
+    if (!next.has(url)) {
+      next.set(url, "checking");
+      changed = true;
+    }
+  }
+
+  return changed ? next : current;
+}
+
+function useDevServerReachability(
+  links: ReadonlyArray<DevServerLink>,
+  probe: (url: string) => Promise<boolean>,
+): ReadonlyMap<string, DevServerReachabilityStatus> {
+  const [probeStatuses, setProbeStatuses] = useState<
+    ReadonlyMap<string, DevServerReachabilityStatus>
+  >(() => new Map());
+  // Keep the latest probe without retriggering the polling effect when the
+  // parent passes a fresh callback identity on each render.
+  const probeRef = useRef(probe);
+  probeRef.current = probe;
+  const urlKey = links.map((link) => link.url).join("\u0000");
+
+  useEffect(() => {
+    const urls = urlKey.length > 0 ? [...new Set(urlKey.split("\u0000"))] : [];
+    setProbeStatuses((current) => reconcileProbeStatuses(current, urls));
+
+    if (urls.length === 0) {
+      return;
+    }
+
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const browserHostname = typeof window === "undefined" ? "" : window.location.hostname;
+
+    const updateReachability = (url: string, reachable: boolean) => {
+      if (disposed) return;
+
+      setProbeStatuses((current) => {
+        if (!current.has(url)) return current;
+        const nextStatus: DevServerReachabilityStatus = reachable ? "reachable" : "unreachable";
+        if (current.get(url) === nextStatus) return current;
+
+        const next = new Map(current);
+        next.set(url, nextStatus);
+        return next;
+      });
+    };
+
+    const probeUrls = () => {
+      for (const url of urls) {
+        void probeDevServerReachable(url, {
+          browserHostname,
+          probe: (target) => probeRef.current(target),
+        })
+          .then((reachable) => updateReachability(url, reachable))
+          .catch(() => updateReachability(url, false));
+      }
+    };
+
+    const scheduleProbe = (delayMs: number) => {
+      timer = setTimeout(() => {
+        timer = null;
+        probeUrls();
+        if (!disposed) {
+          scheduleProbe(DEV_SERVER_PROBE_INTERVAL_MS);
+        }
+      }, delayMs);
+    };
+
+    scheduleProbe(DEV_SERVER_PROBE_INITIAL_DELAY_MS);
+
+    return () => {
+      disposed = true;
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+    };
+  }, [urlKey]);
+
+  return probeStatuses;
+}
+
+function aggregateProbeStatus(
+  links: ReadonlyArray<DevServerLink>,
+  probeStatuses: ReadonlyMap<string, DevServerReachabilityStatus>,
+): DevServerReachabilityStatus | null {
+  if (links.length === 0) return null;
+  const statuses = new Set(links.map((link) => probeStatuses.get(link.url) ?? "checking"));
+  if (statuses.has("reachable")) return "reachable";
+  if (statuses.has("checking")) return "checking";
+  return "unreachable";
+}
+
+function devServerReachabilityDotClassName(status: DevServerReachabilityStatus): string {
+  if (status === "reachable") {
+    return "block size-2 shrink-0 rounded-full bg-emerald-500 ring-2 ring-emerald-500/20";
+  }
+  if (status === "checking") {
+    return "block size-2 shrink-0 animate-pulse rounded-full bg-muted-foreground/60";
+  }
+  return "block size-2 shrink-0 rounded-full bg-muted-foreground/40";
+}
+
+function DevServerReachabilityDot({ status }: { readonly status: DevServerReachabilityStatus }) {
+  return <span aria-hidden="true" className={devServerReachabilityDotClassName(status)} />;
+}
+
+function DevServerBrowserIcon({
+  className,
+  status,
+}: {
+  readonly className: string;
+  readonly status: DevServerReachabilityStatus | null;
+}) {
+  return (
+    <span className="relative inline-flex">
+      <GlobeIcon className={className} />
+      {status === "reachable" ? (
+        <span
+          aria-hidden="true"
+          className={`${devServerReachabilityDotClassName(status)} -right-1 -top-1 absolute border border-background`}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+function MobileDevServerButton({
+  links,
+  probe,
+}: {
+  readonly links: ReadonlyArray<DevServerLink>;
+  readonly probe: (url: string) => Promise<boolean>;
+}) {
+  const hasLinks = links.length > 0;
+  const [disabledTooltipOpen, setDisabledTooltipOpen] = useState(false);
+  const disabledTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const probeStatuses = useDevServerReachability(links, probe);
+  const headerProbeStatus = aggregateProbeStatus(links, probeStatuses);
+  const tooltipLabel = hasLinks
+    ? links.length === 1
+      ? (links[0]?.displayUrl ?? "Open dev server")
+      : "Open dev server"
+    : "No running dev servers";
+  const buttonClassName = hasLinks
+    ? "shrink-0 text-foreground hover:text-foreground"
+    : "shrink-0 cursor-default opacity-64";
+  const iconClassName = hasLinks
+    ? "size-4.5 text-foreground sm:size-3"
+    : "size-4.5 text-muted-foreground opacity-80 sm:size-3.5";
+
+  useEffect(() => {
+    if (!hasLinks) return;
+    if (disabledTooltipTimerRef.current !== null) {
+      clearTimeout(disabledTooltipTimerRef.current);
+      disabledTooltipTimerRef.current = null;
+    }
+    setDisabledTooltipOpen(false);
+  }, [hasLinks]);
+
+  useEffect(
+    () => () => {
+      if (disabledTooltipTimerRef.current !== null) {
+        clearTimeout(disabledTooltipTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const showDisabledTooltip = () => {
+    if (hasLinks) return;
+    setDisabledTooltipOpen(true);
+
+    if (disabledTooltipTimerRef.current !== null) {
+      clearTimeout(disabledTooltipTimerRef.current);
+    }
+    disabledTooltipTimerRef.current = setTimeout(() => {
+      disabledTooltipTimerRef.current = null;
+      setDisabledTooltipOpen(false);
+    }, 1600);
+  };
+
+  if (links.length > 1) {
+    return (
+      <Tooltip>
+        <Menu>
+          <TooltipTrigger
+            render={
+              <MenuTrigger
+                render={
+                  <Button
+                    aria-label="Open detected dev server"
+                    className={buttonClassName}
+                    size="icon-xs"
+                    variant="outline"
+                  />
+                }
+              >
+                <DevServerBrowserIcon className={iconClassName} status={headerProbeStatus} />
+              </MenuTrigger>
+            }
+          />
+          <TooltipPopup side="bottom">{tooltipLabel}</TooltipPopup>
+          <MenuPopup align="end" side="bottom" className="min-w-56">
+            {links.map((link) => (
+              <MenuItem key={link.url} onClick={() => openDevServerLink(link.url)}>
+                <DevServerReachabilityDot status={probeStatuses.get(link.url) ?? "checking"} />
+                <span className="min-w-0 flex-1 truncate font-mono text-xs">{link.displayUrl}</span>
+                <ExternalLinkIcon
+                  aria-hidden="true"
+                  className="ml-auto size-3.5 shrink-0 text-muted-foreground opacity-80"
+                />
+              </MenuItem>
+            ))}
+          </MenuPopup>
+        </Menu>
+      </Tooltip>
+    );
+  }
+
+  const link = links[0] ?? null;
+  return (
+    <Tooltip open={link ? undefined : disabledTooltipOpen}>
+      <TooltipTrigger
+        render={
+          <Button
+            aria-label={link ? `Open ${link.displayUrl}` : "No running dev servers"}
+            aria-disabled={!link}
+            className={buttonClassName}
+            onClick={
+              link
+                ? () => openDevServerLink(link.url)
+                : (event) => {
+                    event.preventDefault();
+                    showDisabledTooltip();
+                  }
+            }
+            onFocus={!link ? showDisabledTooltip : undefined}
+            onPointerDown={!link ? showDisabledTooltip : undefined}
+            onPointerEnter={!link ? showDisabledTooltip : undefined}
+            size="icon-xs"
+            variant="outline"
+          >
+            <DevServerBrowserIcon className={iconClassName} status={headerProbeStatus} />
+          </Button>
+        }
+      />
+      <TooltipPopup side="bottom">{tooltipLabel}</TooltipPopup>
+    </Tooltip>
+  );
+}

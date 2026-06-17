@@ -40,6 +40,8 @@ import type {
 import type { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import type {
   ServerConfig,
+  ServerProbeDevServerUrlInput,
+  ServerProbeDevServerUrlResult,
   ServerProcessDiagnosticsResult,
   ServerProcessResourceHistoryInput,
   ServerProcessResourceHistoryResult,
@@ -66,6 +68,7 @@ import type {
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalRestartInput,
+  TerminalSnapshotInput,
   TerminalSessionSnapshot,
   TerminalWriteInput,
 } from "./terminal.ts";
@@ -549,6 +552,7 @@ export interface EnvironmentApi {
     write: (input: typeof TerminalWriteInput.Encoded) => Promise<void>;
     resize: (input: typeof TerminalResizeInput.Encoded) => Promise<void>;
     clear: (input: typeof TerminalClearInput.Encoded) => Promise<void>;
+    snapshot: (input: typeof TerminalSnapshotInput.Encoded) => Promise<TerminalSessionSnapshot>;
     restart: (input: typeof TerminalRestartInput.Encoded) => Promise<TerminalSessionSnapshot>;
     close: (input: typeof TerminalCloseInput.Encoded) => Promise<void>;
     onEvent: (callback: (event: TerminalEvent) => void) => () => void;
@@ -602,6 +606,11 @@ export interface EnvironmentApi {
     preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Promise<GitPreparePullRequestThreadResult>;
+  };
+  server: {
+    probeDevServerUrl: (
+      input: ServerProbeDevServerUrlInput,
+    ) => Promise<ServerProbeDevServerUrlResult>;
   };
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;

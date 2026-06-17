@@ -6,9 +6,18 @@
  */
 
 import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime";
-import { type ScopedThreadRef, type TerminalEvent } from "@t3tools/contracts";
+import {
+  type ScopedThreadRef,
+  type TerminalEvent,
+  type TerminalSessionSnapshot,
+} from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import {
+  detectDevServerLinksFromText,
+  mergeDevServerLinks,
+  type DevServerLink,
+} from "./devServerLinks";
 import { resolveStorage } from "./lib/storage";
 import { terminalRunningSubprocessFromEvent } from "./terminalActivity";
 import {
@@ -39,8 +48,11 @@ export interface TerminalEventEntry {
 }
 
 const TERMINAL_STATE_STORAGE_KEY = "t3code:terminal-state:v1";
+const EMPTY_DEV_SERVER_LINKS: ReadonlyArray<DevServerLink> = [];
 const EMPTY_TERMINAL_EVENT_ENTRIES: ReadonlyArray<TerminalEventEntry> = [];
 const MAX_TERMINAL_EVENT_BUFFER = 200;
+const MAX_TERMINAL_SNAPSHOT_HISTORY_LINES = 5_000;
+const DEV_SERVER_LINK_DETECTION_HISTORY_TAIL_CHARS = 4_096;
 
 interface PersistedTerminalStateStoreState {
   terminalStateByThreadKey?: Record<string, ThreadTerminalState>;
@@ -300,6 +312,327 @@ function appendTerminalEventEntry(
     },
     nextTerminalEventId: nextTerminalEventId + 1,
   };
+}
+
+function capTerminalSnapshotHistory(history: string): string {
+  if (history.length === 0) return history;
+  const hasTrailingNewline = history.endsWith("\n");
+  const lines = history.split("\n");
+  if (hasTrailingNewline) {
+    lines.pop();
+  }
+  if (lines.length <= MAX_TERMINAL_SNAPSHOT_HISTORY_LINES) return history;
+  const capped = lines.slice(lines.length - MAX_TERMINAL_SNAPSHOT_HISTORY_LINES).join("\n");
+  return hasTrailingNewline ? `${capped}\n` : capped;
+}
+
+function normalizeTerminalSessionSnapshot(
+  snapshot: TerminalSessionSnapshot,
+): TerminalSessionSnapshot {
+  const history = capTerminalSnapshotHistory(snapshot.history);
+  return history === snapshot.history ? snapshot : { ...snapshot, history };
+}
+
+function terminalSnapshotKey(threadRef: ScopedThreadRef, terminalId: string): string {
+  return terminalEventBufferKey(threadRef, terminalId);
+}
+
+function terminalDevServerLinksKey(threadRef: ScopedThreadRef, terminalId: string): string {
+  return terminalEventBufferKey(threadRef, terminalId);
+}
+
+function devServerLinksEqual(
+  left: ReadonlyArray<DevServerLink> | undefined,
+  right: ReadonlyArray<DevServerLink>,
+): boolean {
+  if (!left || left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    const leftLink = left[index];
+    const rightLink = right[index];
+    if (!leftLink || !rightLink) return false;
+    if (
+      leftLink.url !== rightLink.url ||
+      leftLink.displayUrl !== rightLink.displayUrl ||
+      leftLink.label !== rightLink.label ||
+      leftLink.host !== rightLink.host ||
+      leftLink.port !== rightLink.port
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function setTerminalDevServerLinks(
+  terminalDevServerLinksByKey: Record<string, ReadonlyArray<DevServerLink>>,
+  threadRef: ScopedThreadRef,
+  terminalId: string,
+  links: ReadonlyArray<DevServerLink>,
+): Record<string, ReadonlyArray<DevServerLink>> {
+  const key = terminalDevServerLinksKey(threadRef, terminalId);
+  const nextLinks = mergeDevServerLinks(links);
+  if (nextLinks.length === 0) {
+    if (!terminalDevServerLinksByKey[key]) {
+      return terminalDevServerLinksByKey;
+    }
+    const { [key]: _removed, ...rest } = terminalDevServerLinksByKey;
+    return rest;
+  }
+  if (devServerLinksEqual(terminalDevServerLinksByKey[key], nextLinks)) {
+    return terminalDevServerLinksByKey;
+  }
+  return {
+    ...terminalDevServerLinksByKey,
+    [key]: nextLinks,
+  };
+}
+
+function mergeTerminalDevServerLinks(
+  terminalDevServerLinksByKey: Record<string, ReadonlyArray<DevServerLink>>,
+  threadRef: ScopedThreadRef,
+  terminalId: string,
+  links: ReadonlyArray<DevServerLink>,
+): Record<string, ReadonlyArray<DevServerLink>> {
+  if (links.length === 0) return terminalDevServerLinksByKey;
+  const current =
+    terminalDevServerLinksByKey[terminalDevServerLinksKey(threadRef, terminalId)] ??
+    EMPTY_DEV_SERVER_LINKS;
+  return setTerminalDevServerLinks(terminalDevServerLinksByKey, threadRef, terminalId, [
+    ...links,
+    ...current,
+  ]);
+}
+
+function linkDetectionTextForOutput(history: string, data: string): string {
+  if (history.length <= DEV_SERVER_LINK_DETECTION_HISTORY_TAIL_CHARS) {
+    return `${history}${data}`;
+  }
+  return `${history.slice(-DEV_SERVER_LINK_DETECTION_HISTORY_TAIL_CHARS)}${data}`;
+}
+
+function updateTerminalDevServerLinksForEvent(
+  terminalDevServerLinksByKey: Record<string, ReadonlyArray<DevServerLink>>,
+  threadRef: ScopedThreadRef,
+  event: TerminalEvent,
+  currentSnapshot: TerminalSessionSnapshot | undefined,
+): Record<string, ReadonlyArray<DevServerLink>> {
+  switch (event.type) {
+    case "started":
+    case "restarted":
+      return setTerminalDevServerLinks(
+        terminalDevServerLinksByKey,
+        threadRef,
+        event.terminalId,
+        event.snapshot.status === "running"
+          ? detectDevServerLinksFromText(event.snapshot.history)
+          : EMPTY_DEV_SERVER_LINKS,
+      );
+    case "output":
+      return mergeTerminalDevServerLinks(
+        terminalDevServerLinksByKey,
+        threadRef,
+        event.terminalId,
+        detectDevServerLinksFromText(
+          linkDetectionTextForOutput(currentSnapshot?.history ?? "", event.data),
+        ),
+      );
+    case "activity":
+      return event.hasRunningSubprocess
+        ? terminalDevServerLinksByKey
+        : setTerminalDevServerLinks(
+            terminalDevServerLinksByKey,
+            threadRef,
+            event.terminalId,
+            EMPTY_DEV_SERVER_LINKS,
+          );
+    case "cleared":
+    case "exited":
+    case "error":
+      return setTerminalDevServerLinks(
+        terminalDevServerLinksByKey,
+        threadRef,
+        event.terminalId,
+        EMPTY_DEV_SERVER_LINKS,
+      );
+  }
+}
+
+function updateTerminalDevServerLinksForSnapshot(
+  terminalDevServerLinksByKey: Record<string, ReadonlyArray<DevServerLink>>,
+  threadRef: ScopedThreadRef,
+  snapshot: TerminalSessionSnapshot,
+): Record<string, ReadonlyArray<DevServerLink>> {
+  if (snapshot.status !== "running") {
+    return setTerminalDevServerLinks(
+      terminalDevServerLinksByKey,
+      threadRef,
+      snapshot.terminalId,
+      EMPTY_DEV_SERVER_LINKS,
+    );
+  }
+  return mergeTerminalDevServerLinks(
+    terminalDevServerLinksByKey,
+    threadRef,
+    snapshot.terminalId,
+    detectDevServerLinksFromText(snapshot.history),
+  );
+}
+
+function removeTerminalDevServerLinksForThread(
+  terminalDevServerLinksByKey: Record<string, ReadonlyArray<DevServerLink>>,
+  threadKey: string,
+): Record<string, ReadonlyArray<DevServerLink>> {
+  const nextTerminalDevServerLinksByKey = { ...terminalDevServerLinksByKey };
+  let removedLinks = false;
+  for (const key of Object.keys(nextTerminalDevServerLinksByKey)) {
+    if (key.startsWith(`${threadKey}\u0000`)) {
+      delete nextTerminalDevServerLinksByKey[key];
+      removedLinks = true;
+    }
+  }
+  return removedLinks ? nextTerminalDevServerLinksByKey : terminalDevServerLinksByKey;
+}
+
+function removeTerminalDevServerLinks(
+  terminalDevServerLinksByKey: Record<string, ReadonlyArray<DevServerLink>>,
+  threadRef: ScopedThreadRef,
+  terminalId: string,
+): Record<string, ReadonlyArray<DevServerLink>> {
+  const key = terminalDevServerLinksKey(threadRef, terminalId);
+  if (!terminalDevServerLinksByKey[key]) {
+    return terminalDevServerLinksByKey;
+  }
+  const { [key]: _removed, ...rest } = terminalDevServerLinksByKey;
+  return rest;
+}
+
+function upsertTerminalSessionSnapshot(
+  terminalSessionSnapshotsByKey: Record<string, TerminalSessionSnapshot>,
+  threadRef: ScopedThreadRef,
+  snapshot: TerminalSessionSnapshot,
+): Record<string, TerminalSessionSnapshot> {
+  const normalizedSnapshot = normalizeTerminalSessionSnapshot(snapshot);
+  const key = terminalSnapshotKey(threadRef, normalizedSnapshot.terminalId);
+  const current = terminalSessionSnapshotsByKey[key];
+  if (
+    current?.threadId === normalizedSnapshot.threadId &&
+    current.terminalId === normalizedSnapshot.terminalId &&
+    current.cwd === normalizedSnapshot.cwd &&
+    current.worktreePath === normalizedSnapshot.worktreePath &&
+    current.status === normalizedSnapshot.status &&
+    current.pid === normalizedSnapshot.pid &&
+    current.history === normalizedSnapshot.history &&
+    current.exitCode === normalizedSnapshot.exitCode &&
+    current.exitSignal === normalizedSnapshot.exitSignal &&
+    current.updatedAt === normalizedSnapshot.updatedAt
+  ) {
+    return terminalSessionSnapshotsByKey;
+  }
+  return {
+    ...terminalSessionSnapshotsByKey,
+    [key]: normalizedSnapshot,
+  };
+}
+
+function updateTerminalSessionSnapshotsForEvent(
+  terminalSessionSnapshotsByKey: Record<string, TerminalSessionSnapshot>,
+  threadRef: ScopedThreadRef,
+  event: TerminalEvent,
+): Record<string, TerminalSessionSnapshot> {
+  if (event.type === "started" || event.type === "restarted") {
+    return upsertTerminalSessionSnapshot(terminalSessionSnapshotsByKey, threadRef, event.snapshot);
+  }
+
+  const key = terminalSnapshotKey(threadRef, event.terminalId);
+  const current = terminalSessionSnapshotsByKey[key];
+  if (!current) {
+    return terminalSessionSnapshotsByKey;
+  }
+
+  switch (event.type) {
+    case "output":
+      return {
+        ...terminalSessionSnapshotsByKey,
+        [key]: {
+          ...current,
+          history: capTerminalSnapshotHistory(`${current.history}${event.data}`),
+          updatedAt: event.createdAt,
+        },
+      };
+    case "cleared":
+      return {
+        ...terminalSessionSnapshotsByKey,
+        [key]: {
+          ...current,
+          history: "",
+          updatedAt: event.createdAt,
+        },
+      };
+    case "activity":
+      if (event.hasRunningSubprocess) {
+        return terminalSessionSnapshotsByKey;
+      }
+      return {
+        ...terminalSessionSnapshotsByKey,
+        [key]: {
+          ...current,
+          history: "",
+          updatedAt: event.createdAt,
+        },
+      };
+    case "exited":
+      return {
+        ...terminalSessionSnapshotsByKey,
+        [key]: {
+          ...current,
+          status: "exited",
+          pid: null,
+          exitCode: event.exitCode,
+          exitSignal: event.exitSignal,
+          updatedAt: event.createdAt,
+        },
+      };
+    case "error":
+      return {
+        ...terminalSessionSnapshotsByKey,
+        [key]: {
+          ...current,
+          status: "error",
+          pid: null,
+          updatedAt: event.createdAt,
+        },
+      };
+    default:
+      return terminalSessionSnapshotsByKey;
+  }
+}
+
+function removeTerminalSessionSnapshotsForThread(
+  terminalSessionSnapshotsByKey: Record<string, TerminalSessionSnapshot>,
+  threadKey: string,
+): Record<string, TerminalSessionSnapshot> {
+  const nextTerminalSessionSnapshotsByKey = { ...terminalSessionSnapshotsByKey };
+  let removedSnapshots = false;
+  for (const key of Object.keys(nextTerminalSessionSnapshotsByKey)) {
+    if (key.startsWith(`${threadKey}\u0000`)) {
+      delete nextTerminalSessionSnapshotsByKey[key];
+      removedSnapshots = true;
+    }
+  }
+  return removedSnapshots ? nextTerminalSessionSnapshotsByKey : terminalSessionSnapshotsByKey;
+}
+
+function removeTerminalSessionSnapshot(
+  terminalSessionSnapshotsByKey: Record<string, TerminalSessionSnapshot>,
+  threadRef: ScopedThreadRef,
+  terminalId: string,
+): Record<string, TerminalSessionSnapshot> {
+  const key = terminalSnapshotKey(threadRef, terminalId);
+  if (!terminalSessionSnapshotsByKey[key]) {
+    return terminalSessionSnapshotsByKey;
+  }
+  const { [key]: _removed, ...rest } = terminalSessionSnapshotsByKey;
+  return rest;
 }
 
 function launchContextFromStartEvent(
@@ -563,10 +896,37 @@ export function selectTerminalEventEntries(
   );
 }
 
+export function selectTerminalSessionSnapshot(
+  terminalSessionSnapshotsByKey: Record<string, TerminalSessionSnapshot>,
+  threadRef: ScopedThreadRef | null | undefined,
+  terminalId: string,
+): TerminalSessionSnapshot | null {
+  if (!threadRef || threadRef.threadId.length === 0 || terminalId.trim().length === 0) {
+    return null;
+  }
+  return terminalSessionSnapshotsByKey[terminalSnapshotKey(threadRef, terminalId)] ?? null;
+}
+
+export function selectTerminalDevServerLinks(
+  terminalDevServerLinksByKey: Record<string, ReadonlyArray<DevServerLink>>,
+  threadRef: ScopedThreadRef | null | undefined,
+  terminalId: string,
+): ReadonlyArray<DevServerLink> {
+  if (!threadRef || threadRef.threadId.length === 0 || terminalId.trim().length === 0) {
+    return EMPTY_DEV_SERVER_LINKS;
+  }
+  return (
+    terminalDevServerLinksByKey[terminalDevServerLinksKey(threadRef, terminalId)] ??
+    EMPTY_DEV_SERVER_LINKS
+  );
+}
+
 interface TerminalStateStoreState {
   terminalStateByThreadKey: Record<string, ThreadTerminalState>;
   terminalLaunchContextByThreadKey: Record<string, ThreadTerminalLaunchContext>;
   terminalEventEntriesByKey: Record<string, ReadonlyArray<TerminalEventEntry>>;
+  terminalSessionSnapshotsByKey: Record<string, TerminalSessionSnapshot>;
+  terminalDevServerLinksByKey: Record<string, ReadonlyArray<DevServerLink>>;
   nextTerminalEventId: number;
   setTerminalOpen: (threadRef: ScopedThreadRef, open: boolean) => void;
   setTerminalHeight: (threadRef: ScopedThreadRef, height: number) => void;
@@ -591,6 +951,7 @@ interface TerminalStateStoreState {
   ) => void;
   recordTerminalEvent: (threadRef: ScopedThreadRef, event: TerminalEvent) => void;
   applyTerminalEvent: (threadRef: ScopedThreadRef, event: TerminalEvent) => void;
+  recordTerminalSnapshot: (threadRef: ScopedThreadRef, snapshot: TerminalSessionSnapshot) => void;
   clearTerminalState: (threadRef: ScopedThreadRef) => void;
   removeTerminalState: (threadRef: ScopedThreadRef) => void;
   removeOrphanedTerminalStates: (activeThreadKeys: Set<string>) => void;
@@ -622,6 +983,8 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
         terminalStateByThreadKey: {},
         terminalLaunchContextByThreadKey: {},
         terminalEventEntriesByKey: {},
+        terminalSessionSnapshotsByKey: {},
+        terminalDevServerLinksByKey: {},
         nextTerminalEventId: 1,
         setTerminalOpen: (threadRef, open) =>
           updateTerminal(threadRef, (state) => setThreadTerminalOpen(state, open)),
@@ -655,7 +1018,35 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
         setActiveTerminal: (threadRef, terminalId) =>
           updateTerminal(threadRef, (state) => setThreadActiveTerminal(state, terminalId)),
         closeTerminal: (threadRef, terminalId) =>
-          updateTerminal(threadRef, (state) => closeThreadTerminal(state, terminalId)),
+          set((state) => {
+            const nextTerminalStateByThreadKey = updateTerminalStateByThreadKey(
+              state.terminalStateByThreadKey,
+              threadRef,
+              (current) => closeThreadTerminal(current, terminalId),
+            );
+            const nextTerminalSessionSnapshotsByKey = removeTerminalSessionSnapshot(
+              state.terminalSessionSnapshotsByKey,
+              threadRef,
+              terminalId,
+            );
+            const nextTerminalDevServerLinksByKey = removeTerminalDevServerLinks(
+              state.terminalDevServerLinksByKey,
+              threadRef,
+              terminalId,
+            );
+            if (
+              nextTerminalStateByThreadKey === state.terminalStateByThreadKey &&
+              nextTerminalSessionSnapshotsByKey === state.terminalSessionSnapshotsByKey &&
+              nextTerminalDevServerLinksByKey === state.terminalDevServerLinksByKey
+            ) {
+              return state;
+            }
+            return {
+              terminalStateByThreadKey: nextTerminalStateByThreadKey,
+              terminalSessionSnapshotsByKey: nextTerminalSessionSnapshotsByKey,
+              terminalDevServerLinksByKey: nextTerminalDevServerLinksByKey,
+            };
+          }),
         setTerminalLaunchContext: (threadRef, context) =>
           set((state) => ({
             terminalLaunchContextByThreadKey: {
@@ -690,6 +1081,19 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
             const threadKey = terminalThreadKey(threadRef);
             let nextTerminalStateByThreadKey = state.terminalStateByThreadKey;
             let nextTerminalLaunchContextByThreadKey = state.terminalLaunchContextByThreadKey;
+            const currentSnapshot =
+              state.terminalSessionSnapshotsByKey[terminalSnapshotKey(threadRef, event.terminalId)];
+            const nextTerminalSessionSnapshotsByKey = updateTerminalSessionSnapshotsForEvent(
+              state.terminalSessionSnapshotsByKey,
+              threadRef,
+              event,
+            );
+            const nextTerminalDevServerLinksByKey = updateTerminalDevServerLinksForEvent(
+              state.terminalDevServerLinksByKey,
+              threadRef,
+              event,
+              currentSnapshot,
+            );
 
             if (event.type === "started" || event.type === "restarted") {
               nextTerminalStateByThreadKey = updateTerminalStateByThreadKey(
@@ -731,7 +1135,33 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
             return {
               terminalStateByThreadKey: nextTerminalStateByThreadKey,
               terminalLaunchContextByThreadKey: nextTerminalLaunchContextByThreadKey,
+              terminalSessionSnapshotsByKey: nextTerminalSessionSnapshotsByKey,
+              terminalDevServerLinksByKey: nextTerminalDevServerLinksByKey,
               ...nextEventState,
+            };
+          }),
+        recordTerminalSnapshot: (threadRef, snapshot) =>
+          set((state) => {
+            const normalizedSnapshot = normalizeTerminalSessionSnapshot(snapshot);
+            const nextTerminalSessionSnapshotsByKey = upsertTerminalSessionSnapshot(
+              state.terminalSessionSnapshotsByKey,
+              threadRef,
+              normalizedSnapshot,
+            );
+            const nextTerminalDevServerLinksByKey = updateTerminalDevServerLinksForSnapshot(
+              state.terminalDevServerLinksByKey,
+              threadRef,
+              normalizedSnapshot,
+            );
+            if (
+              nextTerminalSessionSnapshotsByKey === state.terminalSessionSnapshotsByKey &&
+              nextTerminalDevServerLinksByKey === state.terminalDevServerLinksByKey
+            ) {
+              return state;
+            }
+            return {
+              terminalSessionSnapshotsByKey: nextTerminalSessionSnapshotsByKey,
+              terminalDevServerLinksByKey: nextTerminalDevServerLinksByKey,
             };
           }),
         clearTerminalState: (threadRef) =>
@@ -754,10 +1184,20 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
                 removedEventEntries = true;
               }
             }
+            const nextTerminalSessionSnapshotsByKey = removeTerminalSessionSnapshotsForThread(
+              state.terminalSessionSnapshotsByKey,
+              threadKey,
+            );
+            const nextTerminalDevServerLinksByKey = removeTerminalDevServerLinksForThread(
+              state.terminalDevServerLinksByKey,
+              threadKey,
+            );
             if (
               nextTerminalStateByThreadKey === state.terminalStateByThreadKey &&
               !hadLaunchContext &&
-              !removedEventEntries
+              !removedEventEntries &&
+              nextTerminalSessionSnapshotsByKey === state.terminalSessionSnapshotsByKey &&
+              nextTerminalDevServerLinksByKey === state.terminalDevServerLinksByKey
             ) {
               return state;
             }
@@ -765,6 +1205,8 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
               terminalStateByThreadKey: nextTerminalStateByThreadKey,
               terminalLaunchContextByThreadKey: remainingLaunchContexts,
               terminalEventEntriesByKey: nextTerminalEventEntriesByKey,
+              terminalSessionSnapshotsByKey: nextTerminalSessionSnapshotsByKey,
+              terminalDevServerLinksByKey: nextTerminalDevServerLinksByKey,
             };
           }),
         removeTerminalState: (threadRef) =>
@@ -781,7 +1223,21 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
                 removedEventEntries = true;
               }
             }
-            if (!hadTerminalState && !hadLaunchContext && !removedEventEntries) {
+            const nextTerminalSessionSnapshotsByKey = removeTerminalSessionSnapshotsForThread(
+              state.terminalSessionSnapshotsByKey,
+              threadKey,
+            );
+            const nextTerminalDevServerLinksByKey = removeTerminalDevServerLinksForThread(
+              state.terminalDevServerLinksByKey,
+              threadKey,
+            );
+            if (
+              !hadTerminalState &&
+              !hadLaunchContext &&
+              !removedEventEntries &&
+              nextTerminalSessionSnapshotsByKey === state.terminalSessionSnapshotsByKey &&
+              nextTerminalDevServerLinksByKey === state.terminalDevServerLinksByKey
+            ) {
               return state;
             }
             const nextTerminalStateByThreadKey = { ...state.terminalStateByThreadKey };
@@ -792,6 +1248,8 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
               terminalStateByThreadKey: nextTerminalStateByThreadKey,
               terminalLaunchContextByThreadKey: nextLaunchContexts,
               terminalEventEntriesByKey: nextTerminalEventEntriesByKey,
+              terminalSessionSnapshotsByKey: nextTerminalSessionSnapshotsByKey,
+              terminalDevServerLinksByKey: nextTerminalDevServerLinksByKey,
             };
           }),
         removeOrphanedTerminalStates: (activeThreadKeys) =>
@@ -811,10 +1269,34 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
                 removedEventEntries = true;
               }
             }
+            const nextTerminalSessionSnapshotsByKey = {
+              ...state.terminalSessionSnapshotsByKey,
+            };
+            let removedSnapshots = false;
+            for (const key of Object.keys(nextTerminalSessionSnapshotsByKey)) {
+              const [threadKey] = key.split("\u0000");
+              if (threadKey && !activeThreadKeys.has(threadKey)) {
+                delete nextTerminalSessionSnapshotsByKey[key];
+                removedSnapshots = true;
+              }
+            }
+            const nextTerminalDevServerLinksByKey = {
+              ...state.terminalDevServerLinksByKey,
+            };
+            let removedDevServerLinks = false;
+            for (const key of Object.keys(nextTerminalDevServerLinksByKey)) {
+              const [threadKey] = key.split("\u0000");
+              if (threadKey && !activeThreadKeys.has(threadKey)) {
+                delete nextTerminalDevServerLinksByKey[key];
+                removedDevServerLinks = true;
+              }
+            }
             if (
               orphanedIds.length === 0 &&
               orphanedLaunchContextIds.length === 0 &&
-              !removedEventEntries
+              !removedEventEntries &&
+              !removedSnapshots &&
+              !removedDevServerLinks
             ) {
               return state;
             }
@@ -830,6 +1312,12 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
               terminalStateByThreadKey: next,
               terminalLaunchContextByThreadKey: nextLaunchContexts,
               terminalEventEntriesByKey: nextTerminalEventEntriesByKey,
+              terminalSessionSnapshotsByKey: removedSnapshots
+                ? nextTerminalSessionSnapshotsByKey
+                : state.terminalSessionSnapshotsByKey,
+              terminalDevServerLinksByKey: removedDevServerLinks
+                ? nextTerminalDevServerLinksByKey
+                : state.terminalDevServerLinksByKey,
             };
           }),
       };

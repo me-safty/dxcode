@@ -255,6 +255,11 @@ function createMockEnvironmentApi(input: {
     sourceControl: {} as EnvironmentApi["sourceControl"],
     vcs: {} as EnvironmentApi["vcs"],
     git: {} as EnvironmentApi["git"],
+    server: {
+      probeDevServerUrl: (async () => ({
+        reachable: false,
+      })) as EnvironmentApi["server"]["probeDevServerUrl"],
+    },
     orchestration: {
       dispatchCommand: input.dispatchCommand,
       getTurnDiff: (() => {
@@ -2174,6 +2179,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
       terminalStateByThreadKey: {},
       terminalLaunchContextByThreadKey: {},
       terminalEventEntriesByKey: {},
+      terminalSessionSnapshotsByKey: {},
+      terminalDevServerLinksByKey: {},
       nextTerminalEventId: 1,
     });
   });
@@ -3001,6 +3008,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("sends bootstrap turn-starts and waits for server setup on first-send worktree drafts", async () => {
     useTerminalStateStore.setState({
       terminalStateByThreadKey: {},
+      terminalDevServerLinksByKey: {},
     });
     useComposerDraftStore.setState({
       draftThreadsByThreadKey: {
@@ -3505,6 +3513,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("shows the send state once bootstrap dispatch is in flight", async () => {
     useTerminalStateStore.setState({
       terminalStateByThreadKey: {},
+      terminalDevServerLinksByKey: {},
     });
     useComposerDraftStore.setState({
       draftThreadsByThreadKey: {

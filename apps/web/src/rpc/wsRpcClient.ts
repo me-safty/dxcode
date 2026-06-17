@@ -175,6 +175,7 @@ export interface WsRpcClient {
     readonly write: RpcUnaryMethod<typeof WS_METHODS.terminalWrite>;
     readonly resize: RpcUnaryMethod<typeof WS_METHODS.terminalResize>;
     readonly clear: RpcUnaryMethod<typeof WS_METHODS.terminalClear>;
+    readonly snapshot: RpcUnaryMethod<typeof WS_METHODS.terminalSnapshot>;
     readonly restart: RpcUnaryMethod<typeof WS_METHODS.terminalRestart>;
     readonly close: RpcUnaryMethod<typeof WS_METHODS.terminalClose>;
     readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
@@ -263,6 +264,7 @@ export interface WsRpcClient {
       typeof WS_METHODS.serverGetProcessResourceHistory
     >;
     readonly signalProcess: RpcUnaryMethod<typeof WS_METHODS.serverSignalProcess>;
+    readonly probeDevServerUrl: RpcUnaryMethod<typeof WS_METHODS.serverProbeDevServerUrl>;
     readonly getPushConfig: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetPushConfig>;
     readonly registerPushSubscription: RpcUnaryMethod<
       typeof WS_METHODS.serverRegisterPushSubscription
@@ -310,6 +312,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       write: (input) => transport.request((client) => client[WS_METHODS.terminalWrite](input)),
       resize: (input) => transport.request((client) => client[WS_METHODS.terminalResize](input)),
       clear: (input) => transport.request((client) => client[WS_METHODS.terminalClear](input)),
+      snapshot: (input) =>
+        transport.request((client) => client[WS_METHODS.terminalSnapshot](input)),
       restart: (input) => transport.request((client) => client[WS_METHODS.terminalRestart](input)),
       close: (input) => transport.request((client) => client[WS_METHODS.terminalClose](input)),
       onEvent: (listener, options) =>
@@ -437,6 +441,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       signalProcess: (input) =>
         transport.request((client) =>
           client[WS_METHODS.serverSignalProcess](input).pipe(Effect.withTracerEnabled(false)),
+        ),
+      probeDevServerUrl: (input) =>
+        transport.request((client) =>
+          client[WS_METHODS.serverProbeDevServerUrl](input).pipe(Effect.withTracerEnabled(false)),
         ),
       getPushConfig: () =>
         transport.request((client) => client[WS_METHODS.serverGetPushConfig]({})),

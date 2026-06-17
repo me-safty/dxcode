@@ -343,6 +343,28 @@ it.layer(
     }),
   );
 
+  it.effect("reads an existing terminal snapshot without opening a missing session", () =>
+    Effect.gen(function* () {
+      const { manager } = yield* createManager();
+
+      yield* manager.open(openInput());
+      const snapshot = yield* manager.snapshot({
+        threadId: "thread-1",
+        terminalId: "default",
+      });
+      assert.equal(snapshot.status, "running");
+      assert.equal(snapshot.terminalId, "default");
+
+      const missing = yield* Effect.flip(
+        manager.snapshot({
+          threadId: "thread-1",
+          terminalId: "missing",
+        }),
+      );
+      assert.equal(missing._tag, "TerminalSessionLookupError");
+    }),
+  );
+
   it.effect("forwards write and resize to active pty process", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager();

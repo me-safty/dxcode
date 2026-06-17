@@ -82,6 +82,7 @@ import {
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalRestartInput,
+  TerminalSnapshotInput,
   TerminalSessionSnapshot,
   TerminalWriteInput,
 } from "./terminal.ts";
@@ -98,6 +99,8 @@ import {
   ServerProcessDiagnosticsResult,
   ServerProcessResourceHistoryInput,
   ServerProcessResourceHistoryResult,
+  ServerProbeDevServerUrlInput,
+  ServerProbeDevServerUrlResult,
   ServerSignalProcessInput,
   ServerSignalProcessResult,
   ServerUpsertKeybindingInput,
@@ -167,6 +170,7 @@ export const WS_METHODS = {
   terminalWrite: "terminal.write",
   terminalResize: "terminal.resize",
   terminalClear: "terminal.clear",
+  terminalSnapshot: "terminal.snapshot",
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
 
@@ -184,6 +188,7 @@ export const WS_METHODS = {
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
+  serverProbeDevServerUrl: "server.probeDevServerUrl",
   serverGetPushConfig: "server.getPushConfig",
   serverRegisterPushSubscription: "server.registerPushSubscription",
   serverUnregisterPushSubscription: "server.unregisterPushSubscription",
@@ -290,6 +295,11 @@ export const WsServerGetProcessResourceHistoryRpc = Rpc.make(
 export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
+});
+
+export const WsServerProbeDevServerUrlRpc = Rpc.make(WS_METHODS.serverProbeDevServerUrl, {
+  payload: ServerProbeDevServerUrlInput,
+  success: ServerProbeDevServerUrlResult,
 });
 
 export const WsServerGetPushConfigRpc = Rpc.make(WS_METHODS.serverGetPushConfig, {
@@ -513,6 +523,12 @@ export const WsTerminalClearRpc = Rpc.make(WS_METHODS.terminalClear, {
   error: TerminalError,
 });
 
+export const WsTerminalSnapshotRpc = Rpc.make(WS_METHODS.terminalSnapshot, {
+  payload: TerminalSnapshotInput,
+  success: TerminalSessionSnapshot,
+  error: TerminalError,
+});
+
 export const WsTerminalRestartRpc = Rpc.make(WS_METHODS.terminalRestart, {
   payload: TerminalRestartInput,
   success: TerminalSessionSnapshot,
@@ -643,6 +659,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetProcessDiagnosticsRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
+  WsServerProbeDevServerUrlRpc,
   WsServerGetPushConfigRpc,
   WsServerRegisterPushSubscriptionRpc,
   WsServerUnregisterPushSubscriptionRpc,
@@ -678,6 +695,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalWriteRpc,
   WsTerminalResizeRpc,
   WsTerminalClearRpc,
+  WsTerminalSnapshotRpc,
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
   WsSubscribeTerminalEventsRpc,

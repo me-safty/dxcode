@@ -39,6 +39,7 @@ const {
         open: ReturnType<typeof vi.fn>;
         resize: ReturnType<typeof vi.fn>;
         restart: ReturnType<typeof vi.fn>;
+        snapshot: ReturnType<typeof vi.fn>;
         write: ReturnType<typeof vi.fn>;
       };
     }
@@ -251,6 +252,7 @@ function createEnvironmentApi() {
       open: vi.fn(async () => createTerminalSnapshot()),
       write: vi.fn(async () => undefined),
       resize: vi.fn(async () => undefined),
+      snapshot: vi.fn(async () => createTerminalSnapshot()),
       restart: vi.fn(async () =>
         createTerminalSnapshot({
           pid: 456,
@@ -431,6 +433,8 @@ describe("TerminalViewport", () => {
       nextTerminalEventId: 1,
       terminalEventEntriesByKey: {},
       terminalLaunchContextByThreadKey: {},
+      terminalSessionSnapshotsByKey: {},
+      terminalDevServerLinksByKey: {},
       terminalStateByThreadKey: {},
     });
     terminalConstructorSpy.mockClear();

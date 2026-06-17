@@ -4551,6 +4551,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             write: () => Effect.void,
             resize: () => Effect.void,
             clear: () => Effect.void,
+            snapshot: () => Effect.succeed(snapshot),
             restart: () => Effect.succeed(snapshot),
             close: () => Effect.void,
           },
@@ -4599,6 +4600,16 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           }),
         ),
       );
+
+      const readSnapshot = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.terminalSnapshot]({
+            threadId: "thread-1",
+            terminalId: "default",
+          }),
+        ),
+      );
+      assert.equal(readSnapshot.terminalId, "default");
 
       const restarted = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>

@@ -1,7 +1,16 @@
 import { EnvironmentId } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { shouldShowOpenInPicker } from "./ChatHeader";
+import {
+  __resetDevServerWindowForTests,
+  openDevServerLink,
+  shouldShowOpenInPicker,
+} from "./ChatHeader";
+
+afterEach(() => {
+  __resetDevServerWindowForTests();
+  vi.unstubAllGlobals();
+});
 
 describe("shouldShowOpenInPicker", () => {
   const primaryEnvironmentId = EnvironmentId.make("environment-primary");
@@ -44,5 +53,29 @@ describe("shouldShowOpenInPicker", () => {
         primaryEnvironmentId,
       }),
     ).toBe(false);
+  });
+});
+
+describe("openDevServerLink", () => {
+  it("reuses the named browser tab while it is still available", () => {
+    const openedWindow = {
+      closed: false,
+      focus: vi.fn(),
+      location: {
+        href: "",
+      },
+      opener: {},
+    };
+    const open = vi.fn(() => openedWindow);
+    vi.stubGlobal("window", { open });
+
+    openDevServerLink("http://localhost:5173/");
+    openDevServerLink("http://localhost:3000/");
+
+    expect(open).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledWith("http://localhost:5173/", "salchi-dev-server-preview");
+    expect(openedWindow.location.href).toBe("http://localhost:3000/");
+    expect(openedWindow.focus).toHaveBeenCalledTimes(2);
+    expect(openedWindow.opener).toBeNull();
   });
 });

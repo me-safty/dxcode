@@ -47,6 +47,7 @@ import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { ServerConfig } from "./config.ts";
+import { probeDevServerUrl } from "./devServerReachability.ts";
 import { Keybindings } from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
@@ -1241,6 +1242,16 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.serverSignalProcess, processDiagnostics.signal(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverProbeDevServerUrl]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverProbeDevServerUrl,
+            Effect.promise(() => probeDevServerUrl(input.url)).pipe(
+              Effect.map((reachable) => ({ reachable })),
+            ),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
         [WS_METHODS.serverGetPushConfig]: (_input) =>
           observeRpcEffect(WS_METHODS.serverGetPushConfig, webPush.getConfig, {
             "rpc.aggregate": "server",
@@ -1552,6 +1563,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           }),
         [WS_METHODS.terminalClear]: (input) =>
           observeRpcEffect(WS_METHODS.terminalClear, terminalManager.clear(input), {
+            "rpc.aggregate": "terminal",
+          }),
+        [WS_METHODS.terminalSnapshot]: (input) =>
+          observeRpcEffect(WS_METHODS.terminalSnapshot, terminalManager.snapshot(input), {
             "rpc.aggregate": "terminal",
           }),
         [WS_METHODS.terminalRestart]: (input) =>
