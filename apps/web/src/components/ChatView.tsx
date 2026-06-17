@@ -44,6 +44,7 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
+import { useMessageQueue, type QueuedMessage } from "../messageQueue";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
   collapseExpandedComposerCursor,
@@ -830,6 +831,12 @@ export default function ChatView(props: ChatViewProps) {
   );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
+  const messageQueueEnqueue = useMessageQueue((store) => store.enqueue);
+  const messageQueueDequeue = useMessageQueue((store) => store.dequeue);
+  const messageQueueRemove = useMessageQueue((store) => store.remove);
+  const queuedMessages = useMessageQueue((store) =>
+    isServerThread ? store.getQueue(routeThreadRef) : [],
+  );
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
     (store) => store.getDraftSessionByLogicalProjectKey,
   );
@@ -850,6 +857,7 @@ export default function ChatView(props: ChatViewProps) {
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
+  const autoSendQueuedMessageInFlightRef = useRef(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
@@ -1567,6 +1575,40 @@ export default function ChatView(props: ChatViewProps) {
     threadError: activeThread?.error,
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const canQueueMessages =
+    isServerThread && !isConnecting && !activeEnvironmentUnavailable && !activePendingProgress;
+
+  const restoreQueuedMessageToComposer = useCallback(
+    (queued: QueuedMessage) => {
+      promptRef.current = queued.prompt;
+      setComposerDraftPrompt(composerDraftTarget, queued.prompt);
+      setComposerDraftModelSelection(composerDraftTarget, queued.modelSelection);
+      setComposerDraftRuntimeMode(composerDraftTarget, queued.runtimeMode);
+      setComposerDraftInteractionMode(composerDraftTarget, queued.interactionMode);
+      composerImagesRef.current = queued.images;
+      composerFilesRef.current = queued.files;
+      composerTerminalContextsRef.current = queued.terminalContexts;
+      setComposerDraftTerminalContexts(composerDraftTarget, queued.terminalContexts);
+      addComposerDraftImages(composerDraftTarget, queued.images);
+      addComposerDraftFiles(composerDraftTarget, queued.files);
+      composerRef.current?.resetCursorState({
+        cursor: collapseExpandedComposerCursor(queued.prompt, queued.prompt.length),
+        prompt: queued.prompt,
+        detectTrigger: true,
+      });
+    },
+    [
+      addComposerDraftFiles,
+      addComposerDraftImages,
+      composerDraftTarget,
+      setComposerDraftInteractionMode,
+      setComposerDraftModelSelection,
+      setComposerDraftPrompt,
+      setComposerDraftRuntimeMode,
+      setComposerDraftTerminalContexts,
+    ],
+  );
+
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -2844,7 +2886,6 @@ export default function ChatView(props: ChatViewProps) {
     if (
       !api ||
       !activeThread ||
-      isSendBusy ||
       isConnecting ||
       activeEnvironmentUnavailable ||
       sendInFlightRef.current
@@ -2921,6 +2962,24 @@ export default function ChatView(props: ChatViewProps) {
       }
       return;
     }
+
+    if ((isSendBusy || phase === "running") && canQueueMessages) {
+      messageQueueEnqueue(routeThreadRef, {
+        prompt: promptForSend,
+        images: composerImages.map(cloneComposerImageForRetry),
+        files: composerFiles,
+        terminalContexts: sendableComposerTerminalContexts,
+        modelSelection: ctxSelectedModelSelection,
+        runtimeMode,
+        interactionMode,
+      });
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      return;
+    }
+
+    if (isSendBusy || phase === "running") return;
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
@@ -3171,6 +3230,45 @@ export default function ChatView(props: ChatViewProps) {
       resetLocalDispatch();
     }
   };
+  const onSendRef = useRef(onSend);
+  onSendRef.current = onSend;
+
+  useEffect(() => {
+    if (
+      !isServerThread ||
+      isSendBusy ||
+      phase === "running" ||
+      isConnecting ||
+      activePendingProgress ||
+      activeEnvironmentUnavailable ||
+      autoSendQueuedMessageInFlightRef.current
+    ) {
+      return;
+    }
+    const dequeued = messageQueueDequeue(routeThreadRef);
+    if (!dequeued) {
+      return;
+    }
+    autoSendQueuedMessageInFlightRef.current = true;
+    restoreQueuedMessageToComposer(dequeued);
+    void onSendRef
+      .current()
+      .catch(() => undefined)
+      .finally(() => {
+        autoSendQueuedMessageInFlightRef.current = false;
+      });
+  }, [
+    activeEnvironmentUnavailable,
+    activePendingProgress,
+    isConnecting,
+    isSendBusy,
+    isServerThread,
+    messageQueueDequeue,
+    phase,
+    queuedMessages.length,
+    restoreQueuedMessageToComposer,
+    routeThreadRef,
+  ]);
 
   const onInterrupt = async () => {
     const api = readEnvironmentApi(environmentId);
@@ -3884,6 +3982,7 @@ export default function ChatView(props: ChatViewProps) {
                   isConnecting={isConnecting}
                   isSendBusy={isSendBusy}
                   isPreparingWorktree={isPreparingWorktree}
+                  canQueueMessages={canQueueMessages}
                   environmentUnavailable={activeEnvironmentUnavailableState}
                   activePendingApproval={activePendingApproval}
                   pendingApprovals={pendingApprovals}
@@ -3894,6 +3993,11 @@ export default function ChatView(props: ChatViewProps) {
                   activePendingDraftAnswers={activePendingDraftAnswers}
                   activePendingQuestionIndex={activePendingQuestionIndex}
                   respondingRequestIds={respondingRequestIds}
+                  queuedMessages={queuedMessages}
+                  onRemoveQueuedMessage={useCallback(
+                    (id) => messageQueueRemove(routeThreadRef, id),
+                    [messageQueueRemove, routeThreadRef],
+                  )}
                   showPlanFollowUpPrompt={showPlanFollowUpPrompt}
                   activeProposedPlan={activeProposedPlan}
                   activePlan={activePlan as { turnId?: TurnId } | null}
