@@ -68,21 +68,25 @@ Items are sorted by operational urgency, then recency. An unclean working tree i
 
 The `Working tree` row expands to a compact changed-file list. There is no staged-versus-unstaged grouping in the panel UI. Each changed file has a selector, and newly appearing changed files are selected by default.
 
+The working-tree subsection header shows a tri-state checkbox before the selection summary. Checked means all files are selected, unchecked means none are selected, and partial means some files are selected; clicking a partial or unchecked checkbox selects all files, while clicking a checked checkbox unselects all files. The summary reads `x of y files selected` and shows selected-file `+x`/`-y` line stats immediately after the label when non-zero.
+
 The working-tree header actions are:
 
-- Select all files.
-- Clear all selected files.
 - Commit selected files.
 - Stash selected files.
 - Discard selected files, with confirmation.
 
 Commit selected and stash selected generate their messages by default. Holding Shift while pressing either action opens the same optional-message dialog path used by the existing Git action control: the commit field is labeled `Commit message (optional)`, its placeholder is `Leave empty to auto-generate`, and a blank message still uses the generation flow. The stash dialog behaves the same way for stash messages.
 
+Branch sync actions such as push, pull, fetch, publish, and undo latest commit are intentionally not rendered on the `Working tree` row. They belong to branch rows, where the target branch is explicit.
+
 File rows are compact. They show a one-letter status indicator such as `A`, `D`, or `M`, line change counts, and hover/focus-only action buttons. `+x` uses the added-line color and `-y` uses the removed-line color. Zero counts are hidden. Expanding a file row opens an inline diff for that file change in working-tree, commit, stash, branch, and compare file lists. The row actions are:
 
 - Open file in the right-panel File surface.
 - Open in VS Code through the preferred editor or host bridge.
 - Discard changes, with confirmation.
+
+Untracked directories are expanded to file-level rows instead of being shown as a single folder row. Untracked files get `A` rows with line stats computed from a `/dev/null` comparison, so renamed folders show deleted rows for the old paths and added rows for the new file paths rather than an added folder with no meaningful diff.
 
 The `Working tree` context menu includes selected-file commit and stash actions plus a separated destructive `Discard selected changes` action.
 
@@ -125,7 +129,7 @@ Ahead, behind, history, and changes file lists use the shared compact file-chang
 
 ## Commit Rows
 
-Commit rows appear in branch history and ahead/behind lists. They show author avatar when available, commit message, branch/tag labels, line-change indicators, and a relative date. The short SHA is available from the commit tooltip and context-menu copy action rather than the row label.
+Commit rows appear in branch history and ahead/behind lists. They show an author avatar, commit message, branch/tag labels, line-change indicators, and a relative date. Author avatars come from commit author email when possible and fall back to compact initials when no avatar is available. The short SHA is available from the commit tooltip and context-menu copy action rather than the row label.
 
 Commit labels are de-duplicated:
 
@@ -180,6 +184,8 @@ The panel routes all repository mutations through server-side RPC methods and re
 - Remote operations: list, add, remove, fetch one remote, fetch one branch ref, periodic Actionable fetch, and fetch all remotes.
 
 Non-current branch fetches are scoped to the selected branch. Operation busy state is keyed per action target so fetching one branch does not disable equivalent actions on other branches or remote entries.
+
+Discard operations split staged and unstaged portions explicitly and preserve rename source paths when needed. Server-side discard handling partitions tracked, untracked, HEAD-backed, and newly added paths before running Git restore/reset/clean commands, so mixed selections such as tracked edits plus untracked files do not cause one path class to prevent the rest of the selected discard from applying.
 
 ## Error Handling
 

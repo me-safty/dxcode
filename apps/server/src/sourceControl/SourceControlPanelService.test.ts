@@ -323,6 +323,89 @@ describe("SourceControlPanelService", () => {
     ),
   );
 
+  it.effect("expands untracked directories into file rows with stats", () =>
+    Effect.gen(function* () {
+      const service = yield* SourceControlPanelService;
+
+      const snapshot = yield* service.snapshot({ cwd: "/repo" });
+      const unstagedFiles =
+        snapshot.changeGroups.find((group) => group.kind === "unstaged")?.files ?? [];
+
+      assert.deepStrictEqual(unstagedFiles, [
+        {
+          path: "blast-review/agents/openai.yaml",
+          originalPath: null,
+          status: "untracked",
+          insertions: 6,
+          deletions: 0,
+        },
+        {
+          path: "blast-review/SKILL.md",
+          originalPath: null,
+          status: "untracked",
+          insertions: 21,
+          deletions: 0,
+        },
+        {
+          path: "copilot-blast-review/SKILL.md",
+          originalPath: null,
+          status: "deleted",
+          insertions: 0,
+          deletions: 20,
+        },
+      ]);
+    }).pipe(
+      Effect.provide(
+        makeTestLayer(
+          (input) =>
+            Effect.sync(() => {
+              switch (input.operation) {
+                case "vcs.panel.localBranches":
+                case "vcs.panel.remotes":
+                case "vcs.panel.stashes":
+                  return success("");
+                case "vcs.panel.statusPorcelain":
+                  assert.deepStrictEqual(input.args, [
+                    "status",
+                    "--porcelain=2",
+                    "--branch",
+                    "-uall",
+                  ]);
+                  return success(
+                    [
+                      "# branch.oid abc",
+                      "# branch.head main",
+                      "1 .D N... 100644 100644 000000 abc abc copilot-blast-review/SKILL.md",
+                      "? blast-review/SKILL.md",
+                      "? blast-review/agents/openai.yaml",
+                    ].join("\n"),
+                  );
+                case "vcs.panel.unstagedNumstat":
+                  return success("0\t20\tcopilot-blast-review/SKILL.md\n");
+                case "vcs.panel.untrackedNumstat": {
+                  const path = input.args.at(-1);
+                  if (path === "blast-review/SKILL.md") {
+                    return success("21\t0\t\0/dev/null\0blast-review/SKILL.md\0");
+                  }
+                  if (path === "blast-review/agents/openai.yaml") {
+                    return success("6\t0\t\0/dev/null\0blast-review/agents/openai.yaml\0");
+                  }
+                  return success("");
+                }
+                case "vcs.panel.stagedNumstat":
+                  return success("");
+                default:
+                  return success("");
+              }
+            }),
+          {
+            localStatus: () => Effect.succeed(localStatus),
+          },
+        ),
+      ),
+    ),
+  );
+
   it.effect("surfaces same-name remote forks only when the local branch is behind", () =>
     Effect.gen(function* () {
       const service = yield* SourceControlPanelService;

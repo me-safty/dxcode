@@ -179,6 +179,22 @@ function parseNumstat(output: string): Map<string, { insertions: number; deletio
   return stats;
 }
 
+function mergeNumstats(
+  maps: Iterable<ReadonlyMap<string, { insertions: number; deletions: number }>>,
+): Map<string, { insertions: number; deletions: number }> {
+  const merged = new Map<string, { insertions: number; deletions: number }>();
+  for (const map of maps) {
+    for (const [path, stats] of map) {
+      const existing = merged.get(path);
+      merged.set(path, {
+        insertions: (existing?.insertions ?? 0) + stats.insertions,
+        deletions: (existing?.deletions ?? 0) + stats.deletions,
+      });
+    }
+  }
+  return merged;
+}
+
 function statusFromCode(code: string, fallback: VcsPanelFileStatus): VcsPanelFileStatus {
   switch (code) {
     case "A":
@@ -220,6 +236,7 @@ function parsePorcelainStatus(input: {
   status: string;
   stagedStats: Map<string, { insertions: number; deletions: number }>;
   unstagedStats: Map<string, { insertions: number; deletions: number }>;
+  untrackedStats: Map<string, { insertions: number; deletions: number }>;
 }): VcsPanelChangeGroup[] {
   const staged: VcsPanelFileChange[] = [];
   const unstaged: VcsPanelFileChange[] = [];
@@ -229,7 +246,12 @@ function parsePorcelainStatus(input: {
     if (line.length === 0 || line.startsWith("#")) continue;
     if (line.startsWith("? ")) {
       const path = line.slice(2);
-      addChange(unstaged, { path, originalPath: null, status: "untracked" });
+      addChange(unstaged, {
+        path,
+        originalPath: null,
+        status: "untracked",
+        stats: input.untrackedStats.get(path),
+      });
       continue;
     }
     if (line.startsWith("u ")) {
@@ -290,6 +312,10 @@ function parsePorcelainStatus(input: {
     { kind: "unstaged" as const, files: sortFiles(unstaged) },
     { kind: "conflicts" as const, files: sortFiles(conflicts) },
   ];
+}
+
+function untrackedPathsFromPorcelain(status: string): string[] {
+  return status.split(/\r?\n/u).flatMap((line) => (line.startsWith("? ") ? [line.slice(2)] : []));
 }
 
 function parsePorcelainBranchSync(status: string) {
@@ -1200,7 +1226,12 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
             "branch",
             "--format=%(refname:short)%09%(HEAD)%09%(worktreepath)%09%(committerdate:iso-strict)%09%(upstream:short)%09%(upstream:track)",
           ]),
-          run("vcs.panel.statusPorcelain", input.cwd, ["status", "--porcelain=2", "--branch"]),
+          run("vcs.panel.statusPorcelain", input.cwd, [
+            "status",
+            "--porcelain=2",
+            "--branch",
+            "-uall",
+          ]),
           run("vcs.panel.unstagedNumstat", input.cwd, [
             "diff",
             "--numstat",
@@ -1225,6 +1256,22 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
       );
 
       const localBranches = parseLocalBranches(localBranchesOutput);
+      const untrackedStats = mergeNumstats(
+        yield* Effect.forEach(
+          untrackedPathsFromPorcelain(porcelain),
+          (path) =>
+            run(
+              "vcs.panel.untrackedNumstat",
+              input.cwd,
+              ["diff", "--no-index", "--numstat", "-z", "--", "/dev/null", path],
+              { allowNonZeroExit: true },
+            ).pipe(
+              Effect.map(parseNumstat),
+              Effect.orElseSucceed(() => new Map()),
+            ),
+          { concurrency: 4 },
+        ),
+      );
       const remotes = parseRemoteVerbose(remotesOutput);
       const remotesWithBranches = yield* Effect.forEach(
         remotes,
@@ -1259,6 +1306,7 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
           status: porcelain,
           stagedStats: parseNumstat(stagedNumstat),
           unstagedStats: parseNumstat(unstagedNumstat),
+          untrackedStats,
         }),
         localBranches,
         branchDetails: [],
