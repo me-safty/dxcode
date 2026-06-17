@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { createHash } from "node:crypto";
 import { detectSourceControlProviderFromRemoteUrl } from "@t3tools/shared/sourceControl";
 import {
   GitCommandError,
@@ -490,7 +491,8 @@ function compareBranchActivity(
 function avatarUrlForEmail(email: string | null | undefined): string | null {
   const normalized = email?.trim().toLowerCase();
   if (!normalized || !normalized.includes("@")) return null;
-  return null;
+  const hash = createHash("md5").update(normalized).digest("hex");
+  return `https://www.gravatar.com/avatar/${hash}?d=identicon&s=64`;
 }
 
 function parseRefLines(output: string): string[] {

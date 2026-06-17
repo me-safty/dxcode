@@ -18,7 +18,6 @@ import { FileDiff } from "@pierre/diffs/react";
 import {
   Archive,
   AlertTriangle,
-  Check,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -39,7 +38,6 @@ import {
   Trash2,
   Undo2,
   Upload,
-  X,
 } from "lucide-react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
@@ -499,15 +497,36 @@ function AuthorAvatar({
   readonly commit: VcsPanelCommitSummary;
   readonly className?: string;
 }) {
-  if (!commit.authorAvatarUrl) return null;
+  const [failed, setFailed] = useState(false);
+  const fallbackText =
+    commit.authorName
+      ?.trim()
+      .split(/\s+/u)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") ||
+    commit.authorEmail?.trim()[0]?.toUpperCase() ||
+    "?";
+  const avatarClassName = cn(
+    "inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground object-cover",
+    className,
+  );
+  if (!commit.authorAvatarUrl || failed) {
+    return (
+      <span className={avatarClassName} aria-label={commit.authorName ?? "Unknown author"}>
+        {fallbackText}
+      </span>
+    );
+  }
   return (
     <img
       alt={commit.authorName ? `${commit.authorName} avatar` : "Author avatar"}
-      className={cn("size-4 shrink-0 rounded-full bg-muted object-cover", className)}
+      className={avatarClassName}
       referrerPolicy="no-referrer"
       src={commit.authorAvatarUrl}
       onError={(event) => {
         event.currentTarget.hidden = true;
+        setFailed(true);
       }}
     />
   );
@@ -791,6 +810,10 @@ function fileBasename(path: string): string {
   return path;
 }
 
+function commitCountLabel(count: number): string {
+  return count === 1 ? "1 commit" : `${count} commits`;
+}
+
 function stashBranchName(stash: VcsPanelStash): string | null {
   return /^(?:WIP\s+)?on\s+([^:]+):/i.exec(stash.message)?.[1]?.trim() ?? null;
 }
@@ -1062,6 +1085,15 @@ export function SourceControlPanel({
     () => selectedChangedFiles.map((file) => file.path),
     [selectedChangedFiles],
   );
+  const selectedChangeStats = useMemo(() => sumFiles(selectedChangedFiles), [selectedChangedFiles]);
+  const allChangedFilesSelected =
+    changedFiles.length > 0 && selectedChangedFiles.length === changedFiles.length;
+  const noChangedFilesSelected = selectedChangedFiles.length === 0;
+  const partialChangedFilesSelected =
+    changedFiles.length > 0 && !allChangedFilesSelected && !noChangedFilesSelected;
+  const toggleAllChangedFilesSelection = useCallback(() => {
+    setSelectedChangePaths(allChangedFilesSelected ? new Set() : new Set(changedPaths));
+  }, [allChangedFilesSelected, changedPaths]);
   const vcsStatusFingerprint = useMemo(() => {
     const status = vcsStatus.data;
     if (!status) return null;
@@ -2329,7 +2361,7 @@ export function SourceControlPanel({
     readonly details: VcsPanelBranchDetails;
     readonly id: string;
     readonly title: ReactNode;
-    readonly count: number | null;
+    readonly count: ReactNode | null;
     readonly children: ReactNode;
     readonly icon?: ReactNode;
     readonly action?: ReactNode;
@@ -2427,7 +2459,7 @@ export function SourceControlPanel({
           details,
           id: "commits",
           title: "History",
-          count: historyTotal,
+          count: commitCountLabel(historyTotal),
           children: (
             <div className="space-y-0.5">
               {details.commits.length === 0 ? (
@@ -2758,14 +2790,13 @@ export function SourceControlPanel({
           ) : (
             <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
           )}
-          <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
+          {hasLocalBranch ? (
+            <SyncedIcon className="size-3.5 text-muted-foreground" />
+          ) : (
+            <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
+          )}
           <span className="min-w-0 flex-1 truncate text-sm">{displayName}</span>
           <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1">
-            {hasLocalBranch && hasUpstream && aheadCount === 0 && behindCount === 0 ? (
-              <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-                <SyncedIcon />
-              </span>
-            ) : null}
             {hasLocalBranch && !hasUpstream ? <CompactBadge>local</CompactBadge> : null}
             {current ? <CompactBadge>current</CompactBadge> : null}
             {branch.isDefault ? <CompactBadge>default</CompactBadge> : null}
@@ -3173,24 +3204,35 @@ export function SourceControlPanel({
       ) : (
         <div className="space-y-0.5">
           <div className="flex h-6 items-center justify-between gap-2 rounded px-1 text-xs font-medium uppercase text-muted-foreground">
-            <span className="min-w-0 truncate">
-              {selectedChangedFiles.length} of {changedFiles.length} selected
-            </span>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="inline-flex shrink-0 items-center">
+                      <Checkbox
+                        checked={allChangedFilesSelected}
+                        indeterminate={partialChangedFilesSelected}
+                        aria-label={
+                          allChangedFilesSelected ? "Unselect all files" : "Select all files"
+                        }
+                        onCheckedChange={toggleAllChangedFilesSelection}
+                      />
+                    </span>
+                  }
+                />
+                <TooltipPopup side="top">
+                  {allChangedFilesSelected ? "Unselect all files" : "Select all files"}
+                </TooltipPopup>
+              </Tooltip>
+              <span className="min-w-0 truncate">
+                {selectedChangedFiles.length} of {changedFiles.length} files selected
+              </span>
+              <StatLabels
+                insertions={selectedChangeStats.insertions}
+                deletions={selectedChangeStats.deletions}
+              />
+            </div>
             <div className="flex items-center gap-1">
-              <IconButton
-                label="Select all changes"
-                disabled={selectedChangedFiles.length === changedFiles.length}
-                onClick={() => setSelectedChangePaths(new Set(changedPaths))}
-              >
-                <Check className="size-3.5" />
-              </IconButton>
-              <IconButton
-                label="Clear all changes"
-                disabled={selectedChangedFiles.length === 0}
-                onClick={() => setSelectedChangePaths(new Set())}
-              >
-                <X className="size-3.5" />
-              </IconButton>
               <IconButton
                 label="Commit selected changes. Shift: message."
                 disabled={
@@ -3347,16 +3389,6 @@ export function SourceControlPanel({
               event,
               [
                 {
-                  id: "select-all",
-                  label: "Select all changes",
-                  disabled: selectedChangedFiles.length === changedFiles.length,
-                },
-                {
-                  id: "clear-all",
-                  label: "Clear all changes",
-                  disabled: selectedChangedFiles.length === 0,
-                },
-                {
                   id: "commit-selected",
                   label: "Commit selected changes",
                   disabled:
@@ -3381,8 +3413,6 @@ export function SourceControlPanel({
                 },
               ],
               {
-                "select-all": () => setSelectedChangePaths(new Set(changedPaths)),
-                "clear-all": () => setSelectedChangePaths(new Set()),
                 "commit-selected": () => void runGeneratedPanelCommit(),
                 "stash-selected": () => void runGeneratedPanelStash(),
                 "discard-selected": discardSelectedChanges,
