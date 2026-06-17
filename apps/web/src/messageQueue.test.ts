@@ -1,7 +1,7 @@
 import { ModelSelection, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { describe, expect, it } from "vite-plus/test";
-import { useMessageQueue, type QueuedMessage } from "./messageQueue";
+import { isComposerQueueDraftEmpty, useMessageQueue, type QueuedMessage } from "./messageQueue";
 
 const THREAD_REF = scopeThreadRef(
   "env-1" as unknown as import("@t3tools/contracts").EnvironmentId,
@@ -102,5 +102,51 @@ describe("messageQueue", () => {
 
     expect(useMessageQueue.getState().getQueue(THREAD_REF)).toHaveLength(1);
     expect(useMessageQueue.getState().getQueue(otherThreadRef)).toHaveLength(1);
+  });
+
+  it("treats a whitespace-only draft with no attachments as empty", () => {
+    expect(
+      isComposerQueueDraftEmpty({
+        prompt: "  \n\t",
+        images: [],
+        files: [],
+        terminalContexts: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("does not treat unsent composer content as empty", () => {
+    expect(
+      isComposerQueueDraftEmpty({
+        prompt: "next thought",
+        images: [],
+        files: [],
+        terminalContexts: [],
+      }),
+    ).toBe(false);
+    expect(
+      isComposerQueueDraftEmpty({
+        prompt: "",
+        images: [{}],
+        files: [],
+        terminalContexts: [],
+      }),
+    ).toBe(false);
+    expect(
+      isComposerQueueDraftEmpty({
+        prompt: "",
+        images: [],
+        files: [{}],
+        terminalContexts: [],
+      }),
+    ).toBe(false);
+    expect(
+      isComposerQueueDraftEmpty({
+        prompt: "",
+        images: [],
+        files: [],
+        terminalContexts: [{}],
+      }),
+    ).toBe(false);
   });
 });

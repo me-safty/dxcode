@@ -36,6 +36,22 @@ export interface MessageQueueState {
   readonly getQueue: (threadRef: ScopedThreadRef) => readonly QueuedMessage[];
 }
 
+export interface ComposerQueueDraftSnapshot {
+  readonly prompt: string;
+  readonly images: readonly unknown[];
+  readonly files: readonly unknown[];
+  readonly terminalContexts: readonly unknown[];
+}
+
+export function isComposerQueueDraftEmpty(snapshot: ComposerQueueDraftSnapshot): boolean {
+  return (
+    snapshot.prompt.trim().length === 0 &&
+    snapshot.images.length === 0 &&
+    snapshot.files.length === 0 &&
+    snapshot.terminalContexts.length === 0
+  );
+}
+
 function threadKey(threadRef: ScopedThreadRef): string {
   return scopedThreadKey(threadRef);
 }
