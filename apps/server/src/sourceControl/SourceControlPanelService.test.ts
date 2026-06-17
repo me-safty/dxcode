@@ -139,7 +139,7 @@ describe("SourceControlPanelService", () => {
     );
   });
 
-  it.effect("falls back when discarding staged additions missing from HEAD", () => {
+  it.effect("cleans staged additions missing from HEAD without failing tracked paths", () => {
     const calls: ExecuteGitInput[] = [];
     return Effect.gen(function* () {
       const service = yield* SourceControlPanelService;
@@ -153,9 +153,8 @@ describe("SourceControlPanelService", () => {
       assert.deepStrictEqual(
         calls.map((call) => call.args),
         [
-          ["restore", "--staged", "--worktree", "--source=HEAD", "--", "new-file.ts"],
+          ["ls-tree", "-r", "--name-only", "HEAD", "--", "new-file.ts"],
           ["reset", "--", "new-file.ts"],
-          ["restore", "--worktree", "--", "new-file.ts"],
           ["clean", "-fd", "--", "new-file.ts"],
         ],
       );
@@ -164,9 +163,40 @@ describe("SourceControlPanelService", () => {
         makeTestLayer((input) =>
           Effect.sync(() => {
             calls.push(input);
-            return input.operation === "vcs.panel.discardStagedFiles"
-              ? failure("pathspec 'new-file.ts' did not match any files")
-              : success();
+            return success("");
+          }),
+        ),
+      ),
+    );
+  });
+
+  it.effect("discards mixed tracked and untracked unstaged files in one action", () => {
+    const calls: ExecuteGitInput[] = [];
+    return Effect.gen(function* () {
+      const service = yield* SourceControlPanelService;
+
+      yield* service.discardFiles({
+        cwd: "/repo",
+        paths: ["tracked.ts", "new-file.ts"],
+        staged: false,
+      });
+
+      assert.deepStrictEqual(
+        calls.map((call) => call.args),
+        [
+          ["ls-files", "--cached", "--", "tracked.ts", "new-file.ts"],
+          ["restore", "--worktree", "--", "tracked.ts"],
+          ["clean", "-fd", "--", "tracked.ts", "new-file.ts"],
+        ],
+      );
+    }).pipe(
+      Effect.provide(
+        makeTestLayer((input) =>
+          Effect.sync(() => {
+            calls.push(input);
+            return input.operation === "vcs.panel.discardUnstagedFiles.listIndexPaths"
+              ? success("tracked.ts\n")
+              : success("");
           }),
         ),
       ),

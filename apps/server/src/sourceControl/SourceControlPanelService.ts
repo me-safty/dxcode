@@ -503,6 +503,14 @@ function parseRefLines(output: string): string[] {
     .toSorted((left, right) => left.localeCompare(right));
 }
 
+function parsePathLines(output: string): string[] {
+  return output.split(/\r?\n/u).filter((line) => line.length > 0);
+}
+
+function uniquePaths(paths: readonly string[]): string[] {
+  return [...new Set(paths.filter((path) => path.length > 0))];
+}
+
 function parseCreatedFromRef(output: string): string | null {
   for (const line of output.split(/\r?\n/u)) {
     const match = /^branch: Created from (.+)$/u.exec(line.trim());
@@ -1271,59 +1279,65 @@ export const make = Effect.fn("makeSourceControlPanelService")(function* () {
 
   const discardFiles: SourceControlPanelServiceShape["discardFiles"] = (input) =>
     Effect.gen(function* () {
+      const paths = uniquePaths(input.paths);
+      if (paths.length === 0) return;
       if (input.staged) {
-        const restoreFromHead = run("vcs.panel.discardStagedFiles", input.cwd, [
-          "restore",
-          "--staged",
-          "--worktree",
-          "--source=HEAD",
-          "--",
-          ...input.paths,
-        ]).pipe(Effect.asVoid);
-        yield* restoreFromHead.pipe(
-          Effect.catch(() =>
-            Effect.gen(function* () {
-              yield* run("vcs.panel.discardStagedFiles.reset", input.cwd, [
-                "reset",
-                "--",
-                ...input.paths,
-              ]).pipe(Effect.asVoid);
-              yield* run("vcs.panel.discardStagedFiles.restore", input.cwd, [
-                "restore",
-                "--worktree",
-                "--",
-                ...input.paths,
-              ]).pipe(
-                Effect.asVoid,
-                Effect.catch(() => Effect.void),
-              );
-              yield* run("vcs.panel.discardStagedFiles.clean", input.cwd, [
-                "clean",
-                "-fd",
-                "--",
-                ...input.paths,
-              ]).pipe(Effect.asVoid);
-            }),
-          ),
-        );
+        const headPaths = yield* run(
+          "vcs.panel.discardStagedFiles.listHeadPaths",
+          input.cwd,
+          ["ls-tree", "-r", "--name-only", "HEAD", "--", ...paths],
+          { allowNonZeroExit: true },
+        ).pipe(Effect.map(parsePathLines));
+        const headPathSet = new Set(headPaths);
+        const pathsInHead = paths.filter((path) => headPathSet.has(path));
+        const pathsOutsideHead = paths.filter((path) => !headPathSet.has(path));
+
+        if (pathsInHead.length > 0) {
+          yield* run("vcs.panel.discardStagedFiles", input.cwd, [
+            "restore",
+            "--staged",
+            "--worktree",
+            "--source=HEAD",
+            "--",
+            ...pathsInHead,
+          ]).pipe(Effect.asVoid);
+        }
+        if (pathsOutsideHead.length > 0) {
+          yield* run("vcs.panel.discardStagedFiles.reset", input.cwd, [
+            "reset",
+            "--",
+            ...pathsOutsideHead,
+          ]).pipe(Effect.asVoid);
+          yield* run("vcs.panel.discardStagedFiles.clean", input.cwd, [
+            "clean",
+            "-fd",
+            "--",
+            ...pathsOutsideHead,
+          ]).pipe(Effect.asVoid);
+        }
         return;
       }
 
-      yield* run("vcs.panel.discardUnstagedFiles", input.cwd, [
-        "restore",
-        "--worktree",
+      const trackedPaths = yield* run("vcs.panel.discardUnstagedFiles.listIndexPaths", input.cwd, [
+        "ls-files",
+        "--cached",
         "--",
-        ...input.paths,
-      ]).pipe(
+        ...paths,
+      ]).pipe(Effect.map(parsePathLines));
+      if (trackedPaths.length > 0) {
+        yield* run("vcs.panel.discardUnstagedFiles", input.cwd, [
+          "restore",
+          "--worktree",
+          "--",
+          ...trackedPaths,
+        ]).pipe(
+          Effect.asVoid,
+          Effect.catch(() => Effect.void),
+        );
+      }
+      yield* run("vcs.panel.cleanUntrackedFiles", input.cwd, ["clean", "-fd", "--", ...paths]).pipe(
         Effect.asVoid,
-        Effect.catch(() => Effect.void),
       );
-      yield* run("vcs.panel.cleanUntrackedFiles", input.cwd, [
-        "clean",
-        "-fd",
-        "--",
-        ...input.paths,
-      ]).pipe(Effect.asVoid);
     });
 
   const readFileDiff: SourceControlPanelServiceShape["readFileDiff"] = Effect.fn("readFileDiff")(

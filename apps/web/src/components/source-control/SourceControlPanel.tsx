@@ -810,6 +810,14 @@ function fileBasename(path: string): string {
   return path;
 }
 
+function uniquePaths(paths: readonly string[]): string[] {
+  return [...new Set(paths.filter((path) => path.length > 0))];
+}
+
+function discardPathsForFile(file: Pick<VcsPanelFileChange, "path" | "originalPath">): string[] {
+  return uniquePaths(file.originalPath ? [file.path, file.originalPath] : [file.path]);
+}
+
 function commitCountLabel(count: number): string {
   return count === 1 ? "1 commit" : `${count} commits`;
 }
@@ -1747,19 +1755,23 @@ export function SourceControlPanel({
             ? "the selected change"
             : `${selectedChangedFiles.length} selected changes`;
         if (!(await confirm(`Discard ${countLabel}?`))) return;
-        const stagedPaths = selectedChangedFiles
-          .filter((file) => file.hasStagedChanges)
-          .map((file) => file.path);
-        const unstagedOnlyPaths = selectedChangedFiles
-          .filter((file) => file.hasUnstagedChanges && !file.hasStagedChanges)
-          .map((file) => file.path);
+        const stagedPaths = uniquePaths(
+          selectedChangedFiles
+            .filter((file) => file.hasStagedChanges)
+            .flatMap((file) => discardPathsForFile(file)),
+        );
+        const unstagedPaths = uniquePaths(
+          selectedChangedFiles
+            .filter((file) => file.hasUnstagedChanges)
+            .flatMap((file) => discardPathsForFile(file)),
+        );
         await runAction("changes-discard-selected", async () => {
           if (!api) return;
+          if (unstagedPaths.length > 0) {
+            await api.vcs.discardFiles({ cwd, paths: unstagedPaths, staged: false });
+          }
           if (stagedPaths.length > 0) {
             await api.vcs.discardFiles({ cwd, paths: stagedPaths, staged: true });
-          }
-          if (unstagedOnlyPaths.length > 0) {
-            await api.vcs.discardFiles({ cwd, paths: unstagedOnlyPaths, staged: false });
           }
         });
       })(),
@@ -2107,15 +2119,16 @@ export function SourceControlPanel({
     const discardFile = () =>
       void (async () => {
         if (!(await confirm(`Discard changes in ${file.path}?`))) return;
-        await runAction(
-          discardKey,
-          () =>
-            api?.vcs.discardFiles({
-              cwd,
-              paths: [file.path],
-              staged: file.hasStagedChanges,
-            }) ?? Promise.resolve(),
-        );
+        await runAction(discardKey, async () => {
+          if (!api) return;
+          const paths = discardPathsForFile(file);
+          if (file.hasUnstagedChanges) {
+            await api.vcs.discardFiles({ cwd, paths, staged: false });
+          }
+          if (file.hasStagedChanges) {
+            await api.vcs.discardFiles({ cwd, paths, staged: true });
+          }
+        });
       })();
     return (
       <div key={file.path} className="space-y-0.5">
@@ -2206,6 +2219,8 @@ export function SourceControlPanel({
       </div>
     );
   };
+
+  const workingFileRows = changedFiles.map((file) => renderWorkingFile(file));
 
   const renderCommit = (
     commit: VcsPanelCommitSummary,
@@ -3272,7 +3287,7 @@ export function SourceControlPanel({
               </IconButton>
             </div>
           </div>
-          {changedFiles.map((file) => renderWorkingFile(file))}
+          {workingFileRows}
         </div>
       )}
     </div>
